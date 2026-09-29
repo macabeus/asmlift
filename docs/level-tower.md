@@ -1307,7 +1307,9 @@ object keys on what the escape may REACH rather than on whether it writes, becau
 about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
 past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
 control halfword), read per transfer, and a call or an unresolved store after the transfer is
-handed the address leaves the read unbounded.
+handed the address leaves the read unbounded. An interrupt handler arming the channel is the one
+re-arm it assumes away: it may run at any instruction, and nothing about one function can rule it
+out.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

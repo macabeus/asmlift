@@ -1027,8 +1027,11 @@ export function auditFrameObjects({
     // decodes. A call on that path may re-arm the channel with a control this function never
     // wrote, and a store through a pointer this cannot resolve — one that is this frame's on only
     // some paths included (`frameOnEveryPath`) — may BE the control halfword, so either leaves the
-    // read unbounded — as does a transfer never armed here at all. An unbounded
-    // device read says which of those it met (`why`): each is a different capability to build.
+    // read unbounded — as does a transfer never armed here at all. An unbounded device read says
+    // which of those it met (`why`): each is a different capability to build.
+    // KNOWN GAP: an interrupt handler may arm the channel at any instruction, not only at a call,
+    // and this bound assumes none does while the source register holds this frame — a premise no
+    // fact about this function can check.
     const at = new Map<Op, { blk: Block; i: number }>();
     for (const blk of irBlocks) {
       blk.ops.forEach((op, i) => at.set(op, { blk, i }));
@@ -1213,8 +1216,8 @@ export function auditFrameObjects({
     // a loop that stores and escapes each iteration. What the qualifier does change is register
     // ALLOCATION — the same function compiled `vu16` and `u16` is 98 instructions either way and
     // differs in three register assignments — which is why it still has to be right. asmlift's
-    // OWN dead-store pass used to key on it; it keys on address-taken now (l3/dce.ts), so
-    // dropping the qualifier here cannot cost a store.
+    // OWN dead-store pass keys on address-taken, not on the qualifier (l3/dce.ts), so dropping the
+    // qualifier here cannot cost a store.
     //
     // An object whose address never leaves the function needs no volatile and must not pay it.
     //
