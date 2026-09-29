@@ -1560,6 +1560,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …and a READ of the capture between two moves does not end the walk: sa3's `sub_8068E5C`
+    // addresses through a capture and then moves it (`mov r2, sp / adds r2, #5 / strb r0, [r2] /
+    // … / adds r2, #2`). The move after the store is the capture at the sum, as the direct spelling
+    // of that offset is.
+    test('a capture moved after an access through it is the capture at the sum', () => {
+      const bytes = (second: string) =>
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n\tadd\tr2, #0x4\n\tstrb\tr0, [r2]\n' +
+        `${second}\tstrb\tr1, [r2]\n\tmov\tr3, sp\n\tadd\tr3, #0x4\n\tldrb\tr0, [r3]\n\tldrb\tr1, [r2]\n` +
+        '\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+      const moved = decompile('f', bytes('\tadd\tr2, #0x1\n'), ARMV4T_AGBCC).source;
+      expect(moved).toBe(decompile('f', bytes('\tadd\tr2, sp, #0x5\n'), ARMV4T_AGBCC).source);
+      expect(moved).toContain('return sp4 + sp5;');
+    });
+
     // …and the same frame word READ back after a call that took its address at argument 0 is,
     // instruction for instruction, a struct return's hidden temp. agbcc's own output for
     // `struct S4 { char a, b, c, d; }; s32 f(s32 x){ struct S4 s; five(x, x, x, x, x); s = mk(x);

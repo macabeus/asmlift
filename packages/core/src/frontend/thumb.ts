@@ -453,9 +453,11 @@ function expandRegList(tokens: string[]): string[] {
 //
 // Its callers, and which way each may be wrong:
 //   * `heldFrameWalk`, the one walk both frame-base acceptances and the constant-capture offsets
-//     are spelled with, asks it of EVERY instruction. It is an ACCEPTANCE, so it may never
+//     are spelled with, asks it of EVERY instruction — directly for the two acceptances, and
+//     through `mayWriteReg` for the offsets. It is an ACCEPTANCE, so it may never
 //     over-approximate: MENTION, not "writes" — a `cmp` on the register ends the walk, which costs
-//     a decline, never a wrong value.
+//     a decline, never a wrong value; and every instruction whose written register
+//     `mayWriteReg` cannot name answers as a mention.
 //   * `highRegisterHeld` asks it only of a `pop` or a control transfer; calls, copies and stack
 //     slots it tracks itself. It feeds an acceptance (`wideReturn`) and a REFUSAL
 //     (`refuseWordReturns`), and for the refusal every over-statement — a spurious mention
@@ -472,6 +474,30 @@ function mentionsReg(ins: { ops: string[] }, r: string): boolean {
       .filter(Boolean),
   );
   return tokens.includes(r) || ins.ops.some((o) => new RegExp(`\\b${r}\\b`, 'i').test(o));
+}
+
+// Whether an instruction may WRITE a register. Answered exactly only where the written register is
+// fixed by the mnemonic — a single-register store, a `push` and a compare write none, a
+// single-register load and a Thumb-1 data-processing instruction write their first operand — and
+// as `mentionsReg` everywhere else, which over-approximates a write and so only ever ends a walk
+// early. A `!` anywhere is a writeback to a base, and answers as a mention too.
+const WRITES_NONE = /^(?:str[bh]?|push|cmp|cmn|tst)$/;
+const SINGLE_LOAD = /^ldr(?:s?[bh])?$/;
+const WRITES_OPERAND_0 = /^(?:adc|add|and|asr|bic|eor|lsl|lsr|mov|mul|mvn|neg|orr|ror|sbc|sub)s?$/;
+function mayWriteReg(ins: { mnemonic: string; ops: string[] }, r: string): boolean {
+  if (!mentionsReg(ins, r)) {
+    return false;
+  }
+  if (ins.ops.some((o) => o.includes('!'))) {
+    return true;
+  }
+  if (WRITES_NONE.test(ins.mnemonic)) {
+    return false;
+  }
+  if (SINGLE_LOAD.test(ins.mnemonic) || WRITES_OPERAND_0.test(ins.mnemonic)) {
+    return mentionsReg({ ops: ins.ops.slice(0, 1) }, r);
+  }
+  return true;
 }
 
 // Expand a register list and vouch that every entry is a DEFINITE register, or return null.
@@ -2964,22 +2990,33 @@ export function lift(
   // does not fix is an ACCEPTANCE that over-approximates. `held` maps a register to the frame
   // offset its value is sp plus; `consumes` is called on every instruction, before the call clear.
   //
-  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-MENTION, because this feeds ACCEPTANCES and so may
+  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-WRITE, because this feeds ACCEPTANCES and so may
   // never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload scan
   // skips them — an instruction that never executes is not a fact about the frame, and one appended
   // `mov r0, sp; bl use` after the return was enough to license a whole function. A block is
   // straight-line, so a capture that is still held when the consuming instruction is decoded is
-  // held on every execution that reaches it; and a register is dropped the moment ANY other
-  // instruction so much as MENTIONS it, since a write cannot happen without the token appearing.
-  // That over-kills (a `cmp` on the register between the capture and the consumer ends it) and
-  // over-killing only costs a decline.
+  // held on every execution that reaches it; and a register is dropped at any instruction `ends`
+  // says ends it, which over-kills wherever it cannot name the written register and over-killing
+  // only costs a decline.
+  //
+  // TWO KILL RULES, because the walk answers two questions. WHICH OFFSET A REGISTER HOLDS changes
+  // only at a write (`mayWriteReg`): agbcc addresses through a capture and then moves it (`mov r2,
+  // sp / adds r2, #5 / strb r0, [r2] / … / adds r2, #2`), and ending at the `strb` left the move
+  // unfolded. WHETHER THE FRAME BASE WAS HANDED OVER is the escape licences' question, and there
+  // the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy addressed through and
+  // still live at a call is an addressing copy, not an argument — `EReader_Reset` is `mov r1, sp /
+  // strh r0, [r1] / … / bl` into callees that take nothing, and read as handed over, the licence's
+  // re-proof refused a function that lifts.
   //
   // A `bl` CLEARS EVERY HELD REGISTER, and for the callee escape that is the ABI — the argument
   // registers are the only ones it tests and the callee clobbers them. The publish escape can hold
   // r4-r7, which AAPCS says the callee PRESERVES, so there the clear is not an ISA fact but a
   // deliberate blunt over-kill in the direction that costs a decline; a test pins the decline so
   // the over-approximation is a decision on the record rather than a regression found later.
-  const heldFrameWalk = (consumes: (ins: Instr, held: ReadonlyMap<string, number>) => boolean): boolean => {
+  const heldFrameWalk = (
+    ends: (ins: Instr, r: string) => boolean,
+    consumes: (ins: Instr, held: ReadonlyMap<string, number>) => boolean,
+  ): boolean => {
     for (const b of entryReachable) {
       const ab = asmBlocks[b];
       const held = new Map<string, number>();
@@ -2992,14 +3029,12 @@ export function lift(
           continue;
         }
         const carried = frameAddressDefined(ins, held);
-        // The OPERAND TOKENS, not the mnemonic: `asWritten` carries only the normalised mnemonic,
-        // so the operands are the only place a written register can appear. `mentionsReg` owns how
-        // one is spotted, including the range expansion — `pop {r0-r3}` writes r2 with the string
-        // `r2` nowhere in the instruction, and a dead capture surviving that `pop` made the callee
-        // acceptance fire on a frame that really did stage an outgoing argument, dropping all five
-        // of that call's arguments.
+        // `mentionsReg` owns how a register is spotted in the operands, including the range
+        // expansion — `pop {r0-r3}` writes r2 with the string `r2` nowhere in the instruction, and
+        // a dead capture surviving that `pop` made the callee acceptance fire on a frame that
+        // really did stage an outgoing argument, dropping all five of that call's arguments.
         for (const r of [...held.keys()]) {
-          if (mentionsReg(ins, r)) {
+          if (ends(ins, r)) {
             held.delete(r);
           }
         }
@@ -3045,7 +3080,7 @@ export function lift(
   //
   // ARGUMENT registers only: the frame base merely live across a call is not evidence that it was
   // passed to one, and for `blx rN` the TARGET register is not an argument either.
-  const frameBasePassedToCallee = heldFrameWalk((ins, held) => {
+  const frameBasePassedToCallee = heldFrameWalk(mentionsReg, (ins, held) => {
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
     }
@@ -3130,7 +3165,7 @@ export function lift(
   // earlier block is excluded there and not here. The containment still holds — whole-function
   // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
   // and more — and the difference therefore lands on the refusing side. Pinned as a row.
-  const frameBasePublishedToMemory = heldFrameWalk((ins, held) => {
+  const frameBasePublishedToMemory = heldFrameWalk(mentionsReg, (ins, held) => {
     if (ins.mnemonic !== 'str' || held.get(reg(ins.ops[0] ?? '')) !== 0) {
       return false;
     }
@@ -3482,7 +3517,7 @@ export function lift(
   // What the walk cannot follow (a move in another block than the capture) the lift does not
   // fold either, and the audit refuses the arithmetic by that name.
   const captureOffsetOf = new Map<Instr, number>();
-  heldFrameWalk((ins, held) => {
+  heldFrameWalk(mayWriteReg, (ins, held) => {
     const defined = frameAddressDefined(ins, held);
     if (defined !== null) {
       captureOffsetOf.set(ins, defined[1]);

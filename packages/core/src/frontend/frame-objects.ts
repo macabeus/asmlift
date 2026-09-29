@@ -418,12 +418,12 @@ export function auditFrameObjects({
             return;
           }
           // A CONSTANT move the lift did not fold is one `heldFrameWalk` could not follow — made in
-          // another block than the capture, or by a constant held in a register — so no frame word
-          // was keyed to the offset it names, and saying so is the attribution.
+          // another block than the capture, after a call, or by a constant held in a register — so
+          // no frame word was keyed to the offset it names, and saying so is the attribution.
           if (other !== undefined && defOf.get(other)?.opcode === 'const') {
             fail(
               `the captured address at [sp,#${off}) is moved by a constant the pre-lift walk does not follow ` +
-                '(it is block-local, and follows an immediate only)',
+                "(it follows a move by an immediate in the capture's own block, with no call between)",
             );
           }
           fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
