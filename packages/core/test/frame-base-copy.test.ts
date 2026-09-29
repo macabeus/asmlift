@@ -140,6 +140,19 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     expect(() => lift(outgoing)).toThrow(CAPTURE);
   });
 
+  // A capture that was not split is refused with ITS OWN reason. Two captures here: [sp,#0]'s word
+  // access is the word refusal, and [sp,#8]'s byte access is refused because that capture also
+  // escapes — which the word refusal, reported against it, would misname.
+  test('an access through a capture is refused with that capture’s reason', () => {
+    const two =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr5, sp, #0x8\n\tstrb\tr1, [r5, #0x1]\n' +
+      '\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n\tmov\tr0, r5\n\tbl\tg\n\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', two, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
+      /a store at \[\+1\] through the captured address — only a scalar at the captured address is modelled/,
+    );
+  });
+
   test('a capture that ESCAPES keeps the frame base', () => {
     expect(() => lift(SPILL)).not.toThrow();
     expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tstr\tr3, [r0, #0x4]\n'))).toThrow(CAPTURE);

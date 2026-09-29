@@ -1515,13 +1515,32 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         );
       });
 
-      test('a capture the text scan cannot follow leaves the slot, and the audit refuses the pair', () => {
-        // a register copy is not a spelling the scan tracks, so [sp,#4] keeps both of its old
-        // readings — a slot, and a word staged for the call — and the second refuses, loudly
-        expect(() =>
-          decompile('f', word('\tmov\tr0, sp\n\tmov\tr1, r0\n\tadd\tr0, r1, #0x4\n'), ARMV4T_AGBCC, { prototypes }),
-        ).toThrow(/the store to \[sp,#4\] reaches `bl getw` unread .* it may be that call's outgoing stack argument/);
+      // TWO SPELLINGS OF ONE COPY MUST NOT GIVE TWO VERDICTS: the offsets set aside for the object
+      // and the capture the lift folds come off one walk (`heldFrameWalk`), so a register copy or
+      // a move is the same capture whichever way it is written.
+      test.each([
+        ['a register copy', '\tmov\tr0, sp\n\tmov\tr1, r0\n\tadd\tr0, r1, #0x4\n'],
+        ["agbcc's copy idiom", '\tmov\tr0, sp\n\tadd\tr1, r0, #0\n\tadd\tr0, r1, #0x4\n'],
+        ['a two-operand move', '\tmov\tr0, sp\n\tadd\tr0, #0x4\n'],
+      ])('%s is the same capture', (_, capture) => {
+        expect(decompile('f', word(capture), ARMV4T_AGBCC, { prototypes }).source).toBe(
+          decompile('f', word('\tadd\tr0, sp, #0x4\n'), ARMV4T_AGBCC, { prototypes }).source,
+        );
       });
+    });
+
+    // …and a move the walk cannot follow — the capture in one block, the move in the next — is
+    // refused by that name, not as the slot the unfolded offset left behind.
+    test('a capture moved in another block is refused as the move', () => {
+      const crossBlock =
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tmov\tr5, sp\n' +
+        '\tstr\tr4, [sp, #0x8]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tadd\tr5, r5, #0x8\n\tadd\tr0, r5, #0\n' +
+        '\tbl\tget\n\tb\t.L3\n.L2:\n\tadd\tr0, r5, #0x8\n\tbl\tget\n.L3:\n\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const get = { params: ['const s32 *'], returns: 's32' };
+      expect(() => decompile('f', crossBlock, ARMV4T_AGBCC, { prototypes: { get } })).toThrow(
+        /the captured address at \[sp,#0\) is moved by a constant the pre-lift walk does not follow/,
+      );
     });
 
     // …and the same frame word READ back after a call that took its address at argument 0 is,

@@ -453,9 +453,10 @@ function expandRegList(tokens: string[]): string[] {
 // The word-boundary fallback covers the operand forms the token split does not reach.
 //
 // Its callers, and which way each may be wrong:
-//   * `heldFrameBaseWalk`, the one walk both frame-base acceptances are spelled with, asks it of
-//     EVERY instruction. It is an ACCEPTANCE, so it may never over-approximate: MENTION, not
-//     "writes" — a `cmp` on the register ends the walk, which costs a decline, never a wrong value.
+//   * `heldFrameWalk`, the one walk both frame-base acceptances and the constant-capture offsets
+//     are spelled with, asks it of EVERY instruction. It is an ACCEPTANCE, so it may never
+//     over-approximate: MENTION, not "writes" — a `cmp` on the register ends the walk, which costs
+//     a decline, never a wrong value.
 //   * `highRegisterHeld` asks it only of a `pop` or a control transfer; calls, copies and stack
 //     slots it tracks itself. It feeds an acceptance (`wideReturn`) and a REFUSAL
 //     (`refuseWordReturns`), and for the refusal every over-statement — a spurious mention
@@ -2496,8 +2497,9 @@ function auditFrameObjects({
     // split.
     // Why a capture was NOT split, when the reason is one no later message carries — the
     // `slotsOffReason` idiom: a refusal reported as the wrong capability sends the improvement
-    // loop to build the wrong thing.
-    let splitRefusal: string | null = null;
+    // loop to build the wrong thing. Per capture offset, so an access is refused with its own
+    // capture's reason and not the first one found.
+    const splitRefusal = new Map<number, string>();
     {
       const uses = new Map<Value, { op: Op; idx: number; blk: Block }[]>();
       const record = (v: Value, op: Op, idx: number, blk: Block) =>
@@ -2535,7 +2537,10 @@ function auditFrameObjects({
           continue;
         }
         if (!subWord) {
-          splitRefusal ??= 'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form';
+          splitRefusal.set(
+            capture.attrs.off as number,
+            'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form',
+          );
           continue;
         }
         // Nothing to split when the capture already names ONE object: every access at offset 0 is
@@ -2689,7 +2694,7 @@ function auditFrameObjects({
             if ((op.attrs.off as number) !== 0) {
               fail(
                 `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
-                  (splitRefusal ?? 'only a scalar at the captured address is modelled'),
+                  (splitRefusal.get(off) ?? 'only a scalar at the captured address is modelled'),
               );
             }
           };
@@ -2744,6 +2749,15 @@ function auditFrameObjects({
           if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
             indexedAccess(off, op.results[0]);
             return;
+          }
+          // A CONSTANT move the lift did not fold is one `heldFrameWalk` could not follow — made in
+          // another block than the capture, or by a constant held in a register — so no frame word
+          // was keyed to the offset it names, and saying so is the attribution.
+          if (other !== undefined && defOf.get(other)?.opcode === 'const') {
+            fail(
+              `the captured address at [sp,#${off}) is moved by a constant the pre-lift walk does not follow ` +
+                '(it is block-local, and follows an immediate only)',
+            );
           }
           fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
         });
@@ -3912,13 +3926,13 @@ export function lift(
     }
   };
 
-  // IS A BARE `mov rD, sp` STILL HELD, UNMODIFIED, WHEN `consumes` FIRES? Both ways an agbcc frame
-  // address escapes ask that one question and differ only in the consuming event, so they get ONE
-  // walk — the same rule `definiteRegList` and `regListOf` a few hundred lines above are written
-  // down for, and for the same reason: two hand-rolled copies of a safety walk drift to unequal
-  // strength, and the one a future editor does not fix is an ACCEPTANCE that over-approximates.
-  // `consumes` is called on every instruction, before the call clear, and is the whole of what the
-  // two escapes disagree about.
+  // WHICH FRAME ADDRESS DOES EACH REGISTER HOLD WHEN `consumes` FIRES? Every question this file
+  // asks of a captured frame address before the lift is this one — the two frame-base escapes, and
+  // which offsets a constant capture names — so they get ONE walk, the same rule `definiteRegList`
+  // and `regListOf` a few hundred lines above are written down for, and for the same reason: two
+  // hand-rolled copies of a safety walk drift to unequal strength, and the one a future editor
+  // does not fix is an ACCEPTANCE that over-approximates. `held` maps a register to the frame
+  // offset its value is sp plus; `consumes` is called on every instruction, before the call clear.
   //
   // ENTRY-REACHABLE, BLOCK-LOCAL AND KILL-ON-MENTION, because this feeds ACCEPTANCES and so may
   // never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload scan
@@ -3935,10 +3949,10 @@ export function lift(
   // r4-r7, which AAPCS says the callee PRESERVES, so there the clear is not an ISA fact but a
   // deliberate blunt over-kill in the direction that costs a decline; a test pins the decline so
   // the over-approximation is a decision on the record rather than a regression found later.
-  const heldFrameBaseWalk = (consumes: (ins: Instr, held: ReadonlySet<string>) => boolean): boolean => {
+  const heldFrameWalk = (consumes: (ins: Instr, held: ReadonlyMap<string, number>) => boolean): boolean => {
     for (const b of entryReachable) {
       const ab = asmBlocks[b];
-      const held = new Set<string>();
+      const held = new Map<string, number>();
       for (const ins of ab.instrs) {
         if (consumes(ins, held)) {
           return true;
@@ -3947,30 +3961,49 @@ export function lift(
           held.clear();
           continue;
         }
-        // The two shapes that can carry the base forward: the capture itself, and a bare register
-        // copy of a value already held. Everything else only kills.
-        const carried = capturesSp(ins)
-          ? reg(ins.ops[0] ?? '')
-          : /^movs?$/.test(ins.mnemonic) && held.has(reg(ins.ops[1] ?? ''))
-            ? reg(ins.ops[0] ?? '')
-            : null;
+        const carried = frameAddressDefined(ins, held);
         // The OPERAND TOKENS, not the mnemonic: `asWritten` carries only the normalised mnemonic,
         // so the operands are the only place a written register can appear. `mentionsReg` owns how
         // one is spotted, including the range expansion — `pop {r0-r3}` writes r2 with the string
         // `r2` nowhere in the instruction, and a dead capture surviving that `pop` made the callee
         // acceptance fire on a frame that really did stage an outgoing argument, dropping all five
         // of that call's arguments.
-        for (const r of [...held]) {
+        for (const r of [...held.keys()]) {
           if (mentionsReg(ins, r)) {
             held.delete(r);
           }
         }
         if (carried !== null) {
-          held.add(carried);
+          held.set(carried[0], carried[1]);
         }
       }
     }
     return false;
+  };
+  // The register an instruction leaves holding a frame address, and that address's offset, or
+  // null. The shapes that carry one: the capture itself (`mov rD, sp`, `add rD, sp, #k`), a copy
+  // of a held register (`mov rD, rS`, and agbcc's `add rD, rS, #0`), and a held register moved by
+  // a constant (`add rD, rS, #c`, `add rD, #c`). Everything else only kills.
+  const frameAddressDefined = (ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null => {
+    const [d, s1, s2] = ins.ops;
+    if (d === undefined || isSpReg(d)) {
+      return null;
+    }
+    if (capturesSp(ins)) {
+      return [reg(d), 0];
+    }
+    if (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && held.has(reg(s1))) {
+      return [reg(d), held.get(reg(s1))!];
+    }
+    if (/^adds?$/.test(ins.mnemonic)) {
+      const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
+      if (src === undefined || by === undefined || !IMM_LITERAL.test(by)) {
+        return null;
+      }
+      const from = isSpReg(src) ? 0 : held.get(reg(src));
+      return from === undefined ? null : [reg(d), from + imm(by)];
+    }
+    return null;
   };
 
   // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
@@ -3982,14 +4015,14 @@ export function lift(
   //
   // ARGUMENT registers only: the frame base merely live across a call is not evidence that it was
   // passed to one, and for `blx rN` the TARGET register is not an argument either.
-  const frameBasePassedToCallee = heldFrameBaseWalk((ins, held) => {
+  const frameBasePassedToCallee = heldFrameWalk((ins, held) => {
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
     }
     // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3` branches
     // THROUGH the frame base, it does not pass it.
     const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : null;
-    return [...held].some((r) => target.argRegs.includes(r) && r !== targetReg);
+    return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
   });
 
   // THE FRAME BASE PUBLISHED TO MEMORY — the other way an agbcc frame address escapes, and the
@@ -4048,7 +4081,7 @@ export function lift(
   // wider frame the publish escape admits exactly the shape the callee escape's table warns
   // about; at one word it cannot occur.
   //
-  // THE WALK IS `heldFrameBaseWalk`, the same one the callee escape is spelled with, because the
+  // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
   // question is the same one and only the consuming event differs. Here that event is a WORD store
   // whose SOURCE operand is a held capture — a `strh` hands over half an address, so the device's
   // source is not this object — through a base that is neither sp nor another held capture: a
@@ -4067,8 +4100,8 @@ export function lift(
   // earlier block is excluded there and not here. The containment still holds — whole-function
   // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
   // and more — and the difference therefore lands on the refusing side. Pinned as a row.
-  const frameBasePublishedToMemory = heldFrameBaseWalk((ins, held) => {
-    if (ins.mnemonic !== 'str' || !held.has(reg(ins.ops[0] ?? ''))) {
+  const frameBasePublishedToMemory = heldFrameWalk((ins, held) => {
+    if (ins.mnemonic !== 'str' || held.get(reg(ins.ops[0] ?? '')) !== 0) {
       return false;
     }
     const { base } = parseAddr(ins.ops[1] ?? '');
@@ -4413,48 +4446,25 @@ export function lift(
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
     localArea === 4;
 
-  // THE FRAME OFFSETS A CONSTANT CAPTURE NAMES, read off the text the way the mov and add arms
-  // will lower it: `add rD, sp, #k`, and a held capture moved by a constant. Nonzero only — the
-  // frame base has its own licence, `capturedObjectIsTheWholeFrame`. Block-local, and any mention
-  // of a held register or a call drops it, so the set can only be too SMALL, which costs a decline.
-  //
-  // A word whose address is taken is not an outgoing argument — C gives an argument no address —
-  // so the outgoing-argument analysis below does not see these offsets either: a store there
-  // reaching a call unread is the object being filled for the callee that is handed it.
-  const constantCaptureOffsets = ((): ReadonlySet<number> => {
-    const offs = new Set<number>();
-    for (const b of entryReachable) {
-      const held = new Map<string, number>();
-      for (const ins of asmBlocks[b].instrs) {
-        const [d, s1, s2] = ins.ops;
-        let next: number | undefined;
-        if (capturesSp(ins)) {
-          next = 0;
-        } else if (/^adds?$/.test(ins.mnemonic) && d !== undefined && !isSpReg(d)) {
-          const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
-          if (src !== undefined && by !== undefined && IMM_LITERAL.test(by)) {
-            const from = isSpReg(src) ? 0 : held.get(reg(src));
-            next = from === undefined ? undefined : from + imm(by);
-          }
-        }
-        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          held.clear();
-        }
-        for (const r of [...held.keys()]) {
-          if (mentionsReg(ins, r)) {
-            held.delete(r);
-          }
-        }
-        if (next !== undefined && d !== undefined) {
-          held.set(reg(d), next);
-          if (next > 0) {
-            offs.add(next);
-          }
-        }
-      }
+  // THE FRAME ADDRESS EACH INSTRUCTION DEFINES, off `heldFrameWalk` — and the lift's mov and add
+  // arms fold a capture at an offset only where this says so, so the offsets the slot model and
+  // the outgoing-argument analysis set aside below are, by construction, the ones the lift names.
+  // What the walk cannot follow (a move in another block than the capture) the lift does not
+  // fold either, and the audit refuses the arithmetic by that name.
+  const captureOffsetOf = new Map<Instr, number>();
+  heldFrameWalk((ins, held) => {
+    const defined = frameAddressDefined(ins, held);
+    if (defined !== null) {
+      captureOffsetOf.set(ins, defined[1]);
     }
-    return offs;
-  })();
+    return false;
+  });
+  // …and the offsets themselves, nonzero only — the frame base has its own licence,
+  // `capturedObjectIsTheWholeFrame`. A word whose address is taken is not an outgoing argument —
+  // C gives an argument no address — so the outgoing-argument analysis below does not see these
+  // offsets either: a store there reaching a call unread is the object being filled for the
+  // callee that is handed it.
+  const constantCaptureOffsets: ReadonlySet<number> = new Set([...captureOffsetOf.values()].filter((o) => o > 0));
 
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
   // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
@@ -4589,9 +4599,7 @@ export function lift(
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
   const usedSlotOffsets = new Set<number>();
-  // The frame offset each `laddr` the mov and add arms minted names, so a capture moved by a
-  // constant is re-minted at its own offset rather than audited as arithmetic.
-  const laddrOff = new Map<Value, number>();
+  // Every capture the add arm moved by a constant: the audit drops one nothing else reads.
   const movedCaptures = new Set<Value>();
 
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
@@ -4612,9 +4620,9 @@ export function lift(
   // THE SAME HOLDS AT EVERY OFFSET A CONSTANT CAPTURE NAMES. `vu32 t = -1; CpuSet(&t, …)` above an
   // outgoing block is `str r4, [sp, #0x4] / add r0, sp, #0x4 / bl CpuSet`: the store is to the
   // object whose address the call is handed. Those offsets are read off the text before the lift
-  // (`constantCaptureOffsets`), and one it misses keeps the slot, which the audit refuses as two
-  // models for one byte. Above the outgoing block only — a word staged there is an argument the
-  // call reads as a slot — and inside the reserved area, where a slot could have been.
+  // (`constantCaptureOffsets`), from the same walk the lift folds captures by. Above the outgoing
+  // block only — a word staged there is an argument the call reads as a slot — and inside the
+  // reserved area, where a slot could have been.
   const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
     slotsOk &&
     isSpReg(base) &&
@@ -4935,7 +4943,6 @@ export function lift(
             if (slotsOk && localArea > 0) {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: 0 } }));
-              laddrOff.set(res, 0);
               writeData(reg(a), bi, res);
               break;
             }
@@ -4964,7 +4971,6 @@ export function lift(
             if (slotsOk && localArea > 0) {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));
-              laddrOff.set(res, imm(c));
               writeData(reg(a), bi, res);
               break;
             }
@@ -4972,19 +4978,15 @@ export function lift(
           }
           // …and a capture MOVED by a constant is the capture of that other offset, which is how
           // agbcc spells one it cannot reach in a single `add rD, sp, #k`: `mov r2, sp / add r2,
-          // r2, #0x8`. The two-operand `add rD, #c` moves rD itself.
+          // r2, #0x8`. The two-operand `add rD, #c` moves rD itself. Where `heldFrameWalk` says so
+          // and nowhere else (`captureOffsetOf`); a move by 0 is the copy below, one value.
           {
+            const at = captureOffsetOf.get(ins);
             const [src, by] = c === undefined ? [a, b] : [b, c];
-            const from =
-              src !== undefined && !isSpReg(src) && by !== undefined && IMM_LITERAL.test(by)
-                ? readData(reg(src), bi)
-                : undefined;
-            const base = from === undefined ? undefined : laddrOff.get(from);
-            if (from !== undefined && base !== undefined && by !== undefined) {
-              movedCaptures.add(from);
+            if (at !== undefined && src !== undefined && by !== undefined && !immEq(by, 0)) {
+              movedCaptures.add(readData(reg(src), bi));
               const res = mkValue(T.unk(32));
-              irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: base + imm(by) } }));
-              laddrOff.set(res, base + imm(by));
+              irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: at } }));
               writeData(reg(a), bi, res);
               break;
             }
