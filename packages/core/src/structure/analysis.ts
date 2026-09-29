@@ -858,6 +858,9 @@ export interface AnalyzeOptions {
   /** Name a float product a float add or subtract reads, so a contracting compiler cannot fuse the
    *  two (StructureOptions.contractsFloatProducts). */
   contractsFloatProducts?: boolean;
+  /** The target has no divider, so a register-form divide is a runtime helper call
+   *  (StructureOptions.divideIsCall). */
+  divideIsCall?: boolean;
   /** The merge-feed-home variation (rank.ts `/merge-home`). A pure value one join's incoming edges
    *  render into the SAME parameter slot from 2+ places materializes at its def: the copy machinery
    *  has no name to reference, so the default re-derives the whole expression per arm
@@ -1196,6 +1199,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
     contractsFloatProducts = false,
+    divideIsCall = false,
   } = opts;
   // ── use registry ────────────────────────────────────────────────────────────────────────
   // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
@@ -1803,11 +1807,21 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // computation where the asm ran it and claims nothing about where it faults. A named divide
           // bars what the barrier scan below places, as a named call does, so a call or a divide the
           // asm ran ahead of it stays ahead of it.
+          // Where the divide IS a call (`divideIsCall`, a register-form divide: a constant power of
+          // two is the `imm` form, shifts in the asm), it keeps the call's path rule too: rendered in
+          // a block other than its own, or riding a branch's edge copy (`ridesEdge`), it would run on
+          // the paths that render it and not where the asm ran it once. `t = k / n; if (c) return
+          // t + 1; return t - 3;` is one `bl __divsi3` above the `cmp`, and inlined into both arms
+          // it recompiles to one per arm.
           // Not in a `&&`/`||` guarded cone: raise/shortcircuit.ts may have lifted it out of the arm,
           // so its def block is a fold artifact and a name there divides where the source did not.
           if (isDivide(op) && pr && useSitesOf.has(pr) && !shortCircuitGuarded.has(pr)) {
             const at = emitPositions(op);
-            if (!at || at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedDivide(x)))) {
+            if (
+              !at ||
+              (divideIsCall && op.operands.length === 2 && (at.some((p) => p.blk !== b) || ridesEdge(op))) ||
+              at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedDivide(x)))
+            ) {
               materialize.add(op);
               continue;
             }

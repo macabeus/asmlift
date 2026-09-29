@@ -225,3 +225,58 @@ test('an exit tail copied into two returns is one call on each path', () => {
   expect(src.match(/= f\(\);/g)).toHaveLength(2);
   expect(src).toMatch(/v\d+ = g\(a0\);\n\s+v\d+ = v\d+ \/ a0;/);
 });
+
+// `t = k / n; if (c) return t + 1; return t - 3;` with the divide above the branch and its two uses
+// in the arms.
+const DIV_ARMS = `fn f {
+^bb0(%0: s32, %1: s32, %2: s32):
+  %3: s32 = sdiv %0, %1
+  %4: s32 = const {value=0}
+  %5: u32 = icmp_ne %2, %4
+  cond_br %5, ^bb1(), ^bb2()
+^bb1():
+  %6: s32 = const {value=1}
+  %7: s32 = add %3, %6
+  ret %7
+^bb2():
+  %8: s32 = const {value=3}
+  %9: s32 = sub %3, %8
+  ret %9
+}
+`;
+
+test('where the divide is a call, it runs once above the branch the asm ran it above', () => {
+  const fn = parse(DIV_ARMS);
+  verify(fn);
+  recoverTypes(fn);
+  const src = cBackend.emit(structure(fn, { divideIsCall: true }));
+  expect(src).toMatch(/v0 = a0 \/ a1;\n\s+if /);
+  expect(src.match(/ \/ /g)).toHaveLength(1);
+});
+
+test('where the divide is an instruction, it renders in the arms like any pure op', () => {
+  expect(emit(DIV_ARMS).match(/a0 \/ a1/g)).toHaveLength(2);
+});
+
+// agbcc's own spelling of the same function: one `bl __divsi3` ahead of the `cmp`.
+const THUMB_DIV_ARMS = `a3:
+	push	{r4, lr}
+	add	r4, r2, #0
+	bl	__divsi3
+	cmp	r4, #0
+	bne	.L3
+	sub	r0, r0, #0x3
+	b	.L5
+.L3:
+	add	r0, r0, #0x1
+.L5:
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+`;
+
+test('agbcc’s __divsi3 above a branch is named there through the pipeline', () => {
+  const src = decompile('a3', THUMB_DIV_ARMS, ARMV4T_AGBCC, { prototypes: { a3: { params: 3 } } }).source;
+  expect(src).toMatch(/v0 = a0 \/ a1;\n\s+if /);
+  expect(src.match(/ \/ /g)).toHaveLength(1);
+});
