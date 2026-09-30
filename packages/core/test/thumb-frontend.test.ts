@@ -1072,6 +1072,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …and where the one object's only member is one access at its base, it is still the array the
+    // declaration says. The read reaches words nothing accounts for, so the frame stays whole; a
+    // scalar spelling of the member would assign to the array, or read its address. Verbatim agbcc,
+    // `u16 buf[4]; buf[0] = x; REG_DMA3SAD = (u32)buf; REG_DMA3DAD = (u32)gDst; return buf[0];` —
+    // the channel is never armed here, so nothing bounds the read.
+    test('a lone member at the base of one object is spelled through the array', () => {
+      const lone =
+        'm6:\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr0, .L12\n\tstr\tr1, [r0]\n' +
+        '\tldr\tr1, .L12+0x4\n\tldr\tr0, .L12+0x8\n\tstr\tr0, [r1]\n\tmov\tr0, sp\n\tldrh\tr0, [r0]\n' +
+        '\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n' +
+        '\t.word\tgDst\n';
+      const src = decompile('m6', lone, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('*(u16 *)sp0 = a0;');
+      expect(src).toContain('return *(u16 *)sp0;');
+      // …and a read alone: the machine loads the word at [sp], it does not return the frame address
+      const readOnly =
+        'j:\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tldr\tr0, .L3\n\tstr\tr1, [r0]\n\tldr\tr0, [r1]\n' +
+        '\tadd\tsp, sp, #0x10\n\tbx\tlr\n.L3:\n\t.word\t0x40000d4\n';
+      const read = decompile('j', readOnly, ARMV4T_AGBCC).source;
+      expect(read).toContain('volatile u8 sp0[16];');
+      expect(read).toContain('return *(s32 *)sp0;');
+    });
+
     // …a member at [+1] through the captured address. Verbatim agbcc, `union U { u16 h; u8 b[2]; }
     // u; u.h = x; REG_DMA3SAD = (u32)&u; …; *gCnt = 5; return u.b[1];`.
     test('a member through the captured address is one object when the read is unbounded', () => {
