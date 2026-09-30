@@ -17,7 +17,7 @@ import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
-import type { TargetDescription } from '../target';
+import { type TargetDescription, blockTransferRead } from '../target';
 import { FrontendUnsupportedError } from './errors';
 import { type LiveInModel, slotKeyOffset } from './ssa';
 
@@ -620,6 +620,28 @@ export function auditFrameObjects({
     // …and for the others, the stores that handed the address to a source register, which is
     // where `readWindow` below reads how far the device reads
     const sourceStores = new Map<number, { op: Op; sink: number }[]>();
+    // …and a CALL that only reads is the same answer: the address handed to a block transfer
+    // (`blockTransferCalls`) as its source, with a literal control word, is read `[lo, hi)` from
+    // the object and written by nobody. `CPU_FILL`'s `vu32 tmp = v; CpuSet(&tmp, dest, …)` is the
+    // shape. A control word this cannot read, or any other argument position, is a callee that
+    // may write, as before.
+    const calleeReads = new Map<number, { lo: number; hi: number }>();
+    // …and of those, the objects a transfer FILLS from — a fixed source, the `tmp` of every fill
+    // macro — which the `volatile` stamp below keys on beside `published`
+    const filledFrom = new Set<number>();
+    const transferRead = (op: Op, idx: number, off: number): { lo: number; hi: number; fill: boolean } | undefined => {
+      const callee = op.attrs.target;
+      const calls = target.capabilities.blockTransferCalls;
+      const call = typeof callee === 'string' && calls && Object.hasOwn(calls, callee) ? calls[callee] : undefined;
+      const control = call === undefined || idx !== call.source ? undefined : op.operands[call.control];
+      const word = control === undefined ? undefined : constOfValue(control);
+      if (call === undefined || word === undefined) {
+        return undefined;
+      }
+      // the machine reads in whole units, from the unit-aligned address at or below the object's
+      const { unit, bytes } = blockTransferRead(call, word);
+      return { lo: -(off % unit), hi: bytes, fill: (word & call.fixedBit) !== 0 };
+    };
     // …and the two escapes SPLIT, because each decides something the other does not.
     // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
     // writer this frontend can name, which is what the struct-return premise re-check below rests
@@ -722,7 +744,14 @@ export function auditFrameObjects({
           if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
             escaped.add(off); // the address ESCAPES as a value — the point of the capability
             const sink = op.opcode === 'store' ? readsThrough(op) : undefined;
-            if (sink === undefined) {
+            const read = op.opcode === 'call' ? transferRead(op, idx, off) : undefined;
+            if (read !== undefined) {
+              const had = calleeReads.get(off) ?? read;
+              calleeReads.set(off, { lo: Math.min(had.lo, read.lo), hi: Math.max(had.hi, read.hi) });
+              if (read.fill) {
+                filledFrom.add(off);
+              }
+            } else if (sink === undefined) {
               mayWrite.add(off);
             } else {
               (sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!).push({ op, sink });
@@ -790,7 +819,8 @@ export function auditFrameObjects({
     // decodes. A store through a pointer this cannot resolve — one that is this frame's on only
     // some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves the
     // read unbounded — as does a transfer never armed here at all. An unbounded device read says
-    // which of those it met (`why`): each is a different capability to build.
+    // which of those it met (`why`): each is a different capability to build. A block transfer
+    // that took the address as its source adds the bytes its control word reads (`calleeReads`).
     //
     // A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED WHERE THE SYMBOL MAP PLACES THE NAME, and then
     // exactly, by the overlap test below. agbcc's alias model never lets a C identifier plus a
@@ -816,6 +846,10 @@ export function auditFrameObjects({
       }
       const control = target.capabilities.readSourceControl;
       const stores = sourceStores.get(off);
+      const called = calleeReads.get(off);
+      if (!mayWrite.has(off) && stores === undefined && called !== undefined) {
+        return { lo: called.lo, hi: called.hi, why: 'that reads through it' };
+      }
       if (mayWrite.has(off) || stores === undefined || control === undefined) {
         return unbounded('that reads through it');
       }
@@ -867,7 +901,7 @@ export function auditFrameObjects({
           return unbounded('this function never arms');
         }
       }
-      let [lo, hi] = [0, 0];
+      let { lo, hi } = called ?? { lo: 0, hi: 0 };
       for (const h of halves) {
         const unit = control.units[(h & control.wideBit) !== 0 ? 1 : 0];
         const mode = control.modes[(h >> control.modeShift) & (control.modes.length - 1)];
@@ -1240,7 +1274,7 @@ export function auditFrameObjects({
           width: 1,
           signed: false,
           count: to - from,
-          ...(published.size > 0 ? { volatile: true } : {}),
+          ...(published.size > 0 || filledFrom.size > 0 ? { volatile: true } : {}),
         },
       });
       const base = object.results[0];
@@ -1607,6 +1641,12 @@ export function auditFrameObjects({
     // `PLATFORM_GBA`, pokeemerald's inside `DMA_FILL_UNCHECKED`, and the address goes to a device
     // register through a store. Reproducing that source means reproducing the qualifier.
     //
+    // …and iff it is the FIXED source of a block transfer (`filledFrom`), the same idiom through a
+    // BIOS call: every fill macro writes `vu##bit tmp = value; CpuSet((void *)&tmp, …)` (sa3's
+    // cpuset_macros.h, pokeemerald's macro.h). Compiled, the plain spelling is not the same
+    // program: a `u16` parameter stored to a plain `u16 tmp` loses its `lsl`/`lsr` pair, and the
+    // pool loads around the call reorder.
+    //
     // NOT on an ordinary `&local` ARGUMENT, where no source in the corpus writes one and the
     // qualifier is not free. `void f(u32 i){ s32 w; w = gEnts[i].h; use(&w); four(w,w,w,w); }`
     // compiles to one `ldr` reloaded into four registers by copies; the structurer emits one C
@@ -1638,12 +1678,13 @@ export function auditFrameObjects({
       const signed = accesses.get(off)!.some((a) => a.signed);
       const aggregate = aggregateAt.get(off);
       for (const op of ops) {
+        const qualified = published.has(off) || filledFrom.has(off);
         op.attrs = {
           ...op.attrs,
           width,
           signed,
           count,
-          ...(published.has(off) ? { volatile: true } : {}),
+          ...(qualified ? { volatile: true } : {}),
           ...(aggregate !== undefined ? { aggregate: true } : {}),
         };
         // a return temp's address points at the struct the call returns

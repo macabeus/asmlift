@@ -1200,6 +1200,66 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the object at \[sp,#4\)/,
       );
     });
+
+    // …and a BIOS block transfer is the same bound through a call (`blockTransferCalls`): CpuSet
+    // reads its source as far as a literal control word says and never writes through it. agbcc's
+    // output for `vu16 a; vu32 b; a = x; CpuSet((void *)&a, gA, 0x01000010); b = y;
+    // CpuSet((void *)&b, gB, 0x05000008);` — sa3's `CpuFill16` then `CpuFill32`.
+    const cpuFills = (callee: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r1, #0\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr1, .L3\n\tldr\tr2, .L3+0x4\n\tmov\tr0, sp\n\tbl\tCpuSet\n' +
+      `\tstr\tr4, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tldr\tr1, .L3+0x8\n\tldr\tr2, .L3+0xc\n\tbl\t${callee}\n` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgA\n' +
+      '\t.word\t0x1000010\n\t.word\tgB\n\t.word\t0x5000008\n';
+
+    test('two CpuSet fills each read their own object, spelled as the fill macro spells it', () => {
+      const src = decompile('f', cpuFills('CpuSet'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u16 sp0;');
+      expect(src).toContain('volatile u32 sp4;');
+      expect(src).toContain('CpuSet(&sp4, &gB, 83886088);');
+      // CONTROL: a callee the target names no extent for may write anything from the address
+      expect(() => decompile('f', cpuFills('CpuSet2'), ARMV4T_AGBCC)).toThrow(
+        /something outside this function reaches the whole frame/,
+      );
+    });
+
+    test('a control word built at run time bounds nothing', () => {
+      // `CpuSet((void *)&b, gB, 0x05000000 | y)`
+      const runtime = cpuFills('CpuSet').replace(
+        '\tldr\tr2, .L3+0xc\n',
+        '\tmov\tr2, #0xa0\n\tlsl\tr2, r2, #0x13\n\torr\tr2, r2, r4\n',
+      );
+      expect(() => decompile('f', runtime, ARMV4T_AGBCC)).toThrow(
+        /something outside this function reaches the whole frame/,
+      );
+    });
+
+    test('a copy reads every unit it copies, past its own object', () => {
+      // `CpuSet((void *)&a, gA, 4)`: four halfwords from [sp,#0], and `b` at [sp,#4] is two of them
+      const copy = cpuFills('CpuSet').replace('\t.word\t0x1000010\n', '\t.word\t0x4\n');
+      expect(() => decompile('f', copy, ARMV4T_AGBCC)).toThrow(
+        /the captured address at \[sp,#0\) is passed to a callee, which may read the object at \[sp,#4\)/,
+      );
+      // CpuFastSet rounds a count of one word up to eight, so it reads the slot above
+      const fast =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tmov\tr2, sp\n' +
+        '\tstrh\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n\tldr\tr1, .L18\n\tmov\tr0, sp\n\tmov\tr2, #0x1\n\tbl\tCpuFastSet\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\tgA\n';
+      expect(() => decompile('f', fast, ARMV4T_AGBCC)).toThrow(/which may read the slot at \[sp,#4\]/);
+    });
+
+    test('a frame address the transfer writes through is a writer, as any callee is', () => {
+      // `CpuSet((void *)&a, (void *)&b, 0x01000002); CpuSet((void *)&b, gB, 0x05000008);`
+      const asDest =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tmov\tr2, sp\n' +
+        '\tstrh\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n\tadd\tr4, sp, #0x4\n\tldr\tr2, .L21\n\tmov\tr0, sp\n' +
+        '\tadd\tr1, r4, #0\n\tbl\tCpuSet\n\tldr\tr1, .L21+0x4\n\tldr\tr2, .L21+0x8\n\tadd\tr0, r4, #0\n\tbl\tCpuSet\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L22:\n\t.align\t2, 0\n.L21:\n\t.word\t0x1000002\n' +
+        '\t.word\tgB\n\t.word\t0x5000008\n';
+      expect(() => decompile('f', asDest, ARMV4T_AGBCC)).toThrow(
+        /something outside this function reaches the whole frame/,
+      );
+    });
   });
 
   test('an ESCAPED frame address retracts the undef argument — a callee may have written the slot', () => {
