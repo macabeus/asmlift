@@ -226,6 +226,20 @@ describe('prototypes from a declaration context', () => {
       returnLayout: { kind: 'struct' },
       params: ['s32'],
     });
+    // …a definition after a forward declaration is the one laid out
+    const gxc = prototypesFromContext('struct GXC; struct GXC { u8 r, g, b, a; }; GXC getc2(s32 i);', 'c++');
+    expect(gxc.getc2?.returnLayout?.members).toEqual(['r', 'g', 'b', 'a'].map((name) => ({ name, type: 'u8' })));
+    // …and a class, or a struct with a base, is a struct whose members this does not lay out
+    for (const def of [
+      'class Vec { public: u32 x, y, z; };',
+      'struct Base { u32 x; }; struct Vec : Base { u32 y, z; };',
+    ]) {
+      expect(prototypesFromContext(`${def} extern "C" Vec getv(s32 i);`, 'c++').getv).toEqual({
+        returns: 'Vec',
+        returnLayout: { kind: 'struct' },
+        params: ['s32'],
+      });
+    }
   });
 
   test('C++ default arguments and comments do not reach a spelling', () => {

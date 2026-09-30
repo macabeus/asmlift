@@ -261,9 +261,18 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     if (def) {
       tagged.set(`${def[1]} ${def[2]}`, s.bodies[0]);
     }
-    const tag = def ?? /^(struct|union)\s+([A-Za-z_]\w*)$/.exec(s.text);
-    if (tag && language === 'c++' && !named.has(tag[2])) {
-      named.set(tag[2], { kind: tag[1] as AggregateLayout['kind'], body: def ? s.bodies[0] : undefined });
+    // In C++ a class is a struct too. Its body (access labels, member functions), or one after a
+    // base clause, whose members start past the base's, is none this lays out: the kind is known and
+    // the members are not. A forward declaration states the kind alone, so a definition after it
+    // replaces it, and nothing replaces a definition.
+    const cpp =
+      language === 'c++'
+        ? (/^(?:typedef\s+)?(struct|union|class)\s+([A-Za-z_]\w*)\s*(:[^{]*)?\{\}/.exec(s.text) ??
+          /^(struct|union|class)\s+([A-Za-z_]\w*)$/.exec(s.text))
+        : null;
+    if (cpp && named.get(cpp[2])?.body === undefined) {
+      const layable = def !== null && cpp[1] !== 'class' && cpp[3] === undefined;
+      named.set(cpp[2], { kind: cpp[1] === 'union' ? 'union' : 'struct', body: layable ? s.bodies[0] : undefined });
     }
     if (/^typedef\b/.test(s.text)) {
       const td = readTypedef(s.text);
@@ -553,7 +562,7 @@ function readSignature(
   // is then read as argument 0; a symbol map that sizes the return closes it
   // (`prototypesFromSymbols`).
   const layout = declaredWidth(r) === undefined ? layoutOf(r) : undefined;
-  const keyword = /\b(struct|union)\b/.exec(r);
+  const keyword = /\b(struct|union|class)\b/.exec(r);
   if (r === 'void') {
     proto.returnsVoid = true;
   } else if (declaredWidth(r) !== undefined) {
@@ -562,7 +571,7 @@ function readSignature(
     proto.returns = r;
     proto.returnLayout = layout;
   } else if (keyword && !r.includes('*')) {
-    proto.returnLayout = { kind: keyword[1] as AggregateLayout['kind'] };
+    proto.returnLayout = { kind: keyword[1] === 'union' ? 'union' : 'struct' };
   }
   const list = params.trim();
   if (list === '' ? language === 'c++' : list === 'void') {
