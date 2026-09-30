@@ -857,6 +857,7 @@ export function makeSsaBuilder(
           }
         }
         trimClobberedCallArgs({
+          name,
           argRegs: abiSeen.argRegs,
           returnReg: abiSeen.returnReg,
           calleeResults,
@@ -986,6 +987,8 @@ export interface GuessedCallSite {
 }
 
 export interface CallArgTrim {
+  /** the function being lifted, for a refusal */
+  name: string;
   argRegs: string[];
   /** the ABI return register. Load-bearing only where it IS `argRegs[0]` (ARM r0, PPC r3) — that
    *  aliasing is what makes a callee's result indistinguishable from caller-side argument setup. */
@@ -1101,10 +1104,19 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // mkw(s32)`) writes no value there — its bytes are a struct, not a word — so the register still
   // names what it held BEFORE that call, and neither clause above can tell: that value is no callee
   // result, which is the join clause's sign of a real argument. Destroyed on any path is no setup on
-  // that path, so the register is an ordinary unfresh one there, and the run stops below it.
+  // that path, so the register is an ordinary unfresh one there, and the run stops below it —
+  // unless a later register is set up, which puts argument 0 below a proven one: that argument is
+  // then the struct itself (`other(mv(a), b)`), a value no register here names, and it declines.
   const argcAt = (s: GuessedCallSite, fresh: Set<string>): number => {
     const destroyed =
       s.returnRegBefore === 'destroyed' || (s.returnRegBefore === 'inherited' && destroyedIn[s.block].has(returnReg));
+    if (argRegs[0] === returnReg && !fresh.has(argRegs[0]) && destroyed && setsUpLater(fresh)) {
+      const callee = s.op.attrs.target;
+      throw new FrontendUnsupportedError(
+        `cannot lift '${inp.name}': argument 1 of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
+          `is a struct an earlier call handed back in ${returnReg}, and nothing here passes one on as an argument — not modelled`,
+      );
+    }
     if (argRegs[0] !== returnReg || fresh.has(argRegs[0]) || destroyed) {
       return runOfFresh(fresh, 0);
     }

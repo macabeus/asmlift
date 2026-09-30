@@ -156,6 +156,23 @@ describe('a callee declared to return a struct through memory', () => {
 });
 
 describe('a callee declared to return a struct or union by value', () => {
+  // `struct One mv(); void other(); void f(s32 a, s32 b) { other(mv(a), b); }` — agbcc passes the
+  // struct `mv` hands back in r0 straight on as `other`'s argument 0, with `b` in r1
+  test('a struct returned in r0 and passed on to a guessed call declines', () => {
+    const F =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tbl\tmv\n\tadd\tr1, r4, #0\n\tbl\tother\n' +
+      '\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const layout = { kind: 'struct' as const, members: [{ name: 'a', type: 's32' }] };
+    for (const mv of [
+      { returns: 'struct One', returnLayout: layout },
+      { params: ['s32'], returns: 'struct One', returnLayout: layout },
+    ]) {
+      expect(() => decompile('f', F, ARMV4T_AGBCC, { prototypes: { mv } })).toThrow(
+        /argument 1 of the call to 'other' is a struct an earlier call handed back in r0/,
+      );
+    }
+  });
+
   // `struct One { s32 a; }; struct One mv(s32 x, ...); s32 cv(s32 a) { return mv(a).a; }` — agbcc
   // hands the one-word struct back in r0, and nothing sizes the variadic call's arguments
   test("a struct returned in r0 is not a value r0 holds when the call's arity is guessed", () => {
