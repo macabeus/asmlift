@@ -25,11 +25,12 @@
 //     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), the
 //     structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
 //     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions), and the
-//     frame-object audit's pin on a function it keeps as one object (frontend/frame-objects.ts),
-//     which spells every access in the window `volatile`. That last reader makes the answer a
-//     correctness one — agbcc deletes or hoists a plain device access the machine made — so it
-//     may be approximate in ONE direction only: the window must cover every register a source
-//     reaches, and covering more costs a spelling, never a store.
+//     frame-object audit's pin (frontend/frame-objects.ts), which spells every access in the
+//     window `volatile` in a function it keeps as one object, and the device stores a later
+//     store in their block overwrites in one it accepts object by object. That last reader makes
+//     the answer a correctness one — agbcc deletes or hoists a plain device access the machine
+//     made — so it may be approximate in ONE direction only: the window must cover every
+//     register a source reaches, and covering more costs a spelling, never an access.
 //   • capabilities.deviceMemoryWriters → the MEMORY-MODEL question, which is a different one and
 //     may NOT be approximate: "can a write to this register make the DEVICE write ordinary
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because

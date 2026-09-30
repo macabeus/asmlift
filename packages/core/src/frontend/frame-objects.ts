@@ -236,7 +236,8 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  name, and each surviving `laddr` is stamped with its width, signedness, count and `volatile`.
  *  One object mutates more: every access through a member is re-based onto one minted `laddr`,
  *  the member `laddr`s are deleted or re-minted as that one moved by a `const`, and every device
- *  load and store of the function — through no `laddr` at all — is marked `volatile`. */
+ *  load and store of the function — through no `laddr` at all — is marked `volatile`. Per object,
+ *  only the device stores a later store in their own block overwrites are marked. */
 export function auditFrameObjects({
   name,
   irBlocks,
@@ -1032,16 +1033,76 @@ export function auditFrameObjects({
     // The address may be a literal, a literal plus a runtime index — `(vu32 *)(0x40000B0 + ch*12)`,
     // a channel chosen at run time — or a phi each of whose incoming values is one of those: every
     // way the lift names a device register and not a pointer loaded, passed or computed from
-    // nothing it can place. Over-reach costs a spelling and never a store: `volatile` only keeps
-    // accesses the machine made. The window is the target's `deviceRegisters`, which has to cover
+    // nothing it can place. Over-reach costs a spelling and never an access: `volatile` keeps the
+    // accesses the machine made, and a marked read is placed once, as a call is
+    // (structure/analysis.ts), so the qualifier adds none. The window is the target's `deviceRegisters`, which has to cover
     // every register a source reaches — an address outside it stays plain — or the channels
     // handed a frame address without one.
-    // KNOWN GAP: a function accepted object by object keeps its device accesses plain — the pinned
-    // store spelling is `/vol-store`'s candidate beside it (l3/volstore.ts) — so its unranked lift
-    // can lose a transfer the same way. Pinned in the structured tree, they are pinned in every
-    // variation too, and the ones that home the base or un-reduce a loop refuse a qualified base:
-    // `synthetic:dmastride` and `synthetic:dmaptrsrc` lose their matches.
-    const pinDeviceAccesses = (): void => {
+    //
+    // A FUNCTION ACCEPTED OBJECT BY OBJECT pins only the stores of the first kind (`overwritten`):
+    // a device store a later store in its own block overwrites, with no call between to clear
+    // flow.c's list of pending stores (flow.c:1962) and no read of its bytes the lift keeps. Any
+    // other read between is let pass, which may pin a store agbcc keeps — a spelling. Two fills through one channel back to back is
+    // the shape, and plain, the first transfer is gone. Its other device accesses stay plain — the
+    // pinned store spelling is `/vol-store`'s candidate beside it (l3/volstore.ts) — because pinned
+    // in the structured tree they are pinned in every variation too, and the ones that home the
+    // base or un-reduce a loop refuse a qualified base: `synthetic:dmastride` and
+    // `synthetic:dmaptrsrc` lose their matches. KNOWN GAP: so an unranked lift of such a function
+    // still spells a device poll plain, and agbcc hoists it out of a loop that stores nothing.
+    const overwritten = (op: Op, blk: Block, at: number): boolean => {
+      if (op.opcode !== 'store') {
+        return false;
+      }
+      const addressOf = (x: Op): number | undefined => {
+        const lit = literalAddrOf(x.operands[0]);
+        return lit === undefined ? undefined : lit + (x.attrs.off as number);
+      };
+      // Where `x` starts relative to `op`, when both name their bytes the same way.
+      const startOf = (x: Op): { from: number; by: number } | undefined => {
+        const sameBase = x.operands[0] === op.operands[0];
+        const from = sameBase ? (op.attrs.off as number) : addressOf(op);
+        const by = sameBase ? (x.attrs.off as number) : addressOf(x);
+        return from === undefined || by === undefined ? undefined : { from, by };
+      };
+      const width = op.attrs.width as number;
+      for (const later of blk.ops.slice(at + 1)) {
+        if (later.opcode === 'call') {
+          return false;
+        }
+        const s = later.opcode === 'store' || later.opcode === 'load' ? startOf(later) : undefined;
+        if (s === undefined) {
+          continue;
+        }
+        const w = later.attrs.width as number;
+        // A read of those bytes the lift keeps is a use flow.c honours, and the store stands.
+        if (
+          later.opcode === 'load' &&
+          s.by < s.from + width &&
+          s.from < s.by + w &&
+          readValues().has(later.results[0])
+        ) {
+          return false;
+        }
+        if (later.opcode === 'store' && s.by <= s.from && s.by + w >= s.from + width) {
+          return true;
+        }
+      }
+      return false;
+    };
+    let readCache: Set<Value> | undefined;
+    const readValues = (): Set<Value> => {
+      if (readCache === undefined) {
+        readCache = new Set<Value>();
+        for (const b of irBlocks) {
+          for (const x of b.ops) {
+            x.operands.forEach((v) => readCache!.add(v));
+            (x.successors ?? []).forEach((sx) => sx.args.forEach((v) => readCache!.add(v)));
+          }
+        }
+      }
+      return readCache;
+    };
+    const pinDeviceAccesses = (pins: (op: Op, blk: Block, at: number) => boolean): void => {
       const sinks = [...new Set([...sourceStores.values()].flat().map((s) => s.sink))];
       if (sinks.length === 0) {
         return;
@@ -1089,15 +1150,19 @@ export function auditFrameObjects({
         return each.find((a) => typeof a === 'number') ?? 'cycle';
       };
       for (const blk of irBlocks) {
-        for (const op of blk.ops) {
+        blk.ops.forEach((op, at) => {
           if (op.opcode !== 'store' && op.opcode !== 'load') {
-            continue;
+            return;
           }
           const base = placed(op.operands[0], new Set());
-          if (typeof base === 'number' && isDevice(base + (op.attrs.off as number), op.attrs.width as number)) {
+          if (
+            typeof base === 'number' &&
+            isDevice(base + (op.attrs.off as number), op.attrs.width as number) &&
+            pins(op, blk, at)
+          ) {
             op.attrs = { ...op.attrs, volatile: true };
           }
-        }
+        });
       }
     };
 
@@ -1214,7 +1279,7 @@ export function auditFrameObjects({
         });
       }
       irBlocks[0].ops.unshift(object);
-      pinDeviceAccesses();
+      pinDeviceAccesses(() => true);
       return undefined;
     }
 
@@ -1542,6 +1607,7 @@ export function auditFrameObjects({
         op.attrs = { ...op.attrs, width, signed, count, ...(published.has(off) ? { volatile: true } : {}) };
       }
     }
+    pinDeviceAccesses(overwritten);
   }
   return undefined;
 }

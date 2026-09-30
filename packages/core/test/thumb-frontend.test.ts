@@ -3069,10 +3069,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('    *(volatile u16 *)67109378;\n}');
   });
 
-  // KNOWN GAP: a function accepted object by object keeps them plain. Verbatim agbcc,
-  // `REG_IME = 0; DmaFill16(3, 0x1111, a, 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`:
-  // this lift recompiles to 7 stores of the target's 10.
-  test('KNOWN GAP: a function accepted object by object keeps its device stores plain', () => {
+  // A function accepted object by object pins the device stores a later store in their block
+  // overwrites, which plain agbcc deletes. Verbatim agbcc, `REG_IME = 0; DmaFill16(3, 0x1111, a,
+  // 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`: the first fill and `REG_IME = 0` are
+  // pinned, and the recompile keeps the target's 10 stores (7 plain). The rest stay plain.
+  test('a function accepted object by object pins a device store its block overwrites', () => {
     const twoFills =
       'd3i:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr5, .L3\n\tmov\tr2, #0x0\n\tstrh\tr2, [r5]\n' +
       '\tmov\tr3, sp\n\tldr\tr4, .L3+0x4\n\tadd\tr2, r4, #0\n\tstrh\tr2, [r3]\n\tldr\tr2, .L3+0x8\n\tstr\tr3, [r2]\n' +
@@ -3083,7 +3084,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t-0x7effffe0\n\t.word\t0x2222\n';
     const src = decompile('d3i', twoFills, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u16 sp0;');
-    expect(src).not.toContain('(volatile s32 *)');
+    expect(src).toContain('    *(volatile u16 *)67109384 = 0;\n');
+    expect(src).toContain(
+      '    *(volatile s32 *)67109076 = &sp0;\n    ((volatile s32 *)67109076)[1] = a0;\n' +
+        '    ((volatile s32 *)67109076)[2] = -2130706400;\n',
+    );
+    expect(src).toContain('    p0[2] = -2130706400;\n    *(u16 *)67109384 = 1;\n');
   });
 
   // one address-taken halfword frame object published to a DMA register — the shape that mints
