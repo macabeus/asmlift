@@ -30,8 +30,8 @@ export function fpPrecision(
 /** Refuse a function computing in both precisions, where the frontend DECODES a float instruction of
  *  it, so a refusal the stream reaches first keeps its own reason. The SSA builder types a register
  *  per key, not per value, and the rounding between the precisions (a conversion, PowerPC's `frsp`,
- *  or a single op over a double operand) is not modelled. It throws here rather than handing the
- *  error back, so the one throw site is the one `declines.test.ts` harvests. */
+ *  or a single op over a double operand) is not modelled. It throws here, so its throw site is the
+ *  one `declines.test.ts` harvests. */
 export function refuseBothPrecisions(name: string, mnemonic: string): never {
   throw new FrontendUnsupportedError(
     `cannot lift '${name}': '${mnemonic}' is in a function that computes in ` +
@@ -114,7 +114,7 @@ export function fpuArgSlots(
       const floatTop = top(true);
       const intTop = top(false);
       if (fpu?.slots === 'leading') {
-        // The last integer slot the floats read shadow: a double's second word is its too.
+        // The last integer slot the floats read shadow; a double shadows two.
         const floatEnd = floatTop < 0 ? -1 : floatTop + words - 1;
         const shadowed = read.find((s) => !s.float && s.slot <= floatEnd);
         if (shadowed) {

@@ -263,8 +263,8 @@ test('a demangled signature of doubles over a precision-free body is all double'
 });
 
 // …AND A SLOT THE BODY NEVER READS STATES NONE EITHER. The lift types every float register at the
-// function's precision, the unread slot a later float argument proves included, so the `a` of these
-// is a single in a single-precision function and a double in a double one. All three compiled at
+// function's precision, including a slot minted only to hold a later float argument's place, so the
+// `a` of these is a single in a single-precision function and a double in a double one. All three compiled at
 // mwcc_242_81's canonical flags.
 const F1_MWCC = '00000000 <f1__Fdf>:\n   0:\tfadds\tf1,f2,f2\n   4:\tblr\n';
 const F3_MWCC = '00000000 <f3__Fdff>:\n   0:\tfmuls\tf1,f2,f3\n   4:\tblr\n';

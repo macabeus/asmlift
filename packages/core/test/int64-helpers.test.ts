@@ -199,8 +199,8 @@ describe('what refuses', () => {
 
   // A PAIR IN ANY ORDER BUT THE SLOTS' IS ANOTHER VALUE. agbcc -O2 compiles
   //   s64 llswap(s64 a, s64 b){ return (s64)(((u64)a << 32) | ((u64)a >> 32)) * b; }
-  // to these moves: `__muldi3` receives a's words swapped, `concat(r1, r0)`. Fused, it printed
-  // `a0 * a1` — the rotation gone, at exit 0.
+  // to these moves: `__muldi3` receives a's words swapped, `concat(r1, r0)`. Fusing it would print
+  // `a0 * a1`, the rotation gone.
   test('a pair built from its argument slots in the wrong order is not fused', () => {
     const llswap = ['\t.code\t16', '\t.globl\tllswap', '\t.thumb_func', 'llswap:', '\tpush\t{r4, r5, lr}']
       .concat(['\tadd\tr4, r1, #0', '\tadd\tr5, r0, #0', '\tadd\tr1, r5, #0', '\tadd\tr0, r4, #0'])

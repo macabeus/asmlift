@@ -2,10 +2,10 @@
 // register pairs a long long travels in (`runtime-helpers.ts` AGBCC_RUNTIME_HELPERS), and
 // `raise/floathelpers.ts` folds the call to the float op over `double`s.
 //
-// WHAT REFUSES IS EVERY PLACE THE PAIR'S WORD ORDER WOULD SHOW. agbcc puts a double's HIGH word in
-// the lower register (thumb.h:335 FLOAT_WORDS_BIG_ENDIAN), the opposite of a long long, so only a
-// pair moved whole may be read as a double. Each refusal below declines naming the helper rather
-// than passing the call through as `__adddf3()`.
+// WHAT REFUSES IS EVERY PAIR NOT MOVED WHOLE. agbcc puts a double's HIGH word in the lower register
+// (thumb.h:335 FLOAT_WORDS_BIG_ENDIAN), the opposite of a long long, so only a pair moved whole from
+// an argument or a helper may be read as a double. Each refusal below declines naming a helper
+// rather than passing the call through as `__adddf3()`.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -143,7 +143,8 @@ describe('a single-precision helper folds through the same path', () => {
 });
 
 describe('what the table names', () => {
-  // The IR has no int<->float op to fold a compare or a conversion into, and nothing folds a single.
+  // The IR has no int<->float op to fold a compare or a conversion into; the singles' absence is the
+  // table note's trade.
   test('only the double arithmetic', () => {
     for (const name of ['__addsf3', '__mulsf3', '__gtdf2', '__eqdf2', '__floatsidf', '__fixdfsi', '__extendsfdf2']) {
       expect(AGBCC_RUNTIME_HELPERS[name], name).toBeUndefined();

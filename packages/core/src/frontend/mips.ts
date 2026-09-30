@@ -1220,7 +1220,7 @@ export function lift(
     const emitUn = kit.un;
     // Arithmetic on the FPU's file, keyed by `mipsEvenFpKey` so both dialects' spellings of one
     // register are one SSA variable. Anything it cannot key — an odd half, a target with no float
-    // homes — is the register-file refusal it always was.
+    // homes — keeps the register-file refusal.
     const emitFpArith = (ins: Instr) => {
       const keys = ins.ops.map(mipsEvenFpKey);
       if (fpu === undefined || keys.length === 0 || keys.some((k) => k === null)) {

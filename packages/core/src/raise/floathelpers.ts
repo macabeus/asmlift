@@ -58,8 +58,8 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   if (!sites.length) {
     return false;
   }
-  // A projection nothing reads is not a read of a half: without an idiom fold ahead of this pass
-  // nothing has run `dce` since the frontend split the result back into its registers.
+  // A projection nothing reads is not a read of a half: `dce` runs ahead of this pass only after a
+  // fold that changed the IR, so the frontend's split of the result back into its registers may stand.
   const deadHalf = (u: Op | null) =>
     u !== null && (u.opcode === 'lo32' || u.opcode === 'hi32') && !users.has(u.results[0]);
   const entry = fn.blocks[0].params;

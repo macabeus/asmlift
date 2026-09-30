@@ -133,10 +133,9 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     gate: (t) => !t.capabilities.hwDivide,
   },
   // NOT gated, where `softdiv` is: a float helper computes on floats, which an ISA with no FPU has no
-  // instruction for, and the target's runtime table is what says whether it calls one. Its own entry rather than
-  // a step of `widehelpers`, because it is a different fold — it re-types the call's words as floats,
-  // with its own closed-set refusal — and a single-precision helper is a float helper that is not
-  // wide.
+  // instruction for, and the target's runtime table is what says whether it calls one. A pass apart
+  // from `widehelpers` because it re-types the call's words as floats, with its own closed-set
+  // refusal, and a single-precision helper is a float helper that is not wide.
   {
     id: 'floathelpers',
     run: (fn, _self, _opts, target) => recognizeFloatHelpers(fn, target),

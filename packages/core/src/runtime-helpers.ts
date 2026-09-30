@@ -140,11 +140,10 @@ export function forgetHelperPlacement(op: Op): Op {
 }
 
 /** Whether a helper computes on floats: its op is a float op, so its operands and result are floats
- *  of the widths its signature states, carried in integer registers by a soft-float runtime. THE
- *  ONE ANSWER every reader of the table asks, because the two families fold into different IR — an
- *  integer helper into its op over the same values, a float helper into a float op over values
- *  re-typed as floats (`raise/floathelpers.ts`) — and a reader that answered by
- *  width alone would fold a single-precision helper into a float op over integers. */
+ *  of the widths its signature states, carried in integer registers by a soft-float runtime. Every
+ *  reader of the table asks this and not the width, because the two families fold into different
+ *  IR: an integer helper into its op over the same values, a float helper into a float op over
+ *  values re-typed as floats (`raise/floathelpers.ts`). */
 export function isFloatHelper(h: RuntimeHelper): boolean {
   return h.op !== undefined && FLOAT_OPS.has(h.op);
 }
@@ -172,7 +171,7 @@ export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> 
  *  NAMING THEM IS A TRADE, and these five make it: a call the fold refuses declines where an
  *  unnamed helper would publish as a pass-through that matches for free. So a function whose
  *  double arithmetic feeds a compare (`__gtdf2`…), a conversion (`__fixdfsi`…) or any other call
- *  declines, where unnamed it printed `__muldf3(); return __fixdfsi();`. The compares and
+ *  declines, where unnamed it would print `__muldf3(); return __fixdfsi();`. The compares and
  *  conversions of both precisions stay out, because the IR has no int<->float op to fold one into;
  *  the single-precision arithmetic stays out because its pass-throughs are what the float rows
  *  score on (`synthetic:fadd:agbcc`), and declining them is the same trade, to be made with a

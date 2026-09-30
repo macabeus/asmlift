@@ -30,8 +30,8 @@ export type IrType =
   // `size` is the one the target's compiler gives it — which is not always its widest view
   // (`T.union` computes it from the compiler's aggregate boundary).
   | { kind: 'union'; members: StructField[]; size: number }
-  // An IEEE floating-point value, single (32) or double (64). A KIND and not an `int` width, which is the one
-  // exception to the 64-bit rule at `ir/opcodes.ts` `concat` ("widen the number that is already
+  // An IEEE floating-point value, single (32) or double (64). A KIND and not an `int` width, which is
+  // the one exception to the 64-bit rule at `ir/opcodes.ts` `concat` ("widen the number that is already
   // there"): a float is not an integer of any width, so every pass that tests `kind === 'int'` must
   // SKIP it rather than compute on it, and skipping is what a new kind buys. Its values live in the
   // FPU's own register file, or in a soft-float runtime's register pair, and are computed only by

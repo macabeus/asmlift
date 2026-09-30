@@ -329,4 +329,4 @@ reaches the fold only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its h
 register, so a literal, a load, a store or a read of one word refuses (`test/soft-double.test.ts`). The
 compares and the conversions (`__gtdf2`, `__floatsidf` …) and every single-precision helper stay
 ordinary calls: the IR has no int<->float op to fold them into, and naming one would decline the
-functions that pass through today.
+functions that pass through them.

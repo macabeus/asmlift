@@ -4649,9 +4649,9 @@ function liftOnce(
               const half = halfOf.get(v);
               // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
               // reader to a declaration that cannot help: a double leaves a soft-float helper only
-              // into another one or the return (`raise/floathelpers.ts`), and a
-              // pair built here for a callee declared to take one is refused there. What a
-              // declaration still settles is a guessed arity that read the pair and never took it.
+              // into another one or the return (`raise/floathelpers.ts`), and a pair built here for a
+              // callee declared to take one is refused there. What a declaration still settles is a
+              // guessed arity that read the pair and never took it.
               const producer = half && pairCallee.get(half.whole);
               const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
               if (half && helper && isFloatHelper(helper)) {
