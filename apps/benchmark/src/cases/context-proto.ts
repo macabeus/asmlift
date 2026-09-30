@@ -24,7 +24,7 @@ export function rowPrototypes(
   language: 'c' | 'c++',
   sym: string,
   symbols: SymbolMap | undefined,
-  target: Pick<TargetDescription, 'softDoubleWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
 ): Prototypes | undefined {
   if (ctxI === '') {
     return manifest;

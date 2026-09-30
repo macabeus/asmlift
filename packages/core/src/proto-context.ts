@@ -796,7 +796,7 @@ export function withContextPrototypes(
   context: Prototypes,
   own: string,
   symbols: SymbolMap | undefined,
-  target: Pick<TargetDescription, 'softDoubleWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
 ): Prototypes {
   const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols, target);
   const out: Prototypes = { ...callees, ...stated };
@@ -832,7 +832,7 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
 function contextPrototypesUnder(
   context: Prototypes,
   symbols: SymbolMap | undefined,
-  target: Pick<TargetDescription, 'softDoubleWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
 ): Prototypes {
   if (symbols === undefined) {
     return context;

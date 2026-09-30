@@ -32,10 +32,8 @@ export function doubleOf(bits: string): number {
  *  negative zero.
  *
  *  THAT IT READS BACK IS A PREMISE ABOUT THE COMPILER, and the one producer of a literal
- *  (`raise/floathelpers.ts`) runs only on a target that states it, through `softDoubleWords`.
- *  agbcc reads it back exactly: c-lex.c:1308 hands the token to REAL_VALUE_ATOF at DFmode, which is
- *  real.c:461 `ereal_atof` → `asctoe53` (:3512) → `asctoeg(s, y, 53)` (:3533), a conversion in
- *  extended precision rounded once to 53 bits. */
+ *  (`raise/floathelpers.ts`) runs only where the target states it
+ *  (`compilerBehaviors.roundTripsDoubleLiterals`, which cites agbcc's source for it). */
 export function doubleLiteral(bits: string): string {
   const x = doubleOf(bits);
   if (!Number.isFinite(x)) {

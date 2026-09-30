@@ -72,7 +72,7 @@ export function calleeNames(asm: string, self?: string): string[] {
 export function guessedArityCallees(
   asm: string,
   self: string,
-  target: Pick<TargetDescription, 'softDoubleWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
 ): string[] {
@@ -86,7 +86,7 @@ export function guessedArityCallees(
 export function guessedArityNote(
   asm: string,
   self: string,
-  target: Pick<TargetDescription, 'softDoubleWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
 ): string {

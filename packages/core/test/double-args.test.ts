@@ -1,6 +1,6 @@
 // A `double` handed to a declared callee on agbcc. It crosses the call in the two general argument
 // words a `long long` takes, wherever they fall, with its HIGH word first
-// (`TargetDescription.softDoubleWords`), so the pair read as an integer is another number —
+// (`TargetDescription.doubleArgWords`), so the pair read as an integer is another number —
 // `g(1.5)` as `g(1073217536, 0)`. The asm is agbcc's own (`scripts/regen-double-arg-probes.ts`).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -98,17 +98,30 @@ describe('a declared double argument', () => {
     );
   });
 
-  // An FPU target passes a double in a float register and no general word, so the declaration
-  // states no layout there and the call is lifted as a callee nobody declared is.
-  test('on a target that does not claim soft doubles the declaration abstains', () => {
-    const { softDoubleWords, ...fpu } = ARMV4T_AGBCC;
-    expect(softDoubleWords).toBe('high-first');
-    expect(lift('dreg', G, fpu)).toBe(lift('dreg'));
+  // A target that states no general words for a double lays out no declared double, and the call
+  // is lifted as a callee nobody declared is.
+  test('on a target that states no double words the declaration abstains', () => {
+    const { doubleArgWords, ...none } = ARMV4T_AGBCC;
+    expect(doubleArgWords).toBe('high-first');
+    expect(lift('dreg', G, none)).toBe(lift('dreg'));
   });
 
-  test('no target states both a soft double and an FPU', () => {
+  // The words' order is the ABI's; that the printed literal reads back as the same double is the
+  // compiler's, and a target that does not state it has no literal to hand the callee.
+  test('a literal needs the compiler to read it back, not only the words', () => {
+    const { roundTripsDoubleLiterals, ...unmeasured } = ARMV4T_AGBCC.compilerBehaviors;
+    expect(roundTripsDoubleLiterals).toBe(true);
+    expect(() => lift('dreg', G, { ...ARMV4T_AGBCC, compilerBehaviors: unmeasured })).toThrow(
+      "argument 1 of the call to 'g'",
+    );
+    expect(lift('dpass', G, { ...ARMV4T_AGBCC, compilerBehaviors: unmeasured })).toBe(lift('dpass', G));
+  });
+
+  // Where a double travels beside the FPU's slots it takes no general word, so such a target has
+  // none to state; o32's `'leading'` slots still give a double its two general words.
+  test('a target whose float arguments take no integer slot states no double words', () => {
     for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
-      expect(t.softDoubleWords === undefined || t.fpu === undefined).toBe(true);
+      expect(t.fpu?.slots === 'separate' && t.doubleArgWords !== undefined).toBe(false);
     }
   });
 });

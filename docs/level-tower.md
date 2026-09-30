@@ -748,7 +748,7 @@ the IR the way a 64-bit integer does — a `concat` of two argument registers in
 result split back into r0:r1 — and `raise/floathelpers.ts` folds the call to the float op over
 `f64`s, in its own pass just ahead of the one that folds `__muldi3`. A call to an ordinary callee a
 prototype declares to take a `double` enters the same way: the frontend lays that parameter out as
-the next two argument words wherever they fall (`TargetDescription.softDoubleWords` — two registers,
+the next two argument words wherever they fall (`TargetDescription.doubleArgWords` — two registers,
 r3 and [sp,#0], or two outgoing stack words), lists it in the call's `doubles`, and the same pass
 hands it a double. That pass is the only producer of an `f64` from integer words, and it is not an
 op: verify holds that a `concat` builds an integer, so a double may come only from a pair of this

@@ -187,7 +187,7 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'TaskFunc', 's32'] } })).toThrow(
       /stack pointer used as data/,
     );
-    // …where a `double` is two words on agbcc (`TargetDescription.softDoubleWords`), so it lays the
+    // …where a `double` is two words on agbcc (`TargetDescription.doubleArgWords`), so it lays the
     // block out, and the verdict is about the double: its words are `a0` and `a1`, which are also
     // passed as words, so it is no double moved whole.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(

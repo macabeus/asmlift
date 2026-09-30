@@ -182,15 +182,15 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  expands to that many words and can never abstain. It is the way past a header this cannot size.
  *
  *  A `double` IS A TARGET FACT. Where it crosses a call in general argument words
- *  (`TargetDescription.softDoubleWords`) it is 64 bits of words and its index is in `doubles`, so a
- *  reader can tell it from a `long long`, whose bits are the same words in another order; on an FPU
- *  target it takes no general word, and the list abstains. A `float` states no layout on either: it
+ *  (`TargetDescription.doubleArgWords`) it is 64 bits of words and its index is in `doubles`, so a
+ *  reader can tell it from a `long long`, whose bits are the same words in another order; on a
+ *  target that states no such words the list abstains. A `float` states no layout on either: it
  *  is one word on a soft-float target, but that word is a float only to a callee whose declaration
  *  the candidate prints, and `spellableProto` prints no floating type — an undeclared callee is
  *  handed a `float` promoted to a `double`, which is two words. */
 export function declaredCallArgs(
   p: FnProto | undefined,
-  target: Pick<TargetDescription, 'softDoubleWords'>,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
 ): { widths: readonly number[]; doubles: ReadonlySet<number> } | undefined {
   if (typeof p?.params === 'number') {
     return { widths: Array.from({ length: p.params }, () => 32), doubles: new Set() };
@@ -204,7 +204,7 @@ export function declaredCallArgs(
     const w = declaredWidth(t);
     if (w !== undefined) {
       widths.push(w);
-    } else if (target.softDoubleWords !== undefined && isDoubleSpelling(t)) {
+    } else if (target.doubleArgWords !== undefined && isDoubleSpelling(t)) {
       doubles.add(i);
       widths.push(64);
     } else {

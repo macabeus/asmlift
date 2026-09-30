@@ -3556,7 +3556,7 @@ function liftOnce(
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
   // spell — including `long long`, which is why a pair no longer needs guessing at — and
   // `undefined` for a project typedef, a by-value struct or a floating type. `declaredCallArgs`
-  // sizes a `double` from the target (`TargetDescription.softDoubleWords`); one other such spelling
+  // sizes a `double` from the target (`TargetDescription.doubleArgWords`); one other such spelling
   // and it states no layout at all, because the question here is not how wide that
   // parameter is but whether it occupies one argument register or two, and the choice moves every
   // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
@@ -4732,7 +4732,7 @@ function liftOnce(
           const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
           const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
           // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
-          // sign and exponent (`TargetDescription.softDoubleWords`), so the pair read as an integer
+          // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
           // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
           // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
           const doubles = declared?.doubles.size ? [...declared.doubles] : undefined;

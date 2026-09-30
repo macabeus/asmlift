@@ -341,9 +341,9 @@ describe('declaredWidth', () => {
   });
 });
 
-// A `double`'s general argument words are a TARGET fact (`TargetDescription.softDoubleWords`), so
+// A `double`'s general argument words are a TARGET fact (`TargetDescription.doubleArgWords`), so
 // the reader that lays one out takes the target's answer and `declaredWidth` keeps its absence.
-describe('declaredCallArgs on a soft double', () => {
+describe('declaredCallArgs on a double', () => {
   const soft = ARMV4T_AGBCC;
 
   test('on agbcc a double is two words, marked, with no alignment', () => {

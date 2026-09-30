@@ -3,8 +3,9 @@
 // Three things cross it. A runtime helper whose op is a float op (`isFloatHelper`) — the peer of
 // `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
 // A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). And a
-// double literal, two constant words, on a target that states its soft double
-// (`TargetDescription.softDoubleWords`). What sets all three apart from the integer helpers is the
+// double literal, two constant words, where the target states their order
+// (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
+// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all three apart from the integer helpers is the
 // value's KIND: the words are bits in integer registers, and the pass re-types them as floats,
 // which only data flow may justify — see the function below.
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
@@ -102,13 +103,20 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     return d !== undefined && calls.has(d);
   };
   // A LITERAL IS TWO CONSTANT WORDS, HIGH WORD FIRST on a target whose double crosses a call in
-  // general words (`TargetDescription.softDoubleWords`) — the order that makes the long long naming
+  // general words (`TargetDescription.doubleArgWords`) — the order that makes the long long naming
   // of the same pair another number. Its bits, or undefined where the pair is no literal, the target
-  // states no such double, or the double is not finite — which no C literal spells.
+  // states no such double, its compiler is not known to read the literal back
+  // (`compilerBehaviors.roundTripsDoubleLiterals`), or the double is not finite — which no C literal
+  // spells.
   const literalBits = (v: Value): string | undefined => {
     const d = def.get(v);
     const [first, second] = (d?.opcode === 'concat' ? d.operands : []).map((o) => def.get(o));
-    if (target.softDoubleWords === undefined || first?.opcode !== 'const' || second?.opcode !== 'const') {
+    if (
+      target.doubleArgWords === undefined ||
+      target.compilerBehaviors.roundTripsDoubleLiterals !== true ||
+      first?.opcode !== 'const' ||
+      second?.opcode !== 'const'
+    ) {
       return undefined;
     }
     const bits = doubleBits(Number(first.attrs.value), Number(second.attrs.value));
