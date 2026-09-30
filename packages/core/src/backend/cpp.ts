@@ -73,7 +73,9 @@ export function cppSymbol(spec: CppFnSpec): string {
  *  reads no FPU register mints it as two 32-bit holes: `void n1(double d, int *p, int *q){ *p = 0; }`
  *  (gcc2.7.2kmc) is `sw zero,0(a2)` and lifts as `(s32 a0, s32 a1, s32 *a2)`, where binding by
  *  position would name `a2` `q`. Only a lifted 64-bit parameter holds both slots, so a spec double
- *  over a narrower one refuses once any lifted parameter follows it. */
+ *  over a narrower one refuses once any lifted parameter follows it — unless it is the spec's last
+ *  and the body reads none of the slots from it on, which is IDO homing a trailing double it never
+ *  uses (`int o1(int a, double d){ return a; }` spills `a2`/`a3`): nothing then binds past it. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
   lifted: Pick<SFn, 'params' | 'body'>,
@@ -93,6 +95,8 @@ export function bindSpecParams(
       floatBits(t) === null ||
       (p.type.width !== null && (laysOut || read.has(p.name)) && floatBits(t) !== p.type.width));
   const explicit = lifted.params.slice(spec.cls ? 1 : 0);
+  const lastAndUnread = (i: number) =>
+    i === spec.params.length - 1 && explicit.slice(i).every((p) => !read.has(p.name));
   if (floatSlots !== 'separate') {
     const clash = explicit.some((p, i) => {
       const t = spec.params[i]?.type;
@@ -104,7 +108,7 @@ export function bindSpecParams(
           t,
           later.some((q) => q.type.kind !== 'float'),
         ) ||
-        (t !== undefined && floatBits(t) === 64 && oneSlot && later.length > 0)
+        (t !== undefined && floatBits(t) === 64 && oneSlot && later.length > 0 && !lastAndUnread(i))
       );
     });
     return clash ? null : spec.params.map((_, i) => explicit[i]?.name);

@@ -378,6 +378,21 @@ test.each([
   expect(cpp(sym, asm, MIPS_GCC)).toBe(free);
 });
 
+// …EXCEPT A TRAILING DOUBLE NOTHING READS. IDO 7.1 at its canonical flags homes it (`sw a2,8(sp); sw
+// a3,12(sp)`), so the lift keeps both slots as parameters the body never reads, and no spec
+// parameter follows the double to be named one slot early.
+const O1_IDO = '00000000 <o1__Fid>:\n   0:\tsw\ta2,8(sp)\n   4:\tsw\ta3,12(sp)\n   8:\tjr\tra\n   c:\tmove\tv0,a0\n';
+
+test('o32: a trailing spec double over integer holes the body never reads binds', () => {
+  const spec = specOf('o1', [
+    ['a', 'int'],
+    ['d', 'double'],
+  ]);
+  expect(decompile('o1__Fid', O1_IDO, MIPS_IDO, { backend: cppBackend(spec, MIPS_IDO.fpu?.slots) }).source).toBe(
+    'int o1(int a, double d) {\n    return a;\n}\n',
+  );
+});
+
 test('o32: a spec float over a lifted integer hole takes its one slot', () => {
   expect(cpp('k__Ffi', K_KMC, MIPS_GCC)).toBe('int k(float a, int b) {\n    return b;\n}\n');
 });
