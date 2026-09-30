@@ -92,7 +92,7 @@
 // both configurations and with any window. No row demands the read spelling, and a variation with no
 // inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
-import { cellAddress, inRange } from './address';
+import { cellAddress, inRange, qualifiedBase } from './address';
 import { type Expr, type SFn, type Stmt, dotBase, stmtChildren } from './ast';
 import { type Gate, firstRejection } from './gates';
 
@@ -140,9 +140,6 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
     rejects: (c) => c.qualified,
   },
 ];
-
-/** Does this base already assert volatility — a `volatile` cast at any depth of the cast chain? */
-const qualifiedBase = (e: Expr): boolean => e.k === 'cast' && (e.volatile === true || qualifiedBase(e.e));
 
 /** The pointee the deref cast carries: the access's own scalar type. */
 const pointee = (ix: Extract<Expr, { k: 'index' }>): IrType => scalarTypeForAccess(ix.width, ix.signed);
