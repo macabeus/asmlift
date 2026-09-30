@@ -13,7 +13,7 @@
 // Scope: free functions and non-virtual member functions with scalar/pointer params and named
 // field access. Virtual dispatch, references, and constructors/destructors are deliberately not
 // built ahead of an inhabitant.
-import { Expr, LanguageBackend, SFn } from '../l3/ast';
+import { Expr, LanguageBackend, SFn, walkExprs } from '../l3/ast';
 import { type CppType, declareCpp, mangle, spellType } from '../mangle';
 import type { TargetDescription } from '../target';
 import { LeafHook, cComment, emitCFamily } from './cfamily';
@@ -51,19 +51,34 @@ export function cppSymbol(spec: CppFnSpec): string {
  *  precision for. No binding of the rest is then trustworthy. The precision is part of the
  *  contradiction because the body is spelled over the spec's types: a lifted `double` bound to a
  *  `float a, float b` prints `a + b`, which is a single-precision add where the machine did a
- *  double one. A lifted float of no stated precision (`T.fUnstated`) binds a spec float of either:
- *  its code compiles the same under both, so the spec's is the one to print. */
+ *  double one.
+ *
+ *  THE PRECISION IS AN OPERATION'S, so only a parameter the body reads has one to contradict. A
+ *  frontend types every float register of a function at the function's one precision
+ *  (frontend/fpu.ts `fpPrecision`), and that includes an argument slot the body never reads, which
+ *  it mints only to hold the later arguments' places: `float f1(double a, float b){ return b + b; }`
+ *  is `fadds f1,f2,f2`, and its `a` is a single-precision hole that nothing states the width of. So
+ *  is a lifted float of no stated precision (`T.fUnstated`) anywhere. Either binds a spec float of
+ *  both widths, and the spec's is the one to print. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
-  lifted: SFn['params'],
+  lifted: Pick<SFn, 'params' | 'body'>,
   floatSlots: FloatSlots | undefined,
 ): (string | undefined)[] | null {
   const floatBits = (t: CppType) => (t.ptr !== 0 ? null : t.base === 'float' ? 32 : t.base === 'double' ? 64 : null);
   const isFloat = (t: CppType) => floatBits(t) !== null;
+  const read = new Set<string>();
+  for (const e of walkExprs(lifted.body)) {
+    if (e.k === 'var') {
+      read.add(e.name);
+    }
+  }
+  const stated = (p: SFn['params'][number]) =>
+    p.type.kind === 'float' && p.type.width !== null && read.has(p.name) ? p.type.width : null;
   const clashes = (p: SFn['params'][number], t: CppType | undefined) =>
     p.type.kind === 'float' &&
-    (t === undefined || floatBits(t) === null || (p.type.width !== null && floatBits(t) !== p.type.width));
-  const explicit = lifted.slice(spec.cls ? 1 : 0);
+    (t === undefined || floatBits(t) === null || (stated(p) !== null && floatBits(t) !== stated(p)));
+  const explicit = lifted.params.slice(spec.cls ? 1 : 0);
   if (floatSlots !== 'separate') {
     const clash = explicit.some((p, i) => clashes(p, spec.params[i]?.type));
     return clash ? null : spec.params.map((_, i) => explicit[i]?.name);
@@ -96,7 +111,7 @@ export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined):
         rename.set(thisVar, 'this');
         recv.set(thisVar, { cls: spec.cls!, via: 'this' });
       }
-      const bound = bindSpecParams(spec, fn.params, floatSlots);
+      const bound = bindSpecParams(spec, fn, floatSlots);
       if (!bound) {
         throw new Error(
           `cpp backend: the spec's floating-point parameters do not match the lifted function's — ` +

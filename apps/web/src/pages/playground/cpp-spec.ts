@@ -114,7 +114,7 @@ export function deriveSpec(
   // floats binds nothing it can trust.
   const bound = bindSpecParams(
     { cls: sig.cls, params: sig.params.map((type) => ({ name: '', type })) },
-    sfn.params,
+    sfn,
     floatSlots,
   );
   if (sfn.params.length !== (sig.cls ? 1 : 0) + sig.params.length || !bound) {

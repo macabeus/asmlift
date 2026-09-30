@@ -5,7 +5,9 @@ precision — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and their `.d` twi
 `fadds`/`fsubs`/`fmuls`/`fdivs`, `fadd`/`fsub`/`fmul`/`fdiv`, `fneg`/`fmr` — through each ABI's float
 argument and return homes, and nothing else in that file; a function computing in both precisions
 refuses. `fneg` and `fmr` state no precision, so a function made only of them lifts a float of none
-(`T.fUnstated`): C spells it `float`, and a C++ declaration binds it at either width.
+(`T.fUnstated`): C spells it `float`, and a C++ declaration binds it at either width. So does an
+argument slot the body never reads (`float f1(double a, float b){ return b + b; }` is `fadds f1,f2,f2`):
+no instruction states its width, whatever the function's precision typed it.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
 On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through

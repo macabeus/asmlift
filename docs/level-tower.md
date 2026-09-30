@@ -695,11 +695,13 @@ FPU target: the entry reads of `$f12`/`f1` mint phantom integer parameters, and 
 register that is not the return, so the add is dead ([`floating-point.md`](floating-point.md) §2).
 So it was built downwards, and each level is a layer that document prices.
 
-**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32 | 64}` is the one exception to the
+**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32 | 64 | null}` is the one exception to the
 64-bit section's rule ("for TYPES, widen the number that is already there"): a float is not an integer
 of any width, so every pass that tests `kind === 'int'` must SKIP it, and a new kind is what makes it
-skip. Its width says single or double, and two widths are two types, so a float op mixing them fails
-verify. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the
+skip. Its width says single or double, or, where null (`T.fUnstated`, IR text `f?`), that no
+instruction of the function states one: PowerPC's `fneg` and `fmr` are one instruction for both, so
+a function of only those compiles to one object whichever the source declared. The three widths are
+three types, so a float op mixing them fails verify. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the
 same reason `concat` is its own opcode: every pass that matches `add` is an integer rewrite. `ir/verify.ts` holds both directions — a
 float op computes on floats only, and a float is an operand of nothing else but `ret` — so a
 pass that matched an opcode without asking what it computes on fails where it did it.

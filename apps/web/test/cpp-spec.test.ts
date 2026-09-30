@@ -262,6 +262,64 @@ test('a demangled signature of doubles over a precision-free body is all double'
   expect(cpp('dsnd__Fdd', DSND_MWCC, PPC_MWCC)).toBe('double dsnd(double a, double b) {\n    return b;\n}\n');
 });
 
+// …AND A SLOT THE BODY NEVER READS STATES NONE EITHER. The lift types every float register at the
+// function's precision, the unread slot a later float argument proves included, so the `a` of these
+// is a single in a single-precision function and a double in a double one. All three compiled at
+// mwcc_242_81's canonical flags.
+const F1_MWCC = '00000000 <f1__Fdf>:\n   0:\tfadds\tf1,f2,f2\n   4:\tblr\n';
+const F3_MWCC = '00000000 <f3__Fdff>:\n   0:\tfmuls\tf1,f2,f3\n   4:\tblr\n';
+const H2_MWCC = '00000000 <h2__Ffdd>:\n   0:\tfadd\tf1,f2,f3\n   4:\tblr\n';
+
+test.each([
+  [
+    'float f1(double a, float b)',
+    'f1__Fdf',
+    F1_MWCC,
+    specOf(
+      'f1',
+      [
+        ['a', 'double'],
+        ['b', 'float'],
+      ],
+      'float',
+    ),
+    'float f1(double a, float b) {\n    return b + b;\n}\n',
+  ],
+  [
+    'float f3(double a, float b, float c)',
+    'f3__Fdff',
+    F3_MWCC,
+    specOf(
+      'f3',
+      [
+        ['a', 'double'],
+        ['b', 'float'],
+        ['c', 'float'],
+      ],
+      'float',
+    ),
+    'float f3(double a, float b, float c) {\n    return b * c;\n}\n',
+  ],
+  [
+    'double h2(float a, double b, double c)',
+    'h2__Ffdd',
+    H2_MWCC,
+    specOf(
+      'h2',
+      [
+        ['a', 'float'],
+        ['b', 'double'],
+        ['c', 'double'],
+      ],
+      'double',
+    ),
+    'double h2(float a, double b, double c) {\n    return b + c;\n}\n',
+  ],
+])('an unread float slot binds a spec float of the other precision: %s', (_label, sym, asm, spec, source) => {
+  expect(decompile(sym, asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) }).source).toBe(source);
+  expect(cpp(sym, asm, PPC_MWCC)).toBe(source);
+});
+
 test.each([
   [
     'EABI: a trailing unread float',
