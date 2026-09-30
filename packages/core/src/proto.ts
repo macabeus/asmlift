@@ -77,6 +77,19 @@ export interface FnProto {
    *  `typeSpelling` sizes 1, 2 and 4 bytes, so a DWARF-derived entry could only ever spell a return
    *  that already fits a register, where the field changes nothing. */
   returns?: ParamType;
+  /** The declared return is a struct or union handed back BY VALUE. A caller that calls such a
+   *  function may be handing it a hidden pointer to the storage the return lands in, in argument 0
+   *  (agbcc thumb.h:672 STRUCT_VALUE_REGNUM 0), with every declared argument one register up
+   *  (thumb.h:644-645) — so the declared `params` do not say which registers the call reads, and a
+   *  lift that reads them from r0 names the hidden pointer as the first argument. A `returns` that
+   *  spells `struct Tag` or `union Tag` states the same fact ({@link declaresAggregateReturn});
+   *  this key is how a declaration says it of a typedef name, which spells no keyword. */
+  returnLayout?: AggregateLayout;
+}
+
+/** A struct or union a declaration spells. */
+export interface AggregateLayout {
+  kind: 'struct' | 'union';
 }
 
 /** symbol → prototype. The function under decompilation and its callees share one table. */
@@ -208,6 +221,15 @@ export function declaresVoidReturn(p: FnProto | undefined): boolean {
   return p?.returnsVoid === true || p?.returns?.trim() === 'void';
 }
 
+/** Whether a declaration says the function returns a struct or union by value — through either
+ *  key that can say it (`FnProto.returnLayout`). Read through `?.` for the reason
+ *  `returnsWithoutHiddenPointer` gives: a `null` entry out of parsed JSON reaches every reader. */
+export function declaresAggregateReturn(p: FnProto | undefined): boolean {
+  return (
+    p?.returnLayout !== undefined || /^(?:(?:const|volatile)\s+)*(?:struct|union)\s/.test(p?.returns?.trim() ?? '')
+  );
+}
+
 /** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in
  *  argument 0. A callee that returns nothing has no such pointer to be given; neither has one
  *  whose return travels in a register. Every other answer — including silence — is `false`,
@@ -243,6 +265,9 @@ export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototyp
   const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
   if (declaresVoidReturn(own)) {
     return true;
+  }
+  if (declaresAggregateReturn(own)) {
+    return false;
   }
   // A PROJECT'S OWN `returns` ANSWERS THIS THROUGH THE SAME READING A STANDARD SIGNATURE'S DOES,
   // and it ranks above the table for the same reason `declaredCall` ranks a re-declaration above
@@ -509,15 +534,29 @@ export function validatePrototypes(value: unknown): string[] {
       continue;
     }
     for (const key of Object.keys(proto)) {
-      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns') {
-        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid" or "returns")`);
+      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns' && key !== 'returnLayout') {
+        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns" or "returnLayout")`);
       }
     }
-    const { params, returnsVoid, returns } = proto as {
+    const { params, returnsVoid, returns, returnLayout } = proto as {
       params?: unknown;
       returnsVoid?: unknown;
       returns?: unknown;
+      returnLayout?: unknown;
     };
+    if (returnLayout !== undefined) {
+      problems.push(...layoutProblems(`${sym}: "returnLayout"`, returnLayout));
+      // A layout beside a return that says `void` or spells a scalar is two answers to one question
+      // — whether the call hands the callee a hidden pointer — and neither can be picked.
+      if (
+        returnsVoid === true ||
+        (typeof returns === 'string' && (returns.trim() === 'void' || declaredWidth(returns) !== undefined))
+      ) {
+        problems.push(
+          `${sym}: "returnLayout" says the return is a struct or union, and the return is also declared scalar or void`,
+        );
+      }
+    }
     const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
     const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
     if (params !== undefined && !countOk && !listOk) {
@@ -568,6 +607,24 @@ export function validatePrototypes(value: unknown): string[] {
             .join('/')}`,
       );
     }
+  }
+  return problems;
+}
+
+/** Problems with one hand-written {@link AggregateLayout}, each prefixed with `where`. */
+function layoutProblems(where: string, value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return [`${where} must be an object, e.g. {"kind": "struct"}`];
+  }
+  const problems: string[] = [];
+  for (const key of Object.keys(value)) {
+    if (key !== 'kind') {
+      problems.push(`${where}: unknown key "${key}" (expected "kind")`);
+    }
+  }
+  const { kind } = value as { kind?: unknown };
+  if (kind !== 'struct' && kind !== 'union') {
+    problems.push(`${where}: "kind" must be "struct" or "union"`);
   }
   return problems;
 }

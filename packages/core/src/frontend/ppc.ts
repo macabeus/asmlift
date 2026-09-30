@@ -40,7 +40,7 @@
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredArgWidths, declaredReturnWidth } from '../proto';
+import { type Prototypes, declaredArgWidths, declaredReturnWidth, declaresAggregateReturn } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -1073,7 +1073,16 @@ export function lift(
           //
           // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
           // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
-          const widths = declaredArgWidths(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          const own = Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined;
+          // mwcc hands a struct over 8 bytes a hidden pointer in r3 and moves every argument up one
+          // register; a smaller one comes back in r3/r3:r4 — neither is the call read below.
+          if (declaresAggregateReturn(own)) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': '${sym}' is declared to return ${own?.returns ?? 'a struct or union'} by value — ` +
+                'a call to a struct-returning function is not modelled',
+            );
+          }
+          const widths = declaredArgWidths(own);
           let declared: number | undefined;
           if (widths !== undefined) {
             const wideAt = widths.findIndex((w) => w > 32);

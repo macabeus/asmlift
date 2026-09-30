@@ -2,7 +2,13 @@
 // compiled against (core `prototypesFromContext`), so asmlift lifts each call at the arity the
 // compiler will check it against — and, on a row m2c is given no project context, the same
 // declarations rendered as the C m2c reads (`m2cDeclarations`).
-import { PRELUDE_TYPEDEFS, type Prototypes, declaredWidth, declaresVoidReturn } from '@asmlift/core/proto';
+import {
+  PRELUDE_TYPEDEFS,
+  type Prototypes,
+  declaredWidth,
+  declaresAggregateReturn,
+  declaresVoidReturn,
+} from '@asmlift/core/proto';
 import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 
@@ -53,8 +59,9 @@ export function referencedPrototypes(proto: Prototypes | undefined, text: string
  *  header's own spelling, and each project type a spelling names is declared opaque ahead of them
  *  (`typedef struct OSMutex OSMutex;`): m2c reads a declaration for its signature, and its output is
  *  compiled against the project's own headers, where a pointer of another type than the declared
- *  one is a C++ compile error. An entry with a parameter or a return nothing sizes is left out, and
- *  so is a name the row's context already declares.
+ *  one is a C++ compile error. An entry with a parameter or a return nothing sizes is left out —
+ *  a struct or union return included, whose body this does not declare — and so is a name the
+ *  row's context already declares.
  *
  *  This admits more than core's `spellableProto`, which prints a declaration into the candidate's
  *  own translation unit and so only spells types that unit is sure to know. m2c's declarations are
@@ -63,7 +70,12 @@ export function m2cDeclarations(proto: Prototypes | undefined, sym: string, ctx:
   const opaque = new Map<string, string>();
   const lines: string[] = [];
   for (const [name, p] of Object.entries(proto ?? {})) {
-    if (name === sym || !Array.isArray(p.params) || (ctx !== undefined && declaredIn(ctx, name))) {
+    if (
+      name === sym ||
+      !Array.isArray(p.params) ||
+      declaresAggregateReturn(p) ||
+      (ctx !== undefined && declaredIn(ctx, name))
+    ) {
       continue;
     }
     const ret = declaresVoidReturn(p) ? 'void' : p.returns;

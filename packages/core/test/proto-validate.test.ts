@@ -15,6 +15,7 @@ describe('accepts every form the type allows', () => {
     ['a declared return width', { f: { params: [], returns: 'long long' } }],
     ['a return spelling nothing can size — silence, which the frontend already handles', { f: { returns: 'Fixed64' } }],
     ['the two return keys agreeing', { f: { returnsVoid: true, returns: 'void' } }],
+    ['a struct return', { f: { params: ['s32'], returns: 'Pair', returnLayout: { kind: 'struct' } } }],
     ['an empty proto — the frontend then guesses, which is a choice not a mistake', { f: {} }],
     ['an empty table', {}],
   ])('%s', (_label, table) => {
@@ -32,7 +33,7 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
 
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
-      'f: unknown key "returnVoid" (expected "params", "returnsVoid" or "returns")',
+      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns" or "returnLayout")',
     ]);
   });
 
@@ -44,6 +45,9 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
     ['a non-string returns', { f: { returns: 64 } }],
     ['a proto that is not an object', { f: 2 }],
     ['a proto that is an array', { f: [] }],
+    ['a layout of no known kind', { f: { returnLayout: { kind: 'class' } } }],
+    ['a layout beside a void return', { f: { returnsVoid: true, returnLayout: { kind: 'struct' } } }],
+    ['a layout beside a scalar return', { f: { returns: 'u32', returnLayout: { kind: 'union' } } }],
   ])('%s', (_label, table) => {
     expect(validatePrototypes(table).length).toBeGreaterThan(0);
   });

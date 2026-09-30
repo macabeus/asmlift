@@ -1,4 +1,4 @@
-import type { FnProto, ParamType, Prototypes } from './proto';
+import type { AggregateLayout, FnProto, ParamType, Prototypes } from './proto';
 import { declaredArgWidths, declaredWidth, symbolPrototype, validatePrototypes } from './proto';
 import type { SymbolMap } from './symbols';
 
@@ -238,11 +238,17 @@ function resolve(t: string, typedefs: ReadonlyMap<string, string>): string {
 export function prototypesFromContext(src: string, language: 'c' | 'c++'): Prototypes {
   const stmts = statements(src);
   const typedefs = new Map<string, string>();
+  // typedef names bound to a struct or union BODY, which resolve to themselves and spell no keyword
+  const aggregates = new Map<string, AggregateLayout['kind']>();
   for (const s of stmts) {
     if (/^typedef\b/.test(s.text)) {
       const td = readTypedef(s.text);
       if (td) {
         typedefs.set(td[0], td[1]);
+        const body = /^typedef\s+(struct|union)\b[^{]*\{\}/.exec(s.text);
+        if (body && td[1] === td[0]) {
+          aggregates.set(td[0], body[1] as AggregateLayout['kind']);
+        }
       }
     }
   }
@@ -262,7 +268,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     if (!m || /[(){}]/.test(m[1]) || TYPE_WORDS.has(m[2])) {
       continue;
     }
-    const proto = readSignature(m[1], m[3], language, typedefs);
+    const proto = readSignature(m[1], m[3], language, typedefs, aggregates);
     const prior = found.get(m[2]);
     found.set(m[2], prior === undefined || same(prior, proto) ? proto : null);
   }
@@ -293,13 +299,21 @@ function readSignature(
   params: string,
   language: 'c' | 'c++',
   typedefs: ReadonlyMap<string, string>,
+  aggregates: ReadonlyMap<string, AggregateLayout['kind']>,
 ): FnProto {
   const proto: FnProto = {};
   const r = resolve(ret.trim(), typedefs);
+  // A struct or union returned by value is kept, spelled as the header spells it: it is the fact
+  // that moves every argument one register up on a target that returns it through a hidden pointer.
+  const bare = r.replace(/\b(?:const|volatile)\b/g, ' ').trim();
+  const kind = /^(struct|union)\s+[A-Za-z_]\w*$/.exec(bare)?.[1] ?? aggregates.get(bare);
   if (r === 'void') {
     proto.returnsVoid = true;
   } else if (declaredWidth(r) !== undefined) {
     proto.returns = r;
+  } else if (kind !== undefined) {
+    proto.returns = r;
+    proto.returnLayout = { kind: kind as AggregateLayout['kind'] };
   }
   const list = params.trim();
   if (list === '' ? language === 'c++' : list === 'void') {

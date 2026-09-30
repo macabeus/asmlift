@@ -100,6 +100,29 @@ describe('prototypes from a declaration context', () => {
     expect(p.fmod?.params).toEqual(['double', 'double']);
   });
 
+  test('a struct or union returned by value is kept, and marked as one', () => {
+    const p = prototypesFromContext(
+      `struct Blob64 { u32 w[16]; };
+       struct Blob64 makeblob(const void *);
+       typedef struct { u32 a, b; } Pair; Pair mkpair(s32);
+       typedef struct Tagged Alias; Alias mkalias(void);
+       union U4 { u32 a; u16 b; }; union U4 mku(s32);
+       typedef enum { A, B } E; E mke(void);`,
+      'c',
+    );
+    expect(p.makeblob).toEqual({
+      returns: 'struct Blob64',
+      returnLayout: { kind: 'struct' },
+      params: ['const void *'],
+    });
+    // a typedef of a struct body spells no keyword, so the layout key is what says it
+    expect(p.mkpair).toEqual({ returns: 'Pair', returnLayout: { kind: 'struct' }, params: ['s32'] });
+    expect(p.mkalias).toEqual({ returns: 'struct Tagged', returnLayout: { kind: 'struct' }, params: [] });
+    expect(p.mku?.returnLayout).toEqual({ kind: 'union' });
+    // an enum is not an aggregate: its return stays unstated
+    expect(p.mke).toEqual({ params: [] });
+  });
+
   test('C++ default arguments and comments do not reach a spelling', () => {
     const p = prototypesFromContext('/* a */ int f(int a = 3, /* b */ int b = 4); // c', 'c++');
     expect(p.f).toEqual({ returns: 'int', params: ['int', 'int'] });

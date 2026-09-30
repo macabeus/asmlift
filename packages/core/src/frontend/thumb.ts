@@ -26,6 +26,7 @@ import {
   STANDARD_SIGNATURES,
   declaredArgWidths,
   declaredReturnWidth,
+  declaresAggregateReturn,
   declaresParams,
   wordsOf,
 } from '../proto';
@@ -3591,6 +3592,13 @@ function liftOnce(
     // read a `Function` off `Object.prototype` as its prototype entry.
     const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
     const own = known(prototypes);
+    if (declaresAggregateReturn(own)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${callee}\` is declared to return ${own?.returns ?? 'a struct or union'} by value, ` +
+          'which the caller may hand a hidden pointer in r0 with every declared argument one register up — ' +
+          'a call to a struct-returning function is not modelled',
+      );
+    }
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
     const widths = declaredArgWidths(proto);
     if (widths === undefined) {
