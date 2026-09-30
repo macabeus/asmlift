@@ -4621,17 +4621,6 @@ function liftOnce(
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
           const wide = wideHelper(targetSym);
           const declared = wide ? null : declaredCall(targetSym);
-          // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
-          // sign and exponent (`compilerBehaviors.softDoubleWords`), so the pair read as an integer
-          // spells a different number — `g(1.5)` as `g(1073217536, 0)`. Nothing here passes one
-          // yet, so the call declines naming the parameter.
-          const firstDouble = declared ? [...declared.doubles][0] : undefined;
-          if (firstDouble !== undefined) {
-            throw new FrontendUnsupportedError(
-              `cannot lift '${name}': \`${targetSym}\` is declared to take a double as argument word ` +
-                `${wordsOf(declared!.widths.slice(0, firstDouble)) + 1}, and a floating-point argument to a declared callee is not modelled`,
-            );
-          }
           // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
           // runtime table or the project's headers. Both answer the same question, so the walk that
           // reads argument registers off the answer is written once; two walks would be two chances
@@ -4719,10 +4708,9 @@ function liftOnce(
             for (const [j, v] of args.entries()) {
               const half = halfOf.get(v);
               // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
-              // reader to a declaration that cannot help: a double leaves a soft-float helper only
-              // into another one or the return (`raise/floathelpers.ts`), and a pair built here for a
-              // callee declared to take one is refused there. What a declaration still settles is a
-              // guessed arity that read the pair and never took it.
+              // reader to the wrong declaration: a double leaves a soft-float helper only into
+              // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
+              // and a pair built here for a callee declared to take a `long long` is refused there.
               const producer = half && pairCallee.get(half.whole);
               const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
               if (half && helper && isFloatHelper(helper)) {
@@ -4730,10 +4718,10 @@ function liftOnce(
                   `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
                     `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
                     `returned, and nothing states how wide '${targetSym}'s parameters are. A double is ` +
-                    "modelled only into the runtime's arithmetic helpers and the return, so a callee that " +
-                    'takes one declines whatever its prototype says (a compare, a conversion, any other ' +
-                    'call); a callee that takes fewer arguments than its registers suggest lifts once a ' +
-                    `prototype states them (\`{"${targetSym}": {"params": [...]}}\`)`,
+                    "modelled into the runtime's arithmetic helpers, the return and a parameter a prototype " +
+                    'declares `double`, so a runtime compare or conversion declines; a callee that takes a ' +
+                    'double, or fewer arguments than its registers suggest, lifts once a prototype states ' +
+                    `them (\`{"${targetSym}": {"params": [...]}}\`)`,
                 );
               }
               if (half) {
@@ -4754,10 +4742,19 @@ function liftOnce(
             declared?.returned ?? (declared === null && !wide ? registerStructReturn(targetSym) : undefined);
           const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
           const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
+          // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
+          // sign and exponent (`compilerBehaviors.softDoubleWords`), so the pair read as an integer
+          // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
+          // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
+          const doubles = declared?.doubles.size ? [...declared.doubles] : undefined;
           const callOp = mkOp('call', {
             operands: args,
             results: [res],
-            attrs: { target: targetSym, ...(sret === undefined ? {} : { sret: true }) },
+            attrs: {
+              target: targetSym,
+              ...(sret === undefined ? {} : { sret: true }),
+              ...(doubles === undefined ? {} : { doubles }),
+            },
           });
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it

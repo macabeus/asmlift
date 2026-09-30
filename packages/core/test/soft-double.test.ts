@@ -84,9 +84,13 @@ describe('what refuses', () => {
     expect(() => lift('dst1')).toThrow(/no model for the runtime helper '__negdf2'/);
   });
 
-  // A declaration that the callee takes a long long builds the pair, and it is still not a double.
-  test('a result passed to an ordinary callee', () => {
+  // A declaration that the callee takes a long long builds the pair, and it is still not a double;
+  // one that it takes a double hands it the double (`double-args.test.ts`).
+  test('a result passed to an ordinary callee declared to take a long long', () => {
     expect(() => lift('dpass', { use: { params: ['s64'] } })).toThrow(/no model for the runtime helper '__adddf3'/);
+    expect(lift('dpass', { use: { params: ['double'], returnsVoid: true } })).toBe(
+      'void dpass(double a0, double a1) {\n    use(a0 + a1);\n}\n',
+    );
   });
 
   // Each argument register is read by two pairs, so neither pair is the argument alone. The 64-bit
@@ -97,7 +101,7 @@ describe('what refuses', () => {
 
   // A double into a compare, a conversion or an ordinary callee is no long long, and the refusal
   // says so rather than asking for a prototype that states one: with one, the pair is built and the
-  // fold refuses it (`a result passed to an ordinary callee` above).
+  // fold refuses it (`a result passed to an ordinary callee declared to take a long long` above).
   test.each([
     ['d2i', '__fixdfsi', '__muldf3'],
     ['dgt', '__gtdf2', '__adddf3'],

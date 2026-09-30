@@ -188,9 +188,10 @@ describe('the declaration must say how many WORDS, and a parameter list is param
       /stack pointer used as data/,
     );
     // …where a `double` is two words on agbcc (`compilerBehaviors.softDoubleWords`), so it lays the
-    // block out and the verdict is about the double.
+    // block out, and the verdict is about the double: its words are `a0` and `a1`, which are also
+    // passed as words, so it is no double moved whole.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
-      /`fd` is declared to take a double as argument word 5/,
+      /argument 5 of the call to 'fd' is a floating-point argument its callee declares `double`/,
     );
     // …and a COUNT, which states argument registers directly, is what gets past it.
     expect(src(TWO, { fd: { params: 6 } })).toContain('fd(a0, a1, a2, a3, a0, a1)');
