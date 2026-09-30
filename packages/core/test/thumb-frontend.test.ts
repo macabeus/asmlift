@@ -3092,6 +3092,27 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('    p0[2] = -2130706400;\n    *(u16 *)67109384 = 1;\n');
   });
 
+  // …and a read of the channel between the two fills does not stand for the first: agbcc forwards
+  // the stored control to a `u32` read of it and deletes the store (a `u16` read would not alias
+  // it). Verbatim agbcc, the same two fills with `gY = *(vu32 *)0x40000DC;` between: 11 stores in
+  // the target, 10 in a recompile that leaves the first control store plain, 11 in this one's.
+  test('a read of an overwritten device store does not unpin it', () => {
+    const readBetween =
+      'e2:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr5, .L3\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r5]\n\tmov\tr3, sp\n\tldr\tr4, .L3+0x4\n\tadd\tr2, r4, #0\n\tstrh\tr2, [r3]\n' +
+      '\tldr\tr2, .L3+0x8\n\tstr\tr3, [r2]\n\tstr\tr0, [r2, #0x4]\n\tldr\tr4, .L3+0xc\n' +
+      '\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tldr\tr3, .L3+0x10\n\tldr\tr0, .L3+0x14\n' +
+      '\tldr\tr0, [r0]\n\tstr\tr0, [r3]\n\tmov\tr3, sp\n\tldr\tr6, .L3+0x18\n\tadd\tr0, r6, #0\n' +
+      '\tstrh\tr0, [r3]\n\tstr\tr3, [r2]\n\tstr\tr1, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n' +
+      '\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x1\n\tstrh\tr0, [r5]\n\tadd\tsp, sp, #0x4\n' +
+      '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x4000208\n' +
+      '\t.word\t0x1111\n\t.word\t0x40000d4\n\t.word\t-0x7effffe0\n\t.word\tgY\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x2222\n';
+    expect(decompile('e2', readBetween, ARMV4T_AGBCC).source).toContain(
+      '    ((volatile s32 *)67109076)[2] = -2130706400;\n    gY = *(s32 *)67109084;\n',
+    );
+  });
+
   // one address-taken halfword frame object published to a DMA register — the shape that mints
   // an `sp<off>` name, reused by the two shadowing tests below
   const declaresSp0 =

@@ -1041,9 +1041,11 @@ export function auditFrameObjects({
     //
     // A FUNCTION ACCEPTED OBJECT BY OBJECT pins only the stores of the first kind (`overwritten`):
     // a device store a later store in its own block overwrites, with no call between to clear
-    // flow.c's list of pending stores (flow.c:1962) and no read of its bytes the lift keeps. Any
-    // other read between is let pass, which may pin a store agbcc keeps — a spelling. Two fills
-    // through one channel back to back is the shape, and plain, the first transfer is gone. Its
+    // flow.c's list of pending stores (flow.c:1962). A plain read of its bytes between does not
+    // keep it: of the same type, cse.c forwards the stored value to the read and the store is
+    // then dead; of another type, it does not alias. Only a `char` read would, and pinning the
+    // store agbcc keeps there costs a spelling. Two fills through one channel back to back is the
+    // shape, and plain, the first transfer is gone. Its
     // other device accesses stay plain, their qualified spelling left to `/vol-store`'s candidate
     // (l3/volstore.ts): pinned in the structured tree they are pinned in every variation, and the
     // ones that home the base or un-reduce a loop refuse a qualified base, which costs
@@ -1070,38 +1072,12 @@ export function auditFrameObjects({
         if (later.opcode === 'call') {
           return false;
         }
-        const s = later.opcode === 'store' || later.opcode === 'load' ? startOf(later) : undefined;
-        if (s === undefined) {
-          continue;
-        }
-        const w = later.attrs.width as number;
-        // A read of those bytes the lift keeps is a use flow.c honours, and the store stands.
-        if (
-          later.opcode === 'load' &&
-          s.by < s.from + width &&
-          s.from < s.by + w &&
-          readValues().has(later.results[0])
-        ) {
-          return false;
-        }
-        if (later.opcode === 'store' && s.by <= s.from && s.by + w >= s.from + width) {
+        const s = later.opcode === 'store' ? startOf(later) : undefined;
+        if (s !== undefined && s.by <= s.from && s.by + (later.attrs.width as number) >= s.from + width) {
           return true;
         }
       }
       return false;
-    };
-    let readCache: Set<Value> | undefined;
-    const readValues = (): Set<Value> => {
-      if (readCache === undefined) {
-        readCache = new Set<Value>();
-        for (const b of irBlocks) {
-          for (const x of b.ops) {
-            x.operands.forEach((v) => readCache!.add(v));
-            (x.successors ?? []).forEach((sx) => sx.args.forEach((v) => readCache!.add(v)));
-          }
-        }
-      }
-      return readCache;
     };
     const pinDeviceAccesses = (pins: (op: Op, blk: Block, at: number) => boolean): void => {
       const sinks = [...new Set([...sourceStores.values()].flat().map((s) => s.sink))];
