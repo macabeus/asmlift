@@ -197,6 +197,41 @@ export function declaredArgWidths(p: FnProto | undefined): readonly number[] | u
   return widths;
 }
 
+/** `declaredArgWidths` for a call on a target whose `double` crosses a call in general argument
+ *  words (`compilerBehaviors.softDoubleWords`): there a `double` parameter is 64 bits of words and
+ *  its index is in `doubles`, so a reader can tell it from a `long long`, whose bits are the same
+ *  words in another order. Everything else abstains exactly as `declaredArgWidths` does.
+ *
+ *  A `float` STILL STATES NO LAYOUT. It is one word on such a target, but that word is a float only
+ *  to a callee whose declaration the candidate prints, and `spellableProto` prints no floating
+ *  type: an undeclared callee is handed a `float` promoted to a `double`, which is two words. */
+export function declaredCallArgs(
+  p: FnProto | undefined,
+  softDouble: boolean,
+): { widths: readonly number[]; doubles: ReadonlySet<number> } | undefined {
+  if (!softDouble || !Array.isArray(p?.params)) {
+    const widths = declaredArgWidths(p);
+    return widths && { widths, doubles: new Set() };
+  }
+  const widths: number[] = [];
+  const doubles = new Set<number>();
+  for (const [i, t] of p.params.entries()) {
+    const w = declaredWidth(t);
+    if (w !== undefined) {
+      widths.push(w);
+    } else if (isDoubleSpelling(t)) {
+      doubles.add(i);
+      widths.push(64);
+    } else {
+      return undefined;
+    }
+  }
+  return { widths, doubles };
+}
+
+/** Whether a declared type is `double`, qualifiers aside. */
+const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
+
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
  *  prototype is a lower bound assembled from whatever a header extraction could read, and omits
  *  what it could not. The standard omits nothing, so the RETURN is spelled here and is required —

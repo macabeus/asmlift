@@ -12,6 +12,7 @@ import type { FnProto } from '../src/proto';
 import {
   PRELUDE_TYPEDEFS,
   declaredArgWidths,
+  declaredCallArgs,
   declaredReturnWidth,
   declaredWidth,
   prototypesFromSymbols,
@@ -334,6 +335,37 @@ describe('declaredWidth', () => {
     expect(['size_t', 'ssize_t', 'ptrdiff_t', 'intptr_t', 'uintptr_t'].map(declaredWidth)).toEqual([
       32, 32, 32, 32, 32,
     ]);
+  });
+});
+
+// A `double`'s general argument words are a TARGET fact (`compilerBehaviors.softDoubleWords`), so
+// the reader that lays one out takes the target's answer and `declaredWidth` keeps its absence.
+describe('declaredCallArgs', () => {
+  const soft = ARMV4T_AGBCC.compilerBehaviors.softDoubleWords !== undefined;
+
+  test('on agbcc a double is two words, marked, with no alignment', () => {
+    expect(soft).toBe(true);
+    const five = declaredCallArgs({ params: ['s32', 's32', 's32', 's32', 'double'] }, soft)!;
+    expect(five.widths).toEqual([32, 32, 32, 32, 64]);
+    expect(wordsOf(five.widths)).toBe(6);
+    expect([...five.doubles]).toEqual([4]);
+    // qualifiers aside, and a `long long` beside it is 64 bits and no double
+    const mixed = declaredCallArgs({ params: ['s32', 'const double', 'long long'] }, soft)!;
+    expect(mixed.widths).toEqual([32, 64, 64]);
+    expect([...mixed.doubles]).toEqual([1]);
+  });
+
+  test('a target whose doubles take no general word abstains, as declaredArgWidths does', () => {
+    expect(declaredCallArgs({ params: ['s32', 'double'] }, false)).toBeUndefined();
+    expect(declaredCallArgs({ params: ['s32', 's32'] }, false)).toEqual({ widths: [32, 32], doubles: new Set() });
+  });
+
+  // An undeclared callee is handed a `float` promoted to a `double`, and the candidate declares no
+  // floating parameter, so one word would be the wrong layout for the C that is compiled.
+  test('a float, a long double and a count state what they did before', () => {
+    expect(declaredCallArgs({ params: ['s32', 'float'] }, soft)).toBeUndefined();
+    expect(declaredCallArgs({ params: ['long double'] }, soft)).toBeUndefined();
+    expect(declaredCallArgs({ params: 5 }, soft)).toEqual({ widths: [32, 32, 32, 32, 32], doubles: new Set() });
   });
 });
 

@@ -77,6 +77,14 @@ describe('guessedArityCallees', () => {
     ]);
   });
 
+  // A `double` is two general argument words where the target passes it in them, and no layout
+  // where it does not, so the note asks the frontend's question with the target's answer.
+  it('counts a double parameter only on a target that passes it in general words', () => {
+    const typed = { thunk_HeapFree: { params: ['double'] }, DecompressAlloc: { params: 2 } };
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', typed, undefined, true)).toEqual([]);
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', typed)).toEqual(['thunk_HeapFree']);
+  });
+
   it('counts a signature the project ELF declares', () => {
     const symbols: SymbolMap = new Map([
       [

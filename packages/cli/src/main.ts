@@ -757,7 +757,13 @@ export async function runCli(
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the
   // context, so neither a withheld signature nor an unread header makes the note claim a fact the
   // run did not use.
-  const protoNote = guessedArityNote(asm, name, prototypes, symbols);
+  const protoNote = guessedArityNote(
+    asm,
+    name,
+    prototypes,
+    symbols,
+    unitTarget.compilerBehaviors.softDoubleWords !== undefined,
+  );
 
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score

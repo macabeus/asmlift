@@ -26,7 +26,7 @@ import {
   type FnProto,
   type Prototypes,
   STANDARD_SIGNATURES,
-  declaredArgWidths,
+  declaredCallArgs,
   declaredReturnWidth,
   declaresAggregateReturn,
   declaresParams,
@@ -3637,7 +3637,12 @@ function liftOnce(
   };
   const declaredCall = (
     callee: string,
-  ): { widths: readonly number[]; block: readonly number[] | null; returned?: StructReturn | 'register' } | null => {
+  ): {
+    widths: readonly number[];
+    doubles: ReadonlySet<number>;
+    block: readonly number[] | null;
+    returned?: StructReturn | 'register';
+  } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
@@ -3653,7 +3658,8 @@ function liftOnce(
     const own = known(prototypes);
     const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const params = declaredArgWidths(proto);
+    const declared = declaredCallArgs(proto, target.compilerBehaviors.softDoubleWords !== undefined);
+    const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from r0, which holds the hidden pointer
       throw new FrontendUnsupportedError(
@@ -3664,7 +3670,9 @@ function liftOnce(
     if (params === undefined) {
       return null;
     }
-    const widths = returned === undefined || returned === 'register' ? params : [32, ...params];
+    const hidden = returned === undefined || returned === 'register' ? 0 : 1;
+    const widths = hidden === 0 ? params : [32, ...params];
+    const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
     // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
     // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
     // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
@@ -3704,6 +3712,7 @@ function liftOnce(
     const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
     return {
       widths,
+      doubles,
       block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
       ...(returned === undefined ? {} : { returned }),
     };
@@ -4638,6 +4647,17 @@ function liftOnce(
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
           const wide = wideHelper(targetSym);
           const declared = wide ? null : declaredCall(targetSym);
+          // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
+          // sign and exponent (`compilerBehaviors.softDoubleWords`), so the pair read as an integer
+          // spells a different number — `g(1.5)` as `g(1073217536, 0)`. Nothing here passes one
+          // yet, so the call declines naming the parameter.
+          const firstDouble = declared ? [...declared.doubles][0] : undefined;
+          if (firstDouble !== undefined) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': \`${targetSym}\` is declared to take a double as argument word ` +
+                `${wordsOf(declared!.widths.slice(0, firstDouble)) + 1}, and a floating-point argument to a declared callee is not modelled`,
+            );
+          }
           // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
           // runtime table or the project's headers. Both answer the same question, so the walk that
           // reads argument registers off the answer is written once; two walks would be two chances
