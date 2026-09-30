@@ -1,11 +1,13 @@
 // Regenerate the committed agbcc probe the Thumb frontend's survivor bound rests on, read by
 // `packages/core/test/outgoing-area-probes.test.ts`.
 //
-// WHY A SCRIPT AND NOT A NOTE. `survivorBound` (frontend/stackargs.ts) reads a compiler behavior
-// BACKWARDS — agbcc never reads its outgoing area back after a call, so a word loaded after a call is
-// a local — and being wrong costs an ANSWER, an argument dropped from a call. A backward reading owes
-// the compiled objects it rests on, re-measurable and not only re-readable
-// (`docs/level-tower.md`, RE-READABLE IS NOT RE-MEASURABLE). The probe holds both sides: `twice`
+// WHY A SCRIPT AND NOT A NOTE. `survivorBound` (frontend/stackargs.ts) applies the CONTRAPOSITIVE
+// of a universal emission fact: for every source, agbcc never reads a word of its outgoing area back
+// after a call, so a word loaded after a call is not in that area — it is a local
+// (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A BACKWARDS READING). It is as
+// sound as the universal, and a universal wrong for some producer costs an ANSWER there, an argument
+// dropped from a call; so the universal owes the compiled objects it rests on, re-measurable and not
+// only re-readable (RE-READABLE IS NOT RE-MEASURABLE, same file). The probe holds both sides: `twice`
 // re-stages an unchanged argument before its second call, and `owns` assigns to its own incoming
 // stack parameter, which is its caller's outgoing word.
 //

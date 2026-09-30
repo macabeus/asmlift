@@ -81,13 +81,15 @@ export interface OutgoingArgs<C> {
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 
 /** THE LOWEST FRAME WORD THAT SURVIVES A CALL, or `Infinity` when none does. A word LOADED on some
- *  path out of a live call before anything re-stores it held a value across that call — and a
- *  caller whose outgoing area belongs to the callee never reads that area back after a call (the
- *  callee may assign to its stack parameters; agbcc re-stages an argument before every call rather
- *  than trust the word to survive — both compiled in `test/corpus/agbcc-restage.s`). So the word is
- *  a local, and since the area is one region at
- *  the frame bottom that every call shares, no call's block reaches it: every word at or above the
- *  bound is proven not to be an argument.
+ *  path out of a live call before anything re-stores it held a value across that call. The premise
+ *  is a UNIVERSAL about the producer: a caller whose outgoing area belongs to the callee never reads
+ *  that area back after a call, for any source (the callee may assign to its stack parameters;
+ *  agbcc re-stages an argument before every call rather than trust the word to survive — both
+ *  compiled in `test/corpus/agbcc-restage.s`). Its contrapositive makes the word a local, and since
+ *  the area is one region at the frame bottom that every call shares, no call's block reaches it:
+ *  every word at or above the bound is proven not to be an argument. The CONVERSE — a word never
+ *  read back is an argument — is false, since a dead local is never read back either; that is why
+ *  refusals (a) and (b) below decline rather than infer.
  *
  *  A backward liveness over the live blocks: a load makes its offset live, a store kills it, and a
  *  call is transparent — a word read after two calls survived both. Dead blocks contribute nothing:

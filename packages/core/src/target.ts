@@ -366,12 +366,15 @@ export interface TargetDescription {
     // (`stagesOutgoingArgsInFrame`) and still break this: mwcc may put a local in the words its
     // outgoing parameters use (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY ARGUMENT REGISTER").
     //
-    // Its one reader is the survivor bound (`frontend/stackargs.ts` `survivorBound`): a word loaded
-    // after a call before any re-store is a local, and so is every word above it, which lets a
-    // spill live across a call lift, and a call NO declaration covers. Hand-written asm that reads
-    // its outgoing argument back after a call defeats it and loses that argument silently; the
-    // premise is this compiler's, not the ISA's. Absent ⇒ every staged word stays a candidate
-    // argument.
+    // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
+    // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
+    // call before any re-store is not in the area, so it is a local, and so is every word above it,
+    // which lets a spill live across a call lift, and a call NO declaration covers. That is not a
+    // backwards reading (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
+    // BACKWARDS READING); it is exactly as sound as the universal, so its residue is every producer
+    // the universal does not cover. Hand-written asm that reads its outgoing argument back after a
+    // call is one, and loses that argument silently; the premise is this compiler's, not the ISA's.
+    // Absent ⇒ every staged word stays a candidate argument.
     //
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and

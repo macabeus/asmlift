@@ -1,7 +1,8 @@
-// `survivorBound` (frontend/stackargs.ts) reads agbcc's outgoing area backwards: the caller never
-// reads a word of it back after a call, so a word loaded after a call is a local. The committed probe
-// (`scripts/regen-outgoing-area-probes.ts`) is what that reading rests on — the callee may assign to
-// the word, and the caller re-stages an argument before every call rather than trust it to survive.
+// `survivorBound` (frontend/stackargs.ts) applies the contrapositive of a universal agbcc fact: the
+// caller never reads a word of its outgoing area back after a call, so a word loaded after a call is
+// a local. The committed probe (`scripts/regen-outgoing-area-probes.ts`) is what that universal rests
+// on — the callee may assign to the word, and the caller re-stages an argument before every call
+// rather than trust it to survive.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
