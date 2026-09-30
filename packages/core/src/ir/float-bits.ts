@@ -12,8 +12,15 @@ export function doubleBits(hi: number, lo: number): string {
   return (hi >>> 0).toString(16).padStart(8, '0') + (lo >>> 0).toString(16).padStart(8, '0');
 }
 
+/** Whether `bits` is a double's bit pattern: sixteen hex digits, as `doubleBits` spells one. A
+ *  single's eight would name another number read as a double, so nothing here takes one. */
+export const isDoubleBits = (bits: unknown): bits is string => typeof bits === 'string' && /^[0-9a-f]{16}$/.test(bits);
+
 /** The double a bit pattern names. */
 export function doubleOf(bits: string): number {
+  if (!isDoubleBits(bits)) {
+    throw new Error(`'${bits}' is not a double's bit pattern`);
+  }
   view.setUint32(0, parseInt(bits.slice(0, 8), 16));
   view.setUint32(4, parseInt(bits.slice(8, 16), 16));
   return view.getFloat64(0);
@@ -24,6 +31,8 @@ export function doubleOf(bits: string): number {
  *  neither a point nor an exponent, so C reads a `double` and not an `int`, and `-0.0` for the
  *  negative zero.
  *
+ *  THAT IT READS BACK IS A PREMISE ABOUT THE COMPILER, and the one producer of a literal
+ *  (`raise/floathelpers.ts`) runs only on a target that states it, through `softDoubleWords`.
  *  agbcc reads it back exactly: c-lex.c:1308 hands the token to REAL_VALUE_ATOF at DFmode, which is
  *  real.c:461 `ereal_atof` → `asctoe53` (:3512) → `asctoeg(s, y, 53)` (:3533), a conversion in
  *  extended precision rounded once to 53 bits. */

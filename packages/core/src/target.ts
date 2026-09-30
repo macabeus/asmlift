@@ -168,7 +168,9 @@ export interface TargetDescription {
    *  are `proto.ts` `declaredCallArgs` (the call's layout) and `raise/floathelpers.ts` (a literal's
    *  bits). ABSENT ⇒ a declared `double` parameter states no layout and the call takes the
    *  arg-register guess. A target states this or `fpu`, never both: with an FPU the value travels
-   *  in a float register and takes no general word.
+   *  in a float register and takes no general word. Stating it also states that the compiler reads
+   *  a double literal's shortest round-trip decimal back as the same double (`ir/float-bits.ts`
+   *  `doubleLiteral`), which is how the pair's two constant words are printed.
    *
    *  agbcc: FLOAT_WORDS_BIG_ENDIAN 1 (gcc/config/arm/thumb.h:335); FUNCTION_ARG (:632) places by
    *  word offset, FUNCTION_ARG_PARTIAL_NREGS (:636) splits a pair across r3 and the stack,

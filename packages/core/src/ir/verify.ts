@@ -5,10 +5,11 @@
 //   3. SSA: each value defined once; every use is defined; def dominates use
 //   4. a float value is an operand or result of a float op or `ret` only — or a `double` operand of
 //      a call whose callee declares one there — and crosses an edge only into a block parameter of
-//      its own type
+//      its own type; an `fconst` is a double, sixteen hex digits into an f64
 //   5. side data: a fn that carries a write-order record carries one for EVERY block, with every
 //      ordinal inside that block's own write count (ir/core.ts `WriteOrder`)
 import { Block, Fn, Op, Value, dominators } from './core';
+import { isDoubleBits } from './float-bits';
 import { FLOAT_OPS, WIDE_BITS, opSig } from './opcodes';
 import { type IrType, T, intWidth, typeEquals, typeToString } from './types';
 
@@ -224,6 +225,12 @@ export function verify(fn: Fn): void {
             }
           } else if (floats.length > 0 && op.opcode !== 'ret' && !doublesDeclared(op)) {
             throw new VerifyError(`a float value reaches '${op.opcode}', which does not compute on floats`);
+          }
+          // A literal's width is its pattern's, so the pattern and the result must name one width.
+          if (op.opcode === 'fconst' && (!isDoubleBits(op.attrs.bits) || !typeEquals(op.results[0].type, T.f64()))) {
+            throw new VerifyError(
+              `'fconst' is a double literal: bits ${JSON.stringify(op.attrs.bits)} into ${typeToString(op.results[0].type)}`,
+            );
           }
           for (const k of sig.requiredAttrs ?? []) {
             if (!(k in op.attrs)) {

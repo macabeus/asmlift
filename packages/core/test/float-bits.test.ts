@@ -54,6 +54,13 @@ describe('the C spelling', () => {
       expect(() => doubleLiteral(bits)).toThrow(/is not finite/);
     }
   });
+
+  // A single's eight digits name another number read as a double: `3fc00000` is 1.5 as a float.
+  test('refuses a pattern that is not a double', () => {
+    for (const bits of ['3fc00000', '3FF8000000000000', '3ff80000000000000']) {
+      expect(() => doubleLiteral(bits)).toThrow(/is not a double's bit pattern/);
+    }
+  });
 });
 
 describe('fconst', () => {
@@ -63,6 +70,13 @@ describe('fconst', () => {
     expect(() => verify(parse(ret('3ff8000000000000')))).not.toThrow();
     expect(() => verify(parse('fn f {\n^bb0():\n  %0: s32 = fconst {bits="3ff8000000000000"}\n  ret %0\n}\n'))).toThrow(
       /'fconst' computes on floats only/,
+    );
+  });
+
+  test('is a double: sixteen hex digits into an f64', () => {
+    expect(() => verify(parse(ret('3fc00000')))).toThrow(/'fconst' is a double literal/);
+    expect(() => verify(parse('fn f {\n^bb0():\n  %0: f32 = fconst {bits="3ff8000000000000"}\n  ret %0\n}\n'))).toThrow(
+      /'fconst' is a double literal/,
     );
   });
 
