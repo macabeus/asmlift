@@ -20,8 +20,8 @@ export interface Gate<Ctx> {
    *  heuristic the differ still referees. This flag is what makes `guardedBy` mandatory. */
   readonly sound: boolean;
   /** the test that fails when this gate is removed — required for a sound gate; a rule with two
-   *  halves names one test per half, `; `-separated */
-  readonly guardedBy?: string;
+   *  halves names one test per half */
+  readonly guardedBy?: string | readonly string[];
   /** true ⇒ REJECT this candidate */
   readonly rejects: (c: Ctx) => boolean;
 }
@@ -68,6 +68,11 @@ export function ablateHeuristic<Ctx>(gates: readonly Gate<Ctx>[], id: string): r
   return without(gates, id);
 }
 
+/** Every test a gate names as its guard, one per half of the rule. */
+export function guardsOf<Ctx>(g: Gate<Ctx>): readonly string[] {
+  return typeof g.guardedBy === 'string' ? [g.guardedBy] : (g.guardedBy ?? []);
+}
+
 /** Structural defects in a gate table — the part checkable without running the pass. Returns
  *  findings rather than throwing, so core stays free of a test-framework import. */
 export function gateTableDefects<Ctx>(gates: readonly Gate<Ctx>[]): string[] {
@@ -85,7 +90,7 @@ export function gateTableDefects<Ctx>(gates: readonly Gate<Ctx>[]): string[] {
       out.push(`gate '${g.id}' has no usable \`why\``);
     }
     // the one rule that costs something to declare
-    if (g.sound && !g.guardedBy?.trim()) {
+    if (g.sound && !guardsOf(g).some((t) => t.trim())) {
       out.push(`gate '${g.id}' is marked sound but names no guard`);
     }
   }

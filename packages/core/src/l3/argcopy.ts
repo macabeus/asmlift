@@ -120,9 +120,10 @@ export const ARGCOPY_REGION_GATES: readonly Gate<ArgCopyRegionCtx>[] = [
     id: 'loop-region',
     why: 'a copy anywhere inside a loop re-runs every iteration, so it belongs to a region that holds the loop instead — and no region does when the loop is at function top level, where this variation offers nothing at all',
     sound: false,
-    // the second clause has its own test, which `guardedBy` cannot also name (one title per gate):
-    // `argcopy.test.ts: a TOP-LEVEL loop is offered NOTHING`
-    guardedBy: 'argcopy.test.ts: an arm NESTED inside a loop body is refused too',
+    guardedBy: [
+      'argcopy.test.ts: an arm NESTED inside a loop body is refused too',
+      'argcopy.test.ts: a TOP-LEVEL loop is offered NOTHING',
+    ],
     rejects: (c) => c.underLoop,
   },
   {

@@ -215,9 +215,10 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
     id: 'reaches-an-unaccounted-word',
     why: 'an escape reaching a frame word no declaration covers reaches past what the recompile allocates',
     sound: true,
-    guardedBy:
-      'thumb-frontend.test.ts: an array whose top nothing bounds declines rather than shrinking the frame; ' +
+    guardedBy: [
+      'thumb-frontend.test.ts: an array whose top nothing bounds declines rather than shrinking the frame',
       'thumb-frontend.test.ts: a copy that reads past its object into a word nothing accounts for declines',
+    ],
     rejects: (e) => e.unaccountedWord !== undefined,
   },
 ];
