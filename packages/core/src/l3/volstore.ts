@@ -174,8 +174,8 @@ function qualify(lval: Expr, window: readonly [number, number] | undefined): Exp
 
 /** An indexed access with `volatile` on the pointee of its deref cast. An existing scalar pointer
  *  cast takes the qualifier in place; a bare base gets one minted, exactly the node
- *  backend/cfamily.ts's own deref legalization would have synthesized. Also the spelling a store
- *  the lift marked `volatile` lowers to (structure/structure.ts). */
+ *  backend/cfamily.ts's own deref legalization would have synthesized. Also how
+ *  {@link qualifiedMemoryAccess} spells an indexed access the lift marked `volatile`. */
 export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Expr, { k: 'index' }> {
   if (qualifiedBase(lval.base)) {
     return lval;

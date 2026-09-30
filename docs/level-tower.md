@@ -1307,19 +1307,23 @@ object keys on what the escape may REACH rather than on whether it writes, becau
 about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
 past it. How far a device reads is target data too (`capabilities.readSourceControl`, the channel's
 control halfword), read per transfer, and an unresolved store after the transfer is handed the
-address — through a pointer, or to a name no symbol map places — leaves the read unbounded. What no fact about one function can check is stated as a premise
-instead: a callee or an interrupt handler arms only a transfer it set up itself, source register
-first, so neither a call on the path nor an interrupt at any instruction re-arms this frame's
-transfer. Where the read is still unbounded and nothing but devices holds the address, the audit
-does not refuse: it answers with the local area, the frontend lifts once more with every word of it
-routed through `laddr`, and the second audit declares those bytes one `u8` array in memory, so every
-store the machine made there is a store the recompile makes. The asm cannot tell a member the
+address — through a pointer, or to a name no symbol map places — leaves the read unbounded. What
+no fact about one function can check is stated as a premise instead: a callee or an interrupt
+handler arms only a transfer it set up itself, source register first, so neither a call on the
+path nor an interrupt at any instruction re-arms this frame's transfer. Where the read is still
+unbounded and nothing but devices holds the address, the audit does not refuse: it answers with the
+local area, the frontend lifts once more with every word of it routed through `laddr`, and the
+second audit declares those bytes one `u8` array in memory, so every store the machine made there
+is a store the recompile makes. The asm cannot tell a member the
 device reads from a spill nobody reads, and keeping both in memory is right for both. The transfer
 has to run too, so every device access of a function kept this way is `volatile` — at a register's
 literal address, that address plus a runtime index, or a phi of those: agbcc deletes a plain store
 to an address a later store overwrites, so of two transfers armed back to back through one channel
 the first would never start, and it hoists a plain load out of a loop that stores nothing it may
-alias, so a poll of `REG_VCOUNT` would never see the register change.
+alias, so a poll of `REG_VCOUNT` would never see the register change. A function accepted object
+by object pins only the first kind, a device store a later store in its own block overwrites; its
+other device accesses are left to the `/vol-store` candidate, because a qualified base in the
+structured tree refuses the variations that home it.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

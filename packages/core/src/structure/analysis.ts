@@ -2078,7 +2078,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const isCall = op.opcode === 'call';
         // A device read the lift marked `volatile` executes once too: each spelling of it is a read
         // the recompile makes, where a plain duplicate is one agbcc CSEs away. It takes the call's
-        // rules below, bar the short-circuit one, which `volatileGuardedRead` declines instead.
+        // two-site, edge and one-position rules below; in a `&&`/`||` cone `volatileGuardedRead`
+        // declines it instead.
         const once = isCall || isPinnedAccess(op);
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (once && sites.length > 1) {

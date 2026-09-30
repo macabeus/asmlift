@@ -224,7 +224,7 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *   - ONE OBJECT, where every escape only reads and a device reads without bound (`oneObject`,
  *     which this answers and the frontend lifts again with): the local area is one `u8` array in
  *     memory, every fixed-offset access in it is a member at its own offset, a runtime index may
- *     reach a byte of it, and two types at one byte refuse.
+ *     reach a byte of it, and two widths at one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -1035,20 +1035,21 @@ export function auditFrameObjects({
     // way the lift names a device register and not a pointer loaded, passed or computed from
     // nothing it can place. Over-reach costs a spelling and never an access: `volatile` keeps the
     // accesses the machine made, and a marked read is placed once, as a call is
-    // (structure/analysis.ts), so the qualifier adds none. The window is the target's `deviceRegisters`, which has to cover
-    // every register a source reaches — an address outside it stays plain — or the channels
-    // handed a frame address without one.
+    // (structure/analysis.ts), so the qualifier adds none. The window is the target's
+    // `deviceRegisters`, which has to cover every register a source reaches — an address outside
+    // it stays plain; without one, it is the channels handed a frame address.
     //
     // A FUNCTION ACCEPTED OBJECT BY OBJECT pins only the stores of the first kind (`overwritten`):
     // a device store a later store in its own block overwrites, with no call between to clear
     // flow.c's list of pending stores (flow.c:1962) and no read of its bytes the lift keeps. Any
-    // other read between is let pass, which may pin a store agbcc keeps — a spelling. Two fills through one channel back to back is
-    // the shape, and plain, the first transfer is gone. Its other device accesses stay plain — the
-    // pinned store spelling is `/vol-store`'s candidate beside it (l3/volstore.ts) — because pinned
-    // in the structured tree they are pinned in every variation too, and the ones that home the
-    // base or un-reduce a loop refuse a qualified base: `synthetic:dmastride` and
-    // `synthetic:dmaptrsrc` lose their matches. KNOWN GAP: so an unranked lift of such a function
-    // still spells a device poll plain, and agbcc hoists it out of a loop that stores nothing.
+    // other read between is let pass, which may pin a store agbcc keeps — a spelling. Two fills
+    // through one channel back to back is the shape, and plain, the first transfer is gone. Its
+    // other device accesses stay plain, their qualified spelling left to `/vol-store`'s candidate
+    // (l3/volstore.ts): pinned in the structured tree they are pinned in every variation, and the
+    // ones that home the base or un-reduce a loop refuse a qualified base, which costs
+    // `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches. KNOWN GAP: so an unranked
+    // lift of such a function still spells a device poll plain, and agbcc hoists it out of a loop
+    // that stores nothing.
     const overwritten = (op: Op, blk: Block, at: number): boolean => {
       if (op.opcode !== 'store') {
         return false;
@@ -1207,9 +1208,9 @@ export function auditFrameObjects({
       // `u16` store to the same bytes — a stale value. So a byte two accesses of different widths
       // reach cannot be spelled through casts. A byte access is exempt, since character types
       // alias everything, and so is a signedness difference, since the signed and unsigned types
-      // of one width share an alias set (c-common.c:1962-1974). The first audit refuses an object
-      // read at two widths, but not an object over a slot, which is how two widths meet here: a
-      // `strh` member through the captured address and a word the slot model had at the same bytes.
+      // of one width share an alias set (c-common.c:1962-1974). The first audit asks for this
+      // answer rather than refusing two widths — an object read at both, or a `strh` member through
+      // the captured address over a word the slot model had — so this is where they refuse.
       const widthAt = new Map<number, number>();
       for (const m of members) {
         if (m.at < from || m.at + m.width > to) {

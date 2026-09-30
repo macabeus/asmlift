@@ -363,9 +363,7 @@ export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aloa
 
 /** A memory access the lift marked `volatile` — a device register access the recompile must make
  *  exactly where, and exactly as often as, the machine did (frontend/frame-objects.ts). The one
- *  predicate every reader of the mark asks: the structurer's spelling of it, its execute-once
- *  placement (structure/analysis.ts, which gives a marked read the treatment a call gets), and the
- *  dead read it must still spell (structure.ts `volatileQualifiable`). */
+ *  predicate every reader of the mark asks. */
 export const isPinnedAccess = (op: Op): boolean => MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true;
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
