@@ -441,8 +441,8 @@ export interface TargetDescription {
     // reaching a call unread declines.
     //
     // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured — the
-    // corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's `sub_0804C300` all
-    // stage their words at [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
+    // corpus's `stkarg` and `stkwide` rows and kleod's `sub_0804C300` all stage their words at
+    // [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
     // else: a push-based caller would stage nothing inside the frame, and `docs/level-tower.md`'s
     // rule for an unmeasured compiler behavior is to claim nothing. No other frontend calls the
     // analysis today, so a second armv4t compiler must state this premise rather than inherit it.
