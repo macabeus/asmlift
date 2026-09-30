@@ -3,6 +3,7 @@ import {
   declaredArgWidths,
   declaredWidth,
   declaresAggregateReturn,
+  statesNoReturn,
   symbolPrototype,
   validatePrototypes,
 } from './proto';
@@ -576,7 +577,8 @@ function readSignature(
  *  (`asIfUndecompiled`): a header's signature for the function being decompiled is that kind of
  *  fact, and only what the caller states about it is kept.
  *
- *  A stated entry that says nothing of the return keeps a struct return the context states: it is
+ *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
+ *  false` as nothing) keeps a struct return the context states: it is
  *  what says argument 0 may be a hidden pointer, and an entry stating only the arity would
  *  otherwise hand that pointer to the call as its first argument. */
 export function withContextPrototypes(
@@ -589,7 +591,7 @@ export function withContextPrototypes(
   const out: Prototypes = { ...callees, ...stated };
   for (const [name, p] of Object.entries(stated ?? {})) {
     const heard = Object.hasOwn(callees, name) ? callees[name] : undefined;
-    if (p && p.returns === undefined && p.returnsVoid === undefined && p.returnLayout === undefined) {
+    if (p && statesNoReturn(p)) {
       out[name] = { ...p, ...aggregateReturnOf(heard) };
     }
   }

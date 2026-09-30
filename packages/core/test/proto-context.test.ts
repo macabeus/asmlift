@@ -242,6 +242,20 @@ describe('a context struct return under a stated or mapped signature', () => {
     // …and one that states a return of its own is taken whole
     const own = withContextPrototypes({ makeblob: { params: 1, returns: 's32' } }, ctx, 'f', undefined);
     expect(own.makeblob).toEqual({ params: 1, returns: 's32' });
+    const none = withContextPrototypes({ makeblob: { params: 1, returnsVoid: true } }, ctx, 'f', undefined);
+    expect(none.makeblob).toEqual({ params: 1, returnsVoid: true });
+  });
+
+  // `returnsVoid: false` states nothing a reader acts on, and it is how a manifest spells a callee
+  // it knows only the parameters of
+  test('a stated entry that says only that the return is not void keeps it', () => {
+    const p = withContextPrototypes(
+      { makeblob: { params: ['const void *'], returnsVoid: false } },
+      ctx,
+      'f',
+      undefined,
+    );
+    expect(p.makeblob).toEqual({ params: ['const void *'], returnsVoid: false, ...blob });
   });
 
   test('an entry the symbol map sizes better keeps it', () => {

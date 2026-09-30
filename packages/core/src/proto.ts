@@ -240,6 +240,14 @@ export function declaresVoidReturn(p: FnProto | undefined): boolean {
   return p?.returnsVoid === true || p?.returns?.trim() === 'void';
 }
 
+/** Whether a declaration says nothing any reader acts on about the return — no spelling, no
+ *  layout, and no `returnsVoid: true`. `returnsVoid: false` is silence (`declaresVoidReturn`), and
+ *  it is how a manifest spells a callee it knows only the parameters of. Such an entry can take a
+ *  struct return another source states without contradicting itself. */
+export function statesNoReturn(p: FnProto): boolean {
+  return p.returns === undefined && p.returnsVoid !== true && p.returnLayout === undefined;
+}
+
 /** Whether a declaration says the function returns a struct or union by value — through either
  *  key that can say it (`FnProto.returnLayout`). Read through `?.` for the reason
  *  `returnsWithoutHiddenPointer` gives: a `null` entry out of parsed JSON reaches every reader. */
