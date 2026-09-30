@@ -302,7 +302,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 56 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 53 rows whose own message names an FPU instruction.
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, and PowerPC's float-plus-
     // call refusal): the single-precision arithmetic lifts through the float homes, and what still
