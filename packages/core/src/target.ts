@@ -40,7 +40,8 @@
 //     Others are read off the target directly by a consumer that is not the structurer — among
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
-//     `aggregateReturn` and `largestAlignment` (aggregate.ts, for frontend/thumb.ts and frontend/ppc.ts),
+//     `aggregateReturn`, `largestAlignment`, `enumBytes` and `bitfieldPacking` (aggregate.ts, for
+//     frontend/thumb.ts and frontend/ppc.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
@@ -592,6 +593,21 @@ export interface TargetDescription {
     // a one-word one included (compiled: `struct {u32 x;} mkw(s32)` is called `addiu a0,sp,28 / jal
     // mkw / lw v0,28(sp)`), and states nothing: the MIPS frontend lowers no call to read it.
     aggregateReturn?: 'apcs' | 'svr4';
+    // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
+    // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
+    // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
+    // and `enum {B0 = 300}` are both 4. ABSENT ⇒ unmeasured, and an aggregate with an enum member
+    // is not sized.
+    enumBytes?: number;
+    // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
+    // one before, straddling a byte or a word of its declared type, with the next member that is not
+    // a bitfield at the first byte past it that its alignment allows. agbcc: thumb.h defines no
+    // PCC_BITFIELD_TYPE_MATTERS, so stor-layout.c:404-405 lays a bitfield at bit alignment and
+    // skips the no-straddle rule of :462-481 (compiled: `{u32 a:20; u32 b:20; u8 c;}` puts `c` at
+    // 5, `{u32 a:31; u32 b:31; u32 c:2;}` is 8 bytes, `{u8 a:5; u8 b:5; u8 c;}` puts `c` at 2). A
+    // zero-width bitfield, which moves the next member to EMPTY_FIELD_BOUNDARY, is not placed.
+    // ABSENT ⇒ unmeasured, and an aggregate with a bitfield is not sized.
+    bitfieldPacking?: 'contiguous';
     // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
     // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
     // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
@@ -695,6 +711,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     aggregateBoundary: 4,
     largestAlignment: 4,
     aggregateReturn: 'apcs',
+    enumBytes: 4,
+    bitfieldPacking: 'contiguous',
     // agbcc 2.9 (gcc/varasm.c `assemble_variable`, gcc/thumb.h): an array takes its element's
     // alignment (no DATA_ALIGNMENT); a declaration initialized by a STRING_CST is word-aligned —
     // CONSTANT_ALIGNMENT (thumb.h:361) over DECL_INITIAL (varasm.c:1214-1216), so

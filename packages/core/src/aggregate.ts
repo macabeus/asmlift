@@ -16,8 +16,8 @@ import {
 import type { TargetDescription } from './target';
 
 /** The size and alignment of a laid-out aggregate in bytes, or undefined where the declaration or
- *  the target leaves either open: a member not laid out, a bitfield (whose packing is not modelled
- *  here), or a target that states no largest alignment. */
+ *  the target leaves either open: a member not laid out, a member whose size or placement the
+ *  target does not state (an enum, a bitfield), or a target that states no largest alignment. */
 export function aggregateSize(
   layout: AggregateLayout,
   target: TargetDescription,
@@ -26,33 +26,46 @@ export function aggregateSize(
   return placed && { size: placed.size, align: placed.align };
 }
 
-/** Each member's offset, with the aggregate's size and alignment — `aggregateSize`'s walk. */
+/** Each member's offset — a bitfield's is the byte its first bit is in — with the aggregate's size
+ *  and alignment: `aggregateSize`'s walk. The cursor is in bits, since a bitfield can end
+ *  mid-byte. */
 function place(
   layout: AggregateLayout,
   target: TargetDescription,
 ): { size: number; align: number; offsets: number[] } | undefined {
-  const { aggregateBoundary, largestAlignment } = target.compilerBehaviors;
+  const { aggregateBoundary, largestAlignment, bitfieldPacking } = target.compilerBehaviors;
   if (layout.members === undefined || aggregateBoundary === undefined || largestAlignment === undefined) {
     return undefined;
   }
-  let size = 0;
+  let bits = 0;
   let align = aggregateBoundary;
   const offsets: number[] = [];
   for (const m of layout.members) {
+    if (m.bits !== undefined) {
+      if (bitfieldPacking !== 'contiguous' || m.bits === 0 || typeof m.type !== 'string') {
+        return undefined;
+      }
+      if (scalarBytes(m.type, target) === undefined) {
+        return undefined;
+      }
+      offsets.push(layout.kind === 'struct' ? Math.floor(bits / 8) : 0);
+      bits = layout.kind === 'struct' ? bits + m.bits : Math.max(bits, m.bits);
+      continue;
+    }
     const one = memberSize(m, target);
     if (one === undefined) {
       return undefined;
     }
     align = Math.max(align, one.align);
     if (layout.kind === 'struct') {
-      offsets.push(roundUp(size, one.align));
-      size = offsets[offsets.length - 1] + one.size;
+      offsets.push(roundUp(Math.ceil(bits / 8), one.align));
+      bits = (offsets[offsets.length - 1] + one.size) * 8;
     } else {
       offsets.push(0);
-      size = Math.max(size, one.size);
+      bits = Math.max(bits, one.size * 8);
     }
   }
-  return { size: roundUp(size, align), align, offsets };
+  return { size: roundUp(Math.ceil(bits / 8), align), align, offsets };
 }
 
 /** A declared struct as the IR types it: `name` with every member a field at the offset this target
@@ -92,25 +105,41 @@ function scalarType(spelling: string): IrType | undefined {
   if (s.endsWith('*')) {
     return T.ptr(scalarType(s.slice(0, -1)) ?? T.void());
   }
+  if (s === 'float' || s === 'double') {
+    return s === 'float' ? T.f32() : T.f64();
+  }
   const bits = declaredWidth(s);
   return bits === undefined || s === 'char' ? undefined : T.int(bits, !/^u\d|\bunsigned\b/.test(s));
 }
 
 function memberSize(m: AggregateMember, target: TargetDescription): { size: number; align: number } | undefined {
-  if (m.bits !== undefined) {
-    return undefined;
-  }
   const count = (m.dims ?? []).reduce((n, d) => n * d, 1);
   if (typeof m.type !== 'string') {
     const inner = aggregateSize(m.type, target);
     return inner === undefined ? undefined : { size: inner.size * count, align: inner.align };
   }
-  const bits = declaredWidth(m.type);
-  if (bits === undefined) {
+  const bytes = scalarBytes(m.type, target);
+  if (bytes === undefined) {
     return undefined;
   }
-  const bytes = bits / 8;
   return { size: bytes * count, align: Math.min(bytes, target.compilerBehaviors.largestAlignment!) };
+}
+
+/** The bytes a scalar or pointer member spelled `spelling` takes in storage. Not `declaredWidth`'s
+ *  question, which is how many argument registers a parameter takes, and which leaves the floating
+ *  types out because on an FPU target they take none: in memory a `float` is 4 bytes and a `double`
+ *  8 on every target here (IEEE single and double). An enum (`enum E`) is the target's `enumBytes`,
+ *  and unsized where it states none. */
+function scalarBytes(spelling: string, target: TargetDescription): number | undefined {
+  const s = spelling
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (/^enum [A-Za-z_]\w*$/.test(s)) {
+    return target.compilerBehaviors.enumBytes;
+  }
+  const bits = s === 'float' ? 32 : s === 'double' ? 64 : declaredWidth(s);
+  return bits === undefined ? undefined : bits / 8;
 }
 
 const roundUp = (n: number, to: number): number => Math.ceil(n / to) * to;

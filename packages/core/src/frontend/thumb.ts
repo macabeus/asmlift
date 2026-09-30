@@ -3602,7 +3602,8 @@ function liftOnce(
     const inMemory = returnsInMemory(layout, target);
     if (inMemory === undefined) {
       refuse(
-        'nothing here says whether it comes back through a hidden pointer — its members are not all known, or this target states no rule ' +
+        'nothing here says whether it comes back through a hidden pointer — its members are not all known, this target does not ' +
+          'say how it lays one of them out (an enum, a bitfield), or it states no rule ' +
           '(a prototype states them as `returnLayout`, a context by defining the struct)',
       );
     }

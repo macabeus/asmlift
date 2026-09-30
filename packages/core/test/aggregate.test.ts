@@ -33,8 +33,16 @@ describe('agbcc (thumb.c:1423-1493)', () => {
       union(m('s', struct(m('a', 'u8'), m('b', 'u8'))), m('w', 'u32')),
       true,
     ],
-    // compiled into r0, and left open here: bitfield packing is not modelled
-    ['{ u32 a : 8; u32 b : 8; }', struct(m('a', 'u32', { bits: 8 }), m('b', 'u32', { bits: 8 })), undefined],
+    ['{ u32 a : 8; u32 b : 8; }', struct(m('a', 'u32', { bits: 8 }), m('b', 'u32', { bits: 8 })), false],
+    ['{ u32 a : 20; u32 b : 20; } — 40 bits', struct(m('a', 'u32', { bits: 20 }), m('b', 'u32', { bits: 20 })), true],
+    ['{ float x; }', struct(m('x', 'float')), false],
+    ['{ enum E k; }', struct(m('k', 'enum E')), false],
+    // a zero-width bitfield moves what follows to a word, which this does not place
+    [
+      '{ u8 a : 2; u8 : 0; u8 b : 2; }',
+      struct(m('a', 'u8', { bits: 2 }), m('', 'u8', { bits: 0 }), m('b', 'u8', { bits: 2 })),
+      undefined,
+    ],
     ['a struct whose members were not read', { kind: 'struct' }, undefined],
   ])('%s', (_label, layout, inMemory) => {
     expect(returnsInMemory(layout, ARMV4T_AGBCC)).toBe(inMemory);
@@ -45,6 +53,20 @@ describe('agbcc (thumb.c:1423-1493)', () => {
     expect(aggregateSize(struct(m('c', 'u8'), m('v', 'long long')), ARMV4T_AGBCC)).toEqual({ size: 12, align: 4 });
     expect(aggregateSize(struct(m('a', 'u8')), ARMV4T_AGBCC)).toEqual({ size: 4, align: 4 });
     expect(aggregateSize(struct(m('w', 'u32', { dims: [16] })), ARMV4T_AGBCC)?.size).toBe(64);
+  });
+
+  // compiled: `sizeof` of each, and `(int)&((T *)0)->c` for the member past the bitfields
+  test('bitfields pack at the next bit, straddling a byte or a word; floats and enums have a size', () => {
+    const bf = (...widths: number[]) => widths.map((bits, i) => m(`b${i}`, 'u32', { bits }));
+    expect(aggregateSize(struct(...bf(31, 31, 2)), ARMV4T_AGBCC)?.size).toBe(8);
+    expect(aggregateSize(struct(...bf(20, 20, 20)), ARMV4T_AGBCC)?.size).toBe(8);
+    expect(aggregateType('P', 'struct P', struct(...bf(20, 20), m('c', 'u8')), ARMV4T_AGBCC)).toBeUndefined();
+    expect(aggregateSize(struct(...bf(20, 20), m('c', 'u8')), ARMV4T_AGBCC)?.size).toBe(8);
+    expect(aggregateSize(struct(m('a', 'u8'), m('b', 'u32', { bits: 30 })), ARMV4T_AGBCC)?.size).toBe(8);
+    expect(aggregateSize(struct(m('a', 'u8'), m('b', 'u32', { bits: 4 })), ARMV4T_AGBCC)?.size).toBe(4);
+    // `{u8 a; double d;}` is 12: a double aligns to a word here
+    expect(aggregateSize(struct(m('a', 'u8'), m('d', 'double')), ARMV4T_AGBCC)).toEqual({ size: 12, align: 4 });
+    expect(aggregateSize(struct(m('c', 'u8'), m('k', 'enum E')), ARMV4T_AGBCC)?.size).toBe(8);
   });
 });
 
@@ -63,6 +85,17 @@ describe('mwcc (8 bytes or less in r3/r3:r4)', () => {
     expect(returnsInMemory(layout, PPC_MWCC)).toBe(inMemory);
   });
 
+  test('a struct of two floats is 8 bytes, and comes back in r3:r4', () => {
+    expect(returnsInMemory(struct(m('x', 'float'), m('y', 'float')), PPC_MWCC)).toBe(false);
+    expect(aggregateSize(struct(m('a', 'u8'), m('d', 'double')), PPC_MWCC)).toEqual({ size: 16, align: 8 });
+  });
+
+  // nothing here has measured how mwcc sizes an enum or places a bitfield
+  test('an enum or a bitfield member leaves it unsized', () => {
+    expect(returnsInMemory(struct(m('k', 'enum E')), PPC_MWCC)).toBeUndefined();
+    expect(returnsInMemory(struct(m('a', 'u32', { bits: 8 })), PPC_MWCC)).toBeUndefined();
+  });
+
   test('a long long aligns to 8', () => {
     // compiled: `struct { u8 a; long long d; }` puts `d` at 8 and sizes 16
     expect(aggregateSize(struct(m('a', 'u8'), m('d', 'long long')), PPC_MWCC)).toEqual({ size: 16, align: 8 });
@@ -77,7 +110,13 @@ test('a target that states no rule answers nothing', () => {
 // The struct a local of the returned type is declared as: every member a field at its offset, and
 // spelled as the headers spell it, which marks it theirs
 test('a declared struct lays out as an IR struct, or not at all', () => {
-  const s = struct(m('a', 'u8'), m('w', 's16', { dims: [2, 3] }), m('p', 'const u8 *'), m('o', 'struct Opaque *'));
+  const s = struct(
+    m('a', 'u8'),
+    m('w', 's16', { dims: [2, 3] }),
+    m('p', 'const u8 *'),
+    m('o', 'struct Opaque *'),
+    m('f', 'float'),
+  );
   expect(aggregateType('S', 'S_t', s, ARMV4T_AGBCC)).toEqual({
     ...T.struct(
       'S',
@@ -86,8 +125,9 @@ test('a declared struct lays out as an IR struct, or not at all', () => {
         { off: 2, type: T.array(T.array(T.s(16), 3), 2), name: 'w' },
         { off: 16, type: T.ptr(T.u(8)), name: 'p' },
         { off: 20, type: T.ptr(T.void()), name: 'o' },
+        { off: 24, type: T.f32(), name: 'f' },
       ],
-      24,
+      28,
     ),
     declared: 'S_t',
   });

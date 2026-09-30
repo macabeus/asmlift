@@ -103,7 +103,8 @@ export interface AggregateLayout {
 export interface AggregateMember {
   /** empty only for an unnamed bitfield, which pads */
   name: string;
-  /** a scalar or pointer type as C spells it (`u32`, `u8 *`), or a nested struct or union */
+  /** a scalar or pointer type as C spells it (`u32`, `float`, `u8 *`), an enum as `enum` and its
+   *  name, or a nested struct or union */
   type: ParamType | AggregateLayout;
   /** an array member's extents, outermost first */
   dims?: number[];

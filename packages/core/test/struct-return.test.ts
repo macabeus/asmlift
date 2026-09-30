@@ -203,6 +203,40 @@ describe('a callee declared to return a struct or union by value', () => {
     );
   });
 
+  // `struct F1 { f32 x; }`, `struct E1 { Kind k; }` and `struct BF { u32 a:8; u32 b:8; }` each come
+  // back in r0 (the same q2 as `mkw`'s, compiled), and mwcc's `typedef struct { f32 x, y; } Vec2;`
+  // in r3:r4 (the same `f` as `getcol`'s)
+  test('a float, an enum or a bitfield member is sized by the target', () => {
+    const q2 =
+      'q2:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tbl\tmkw\n\tadd\tr4, r4, #0x1\n\tadd\tr0, r4, #0\n' +
+      '\tbl\tusei\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const usei = { params: ['s32'], returnsVoid: true as const };
+    for (const members of [
+      [{ name: 'x', type: 'float' }],
+      [{ name: 'k', type: 'enum Kind' }],
+      [
+        { name: 'a', type: 'u32', bits: 8 },
+        { name: 'b', type: 'u32', bits: 8 },
+      ],
+    ]) {
+      const mkw = { params: ['s32'], returns: 'struct W1', returnLayout: { kind: 'struct' as const, members } };
+      expect(decompile('q2', q2, ARMV4T_AGBCC, { prototypes: { mkw, usei } }).source).toMatch(
+        /mkw\(a0\);\s+usei\(a0 \+ 1\);/,
+      );
+    }
+    const getv = {
+      params: ['s32'],
+      returns: 'Vec2',
+      returnLayout: { kind: 'struct' as const, members: ['x', 'y'].map((name) => ({ name, type: 'float' })) },
+    };
+    const f =
+      '00000000 <f>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n   c:\tstw     r31,12(r1)\n' +
+      '  10:\tmr      r31,r3\n  14:\tbl      14 <f+0x14>\n\t\t\t14: R_PPC_REL24\tgetv\n  18:\taddi    r3,r31,1\n' +
+      '  1c:\tbl      1c <f+0x1c>\n\t\t\t1c: R_PPC_REL24\tusei\n  20:\tlwz     r0,20(r1)\n  24:\tlwz     r31,12(r1)\n' +
+      '  28:\tmtlr    r0\n  2c:\taddi    r1,r1,16\n  30:\tblr\n';
+    expect(decompile('f', f, PPC_MWCC, { prototypes: { getv, usei } }).source).toContain('getv(a0);');
+  });
+
   // `void f(void){ mkw(5); other(); }` and `void g(s32 i){ if (i) mkw(i); other(); }` — r0 past
   // `mkw` holds the struct, so a guessed arity for `other` must not read what r0 held before it
   test('a guessed call after one does not take the value its return register held before', () => {

@@ -305,6 +305,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   const named = new Map<string, { kind: AggregateLayout['kind']; body?: string }>();
   // a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own
   const unspelledPointers = new Set<string>();
+  // a typedef name bound to an enum body
+  const enums = new Set<string>();
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
     if (def) {
@@ -329,6 +331,9 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
         typedefs.set(td.name, td.type);
         if (aggregate && td.names === 'body') {
           named.set(td.name, { kind: aggregate[1] as AggregateLayout['kind'], body: s.bodies[0] });
+        }
+        if (td.names === 'body' && /^typedef\s+(?:(?:const|volatile)\s+)*enum\b/.test(s.text)) {
+          enums.add(td.name);
         }
         if (td.names === 'unspelled pointer') {
           unspelledPointers.add(td.name);
@@ -360,9 +365,9 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     laidOut.set(key, layout);
     return layout;
   };
-  // A body's members, or undefined when one of them is a type this cannot lay out — a float, an
-  // enum, a project typedef that resolves to nothing sized, a nested aggregate with no body here, a
-  // flexible or non-literal extent. Bounded in depth, since a body may name its own tag.
+  // A body's members, or undefined when one of them is a type this cannot lay out — a project
+  // typedef that resolves to nothing sized, a nested aggregate with no body here, a flexible or
+  // non-literal extent. Bounded in depth, since a body may name its own tag.
   const readMembers = (body: string, depth: number): AggregateMember[] | undefined => {
     if (depth > 8) {
       return undefined;
@@ -386,10 +391,13 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
           return undefined;
         }
         const base = resolve(split.base, typedefs);
-        if (declaredWidth(base) !== undefined) {
+        if (declaredWidth(base) !== undefined || base === 'float' || base === 'double') {
           type = base;
         } else if (unspelledPointers.has(base)) {
           type = 'void *';
+        } else if (/^enum [A-Za-z_]\w*$/.test(base) || enums.has(base)) {
+          // an enum, which the target sizes whatever it is called: spelled `enum` and its name
+          type = enums.has(base) ? `enum ${base}` : base;
         } else {
           const nested = layoutOf(base, depth + 1);
           if (nested?.members === undefined) {
