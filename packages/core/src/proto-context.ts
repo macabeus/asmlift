@@ -251,13 +251,18 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   const stmts = statements(src);
   const typedefs = new Map<string, string>();
   // struct and union bodies: by `struct Tag` spelling, and by a typedef name bound to a body, which
-  // resolves to itself and spells no keyword
+  // resolves to itself and spells no keyword — as C++ spells every tag, a declared one with no body
+  // included
   const tagged = new Map<string, string>();
-  const named = new Map<string, { kind: AggregateLayout['kind']; body: string }>();
+  const named = new Map<string, { kind: AggregateLayout['kind']; body?: string }>();
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
     if (def) {
       tagged.set(`${def[1]} ${def[2]}`, s.bodies[0]);
+    }
+    const tag = def ?? /^(struct|union)\s+([A-Za-z_]\w*)$/.exec(s.text);
+    if (tag && language === 'c++' && !named.has(tag[2])) {
+      named.set(tag[2], { kind: tag[1] as AggregateLayout['kind'], body: def ? s.bodies[0] : undefined });
     }
     if (/^typedef\b/.test(s.text)) {
       const td = readTypedef(s.text);
@@ -352,6 +357,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   const found = new Map<string, FnProto | null>();
   for (const s of stmts) {
     const t = s.text
+      .replace(/\bextern\s*"C(?:\+\+)?"/g, ' ')
       .replace(SPECIFIERS, ' ')
       .replace(/__attribute__\s*\(\(.*?\)\)/g, ' ')
       .replace(/\s+/g, ' ')
@@ -526,7 +532,10 @@ function readSignature(
   const r = resolve(ret.trim(), typedefs);
   // A struct or union returned by value is kept, spelled as the header spells it: it is the fact
   // that moves every argument one register up on a target that returns it through a hidden pointer.
+  // A spelling that names one and reads as no type (`struct Blob64 EWRAM_FN`, a macro this never
+  // expands) still returns one, and says nothing else about it.
   const layout = declaredWidth(r) === undefined ? layoutOf(r) : undefined;
+  const keyword = /\b(struct|union)\b/.exec(r);
   if (r === 'void') {
     proto.returnsVoid = true;
   } else if (declaredWidth(r) !== undefined) {
@@ -534,6 +543,8 @@ function readSignature(
   } else if (layout !== undefined) {
     proto.returns = r;
     proto.returnLayout = layout;
+  } else if (keyword && !r.includes('*')) {
+    proto.returnLayout = { kind: keyword[1] as AggregateLayout['kind'] };
   }
   const list = params.trim();
   if (list === '' ? language === 'c++' : list === 'void') {

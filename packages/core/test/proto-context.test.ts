@@ -201,6 +201,26 @@ describe('prototypes from a declaration context', () => {
     expect(p.mknine?.returnLayout).toEqual({ kind: 'struct' });
   });
 
+  test('a struct return spelled in a way this cannot read still returns a struct', () => {
+    const c = prototypesFromContext(
+      'struct Blob64 { u32 w[16]; }; struct Blob64 EWRAM_FN makeblob(const void *); union U __attr mku(s32);',
+      'c',
+    );
+    expect(c.makeblob).toEqual({ returnLayout: { kind: 'struct' }, params: ['const void *'] });
+    expect(c.mku).toEqual({ returnLayout: { kind: 'union' }, params: ['s32'] });
+    // C++ names a struct by its tag, and a linkage specification declares nothing about the type
+    const vec = { kind: 'struct', members: ['x', 'y', 'z'].map((name) => ({ name, type: 'u32' })) };
+    for (const decl of ['extern "C" Vec getv(s32 i);', 'extern "C" { Vec getv(s32 i); }']) {
+      const cpp = prototypesFromContext(`struct Vec { u32 x, y, z; }; ${decl}`, 'c++');
+      expect(cpp.getv).toEqual({ returns: 'Vec', returnLayout: vec, params: ['s32'] });
+    }
+    expect(prototypesFromContext('struct Fwd; Fwd getf(s32 i);', 'c++').getf).toEqual({
+      returns: 'Fwd',
+      returnLayout: { kind: 'struct' },
+      params: ['s32'],
+    });
+  });
+
   test('C++ default arguments and comments do not reach a spelling', () => {
     const p = prototypesFromContext('/* a */ int f(int a = 3, /* b */ int b = 4); // c', 'c++');
     expect(p.f).toEqual({ returns: 'int', params: ['int', 'int'] });
