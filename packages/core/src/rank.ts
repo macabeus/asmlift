@@ -1772,7 +1772,21 @@ export function enumerateCandidates(
     const usableStructureSettings = symbolSetting.symbols
       ? structureSettings
       : structureSettings.filter((s) => s.bitfields && s.ptrElems && (s.declRank || rawDerivesRank));
-    const treeOwnedFold = treeOwnedIn(symbolSetting.symbols);
+    // THE `/raw-globals` SETTING IS A VARIATION, so a lift that declines without the map drops it
+    // and keeps the map's candidates, the posture of every lift variation below. The two lifts can
+    // disagree on whether a function lifts at all: a name only the map places is, without it, a
+    // pointer the frame-object audit cannot bound. This is the setting's first lift, and every
+    // later one is the same lift again.
+    let treeOwnedFold: boolean;
+    try {
+      treeOwnedFold = treeOwnedIn(symbolSetting.symbols);
+    } catch (e) {
+      if (symbolSetting.variations.length === 0) {
+        throw e;
+      }
+      reportThrow(symbolSetting.variations, e);
+      continue;
+    }
     // The signedness variation DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
     // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises and
