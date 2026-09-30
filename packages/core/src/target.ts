@@ -350,7 +350,7 @@ export interface TargetDescription {
     // It says WHERE the words go and nothing about the rest of the frame. Its one reader is the
     // Thumb frontend's stack-argument licence (`frontend/thumb.ts` `declaredCall`): a declared call
     // consumes the words it stages. Absent ⇒ no outgoing area is claimed, and a `[sp,#k]` store
-    // reaching a call unread declines as it did before the licence existed.
+    // reaching a call unread declines.
     //
     // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured — the
     // corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's `sub_0804C300` all
@@ -369,11 +369,11 @@ export interface TargetDescription {
     // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
     // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
     // call before any re-store is not in the area, so it is a local, and so is every word above it,
-    // which lets a spill live across a call lift, and a call NO declaration covers. That is not a
-    // backwards reading (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
-    // BACKWARDS READING); it is exactly as sound as the universal, so its residue is every producer
-    // the universal does not cover. Hand-written asm that reads its outgoing argument back after a
-    // call is one, and loses that argument silently; the premise is this compiler's, not the ISA's.
+    // which lets a spill live across a call lift, and a call NO declaration covers
+    // (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A BACKWARDS READING). It is
+    // exactly as sound as the universal, so its residue is every producer the universal does not
+    // cover: hand-written asm that reads its outgoing argument back after a call loses that
+    // argument silently. The premise is this compiler's, not the ISA's.
     // Absent ⇒ every staged word stays a candidate argument.
     //
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)

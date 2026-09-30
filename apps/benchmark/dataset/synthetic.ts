@@ -3402,15 +3402,15 @@ export const SYNTHETIC: SynthSpec[] = [
   // belongs to the callee across a call and sits below every local, so a word that outlives a call
   // is a local and bounds the area of every call (`frontend/stackargs.ts`, `survivorBound`). The
   // declared arity cannot decide it — `callee` takes one argument, and a declared list is a lower
-  // bound on the words a call is handed. The refusal this row pins open — `stack pointer used as
-  // data — the store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied` — was
+  // bound on the words a call is handed. The refusal this row guards against — `stack pointer used
+  // as data — the store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied` — was
   // the first blocker of 7 of the 51 klonoa functions selected in the LoadBGTilemapData round, so
   // the row pins a population, not one function. The four stack-heavy siblings that round also
   // ran decline on OTHER links of the same stack-addr chain, which this row does not measure: two
   // on the declared-arity refusal (`callee \`SetupOAMSprite\` is declared with 9 arguments`,
   // `stkarg`'s shape), one address-taken (`a store at [+4] through the captured address`), one
   // `sp moves in a block that neither returns nor is the entry`.
-  // Lifted, it ranks 16 candidates, best 24 of 93 — 19 register rows and 5 loop-entry rows (a
+  // Lifted, its residual is 19 register rows and 5 loop-entry rows (a
   // `[sp,#8]` store deleted and a reload replaced, an inserted `mov`, `cmp r1,r10` vs `cmp r0,#0`,
   // `bge` vs `ble`: the `for` rendered as `if (0 >= a0)` + `do {} while`) and NO row whose
   // difference is a `[sp,#k]` offset. The naming walk emits `v0..v9, v10, v11` and the target's

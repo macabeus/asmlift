@@ -26,8 +26,8 @@ export interface StackArgsSlot {
 /** A call, and what its callee's DECLARATION says it takes on the stack. `declared` is the block
  *  `[0, 4*(n - argRegs))` as an ascending offset list, or null when nothing declares this call —
  *  an indirect call, a callee with no prototype, or one whose arity fits in registers. The code
- *  alone cannot say where a null declaration's block ENDS; under a one-area compiler a word that
- *  survives a call says where the AREA ends (`survivorBound`), and that is all it can accept. */
+ *  alone cannot say where a null declaration's block ENDS, so such a call is never handed a stack
+ *  word; it lifts only when `survivorBound` clears every word that could open one. */
 export interface StackArgsCall<C> {
   readonly kind: 'call';
   /** The frontend's own handle for this call — the key of `OutgoingArgs.blocks`. */
@@ -81,15 +81,10 @@ export interface OutgoingArgs<C> {
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 
 /** THE LOWEST FRAME WORD THAT SURVIVES A CALL, or `Infinity` when none does. A word LOADED on some
- *  path out of a live call before anything re-stores it held a value across that call. The premise
- *  is a UNIVERSAL about the producer: a caller whose outgoing area belongs to the callee never reads
- *  that area back after a call, for any source (the callee may assign to its stack parameters;
- *  agbcc re-stages an argument before every call rather than trust the word to survive — both
- *  compiled in `test/corpus/agbcc-restage.s`). Its contrapositive makes the word a local, and since
- *  the area is one region at the frame bottom that every call shares, no call's block reaches it:
- *  every word at or above the bound is proven not to be an argument. The CONVERSE — a word never
- *  read back is an argument — is false, since a dead local is never read back either; that is why
- *  refusals (a) and (b) below decline rather than infer.
+ *  path out of a live call before anything re-stores it held a value across that call. Under
+ *  `localsAboveOutgoingArea` the caller never reads its outgoing area back after a call, so that
+ *  word is a local; and since the area is one region at the frame bottom that every call shares,
+ *  every word at or above the bound is proven not to be an argument.
  *
  *  A backward liveness over the live blocks: a load makes its offset live, a store kills it, and a
  *  call is transparent — a word read after two calls survived both. Dead blocks contribute nothing:
@@ -470,7 +465,7 @@ export function analyzeOutgoingArgs<C>({
   // where the function ENDS. That is not an argument and not a local anyone reloads, so nothing
   // here can say what it is: decline rather than let it drop as a dead def.
   //
-  // "WHERE THE FUNCTION ENDS" IS A LIVE BLOCK WITH NO LIVE SUCCESSOR, read off `preds`, not a
+  // "WHERE THE FUNCTION ENDS" IS A LIVE BLOCK WITH NO LIVE SUCCESSOR, read off `succs`, not a
   // terminator the caller classified. Under Thumb the two coincide — a computed PC write has no
   // static successor and the frontend throws on one long before here — but asking the CFG costs
   // nothing and removes a fact the caller could get wrong.
