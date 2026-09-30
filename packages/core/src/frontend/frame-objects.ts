@@ -633,7 +633,7 @@ export function auditFrameObjects({
     // (`blockTransferCalls`) as its source, with a literal control word, is read `[lo, hi)` from
     // the object and written by nobody. `CPU_FILL`'s `vu32 tmp = v; CpuSet(&tmp, dest, …)` is the
     // shape. A control word this cannot read, or any other argument position, is a callee that
-    // may write, as before.
+    // may write.
     const calleeReads = new Map<number, { lo: number; hi: number }>();
     // …and of those, the objects a transfer FILLS from — a fixed source, the `tmp` of every fill
     // macro — which the `volatile` stamp below keys on beside `published`
@@ -1617,11 +1617,11 @@ export function auditFrameObjects({
     // …unless the one-object answer is on offer (every escape only READS and one of them reads
     // without bound) and the per-object model does not describe the frame: it refused a shape, an
     // object sits over a slot, or the unbounded read reaches another object, a slot or a word
-    // nothing accounts for. Then what
-    // the device may read is kept rather than refused: lift again with the local area as one object
-    // in memory (`oneObject` above). Below the local area are the outgoing arguments and above it
-    // the saved registers, neither of them an object. Where the per-object model does describe the
-    // frame — one object and nothing else in reach — it stands, and the object keeps its own type.
+    // nothing accounts for. Then what the device may read is kept rather than refused: lift again
+    // with the local area as one object in memory (`oneObject` above). Below the local area are the
+    // outgoing arguments and above it the saved registers, neither of them an object. Where the
+    // per-object model does describe the frame — one object and nothing else in reach — it stands,
+    // and the object keeps its own type.
     if (
       oneObjectOnOffer &&
       (perObjectRefused ||

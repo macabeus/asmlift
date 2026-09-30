@@ -2376,7 +2376,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         // A frame object declared as an aggregate (`laddrType`) is one whatever its accesses agree
-        // on — the frame-side twin of the symbol map's declaration-shape override below. Spelled
+        // on — the frame-side twin of the symbol map's declaration-shape override. Spelled
         // scalar, a store assigns to the array and a load reads its address.
         if (op.opcode === 'laddr' && laddrType(op).kind !== 'int') {
           bumpAgg(laddrName.get(op)!);
