@@ -3655,7 +3655,8 @@ function liftOnce(
     argRegs: target.argRegs.length,
     capturedWholeFrame: capturedObjectIsTheWholeFrame,
     // ACCUMULATE_OUTGOING_ARGS puts the area at the frame bottom with every local above it, and the
-    // caller re-stages each argument before every call (thumb.h:573/600-622/628, calls.c:1675)
+    // caller re-stages each argument before every call (thumb.h:573/600-622/628, calls.c:1675;
+    // compiled in test/corpus/agbcc-restage.s)
     localsAboveOutgoingArea: target.compilerBehaviors.stagesOutgoingArgsInFrame === true,
   });
 
