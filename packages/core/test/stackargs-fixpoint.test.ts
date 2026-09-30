@@ -211,6 +211,26 @@ describe('a word LOADED after a call before any re-store is a local, and bounds 
   });
 });
 
+describe('the licence’s NOTHING EXTRA reads the same bound', () => {
+  test('a spill reloaded after a licensed call is no word that call takes', () => {
+    const r = run(line([st(0), st(4), call('five', 1), ld(4)]), chain(1), 8);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('five')).toEqual([0]);
+    expect(r.area).toBe(4);
+  });
+
+  test('…and without the compiler’s layout claim it is an extra word again', () => {
+    const r = run(line([st(0), st(4), call('five', 1), ld(4)]), chain(1), 8, false, false);
+    expect(r.blocker).toMatch(/\[sp,#4\] also reaches the call unread/);
+  });
+
+  test('a declared block that reaches the bound contradicts it, and refuses', () => {
+    // [sp,#4] outlives the call, yet the declaration says the call takes it
+    const r = run(line([st(0), st(4), call('six', 2), ld(4)]), chain(1), 8);
+    expect(r.blocker).toMatch(/\[sp,#4\] is an outgoing stack-argument slot .* but this function also LOADS it/);
+  });
+});
+
 describe('the contiguity filter, and the frames that refuse outright', () => {
   test('a never-reloaded store whose lower slots are nowhere supplied is a local, not an argument', () => {
     // kleod's ProcessInputAndUpdateEntities shape: a spill at [sp,#4] with offset 0 never stored.

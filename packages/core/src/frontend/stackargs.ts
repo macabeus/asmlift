@@ -170,13 +170,15 @@ function survivorBound<C>(
 //     0x0 in block")`; here it is a decline, and for the same reason — it is a GAP, and a gap
 //     must never render as a plausible value.
 //
-// WHAT "NOTHING EXTRA" COSTS, because the reach is narrower than the disappearance of the old
-// decline suggests. A genuine SPILL that is live across a licensed call sits in the may set and is
-// not in the declared block, so the call refuses — and that is agbcc's commonest frame with an
-// outgoing area. `survivorBound` proves such a word a local, but only condition (b) reads it.
-// The cost is in attribution, not correctness: the decline such a function gets names a STORE
-// ("[sp,#k] also reaches the call unread") rather than the capability, so a gap histogram groups
-// this class under that message and not under anything about stack arguments.
+// A SPILL LIVE ACROSS A LICENSED CALL sits in the may set and is not in the declared block — agbcc's
+// commonest frame with an outgoing area. The declaration cannot excuse it; `survivorBound` can: a
+// word loaded after a call before any re-store is a local, so NOTHING EXTRA counts only the pending
+// words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
+// check of its own: the block is contiguous words from zero, so it holds the bound's word, which
+// this function loads — "this function also LOADS it" below refuses it if nothing earlier does.
+// A spill never reloaded
+// after any call still refuses, and its decline names a STORE ("[sp,#k] also reaches the call
+// unread") rather than the capability, so a gap histogram groups it under that message.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
 // site needs: agbcc does tail-merge (`Task_BonusFlower_Spawn`, sa3 bonus_game_enemies, stores
 // argument 5 in both predecessors with the `bl` in the join), and a one-armed store — the same
@@ -358,7 +360,7 @@ export function analyzeOutgoingArgs<C>({
     const may = mayAt.get(ev) ?? new Set<number>();
     const must = mustAt.get(ev) ?? new Set<number>();
     const missing = offs.filter((o) => !must.has(o));
-    const extra = asc(may).filter((o) => !offs.includes(o));
+    const extra = asc(may).filter((o) => o < bound && !offs.includes(o));
     if (missing.length > 0 || extra.length > 0) {
       return refuse(
         `callee \`${ev.callee}\` is declared with ${arityOf(offs)} arguments, so its outgoing stack-argument block is ${say(offs)} — but ` +
