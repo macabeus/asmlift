@@ -216,19 +216,27 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
 /** FRAME-OBJECT AUDIT. Every `laddr` the frontend emitted is only a CLAIM that the address it
  *  names is used as "the address of one local object"; this proves it, over the finished function,
  *  the same boundary-total style as the slot-escape assert in finish(). The address may flow
- *  anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — but every
- *  MEMORY access through it must be at offset 0, with one agreed width and one agreed extension,
- *  or a byte read or written through a runtime index into storage nothing else types; its bytes
- *  must belong to nothing else in the frame, and any use the audit cannot vouch for declines the
- *  whole function loudly. Nothing here guesses: a scalar's declared type is exactly the access
- *  type the machine used, and an object NO access reaches is sized by the frame reservation and
- *  left untyped.
+ *  anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — and it is
+ *  judged in one of two models, chosen before any shape is:
+ *   - PER OBJECT, the default: every MEMORY access through it must be at offset 0, with one agreed
+ *     width and one agreed extension, or a byte read or written through a runtime index into
+ *     storage nothing else types, and its bytes must belong to nothing else in the frame;
+ *   - ONE OBJECT, where every escape only reads and a device reads without bound (`oneObject`,
+ *     which this answers and the frontend lifts again with): the local area is one `u8` array in
+ *     memory, every fixed-offset access in it is a member at its own offset, a runtime index may
+ *     reach a byte of it, and two types at one byte refuse.
+ *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
+ *  scalar's declared type is exactly the access type the machine used, and an object NO access
+ *  reaches is sized by the frame reservation and left untyped.
  *
  *  Takes its inputs explicitly rather than closing over `lift`. Every one of them is READ, none is
  *  reassigned, and the only mutations are to the ops reachable through `irBlocks`: an `add` of a
  *  capture and a constant is re-minted as the `laddr` it names, a moved-from capture nothing reads
  *  is dropped, a capture addressed through at fixed offsets is split into the objects its accesses
- *  name, and each surviving `laddr` is stamped with its width, signedness, count and `volatile`. */
+ *  name, and each surviving `laddr` is stamped with its width, signedness, count and `volatile`.
+ *  One object mutates more: every access through a member is re-based onto one minted `laddr`,
+ *  the member `laddr`s are deleted or re-minted as that one moved by a `const`, and every device
+ *  load and store of the function — through no `laddr` at all — is marked `volatile`. */
 export function auditFrameObjects({
   name,
   irBlocks,

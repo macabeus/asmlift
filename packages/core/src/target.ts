@@ -17,14 +17,19 @@
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
 //   • capabilities.readSourceControl → the same audit: which frame bytes beside the object that
 //     device may read, so a slot it cannot reach is not refused.
-//   • capabilities.deviceRegisters → five readers, and they ask ONE question — "would a source
+//   • capabilities.deviceRegisters → six readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the `/vol-store` variation's eligibility (l3/volstore.ts), rank.ts's volatility
 //     tie-break between two byte-identical spellings, the first half of `/unreduce`'s
 //     disjointness gate (l3/unreduce.ts), the `/homesplit` pairing's refusal to leave a device
-//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), and
-//     the structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
-//     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions).
+//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), the
+//     structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
+//     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions), and the
+//     frame-object audit's pin on a function it keeps as one object (frontend/frame-objects.ts),
+//     which spells every access in the window `volatile`. That last reader makes the answer a
+//     correctness one — agbcc deletes or hoists a plain device access the machine made — so it
+//     may be approximate in ONE direction only: the window must cover every register a source
+//     reaches, and covering more costs a spelling, never a store.
 //   • capabilities.deviceMemoryWriters → the MEMORY-MODEL question, which is a different one and
 //     may NOT be approximate: "can a write to this register make the DEVICE write ordinary
 //     memory". One reader — `/unreduce`'s second half. Split from `deviceRegisters` because
@@ -171,9 +176,11 @@ export interface TargetDescription {
     // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
     // so a source that touched one all but certainly declared it `volatile`. Its readers all ask
     // the same SPELLING question — "would a source have written `volatile` here" — and the file
-    // header's ledger names them and what each does with the answer. None of them decides for the
-    // reader: which cells a source qualified is not derivable from the asm, so both spellings are
-    // enumerated and the differ referees. ABSENT ⇒ the variation declines everywhere and the tie-break
+    // header's ledger names them and what each does with the answer. All but one leave the
+    // decision to the differ: which cells a source qualified is not derivable from the asm, so
+    // both spellings are enumerated and the differ referees. The frame-object pin decides, because
+    // there the plain spelling recompiles to a different program; that is why the window has to
+    // cover every register. ABSENT ⇒ the variation declines everywhere and the tie-break
     // has no preference, which is the neutral direction — outside a declared window the qualifier
     // is a claim about ordinary memory that the target does not support.
     //
