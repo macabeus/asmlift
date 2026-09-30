@@ -166,12 +166,12 @@ function survivorBound<C>(
 // A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
 // keeps one outgoing area below every local and never reads it back after a call
 // (`localsAboveOutgoingArea`), a word LOADED after a call before any re-store is a local, and so
-// is every word above it (`survivorBound`). Code plus that layout premise accepts an undeclared
-// call once no pending word below the bound could open an argument block, and the call then takes
-// no stack word. Hand-written
-// asm that reads its own outgoing argument back after a call defeats it, and lifts with that
-// argument dropped — a producer assumption of the same kind as CONTIGUITY below, which is why the
-// premise is declared per compiler (`target.ts` `stagesOutgoingArgsInFrame`) and never inferred.
+// is every word above it (`survivorBound`). Every refusal that reads the code — NOTHING EXTRA,
+// (a) and (b) — then weighs only the words beneath the bound, so an undeclared call lifts once no
+// word there could open an argument block, and takes no stack word. Hand-written asm that reads
+// its own outgoing argument back after a call defeats it, and lifts with that argument dropped — a
+// producer assumption of the same kind as CONTIGUITY below, which is why the premise is declared
+// per compiler (`target.ts` `stagesOutgoingArgsInFrame`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -188,7 +188,7 @@ function survivorBound<C>(
 // words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
 // check of its own: the block is contiguous words from zero, so it holds the bound's word, which
 // this function loads — "this function also LOADS it" below refuses it if nothing earlier does.
-// A spill never reloaded after any call still refuses, and its decline names a STORE ("[sp,#k]
+// A spill with no survivor at or beneath it still refuses, and its decline names a STORE ("[sp,#k]
 // also reaches the call unread") rather than the capability, so a gap histogram groups it under
 // that message.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
@@ -263,8 +263,12 @@ export function analyzeOutgoingArgs<C>({
       }
     }
   }
-  // Every pending word at or above this is a proven local, so it is no call's argument.
+  // Every word at or above this is a proven local, so it is no call's argument. The three
+  // code-reading refusals below — the licence's NOTHING EXTRA, (a) and (b) — each hunt for a word
+  // that could be one, so the words they weigh are cut to those beneath the bound once, where
+  // they are collected (`mayAt`, `storedAnywhere`), and none of them repeats the test.
   const bound = localsAboveOutgoingArea ? survivorBound(asmBlocks, succs, live) : Infinity;
+  const belowBound = (s: Iterable<number>): Set<number> => new Set([...s].filter((o) => o < bound));
 
   const everySlot: number[] = [];
   for (let o = 0; o + 4 <= localArea; o += 4) {
@@ -312,7 +316,7 @@ export function analyzeOutgoingArgs<C>({
       );
       for (const ev of asmBlocks[b].events) {
         if (isCallEvent(ev)) {
-          mayAt.set(ev, new Set(may));
+          mayAt.set(ev, belowBound(may));
           mustAt.set(ev, new Set(must));
           storedAt.set(ev, new Set(stored));
           for (const o of ev.declared ?? []) {
@@ -372,7 +376,7 @@ export function analyzeOutgoingArgs<C>({
     const may = mayAt.get(ev) ?? new Set<number>();
     const must = mustAt.get(ev) ?? new Set<number>();
     const missing = offs.filter((o) => !must.has(o));
-    const extra = asc(may).filter((o) => o < bound && !offs.includes(o));
+    const extra = asc(may).filter((o) => !offs.includes(o));
     if (missing.length > 0 || extra.length > 0) {
       return refuse(
         `callee \`${ev.callee}\` is declared with ${arityOf(offs)} arguments, so its outgoing stack-argument block is ${say(offs)} — but ` +
@@ -395,14 +399,15 @@ export function analyzeOutgoingArgs<C>({
   // every offset live code loads back. A reload in dead code is not evidence that anything reads
   // the slot back, so it does not count.
   const reloaded = new Set<number>();
-  const storedAnywhere = new Set<number>();
+  const stores = new Set<number>();
   for (const b of live) {
     for (const ev of asmBlocks[b].events) {
       if (ev.kind !== 'call') {
-        (ev.kind === 'store' ? storedAnywhere : reloaded).add(ev.off);
+        (ev.kind === 'store' ? stores : reloaded).add(ev.off);
       }
     }
   }
+  const storedAnywhere = belowBound(stores);
   // A LICENSED WORD THIS FUNCTION ALSO LOADS. The area belongs to the CALLEE — which may assign
   // to a stack parameter — so after the `bl` the word holds whatever the callee left, and an
   // `ldr` off that offset reads a GAP. The dataflow above cannot catch it: the call consumes the
@@ -425,7 +430,8 @@ export function analyzeOutgoingArgs<C>({
   // (a) — a store never reloaded ANYWHERE, with its lower slots supplied, is an argument's
   // signature: an outgoing argument is read by the CALLEE, never by the caller. Its real theorem
   // is the layout one (the area sits at the BOTTOM of localArea, disjoint from the locals, so no
-  // local load can land on an argument offset), which is why it is a whole-function question.
+  // local load can land on an argument offset), which is why it is a whole-function question, and
+  // why a word at or above `bound` never reaches it: the bound proves that theorem for it.
   // A LICENSED offset is excluded: its never being reloaded is explained by the call that takes it.
   for (const off of asc(storedAnywhere)) {
     if (!licensed.has(off) && !reloaded.has(off) && prefixStored(off, storedAnywhere)) {
@@ -437,8 +443,7 @@ export function analyzeOutgoingArgs<C>({
   // (b) — no slot store may reach a `bl` unread ALONG A PATH. For a call the licence covered,
   // the equality above already answered this; what is left are the calls no declaration sizes,
   // where a plausible argument block reaching one unread is an argument this analysis cannot
-  // size, and the answer is the decline. A word at or above `bound` is not a candidate: some word
-  // at or below it outlived a call, so the area every call shares ends beneath it.
+  // size, and the answer is the decline.
   //
   // THE OFFSET THIS NAMES IS THE LOWEST PENDING ONE, because `may` is reported through `asc`. The
   // verdict does not depend on it — any one of them refuses — but the message is what a gap
@@ -451,7 +456,7 @@ export function analyzeOutgoingArgs<C>({
     const may = mayAt.get(ev) ?? new Set<number>();
     const stored = storedAt.get(ev) ?? new Set<number>();
     for (const k of asc(may)) {
-      if (k < bound && prefixStored(k, stored)) {
+      if (prefixStored(k, stored)) {
         return refuse(
           `the store to [sp,#${k}] reaches \`bl ${ev.callee}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`,
         );

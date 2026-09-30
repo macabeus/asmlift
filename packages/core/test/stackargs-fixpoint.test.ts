@@ -231,6 +231,26 @@ describe('the licence’s NOTHING EXTRA reads the same bound', () => {
   });
 });
 
+describe('condition (a) reads the same bound', () => {
+  test('a never-reloaded word above a survivor is a local, not an argument', () => {
+    // compiled agbcc, `volatile int r, w; r = x; w = y; f(x); return r;`: `str r0,[sp]; str
+    // r1,[sp,#4]; bl f; ldr r0,[sp]`. [sp,#0] outlives the call, so [sp,#4] above it is no
+    // argument, reloaded or not.
+    const r = run(line([st(0), st(4), call('f', 0), ld(0)]), chain(1), 8);
+    expect(r).toEqual({ blocker: null, blocks: new Map(), area: 0 });
+  });
+
+  test('…and without the compiler’s layout claim it may be an argument again', () => {
+    const r = run(line([st(0), st(4), call('f', 0), ld(0)]), chain(1), 8, false, false);
+    expect(r.blocker).toMatch(/the store to \[sp,#4\] is never reloaded and its lower slots are supplied/);
+  });
+
+  test('a never-reloaded word beneath the bound still refuses', () => {
+    const r = run(line([st(0), st(4), st(8), call('f', 0), ld(8)]), chain(1), 12);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded and its lower slots are supplied/);
+  });
+});
+
 describe('the contiguity filter, and the frames that refuse outright', () => {
   test('a never-reloaded store whose lower slots are nowhere supplied is a local, not an argument', () => {
     // kleod's ProcessInputAndUpdateEntities shape: a spill at [sp,#4] with offset 0 never stored.
