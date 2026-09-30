@@ -153,13 +153,16 @@ describe.each(Object.entries(TABLES))('%s', (_name, gates) => {
   test('every named guard is a test that still exists', () => {
     // `guardedBy` is prose until something reads it: `<file>.test.ts: <title>`. Matching the title
     // against the text of the FILE it names is what stops it from decaying into a comment that names
-    // a test deleted two refactors ago, or a file that was since renamed.
+    // a test deleted two refactors ago, or a file that was since renamed. A rule with two halves
+    // names one guard per half, `; `-separated, and each is looked up.
     const missing = gates
       .filter((g) => g.guardedBy)
-      .map((g) => {
-        const parts = g.guardedBy!.split(':');
-        return { id: g.id, file: parts[0].trim(), guard: parts[parts.length - 1].trim() };
-      })
+      .flatMap((g) =>
+        g.guardedBy!.split('; ').map((one) => {
+          const parts = one.split(':');
+          return { id: g.id, file: parts[0].trim(), guard: parts[parts.length - 1].trim() };
+        }),
+      )
       .filter((g) => !testFiles.get(g.file)?.includes(g.guard));
     expect(missing).toEqual([]);
   });

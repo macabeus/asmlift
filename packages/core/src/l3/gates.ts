@@ -19,7 +19,8 @@ export interface Gate<Ctx> {
   /** Remove it and some candidate is WRONG, not merely worse. Everything else is a codegen
    *  heuristic the differ still referees. This flag is what makes `guardedBy` mandatory. */
   readonly sound: boolean;
-  /** the test that fails when this gate is removed — required for a sound gate */
+  /** the test that fails when this gate is removed — required for a sound gate; a rule with two
+   *  halves names one test per half, `; `-separated */
   readonly guardedBy?: string;
   /** true ⇒ REJECT this candidate */
   readonly rejects: (c: Ctx) => boolean;
