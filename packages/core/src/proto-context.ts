@@ -584,7 +584,7 @@ function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefi
   const mapped = new Set<string>();
   for (const infos of symbols.values()) {
     for (const info of infos) {
-      if (symbolPrototype(info) !== undefined) {
+      if (symbolPrototype(info)?.params !== undefined) {
         mapped.add(info.name);
       }
     }

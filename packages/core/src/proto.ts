@@ -742,16 +742,28 @@ function typeSpelling(t: SymbolTypeFacts): ParamType | null {
 }
 
 /** The prototype a code symbol's DWARF signature states, or `undefined` when it states none this
- *  can spell — every parameter must spell faithfully (see `prototypesFromSymbols`). */
+ *  can spell — every parameter must spell faithfully (see `prototypesFromSymbols`).
+ *
+ *  A STRUCT OR UNION RETURN IS KEPT WHEN THE PARAMETERS ARE NOT, because it is what says argument 0
+ *  may be a hidden pointer, and a call read without it names that pointer as the first argument.
+ *  DWARF sizes the return and states no kind: a base type carries a sign and a pointer says so, so
+ *  a signless non-pointer return is an enum, a struct or a union — and one wider than a word is not
+ *  an enum on any target here. The layout it states has no members, which is how a call to it
+ *  declines. KNOWN GAP: a signless return of a word or less is an enum or a small aggregate, and
+ *  nothing here tells them apart, so it states nothing — agbcc returns `struct { u16 a, b; }` through
+ *  memory, and a call storing one straight into a global lifts with the pointer as argument 0. */
 export function symbolPrototype(info: SymbolInfo): FnProto | undefined {
   if (info.kind !== 'code' || !info.signature) {
     return undefined;
   }
+  const r = info.signature.returns;
+  const aggregate = r !== null && r.signed === null && r.pointer !== true && r.size !== null && r.size > 4;
+  const layout = aggregate ? { returnLayout: { kind: 'struct' as const } } : {};
   const params = info.signature.params.map(typeSpelling);
   if (params.some((p) => p === null)) {
-    return undefined;
+    return aggregate ? layout : undefined;
   }
-  return { params: params as ParamType[], ...(info.signature.returns === null ? { returnsVoid: true } : {}) };
+  return { params: params as ParamType[], ...(r === null ? { returnsVoid: true } : {}), ...layout };
 }
 
 /**

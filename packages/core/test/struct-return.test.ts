@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { declaresAggregateReturn } from '../src/proto';
+import { declaresAggregateReturn, symbolPrototype } from '../src/proto';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 // `struct Blob64 { u32 w[16]; }; struct Blob64 makeblob(const void *); extern struct Blob64 gDst;
@@ -111,6 +111,24 @@ describe('a callee declared to return a struct or union by value', () => {
     expect(decompile('c', ppc, PPC_MWCC, { prototypes: { g } }).source).toContain('return g();');
     const thumb = 'c:\n\tpush\t{lr}\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('c', thumb, ARMV4T_AGBCC, { prototypes: { g } }).source).toContain('return g();');
+  });
+
+  // DWARF sizes a return and states no kind; a signless non-pointer one wider than a word is an
+  // aggregate, whatever the parameters say
+  test('a symbol map whose signature returns a struct states one', () => {
+    const blob = { size: 64, signed: null };
+    const symbols = (params: { size: number | null; signed: boolean | null; pointer?: boolean }[]) =>
+      new Map([[0x1000, [{ name: 'makeblob', kind: 'code' as const, signature: { returns: blob, params } }]]]);
+    for (const params of [[{ size: 4, signed: null, pointer: true }], [{ size: 12, signed: null }]]) {
+      expect(() => decompile('p4', P4, ARMV4T_AGBCC, { symbols: symbols(params) })).toThrow(
+        /`makeblob` is declared to return a struct or union by value, and nothing here says whether it comes back/,
+      );
+    }
+    // a word-wide signless return is an enum as often as a struct, and states nothing
+    const word = new Map([
+      [0x1000, [{ name: 'mke', kind: 'code' as const, signature: { returns: { size: 4, signed: null }, params: [] } }]],
+    ]);
+    expect(symbolPrototype(word.get(0x1000)![0])).toEqual({ params: [] });
   });
 
   test('a PowerPC call to one declines', () => {
