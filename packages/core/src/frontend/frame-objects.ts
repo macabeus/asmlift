@@ -959,10 +959,9 @@ export function auditFrameObjects({
       // `u16` store to the same bytes — a stale value. So a byte two accesses of different widths
       // reach cannot be spelled through casts. A byte access is exempt, since character types
       // alias everything, and so is a signedness difference, since the signed and unsigned types
-      // of one width share an alias set (c-common.c:1962-1974). PRECAUTIONARY in the Thumb lift:
-      // its first audit already refused an object read at two widths and an object over a slot,
-      // so the members it hands here never disagree. It is kept because a cast spelling that did
-      // would compile to a stale read with no diagnostic.
+      // of one width share an alias set (c-common.c:1962-1974). The first audit refuses an object
+      // read at two widths, but not an object over a slot, which is how two widths meet here: a
+      // `strh` member through the captured address and a word the slot model had at the same bytes.
       const widthAt = new Map<number, number>();
       for (const m of members) {
         if (m.at < from || m.at + m.width > to) {
@@ -1099,7 +1098,15 @@ export function auditFrameObjects({
 
     // The SHAPE of each object — `count` elements of `width` bytes, spanning `width * count` —
     // and then that its bytes belong to nothing else.
+    //
+    // AN OBJECT OVER A SLOT IS REFUSED LAST, after the one-object answer below is asked: that
+    // answer routes every word of the local area through `laddr`, so no slot is left for the
+    // object to overlap, and refusing first would decline exactly the frames it exists for — an
+    // object at [sp,#0] whose first member is a word stored `str rN, [sp]`.
     const extent = new Map<number, { width: number; count: number }>();
+    const overSlot: [number, number][] = [];
+    const slotKeys = (off: number, width: number): boolean =>
+      [...usedSlotOffsets].some((slot) => overlaps(off, width, slot, 4));
     for (const [off, acc] of accesses) {
       const byIndex = indexed.get(off) ?? [];
       if (acc.length === 0) {
@@ -1107,7 +1114,10 @@ export function auditFrameObjects({
         // ways it gets there are two different gaps. Its bytes may already be keyed by the slot
         // model, which one byte is enough to decide; otherwise nothing in-function pins it at
         // all, and a guessed declaration is the plausible-but-wrong class.
-        failIfSlotKeysIt(off, 1);
+        if (slotKeys(off, 1)) {
+          overSlot.push([off, 1]);
+          continue;
+        }
         const why = notTheWholeArea(off, byIndex.length > 0);
         if (why !== null) {
           fail(
@@ -1180,14 +1190,16 @@ export function auditFrameObjects({
       extent.set(off, { width: acc[0].width, count: 1 });
     }
     // Each object must own its bytes outright: inside the reserved local area, clear of every SSA
-    // slot, and clear of every other object.
+    // slot (`overSlot`, refused below), and clear of every other object.
     const objs = [...extent].sort((x, y) => x[0] - y[0]);
     const span = (o: { width: number; count: number }) => o.width * o.count;
     for (const [off, obj] of objs) {
       if (off < owned.from || off + span(obj) > owned.to) {
         fail(`the object at [sp,#${off}) of width ${span(obj)} lies outside the reserved local area`);
       }
-      failIfSlotKeysIt(off, span(obj));
+      if (slotKeys(off, span(obj))) {
+        overSlot.push([off, span(obj)]);
+      }
     }
     for (let i = 1; i < objs.length; i++) {
       const [off, obj] = objs[i];
@@ -1378,6 +1390,9 @@ export function auditFrameObjects({
       )
     ) {
       return { oneObject: { from: declared.from, to: declared.to } };
+    }
+    for (const [off, width] of overSlot) {
+      failIfSlotKeysIt(off, width);
     }
     // RULE-MAJOR, not escape-major: every escape is asked a rule before any is asked the next, so
     // the refusal a function reports does not turn on the order its escapes were found in.

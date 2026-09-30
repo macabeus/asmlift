@@ -1007,6 +1007,43 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(src).toContain('p0[1] = a1;');
     });
 
+    // …and the object may start at [sp,#0] with its first member a word the slot model keyed, the
+    // overlap the one object dissolves. Verbatim agbcc: `struct Q { u32 a, b, c; } s; s.a = x;
+    // s.b = y; s.c = z; REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst; REG_DMA3CNT = 0x84000001;
+    // *gCnt = 0x84000003;` — its recompile is instruction-identical, all three member stores kept.
+    test('an object at the frame base over a keyed slot is still one object', () => {
+      const atBase =
+        'u1:\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n' +
+        '\tldr\tr0, .L9\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tldr\tr1, .L9+0x4\n\tldr\tr0, .L9+0x8\n\tstr\tr0, [r1]\n' +
+        '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L9+0xc\n\tstr\tr0, [r1]\n\tldr\tr0, .L9+0x10\n\tldr\tr1, [r0]\n' +
+        '\tldr\tr0, .L9+0x14\n\tstr\tr0, [r1]\n\tadd\tsp, sp, #0xc\n\tbx\tlr\n.L10:\n\t.align\t2, 0\n.L9:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7bffffff\n\t.word\tgCnt\n' +
+        '\t.word\t-0x7bfffffd\n';
+      const src = decompile('u1', atBase, ARMV4T_AGBCC, {
+        prototypes: { u1: { params: 3, returnsVoid: true } },
+      }).source;
+      expect(src).toContain('volatile u8 sp0[12];');
+      expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;');
+      // …and where the read is bounded, the overlap is still refused, by the refusal it always had
+      const bounded = atBase.replace(
+        '\tldr\tr0, .L9+0x10\n\tldr\tr1, [r0]\n\tldr\tr0, .L9+0x14\n\tstr\tr0, [r1]\n',
+        '',
+      );
+      expect(() => decompile('u1', bounded, ARMV4T_AGBCC)).toThrow(
+        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+      );
+    });
+
+    // …but a slot word and a narrower member through the captured address at the same bytes are
+    // two types at one byte, which the one object refuses rather than cast-spell
+    test('a slot word under a halfword member is refused as two widths at one byte', () => {
+      const twoWidths =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr2, sp\n' +
+        '\tstrh\tr0, [r2]\n\tldr\tr3, .L9\n\tstr\tr2, [r3]\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n' +
+        '\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\t0x040000D4\n';
+      expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow('is accessed 4 and 2 bytes wide');
+    });
+
     // Half an address is not the address: `strh` to a source register hands the device something
     // that is not this object, so the narrow answer stays the true one.
     test('a HALFWORD store to a source register is not vouched for', () => {
