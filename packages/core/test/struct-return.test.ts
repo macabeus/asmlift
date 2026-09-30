@@ -184,6 +184,33 @@ describe('a callee declared to return a struct or union by value', () => {
     );
   });
 
+  // `void f(void){ mkw(5); other(); }` and `void g(s32 i){ if (i) mkw(i); other(); }` — r0 past
+  // `mkw` holds the struct, so a guessed arity for `other` must not read what r0 held before it
+  test('a guessed call after one does not take the value its return register held before', () => {
+    const mkw = {
+      params: ['s32'],
+      returns: 'struct W1',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'x', type: 'u32' }] },
+    };
+    const f = 'f:\n\tpush\t{lr}\n\tmov\tr0, #0x5\n\tbl\tmkw\n\tbl\tother\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', f, ARMV4T_AGBCC, { prototypes: { mkw } }).source).toMatch(/mkw\(5\);\s+other\(\);/);
+    const g = 'g:\n\tpush\t{lr}\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tbl\tmkw\n.L3:\n\tbl\tother\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('g', g, ARMV4T_AGBCC, { prototypes: { mkw } }).source).toMatch(/mkw\(a0\);\s+other\(\);/);
+    // mwcc_242_81: `GXColor getcol(s32); void f(s32 i){ getcol(i); other(); }`
+    const getcol = {
+      params: ['s32'],
+      returns: 'GXColor',
+      returnLayout: { kind: 'struct' as const, members: ['r', 'g', 'b', 'a'].map((name) => ({ name, type: 'u8' })) },
+    };
+    const ppc =
+      '00000000 <f>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n' +
+      '   c:\tbl      c <f+0xc>\n\t\t\tc: R_PPC_REL24\tgetcol\n  10:\tbl      10 <f+0x10>\n' +
+      '\t\t\t10: R_PPC_REL24\tother\n  14:\tlwz     r0,20(r1)\n  18:\tmtlr    r0\n  1c:\taddi    r1,r1,16\n  20:\tblr\n';
+    const lifted = decompile('f', ppc, PPC_MWCC, { prototypes: { getcol } }).source;
+    expect(lifted).toContain('getcol(a0);');
+    expect(lifted).toMatch(/other\(\)/);
+  });
+
   test('a PowerPC call to one declines', () => {
     const asm =
       '7c <p4>:\n7c:\tstwu    r1,-16(r1)\n80:\tmflr    r0\n84:\tlis     r3,0\n\t\t\t86: R_PPC_ADDR16_HA\tgDst\n' +
