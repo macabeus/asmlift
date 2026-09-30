@@ -3654,10 +3654,7 @@ function liftOnce(
     localArea,
     argRegs: target.argRegs.length,
     capturedWholeFrame: capturedObjectIsTheWholeFrame,
-    // ACCUMULATE_OUTGOING_ARGS puts the area at the frame bottom with every local above it, and the
-    // caller re-stages each argument before every call (thumb.h:573/600-622/628, calls.c:1675;
-    // compiled in test/corpus/agbcc-restage.s)
-    localsAboveOutgoingArea: target.compilerBehaviors.stagesOutgoingArgsInFrame === true,
+    localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
   });
 
   const slotsOffReason = slotModelBlocker(outgoingArgs);

@@ -171,7 +171,7 @@ function survivorBound<C>(
 // word there could open an argument block, and takes no stack word. Hand-written asm that reads
 // its own outgoing argument back after a call defeats it, and lifts with that argument dropped — a
 // producer assumption of the same kind as CONTIGUITY below, which is why the premise is declared
-// per compiler (`target.ts` `stagesOutgoingArgsInFrame`) and never inferred.
+// per compiler (`target.ts` `localsAboveOutgoingArea`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the

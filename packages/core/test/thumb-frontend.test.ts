@@ -1471,11 +1471,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', survives, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    g(a0);\n    return a0 + 1;\n}\n');
-    // a compiler that does not claim that layout keeps the refusal
+    // a compiler that stages its arguments in its frame but does not claim that layout (mwcc's
+    // parameter-area words may hold a local) keeps the refusal
     const unclaimed = {
       ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, stagesOutgoingArgsInFrame: false },
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, localsAboveOutgoingArea: false },
     };
+    expect(unclaimed.compilerBehaviors.stagesOutgoingArgsInFrame).toBe(true);
     expect(() => decompile('f', survives, unclaimed)).toThrow(/it may be that call's outgoing stack argument/);
   });
 
