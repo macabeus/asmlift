@@ -13,6 +13,9 @@
 @   void dst1(double *p, double a){ *p = -a; }
 @   double dsq(double a){ return a * a; }
 @   void dpass(double a, double b){ use(a + b); }
+@   int d2i(double a, double b){ return (int)(a * b); }
+@   int dgt(double a, double b){ return a + b > 0.0; }
+@   float d2f(double a, double b){ return (float)(a - b); }
 @
 @ `dchain`'s third argument is past the registers: agbcc loads it from the caller's stack words.
 @ `dconst` stages the literal HIGH word first (thumb.h:335 FLOAT_WORDS_BIG_ENDIAN): r2=0x3ff80000.
@@ -197,3 +200,52 @@ dpass:
 	bx	r0
 .Lfe13:
 	.size	 dpass,.Lfe13-dpass
+	.align	2, 0
+	.globl	d2i
+	.type	 d2i,function
+	.thumb_func
+d2i:
+	push	{lr}
+	bl	__muldf3
+	bl	__fixdfsi
+	pop	{r1}
+	bx	r1
+.Lfe14:
+	.size	 d2i,.Lfe14-d2i
+	.align	2, 0
+	.globl	dgt
+	.type	 dgt,function
+	.thumb_func
+dgt:
+	push	{r4, lr}
+	mov	r4, #0x0
+	bl	__adddf3
+	ldr	r3, .L20+0x4		@ created by thumb_load_double_from_address
+	ldr	r2, .L20		@ created by thumb_load_double_from_address
+	bl	__gtdf2
+	cmp	r0, #0
+	ble	.L19	@cond_branch
+	mov	r4, #0x1
+.L19:
+	add	r0, r4, #0
+	pop	{r4}
+	pop	{r1}
+	bx	r1
+.L21:
+	.align	2, 0
+.L20:
+	.long 0x0, 0x0	@ double 0.00000000000000000000e0
+.Lfe15:
+	.size	 dgt,.Lfe15-dgt
+	.align	2, 0
+	.globl	d2f
+	.type	 d2f,function
+	.thumb_func
+d2f:
+	push	{lr}
+	bl	__subdf3
+	bl	__truncdfsf2
+	pop	{r1}
+	bx	r1
+.Lfe16:
+	.size	 d2f,.Lfe16-d2f

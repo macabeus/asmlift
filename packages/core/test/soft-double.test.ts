@@ -74,6 +74,21 @@ describe('what refuses', () => {
   test('an argument passed twice', () => {
     expect(() => lift('dsq')).toThrow(/no model for the runtime helper '__muldf3'/);
   });
+
+  // A double into a compare, a conversion or an ordinary callee is no long long, and the refusal
+  // says so rather than asking for a prototype that states one: with one, the pair is built and the
+  // fold refuses it (`a result passed to an ordinary callee` above).
+  test.each([
+    ['d2i', '__fixdfsi', '__muldf3'],
+    ['dgt', '__gtdf2', '__adddf3'],
+    ['d2f', '__truncdfsf2', '__subdf3'],
+    ['dpass', 'use', '__adddf3'],
+  ])('%s: a double into %s', (name, callee, producer) => {
+    expect(() => lift(name)).toThrow(
+      `argument 1 of the call to '${callee}' is the low half of a 64-bit value, the double '${producer}' returned`,
+    );
+    expect(() => lift(name)).not.toThrow(/long long/);
+  });
 });
 
 // THE FOLD READS EACH VALUE'S WIDTH OFF THE HELPER'S SIGNATURE, so a single-precision row is a

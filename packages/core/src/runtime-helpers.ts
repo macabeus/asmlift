@@ -166,11 +166,16 @@ export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> 
  *  `init_floating_libfuncs` names DFmode's add, sub, mul, div (4129-4140) and neg (4155), and
  *  `thumb.md` has no DF pattern but the move, so every one of them is a call; the ABI is a long
  *  long's (thumb.h:632, 655). `raise/widehelpers.ts` folds them to the float ops over a `double`.
- *  The single-precision helpers, and the compares (`__gtdf2`…) and conversions (`__floatsidf`…)
- *  of both, stay out: the IR has no int<->float op to fold a compare or a conversion into, and
- *  naming one would decline every function that uses it where today it publishes a pass-through
- *  (`__addsf3()`). That is a trade to make with a measurement of the float rows, not on the way
- *  past. */
+ *
+ *  NAMING THEM IS A TRADE, and these five make it: a call the fold refuses declines where an
+ *  unnamed helper would publish as a pass-through that matches for free. So a function whose
+ *  double arithmetic feeds a compare (`__gtdf2`…), a conversion (`__fixdfsi`…) or any other call
+ *  declines, where unnamed it printed `__muldf3(); return __fixdfsi();`. The compares and
+ *  conversions of both precisions stay out, because the IR has no int<->float op to fold one into;
+ *  the single-precision arithmetic stays out because its pass-throughs are what the float rows
+ *  score on (`synthetic:fadd:agbcc`), and declining them is the same trade, to be made with a
+ *  measurement of those rows. Making it is a table row: the fold reads each value's width off the
+ *  signature. */
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
