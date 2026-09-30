@@ -6,7 +6,14 @@
 // Crucially, rewrites go through replaceAllUsesWith + DCE — never in-place opcode
 // mutation of a live value.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { EFFECTFUL_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, type Opcode, isDceSafe } from '../ir/opcodes';
+import {
+  EFFECTFUL_OPS,
+  NEGATED_ICMP,
+  ORDER_SENSITIVE_OPS,
+  type Opcode,
+  isDceSafe,
+  isPinnedAccess,
+} from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
@@ -794,7 +801,8 @@ export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget)
 }
 
 /** Remove effect-free ops whose single result is unused, to a fixed point. Deletability is
- *  derived from the ONE effect table in ir/opcodes.ts. */
+ *  derived from the ONE effect table in ir/opcodes.ts, bar a read the lift pinned `volatile`: the
+ *  machine made it, so the recompile has to (`isPinnedAccess`). */
 export function dce(fn: Fn): void {
   let changed = true;
   while (changed) {
@@ -813,7 +821,9 @@ export function dce(fn: Fn): void {
       }
     }
     for (const b of fn.blocks) {
-      const kept = b.ops.filter((op) => !(isDceSafe(op.opcode) && op.results.length === 1 && !used.has(op.results[0])));
+      const kept = b.ops.filter(
+        (op) => !(isDceSafe(op.opcode) && !isPinnedAccess(op) && op.results.length === 1 && !used.has(op.results[0])),
+      );
       if (kept.length !== b.ops.length) {
         b.ops = kept;
         changed = true;

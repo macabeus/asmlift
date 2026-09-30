@@ -10,7 +10,7 @@
 //     "does this function hold a value the variation would home at all" so rank.ts can skip a
 //     variation whose candidate would only duplicate the default. Each mirrors its variation's scope inside `analyze`
 //     and states where it DIVERGES from it, in which direction, and what that costs.
-import { disjointConstSlots, globalBaseOf, globalCellOf, mayWriteGlobal } from '../ir/alias';
+import { constAddressOf, disjointConstSlots, globalBaseOf, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
   Block,
   Fn,
@@ -23,7 +23,14 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS, opSig } from '../ir/opcodes';
+import {
+  EFFECTFUL_OPS,
+  MEM_BASE_OPS,
+  ORDER_SENSITIVE_OPS,
+  REEVAL_UNSAFE_OPS,
+  isPinnedAccess,
+  opSig,
+} from '../ir/opcodes';
 import { raisedHelper } from '../runtime-helpers';
 
 export interface UseSite {
@@ -740,8 +747,9 @@ export interface StructureAnalysis {
   /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
    *  def-avoiding path — the fold-ordering gate (see `makeMemWriteBetween`) */
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
-  /** the name of a VOLATILE object read inside a `&&`/`||`'s guarded operand cone, if any — a value
-   *  in that cone no placement here can answer for, reported for the caller to decline on */
+  /** the name (or, for a device read the lift pinned, the address) of a VOLATILE object read inside
+   *  a `&&`/`||`'s guarded operand cone, if any — a value in that cone no placement here can answer
+   *  for, reported for the caller to decline on */
   volatileGuardedRead: string | null;
 }
 
@@ -1784,15 +1792,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  walked arithmetic where the map carries no array shape. Where the offset IS pinned the question
    *  is asked of that byte, so a plain member beside a `vu16` one keeps its connective. A base that
    *  reaches no name — a pointer parameter, a raw MMIO address — is unknown and does not refuse, the
-   *  posture no map at all has. */
+   *  posture no map at all has, unless the lift marked the read `volatile` (a device register the
+   *  frame audit pinned), which is the same observable access with no name to report but its address. */
   const volatileGuardedRead = ((): string | null => {
-    if (!defs || !volatileGlobal) {
-      return null;
-    }
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         const v = op.results[0];
         if ((op.opcode !== 'load' && op.opcode !== 'aload') || v === undefined || !shortCircuitGuarded.has(v)) {
+          continue;
+        }
+        if (isPinnedAccess(op)) {
+          const at = defs ? constAddressOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0) : null;
+          return at === null || op.opcode === 'aload' ? 'a device register' : `0x${at.toString(16)}`;
+        }
+        if (!defs || !volatileGlobal) {
           continue;
         }
         const base = globalBaseOf(defs, op.operands[0]);
@@ -2063,8 +2076,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const sites = useSitesOf.get(r)!;
         const consumers = [...new Set(sites.map((s) => s.op))];
         const isCall = op.opcode === 'call';
+        // A device read the lift marked `volatile` executes once too: each spelling of it is a read
+        // the recompile makes, where a plain duplicate is one agbcc CSEs away. It takes the call's
+        // rules below, bar the short-circuit one, which `volatileGuardedRead` declines instead.
+        const once = isCall || isPinnedAccess(op);
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
-        if (isCall && sites.length > 1) {
+        if (once && sites.length > 1) {
           materialize.add(op);
           continue;
         }
@@ -2081,7 +2098,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // do-while's exit edge renders the call after the loop, once, where the body ran it every
         // iteration; riding the back edge of a loop that also exits elsewhere it renders in an arm;
         // riding two edge args it renders twice.
-        if (isCall && (branchArgFed.has(r) || ridesEdge(op))) {
+        if (once && (branchArgFed.has(r) || ridesEdge(op))) {
           materialize.add(op);
           continue;
         }
@@ -2162,9 +2179,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // resolves the whole SET instead — the second half of the value-home defect, where the
         // local is invented not by a barrier but because the pure expression downstream is itself
         // duplicated (`gOut = (gValue << 1) + gValue; return (gValue << 1) + gValue;`). Never for a
-        // call: several positions there mean several executions.
+        // call or a marked read: several positions there mean several executions.
         const poss =
-          rereadGlobals && !isCall
+          rereadGlobals && !once
             ? emitPositions(op)
             : consumers.length > 1
               ? consumers.map((c) => emitPos(c))

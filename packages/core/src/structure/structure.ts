@@ -44,7 +44,7 @@
 // into the `default:` — refuse in `chainArms`, which answers null.
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
-import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, opSig } from '../ir/opcodes';
+import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, isPinnedAccess, opSig } from '../ir/opcodes';
 import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
 import {
   BinOp,
@@ -3722,6 +3722,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return { k: 'var', name: '?' };
   };
 
+  // A memory access the lift marked `volatile` is one the recompile must make where the machine
+  // did (frontend/frame-objects.ts), so its spelling carries the qualifier or the function declines:
+  // a plain spelling is one agbcc may delete or hoist.
+  const pinnedAccess = (op: Op, access: Expr): Expr => {
+    if (!isPinnedAccess(op)) {
+      return access;
+    }
+    const q = qualifiedMemoryAccess(access, ctype);
+    if (q === null) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a device ${op.opcode} the lift keeps volatile is reached through a ` +
+          'pointer with no type to put the qualifier on',
+      );
+    }
+    return q;
+  };
+
   // Lower ONE def's operation to an Expr, rendering operands through `e`. Shared between the
   // inline-at-use path (exprWith) and the materialized-temp path (sideEffects), so both spell a
   // given op identically.
@@ -4263,9 +4280,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         false,
         advanceStepOf(d.operands[0]),
       );
-      // A load the lift marked `volatile` is one the recompile must make where the machine did
-      // (frontend/frame-objects.ts).
-      return d.attrs.volatile === true ? qualifiedMemoryAccess(access) : access;
+      return pinnedAccess(d, access);
     }
     // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
     // `base[index].field_K` when it carries a `fieldOff` (array-of-STRUCT element access).
@@ -4281,7 +4296,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ctype,
         symCtx,
       );
-      return d.attrs.volatile === true ? qualifiedMemoryAccess(access) : access;
+      return pinnedAccess(d, access);
     }
     return d.opcode === 'opaque'
       ? mkGap(gapReasonFor(d.attrs), d.operands.map(e))
@@ -4738,6 +4753,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  function spells no read at all — its wait-read is cast-spelled (see `BASECSE_GATES`'
    *  `repeated-const-offset`, whose base local this refusal hands back). */
   const volatileQualifiable = (op: Op): boolean => {
+    // A read the lift pinned is spelled through the qualifier whatever its address arm would say.
+    if (isPinnedAccess(op)) {
+      return true;
+    }
     if (op.opcode !== 'load') {
       return false;
     }
@@ -4916,9 +4935,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           continue;
         }
         // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
-        // inserted cast declares the same scalar the recovered pointee would have. A store the lift
-        // marked `volatile` is one the recompile must make (frontend/frame-objects.ts).
-        const lval = op.attrs.volatile === true ? qualifiedMemoryAccess(lval0) : lval0;
+        // inserted cast declares the same scalar the recovered pointee would have.
+        const lval = pinnedAccess(op, lval0);
         out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
@@ -4937,7 +4955,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         );
         out.push({
           k: 'store',
-          lval: op.attrs.volatile === true ? qualifiedMemoryAccess(lval) : lval,
+          lval: pinnedAccess(op, lval),
           value: expr(op.operands[2]),
         });
       } else if (rendersAtOwnPosition(op)) {

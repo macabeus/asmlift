@@ -93,7 +93,7 @@
 // inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import { cellAddress, inRange } from './address';
-import { type Expr, type SFn, type Stmt, stmtChildren } from './ast';
+import { type Expr, type SFn, type Stmt, dotBase, stmtChildren } from './ast';
 import { type Gate, firstRejection } from './gates';
 
 /** One STORE lvalue as the gates read it. */
@@ -188,25 +188,47 @@ export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Ex
 }
 
 /** A memory access the lift marked `volatile` (frontend/frame-objects.ts), spelled through a
- *  `volatile` pointee: an indexed access by {@link qualifiedAccess}, and a recovered struct
- *  member through its struct pointer cast — `((volatile struct S *)0x40000B0)[ch].field_0`, the
- *  dot form, or `((volatile struct S *)p)->field_0`. Any other spelling is returned unchanged:
- *  it carries no pointer the qualifier could sit on. */
-export function qualifiedMemoryAccess(e: Expr): Expr {
+ *  `volatile` pointee: an indexed access by {@link qualifiedAccess}; a recovered struct member
+ *  through the struct pointer it is reached by — `((volatile struct S *)0x40000B0)[ch].field_0`,
+ *  `((volatile struct S *)p)->field_0` — whether that pointer is already a cast or a variable
+ *  `typeOf` types as one; and a union view through the member it views. A named global — `gSym`,
+ *  `gSym.field` — is returned unchanged, since its declaration owns its qualifiers. Null when the
+ *  pointer the access is reached by has no type to cast it to, for the caller to refuse rather
+ *  than drop the qualifier. */
+export function qualifiedMemoryAccess(e: Expr, typeOf: (x: Expr) => IrType | undefined): Expr | null {
   if (e.k === 'index') {
     return qualifiedAccess(e);
   }
   if (e.k !== 'field') {
     return e;
   }
-  const ptrCast = (x: Expr): x is Extract<Expr, { k: 'cast' }> => x.k === 'cast' && x.to.kind === 'ptr';
-  if (e.base.k === 'index' && ptrCast(e.base.base)) {
-    return qualifiedBase(e.base.base) ? e : { ...e, base: { ...e.base, base: { ...e.base.base, volatile: true } } };
+  const element = dotBase(e);
+  if (element !== undefined) {
+    const base = qualifiedPointer(element.base, typeOf);
+    return base === null ? null : { ...e, base: { ...element, base } };
   }
-  if (ptrCast(e.base)) {
-    return qualifiedBase(e.base) ? e : { ...e, base: { ...e.base, volatile: true } };
+  if (e.dot === true) {
+    if (e.base.k !== 'field') {
+      return e;
+    }
+    const member = qualifiedMemoryAccess(e.base, typeOf);
+    return member === null ? null : { ...e, base: member };
   }
-  return e;
+  const base = qualifiedPointer(e.base, typeOf);
+  return base === null ? null : { ...e, base };
+}
+
+/** A pointer expression carrying `volatile` on its pointee: a pointer cast takes it in place, and
+ *  any other pointer is cast to its own type with it. */
+function qualifiedPointer(p: Expr, typeOf: (x: Expr) => IrType | undefined): Expr | null {
+  if (qualifiedBase(p)) {
+    return p;
+  }
+  if (p.k === 'cast' && p.to.kind === 'ptr') {
+    return { ...p, volatile: true };
+  }
+  const t = typeOf(p);
+  return t?.kind === 'ptr' ? { k: 'cast', to: t, volatile: true, e: p } : null;
 }
 
 /** How many stores this tree would qualify — the enumeration gate, so a function with no device

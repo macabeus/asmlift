@@ -2919,7 +2919,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // count leaves the first read unbounded over the second fill's temporary. Spelled plain, agbcc
   // deletes the 32-bit fill's three channel stores, overwritten by the third fill's with only a
   // `u16` member store between (compiled: 12 stores in this target, 9 in the plain lift's
-  // recompile, 12 in this one's).
+  // recompile, 12 in this one's). Each fill's `dmaRegs[2];` read of the control is kept too.
   test('a function kept as one object keeps every device store volatile', () => {
     const threeFills =
       'p3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr5, sp\n\tmov\tr4, #0x0\n' +
@@ -2934,7 +2934,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const src = decompile('p3', threeFills, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u8 sp0[8];');
     expect(src).not.toMatch(/\(s32 \*\)67109/);
-    expect(src.match(/\(volatile s32 \*\)67109076/g)).toHaveLength(9);
+    expect(src.match(/\(volatile s32 \*\)67109076\S* = /g)).toHaveLength(9);
+    expect(src.match(/^ +\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(3);
   });
 
   // …and every device access, however the lift names the register. Verbatim agbcc, `vu32 *d =
@@ -2995,6 +2996,77 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const src = decompile('q5', poll, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u8 sp0[8];');
     expect(src).toContain('while (*(volatile u16 *)67108870 != 160);');
+  });
+
+  // …and through a variable the struct recovery typed as the device's struct pointer: a channel
+  // chosen by a branch, `d = c ? (struct Snd *)0x4000060 : (struct Snd *)0x4000068`, spelled
+  // `v1->field_0`, carries the qualifier on a cast of that variable (compiled: plain, agbcc hoists
+  // the `ldrh` out of `while (d->lo != 0);` and the recompile never exits the loop).
+  test('a device access through a struct-typed pointer variable is volatile', () => {
+    const phiPoll =
+      'f3:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x1\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr6, .L9\n\tstr\tr3, [r6]\n\tldr\tr5, .L9+0x4\n\tstr\tr0, [r5]\n' +
+      '\tldr\tr4, .L9+0x8\n\tldr\tr2, .L9+0xc\n\tldr\tr3, [r2]\n\tstr\tr3, [r4]\n' +
+      '\tmov\tr2, #0x2\n\tstr\tr2, [sp, #0x4]\n\tadd\tr2, sp, #0x4\n\tstr\tr2, [r6]\n' +
+      '\tstr\tr0, [r5]\n\tstr\tr3, [r4]\n\tldr\tr2, .L9+0x10\n\tcmp\tr1, #0\n\tbeq\t.L3\n' +
+      '\tsub\tr2, r2, #0x8\n.L3:\n\tmov\tr0, #0x5\n\tstr\tr0, [r2, #0x4]\n.L5:\n' +
+      '\tldrh\tr0, [r2]\n\tcmp\tr0, #0\n\tbne\t.L5\n\tldr\tr0, [r2, #0x4]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n.L10:\n\t.align\t2, 0\n' +
+      '.L9:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\tgCnt\n' +
+      '\t.word\t0x4000068\n';
+    const src = decompile('f3', phiPoll, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('((volatile struct Struct1 *)v1)->field_4 = 5;');
+    expect(src).toContain('} while (((volatile struct Struct1 *)v1)->field_0 != 0);');
+    expect(src).toContain('return ((volatile struct Struct1 *)v1)->field_4;');
+  });
+
+  // A marked read executes once, as a call does: `v = REG_VCOUNT; return v * v;` is one `ldrh`,
+  // and inlined at both operands the qualifier makes it two (compiled: 2 `ldrh`, x*y for x*x).
+  test('a volatile device read with two uses is read once', () => {
+    const square =
+      'sv1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr5, .L3\n\tstr\tr3, [r5]\n\tldr\tr4, .L3+0x4\n' +
+      '\tldr\tr3, .L3+0x8\n\tstr\tr3, [r4]\n\tldr\tr2, .L3+0xc\n\tstr\tr0, [r2]\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r5]\n' +
+      '\tstr\tr3, [r4]\n\tstr\tr1, [r2]\n\tldr\tr0, .L3+0x10\n\tldrh\tr0, [r0]\n\tmov\tr1, r0\n' +
+      '\tmul\tr1, r1, r0\n\tadd\tr0, r1, #0\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n' +
+      '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n\t.word\t0x4000006\n';
+    const src = decompile('sv1', square, ARMV4T_AGBCC).source;
+    expect(src).toContain('    v0 = *(volatile u16 *)67108870;\n    return v0 * v0;\n');
+  });
+
+  // …and it stays in the arm it was read in: `if (k && (v = REG_VCOUNT) > 5) h(v);` is not folded
+  // into a `&&`, which would re-guard a read whose place the fold does not record.
+  test('a volatile device read a branch guards stays in its arm', () => {
+    const guarded =
+      'sc1:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tldr\tr6, .L4\n\tstr\tr4, [r6]\n\tldr\tr5, .L4+0x4\n' +
+      '\tldr\tr4, .L4+0x8\n\tstr\tr4, [r5]\n\tldr\tr3, .L4+0xc\n\tstr\tr0, [r3]\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r6]\n' +
+      '\tstr\tr4, [r5]\n\tstr\tr1, [r3]\n\tcmp\tr2, #0\n\tbeq\t.L3\n\tldr\tr0, .L4+0x10\n' +
+      '\tldrh\tr0, [r0]\n\tcmp\tr0, #0x5\n\tbls\t.L3\n\tbl\th\n.L3:\n\tadd\tsp, sp, #0x8\n' +
+      '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L5:\n\t.align\t2, 0\n.L4:\n' +
+      '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x4000006\n';
+    const src = decompile('sc1', guarded, ARMV4T_AGBCC).source;
+    expect(src).toContain('    if (a2 != 0) {\n        v0 = *(volatile u16 *)67108870;\n        if (v0 > 5) h(v0');
+  });
+
+  // A marked read nothing consumes is still one the machine made: `REG_IF;` stays a statement.
+  test('a dead volatile device read is spelled', () => {
+    const ack =
+      'd1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr5, .L3\n\tstr\tr3, [r5]\n\tldr\tr4, .L3+0x4\n' +
+      '\tldr\tr3, .L3+0x8\n\tstr\tr3, [r4]\n\tldr\tr2, .L3+0xc\n\tstr\tr0, [r2]\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r5]\n' +
+      '\tstr\tr3, [r4]\n\tstr\tr1, [r2]\n\tldr\tr0, .L3+0x10\n\tldrh\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n' +
+      '.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x4000202\n';
+    const src = decompile('d1', ack, ARMV4T_AGBCC).source;
+    expect(src).toContain('    *(volatile u16 *)67109378;\n}');
   });
 
   // KNOWN GAP: a function accepted object by object keeps them plain. Verbatim agbcc,

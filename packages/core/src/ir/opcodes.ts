@@ -3,6 +3,7 @@
 // A closed table of signatures. The verifier and the parser are driven by it, so a mnemonic
 // typo or an operand-count mismatch fails at its source instead of surfacing as wrong output
 // several stages later.
+import type { Op } from './core';
 
 export interface OpSig {
   /** exact operand count, or "variadic" (e.g. ret takes 0 or 1). */
@@ -359,6 +360,13 @@ export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
  *  is here and not next to either: `structure/analysis.ts` uses it for the address-home variation's slot
  *  model, and `raise/const.ts` to recognise a folded literal that IS an address. */
 export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aload', 'astore']);
+
+/** A memory access the lift marked `volatile` — a device register access the recompile must make
+ *  exactly where, and exactly as often as, the machine did (frontend/frame-objects.ts). The one
+ *  predicate every reader of the mark asks: the structurer's spelling of it, its execute-once
+ *  placement (structure/analysis.ts, which gives a marked read the treatment a call gets), and the
+ *  dead read it must still spell (structure.ts `volatileQualifiable`). */
+export const isPinnedAccess = (op: Op): boolean => MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true;
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
  *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
