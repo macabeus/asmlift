@@ -1408,16 +1408,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tbl\tg\n\tldr\tr4, [sp, #0x4]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', spill4, ARMV4T_AGBCC).source).toContain('g(');
-    // …but store [sp,#0] anywhere on a path to that call and the same shape refuses: the pending
-    // higher slot now has its argument-block prefix, and the pair could be arguments 5 and 6
+    // …but store [sp,#0] anywhere on a path to that call and the shape refuses on [sp,#0]: the
+    // reload proves [sp,#4] a local, and [sp,#0] beneath it could still be argument 5
     const withBase =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr0, [sp, #0x4]\n\tbl\tg\n' +
       '\tldr\tr4, [sp, #0x4]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', withBase, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', withBase, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\] is never reloaded/);
     // …and a pending [sp,#0] alone always refuses — the prefix condition is vacuous at zero
     const base0 =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
-      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', base0, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
@@ -1442,13 +1442,14 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // The fallback for a caller with no prototypes at all. It is calibration, not proof, so it is
     // deliberately conservative: a store reaching a call unread refuses whether or not a label
     // happens to sit in between. Making the scan block-local instead admitted the cross-block case,
-    // where the accept/refuse boundary was a LABEL rather than anything semantic.
+    // where the accept/refuse boundary was a LABEL rather than anything semantic. The reload comes
+    // after a RE-STORE, so the word read back is not the one that reached the call.
     const sameBlock =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     const crossBlock =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n.L2:\n\tbl\tg\n' +
-      '\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      '\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', sameBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
     expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
     // …and a store never read back at all is the plainest signature of an argument
@@ -1463,15 +1464,261 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', readFirst, ARMV4T_AGBCC).source).toContain('g(');
   });
 
+  test('a slot read back AFTER the call held a value across it, so it is a local and no argument', () => {
+    // agbcc's outgoing area is the callee's across a call — the caller re-stages an argument before
+    // every call and never reads one back — and it sits below every local (thumb.h:573/600-622/628).
+    const survives =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', survives, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    g(a0);\n    return a0 + 1;\n}\n');
+    // a compiler that stages its arguments in its frame but does not claim that layout (mwcc's
+    // parameter-area words may hold a local) keeps the refusal
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, localsAboveOutgoingArea: false },
+    };
+    expect(unclaimed.compilerBehaviors.stagesOutgoingArgsInFrame).toBe(true);
+    expect(() => decompile('f', survives, unclaimed)).toThrow(/it may be that call's outgoing stack argument/);
+  });
+
+  test('spill10, compiled: six spills around `callee(i)` are locals, and every one of them lifts', () => {
+    // `synthetic:spill10:agbcc`'s own source, agbcc 2.9-arm-000512 at the row's flags. [sp,#0]..
+    // [sp,#0x14] are stored before or inside the loop and reloaded after `bl callee`.
+    const spill10 = [
+      'spill10:',
+      '\tpush\t{r4, r5, r6, r7, lr}',
+      '\tmov\tr7, sl',
+      '\tmov\tr6, r9',
+      '\tmov\tr5, r8',
+      '\tpush\t{r5, r6, r7}',
+      '\tadd\tsp, sp, #-0x18',
+      '\tmov\tsl, r0',
+      '\tmov\tr0, #0x0',
+      '\tstr\tr0, [sp, #0x8]',
+      '\tldr\tr3, [r1]',
+      '\tldr\tr0, [r1, #0x4]',
+      '\tmov\tip, r0',
+      '\tldr\tr0, [r1, #0x8]',
+      '\tmov\tr9, r0',
+      '\tldr\tr0, [r1, #0xc]',
+      '\tstr\tr0, [sp]',
+      '\tldr\tr0, [r1, #0x10]',
+      '\tstr\tr0, [sp, #0x4]',
+      '\tldr\tr0, [r1, #0x14]',
+      '\tmov\tr8, r0',
+      '\tldr\tr7, [r1, #0x18]',
+      '\tldr\tr6, [r1, #0x1c]',
+      '\tldr\tr4, [r1, #0x20]',
+      '\tldr\tr2, [r1, #0x24]',
+      '\tmov\tr5, #0x0',
+      '\tldr\tr1, [sp, #0x8]',
+      '\tcmp\tr1, sl',
+      '\tbge\t.L4\t@cond_branch',
+      '\tlsl\tr0, r3, #0x1',
+      '\tadd\tr0, r0, r3',
+      '\tstr\tr0, [sp, #0xc]',
+      '\tmov\tr3, ip',
+      '\tlsl\tr0, r3, #0x2',
+      '\tadd\tr0, r0, ip',
+      '\tstr\tr0, [sp, #0x10]',
+      '.L6:',
+      '\tadd\tr0, r5, #0',
+      '\tstr\tr2, [sp, #0x14]',
+      '\tbl\tcallee',
+      '\tldr\tr1, [sp, #0xc]',
+      '\tadd\tr0, r0, r1',
+      '\tldr\tr3, [sp, #0x10]',
+      '\tadd\tr0, r0, r3',
+      '\tmov\tr3, r9',
+      '\tlsl\tr1, r3, #0x3',
+      '\tsub\tr1, r1, r3',
+      '\tadd\tr0, r0, r1',
+      '\tmov\tr1, #0xb',
+      '\tldr\tr3, [sp]',
+      '\tmul\tr1, r1, r3',
+      '\tadd\tr0, r0, r1',
+      '\tmov\tr1, #0xd',
+      '\tldr\tr3, [sp, #0x4]',
+      '\tmul\tr1, r1, r3',
+      '\tadd\tr0, r0, r1',
+      '\tmov\tr3, r8',
+      '\tlsl\tr1, r3, #0x4',
+      '\tadd\tr1, r1, r8',
+      '\tadd\tr0, r0, r1',
+      '\tlsl\tr1, r7, #0x2',
+      '\tadd\tr1, r1, r7',
+      '\tlsl\tr1, r1, #0x2',
+      '\tsub\tr1, r1, r7',
+      '\tadd\tr0, r0, r1',
+      '\tlsl\tr1, r6, #0x1',
+      '\tadd\tr1, r1, r6',
+      '\tlsl\tr1, r1, #0x3',
+      '\tsub\tr1, r1, r6',
+      '\tadd\tr0, r0, r1',
+      '\tlsl\tr1, r4, #0x3',
+      '\tsub\tr1, r1, r4',
+      '\tlsl\tr1, r1, #0x2',
+      '\tadd\tr1, r1, r4',
+      '\tadd\tr0, r0, r1',
+      '\tldr\tr2, [sp, #0x14]',
+      '\tlsl\tr1, r2, #0x5',
+      '\tsub\tr1, r1, r2',
+      '\tadd\tr0, r0, r1',
+      '\tldr\tr1, [sp, #0x8]',
+      '\tadd\tr1, r1, r0',
+      '\tstr\tr1, [sp, #0x8]',
+      '\tadd\tr5, r5, #0x1',
+      '\tcmp\tr5, sl',
+      '\tblt\t.L6\t@cond_branch',
+      '.L4:',
+      '\tldr\tr0, [sp, #0x8]',
+      '\tadd\tsp, sp, #0x18',
+      '\tpop\t{r3, r4, r5}',
+      '\tmov\tr8, r3',
+      '\tmov\tr9, r4',
+      '\tmov\tsl, r5',
+      '\tpop\t{r4, r5, r6, r7}',
+      '\tpop\t{r1}',
+      '\tbx\tr1',
+    ].join('\n');
+    const src = decompile('spill10', `${spill10}\n`, ARMV4T_AGBCC, { prototypes: { callee: { params: 1 } } }).source;
+    expect(src).toContain('callee(');
+    for (let k = 1; k <= 9; k++) {
+      expect(src).toContain(`a1[${k}]`);
+    }
+  });
+
+  test('a spill that outlives a LICENSED call is not a word that call takes', () => {
+    // agbcc's own output for `int mixed(int k, int *p)`: `s += five(i, 1, 2, 3, v0) + one(i) + …`
+    // over ten live values. Argument 5 is staged at [sp,#0] before every `bl five`; the spills sit
+    // above it at [sp,#4]..[sp,#0x20], several reaching the call unread and reloaded after it.
+    const mixed = [
+      'mixed:',
+      '\tpush\t{r4, r5, r6, r7, lr}',
+      '\tmov\tr7, sl',
+      '\tmov\tr6, r9',
+      '\tmov\tr5, r8',
+      '\tpush\t{r5, r6, r7}',
+      '\tadd\tsp, sp, #-0x24',
+      '\tstr\tr0, [sp, #0x4]',
+      '\tmov\tr0, #0x0',
+      '\tstr\tr0, [sp, #0x18]',
+      '\tldr\tr0, [r1]',
+      '\tstr\tr0, [sp, #0x8]',
+      '\tldr\tr2, [r1, #0x4]',
+      '\tldr\tr0, [r1, #0x8]',
+      '\tstr\tr0, [sp, #0xc]',
+      '\tldr\tr0, [r1, #0xc]',
+      '\tstr\tr0, [sp, #0x10]',
+      '\tldr\tr0, [r1, #0x10]',
+      '\tstr\tr0, [sp, #0x14]',
+      '\tldr\tr0, [r1, #0x14]',
+      '\tmov\tsl, r0',
+      '\tldr\tr0, [r1, #0x18]',
+      '\tmov\tr8, r0',
+      '\tldr\tr7, [r1, #0x1c]',
+      '\tldr\tr6, [r1, #0x20]',
+      '\tldr\tr1, [r1, #0x24]',
+      '\tmov\tr9, r1',
+      '\tmov\tr5, #0x0',
+      '\tldr\tr1, [sp, #0x18]',
+      '\tldr\tr0, [sp, #0x4]',
+      '\tcmp\tr1, r0',
+      '\tbge\t.L4\t@cond_branch',
+      '\tldr\tr1, [sp, #0x8]',
+      '\tlsl\tr0, r1, #0x1',
+      '\tadd\tr0, r0, r1',
+      '\tstr\tr0, [sp, #0x1c]',
+      '\tlsl\tr0, r2, #0x2',
+      '\tadd\tr0, r0, r2',
+      '\tstr\tr0, [sp, #0x20]',
+      '.L6:',
+      '\tldr\tr0, [sp, #0x8]',
+      '\tstr\tr0, [sp]',
+      '\tadd\tr0, r5, #0',
+      '\tmov\tr1, #0x1',
+      '\tmov\tr2, #0x2',
+      '\tmov\tr3, #0x3',
+      '\tbl\tfive',
+      '\tadd\tr4, r0, #0',
+      '\tadd\tr0, r5, #0',
+      '\tbl\tone',
+      '\tadd\tr4, r4, r0',
+      '\tldr\tr1, [sp, #0x1c]',
+      '\tadd\tr4, r4, r1',
+      '\tldr\tr0, [sp, #0x20]',
+      '\tadd\tr4, r4, r0',
+      '\tldr\tr1, [sp, #0xc]',
+      '\tlsl\tr0, r1, #0x3',
+      '\tsub\tr0, r0, r1',
+      '\tadd\tr4, r4, r0',
+      '\tmov\tr0, #0xb',
+      '\tldr\tr1, [sp, #0x10]',
+      '\tmul\tr0, r0, r1',
+      '\tadd\tr4, r4, r0',
+      '\tmov\tr0, #0xd',
+      '\tldr\tr1, [sp, #0x14]',
+      '\tmul\tr0, r0, r1',
+      '\tadd\tr4, r4, r0',
+      '\tmov\tr1, sl',
+      '\tlsl\tr0, r1, #0x4',
+      '\tadd\tr0, r0, sl',
+      '\tadd\tr4, r4, r0',
+      '\tmov\tr1, r8',
+      '\tlsl\tr0, r1, #0x2',
+      '\tadd\tr0, r0, r8',
+      '\tlsl\tr0, r0, #0x2',
+      '\tsub\tr0, r0, r1',
+      '\tadd\tr4, r4, r0',
+      '\tlsl\tr0, r7, #0x1',
+      '\tadd\tr0, r0, r7',
+      '\tlsl\tr0, r0, #0x3',
+      '\tsub\tr0, r0, r7',
+      '\tadd\tr4, r4, r0',
+      '\tlsl\tr0, r6, #0x3',
+      '\tsub\tr0, r0, r6',
+      '\tlsl\tr0, r0, #0x2',
+      '\tadd\tr0, r0, r6',
+      '\tadd\tr4, r4, r0',
+      '\tmov\tr1, r9',
+      '\tlsl\tr0, r1, #0x5',
+      '\tsub\tr0, r0, r1',
+      '\tadd\tr4, r4, r0',
+      '\tldr\tr0, [sp, #0x18]',
+      '\tadd\tr0, r0, r4',
+      '\tstr\tr0, [sp, #0x18]',
+      '\tadd\tr5, r5, #0x1',
+      '\tldr\tr1, [sp, #0x4]',
+      '\tcmp\tr5, r1',
+      '\tblt\t.L6\t@cond_branch',
+      '.L4:',
+      '\tldr\tr0, [sp, #0x18]',
+      '\tadd\tsp, sp, #0x24',
+      '\tpop\t{r3, r4, r5}',
+      '\tmov\tr8, r3',
+      '\tmov\tr9, r4',
+      '\tmov\tsl, r5',
+      '\tpop\t{r4, r5, r6, r7}',
+      '\tpop\t{r1}',
+      '\tbx\tr1',
+    ].join('\n');
+    const prototypes = { five: { params: 5 }, one: { params: 1 } };
+    const src = decompile('mixed', `${mixed}\n`, ARMV4T_AGBCC, { prototypes }).source;
+    expect(src).toMatch(/five\(v\d+, 1, 2, 3, v0\)/);
+    // a declaration that claims the survivor at [sp,#4] as argument 6 contradicts it, and refuses
+    expect(() =>
+      decompile('mixed', `${mixed}\n`, ARMV4T_AGBCC, { prototypes: { ...prototypes, five: { params: 6 } } }),
+    ).toThrow(/stack pointer used as data/);
+  });
+
   test('a tail-merged call site sets its stack argument up in BOTH predecessors', () => {
     // agbcc really does hoist argument setup out of the calling block: sa3's Task_BonusFlower_Spawn
     // tail-merges two call sites, so argument 5 is stored in both predecessors with the `bl` in the
-    // join. A per-block scan does not see that at all — and with a post-call reload of the same
-    // offset to satisfy the never-read test, the store became a dead local and the argument was
-    // dropped from the call. The scan runs over the whole listing for this reason.
+    // join. A per-block scan does not see that at all, and the store became a dead local with the
+    // argument dropped from the call. The scan runs over the whole listing for this reason.
     const tailMerged =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n\tb\t.L3\n' +
-      '.L2:\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n.L3:\n\tbl\tg\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n' +
+      '.L2:\n\tldr\tr2, .LP\n\tstr\tr2, [sp]\n.L3:\n\tbl\tg\n' +
       '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r2}\n\tbx\tr2\n.LP:\n\t.word\t0x08051F54\n';
     expect(() => decompile('f', tailMerged, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
@@ -1568,7 +1815,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       /address-taken stack local — a runtime index into the object at \[sp,#0\) accesses 4 bytes/,
     );
     const outgoing =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/outgoing stack argument/);
     const arity =
@@ -2635,13 +2882,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // an acceptance does not.
     //
     // WHICH GATE, measured both ways, because the message is easy to read as an attribution and it
-    // is not one. Today it lands on the contiguity filter, whose wording offers "it may be that
-    // call's outgoing stack argument". What rules that out here is NOT that `mov r0, sp` is live
-    // in r0 at the `bl` — the `g3` fixture above is a compiled frame where exactly that co-exists
-    // with a genuine outgoing argument at [sp,#0], because the copy is a block-copy base. It is
-    // that all four stores are RELOADED after the call: an outgoing argument is read by the callee
-    // and never by the caller, which is the filter's own condition (a) and the one it is not
-    // applying. Widen `capturedObjectIsTheWholeFrame` to `localArea >= 4` and this same fixture
+    // is not one. The outgoing-argument analysis passes it, and not because `mov r0, sp` is live in
+    // r0 at the `bl` — the `g3` fixture above is a compiled frame where exactly that co-exists with
+    // a genuine outgoing argument at [sp,#0], because the copy is a block-copy base. It is that all
+    // four stores are RELOADED after the call: an outgoing argument is read by the callee and never
+    // by the caller, so the four words are locals. The first gate is then the frame-object audit's
+    // object/slot overlap. Widen `capturedObjectIsTheWholeFrame` to `localArea >= 4` and this same fixture
     // declines at the rule above instead: "the captured address at [sp,#0) is passed to a callee,
     // which may write the slot at [sp,#4]". That is the refusal this shape belongs to, and a
     // reader chasing the contiguity filter would be attacking the wrong one.
@@ -2670,7 +2916,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x10\n' +
         '\tpop\t{r0}\n' +
         '\tbx\tr0\n';
-      expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      expect(() => decompile('hazw', fourWords, ARMV4T_AGBCC)).toThrow(
+        /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#0\] — one byte, two models/,
+      );
     });
 
     // …AND THE TWO SHAPES WHOSE EXTENT THE ASM DOES PIN, which is what stops the twin's undecidable

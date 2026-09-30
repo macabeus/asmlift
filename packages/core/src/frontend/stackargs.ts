@@ -25,8 +25,9 @@ export interface StackArgsSlot {
 
 /** A call, and what its callee's DECLARATION says it takes on the stack. `declared` is the block
  *  `[0, 4*(n - argRegs))` as an ascending offset list, or null when nothing declares this call —
- *  an indirect call, a callee with no prototype, or one whose arity fits in registers. A null
- *  declaration can only ever lead to a refusal: the code alone cannot say where a block ENDS. */
+ *  an indirect call, a callee with no prototype, or one whose arity fits in registers. The code
+ *  alone cannot say where a null declaration's block ENDS, so such a call is never handed a stack
+ *  word; it lifts only when `survivorBound` clears every word that could open one. */
 export interface StackArgsCall<C> {
   readonly kind: 'call';
   /** The frontend's own handle for this call — the key of `OutgoingArgs.blocks`. */
@@ -56,6 +57,10 @@ export interface StackArgsInput<C> {
   readonly argRegs: number;
   /** The frontend's verdict that the whole frame is one addressable object handed to a callee. */
   readonly capturedWholeFrame: boolean;
+  /** The compiler keeps ONE outgoing area at the bottom of the frame, sized for its widest call and
+   *  below every local, and never reads a word of it back after a call. Only then does a word
+   *  loaded after a call prove itself a local — see `survivorBound`. */
+  readonly localsAboveOutgoingArea: boolean;
 }
 
 /** What this function's calls do with the BOTTOM of its frame — the outgoing stack-argument area
@@ -75,6 +80,50 @@ export interface OutgoingArgs<C> {
 
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 
+/** THE LOWEST FRAME WORD THAT SURVIVES A CALL, or `Infinity` when none does. A word LOADED on some
+ *  path out of a live call before anything re-stores it held a value across that call. Under
+ *  `localsAboveOutgoingArea` the caller never reads its outgoing area back after a call, so that
+ *  word is a local; and since the area is one region at the frame bottom that every call shares,
+ *  every word at or above the bound is proven not to be an argument.
+ *
+ *  A backward liveness over the live blocks: a load makes its offset live, a store kills it, and a
+ *  call is transparent — a word read after two calls survived both. Dead blocks contribute nothing:
+ *  a load that cannot run proves nothing, and a call that cannot run is not a call it survived. */
+function survivorBound<C>(
+  blocks: readonly StackArgsBlock<C>[],
+  succs: readonly (readonly number[])[],
+  live: ReadonlySet<number>,
+): number {
+  const liveIn = blocks.map(() => new Set<number>());
+  const liveOut = (b: number): Set<number> => new Set(succs[b].flatMap((s) => [...liveIn[s]]));
+  let bound = Infinity;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = blocks.length - 1; b >= 0; b--) {
+      if (!live.has(b)) {
+        continue;
+      }
+      const cur = liveOut(b);
+      for (const ev of [...blocks[b].events].reverse()) {
+        if (isCallEvent(ev)) {
+          for (const o of cur) {
+            bound = Math.min(bound, o);
+          }
+        } else if (ev.kind === 'load') {
+          cur.add(ev.off);
+        } else {
+          cur.delete(ev.off);
+        }
+      }
+      if ([...cur].some((o) => !liveIn[b].has(o))) {
+        liveIn[b] = cur;
+        changed = true;
+      }
+    }
+  }
+  return bound;
+}
+
 // THE OUTGOING STACK-ARGUMENT AREA, AND WHO MAY CONSUME IT.
 //
 // agbcc's ACCUMULATE_OUTGOING_ARGS reserves the BOTTOM of the frame for arguments 5+ of the calls
@@ -86,7 +135,7 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 // CreateEntity_Platform_0_0 (platform.c:734) forwards SIX arguments and came out as
 // `CreateEntity_Platform(0, 0, a0, (u16)a1)`.
 //
-// TWO INDEPENDENT WITNESSES MUST AGREE, and that agreement is the whole licence:
+// TWO INDEPENDENT WITNESSES MUST AGREE for a call to CONSUME words — the licence:
 //   * the DECLARATION says how many words a call takes. AAPCS lays arguments 5..n at [sp,#0]
 //     upward, one word each, so the block is `[0, 4*(n - |argRegs|))`, contiguous from zero.
 //   * the CODE says which words are staged for it — the offsets stored and not yet reloaded when
@@ -108,8 +157,18 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 // stack arguments deleted. Under the rule here the four words `sprintf` is really handed are four
 // offsets reaching the call that its declaration does not account for, the witnesses disagree, and the answer is the decline again. And the CODE
 // alone cannot say where a block ENDS — a store never reloaded is an argument's signature, but
-// so is a dead local, which is why reading the code alone could only ever refuse (conditions (a)
+// so is a dead local, which is why reading the code alone never licenses a word (conditions (a)
 // and (b) below, kept for every call no declaration covers).
+//
+// A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
+// keeps one outgoing area below every local and never reads it back after a call
+// (`localsAboveOutgoingArea`), a word LOADED after a call before any re-store is a local, and so
+// is every word above it (`survivorBound`). Every refusal that reads the code — NOTHING EXTRA,
+// (a) and (b) — then weighs only the words beneath the bound, so an undeclared call lifts once no
+// word there could open an argument block, and takes no stack word. Hand-written asm that reads
+// its own outgoing argument back after a call defeats it, and lifts with that argument dropped — a
+// producer assumption of the same kind as CONTIGUITY below, which is why the premise is declared
+// per compiler (`target.ts` `localsAboveOutgoingArea`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -120,14 +179,15 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 //     0x0 in block")`; here it is a decline, and for the same reason — it is a GAP, and a gap
 //     must never render as a plausible value.
 //
-// WHAT "NOTHING EXTRA" COSTS, because the reach is narrower than the disappearance of the old
-// decline suggests. A genuine SPILL that is live across a licensed call sits in the may set and is
-// not in the declared block, so the call refuses — and that is agbcc's commonest frame with an
-// outgoing area. Tolerating it means arguing that a pending word which is RELOADED later is a
-// local rather than argument n+1, which needs a gate and a row that gate protects; none exists.
-// The cost is in attribution, not correctness: the decline such a function gets names a STORE
-// ("[sp,#k] also reaches the call unread") rather than the capability, so a gap histogram groups
-// this class under that message and not under anything about stack arguments.
+// A SPILL LIVE ACROSS A LICENSED CALL sits in the may set and is not in the declared block — agbcc's
+// commonest frame with an outgoing area. The declaration cannot excuse it; `survivorBound` can: a
+// word loaded after a call before any re-store is a local, so NOTHING EXTRA counts only the pending
+// words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
+// check of its own: the block is contiguous words from zero, so it holds the bound's word, which
+// this function loads — "this function also LOADS it" below refuses it if nothing earlier does.
+// A spill with no survivor at or beneath it still refuses, and its decline names a STORE ("[sp,#k]
+// also reaches the call unread") rather than the capability, so a gap histogram groups it under
+// that message.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
 // site needs: agbcc does tail-merge (`Task_BonusFlower_Spawn`, sa3 bonus_game_enemies, stores
 // argument 5 in both predecessors with the `bl` in the join), and a one-armed store — the same
@@ -150,6 +210,7 @@ export function analyzeOutgoingArgs<C>({
   localArea,
   argRegs,
   capturedWholeFrame,
+  localsAboveOutgoingArea,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
@@ -190,6 +251,21 @@ export function analyzeOutgoingArgs<C>({
     // through the pointer.
     return { blocker: null, blocks: new Map(), area: 0 };
   }
+
+  const succs = asmBlocks.map((): number[] => []);
+  for (const b of live) {
+    for (const q of preds[b]) {
+      if (live.has(q)) {
+        succs[q].push(b);
+      }
+    }
+  }
+  // Every word at or above this is a proven local, so it is no call's argument. The three
+  // code-reading refusals below — the licence's NOTHING EXTRA, (a) and (b) — each hunt for a word
+  // that could be one, so the words they weigh are cut to those beneath the bound once, where
+  // they are collected (`mayAt`, `storedAnywhere`), and none of them repeats the test.
+  const bound = localsAboveOutgoingArea ? survivorBound(asmBlocks, succs, live) : Infinity;
+  const belowBound = (s: Iterable<number>): Set<number> => new Set([...s].filter((o) => o < bound));
 
   const everySlot: number[] = [];
   for (let o = 0; o + 4 <= localArea; o += 4) {
@@ -237,7 +313,7 @@ export function analyzeOutgoingArgs<C>({
       );
       for (const ev of asmBlocks[b].events) {
         if (isCallEvent(ev)) {
-          mayAt.set(ev, new Set(may));
+          mayAt.set(ev, belowBound(may));
           mustAt.set(ev, new Set(must));
           storedAt.set(ev, new Set(stored));
           for (const o of ev.declared ?? []) {
@@ -320,14 +396,15 @@ export function analyzeOutgoingArgs<C>({
   // every offset live code loads back. A reload in dead code is not evidence that anything reads
   // the slot back, so it does not count.
   const reloaded = new Set<number>();
-  const storedAnywhere = new Set<number>();
+  const stores = new Set<number>();
   for (const b of live) {
     for (const ev of asmBlocks[b].events) {
       if (ev.kind !== 'call') {
-        (ev.kind === 'store' ? storedAnywhere : reloaded).add(ev.off);
+        (ev.kind === 'store' ? stores : reloaded).add(ev.off);
       }
     }
   }
+  const storedAnywhere = belowBound(stores);
   // A LICENSED WORD THIS FUNCTION ALSO LOADS. The area belongs to the CALLEE — which may assign
   // to a stack parameter — so after the `bl` the word holds whatever the callee left, and an
   // `ldr` off that offset reads a GAP. The dataflow above cannot catch it: the call consumes the
@@ -350,7 +427,8 @@ export function analyzeOutgoingArgs<C>({
   // (a) — a store never reloaded ANYWHERE, with its lower slots supplied, is an argument's
   // signature: an outgoing argument is read by the CALLEE, never by the caller. Its real theorem
   // is the layout one (the area sits at the BOTTOM of localArea, disjoint from the locals, so no
-  // local load can land on an argument offset), which is why it is a whole-function question.
+  // local load can land on an argument offset), which is why it is a whole-function question, and
+  // why a word at or above `bound` never reaches it: the bound proves that theorem for it.
   // A LICENSED offset is excluded: its never being reloaded is explained by the call that takes it.
   for (const off of asc(storedAnywhere)) {
     if (!licensed.has(off) && !reloaded.has(off) && prefixStored(off, storedAnywhere)) {
@@ -387,7 +465,7 @@ export function analyzeOutgoingArgs<C>({
   // where the function ENDS. That is not an argument and not a local anyone reloads, so nothing
   // here can say what it is: decline rather than let it drop as a dead def.
   //
-  // "WHERE THE FUNCTION ENDS" IS A LIVE BLOCK WITH NO LIVE SUCCESSOR, read off `preds`, not a
+  // "WHERE THE FUNCTION ENDS" IS A LIVE BLOCK WITH NO LIVE SUCCESSOR, read off `succs`, not a
   // terminator the caller classified. Under Thumb the two coincide — a computed PC write has no
   // static successor and the frontend throws on one long before here — but asking the CFG costs
   // nothing and removes a fact the caller could get wrong.
@@ -399,16 +477,8 @@ export function analyzeOutgoingArgs<C>({
   // declines at L2: "unrecovered back-edge into block #1 (loop-recovery declined this shape)". So
   // the loud answer is preserved by a DIFFERENT family's refusal, not by this one. Closing it needs
   // a backward "can this word still be consumed?" pass, which no row in the corpus asks for.
-  const hasLiveSucc = asmBlocks.map(() => false);
   for (let b = 0; b < asmBlocks.length; b++) {
-    if (live.has(b)) {
-      for (const q of preds[b]) {
-        hasLiveSucc[q] = true;
-      }
-    }
-  }
-  for (let b = 0; b < asmBlocks.length; b++) {
-    if (!live.has(b) || hasLiveSucc[b]) {
+    if (!live.has(b) || succs[b].length > 0) {
       continue;
     }
     for (const off of asc(mayOut[b])) {

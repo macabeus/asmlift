@@ -219,6 +219,19 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   ship as a compiler behavior. It is not what makes an unmeasured one admissible, and a future round citing this
   paragraph owes its own compiled pair and its own reach number.
 
+  **THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A BACKWARDS READING.** A compiler behavior that says what
+  the compiler NEVER emits, for any source, may be applied to an observed output without the three
+  conditions above: an output that has the shape denies the universal's antecedent, and that
+  contrapositive is exactly as sound as the universal. What reads the map backwards is the CONVERSE,
+  from "this output lacks the shape" to a claim about what produced it. `localsAboveOutgoingArea`
+  (`target.ts`) is the worked case: agbcc never reads a word of its outgoing area back after a call,
+  so a word read back after one is a local (`frontend/stackargs.ts` `survivorBound`). The converse,
+  that a word never read back is an argument, is false, because a dead local is never read back
+  either, and the stack-argument licence declines on it rather than infer it. The contrapositive still
+  owes what every compiler behavior owes: the universal grounded in the compiler's source and
+  re-measurable from a committed probe (`corpus/agbcc-restage.s`), and its residue, every producer
+  the universal does not cover, named where the field is set.
+
   A **third fork sits inside the ranked variations**, and the underdetermination criterion does not
   decide it: a question the asm underdetermines can be answered by a STRUCTURE variation, which
   RE-RUNS `structure()` under different options, or by a RESPELL variation, which REWRITES the tree

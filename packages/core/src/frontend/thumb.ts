@@ -3654,6 +3654,7 @@ function liftOnce(
     localArea,
     argRegs: target.argRegs.length,
     capturedWholeFrame: capturedObjectIsTheWholeFrame,
+    localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
   });
 
   const slotsOffReason = slotModelBlocker(outgoingArgs);

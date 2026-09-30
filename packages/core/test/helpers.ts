@@ -421,28 +421,6 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
   return trace;
 }
 
-/** THE SEEDS whose emitted tree still disagrees with its own IR, per depth — a ratchet, not a clean
- *  bill. Every one is the same emission defect, measured and not fixed here: a call rendered at two
- *  positions, so it executes twice (`fz463`: `f1(f0(a1))` in both operands of one test).
- *
- *  ONE QUANTITY, TWO READERS. Both naming fuzzes read this same list, and their failing-seed lists
- *  are IDENTICAL seed for seed at all four depths — not a coincidence of two populations: the
- *  residual is an EMISSION defect of the SHIPPED spelling, which both files structure, and each
- *  file's variation varies only a naming decision on top of it. The populations do differ (2,621 vs 2,627
- *  at depth 1), for the reason each file's `JUDGED` states; the DEFECTS do not.
- *
- *  A LIST, NOT A COUNT. A count is green on a change that fixes one defect and adds another, and it
- *  is what makes a shared constant dangerous: a file whose population quietly loses a bad seed goes
- *  SILENT on a count and LOUD on a list. The cost — re-derived whenever the generator's stream moves
- *  — is already paid by `JUDGED`, which is exact per depth in both files. Re-derive with the probe
- *  in each file's `JUDGED` docblock. */
-export const IR_RESIDUAL_SEEDS: Readonly<Record<0 | 1 | 2 | 3, readonly number[]>> = {
-  0: [463, 862, 1902, 1938, 1962, 2546, 3798, 3977],
-  1: [1475, 2006, 2965, 3324],
-  2: [3324, 3928],
-  3: [],
-};
-
 // A position where EITHER side is UNDEF constrains nothing: the original read a local no path had
 // assigned, so both spellings are ill-defined there rather than one being wrong. Everything else —
 // a different callee, a different argument, a different trace LENGTH (which is what a changed trip

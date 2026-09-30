@@ -283,3 +283,56 @@ test('a call and a read in sibling edge copies keep the order the asm ran them i
   expect(oneCopy).not.toBe(SIBLING_COPIES);
   expect(emit(oneCopy)).toContain('a2 = cb(a0) + *a0;');
 });
+
+// ONE `br`, ONE VALUE IN TWO EDGE COPIES. agbcc's `if (two(a, b) < c) { s += two(c, a); t = s; }
+// else { s = two(a, c) + two(b, c) + two(c, c); }` runs `bl two; add r7, r4, r0; add r4, r7, #0`
+// into the merge, so the arm's `br` passes the one sum as both of its arguments. Each argument is a
+// copy of its own, and a call under the sum inlined into both ran twice. The else arm's three calls
+// hide it from `assertEffectsPreserved`, which compares the most calls on one path with the asm's
+// count, so the placement rule is the only guard: a value one op reads twice renders twice.
+const TWO_COPIES_ONE_VALUE = `fn dup {
+^bb0(%0: s32, %1: s32, %2: s32, %3: s32*):
+  %4: s32 = load %3 {off=0, signed=true, width=4}
+  %5: s32 = load %3 {off=4, signed=true, width=4}
+  %6: s32 = call %0, %1 {target="two"}
+  %7: u32 = icmp_slt %6, %2
+  cond_br %7, ^bb1(), ^bb2()
+^bb1():
+  %8: s32 = call %2, %0 {target="two"}
+  %9: s32 = add %4, %8
+  br ^bb3(%9, %9)
+^bb2():
+  %10: s32 = call %0, %2 {target="two"}
+  %11: s32 = call %1, %2 {target="two"}
+  %12: s32 = call %2, %2 {target="two"}
+  %13: s32 = add %10, %11
+  %14: s32 = add %13, %12
+  br ^bb3(%14, %5)
+^bb3(%15: s32, %16: s32):
+  %17: s32 = call %15, %16 {target="two"}
+  %18: s32 = add %17, %15
+  %19: s32 = add %18, %16
+  ret %19
+}
+`;
+
+test('a call under a value one `br` passes twice is named, not run once per copy', () => {
+  const src = emit(TWO_COPIES_ONE_VALUE);
+  expect(src.match(/two\(a2, a0\)/g)).toHaveLength(1);
+  expect(src.match(/two\(/g)).toHaveLength(6);
+});
+
+test('a call under a value one operation reads twice is named the same way', () => {
+  // `s = *p + two(a, b); return s * s;` — agbcc's `bl two; ldr; add; mov r0, r1; mul r0, r1`. One
+  // `mul` reading the sum in both operands spells it twice, as the `br` above copies it twice.
+  const ir = `fn sq {
+^bb0(%0: s32, %1: s32, %2: s32*):
+  %3: s32 = call %0, %1 {target="two"}
+  %4: s32 = load %2 {off=0, signed=true, width=4}
+  %5: s32 = add %4, %3
+  %6: s32 = mul %5, %5
+  ret %6
+}
+`;
+  expect(emit(ir).match(/two\(/g)).toHaveLength(1);
+});

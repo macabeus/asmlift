@@ -347,19 +347,40 @@ export interface TargetDescription {
     // argument INDISTINGUISHABLE by code alone from a dead local: the words sit inside this
     // frame's reservation and nothing this function does ever reloads one.
     //
-    // Absent ⇒ no outgoing area is claimed and the Thumb frontend's stack-argument licence never
-    // fires, so a `[sp,#k]` store reaching a call unread declines exactly as it did before that
-    // licence existed. Read off the target by the frontend (`frontend/thumb.ts` `declaredCall`),
-    // not by the structurer.
+    // It says WHERE the words go and nothing about the rest of the frame. Its one reader is the
+    // Thumb frontend's stack-argument licence (`frontend/thumb.ts` `declaredCall`): a declared call
+    // consumes the words it stages. Absent ⇒ no outgoing area is claimed, and a `[sp,#k]` store
+    // reaching a call unread declines.
     //
-    // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured —
-    // the corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's
-    // `sub_0804C300` all stage their words at [sp,#0] upward inside the prologue's own
-    // reservation. NOT set anywhere else: a push-based caller would stage nothing inside the
-    // frame, and `docs/level-tower.md`'s rule for an unmeasured compiler behavior is to claim
-    // nothing. No other frontend calls the analysis today, so the field claims a premise rather
-    // than changing a verdict — which is the point: a second armv4t compiler must state it.
+    // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured — the
+    // corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's `sub_0804C300` all
+    // stage their words at [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
+    // else: a push-based caller would stage nothing inside the frame, and `docs/level-tower.md`'s
+    // rule for an unmeasured compiler behavior is to claim nothing. No other frontend calls the
+    // analysis today, so a second armv4t compiler must state this premise rather than inherit it.
     stagesOutgoingArgsInFrame?: boolean;
+    // The outgoing area is ONE region at the frame bottom, sized for the widest call and shared by
+    // every call, with every local and spill above it, and the caller never reads a word of it
+    // back after a call — the callee may assign to its stack parameters, so the caller re-stages
+    // an argument before every call. A compiler can stage in its frame
+    // (`stagesOutgoingArgsInFrame`) and still break this: mwcc may put a local in the words its
+    // outgoing parameters use (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY ARGUMENT REGISTER").
+    //
+    // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
+    // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
+    // call before any re-store is not in the area, so it is a local, and so is every word above it,
+    // which lets a spill live across a call lift, and a call NO declaration covers
+    // (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A BACKWARDS READING). It is
+    // exactly as sound as the universal, so its residue is every producer the universal does not
+    // cover: hand-written asm that reads its outgoing argument back after a call loses that
+    // argument silently. The premise is this compiler's, not the ISA's.
+    // Absent ⇒ every staged word stays a candidate argument.
+    //
+    // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
+    // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
+    // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
+    // re-staging and the callee's write. NOT set anywhere else, for the reason above.
+    localsAboveOutgoingArea?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
     // rests on (`frontend/thumb.ts`, `capturedObjectIsTheWholeFrame`): a bare `mov rD, sp` names
@@ -671,6 +692,9 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
     // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
     stagesOutgoingArgsInFrame: true,
+    // …one area for every call, below the locals (thumb.h:573/600-622/628, calls.c:1675), which
+    // agbcc re-stages before each call and never reads back after one (agbcc-restage.s).
+    localsAboveOutgoingArea: true,
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
