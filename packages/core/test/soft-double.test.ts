@@ -71,7 +71,7 @@ test('the double parameters appear at the soft-float stage', () => {
   const { report } = decompileTraced('dadd', asm, targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
   const first = report.trace.find((s) => s.irDump?.includes('%0: f64'));
   expect(first?.id).toBe('stage:floathelpers');
-  expect(first?.title).toBe('Soft-float helper lower (bl __adddf3 → float op)');
+  expect(first?.title).toBe('Soft-float lower (bl __adddf3 → float op, a declared double, a literal)');
   const at = (id: string) => report.trace.find((s) => s.id === id)?.irDump;
   expect(at('stage:widehelpers') ?? at('stage:floathelpers')).toBe(at('stage:floathelpers'));
 });

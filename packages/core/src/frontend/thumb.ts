@@ -2825,19 +2825,7 @@ function liftOnce(
     if (declaresParams(prototypes[callee])) {
       return null;
     }
-    // A 64-bit argument that straddles the register/stack boundary is a placement this frontend
-    // cannot lay out — agbcc splits it, low half in r3 and high half at [sp,#0] — so the pair is
-    // not read here. This is NOT the refusal: the call falls back to the declared-arity path,
-    // which reads the helper's WORD arity out of `helperProtos` and stops on whichever loud gate
-    // that path meets, the outgoing-stack-argument refusal or `raise/widehelpers.ts` declining to
-    // fold a call it did not build the pair for. What this bounds is the register read: without
-    // it the loop above walks `r${k}` past `argRegs`, so a fifth word is read out of r4, which is
-    // not an argument register on any target here.
-    //
-    // NOTHING REACHES IT. The widest entry in either shipped table is `[64, 64]`, four words,
-    // against four argument registers on Thumb and eight on PPC — so the bound is the table's, and
-    // this is the generalisation that keeps a future entry from being laid out by accident.
-    return wordsOf(h.params) <= target.argRegs.length ? h : null;
+    return h;
   };
   /** Whether the target's own runtime table claims this name — asked of the TABLE, not of what
    *  `wideHelper` made of it.

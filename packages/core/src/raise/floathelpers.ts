@@ -1,10 +1,12 @@
-// asmlift — soft-float runtime-helper lowering (L1 recognition).
+// asmlift — the soft-float boundary (L1 recognition): where integer words become floats.
 //
-// The peer of `raise/widehelpers.ts` for the helpers whose op is a float op (`isFloatHelper`), and
-// NOT gated on a hardware capability either: the target's runtime table is the gate, and a table
-// that names no float helper folds nothing. What sets it apart from the integer helpers is the
-// value's KIND: the call's operands and result are bits in integer registers, and the fold re-types
-// them as floats, which only data flow may justify — see the function below.
+// Three things cross it. A runtime helper whose op is a float op (`isFloatHelper`) — the peer of
+// `raise/widehelpers.ts`, gated by the target's runtime table rather than a hardware capability.
+// A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). And a
+// double literal, two constant words, on a target that states its soft double
+// (`TargetDescription.softDoubleWords`). What sets all three apart from the integer helpers is the
+// value's KIND: the words are bits in integer registers, and the pass re-types them as floats,
+// which only data flow may justify — see the function below.
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
 import { T } from '../ir/types';
