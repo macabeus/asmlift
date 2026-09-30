@@ -243,9 +243,12 @@ export function declaresVoidReturn(p: FnProto | undefined): boolean {
  *  key that can say it (`FnProto.returnLayout`). Read through `?.` for the reason
  *  `returnsWithoutHiddenPointer` gives: a `null` entry out of parsed JSON reaches every reader. */
 export function declaresAggregateReturn(p: FnProto | undefined): boolean {
-  return (
-    p?.returnLayout !== undefined || /^(?:(?:const|volatile)\s+)*(?:struct|union)\s/.test(p?.returns?.trim() ?? '')
-  );
+  // the whole spelling, qualifiers aside — `struct S *` is a pointer, returned in a register
+  const bare = (p?.returns ?? '')
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return p?.returnLayout !== undefined || /^(?:struct|union) [A-Za-z_]\w*$/.test(bare);
 }
 
 /** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in

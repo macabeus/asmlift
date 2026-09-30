@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import { declaresAggregateReturn } from '../src/proto';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 // `struct Blob64 { u32 w[16]; }; struct Blob64 makeblob(const void *); extern struct Blob64 gDst;
@@ -98,6 +99,18 @@ describe('a callee declared to return a struct or union by value', () => {
     expect(decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob: { params: 1 } } }).source).toContain(
       'makeblob(&gDst);',
     );
+  });
+
+  // a POINTER to a struct is a register return, whatever keyword it is spelled with — the shape
+  // of ac-decomp's `struct message_window_s * mMsg_Get_base_window_p(void)`
+  test('a pointer to a struct is not one', () => {
+    const g = { params: [], returns: 'struct message_window_s *' };
+    expect(declaresAggregateReturn(g)).toBe(false);
+    expect(declaresAggregateReturn({ returns: 'const struct S' })).toBe(true);
+    const ppc = '0 <c>:\n0:\tbl      c <c+0xc>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n';
+    expect(decompile('c', ppc, PPC_MWCC, { prototypes: { g } }).source).toContain('return g();');
+    const thumb = 'c:\n\tpush\t{lr}\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('c', thumb, ARMV4T_AGBCC, { prototypes: { g } }).source).toContain('return g();');
   });
 
   test('a PowerPC call to one declines', () => {
