@@ -211,6 +211,23 @@ describe('a callee declared to return a struct or union by value', () => {
     expect(lifted).toMatch(/other\(\)/);
   });
 
+  // `struct W1 fillw(s32 *); void f(void){ s32 v; fillw(&v); usei(v); }` — agbcc hands W1 back in
+  // r0, so the frame word at argument 0 is an out-parameter, not the storage of a return
+  test('one that comes back in the return register takes a frame word as an out-parameter', () => {
+    const fillw = {
+      params: ['s32 *'],
+      returns: 'struct W1',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'x', type: 'u32' }] },
+    };
+    const f =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, sp\n\tbl\tfillw\n\tldr\tr0, [sp]\n\tbl\tusei\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+    const usei = { params: ['s32'], returnsVoid: true as const };
+    expect(decompile('f', f, ARMV4T_AGBCC, { prototypes: { fillw, usei } }).source).toMatch(
+      /fillw\(&sp0\);\s+usei\(sp0\);/,
+    );
+  });
+
   test('a PowerPC call to one declines', () => {
     const asm =
       '7c <p4>:\n7c:\tstwu    r1,-16(r1)\n80:\tmflr    r0\n84:\tlis     r3,0\n\t\t\t86: R_PPC_ADDR16_HA\tgDst\n' +

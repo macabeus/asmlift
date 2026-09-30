@@ -213,7 +213,7 @@ interface StandardSignature extends FnProto {
  *  usually the same number the arg-register heuristic already guessed, so an entry moves no code.
  *  What it moves is what is KNOWN — a guess cannot witness anything, and an entry can. The
  *  frame-object audit reads the `returns` of one to rule out a hidden struct-return pointer
- *  (`returnsWithoutHiddenPointer`, consumed in frontend/thumb.ts).
+ *  (`aggregate.ts` `returnsWithoutHiddenPointer`, asked by frontend/frame-objects.ts).
  *
  *  THE LIST IS SHORT ON PURPOSE. `memcpy` is here because a corpus row exercises it and its price
  *  was measured. `memset`, `strcpy` and the rest of the standard library are equally fixed by the
@@ -258,54 +258,6 @@ export function declaresAggregateReturn(p: FnProto | undefined): boolean {
     .trim()
     .replace(/\s+/g, ' ');
   return p?.returnLayout !== undefined || /^(?:struct|union) [A-Za-z_]\w*$/.test(bare);
-}
-
-/** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in
- *  argument 0. A callee that returns nothing has no such pointer to be given; neither has one
- *  whose return travels in a register. Every other answer — including silence — is `false`,
- *  because this is a fact a caller must be TOLD: the two frames are the same instructions in the
- *  same order, so there is nothing in the assembly to read it off.
- *
- *  A RETURN WIDER THAN A REGISTER STILL TRAVELS IN REGISTERS — it travels in a PAIR, which is
- *  still not a hidden pointer the caller supplied — so `declaredWidth` answering 64 is the right
- *  answer here rather than a width that slipped through a test meant for words. Nothing reaches
- *  it: `STANDARD_SIGNATURES` has one entry and it returns `void *`.
- *
- *  TWO SOURCES AND NEITHER RANKS ABOVE THE OTHER, because on this one question they cannot
- *  disagree: `returnsVoid` from the project's own headers, and the `returns` of a signature the C
- *  standard fixes, which is as known as its parameters. That a project may re-declare a standard
- *  function differently is real and is why `declaredCall` ranks the two for ARITY — but a
- *  re-declaration that changed `memcpy` into a struct-returning function would not be `memcpy`.
- *
- *  `Object.hasOwn`, not `in`: `prototypes` is caller-supplied JSON and the table is an object
- *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. The
- *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
- *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
- *  here, and a raw TypeError would leave through neither the decline channel nor anything a
- *  caller can act on. Every other reader of this table — `declaredArgWidths`, and `declaredCall`
- *  through it — answers "nothing is declared" for such an entry, and so does this. */
-export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
-  // Nothing at all, a value in registers, or a spelling nobody here can size — the last of which is
-  // the only one that leaves the hidden pointer open. A pair is `declaredWidth` 64 and still
-  // travels in registers, so a width wider than a word is an answer here and not an overflow.
-  const travelsInRegisters = (spelling: string): boolean => {
-    const t = spelling.trim();
-    return t === 'void' || declaredWidth(t) !== undefined;
-  };
-  const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
-  if (declaresVoidReturn(own)) {
-    return true;
-  }
-  if (declaresAggregateReturn(own)) {
-    return false;
-  }
-  // A PROJECT'S OWN `returns` ANSWERS THIS THROUGH THE SAME READING A STANDARD SIGNATURE'S DOES,
-  // and it ranks above the table for the same reason `declaredCall` ranks a re-declaration above
-  // one: a project that spells the return has told you about the function it is building.
-  if (own?.returns !== undefined) {
-    return travelsInRegisters(own.returns);
-  }
-  return Object.hasOwn(STANDARD_SIGNATURES, callee) && travelsInRegisters(STANDARD_SIGNATURES[callee].returns);
 }
 
 /** Bit width per C89 base type on every target asmlift lifts (all ILP32 with a 64-bit `long long`).

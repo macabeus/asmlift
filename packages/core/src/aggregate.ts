@@ -3,7 +3,16 @@
 // (`proto.ts` AggregateLayout); the layout rules and the return rule are the target's
 // (`compilerBehaviors.aggregateBoundary`, `largestAlignment`, `aggregateReturn`).
 import { type IrType, type StructField, T } from './ir/types';
-import { type AggregateLayout, type AggregateMember, type FnProto, declaredWidth } from './proto';
+import {
+  type AggregateLayout,
+  type AggregateMember,
+  type FnProto,
+  type Prototypes,
+  STANDARD_SIGNATURES,
+  declaredWidth,
+  declaresAggregateReturn,
+  declaresVoidReturn,
+} from './proto';
 import type { TargetDescription } from './target';
 
 /** The size and alignment of a laid-out aggregate in bytes, or undefined where the declaration or
@@ -144,4 +153,60 @@ export function returnsInMemory(layout: AggregateLayout, target: TargetDescripti
     }
   }
   return answer;
+}
+
+/** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in
+ *  argument 0. A callee that returns nothing has no such pointer to be given; neither has one
+ *  whose return travels in a register. Every other answer — including silence — is `false`,
+ *  because this is a fact a caller must be TOLD: the two frames are the same instructions in the
+ *  same order, so there is nothing in the assembly to read it off.
+ *
+ *  A RETURN WIDER THAN A REGISTER STILL TRAVELS IN REGISTERS — it travels in a PAIR, which is
+ *  still not a hidden pointer the caller supplied — so `declaredWidth` answering 64 is the right
+ *  answer here rather than a width that slipped through a test meant for words. Nothing reaches
+ *  it: `STANDARD_SIGNATURES` has one entry and it returns `void *`.
+ *
+ *  TWO SOURCES AND NEITHER RANKS ABOVE THE OTHER, because on this one question they cannot
+ *  disagree: the project's own headers — `returnsVoid`, or a struct or union `target` hands back
+ *  in a register — and the `returns` of a signature the C standard fixes, which is as known as its
+ *  parameters. That a project may re-declare a standard
+ *  function differently is real and is why `declaredCall` ranks the two for ARITY — but a
+ *  re-declaration that changed `memcpy` into a struct-returning function would not be `memcpy`.
+ *
+ *  `Object.hasOwn`, not `in`: `prototypes` is caller-supplied JSON and the table is an object
+ *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. The
+ *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
+ *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
+ *  here, and a raw TypeError would leave through neither the decline channel nor anything a
+ *  caller can act on. Every other reader of this table — `declaredArgWidths`, and `declaredCall`
+ *  through it — answers "nothing is declared" for such an entry, and so does this. */
+export function returnsWithoutHiddenPointer(
+  callee: string,
+  prototypes: Prototypes,
+  target: TargetDescription,
+): boolean {
+  // Nothing at all, a value in registers, or a spelling nobody here can size — the last of which is
+  // the only one that leaves the hidden pointer open. A pair is `declaredWidth` 64 and still
+  // travels in registers, so a width wider than a word is an answer here and not an overflow.
+  const travelsInRegisters = (spelling: string): boolean => {
+    const t = spelling.trim();
+    return t === 'void' || declaredWidth(t) !== undefined;
+  };
+  const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
+  if (declaresVoidReturn(own)) {
+    return true;
+  }
+  // A STRUCT OR UNION IS THE TARGET'S TO PLACE — agbcc hands a one-word struct back in r0, mwcc up
+  // to eight bytes in r3/r3:r4 — so this asks the rule the call lowering reads, and the two cannot
+  // disagree. A rule or a size nothing states leaves the pointer open.
+  if (own && declaresAggregateReturn(own)) {
+    return returnsInMemory(returnedAggregate(own), target) === false;
+  }
+  // A PROJECT'S OWN `returns` ANSWERS THIS THROUGH THE SAME READING A STANDARD SIGNATURE'S DOES,
+  // and it ranks above the table for the same reason `declaredCall` ranks a re-declaration above
+  // one: a project that spells the return has told you about the function it is building.
+  if (own?.returns !== undefined) {
+    return travelsInRegisters(own.returns);
+  }
+  return Object.hasOwn(STANDARD_SIGNATURES, callee) && travelsInRegisters(STANDARD_SIGNATURES[callee].returns);
 }

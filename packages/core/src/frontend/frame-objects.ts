@@ -11,10 +11,11 @@
  *
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
+import { returnsWithoutHiddenPointer } from '../aggregate';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
-import { type Prototypes, returnsWithoutHiddenPointer } from '../proto';
+import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { FrontendUnsupportedError } from './errors';
@@ -958,10 +959,11 @@ export function auditFrameObjects({
     // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and so is its converse: a callee declared to
     // return a struct through memory, whose call the frontend stamps `sret`, makes the object that
     // call's return storage (`returnTemps`). Those two are the only answers here read off something
-    // other than the instruction stream. `returnsWithoutHiddenPointer` (proto.ts) is where the third
-    // is answered, from the project's own `returnsVoid` or from the `returns` of a signature the C
-    // standard fixes — the same table whose `params` this file already trusts to decide a call's
-    // arity. It is asked of EVERY callee that took the address
+    // other than the instruction stream. `returnsWithoutHiddenPointer` (aggregate.ts) is where the
+    // third is answered, from the project's own `returnsVoid`, from a struct its declaration returns
+    // that the target hands back in a register, or from the `returns` of a signature the C standard
+    // fixes — the same table whose `params` this file already trusts to decide a call's arity. It is
+    // asked of EVERY callee that took the address
     // at argument 0, because the object gets one decision: one callee about whose return nothing
     // is known leaves the ambiguity standing and the refusal fires.
     //
@@ -1001,7 +1003,7 @@ export function auditFrameObjects({
       if (cs === undefined || cs.size === 0) {
         return null;
       }
-      const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes));
+      const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes, target));
       if (unknown.length === 0) {
         return null;
       }

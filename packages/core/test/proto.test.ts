@@ -5,6 +5,7 @@
 // number every frontend walks its argument registers by.
 import { describe, expect, test } from 'vitest';
 
+import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
@@ -14,7 +15,6 @@ import {
   declaredReturnWidth,
   declaredWidth,
   prototypesFromSymbols,
-  returnsWithoutHiddenPointer,
   spellableProto,
   spellableType,
   wordsOf,
@@ -128,15 +128,19 @@ describe('a void return, whichever key states it', () => {
   });
 
   test('a CALLEE stating a void return is one no hidden struct pointer is handed', () => {
-    expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } })).toBe(true);
-    expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } })).toBe(true);
-    expect(returnsWithoutHiddenPointer('g', { g: { params: [] } })).toBe(false);
-    // A struct return leaves it open: whether it comes back through a hidden pointer is the
-    // target's rule over its layout (src/aggregate.ts), which this table-level answer cannot ask.
-    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'struct Blob64' } })).toBe(false);
-    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'P', returnLayout: { kind: 'struct' } } })).toBe(
-      false,
-    );
+    expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } }, ARMV4T_AGBCC)).toBe(true);
+    expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } }, ARMV4T_AGBCC)).toBe(true);
+    expect(returnsWithoutHiddenPointer('g', { g: { params: [] } }, ARMV4T_AGBCC)).toBe(false);
+    // A struct return whose members nothing states leaves it open: whether it comes back through a
+    // hidden pointer is the target's rule over its layout (src/aggregate.ts `returnsInMemory`).
+    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'struct Blob64' } }, ARMV4T_AGBCC)).toBe(false);
+    expect(
+      returnsWithoutHiddenPointer(
+        'g',
+        { g: { params: 1, returns: 'P', returnLayout: { kind: 'struct' } } },
+        ARMV4T_AGBCC,
+      ),
+    ).toBe(false);
   });
 });
 
