@@ -272,6 +272,40 @@ describe('prototypes from a declaration context', () => {
     expect(p.mkpe?.returnLayout?.members).toEqual([{ name: 'e', type: 'enum E' }]);
   });
 
+  // agbcc reads `__attribute` as `__attribute__` (c-parse.gperf:22-23); a typedef's declarator
+  // attribute re-aligns the type it names (c-common.c:392-396, 623-624) — compiled, `struct O { struct
+  // R r; }` goes from 4 bytes to 8 and back through memory; one on a variable reaches only it, and
+  // compiled, `mkw` below still returns in r0
+  test('an attribute reaches the layout from wherever agbcc applies it, and only there', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned short u16; typedef int s32;
+       struct D { u16 x; } __attribute ((aligned(8))); struct D mkd(s32);
+       enum __attribute ((packed)) K { KA, KB }; struct PK { enum K k[2]; }; struct PK mkpk(s32);
+       struct R { u16 x; }; typedef struct R A __attribute__((aligned(8))); struct O { struct R r; }; struct O mko(s32);
+       struct W { s32 v; } gW __attribute__((section(".ewram"))); struct W mkw(s32);`,
+      'c',
+    );
+    for (const name of ['mkd', 'mkpk', 'mko']) {
+      expect(p[name]?.returnLayout, name).toEqual({ kind: 'struct' });
+    }
+    expect(p.mkw?.returnLayout?.members).toEqual([{ name: 'v', type: 's32' }]);
+  });
+
+  // compiled, `struct SB { enum Big k; }` is 8 bytes, where `struct SN { Neg k; }` and `struct SI {
+  // enum Int k; }` are 4
+  test('an enum with a value an int cannot hold is not sized', () => {
+    const p = prototypesFromContext(
+      `typedef int s32;
+       enum Big { B0 = 0, B1 = 0x100000000LL }; struct SB { enum Big k; }; struct SB mkb(s32);
+       typedef enum { N0 = -1, N1 = 0x80000000 } Neg; struct SN { Neg k; }; struct SN mkn(s32);
+       enum Int { I0 = 0, I1 = 0x80000000 }; struct SI { enum Int k; }; struct SI mki(s32);`,
+      'c',
+    );
+    expect(p.mkb?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.mkn?.returnLayout?.members).toEqual([{ name: 'k', type: 'enum Neg' }]);
+    expect(p.mki?.returnLayout?.members).toEqual([{ name: 'k', type: 'enum Int' }]);
+  });
+
   // each member points at the struct itself: laying out every pointee on every path is 9^8 walks
   test('a struct whose members point back at it is laid out once per depth', () => {
     const ptrs = Array.from({ length: 8 }, (_, i) => `struct Node *p${i};`).join(' ');

@@ -305,29 +305,42 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   const typedefs = new Map<string, string>();
   // struct and union bodies: by `struct Tag` spelling, and by a typedef name bound to a body, which
   // resolves to itself and spells no keyword — as C++ spells every tag, a declared one with no body
-  // included. A body whose statement carries an `__attribute__` (`packed`, `aligned(8)`) has none
-  // here: this reads no attribute, and those move members and size the whole.
+  // included. A body an attribute lays out (`packed`, `aligned(8)`) has none here, since this reads
+  // no attribute (`attributesLayout`).
   const tagged = new Map<string, string | undefined>();
   const named = new Map<string, { kind: AggregateLayout['kind']; body?: string }>();
   // a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own
   const unspelledPointers = new Set<string>();
   // a typedef name bound to an enum body
   const enums = new Set<string>();
-  // an `enum Tag` whose declaration carries an attribute: `packed` makes it the smallest integer
-  // its values fit (agbcc c-common.c:446, c-decl.c:6123), which the target's enumBytes is not
-  const attributedEnums = new Set<string>();
+  // an enum, by `enum Tag` or typedef name, that is not the target's enumBytes: `packed` makes it
+  // the smallest integer its values fit (agbcc c-common.c:446, c-decl.c:6123), and so does a value
+  // an int cannot hold (`enumMayWiden`)
+  const unsizedEnums = new Set<string>();
+  // a type a typedef with no body of its own attributes (`typedef struct R A __attribute__(…);`)
+  const retyped = new Set<string>();
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
-    const attributed = /__attribute__/.test(s.text);
+    const attributed = attributesLayout(s.text);
     if (def) {
       tagged.set(`${def[1]} ${def[2]}`, attributed ? undefined : s.bodies[0]);
     }
+    const enumDef = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b[^{]*\{\}/.test(s.text);
+    const unsizedEnum = enumDef && (attributed || enumMayWiden(s.bodies[0]));
     const enumTag =
-      /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute__\s*\(\(.*?\)\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
+      /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute(?:__)?\s*\(\(.*?\)\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
         s.text,
       );
-    if (enumTag && attributed) {
-      attributedEnums.add(`enum ${enumTag[1]}`);
+    if (enumTag && unsizedEnum) {
+      unsizedEnums.add(`enum ${enumTag[1]}`);
+    }
+    if (attributed && /^typedef\b/.test(s.text) && s.bodies.length === 0) {
+      const base = /^typedef\s+(?:(?:const|volatile)\s+)*((?:struct|union|enum)\s+[A-Za-z_]\w*|[A-Za-z_]\w*)/.exec(
+        s.text,
+      );
+      if (base) {
+        retyped.add(base[1]);
+      }
     }
     // In C++ a class is a struct too. Its body (access labels, member functions), or one after a
     // base clause, whose members start past the base's, is none this lays out: the kind is known and
@@ -352,11 +365,29 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
         }
         if (td.names === 'body' && /^typedef\s+(?:(?:const|volatile)\s+)*enum\b/.test(s.text)) {
           enums.add(td.name);
+          if (unsizedEnum) {
+            unsizedEnums.add(td.name);
+          }
         }
         if (td.names === 'unspelled pointer') {
           unspelledPointers.add(td.name);
         }
       }
+    }
+  }
+  for (const t of retyped) {
+    const r = resolve(t, typedefs);
+    const tag = /^(struct|union) ([A-Za-z_]\w*)$/.exec(r);
+    if (tag) {
+      tagged.set(r, undefined);
+    }
+    const name = tag?.[2] ?? r;
+    const aggregate = named.get(name);
+    if (aggregate !== undefined) {
+      named.set(name, { kind: aggregate.kind, body: undefined });
+    }
+    if (/^enum [A-Za-z_]\w*$/.test(r) || enums.has(r)) {
+      unsizedEnums.add(r);
     }
   }
   // Memoised per type and depth: a body whose members point at bodies is walked once per depth,
@@ -393,7 +424,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     }
     const out: AggregateMember[] = [];
     for (const decl of splitMembers(body)) {
-      if (/__attribute__/.test(decl)) {
+      if (ATTRIBUTE.test(decl)) {
         return undefined;
       }
       let type: ParamType | AggregateLayout;
@@ -417,7 +448,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
           type = base;
         } else if (unspelledPointers.has(base)) {
           type = 'void *';
-        } else if (attributedEnums.has(base)) {
+        } else if (unsizedEnums.has(base)) {
           return undefined;
         } else if (/^enum [A-Za-z_]\w*$/.test(base) || enums.has(base)) {
           // an enum, which the target sizes whatever it is called: spelled `enum` and its name
@@ -500,6 +531,34 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
   }
   const { returns: _dropped, ...rest } = p;
   return validatePrototypes({ [name]: rest }).length === 0 ? rest : undefined;
+}
+
+// agbcc reads both spellings (c-parse.gperf:22-23)
+const ATTRIBUTE = /\b__attribute(?:__)?\b/;
+
+/** Whether an attribute in this statement can move the layout of the type it defines or names. One
+ *  in the specifier — ahead of the body or straight after it — lays that body out (c-parse.in:1464-1503).
+ *  One on a typedef's declarator is applied to the type too, after layout (c-common.c:392-396,
+ *  623-624): its size stands, but its alignment moves, and with it the layout of anything that holds
+ *  it. One on a variable's declarator reaches that variable alone. */
+function attributesLayout(text: string): boolean {
+  if (/^typedef\b/.test(text)) {
+    return ATTRIBUTE.test(text);
+  }
+  const body = text.indexOf('{}');
+  return body >= 0 && (ATTRIBUTE.test(text.slice(0, body)) || /^\{\}\s*__attribute(?:__)?\b/.test(text.slice(body)));
+}
+
+/** Whether agbcc may lay an enum with this body out wider than an int. It does for a value past 32
+ *  bits (c-decl.c:6116-6123), which only a 64-bit operand spells, so a literal past 32 bits or one
+ *  of type `long long` is read as one that may. Compiled, `enum {B0, B1 = 0x100000000LL}` is 8
+ *  bytes, where `enum {N0 = -1, N1 = 0xFFFFFFFF}` is 4. */
+function enumMayWiden(body: string): boolean {
+  const literals = [...body.matchAll(/\b(?:0[xX]([0-9a-fA-F]+)|0([0-7]+)|(\d+))([uUlL]*)/g)].map((m) => ({
+    value: m[1] !== undefined ? BigInt(`0x${m[1]}`) : m[2] !== undefined ? BigInt(`0o${m[2]}`) : BigInt(m[3]),
+    suffix: m[4],
+  }));
+  return literals.some((l) => l.value > 0xffffffffn || /l.*l/i.test(l.suffix)) || /\blong\s+long\b/.test(body);
 }
 
 /** A struct body's member declarations: its `;`-separated statements, a nested body kept whole. */

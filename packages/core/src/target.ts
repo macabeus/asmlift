@@ -598,7 +598,8 @@ export interface TargetDescription {
     // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
     // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
     // and `enum {B0 = 300}` are both 4. `targetFor` drops it under `-fshort-enums`, and an enum
-    // declared with an attribute (`packed`) is not sized (proto-context.ts). ABSENT ⇒ unmeasured,
+    // declared with an attribute (`packed`), or with a value an int cannot hold, is not sized
+    // (proto-context.ts). ABSENT ⇒ unmeasured,
     // and an aggregate with an enum member is not sized.
     enumBytes?: number;
     // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
