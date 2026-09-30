@@ -1,19 +1,7 @@
 // asmlift webapp — the in-browser objdiff scorer, agbcc/ARMv4T only. The playground's own match
 // verification: assemble the pasted `.s` to a target object, compile each
-// recovered-C candidate with agbcc, and diff target-vs-candidate with the REAL objdiff engine —
-// the same fitness function the benchmark uses, never a hand-rolled asm/text compare.
-//
-// SOUNDNESS — this file is a near-verbatim PORT of packages/cli/src/objdiff.ts. Its
-// `scoreObjectBytes` MUST stay logic-identical to that file, and objdiff-wasm MUST stay pinned to
-// the EXACT same version as packages/cli: two versions align instruction streams differently, so a
-// browser score computed by one is not comparable to a benchmark score computed by the other. The
-// version is deliberately NOT written here — it lives in the two package.json files, and
-// packages/core/test/one-version.test.ts fails when they disagree. The two copies are a deliberate
-// duplication (apps/web cannot import the Node cli), so they can only be trusted while they agree. In
-// particular: match ⇔ `differences === 0` counted over instruction rows (NOT objdiff's rounded
-// matchPercent, which can round 99.96 → 100), and a missing symbol THROWS (never a soft-fail that
-// would mask an alignment bug as a perpetual "closest"). FAIL-CLOSED: nothing here is caught; any
-// engine failure throws, and a row that cannot be displayed can never count as matched.
+// recovered-C candidate with agbcc, and score target-vs-candidate with @match-kit/scoring — the
+// same scorer the CLI and the benchmark use, never a hand-rolled asm/text compare.
 import { cBackend } from '@asmlift/core/backend/c';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { selfDeclaredContextFor } from '@asmlift/core/declare';
@@ -22,8 +10,8 @@ import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornV
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
+import { EngineFailedError, type MatchScore, type Scorer, type Target, createScorer } from '@match-kit/scoring';
 import { assemble, compileToObject } from 'agbcc';
-import type * as ObjdiffWasm from 'objdiff-wasm';
 
 import { toolFailureLine } from './candidate-compile';
 import type { EmittedProgress } from './rank-progress';
@@ -85,126 +73,20 @@ type RankProgressMessage = { kind: 'progress'; reqId: number } & EmittedProgress
  *  a property, which is how a fourth shape later gets silently mis-routed. */
 export type RankMessage = RankProgressMessage | RankResponse;
 
-export interface DiffBreakdown {
-  insert: number;
-  delete: number;
-  replace: number;
-  opMismatch: number;
-  argMismatch: number;
-}
-export interface MatchScore {
-  symbol: string;
-  score: number; // objdiff total differences; 0 = byte-exact match
-  match: boolean;
-  rows: number;
-  matching: number;
-  breakdown: DiffBreakdown;
-}
+export type { DiffBreakdown, MatchScore } from '@match-kit/scoring';
 
-// objdiff-wasm is a jco-transpiled WebAssembly Component: it fetches its sibling
-// `objdiff.core.wasm` via `new URL('./objdiff.core.wasm', import.meta.url)` and top-level-awaits
-// its init. In the browser (and a worker) `fetch` + `WebAssembly.compileStreaming` are native, and
-// Vite rewrites the URL to a hashed asset — so, unlike the Node cli, NO fetch patch is needed.
-let modPromise: Promise<typeof ObjdiffWasm> | null = null;
-function loadObjdiff(): Promise<typeof ObjdiffWasm> {
-  if (!modPromise) {
-    modPromise = import('objdiff-wasm').then((m) => {
-      try {
-        m.init('error');
-      } catch {
-        /* init() is idempotent-ish; ignore double-init */
-      }
-      return m;
-    });
-  }
-  return modPromise;
-}
+// one scorer per worker, loaded with its engine on first use
+let scorerPromise: Promise<Scorer> | null = null;
+const loadScorer = (): Promise<Scorer> => (scorerPromise ??= createScorer());
 
 /** Warm the wasm engines ahead of the first score (agbcc's two modules + objdiff). */
 export function preloadScorers(): void {
-  void loadObjdiff();
+  void loadScorer();
   void import('agbcc')
     .then((m) => m.preloadAgbcc())
     .catch(() => {
       /* warm-up only */
     });
-}
-
-const DIFF_KINDS: Record<string, keyof DiffBreakdown> = {
-  insert: 'insert',
-  delete: 'delete',
-  replace: 'replace',
-  'op-mismatch': 'opMismatch',
-  'arg-mismatch': 'argMismatch',
-};
-
-/** Diff `candidateObj` against `targetObj` for one symbol and tally objdiff's per-row diffKind.
- *  score === 0 ⇔ objdiff reports zero differing rows ⇔ byte-exact match. Throws when either object
- *  fails to parse, the symbol is missing on either side, the symbol has no rows, or any row fails
- *  to display — an error is NEVER a match. Verbatim port of packages/cli/src/objdiff.ts
- *  scoreObjects (bytes instead of file paths; async because the engine loads lazily) plus the
- *  audit's `rows > 0` guard. */
-export async function scoreObjectBytes(
-  targetObj: Uint8Array,
-  candidateObj: Uint8Array,
-  symbol: string,
-): Promise<MatchScore> {
-  const objdiff = await loadObjdiff();
-  const cfg = new objdiff.diff.DiffConfig();
-  const mappingConfig = { mappings: [], selectingLeft: undefined, selectingRight: undefined };
-
-  const target = objdiff.diff.Object.parse(targetObj, cfg, 'target');
-  const candidate = objdiff.diff.Object.parse(candidateObj, cfg, 'base');
-
-  // left = target, right = candidate (base).
-  const { left, right } = objdiff.diff.runDiff(target, candidate, cfg, mappingConfig);
-  if (!left || !right) {
-    throw new Error('objdiff runDiff returned an empty side');
-  }
-
-  const sym = (od: ObjdiffWasm.diff.ObjectDiff, side: string) => {
-    const s = od.findSymbol(symbol, undefined);
-    if (!s) {
-      throw new Error(`symbol '${symbol}' not found in ${side} object`);
-    }
-    return s;
-  };
-  const lSym = sym(left, 'target'),
-    rSym = sym(right, 'candidate');
-  const lDisp = objdiff.display.displaySymbol(left, lSym.id);
-  const rDisp = objdiff.display.displaySymbol(right, rSym.id);
-  const rows = Math.max(lDisp.rowCount, rDisp.rowCount);
-  // H2 guard (audit MINOR M-a): a degenerate 0-row symbol would fall through the loop with
-  // differences === 0 → a spurious "match". Not reachable for a real compiled body, but the
-  // duplicated copy hardens it explicitly — a symbol with no instructions is never a match.
-  if (rows === 0) {
-    throw new Error(`symbol '${symbol}' has no instruction rows to diff`);
-  }
-
-  const breakdown: DiffBreakdown = { insert: 0, delete: 0, replace: 0, opMismatch: 0, argMismatch: 0 };
-  let matching = 0,
-    differences = 0;
-
-  for (let row = 0; row < rows; row++) {
-    // Rows past a side's own rowCount are that side's padding for the other side's insertions —
-    // kind "none" here is a fact, not a swallowed error.
-    const kindOf = (od: ObjdiffWasm.diff.ObjectDiff, s: ObjdiffWasm.diff.SymbolInfo, disp: { rowCount: number }) =>
-      row >= disp.rowCount ? 'none' : (objdiff.display.displayInstructionRow(od, s.id, row, cfg).diffKind ?? 'none');
-    const lk = kindOf(left, lSym, lDisp);
-    const rk = kindOf(right, rSym, rDisp);
-    const kind = lk !== 'none' ? lk : rk;
-    if (kind === 'none') {
-      matching++;
-      continue;
-    }
-    differences++;
-    const bucket = DIFF_KINDS[kind];
-    if (bucket) {
-      breakdown[bucket]++;
-    }
-  }
-
-  return { symbol, rows, matching, score: differences, match: differences === 0, breakdown };
 }
 
 /** The async analog of the cli's `decompileRanked`, agbcc-only: enumerate the distinct candidate
@@ -290,6 +172,10 @@ export async function rankCandidatesInBrowser(
   // been 76 % wrong) — until a stillborn verdict says the rest will not be, whereupon it is the
   // number compiled, so the phase still ends on a full bar rather than a bar that stops short.
   let total = candidates.length;
+  // Parsed ONCE, before any compile: a target the engine cannot parse would fail every candidate
+  // alike, so it ends the ranking here.
+  const scorer = await loadScorer();
+  using parsedTarget: Target | null = total > 0 ? scorer.parseTarget(t.obj) : null;
   const score = async (i: number): Promise<void> => {
     const c = candidates[i];
     // `outcomes.size` is how many candidates are FINISHED, and the tick is emitted at the top so
@@ -310,8 +196,12 @@ export async function rankCandidatesInBrowser(
           ? new Error(failure)
           : new CompilerRejection(failure, cc.stderr);
       }
-      outcomes.set(c.source, await scoreObjectBytes(t.obj, cc.obj, name));
+      outcomes.set(c.source, scorer.score(parsedTarget!, cc.obj, name));
     } catch (e) {
+      // a dead engine fails every later score, so it ends the ranking
+      if (e instanceof EngineFailedError) {
+        throw e;
+      }
       outcomes.set(c.source, e instanceof Error ? e : new Error(String(e)));
     }
   };

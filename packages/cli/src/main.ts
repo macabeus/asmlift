@@ -53,15 +53,16 @@ import {
 } from './objfile';
 import { PhaseClock } from './phase';
 import { bakedBuild, sampleSourceTree, sourceStamp } from './provenance';
-// TYPE-ONLY, and it must stay that way: `./rank` pulls in objdiff-wasm, which this module loads
-// through a dynamic `import()` on the ranked path alone so a plain decompile stays toolchain-light.
+// TYPE-ONLY, and it must stay that way: `./rank` pulls in the objdiff engine (through `./score`),
+// which this module loads through a dynamic `import()` on the ranked path alone so a plain
+// decompile stays toolchain-light.
 // An `import type` is erased outright and adds no runtime edge.
 import type { RankedResult } from './rank';
 // Re-exported rather than defined here: `scoreOf` is the one renderer for every score any asmlift
 // command prints, and the benchmark's `bench fan` prints the same four lines. A second consumer
 // must be able to reach it without importing this argv entry point — and `./score` is no home for
-// it either, because that module pulls objdiff-wasm and the note above `./rank` is about exactly
-// that edge.
+// it either, because that module loads the objdiff engine and the note above `./rank` is about
+// exactly that edge.
 import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format';
 
 export { scoreOf } from './score-format';
@@ -756,8 +757,8 @@ export async function runCli(
   // --score-against: compile the output (and every ranked candidate) with the project's own
   // compiler command (decomp.yaml tools.asmlift.compiler — REQUIRED) and objdiff-score
   // against the given object. Inherently strict: candidates come from the strict tower, so a
-  // gap is a decline, never a scored stub. score.ts (objdiff-wasm) loads only on this path,
-  // keeping plain decompiles toolchain-light.
+  // gap is a decline, never a scored stub. score.ts (and the objdiff engine) loads only on this
+  // path, keeping plain decompiles toolchain-light.
   const scoreAgainst = flags.get('score-against') as string | undefined;
   // Candidate compiles are most of the CPU a ranked run charges, and independent of one another,
   // so --jobs runs n of them at once; what the split was on a given run is on its own `[phase]`

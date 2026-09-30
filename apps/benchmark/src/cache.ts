@@ -18,7 +18,6 @@
 // bypasses both (candcache.ts reads it), because "bypass the benchmark's caches" has to mean all
 // of them or bisecting a suspect row still reads candidate objects off disk.
 import type { DecompilerResult } from '@asmlift/bench-schema';
-import { objdiffVersion } from '@asmlift/cli/objdiff-version';
 import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { TargetDescription } from '@asmlift/core/target';
 import { extractAsmData, mipsObjdumpText, ppcObjdumpText, scopedForDump } from '@asmlift/toolchains';
@@ -30,6 +29,7 @@ import {
   TOOLCHAIN,
   mwccDir,
 } from '@asmlift/toolchains';
+import { OBJDIFF_VERSION } from '@match-kit/scoring';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
@@ -321,7 +321,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
       kind: 'm2c',
       markers: DECLINE_VOCABULARY,
       commit,
-      objdiff: objdiffVersion(),
+      objdiff: OBJDIFF_VERSION,
       tc: tcId,
       cflags,
       sym,

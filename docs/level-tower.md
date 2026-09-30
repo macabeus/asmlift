@@ -354,7 +354,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   [`test/signedness-variation.test.ts`](../packages/core/test/signedness-variation.test.ts). What IS removable is removed
   by OBSERVATION rather than prediction, and belongs in the scorer, not the enumerator: identical
   candidate objects have one score by definition, which is where
-  [`cli/src/objdiff.ts`](../packages/cli/src/objdiff.ts) collects the 20880 repeats.
+  `@match-kit/scoring/files`'s `scoreFiles` collects the 20880 repeats.
 
   **A PARAMETER'S POINTEE is refused one step earlier than that: the fact has no reader in the
   bytes.** Its one reader is a spelling — a call argument on a unit compiled as C++ is cast to its

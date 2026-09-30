@@ -23,7 +23,7 @@ import { type TargetDescription } from '@asmlift/core/target';
 import type { AsyncCandidateCompiler, CandidateCompiler as SyncCompiler } from './compile-command';
 import { renderDeclarations } from './declare';
 import { type PhaseClock, timed, timedAsync } from './phase';
-import { type CandidateCompiler, MatchScore, scoreObjects, scoreSource } from './score';
+import { type CandidateCompiler, EngineFailedError, MatchScore, scoreObjects, scoreSource } from './score';
 
 // The cli's candidate/result shapes are the core generics pinned to the objdiff MatchScore.
 export type RankedCandidate = Scored<MatchScore>;
@@ -138,21 +138,39 @@ export function decompileRanked(
       : opts.compile;
   let done = 0;
   let best: MatchScore | undefined;
+  // `rankBy` records every throw as a dropped candidate; a dead engine fails every later score, so
+  // it ends the ranking instead.
+  let engineFailure: unknown;
   try {
-    return rankBy(candidates, name, (source, symbol, cand) => {
+    const ranked = rankBy(candidates, name, (source, symbol, cand) => {
+      if (engineFailure) {
+        throw engineFailure;
+      }
       try {
         const s = timed(opts.clock, 'score', () =>
           scoreSource(source, symbol, targetObj, target, backend.id, compile, declarationsOf(cand)),
         );
         best = best === undefined || s.score < best.score ? s : best;
         return s;
+      } catch (e) {
+        if (e instanceof EngineFailedError) {
+          engineFailure = e;
+        }
+        throw e;
       } finally {
         // a candidate the scorer REFUSED still counts as processed: progress must not stall on a
         // variation whose every candidate fails to build
         opts.onProgress?.(++done, candidates.length, best);
       }
     });
+    if (engineFailure) {
+      throw engineFailure;
+    }
+    return ranked;
   } catch (e) {
+    if (engineFailure) {
+      throw engineFailure;
+    }
     // a stillborn fan (core stillborn.ts) ends the pass after the probes: the bar closes on what
     // was compiled rather than stopping short of a total nothing will reach
     if (e instanceof NoScorableCandidateError && e.notCompiled.length > 0) {
@@ -203,7 +221,12 @@ export async function decompileRankedParallel(
   let done = 0;
   let best: MatchScore | undefined;
   const workers = Array.from({ length: jobs }, () => opts.worker());
+  // as in `decompileRanked`, a dead engine ends the ranking
+  let engineFailure: unknown;
   const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
+    if (engineFailure) {
+      return;
+    }
     let result: MatchScore | Error;
     try {
       const obj = await timedAsync(clock, 'compile', () =>
@@ -212,6 +235,10 @@ export async function decompileRankedParallel(
       result = timed(clock, 'score', () => scoreObjects(targetObj, obj, name));
       best = best === undefined || result.score < best.score ? result : best;
     } catch (e) {
+      if (e instanceof EngineFailedError) {
+        engineFailure ??= e;
+        return;
+      }
       // recorded, not thrown: `rankBy` below is what decides whether a refused candidate is
       // survivable (a sibling scored) or fatal (every one failed)
       result = e instanceof Error ? e : new Error(String(e));
@@ -233,6 +260,9 @@ export async function decompileRankedParallel(
         }
       }),
     );
+    if (engineFailure) {
+      throw engineFailure;
+    }
   };
   const outcomeOf = (i: number): ProbeOutcome | undefined => {
     const r = scored.get(candidates[i].source);

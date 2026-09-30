@@ -43,8 +43,8 @@ export interface QualityScore {
   addrDeref: number; // `*(T*)0xADDR` absolute-address derefs — symbol recovery failed (counted, NOT score-penalized)
 }
 
-/** objdiff difference-kind tally (structurally mirrors packages/cli/src/objdiff.ts DiffBreakdown
- *  — spelled out here so this package does not depend on @asmlift/cli). */
+/** objdiff difference-kind tally (structurally mirrors @match-kit/scoring's DiffBreakdown — spelled
+ *  out here so this package does not depend on the scorer). */
 export interface DiffBreakdown {
   insert: number;
   delete: number;
