@@ -276,19 +276,29 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
       }
     }
   }
+  // Memoised per type and depth: a body whose members point at bodies is walked once per depth,
+  // not once per path to it — each pointer member lays its pointee out, and K of them to depth 8
+  // is K^8 walks.
+  const laidOut = new Map<string, AggregateLayout | undefined>();
   const layoutOf = (t: string, depth: number): AggregateLayout | undefined => {
     const bare = t
       .replace(/\b(?:const|volatile)\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+    const key = `${depth} ${bare}`;
+    if (laidOut.has(key)) {
+      return laidOut.get(key);
+    }
     const tag = /^(struct|union) [A-Za-z_]\w*$/.exec(bare);
     const kind = (tag?.[1] as AggregateLayout['kind'] | undefined) ?? named.get(bare)?.kind;
-    if (kind === undefined) {
-      return undefined;
+    let layout: AggregateLayout | undefined;
+    if (kind !== undefined) {
+      const body = tag ? tagged.get(bare) : named.get(bare)?.body;
+      const members = body === undefined ? undefined : readMembers(body, depth);
+      layout = members === undefined ? { kind } : { kind, members };
     }
-    const body = tag ? tagged.get(bare) : named.get(bare)?.body;
-    const members = body === undefined ? undefined : readMembers(body, depth);
-    return members === undefined ? { kind } : { kind, members };
+    laidOut.set(key, layout);
+    return layout;
   };
   // A body's members, or undefined when one of them is a type this cannot lay out — a float, an
   // enum, a project typedef that resolves to nothing sized, a nested aggregate with no body here, a

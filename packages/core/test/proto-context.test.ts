@@ -201,6 +201,13 @@ describe('prototypes from a declaration context', () => {
     expect(p.mknine?.returnLayout).toEqual({ kind: 'struct' });
   });
 
+  // each member points at the struct itself: laying out every pointee on every path is 9^8 walks
+  test('a struct whose members point back at it is laid out once per depth', () => {
+    const ptrs = Array.from({ length: 8 }, (_, i) => `struct Node *p${i};`).join(' ');
+    const p = prototypesFromContext(`struct Node { u32 v; ${ptrs} }; struct Node getnode(s32);`, 'c');
+    expect(p.getnode?.returnLayout?.members).toHaveLength(9);
+  });
+
   test('a struct return spelled in a way this cannot read still returns a struct', () => {
     const c = prototypesFromContext(
       'struct Blob64 { u32 w[16]; }; struct Blob64 EWRAM_FN makeblob(const void *); union U __attr mku(s32);',
