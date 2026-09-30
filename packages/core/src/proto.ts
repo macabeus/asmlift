@@ -753,6 +753,8 @@ export function symbolPrototype(info: SymbolInfo): FnProto | undefined {
  *
  * A caller-supplied proto always wins: it comes from the user's headers or the benchmark
  * manifest, and it is the thing a real user actually has for the function they are decompiling.
+ * The one fact it takes from the map is a struct return, and only when it says nothing of its own
+ * return (`statesNoReturn`).
  * The map fills the rest — in practice the CALLEES, since a function still written in assembly
  * has no signature in its project's ELF (see SymbolSignature).
  *
@@ -791,10 +793,18 @@ export function prototypesFromSymbols(symbols: SymbolMap | undefined, base: Prot
           out[info.name] = rest;
         }
       }
-      if (out[info.name] !== undefined) {
+      const signed = symbolPrototype(info);
+      const held = out[info.name];
+      if (held !== undefined) {
+        // AN ENTRY THAT SAYS NOTHING OF THE RETURN STILL TAKES THE MAP'S STRUCT RETURN, which is
+        // what says argument 0 may be a hidden pointer; without it that pointer is read as the
+        // first declared argument. A header whose return spelling this could not read (`Blob64T`,
+        // defined behind an `#include`) is such an entry too.
+        if (signed?.returnLayout !== undefined && statesNoReturn(held)) {
+          out[info.name] = { ...held, returnLayout: signed.returnLayout };
+        }
         continue;
       }
-      const signed = symbolPrototype(info);
       if (signed !== undefined) {
         out[info.name] = signed;
       }

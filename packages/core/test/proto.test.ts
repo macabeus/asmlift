@@ -387,6 +387,23 @@ describe('prototypesFromSymbols — the project DWARF fills in what the caller d
     expect(prototypesFromSymbols(map, { Callee: { params: 3 } })).toEqual({ Callee: { params: 3 } });
   });
 
+  // DWARF's signless 64-byte return is a struct (`symbolPrototype`), and an entry that says nothing
+  // of its return — a stated arity, or a header whose return spelling nothing here reads — does not
+  // contradict it; one that states a return does
+  test('an entry that says nothing of the return takes the map struct return', () => {
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'mk', { returns: { size: 64, signed: null }, params: [{ size: 4, signed: true }] }),
+    ]);
+    const layout = { returnLayout: { kind: 'struct' } };
+    expect(prototypesFromSymbols(map, { mk: { params: 1 } })).toEqual({ mk: { params: 1, ...layout } });
+    expect(prototypesFromSymbols(map, { mk: { params: ['s32'], returnsVoid: false } })).toEqual({
+      mk: { params: ['s32'], returnsVoid: false, ...layout },
+    });
+    expect(prototypesFromSymbols(map, { mk: { params: 1, returns: 's32' } })).toEqual({
+      mk: { params: 1, returns: 's32' },
+    });
+  });
+
   test('an unspellable parameter drops the WHOLE entry — a partial list would give a right arity with wrong widths', () => {
     const map: SymbolMap = new Map([
       codeAt(0x08001000, 'Odd', {

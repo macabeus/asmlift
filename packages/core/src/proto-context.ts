@@ -535,6 +535,13 @@ function readSignature(
   // that moves every argument one register up on a target that returns it through a hidden pointer.
   // A spelling that names one and reads as no type (`struct Blob64 EWRAM_FN`, a macro this never
   // expands) still returns one, and says nothing else about it.
+  //
+  // A spelling that reads as no type and names no aggregate states nothing, and the parameters are
+  // kept: in a vendored context that is a float, a double or an enum typedef, whose arguments sit
+  // where they are declared. KNOWN GAP: a typedef this never saw (`Blob64T`, defined behind an
+  // `#include` that `clean` blanks) may be a struct returned through memory, whose hidden pointer
+  // is then read as argument 0; a symbol map that sizes the return closes it
+  // (`prototypesFromSymbols`).
   const layout = declaredWidth(r) === undefined ? layoutOf(r) : undefined;
   const keyword = /\b(struct|union)\b/.exec(r);
   if (r === 'void') {
