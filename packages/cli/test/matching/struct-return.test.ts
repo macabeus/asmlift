@@ -18,6 +18,10 @@ struct S4 { u8 a, b, c, d; };
 struct S4 mk4(s32);
 struct S8 { u32 a, b; };
 struct S8 mk8r(s32, s32, s32, s32);
+typedef struct { u32 w[16]; } BlobT;
+BlobT makeblobt(const void *);
+struct Mix { u8 a; s16 w[2][3]; const u8 *p; };
+struct Mix mkmix(s32);
 struct W1 { u32 x; };
 struct W1 mkw(s32);
 extern void usei(s32);
@@ -48,6 +52,8 @@ describe('a call to a function returning a struct', () => {
     ['the storage above an outgoing stack argument', 'void f(s32 x, s32 y, s32 z, s32 w) { mk8r(x, y, z, w); }'],
     ['two calls, two stores', 'void f(s32 x, s32 y) { mk4(x); mk4(y); }'],
     ['two calls in two arms', 'void f(s32 x) { if (x) mk4(x); else makeblob(gBlob); }'],
+    ['a typedef name with no tag', 'void f(void) { BlobT b = makeblobt(gBlob); }'],
+    ['members of several widths, an array of arrays and a pointer', 'void f(s32 x) { mkmix(x); }'],
     // agbcc returns a one-member word in r0: no hidden pointer, no argument moves
     ['a struct returned in r0, discarded', 'void f(s32 x) { mkw(x); usei(x + 1); }'],
   ])('%s', (_label, src) => {

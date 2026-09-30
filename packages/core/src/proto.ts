@@ -1,3 +1,4 @@
+import type { IrType } from './ir/types';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
@@ -501,53 +502,26 @@ export function spellableType(t: ParamType): boolean {
  *  field into 175 real candidates' own translation units at a price nothing has measured — a
  *  different change, with a bench behind it, from the one this makes. `returns` states a return
  *  TYPE, nothing carries it yet, and a project that wants the prototype emitted spells it. */
-export function spellableProto(p: FnProto | undefined): SpelledProto | undefined {
-  const definition = p?.returns === undefined ? undefined : structDefinition(p.returns, p.returnLayout);
+export function spellableProto(
+  p: FnProto | undefined,
+  returned?: IrType,
+): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
+  // A struct returned through memory prints as the struct the lift typed its call as (`returned`),
+  // which the function's own source defines as it defines every struct type its IR carries
+  // (raise/structs.ts `collectStructs`). With no such call it is a return this cannot print.
+  const returns = returned?.kind === 'struct' ? `struct ${returned.name}` : p?.returns;
   if (
-    p?.returns === undefined ||
-    (definition === undefined && (!spellableType(p.returns) || declaredWidth(p.returns) === undefined))
+    p === undefined ||
+    returns === undefined ||
+    (returned === undefined && (!spellableType(returns) || declaredWidth(returns) === undefined))
   ) {
     return undefined;
   }
-  const extra = definition === undefined ? {} : { definition };
   if (p.params === 0) {
-    return { params: [], returns: p.returns, ...extra };
+    return { params: [], returns };
   }
   const printableParam = (t: ParamType): boolean => spellableType(t) && declaredWidth(t) !== undefined;
-  return Array.isArray(p.params) && p.params.every(printableParam)
-    ? { params: p.params, returns: p.returns, ...extra }
-    : undefined;
-}
-
-/** A callee prototype {@link spellableProto} can print. */
-export interface SpelledProto {
-  readonly params: readonly ParamType[];
-  readonly returns: ParamType;
-  /** the definition of the struct `returns` names, printed ahead of the prototype: a function
-   *  returning a struct by value cannot be declared, or called, against an incomplete one */
-  readonly definition?: string;
-}
-
-/** `struct Tag { … };` for a returned struct whose every member this can print — a spellable
- *  scalar or pointer, with its extents or bit width — or undefined. Only the `struct Tag` spelling:
- *  a typedef name, a union or a nested body is declared by nothing here, and a frame local of the
- *  type is declared `struct Tag` (structure.ts). */
-export function structDefinition(returns: ParamType, layout: AggregateLayout | undefined): string | undefined {
-  const tag = /^struct [A-Za-z_]\w*$/.exec(returns.trim().replace(/\s+/g, ' '))?.[0];
-  if (tag === undefined || layout?.kind !== 'struct' || layout.members === undefined) {
-    return undefined;
-  }
-  const members: string[] = [];
-  for (const m of layout.members) {
-    if (typeof m.type !== 'string' || !spellableType(m.type) || declaredWidth(m.type) === undefined) {
-      return undefined;
-    }
-    const pointer = m.type.trim().endsWith('*');
-    const declarator = `${pointer ? m.type.trim() : `${m.type.trim()} `}${m.name}`;
-    const extents = (m.dims ?? []).map((d) => `[${d}]`).join('');
-    members.push(`${declarator}${extents}${m.bits !== undefined ? ` : ${m.bits}` : ''};`);
-  }
-  return `${tag} { ${members.join(' ')} };`;
+  return Array.isArray(p.params) && p.params.every(printableParam) ? { params: p.params, returns } : undefined;
 }
 
 /** The bit width a declaration states its callee RETURNS, or `undefined` when it states nothing a

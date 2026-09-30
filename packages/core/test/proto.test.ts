@@ -5,6 +5,7 @@
 // number every frontend walks its argument registers by.
 import { describe, expect, test } from 'vitest';
 
+import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
 import {
@@ -187,44 +188,15 @@ describe('declaredReturnWidth', () => {
     expect(spellableProto({ params: 0, returns: 'long long' })).toEqual({ params: [], returns: 'long long' });
   });
 
-  // A struct return is printed with its definition, which is what a call returning it by value
-  // needs: `struct Tag` with members this can spell, and nothing else.
-  test('a struct return prints with its definition, or not at all', () => {
-    const members = [
-      { name: 'w', type: 'u32', dims: [4, 2] },
-      { name: 'p', type: 'u8 *' },
-      { name: 'f', type: 'u32', bits: 3 },
-    ];
-    expect(spellableProto({ params: ['s32'], returns: 'struct S', returnLayout: { kind: 'struct', members } })).toEqual(
-      {
-        params: ['s32'],
-        returns: 'struct S',
-        definition: 'struct S { u32 w[4][2]; u8 *p; u32 f : 3; };',
-      },
-    );
-    expect(declaredReturnWidth({ params: [], returns: 'struct S', returnLayout: { kind: 'struct', members } })).toBe(
-      undefined,
-    );
-    for (const p of [
-      { params: [], returns: 'S', returnLayout: { kind: 'struct' as const, members } },
-      { params: [], returns: 'struct S', returnLayout: { kind: 'struct' as const } },
-      { params: [], returns: 'union S', returnLayout: { kind: 'union' as const, members } },
-      {
-        params: [],
-        returns: 'struct S',
-        returnLayout: { kind: 'struct' as const, members: [{ name: 'x', type: 'Fixed' }] },
-      },
-      {
-        params: [],
-        returns: 'struct S',
-        returnLayout: {
-          kind: 'struct' as const,
-          members: [{ name: 'in', type: { kind: 'struct' as const, members } }],
-        },
-      },
-    ]) {
-      expect(spellableProto(p)).toBeUndefined();
-    }
+  // A struct return prints only as the struct a lifted call fills (`returned`, the IR type the lift
+  // laid it out as, which the function's own source defines).
+  test('a struct return prints as the struct its call fills, or not at all', () => {
+    const p = { params: ['s32'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };
+    const returned = T.struct('Blob', [{ off: 0, type: T.array(T.u(32), 16), name: 'w' }], 64);
+    expect(spellableProto(p, returned)).toEqual({ params: ['s32'], returns: 'struct Blob' });
+    expect(spellableProto(p)).toBeUndefined();
+    expect(spellableProto({ params: [], returns: 'struct S' })).toBeUndefined();
+    expect(declaredReturnWidth(p)).toBeUndefined();
   });
 
   // `returnsVoid` IS NOT CONSULTED. It is the other return key and it answers a different

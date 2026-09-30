@@ -43,6 +43,25 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('sp0 = makeblob(&gBlob);');
   });
 
+  // `typedef struct { u32 w[16]; } Blob64;` names no tag: the local is declared by the typedef name,
+  // as the tag of a struct the candidate defines
+  test('a typedef name is the tag the local is declared with', () => {
+    const named = { ...makeblob, returns: 'Blob64' };
+    const { source } = decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: named } });
+    expect(source).toContain('struct Blob64 sp0;');
+    expect(source).toContain('sp0 = makeblob(&gBlob);');
+  });
+
+  test('a union, or a struct with a member the IR cannot type, declines', () => {
+    const union = { ...makeblob, returns: 'union U', returnLayout: { ...BLOB64, kind: 'union' as const } };
+    const nested = { ...makeblob, returnLayout: { kind: 'struct' as const, members: [{ name: 'in', type: BLOB64 }] } };
+    for (const p of [union, nested]) {
+      expect(() => decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: p } })).toThrow(
+        /the local it lands in has no type here/,
+      );
+    }
+  });
+
   test('every argument reads one register up, and each call fills its own local', () => {
     const { source } = decompile('u3', U3, ARMV4T_AGBCC, { prototypes: { mk4 } });
     expect(source).toContain('sp0 = mk4(a0);');
@@ -78,11 +97,6 @@ describe('a callee declared to return a struct or union by value', () => {
     const typedefd = { params: ['const void *'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };
     expect(() => decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob: typedefd } })).toThrow(
       /`makeblob` is declared to return Blob by value/,
-    );
-    // a typedef name has no definition to print into the candidate
-    const named = { ...makeblob, returns: 'Blob64', returnLayout: BLOB64 };
-    expect(() => decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: named } })).toThrow(
-      /its declaration cannot be printed into the candidate/,
     );
     // Told only an arity, nothing separates the pointer from an argument: `gBlob` is dropped. The
     // declaration is the whole of the fix.

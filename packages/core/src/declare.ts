@@ -161,11 +161,6 @@ export function renderDeclarations(refs: SymbolRef[]): string {
     // parameterless list is spelled `(void)`, never `()`, because `()` declares nothing about
     // the arguments and gcc-2.9 then promotes them.
     if (proto !== undefined) {
-      const tag = proto.definition === undefined ? undefined : proto.returns.trim().replace(/^struct\s+/, '');
-      if (tag !== undefined && !declaredTags.has(tag)) {
-        declaredTags.add(tag);
-        lines.push(proto.definition!);
-      }
       lines.push(`${proto.returns} ${name}(${proto.params.length > 0 ? proto.params.join(', ') : 'void'});`);
       continue;
     }

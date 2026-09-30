@@ -16,7 +16,8 @@
 // to recompute it (a dead-store DCE that drops a tree's only reference would otherwise leave a
 // stale ref, transitively reintroducing the hazards the collector excludes). Deriving at the
 // consumption point makes staleness impossible by construction.
-import { type Prototypes, type SpelledProto, spellableProto } from '../proto';
+import type { IrType } from '../ir/types';
+import { type ParamType, type Prototypes, spellableProto } from '../proto';
 import type { SymbolInfo } from '../symbols';
 import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
 
@@ -54,7 +55,7 @@ export interface SymbolRef {
    *  something other than code — two facts that disagree are not one fact — and that subtraction
    *  happens at the table (`proto.ts` `prototypesFromSymbols`), so the frontend loses the same
    *  fact in the same place rather than acting on one this withheld. */
-  proto?: SpelledProto;
+  proto?: { readonly params: readonly ParamType[]; readonly returns: ParamType };
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -88,11 +89,16 @@ export function collectSymbolRefs(
   onRefused?: (name: string, reason: 'call-target' | 'self-name') => void,
 ): SymbolRef[] {
   const called = new Set<string>();
+  // the struct a callee returns through memory, as the lift typed it
+  const returned = new Map<string, IrType>();
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
     if (e.k === 'call') {
       called.add(e.fn);
+      if (e.sret !== undefined) {
+        returned.set(e.fn, e.sret);
+      }
     } else if (named !== undefined && symbols.has(named)) {
       valueRefs.add(named);
     }
@@ -118,7 +124,7 @@ export function collectSymbolRefs(
     // function, and `proto.ts` `prototypesFromSymbols` has already taken the `returns` off such an
     // entry, so what arrives here states no printable prototype and the frontend read the call the
     // same way. Testing it a second time at this reader is what let the two answer differently.
-    const p = Object.hasOwn(prototypes, n) ? spellableProto(prototypes[n]) : undefined;
+    const p = Object.hasOwn(prototypes, n) ? spellableProto(prototypes[n], returned.get(n)) : undefined;
     if (p !== undefined) {
       proto.set(n, p);
     }

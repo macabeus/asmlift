@@ -12,7 +12,7 @@
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
-import { T } from '../ir/types';
+import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import { type Prototypes, returnsWithoutHiddenPointer } from '../proto';
 import type { SymbolMap } from '../symbols';
@@ -728,7 +728,7 @@ export function auditFrameObjects({
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
-              if (idx === 0 && typeof op.attrs.sret === 'string') {
+              if (idx === 0 && op.attrs.sret === true) {
                 (returnTemps.get(off) ?? returnTemps.set(off, []).get(off)!).push(op);
               } else if (idx === 0) {
                 const t = op.attrs.target;
@@ -811,7 +811,7 @@ export function auditFrameObjects({
       // a callee handed only its own return storage writes the struct it returns and nothing else
       const temps = returnTemps.get(off);
       if (temps !== undefined && uses.get(off) === temps.length) {
-        return { lo: 0, hi: temps[0].attrs.sretSize as number, why: 'that returns its struct into it' };
+        return { lo: 0, hi: returnedSize(temps[0]), why: 'that returns its struct into it' };
       }
       const control = target.capabilities.readSourceControl;
       const stores = sourceStores.get(off);
@@ -1353,7 +1353,7 @@ export function auditFrameObjects({
     // refusals here go through `shapeRefused`, for the same reason.
     const extent = new Map<number, { width: number; count: number }>();
     // the declared struct each return temp is, by offset
-    const aggregateAt = new Map<number, string>();
+    const aggregateAt = new Map<number, IrType>();
     const overSlot: [number, number][] = [];
     const slotKeys = (off: number, width: number): boolean =>
       [...usedSlotOffsets].some((slot) => overlaps(off, width, slot, 4));
@@ -1364,8 +1364,9 @@ export function auditFrameObjects({
         // The callee writes the whole struct and this function names it once, as the call's
         // destination. A read of a member, or any other use of the address, is not modelled yet.
         const callee = temps[0].attrs.target as string;
-        const [spelling, size] = [temps[0].attrs.sret as string, temps[0].attrs.sretSize as number];
-        if (temps.some((t) => t.attrs.sret !== spelling)) {
+        const type = temps[0].results[0].type;
+        const spelling = `struct ${typeToString(type)}`;
+        if (temps.some((t) => !typeEquals(t.results[0].type, type))) {
           fail(`the object at [sp,#${off}) is the struct-return storage of calls declared to return different types`);
         }
         if (acc.length > 0 || byIndex.length > 0) {
@@ -1380,8 +1381,8 @@ export function auditFrameObjects({
               'another way — only the call it is returned by is modelled',
           );
         }
-        extent.set(off, { width: 1, count: size });
-        aggregateAt.set(off, spelling);
+        extent.set(off, { width: 1, count: returnedSize(temps[0]) });
+        aggregateAt.set(off, type);
         continue;
       }
       if (acc.length === 0) {
@@ -1629,6 +1630,7 @@ export function auditFrameObjects({
     for (const [off, ops] of objects) {
       const { width, count } = extent.get(off)!;
       const signed = accesses.get(off)!.some((a) => a.signed);
+      const aggregate = aggregateAt.get(off);
       for (const op of ops) {
         op.attrs = {
           ...op.attrs,
@@ -1636,13 +1638,27 @@ export function auditFrameObjects({
           signed,
           count,
           ...(published.has(off) ? { volatile: true } : {}),
-          ...(aggregateAt.has(off) ? { aggregate: aggregateAt.get(off)! } : {}),
+          ...(aggregate !== undefined ? { aggregate: true } : {}),
         };
+        // a return temp's address points at the struct the call returns
+        if (aggregate !== undefined) {
+          op.results[0].type = T.ptr(aggregate);
+        }
       }
     }
     pinDeviceAccesses((op, blk, at) => op.opcode === 'load' || overwritten(op, blk, at));
   }
   return undefined;
+}
+
+/** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/thumb.ts
+ *  types the call's result as that struct). */
+function returnedSize(call: Op): number {
+  const t = call.results[0].type;
+  if (t.kind !== 'struct' || t.size === undefined) {
+    throw new Error(`a call stamped sret returns ${typeToString(t)}, not a laid-out struct`);
+  }
+  return t.size;
 }
 
 /** THE CALLER-SIDE SEAM. A frontend calls the audit THROUGH this record rather than through the

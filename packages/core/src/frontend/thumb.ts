@@ -18,10 +18,10 @@
 // incoming stack argument at `[sp, #N]` locatable at all. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
-import { aggregateSize, returnedAggregate, returnsInMemory } from '../aggregate';
+import { aggregateType, returnedAggregate, returnsInMemory } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { T } from '../ir/types';
+import { type IrType, T, typeToString } from '../ir/types';
 import {
   type FnProto,
   type Prototypes,
@@ -30,7 +30,6 @@ import {
   declaredReturnWidth,
   declaresAggregateReturn,
   declaresParams,
-  spellableProto,
   wordsOf,
 } from '../proto';
 import { type RuntimeHelper, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
@@ -2380,10 +2379,9 @@ function recoverJumpTable(
   return { scrutReg, caseLabels, defaultLabel };
 }
 
-/** A call's struct return through memory: the declared type, and its size on this target. */
+/** A call's struct return through memory: the declared struct, laid out on this target. */
 interface StructReturn {
-  spelling: string;
-  size: number;
+  type: IrType;
 }
 
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
@@ -3610,17 +3608,24 @@ function liftOnce(
     if (inMemory === false) {
       return 'register';
     }
-    const size = aggregateSize(layout, target)?.size;
-    if (size === undefined) {
-      refuse('its size is not known');
+    // the local it lands in is declared `struct Tag`, and a typedef name is that tag too
+    const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(
+      (own.returns ?? '')
+        .replace(/\b(?:const|volatile)\b/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' '),
+    )?.[1];
+    if (tag === undefined) {
+      refuse('it names no type a local of it could be declared with');
     }
-    if (spellableProto(own)?.definition === undefined) {
+    const type = aggregateType(tag!, layout, target);
+    if (type === undefined) {
       refuse(
-        'its declaration cannot be printed into the candidate — a `struct Tag` of spellable members and a list of ' +
-          'spellable parameter types can',
+        'it is a union, or one of its members is not a scalar, a pointer or an array of one (a nested struct or ' +
+          'union, a bitfield, a plain `char`) — the local it lands in has no type here',
       );
     }
-    return { spelling: own.returns!.trim(), size: size! };
+    return { type: type! };
   };
   const declaredCall = (
     callee: string,
@@ -4731,17 +4736,14 @@ function liftOnce(
               }
             }
           }
-          const res = mkValue(T.unk(returnsPair ? 64 : 32));
+          // a struct returned through memory is the call's value, and argument 0 is where it lands
           const returned = declared?.returned;
+          const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
+          const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
           const callOp = mkOp('call', {
             operands: args,
             results: [res],
-            attrs: {
-              target: targetSym,
-              ...(returned === undefined || returned === 'register'
-                ? {}
-                : { sret: returned.spelling, sretSize: returned.size }),
-            },
+            attrs: { target: targetSym, ...(sret === undefined ? {} : { sret: true }) },
           });
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
@@ -4914,9 +4916,9 @@ function liftOnce(
     irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
   );
   for (const op of irBlocks.flatMap((b) => b.ops)) {
-    if (op.opcode === 'call' && typeof op.attrs.sret === 'string' && !laddrs.has(op.operands[0])) {
+    if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': \`${op.attrs.target as string}\` returns ${op.attrs.sret} through the pointer in r0, ` +
+        `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in r0, ` +
           'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
           'through a pointer is not modelled',
       );

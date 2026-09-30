@@ -4,7 +4,8 @@
 // and mwcc at the synthetic tier's.
 import { describe, expect, test } from 'vitest';
 
-import { aggregateSize, returnsInMemory } from '../src/aggregate';
+import { aggregateSize, aggregateType, returnsInMemory } from '../src/aggregate';
+import { T } from '../src/ir/types';
 import type { AggregateLayout, AggregateMember } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -76,4 +77,30 @@ describe('mwcc (8 bytes or less in r3/r3:r4)', () => {
 test('a target that states no rule answers nothing', () => {
   const unstated = { ...PPC_MWCC, compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, aggregateReturn: undefined } };
   expect(returnsInMemory(struct(m('w', 'u32', { dims: [16] })), unstated)).toBeUndefined();
+});
+
+// The struct a local of the returned type is declared as: every member a field at its offset
+test('a declared struct lays out as an IR struct, or not at all', () => {
+  const s = struct(m('a', 'u8'), m('w', 's16', { dims: [2, 3] }), m('p', 'const u8 *'), m('o', 'struct Opaque *'));
+  expect(aggregateType('S', s, ARMV4T_AGBCC)).toEqual(
+    T.struct(
+      'S',
+      [
+        { off: 0, type: T.u(8), name: 'a' },
+        { off: 2, type: T.array(T.array(T.s(16), 3), 2), name: 'w' },
+        { off: 16, type: T.ptr(T.u(8)), name: 'p' },
+        { off: 20, type: T.ptr(T.void()), name: 'o' },
+      ],
+      24,
+    ),
+  );
+  for (const layout of [
+    union(m('a', 'u32')),
+    struct(m('a', 'u32', { bits: 3 })),
+    struct(m('in', struct(m('a', 'u8')))),
+    struct(m('c', 'char')),
+    { kind: 'struct' as const },
+  ]) {
+    expect(aggregateType('S', layout, ARMV4T_AGBCC)).toBeUndefined();
+  }
 });
