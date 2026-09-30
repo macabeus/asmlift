@@ -770,6 +770,64 @@ fixed so the output is deterministic (`fpuArgSlots`). A declaration decides them
 backend reads one (`bindSpecParams`): in C, a project context declaring a float ahead of an integer
 makes the fixed int-first spelling a redeclaration the compiler refuses.
 
+## A struct returned by value, across the tower
+
+The one call whose first argument the caller did not write for the callee to read. Where a
+compiler returns a struct through memory, the caller passes the storage's address as a hidden
+argument 0 and every declared argument moves one register up — so a lift that reads the declared
+parameters from the argument registers names the pointer as the first of them, and drops the last.
+
+**Whether it goes through memory is the target's, and it is DATA.** agbcc puts a struct there when
+it is wider than a word or has a second member that is not a bitfield (thumb.c:1423-1493), passes
+the address in r0 and shifts the arguments (thumb.h:644-645, 672); mwcc hands back up to eight
+bytes in r3/r3:r4 and passes a pointer in r3 past that. `compilerBehaviors.aggregateReturn`,
+`aggregateBoundary` and `largestAlignment` state it, with `enumBytes` and `bitfieldPacking` for the
+members whose size or place is the compiler's (agbcc states both; a float is 4 bytes and a double 8
+everywhere, a storage size that is not `declaredWidth`'s register count). `aggregate.ts` is the one
+reading of them: `returnsInMemory`, asked by the call lowering, and `returnsWithoutHiddenPointer`,
+asked by the frame-object audit, so the two cannot disagree about one call.
+
+**Whether a callee returns a struct at all is a declaration**, never an inference: the
+out-parameter call `add sp,#-4 / mov r0,sp / bl f` and the struct return are the same instructions,
+and a register count cannot tell them apart (frontend/frame-objects.ts says why). `FnProto.returns`
+and `returnLayout` state it — from a context's declaration and the struct it defines, from a
+symbol map by size alone (a layout with no members), or from `--proto`.
+
+**L1 — the call's value is the struct.** A memory return types the call's result as the declared
+struct, laid out on the target (`aggregateType`), with a field for each member the IR can type and
+none for the rest (a nested aggregate, a bitfield, an enum, a plain `char`); `attrs.sret` says
+argument 0 is where it lands; the frame temp's `laddr` is a pointer to it. A register return keeps
+the declared arguments where they are and writes no value: its bytes are a struct, so the return
+register is listed as destroyed, a read of it refuses, and a guessed arity after the call does not
+take it.
+
+**L3 and the backend.** The structurer stamps the call (`Expr` `call.sret`, as it stamps
+`wide64`), and the temp is a local declared with the headers' own spelling of the type:
+`struct Blob64 sp0; sp0 = makeblob(&gBlob);`, or `BlobT sp0;` for a tagless typedef. The struct is
+the headers' type (`ir/types.ts` `declared`), so the lifted source never defines it: the
+declarations block does, beside the callee's prototype, transcribed from the declaration's own
+members rather than from the IR's fields (declare.ts `declaredStructDecl`), and a candidate compiled
+inside the project's headers drops that block.
+
+**What refuses, and why each refusal is where it is.**
+
+| level       | refusal                                                                                                               | because                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| frontend    | a declared struct return whose members are not all known or not sized on this target, or a target that states no rule | where the pointer goes decides where every argument is read from     |
+| frontend    | a memory return whose parameters nothing sizes                                                                        | a guessed arity reads from argument 0, which holds the pointer       |
+| frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
+| frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
+| frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
+| frame audit | a read, a write or any other use of the return temp                                                                   | a member of a returned struct is not modelled                        |
+| frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
+
+**What is NOT built.** Member reads of a returned struct: most of them decline in the Thumb slot
+model (`stack pointer used as data`) before the frame audit is asked, so building them in
+frame-objects.ts alone reaches few of the shapes. A struct returned straight into a global. MIPS,
+which models no call. A symbol map states a signless return of a word or less as nothing, since it
+is an enum as often as a struct; and a context return spelled by a typedef the reader never saw
+keeps its parameters.
+
 ## The contracts are the point
 
 The reason the levels earn their keep is not that the graph changes shape between them — it is

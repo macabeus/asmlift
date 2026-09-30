@@ -40,6 +40,8 @@
 //     Others are read off the target directly by a consumer that is not the structurer — among
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
+//     `aggregateReturn`, `largestAlignment`, `enumBytes` and `bitfieldPacking` (aggregate.ts, for
+//     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
@@ -572,6 +574,43 @@ export interface TargetDescription {
     // value is safe to assume, since one too small mislays the fields after it on agbcc and one too
     // large drops the pad in front of them everywhere else.
     aggregateBoundary?: number;
+    // The largest alignment any member of a struct takes, in bytes (BIGGEST_ALIGNMENT): agbcc 4,
+    // thumb.h:358, so a `long long` member sits at a word. With `aggregateBoundary` it is what sizes
+    // a declared aggregate (`aggregate.ts`). ABSENT ⇒ unmeasured, and no aggregate is sized.
+    largestAlignment?: number;
+    // HOW A STRUCT OR UNION RETURNED BY VALUE COMES BACK, which decides whether a call to a function
+    // declared to return one hands it a hidden pointer as argument 0 and moves every declared
+    // argument one register up (`aggregate.ts` `returnsInMemory`, read by frontend/thumb.ts and
+    // frontend/ppc.ts).
+    //   • 'apcs' — in memory when bigger than a word, when a struct has a second member that is not
+    //     a bitfield, or when a union has a member that would be; in the return register otherwise.
+    //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,
+    //     `{u32 a:8; u32 b:8;}` and `union {u32; u16;}` in r0).
+    //   • 'svr4' — in r3, or r3:r4, when it is 8 bytes or less, whatever its members (a float's
+    //     included); in memory otherwise. mwcc_242_81, mwcc_233_163n and mwcc_247_107 alike
+    //     (compiled: 1 to 8 bytes, `{float}`, `{double}` and a union come back in r3/r3:r4; a 9- and a
+    //     12-byte struct are handed `addi r3,…` ahead of the call).
+    // ABSENT ⇒ unmeasured, and such a call declines. IDO 7.1 returns every aggregate through memory,
+    // a one-word one included (compiled: `struct {u32 x;} mkw(s32)` is called `addiu a0,sp,28 / jal
+    // mkw / lw v0,28(sp)`), and states nothing: the MIPS frontend lowers no call to read it.
+    aggregateReturn?: 'apcs' | 'svr4';
+    // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
+    // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
+    // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
+    // and `enum {B0 = 300}` are both 4. `targetFor` drops it under `-fshort-enums`, and an enum
+    // declared with an attribute (`packed`), or with a value an int cannot hold, is not sized
+    // (proto-context.ts). ABSENT ⇒ unmeasured,
+    // and an aggregate with an enum member is not sized.
+    enumBytes?: number;
+    // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
+    // one before, straddling a byte or a word of its declared type, with the next member that is not
+    // a bitfield at the first byte past it that its alignment allows. agbcc: thumb.h defines no
+    // PCC_BITFIELD_TYPE_MATTERS, so stor-layout.c:404-405 lays a bitfield at bit alignment and
+    // skips the no-straddle rule of :462-481 (compiled: `{u32 a:20; u32 b:20; u8 c;}` puts `c` at
+    // 5, `{u32 a:31; u32 b:31; u32 c:2;}` is 8 bytes, `{u8 a:5; u8 b:5; u8 c;}` puts `c` at 2). A
+    // zero-width bitfield, which moves the next member to EMPTY_FIELD_BOUNDARY, is not placed.
+    // ABSENT ⇒ unmeasured, and an aggregate with a bitfield is not sized.
+    bitfieldPacking?: 'contiguous';
     // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
     // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
     // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
@@ -673,6 +712,10 @@ export const ARMV4T_AGBCC: TargetDescription = {
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
     aggregateBoundary: 4,
+    largestAlignment: 4,
+    aggregateReturn: 'apcs',
+    enumBytes: 4,
+    bitfieldPacking: 'contiguous',
     // agbcc 2.9 (gcc/varasm.c `assemble_variable`, gcc/thumb.h): an array takes its element's
     // alignment (no DATA_ALIGNMENT); a declaration initialized by a STRING_CST is word-aligned —
     // CONSTANT_ALIGNMENT (thumb.h:361) over DECL_INITIAL (varasm.c:1214-1216), so
@@ -924,6 +967,10 @@ export const PPC_MWCC: TargetDescription = {
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
     aggregateBoundary: 1,
+    // MEASURED on all three builds: `struct {u8 a; double d;}` and its `long long` twin put the
+    // member at 8 and size 16
+    largestAlignment: 8,
+    aggregateReturn: 'svr4',
     // MEASURED on mwcc_242_81 through the `.comment` alignment record: an array or a struct is at
     // 4 at least (`u8[1]`, a struct of two bytes), a scalar at its width; a string-literal
     // initializer gets no more than the array does (`char s[] = "hello!"` and a `u8` list both 4);
@@ -1085,7 +1132,7 @@ export interface ResolvedTarget {
   toolchain: ToolchainId;
   /** the flags the function's target and every candidate compile with */
   cflags: readonly string[];
-  /** the description asmlift decompiles against: the toolchain's, at every flag set */
+  /** the description asmlift decompiles against: the toolchain's, less a fact a flag changes */
   target: TargetDescription;
   /** what the flags make the compiler do */
   profile: CodegenProfile;
@@ -1097,7 +1144,14 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   const t: ToolchainTarget = TOOLCHAIN_TARGETS[toolchain];
   const profile = parseFlags(t.family, cflags);
   const cpp = dialectOf(profile.slots.lang) === 'c++';
-  return { toolchain, cflags, target: cpp ? { ...t.description, dialect: 'c++' } : t.description, profile };
+  let target: TargetDescription = cpp ? { ...t.description, dialect: 'c++' } : t.description;
+  if (profile.slots['-fshort-enums'] === 'on') {
+    // every enum is the smallest integer its values fit (c-decl.c:6064-6065, :6123; compiled,
+    // `sizeof(struct {enum {K0, K1} k[2];})` is 4 under the flag and 8 without), so none is enumBytes
+    const { enumBytes: _flagged, ...behaviors } = target.compilerBehaviors;
+    target = { ...target, compilerBehaviors: behaviors };
+  }
+  return { toolchain, cflags, target, profile };
 }
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every

@@ -245,3 +245,30 @@ test('two struct refs sharing a tag declare it once; overlapping (union) members
   ]);
   expect(out).toBe('struct Shared { u32 x; };\nextern struct Shared gA;\nextern struct Shared gB;\n');
 });
+
+// A struct a callee returns through memory is the headers' type, and a map-declared global of the
+// same tag is too: the block defines the tag once, whichever reference comes first
+test('a returned struct and a global of its tag share one definition', () => {
+  const returned = {
+    name: 'Blob64',
+    declared: 'Blob64',
+    layout: { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] },
+  };
+  const out = renderDeclarations([
+    ref('gSrc', {
+      kind: 'data',
+      shape: 'struct',
+      structName: 'Blob64',
+      size: 64,
+      layout: [{ name: 'w', offset: 0, size: 64, elemSize: 4, signed: false }],
+    }),
+    {
+      name: 'makeblob',
+      info: { name: 'makeblob', kind: 'code' },
+      proto: { params: ['const void *'], returns: 'Blob64' },
+      returned,
+    },
+  ]);
+  expect(out.match(/struct Blob64 \{/g)).toHaveLength(1);
+  expect(out).toContain('typedef struct Blob64 Blob64;\nBlob64 makeblob(const void *);\n');
+});

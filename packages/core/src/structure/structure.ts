@@ -251,6 +251,11 @@ function spellsAccessType(declared: boolean | undefined, width: number, signed: 
  *  no access pins an element type there, so the audit stamps bytes and this declares the array
  *  that spells them. Both arms are the audit's own facts; neither infers anything here. */
 function laddrType(op: Op): IrType {
+  // a call's struct-return storage: the audit typed its address as a pointer to that struct
+  const t = op.results[0].type;
+  if (op.attrs.aggregate === true && t.kind === 'ptr') {
+    return t.to;
+  }
   const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
   const count = op.attrs.count as number;
   return count === 1 ? elem : T.array(elem, count);
@@ -4243,6 +4248,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         fn: d.attrs.target as string,
         args: d.operands.map(e),
         ...(wide64 ? { wide64: true as const } : {}),
+        ...(d.attrs.sret === true ? { sret: d.results[0].type } : {}),
       };
     }
     if (d.opcode === 'laddr') {

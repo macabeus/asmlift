@@ -1,3 +1,4 @@
+import type { IrType } from './ir/types';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
@@ -77,6 +78,39 @@ export interface FnProto {
    *  `typeSpelling` sizes 1, 2 and 4 bytes, so a DWARF-derived entry could only ever spell a return
    *  that already fits a register, where the field changes nothing. */
   returns?: ParamType;
+  /** The declared return is a struct or union handed back BY VALUE. A caller that calls such a
+   *  function may be handing it a hidden pointer to the storage the return lands in, in argument 0
+   *  (agbcc thumb.h:672 STRUCT_VALUE_REGNUM 0), with every declared argument one register up
+   *  (thumb.h:644-645) — so the declared `params` do not say which registers the call reads, and a
+   *  lift that reads them from r0 names the hidden pointer as the first argument. A `returns` that
+   *  spells `struct Tag` or `union Tag` states the same fact ({@link declaresAggregateReturn});
+   *  this key also says it of a typedef name, which spells no keyword, and carries the members
+   *  whose layout decides whether the target returns it through memory at all (`aggregate.ts`). */
+  returnLayout?: AggregateLayout;
+}
+
+/** A struct or union a declaration spells: what it is, and its members as the header lists them.
+ *  No offset or size is stored, because both are the TARGET's — agbcc rounds every struct and
+ *  union to a word (thumb.h:367 STRUCTURE_SIZE_BOUNDARY 32) where mwcc does not — and are computed
+ *  where a target is in hand (`aggregate.ts`). */
+export interface AggregateLayout {
+  kind: 'struct' | 'union';
+  /** every member in declaration order; absent when one of them could not be read, which leaves
+   *  the aggregate known to exist and nothing known about its shape */
+  members?: AggregateMember[];
+}
+
+/** One member of an {@link AggregateLayout}. */
+export interface AggregateMember {
+  /** empty only for an unnamed bitfield, which pads */
+  name: string;
+  /** a scalar or pointer type as C spells it (`u32`, `float`, `u8 *`), an enum as `enum` and its
+   *  name, or a nested struct or union */
+  type: ParamType | AggregateLayout;
+  /** an array member's extents, outermost first */
+  dims?: number[];
+  /** a bitfield's width in bits */
+  bits?: number;
 }
 
 /** symbol → prototype. The function under decompilation and its callees share one table. */
@@ -181,7 +215,7 @@ interface StandardSignature extends FnProto {
  *  usually the same number the arg-register heuristic already guessed, so an entry moves no code.
  *  What it moves is what is KNOWN — a guess cannot witness anything, and an entry can. The
  *  frame-object audit reads the `returns` of one to rule out a hidden struct-return pointer
- *  (`returnsWithoutHiddenPointer`, consumed in frontend/thumb.ts).
+ *  (`aggregate.ts` `returnsWithoutHiddenPointer`, asked by frontend/frame-objects.ts).
  *
  *  THE LIST IS SHORT ON PURPOSE. `memcpy` is here because a corpus row exercises it and its price
  *  was measured. `memset`, `strcpy` and the rest of the standard library are equally fixed by the
@@ -208,49 +242,24 @@ export function declaresVoidReturn(p: FnProto | undefined): boolean {
   return p?.returnsVoid === true || p?.returns?.trim() === 'void';
 }
 
-/** Whether a call to `callee` is KNOWN not to be handed a hidden struct-return pointer in
- *  argument 0. A callee that returns nothing has no such pointer to be given; neither has one
- *  whose return travels in a register. Every other answer — including silence — is `false`,
- *  because this is a fact a caller must be TOLD: the two frames are the same instructions in the
- *  same order, so there is nothing in the assembly to read it off.
- *
- *  A RETURN WIDER THAN A REGISTER STILL TRAVELS IN REGISTERS — it travels in a PAIR, which is
- *  still not a hidden pointer the caller supplied — so `declaredWidth` answering 64 is the right
- *  answer here rather than a width that slipped through a test meant for words. Nothing reaches
- *  it: `STANDARD_SIGNATURES` has one entry and it returns `void *`.
- *
- *  TWO SOURCES AND NEITHER RANKS ABOVE THE OTHER, because on this one question they cannot
- *  disagree: `returnsVoid` from the project's own headers, and the `returns` of a signature the C
- *  standard fixes, which is as known as its parameters. That a project may re-declare a standard
- *  function differently is real and is why `declaredCall` ranks the two for ARITY — but a
- *  re-declaration that changed `memcpy` into a struct-returning function would not be `memcpy`.
- *
- *  `Object.hasOwn`, not `in`: `prototypes` is caller-supplied JSON and the table is an object
- *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. The
- *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
- *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
- *  here, and a raw TypeError would leave through neither the decline channel nor anything a
- *  caller can act on. Every other reader of this table — `declaredArgWidths`, and `declaredCall`
- *  through it — answers "nothing is declared" for such an entry, and so does this. */
-export function returnsWithoutHiddenPointer(callee: string, prototypes: Prototypes): boolean {
-  // Nothing at all, a value in registers, or a spelling nobody here can size — the last of which is
-  // the only one that leaves the hidden pointer open. A pair is `declaredWidth` 64 and still
-  // travels in registers, so a width wider than a word is an answer here and not an overflow.
-  const travelsInRegisters = (spelling: string): boolean => {
-    const t = spelling.trim();
-    return t === 'void' || declaredWidth(t) !== undefined;
-  };
-  const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
-  if (declaresVoidReturn(own)) {
-    return true;
-  }
-  // A PROJECT'S OWN `returns` ANSWERS THIS THROUGH THE SAME READING A STANDARD SIGNATURE'S DOES,
-  // and it ranks above the table for the same reason `declaredCall` ranks a re-declaration above
-  // one: a project that spells the return has told you about the function it is building.
-  if (own?.returns !== undefined) {
-    return travelsInRegisters(own.returns);
-  }
-  return Object.hasOwn(STANDARD_SIGNATURES, callee) && travelsInRegisters(STANDARD_SIGNATURES[callee].returns);
+/** Whether a declaration says nothing any reader acts on about the return — no spelling, no
+ *  layout, and no `returnsVoid: true`. `returnsVoid: false` is silence (`declaresVoidReturn`), and
+ *  it is how a manifest spells a callee it knows only the parameters of. Such an entry can take a
+ *  struct return another source states without contradicting itself. */
+export function statesNoReturn(p: FnProto): boolean {
+  return p.returns === undefined && p.returnsVoid !== true && p.returnLayout === undefined;
+}
+
+/** Whether a declaration says the function returns a struct or union by value — through either
+ *  key that can say it (`FnProto.returnLayout`). Read through `?.` for the reason
+ *  `returnsWithoutHiddenPointer` gives: a `null` entry out of parsed JSON reaches every reader. */
+export function declaresAggregateReturn(p: FnProto | undefined): boolean {
+  // the whole spelling, qualifiers aside — `struct S *` is a pointer, returned in a register
+  const bare = (p?.returns ?? '')
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return p?.returnLayout !== undefined || /^(?:struct|union) [A-Za-z_]\w*$/.test(bare);
 }
 
 /** Bit width per C89 base type on every target asmlift lifts (all ILP32 with a 64-bit `long long`).
@@ -457,17 +466,24 @@ export function spellableType(t: ParamType): boolean {
  *  TYPE, nothing carries it yet, and a project that wants the prototype emitted spells it. */
 export function spellableProto(
   p: FnProto | undefined,
+  returned?: IrType,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
-  if (p?.returns === undefined || !spellableType(p.returns) || declaredWidth(p.returns) === undefined) {
+  // A struct returned through memory prints as the headers spell the struct the lift typed its call
+  // as (`returned`), which the declarations block defines beside this prototype (declare.ts). With
+  // no such call it is a return this cannot print.
+  const returns = returned?.kind === 'struct' ? (returned.declared ?? `struct ${returned.name}`) : p?.returns;
+  if (
+    p === undefined ||
+    returns === undefined ||
+    (returned === undefined && (!spellableType(returns) || declaredWidth(returns) === undefined))
+  ) {
     return undefined;
   }
   if (p.params === 0) {
-    return { params: [], returns: p.returns };
+    return { params: [], returns };
   }
   const printableParam = (t: ParamType): boolean => spellableType(t) && declaredWidth(t) !== undefined;
-  return Array.isArray(p.params) && p.params.every(printableParam)
-    ? { params: p.params, returns: p.returns }
-    : undefined;
+  return Array.isArray(p.params) && p.params.every(printableParam) ? { params: p.params, returns } : undefined;
 }
 
 /** The bit width a declaration states its callee RETURNS, or `undefined` when it states nothing a
@@ -509,15 +525,29 @@ export function validatePrototypes(value: unknown): string[] {
       continue;
     }
     for (const key of Object.keys(proto)) {
-      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns') {
-        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid" or "returns")`);
+      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns' && key !== 'returnLayout') {
+        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns" or "returnLayout")`);
       }
     }
-    const { params, returnsVoid, returns } = proto as {
+    const { params, returnsVoid, returns, returnLayout } = proto as {
       params?: unknown;
       returnsVoid?: unknown;
       returns?: unknown;
+      returnLayout?: unknown;
     };
+    if (returnLayout !== undefined) {
+      problems.push(...layoutProblems(`${sym}: "returnLayout"`, returnLayout));
+      // A layout beside a return that says `void` or spells a scalar is two answers to one question
+      // — whether the call hands the callee a hidden pointer — and neither can be picked.
+      if (
+        returnsVoid === true ||
+        (typeof returns === 'string' && (returns.trim() === 'void' || declaredWidth(returns) !== undefined))
+      ) {
+        problems.push(
+          `${sym}: "returnLayout" says the return is a struct or union, and the return is also declared scalar or void`,
+        );
+      }
+    }
     const countOk = typeof params === 'number' && Number.isInteger(params) && params >= 0;
     const listOk = Array.isArray(params) && params.every((t) => typeof t === 'string');
     if (params !== undefined && !countOk && !listOk) {
@@ -572,6 +602,59 @@ export function validatePrototypes(value: unknown): string[] {
   return problems;
 }
 
+/** Problems with one hand-written {@link AggregateLayout}, each prefixed with `where`. */
+function layoutProblems(where: string, value: unknown): string[] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return [`${where} must be an object, e.g. {"kind": "struct"}`];
+  }
+  const problems: string[] = [];
+  for (const key of Object.keys(value)) {
+    if (key !== 'kind' && key !== 'members') {
+      problems.push(`${where}: unknown key "${key}" (expected "kind" or "members")`);
+    }
+  }
+  const { kind, members } = value as { kind?: unknown; members?: unknown };
+  if (kind !== 'struct' && kind !== 'union') {
+    problems.push(`${where}: "kind" must be "struct" or "union"`);
+  }
+  if (members === undefined) {
+    return problems;
+  }
+  if (!Array.isArray(members)) {
+    return [...problems, `${where}: "members" must be a list`];
+  }
+  members.forEach((m: unknown, i) => {
+    const at = `${where}: member ${i + 1}`;
+    if (typeof m !== 'object' || m === null || Array.isArray(m)) {
+      problems.push(`${at} must be an object, e.g. {"name": "w", "type": "u32", "dims": [16]}`);
+      return;
+    }
+    for (const key of Object.keys(m)) {
+      if (key !== 'name' && key !== 'type' && key !== 'dims' && key !== 'bits') {
+        problems.push(`${at}: unknown key "${key}" (expected "name", "type", "dims" or "bits")`);
+      }
+    }
+    const { name, type, dims, bits } = m as { name?: unknown; type?: unknown; dims?: unknown; bits?: unknown };
+    const positive = (n: unknown): boolean => typeof n === 'number' && Number.isInteger(n) && n > 0;
+    if (typeof name !== 'string' || !(/^[A-Za-z_]\w*$/.test(name) || (name === '' && bits !== undefined))) {
+      problems.push(`${at}: "name" must be a C identifier (empty only for an unnamed bitfield)`);
+    }
+    if (typeof type !== 'string') {
+      problems.push(...layoutProblems(`${at}: "type"`, type));
+    }
+    if (dims !== undefined && !(Array.isArray(dims) && dims.length > 0 && dims.every(positive))) {
+      problems.push(`${at}: "dims" must be a list of positive integers`);
+    }
+    if (bits !== undefined && !(typeof bits === 'number' && Number.isInteger(bits) && bits >= 0 && bits <= 64)) {
+      problems.push(`${at}: "bits" must be an integer from 0 to 64`);
+    }
+    if (bits !== undefined && dims !== undefined) {
+      problems.push(`${at}: a bitfield has no extents`);
+    }
+  });
+  return problems;
+}
+
 /** The C type spelling for one declared parameter/return, or null when the facts do not
  *  determine one. A pointer is `void *` — address-identical to any object pointer, and asmlift
  *  makes every stride explicit — so nothing is guessed about what it points at. A richer spelling
@@ -595,16 +678,28 @@ function typeSpelling(t: SymbolTypeFacts): ParamType | null {
 }
 
 /** The prototype a code symbol's DWARF signature states, or `undefined` when it states none this
- *  can spell — every parameter must spell faithfully (see `prototypesFromSymbols`). */
+ *  can spell — every parameter must spell faithfully (see `prototypesFromSymbols`).
+ *
+ *  A STRUCT OR UNION RETURN IS KEPT WHEN THE PARAMETERS ARE NOT, because it is what says argument 0
+ *  may be a hidden pointer, and a call read without it names that pointer as the first argument.
+ *  DWARF sizes the return and states no kind: a base type carries a sign and a pointer says so, so
+ *  a signless non-pointer return is an enum, a struct or a union — and one wider than a word is not
+ *  an enum on any target here. The layout it states has no members, which is how a call to it
+ *  declines. KNOWN GAP: a signless return of a word or less is an enum or a small aggregate, and
+ *  nothing here tells them apart, so it states nothing — agbcc returns `struct { u16 a, b; }` through
+ *  memory, and a call storing one straight into a global lifts with the pointer as argument 0. */
 export function symbolPrototype(info: SymbolInfo): FnProto | undefined {
   if (info.kind !== 'code' || !info.signature) {
     return undefined;
   }
+  const r = info.signature.returns;
+  const aggregate = r !== null && r.signed === null && r.pointer !== true && r.size !== null && r.size > 4;
+  const layout = aggregate ? { returnLayout: { kind: 'struct' as const } } : {};
   const params = info.signature.params.map(typeSpelling);
   if (params.some((p) => p === null)) {
-    return undefined;
+    return aggregate ? layout : undefined;
   }
-  return { params: params as ParamType[], ...(info.signature.returns === null ? { returnsVoid: true } : {}) };
+  return { params: params as ParamType[], ...(r === null ? { returnsVoid: true } : {}), ...layout };
 }
 
 /**
@@ -612,6 +707,8 @@ export function symbolPrototype(info: SymbolInfo): FnProto | undefined {
  *
  * A caller-supplied proto always wins: it comes from the user's headers or the benchmark
  * manifest, and it is the thing a real user actually has for the function they are decompiling.
+ * The one fact it takes from the map is a struct return, and only when it says nothing of its own
+ * return (`statesNoReturn`).
  * The map fills the rest — in practice the CALLEES, since a function still written in assembly
  * has no signature in its project's ELF (see SymbolSignature).
  *
@@ -650,10 +747,18 @@ export function prototypesFromSymbols(symbols: SymbolMap | undefined, base: Prot
           out[info.name] = rest;
         }
       }
-      if (out[info.name] !== undefined) {
+      const signed = symbolPrototype(info);
+      const held = out[info.name];
+      if (held !== undefined) {
+        // AN ENTRY THAT SAYS NOTHING OF THE RETURN STILL TAKES THE MAP'S STRUCT RETURN, which is
+        // what says argument 0 may be a hidden pointer; without it that pointer is read as the
+        // first declared argument. A header whose return spelling this could not read (`Blob64T`,
+        // defined behind an `#include`) is such an entry too.
+        if (signed?.returnLayout !== undefined && statesNoReturn(held)) {
+          out[info.name] = { ...held, returnLayout: signed.returnLayout };
+        }
         continue;
       }
-      const signed = symbolPrototype(info);
       if (signed !== undefined) {
         out[info.name] = signed;
       }

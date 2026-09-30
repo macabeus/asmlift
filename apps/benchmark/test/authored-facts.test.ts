@@ -403,6 +403,19 @@ describe('the synthetic tier declares nothing its own source refutes', () => {
     expect(problems[0]).toMatch(expected);
   });
 
+  // …and a returned struct's layout, which is printed as its definition into the candidate
+  test('a proto that lies about a returned struct`s members is caught', () => {
+    const spec = SYNTHETIC.find((x) => x.sym === 'stkextsret')!;
+    const layout = (n: number) => ({ kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [n] }] });
+    const proto = (n: number) => ({
+      makeblob: { params: ['const void *'], returns: 'struct Blob64', returnLayout: layout(n) },
+    });
+    expect(protoFactProblems('synthetic:stkextsret', 'stkextsret', proto(16), spec.src, spec.ctx ?? '')).toEqual([]);
+    const problems = protoFactProblems('synthetic:stkextsret', 'stkextsret', proto(8), spec.src, spec.ctx ?? '');
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/`returnLayout` for `makeblob` is not the layout its declaration reads to/);
+  });
+
   test('every synthetic src yields exactly one definition of its symbol', () => {
     const noOracle = SYNTHETIC.filter((s) => typeof oracleFor('', s.sym, s.src) === 'string').map((s) => s.sym);
     expect(noOracle).toEqual([]);

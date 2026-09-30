@@ -55,7 +55,12 @@ export type Expr =
   // C uses for its own storage, a non-identifier, a reserved name) — every one of them kills the
   // SPELLING or the whole row rather than leaving this stamp standing over an implicitly-`int`
   // callee.
-  | { k: 'call'; fn: string; args: Expr[]; wide64?: true }
+  //
+  // `sret` is the type of a struct the callee returns BY VALUE through memory. `args[0]` is then the
+  // hidden pointer the frontend read from the first argument register — the address of the struct
+  // the call fills — and the rest are the declared arguments. The only C spelling is a statement,
+  // `dest = fn(rest)`, so such a call stands alone.
+  | { k: 'call'; fn: string; args: Expr[]; wide64?: true; sret?: IrType }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`
   // and `(&gSym)[i]` as `gSym[i]` (a global name decays to a pointer). Only a genuinely
@@ -539,6 +544,7 @@ export function exprEquals(a: Expr, b: Expr): boolean {
       return (
         a.fn === bb.fn &&
         (a.wide64 ?? false) === (bb.wide64 ?? false) &&
+        (a.sret === undefined ? bb.sret === undefined : bb.sret !== undefined && typeEquals(a.sret, bb.sret)) &&
         a.args.length === bb.args.length &&
         a.args.every((x, i) => exprEquals(x, bb.args[i]))
       );

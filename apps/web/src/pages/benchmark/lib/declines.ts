@@ -26,19 +26,22 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 159 distinct decline messages (the texts reached by
+// `packages/core/src` throws 164 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 82 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 87 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       28  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, a base alignment the
 //                               input does not determine, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
-//                               `bl` whose target this asm defines as a data label, and
+//                               `bl` whose target this asm defines as a data label, a call to a
+//                               function declared to return a struct it cannot lower (its
+//                               interpolated reason), one returning it into anything but a
+//                               local, one whose parameters nothing sizes, and
 //                               the reaching-compare throw whose reason is interpolated
 //                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)
@@ -53,11 +56,8 @@
 //   frontend/mips.ts         9  a relocation with an addend, an address below the symbol, an indirect
 //                               `jr`, a non-numeric immediate, and five refusals about a disassembly
 //                               the reader cannot account for
-//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
-//                               branch, an unparsable constant expression, and a magnitude with a
-//                               leading zero (octal to the assembler)
-//   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ppc.ts          7  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//   frontend/ppc.ts          8  `stwu` with update, a relocation on a stack-pointer adjust, a call to
+//                               a function declared to return a struct or union by value, a branch
 //                               testing a cr field a call destroyed (no compiler emits it), a return
 //                               address `mflr` copied out and the body read as a value, the same
 //                               address stored anywhere but the link register's save word, the
@@ -67,8 +67,14 @@
 //                               phrase, because they are that capability gap seen from the frontend
 //                               with no register pair: one for a declared wide PARAMETER and one for
 //                               a declared wide RETURN)
+//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
+//                               branch, an unparsable constant expression, and a magnitude with a
+//                               leading zero (octal to the assembler)
+//   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
+//                               and a struct one call hands back in the return register passed on
+//                               as the next guessed call's first argument
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
-//   frontend/ssa.ts          1  a register read round a cycle through the entry block with no join
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
 // EVERY FIGURE IN THE PARAGRAPH ABOVE IS A GATE, not a comment — all thirteen of them, and the file
@@ -117,8 +123,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
-    // disjunction is 17 of the 19 rows, so a pattern requiring the word only Thumb writes claims
-    // 2 of them and leaves the rest to a class whose label reads "other sp uses".
+    // disjunction is 17 of the 18 rows, so a pattern requiring the word only Thumb writes claims
+    // 1 of them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
     // `apps/web/test/declines.test.ts` ("the disjunction share this paragraph names is the share

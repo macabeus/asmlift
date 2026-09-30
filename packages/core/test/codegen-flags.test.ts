@@ -67,6 +67,16 @@ describe('targetFor', () => {
     expect(structureOptionsFor(r.target, false)).toEqual(structureOptionsFor(DESCRIPTIONS[id], false));
   });
 
+  // …save one the flags change: under `-fshort-enums` an enum is the smallest integer its values fit,
+  // so no size is stated for one, and the last of the pair decides
+  test('-fshort-enums withdraws the enum size, and a later -fno-short-enums restores it', () => {
+    const base = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
+    const short = targetFor('agbcc', [...base, '-fshort-enums']).target;
+    expect(short.compilerBehaviors.enumBytes).toBeUndefined();
+    expect(short.compilerBehaviors.largestAlignment).toBe(DESCRIPTIONS.agbcc.compilerBehaviors.largestAlignment);
+    expect(targetFor('agbcc', [...base, '-fshort-enums', '-fno-short-enums']).target).toBe(DESCRIPTIONS.agbcc);
+  });
+
   test.each(CANONICAL_IDS)('%s’s canonical flags are in normal form and every word is in its family’s table', (id) => {
     const { family, canonicalFlags } = TOOLCHAIN_TARGETS[id];
     expect(storedFlags(family, canonicalFlags)).toEqual(canonicalFlags);

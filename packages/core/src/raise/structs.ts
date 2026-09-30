@@ -460,13 +460,15 @@ export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined):
  *  `ir/struct-names.ts`, which the three struct minters share; this names the prefix. */
 export function firstFreeStructIndex(fn: Fn): number {
   return nextStructIndex(
-    [...collectStructs(fn)].map((s) => s.name),
+    [...collectStructs(fn, true)].map((s) => s.name),
     'Struct',
   );
 }
 
 /** The distinct struct types this function's L2 GRAPH mentions (unwrapping struct pointers on every
- *  value), deduped by name and sorted, for the backend to declare above the function.
+ *  value), deduped by name and sorted, for the backend to declare above the function. A struct the
+ *  headers own (`declared`, ir/types.ts) is left out — the declarations block defines it — unless
+ *  `withDeclared` asks for every name the graph uses, which is what a name allocator needs.
  *
  *  "Mentions", not "references": this walks `fn.blocks` at the moment structuring runs, and the
  *  result is CACHED on the SFn (`structure.ts`) and carried by every later `{...sfn}` pass, so a
@@ -477,11 +479,11 @@ export function firstFreeStructIndex(fn: Fn): number {
  *  is recorded here rather than fixed speculatively. The fix, if a pass ever makes it reachable, is
  *  the one l3/symbol-refs.ts already applies to symbol references: derive at the consumption point
  *  (`backend/cfamily.ts` structDecls) instead of caching. */
-export function collectStructs(fn: Fn): StructType[] {
+export function collectStructs(fn: Fn, withDeclared = false): StructType[] {
   const seen = new Map<string, StructType>();
   const consider = (t: IrType) => {
     const s = t.kind === 'ptr' && t.to.kind === 'struct' ? t.to : t.kind === 'struct' ? t : null;
-    if (s && s.kind === 'struct' && !seen.has(s.name)) {
+    if (s && s.kind === 'struct' && (withDeclared || s.declared === undefined) && !seen.has(s.name)) {
       seen.set(s.name, { name: s.name, fields: s.fields, size: s.size });
     }
   };

@@ -7082,12 +7082,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // `stkext` calls a function whose RETURN the C standard fixes — `memcpy` returns `void *`, in a
   // register (`proto.ts` STANDARD_SIGNATURES), so there is no hidden pointer for argument 0 to be
   // carrying and the frame is this function's: **MATCH**, one candidate. `stkextsret` calls one
-  // whose return nothing describes, and that is the whole difference — the frame is agbcc's return
-  // temporary, not a local at all. It declines:
-  //     cannot lift 'stkextsret': address-taken stack local — the captured address is never
-  //     dereferenced in this function, so nothing pins the local object type — and `makeblob`
-  //     takes it at argument 0 and nothing says what that callee returns — a struct returned
-  //     through a hidden pointer is handed this same frame
+  // declared to return `struct Blob64`, which agbcc hands back through memory (thumb.c:1423-1493),
+  // so the frame is the storage that return lands in — a local of that struct, which the call
+  // fills: `struct Blob64 sp0; sp0 = makeblob(&gBlob);`.
   // THE ARGUMENT REGISTERS ARE NOT THE WITNESS, though the pair looks like they might be: three
   // set against three declared on one side, two against one on the other. They are not, because a
   // register already holding an incoming parameter is written by nobody — compiled,
@@ -7095,28 +7092,23 @@ export const SYNTHETIC: SynthSpec[] = [
   // register for a one-parameter declaration and is still a struct return. What the pair measures
   // is a statement about the RETURN.
   //
-  // WHICH SIDE CARRIES THE WITNESS, measured on the rows' own targets rather than read off the
-  // guard. It is `stkext`'s, and it comes from the STANDARD table rather than from anything the
-  // row says: rename its callee to `blockcopy` and the row declines in `stkextsret`'s words;
-  // declare `blockcopy` `returnsVoid` and it lifts again. `stkextsret`'s own `proto` entry is
-  // INERT for its refusal — with it, without it, and at `params: 2`, the decline is the same
-  // sentence character for character, because an arity is not a statement about a return.
+  // EACH SIDE'S WITNESS IS A DECLARED RETURN. `stkext`'s comes from the STANDARD table rather than
+  // from anything the row says: rename its callee to `blockcopy` and the row declines in the
+  // out-parameter refusal's words; declare `blockcopy` `returnsVoid` and it lifts again.
+  // `stkextsret`'s is its own `proto`, which states the struct and its members as the `ctx` does.
+  // An arity is not one: told only `params: 1`, the same frame declines —
+  //     cannot lift 'stkextsret': address-taken stack local — the captured address is never
+  //     dereferenced in this function, so nothing pins the local object type — and `makeblob`
+  //     takes it at argument 0 and nothing says what that callee returns — a struct returned
+  //     through a hidden pointer is handed this same frame
+  // — and a lift of this frame WITHOUT the declared return would be a regression: nothing in the
+  // asm tells it from `stkext`'s, so whatever accepted it would accept a callee's own storage as a
+  // local. `packages/core/test/struct-return.test.ts` pins that refusal.
   //
-  // A CHANGE THAT MAKES `stkextsret` LIFT IS A REGRESSION, not a gain. It is the one row in this
-  // family whose DECLINE is the result, so `bench diff` reporting it gained reads as progress and
-  // is the opposite: nothing in the asm tells this frame from `stkext`'s, so whatever accepts it
-  // accepts a callee's own storage declared as a local.
-  //
-  // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, which is what makes this a measurement of the
-  // witness rather than of who was told what: the pair differs in the ASM, not in the context.
-  // Not symmetrically, and the asymmetry is asmlift's to carry: m2c's `ctx` spells the RETURN
-  // (`struct Blob64 makeblob(const void *);`) and asmlift's `proto` does not. `FnProto.returns`
-  // CAN spell it, and `returns: 'struct Blob64'` validates, but a return nothing here can size is
-  // silence (`proto.ts`): the decline is the same sentence with it. Silence is the right reading of
-  // a type NAME, because what hands argument 0 a hidden pointer is the struct's SIZE (the one-word
-  // threshold below) and a name carries none. So asmlift is still told strictly less about the one
-  // fact the pair turns on. Told it, m2c uses it — its published `stkextsret` source is
-  // `makeblob(/* return */ &sp0, &gBlob);`.
+  // BOTH DECLARE THEIR CALLEE TO BOTH DECOMPILERS, the same declaration through each tool's own
+  // channel, which is what makes this a measurement of the witness rather than of who was told
+  // what: the pair differs in the ASM, not in the context. m2c, told the same return, spells the
+  // call `makeblob(/* return */ &sp0, &gBlob);`.
   //
   // THE SIZE IS NOT LOAD-BEARING ON `stkext`, which is worth stating because the number looks
   // chosen. Compiled at the row's own flags over 1, 4, 8, 12, 16, 20, 32, 33, 48, 64 and 128
@@ -7126,11 +7118,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // agbcc moves in registers at 4 and 8 bytes, expands inline at 16 and 32, and turns into
   // `bl memcpy` at 64.
   //
-  // WHAT IS LOAD-BEARING IS ON THE OTHER SIDE OF THE PAIR, and its threshold is ONE WORD.
-  // Compiled: a 4-byte struct comes back from `makeblob` in r0 with no frame reserved at all,
-  // while 8, 16 and 64 each reserve the frame and hand its address over at argument 0. So the
-  // shape `stkextsret` is about needs a struct larger than a word and nothing more; 64 is simply
-  // the size the PAIR shares, so that its two targets differ in the call and in nothing else.
+  // WHAT IS LOAD-BEARING IS ON THE OTHER SIDE OF THE PAIR, and it is the struct's LAYOUT, not its
+  // size. Compiled: a one-member struct of a word comes back from `makeblob` in r0 with no frame
+  // reserved at all, while a word of four `u8` members, and 8, 16 and 64 bytes, each reserve the
+  // frame and hand its address over at argument 0 (thumb.c:1423-1493). 64 is simply the size the
+  // PAIR shares, so that its two targets differ in the call and in nothing else.
   //
   // THE m2c SIDE. Every row here but `outparam` is `declined` for m2c on its OWN self-reported
   // gap — it emits `extern ? gTbl;`, or `extern ? gBlob;` on the two extent rows, and the
@@ -7325,10 +7317,15 @@ export const SYNTHETIC: SynthSpec[] = [
     features: [],
     toolchains: ['agbcc'],
     ctx: 'struct Blob64 { u32 w[16]; };\nstruct Blob64 makeblob(const void *);\nvoid stkextsret(void);',
-    // REQUIRED BY THE ctx/proto SYMMETRY GATE — the `ctx` declares `makeblob`, so asmlift is
-    // handed the arity too. INERT for the refusal, which turns on the unknown RETURN and is the
-    // same sentence with the entry, without it, and at a different arity (family comment above).
-    proto: { makeblob: { params: 1 } },
+    // The `ctx`'s declaration of `makeblob` as asmlift reads one out of a header
+    // (`prototypesFromContext`): its parameter, and the struct it returns with that struct's members.
+    proto: {
+      makeblob: {
+        params: ['const void *'],
+        returns: 'struct Blob64',
+        returnLayout: { kind: 'struct', members: [{ name: 'w', type: 'u32', dims: [16] }] },
+      },
+    },
   },
 
   // ═══ CountCollectedGems attribution rows (attr/countgems) ═══════════════════════════════════

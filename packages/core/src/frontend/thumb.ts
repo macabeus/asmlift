@@ -18,14 +18,17 @@
 // incoming stack argument at `[sp, #N]` locatable at all. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
+import { aggregateType, returnedAggregate, returnsInMemory } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { T } from '../ir/types';
+import { type IrType, T, typeToString } from '../ir/types';
 import {
+  type FnProto,
   type Prototypes,
   STANDARD_SIGNATURES,
   declaredArgWidths,
   declaredReturnWidth,
+  declaresAggregateReturn,
   declaresParams,
   wordsOf,
 } from '../proto';
@@ -2376,6 +2379,11 @@ function recoverJumpTable(
   return { scrutReg, caseLabels, defaultLabel };
 }
 
+/** A call's struct return through memory: the declared struct, laid out on this target. */
+interface StructReturn {
+  type: IrType;
+}
+
 /** Lift decoded asm → an L1 Fn with block-argument SSA. `prototypes` supplies each callee's
  *  declared parameter count (from the project's headers); it is authoritative for recovering
  *  how many argument registers a `bl` passes (falling back to a heuristic when absent).
@@ -3577,7 +3585,59 @@ function liftOnce(
   // there IS no outgoing block. This runs over every `bl` while the outgoing-argument analysis is
   // being built, so a refusal thrown here reaches the caller ahead of every other slot-model
   // refusal, which is right because it is the most specific thing that was seen.
-  const declaredCall = (callee: string): { widths: readonly number[]; block: readonly number[] | null } | null => {
+  // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
+  // memory: the caller hands it the storage in r0 and every declared argument one register up
+  // (agbcc thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in r0
+  // is not a value the caller reads (calls.c: the struct is the memory at the address). One the
+  // target returns in r0 takes its arguments where they are declared, and its r0 is the struct's
+  // bytes, which nothing here reads as a struct: the call is `'register'` and a read of r0 after it
+  // refuses. Every other struct-returning call refuses, naming why.
+  const structReturnOf = (callee: string, own: FnProto): StructReturn | 'register' => {
+    const refuse = (why: string): never => {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${callee}\` is declared to return ${own.returns ?? 'a struct or union'} by value, and ${why}`,
+      );
+    };
+    const layout = returnedAggregate(own);
+    const inMemory = returnsInMemory(layout, target);
+    if (inMemory === undefined) {
+      refuse(
+        'nothing here says whether it comes back through a hidden pointer — its members are not all known, this target does not ' +
+          'say how it lays one of them out (an enum, a bitfield), or it states no rule ' +
+          '(a prototype states them as `returnLayout`, a context by defining the struct)',
+      );
+    }
+    if (inMemory === false) {
+      return 'register';
+    }
+    // the local it lands in is declared as the header spells the type, qualifiers aside; the tag
+    // is what the declarations block defines it by, and a typedef name is that tag too
+    const spelling = (own.returns ?? '')
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+    const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
+    if (tag === undefined) {
+      refuse('it names no type a local of it could be declared with');
+    }
+    const type = aggregateType(tag!, spelling, layout, target);
+    if (type === undefined) {
+      refuse(
+        'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
+          '(an enum, a bitfield) — the local it lands in has no type here',
+      );
+    }
+    return { type: type! };
+  };
+  // A callee the project declares to return a struct in r0, asked where `declaredCall` has no
+  // arity to answer with: the return is the declaration's, and needs none.
+  const registerStructReturn = (callee: string | undefined): 'register' | undefined => {
+    const own = callee !== undefined && Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
+    return declaresAggregateReturn(own) && structReturnOf(callee!, own!) === 'register' ? 'register' : undefined;
+  };
+  const declaredCall = (
+    callee: string,
+  ): { widths: readonly number[]; block: readonly number[] | null; returned?: StructReturn | 'register' } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
@@ -3591,11 +3651,20 @@ function liftOnce(
     // read a `Function` off `Object.prototype` as its prototype entry.
     const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
     const own = known(prototypes);
+    const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const widths = declaredArgWidths(proto);
-    if (widths === undefined) {
+    const params = declaredArgWidths(proto);
+    if (params === undefined && returned !== undefined && returned !== 'register') {
+      // a guessed arity reads argument registers from r0, which holds the hidden pointer
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden ` +
+          'pointer in r0, and its parameters are not all sized, so which registers carry its arguments is not known',
+      );
+    }
+    if (params === undefined) {
       return null;
     }
+    const widths = returned === undefined || returned === 'register' ? params : [32, ...params];
     // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
     // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
     // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
@@ -3633,7 +3702,11 @@ function liftOnce(
     // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
     // not claim to stage arguments inside the caller's own frame at all.
     const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
-    return { widths, block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null };
+    return {
+      widths,
+      block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
+      ...(returned === undefined ? {} : { returned }),
+    };
   };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
     blocks: asmBlocks.map((ab) => ({
@@ -4678,8 +4751,17 @@ function liftOnce(
               }
             }
           }
-          const res = mkValue(T.unk(returnsPair ? 64 : 32));
-          const callOp = mkOp('call', { operands: args, results: [res], attrs: { target: targetSym } });
+          // a struct returned through memory is the call's value, and argument 0 is where it lands; one
+          // returned in r0 is r0's bytes, whether or not anything states the call's arity
+          const returned =
+            declared?.returned ?? (declared === null && !wide ? registerStructReturn(targetSym) : undefined);
+          const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
+          const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
+          const callOp = mkOp('call', {
+            operands: args,
+            results: [res],
+            attrs: { target: targetSym, ...(sret === undefined ? {} : { sret: true }) },
+          });
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
           // known whether every path to here passes through another call, which would have clobbered
@@ -4695,6 +4777,12 @@ function liftOnce(
             writeData(target.argRegs[1], bi, projectHalf(irb, res, 'hi', ins));
             pairCallee.set(res, targetSym);
             ssa.noteCall(bi, pairReturnClobbers);
+            break;
+          }
+          if (returned !== undefined) {
+            // the struct is the memory at argument 0, or r0's bytes as a struct; either way r0
+            // holds nothing the caller may read as a value
+            ssa.noteCall(bi, [...callClobbers, target.returnReg]);
             break;
           }
           writeData('r0', bi, res); // the callee defines r0 …
@@ -4836,6 +4924,22 @@ function liftOnce(
   });
   if (relift !== undefined) {
     return relift;
+  }
+  // A struct returned through memory is spelled `local = f(..)`, which hands the callee that local's
+  // address: the destination must be a frame object the audit accepted. A global or a pointer handed
+  // over directly is another spelling (`gDst = f(..)` needs the global declared as the struct), which
+  // nothing here states.
+  const laddrs = new Set(
+    irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
+  );
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in r0, ` +
+          'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
+          'through a pointer is not modelled',
+      );
+    }
   }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);

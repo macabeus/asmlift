@@ -17,7 +17,12 @@ export type IrType =
   // from `ptr(int)`+array-index because its access pattern is inconsistent with a homogeneous
   // array (mixed widths / non-uniform offsets). `name` is synthetic today (`Struct0`); a later
   // DWARF pass supplies real names. Fields are sorted by `off`.
-  | { kind: 'struct'; name: string; fields: StructField[]; size?: number }
+  //
+  // `declared` is a struct the project's HEADERS own — one a callee is declared to return
+  // (aggregate.ts `aggregateType`) — holding the headers' own spelling of it (`struct Blob64`,
+  // `BlobT`). No source this lift prints defines it: the declarations block does, which a candidate
+  // compiled inside the project's headers drops, since the headers define it there.
+  | { kind: 'struct'; name: string; fields: StructField[]; size?: number; declared?: string }
   // A fixed-length array `elem[count]`. Today its sole inhabitant is struct padding (a `u8[N]`
   // pad member seats fields at their exact offsets, raise/struct-arrays.ts) — a REAL type,
   // not a printed string. Array-typed fields declare with the length AFTER the name in C
@@ -185,6 +190,9 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   }
   if (a.kind === 'int' && b.kind === 'int') {
     return a.width === b.width && a.signed === b.signed;
+  }
+  if (a.kind === 'void' && b.kind === 'void') {
+    return true;
   }
   if ((a.kind === 'unknown' && b.kind === 'unknown') || (a.kind === 'float' && b.kind === 'float')) {
     return a.width === b.width;

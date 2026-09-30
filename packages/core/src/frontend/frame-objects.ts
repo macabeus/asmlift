@@ -11,10 +11,11 @@
  *
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
+import { returnsWithoutHiddenPointer } from '../aggregate';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
-import { T } from '../ir/types';
+import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
-import { type Prototypes, returnsWithoutHiddenPointer } from '../proto';
+import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { FrontendUnsupportedError } from './errors';
@@ -646,6 +647,12 @@ export function auditFrameObjects({
     // narrowing of an unstamped `target` attr — the `bl`/`blx` lowering always stamps one — and
     // reads as a callee nothing can be declared about, so it refuses.
     const arg0Callees = new Map<number, Set<string | null>>();
+    // …except where the call's own declaration says argument 0 IS the hidden pointer (the frontend
+    // stamps `sret` on a call to a callee declared to return a struct through memory): that object
+    // is the callee's return storage, a local of the declared type. `uses` counts every use of each
+    // object, so a return temp this function does anything else with is told apart.
+    const returnTemps = new Map<number, Op[]>();
+    const uses = new Map<number, number>();
     // The accesses through a runtime-indexed address, per object — kept apart from `accesses`,
     // which types the object at its own offset: `a[i]` says what one ELEMENT is, not what sits at
     // `a`.
@@ -686,6 +693,7 @@ export function auditFrameObjects({
           if (off === undefined) {
             return;
           }
+          uses.set(off, (uses.get(off) ?? 0) + 1);
           const scalar = (kind: string) => {
             if (oneObject !== undefined) {
               members.push({ at: off + (op.attrs.off as number), width: op.attrs.width as number });
@@ -721,7 +729,9 @@ export function auditFrameObjects({
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
-              if (idx === 0) {
+              if (idx === 0 && op.attrs.sret === true) {
+                (returnTemps.get(off) ?? returnTemps.set(off, []).get(off)!).push(op);
+              } else if (idx === 0) {
                 const t = op.attrs.target;
                 const cs = arg0Callees.get(off) ?? new Set<string | null>();
                 cs.add(typeof t === 'string' ? t : null);
@@ -799,6 +809,11 @@ export function auditFrameObjects({
     }
     const unbounded = (why: string) => ({ lo: -Infinity, hi: Infinity, why });
     const readWindow = (off: number): { lo: number; hi: number; why: string } => {
+      // a callee handed only its own return storage writes the struct it returns and nothing else
+      const temps = returnTemps.get(off);
+      if (temps !== undefined && uses.get(off) === temps.length) {
+        return { lo: 0, hi: returnedSize(temps[0]), why: 'that returns its struct into it' };
+      }
       const control = target.capabilities.readSourceControl;
       const stores = sourceStores.get(off);
       if (mayWrite.has(off) || stores === undefined || control === undefined) {
@@ -941,13 +956,16 @@ export function auditFrameObjects({
     // somewhere leaves the call that takes it at argument 0 exactly as ambiguous as before, so
     // position acquits a call rather than an object.
     //
-    // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and it is the ONLY refusal this frontend
-    // switches off on something other than the instruction stream. `returnsWithoutHiddenPointer`
-    // (proto.ts) is where it is answered, from the project's own `returnsVoid` or from the
-    // `returns` of a signature the C standard fixes — the same table whose `params` this file
-    // already trusts to decide a call's arity. It is asked of EVERY callee that took the address
-    // at argument 0, because the object gets one decision: one callee about whose return nothing
-    // is known leaves the ambiguity standing and the refusal fires.
+    // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and so is its converse: a callee declared to
+    // return a struct through memory, whose call the frontend stamps `sret`, makes the object that
+    // call's return storage (`returnTemps`). Those two are the only answers here read off something
+    // other than the instruction stream. `returnsWithoutHiddenPointer` (aggregate.ts) is where the
+    // third is answered, from the project's own `returnsVoid`, from a struct its declaration returns
+    // that the target hands back in a register, or from the `returns` of a signature the C standard
+    // fixes — the same table whose `params` this file already trusts to decide a call's arity. It is
+    // asked of EVERY callee that took the address at argument 0, because the object gets one
+    // decision: one callee about whose return nothing is known leaves the ambiguity standing and the
+    // refusal fires.
     //
     // AN ARITY CANNOT ANSWER IT, which is worth saying because the count is right there and looks
     // like evidence: a hidden pointer does set one argument register more than the callee
@@ -985,7 +1003,7 @@ export function auditFrameObjects({
       if (cs === undefined || cs.size === 0) {
         return null;
       }
-      const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes));
+      const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes, target));
       if (unknown.length === 0) {
         return null;
       }
@@ -1336,11 +1354,43 @@ export function auditFrameObjects({
     // object at [sp,#0] whose first member is a word stored `str rN, [sp]`. The other per-object
     // refusals here go through `shapeRefused`, for the same reason.
     const extent = new Map<number, { width: number; count: number }>();
+    // the declared struct each return temp is, by offset
+    const aggregateAt = new Map<number, IrType>();
     const overSlot: [number, number][] = [];
     const slotKeys = (off: number, width: number): boolean =>
       [...usedSlotOffsets].some((slot) => overlaps(off, width, slot, 4));
     for (const [off, acc] of accesses) {
       const byIndex = indexed.get(off) ?? [];
+      const temps = returnTemps.get(off);
+      if (temps !== undefined) {
+        // The callee writes the whole struct and this function names it once, as the call's
+        // destination. A read of a member, or any other use of the address, is not modelled —
+        // and most such reads never arrive here: the Thumb slot model refuses a word of the temp
+        // read at a constant offset first ("stack pointer used as data"), a copy of the whole
+        // struct into a global (`gS8 = mk8(x)`, which agbcc stages through the temp) included. So
+        // modelling member reads starts with the slot model handing this audit a read return temp.
+        const callee = temps[0].attrs.target as string;
+        const type = temps[0].results[0].type;
+        const spelling = type.kind === 'struct' ? (type.declared ?? `struct ${type.name}`) : typeToString(type);
+        if (temps.some((t) => !typeEquals(t.results[0].type, type))) {
+          fail(`the object at [sp,#${off}) is the struct-return storage of calls declared to return different types`);
+        }
+        if (acc.length > 0 || byIndex.length > 0) {
+          fail(
+            `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}, and this function also reads or ` +
+              'writes it — a member of a returned struct is not modelled',
+          );
+        }
+        if (uses.get(off) !== temps.length) {
+          fail(
+            `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}, and its address is also used ` +
+              'another way — only the call it is returned by is modelled',
+          );
+        }
+        extent.set(off, { width: 1, count: returnedSize(temps[0]) });
+        aggregateAt.set(off, type);
+        continue;
+      }
       if (acc.length === 0) {
         // An object with no access of its own has no declared type and no extent, and the two
         // ways it gets there are two different gaps. Its bytes may already be keyed by the slot
@@ -1586,13 +1636,35 @@ export function auditFrameObjects({
     for (const [off, ops] of objects) {
       const { width, count } = extent.get(off)!;
       const signed = accesses.get(off)!.some((a) => a.signed);
+      const aggregate = aggregateAt.get(off);
       for (const op of ops) {
-        op.attrs = { ...op.attrs, width, signed, count, ...(published.has(off) ? { volatile: true } : {}) };
+        op.attrs = {
+          ...op.attrs,
+          width,
+          signed,
+          count,
+          ...(published.has(off) ? { volatile: true } : {}),
+          ...(aggregate !== undefined ? { aggregate: true } : {}),
+        };
+        // a return temp's address points at the struct the call returns
+        if (aggregate !== undefined) {
+          op.results[0].type = T.ptr(aggregate);
+        }
       }
     }
     pinDeviceAccesses((op, blk, at) => op.opcode === 'load' || overwritten(op, blk, at));
   }
   return undefined;
+}
+
+/** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/thumb.ts
+ *  types the call's result as that struct). */
+function returnedSize(call: Op): number {
+  const t = call.results[0].type;
+  if (t.kind !== 'struct' || t.size === undefined) {
+    throw new Error(`a call stamped sret returns ${typeToString(t)}, not a laid-out struct`);
+  }
+  return t.size;
 }
 
 /** THE CALLER-SIDE SEAM. A frontend calls the audit THROUGH this record rather than through the

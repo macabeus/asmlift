@@ -1,5 +1,12 @@
-import type { FnProto, ParamType, Prototypes } from './proto';
-import { declaredArgWidths, declaredWidth, symbolPrototype, validatePrototypes } from './proto';
+import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
+import {
+  declaredArgWidths,
+  declaredWidth,
+  declaresAggregateReturn,
+  statesNoReturn,
+  symbolPrototype,
+  validatePrototypes,
+} from './proto';
 import type { SymbolMap } from './symbols';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
@@ -28,6 +35,8 @@ interface Statement {
   text: string;
   /** it ended in a block, not a `;` — a function definition's header */
   definition: boolean;
+  /** the text of each block collapsed to `{}` in `text`, in order */
+  bodies: string[];
 }
 
 /** The source with every comment and preprocessor line (continuation lines included) blanked, and
@@ -84,12 +93,14 @@ function statements(src: string): Statement[] {
   const text = clean(src);
   const out: Statement[] = [];
   let cur = '';
+  let bodies: string[] = [];
   const flush = (definition: boolean): void => {
     const t = cur.replace(/\s+/g, ' ').trim();
     if (t !== '') {
-      out.push({ text: t, definition });
+      out.push({ text: t, definition, bodies });
     }
     cur = '';
+    bodies = [];
   };
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -112,6 +123,7 @@ function statements(src: string): Statement[] {
           depth--;
         }
       }
+      const body = text.slice(i + 1, j - 1);
       i = j - 1;
       if (/^\s*(?:namespace\b|extern\s*"C\+\+")/.test(cur)) {
         // a namespace or C++-linkage block ends with its brace, not a `;`
@@ -120,6 +132,7 @@ function statements(src: string): Statement[] {
         flush(true);
       } else {
         cur += ' {} ';
+        bodies.push(body);
       }
     } else {
       cur += ch;
@@ -191,22 +204,74 @@ function parameterType(p: string): string | null {
   return tokens.join(' ').replace(/ \*/g, ' *').replace(/\* \*/g, '**').trim();
 }
 
-/** `typedef` statements → the name and the type it stands for (as a spelling, before resolution). */
-function readTypedef(t: string): [string, string] | null {
+/** One name a `typedef` declares: the type it stands for (as a spelling, before resolution), and
+ *  whether it names the struct, union or enum body the statement defines, or a pointer to one that
+ *  has no other name to spell it by. */
+interface TypedefName {
+  name: string;
+  type: string;
+  names: 'body' | 'unspelled pointer' | 'other';
+}
+
+/** A `typedef` statement → every name it declares (`typedef struct R {…} R, *RP;` declares two). A
+ *  plain declarator of a body names that body, qualified or not (`} const CR;`), and resolves to
+ *  itself. A pointer declarator is a pointer to the base, spelled by the base's tag or by a plain
+ *  name the same statement gives it, and resolves to itself where the body has neither
+ *  (`typedef struct {…} *PS;`). An array declarator is not read. */
+function readTypedef(t: string): TypedefName[] {
   const body = t.replace(/^typedef\s+/, '');
   const fn = /^(.+?)\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\((.*)\)$/.exec(body);
   if (fn) {
-    return [fn[2], `${fn[1].trim()} (*)(${fn[3].trim()})`];
+    return [{ name: fn[2], type: `${fn[1].trim()} (*)(${fn[3].trim()})`, names: 'other' }];
   }
   if (/[()]/.test(body)) {
-    return null;
+    return [];
   }
-  const m = /^(.*?)\s*\b([A-Za-z_]\w*)\s*$/.exec(body.replace(/\*/g, ' * '));
-  if (!m || m[1].trim() === '') {
-    return null;
+  // qualifiers of the base, then the stars and their own qualifiers, then the name
+  const declarator = /^((?:(?:const|volatile)\b\s*)*)((?:\*\s*(?:(?:const|volatile)\b\s*)*)*)([A-Za-z_]\w*)$/;
+  const withBody = /^((?:(?:const|volatile)\s+)*(?:struct|union|enum)\b[^{]*\{\})\s*(.*)$/.exec(body);
+  let base: string;
+  let declarators: string[];
+  if (withBody) {
+    base = withBody[1];
+    declarators = topLevelCommas(withBody[2]);
+  } else {
+    const parts = topLevelCommas(body);
+    const first = /^(.*?[^\s*])\s*((?:\*\s*(?:(?:const|volatile)\b\s*)*)*[A-Za-z_]\w*)$/.exec(parts[0]);
+    if (!first) {
+      return [];
+    }
+    base = first[1];
+    declarators = [first[2], ...parts.slice(1)];
   }
-  // a typedef of a struct/enum body names an aggregate: it resolves to itself
-  return [m[2], m[1].includes('{}') ? m[2] : m[1].replace(/\s+/g, ' ').replace(/ \*/g, ' *').trim()];
+  const read = declarators
+    .map((d) => declarator.exec(d.trim()))
+    .map((m) => (m === null || /^(?:const|volatile)$/.test(m[3]) ? null : m));
+  const plain = read.find((m) => m !== null && m[2] === '')?.[3];
+  const tag = /^(?:(?:const|volatile)\s+)*((?:struct|union|enum)\s+[A-Za-z_]\w*)\s*\{\}$/.exec(base)?.[1];
+  const out: TypedefName[] = [];
+  for (const m of read) {
+    if (m === null) {
+      continue;
+    }
+    const qualifiers = m[1].replace(/\s+/g, ' ').trim();
+    const stars = m[2].replace(/\s+/g, ' ').trim();
+    const name = m[3];
+    if (withBody && stars === '') {
+      out.push({ name, type: name, names: 'body' });
+    } else if (withBody) {
+      const pointee = tag ?? plain;
+      out.push(
+        pointee === undefined
+          ? { name, type: name, names: 'unspelled pointer' }
+          : { name, type: [qualifiers, pointee, stars].filter((w) => w !== '').join(' '), names: 'other' },
+      );
+    } else {
+      const spelled = [qualifiers, base.replace(/\s+/g, ' ').trim(), stars].filter((w) => w !== '').join(' ');
+      out.push({ name, type: spelled.replace(/\*\s+\*/g, '**'), names: 'other' });
+    }
+  }
+  return out;
 }
 
 /** Resolve a spelling through the typedef table until `declaredWidth` can size it, keeping it the
@@ -238,19 +303,194 @@ function resolve(t: string, typedefs: ReadonlyMap<string, string>): string {
 export function prototypesFromContext(src: string, language: 'c' | 'c++'): Prototypes {
   const stmts = statements(src);
   const typedefs = new Map<string, string>();
+  // struct and union bodies: by `struct Tag` spelling, and by a typedef name bound to a body, which
+  // resolves to itself and spells no keyword — as C++ spells every tag, a declared one with no body
+  // included. A body an attribute lays out (`packed`, `aligned(8)`) has none here, since this reads
+  // no attribute (`attributesLayout`).
+  const tagged = new Map<string, string | undefined>();
+  const named = new Map<string, { kind: AggregateLayout['kind']; body?: string }>();
+  // a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own
+  const unspelledPointers = new Set<string>();
+  // a typedef name bound to an enum body
+  const enums = new Set<string>();
+  // an enum, by `enum Tag` or typedef name, that is not the target's enumBytes: `packed` makes it
+  // the smallest integer its values fit (agbcc c-common.c:446, c-decl.c:6123), and so does a value
+  // an int cannot hold (`enumMayWiden`)
+  const unsizedEnums = new Set<string>();
+  // the enumerators of an enum wider than an int, which widen any enum that names one
+  const wideEnumerators = new Set<string>();
+  // a typedef changed a type after its layout (`realigns`), which moves the layout of whatever holds
+  // it, so no layout is read
+  let realigned = false;
   for (const s of stmts) {
+    const def = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
+    const attributed = attributesLayout(s.text);
+    if (def) {
+      tagged.set(`${def[1]} ${def[2]}`, attributed ? undefined : s.bodies[0]);
+    }
+    const enumDef = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b[^{]*\{\}/.test(s.text);
+    const wide = enumDef && enumMayWiden(s.bodies[0], wideEnumerators);
+    if (wide) {
+      for (const e of s.bodies[0].split(',')) {
+        const name = /^\s*([A-Za-z_]\w*)/.exec(e);
+        if (name) {
+          wideEnumerators.add(name[1]);
+        }
+      }
+    }
+    const unsizedEnum = enumDef && (attributed || wide);
+    const enumTag = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b\s*([A-Za-z_]\w*)\s*\{\}/.exec(
+      withoutAttributes(s.text).replace(/\s+/g, ' ').trim(),
+    );
+    if (enumTag && unsizedEnum) {
+      unsizedEnums.add(`enum ${enumTag[1]}`);
+    }
+    realigned ||= realigns(s.text);
+    // In C++ a class is a struct too. Its body (access labels, member functions), or one after a
+    // base clause, whose members start past the base's, is none this lays out: the kind is known and
+    // the members are not. A forward declaration states the kind alone, so a definition after it
+    // replaces it, and nothing replaces a definition.
+    const cpp =
+      language === 'c++'
+        ? (/^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union|class)\s+([A-Za-z_]\w*)\s*(:[^{]*)?\{\}/.exec(
+            s.text,
+          ) ?? /^(struct|union|class)\s+([A-Za-z_]\w*)$/.exec(s.text))
+        : null;
+    if (cpp && named.get(cpp[2])?.body === undefined) {
+      const layable = def !== null && cpp[1] !== 'class' && cpp[3] === undefined && !attributed;
+      named.set(cpp[2], { kind: cpp[1] === 'union' ? 'union' : 'struct', body: layable ? s.bodies[0] : undefined });
+    }
     if (/^typedef\b/.test(s.text)) {
-      const td = readTypedef(s.text);
-      if (td) {
-        typedefs.set(td[0], td[1]);
+      const aggregate = /^typedef\s+(?:(?:const|volatile)\s+)*(struct|union)\b[^{]*\{\}/.exec(s.text);
+      for (const td of readTypedef(s.text)) {
+        typedefs.set(td.name, td.type);
+        if (aggregate && td.names === 'body') {
+          named.set(td.name, { kind: aggregate[1] as AggregateLayout['kind'], body: s.bodies[0] });
+        }
+        if (td.names === 'body' && /^typedef\s+(?:(?:const|volatile)\s+)*enum\b/.test(s.text)) {
+          enums.add(td.name);
+          if (unsizedEnum) {
+            unsizedEnums.add(td.name);
+          }
+        }
+        if (td.names === 'unspelled pointer') {
+          unspelledPointers.add(td.name);
+        }
       }
     }
   }
+  // Memoised per type and depth: a body whose members point at bodies is walked once per depth,
+  // not once per path to it — each pointer member lays its pointee out, and K of them to depth 8
+  // is K^8 walks.
+  const laidOut = new Map<string, AggregateLayout | undefined>();
+  const layoutOf = (t: string, depth: number): AggregateLayout | undefined => {
+    const bare = t
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const key = `${depth} ${bare}`;
+    if (laidOut.has(key)) {
+      return laidOut.get(key);
+    }
+    const tag = /^(struct|union) [A-Za-z_]\w*$/.exec(bare);
+    const kind = (tag?.[1] as AggregateLayout['kind'] | undefined) ?? named.get(bare)?.kind;
+    let layout: AggregateLayout | undefined;
+    if (kind !== undefined) {
+      const body = tag ? tagged.get(bare) : named.get(bare)?.body;
+      const members = body === undefined || realigned ? undefined : readMembers(body, depth);
+      layout = members === undefined ? { kind } : { kind, members };
+    }
+    laidOut.set(key, layout);
+    return layout;
+  };
+  // A body's members, or undefined when one of them is a type this cannot lay out — a project
+  // typedef that resolves to nothing sized, a nested aggregate with no body here, a flexible extent
+  // or one that is not a constant expression — or carries an attribute, which may place it anywhere.
+  // Bounded in depth, since a body may name its own tag.
+  const readMembers = (body: string, depth: number): AggregateMember[] | undefined => {
+    if (depth > 8) {
+      return undefined;
+    }
+    const out: AggregateMember[] = [];
+    for (const decl of splitMembers(body)) {
+      if (ATTRIBUTE.test(decl)) {
+        return undefined;
+      }
+      let type: ParamType | AggregateLayout;
+      let rest: string;
+      const inline = /^(struct|union)\s*(?:[A-Za-z_]\w*)?\s*\{/.exec(decl);
+      if (inline) {
+        const close = matchingBrace(decl, inline[0].length - 1);
+        const members = close < 0 ? undefined : readMembers(decl.slice(inline[0].length, close), depth + 1);
+        if (members === undefined) {
+          return undefined;
+        }
+        type = { kind: inline[1] as AggregateLayout['kind'], members };
+        rest = decl.slice(close + 1);
+      } else {
+        const split = baseAndDeclarators(decl);
+        if (split === undefined) {
+          return undefined;
+        }
+        const base = resolve(split.base, typedefs);
+        if (declaredWidth(base) !== undefined || base === 'float' || base === 'double') {
+          type = base;
+        } else if (unspelledPointers.has(base)) {
+          type = 'void *';
+        } else if (unsizedEnums.has(base)) {
+          return undefined;
+        } else if (/^enum [A-Za-z_]\w*$/.test(base) || enums.has(base)) {
+          // an enum, which the target sizes whatever it is called: spelled `enum` and its name
+          type = enums.has(base) ? `enum ${base}` : base;
+        } else {
+          const nested = layoutOf(base, depth + 1);
+          if (nested?.members === undefined) {
+            // a pointer to it is still a word; anything else of it cannot be laid out
+            type = `${base} *`;
+            if (!split.declarators.every((d) => /^\*|^\(/.test(d.trim()))) {
+              return undefined;
+            }
+          } else {
+            type = nested;
+          }
+        }
+        rest = split.declarators.join(',');
+      }
+      for (const d of topLevelCommas(rest)) {
+        const m = memberDeclarator(d);
+        if (m === undefined) {
+          return undefined;
+        }
+        const t: ParamType | AggregateLayout = m.pointer
+          ? typeof type === 'string'
+            ? `${type.replace(/ \*$/, '')} *`
+            : 'void *'
+          : type;
+        if (typeof t !== 'string' && m.bits !== undefined) {
+          return undefined;
+        }
+        out.push({
+          name: m.name,
+          type: t,
+          ...(m.dims ? { dims: m.dims } : {}),
+          ...(m.bits !== undefined ? { bits: m.bits } : {}),
+        });
+      }
+    }
+    return out;
+  };
   const found = new Map<string, FnProto | null>();
+  // a function one of whose declarations retypes a parameter with `mode`, which gives it the type
+  // the mode names in place of the one spelled (c-common.c:563): compiled, `int x
+  // __attribute__((mode(DI)))` takes a register pair. Its parameters are not read, in any
+  // declaration of it; its return is.
+  const unreadParams = new Set<string>();
+  const returnOnly = ({ params: _unread, ...rest }: FnProto): FnProto => rest;
   for (const s of stmts) {
-    const t = s.text
+    const attributes: string[] = [];
+    const t = withoutAttributes(s.text, attributes)
+      .replace(/\bextern\s*"C(?:\+\+)?"/g, ' ')
       .replace(SPECIFIERS, ' ')
-      .replace(/__attribute__\s*\(\(.*?\)\)/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
     // an `=` outside the parentheses is a variable's initializer; inside them, a default argument
@@ -262,9 +502,14 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     if (!m || /[(){}]/.test(m[1]) || TYPE_WORDS.has(m[2])) {
       continue;
     }
-    const proto = readSignature(m[1], m[3], language, typedefs);
+    if (attributes.some((a) => /\b(?:__)?mode(?:__)?\s*\(/.test(a))) {
+      unreadParams.add(m[2]);
+    }
+    const read = readSignature(m[1], m[3], language, typedefs, (t) => layoutOf(t, 0));
+    const proto = unreadParams.has(m[2]) ? returnOnly(read) : read;
     const prior = found.get(m[2]);
-    found.set(m[2], prior === undefined || same(prior, proto) ? proto : null);
+    const had = prior && unreadParams.has(m[2]) ? returnOnly(prior) : prior;
+    found.set(m[2], had === undefined || same(had, proto) ? proto : null);
   }
   const out: Prototypes = {};
   for (const [name, p] of found) {
@@ -288,18 +533,228 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
   return validatePrototypes({ [name]: rest }).length === 0 ? rest : undefined;
 }
 
+// agbcc reads both spellings (c-parse.gperf:22-23)
+const ATTRIBUTE = /\b__attribute(?:__)?\b/;
+const ATTRIBUTE_AT = /\b__attribute(?:__)?\s*\(/;
+
+/** Whether an attribute in this statement can move the layout of the body it defines. One in the
+ *  specifier — ahead of the body or straight after it — lays that body out (c-parse.in:1464-1503).
+ *  One elsewhere on a variable reaches that variable alone; one elsewhere in a typedef is read as
+ *  moving it too, whatever it says (`realigns` has what it may do). */
+function attributesLayout(text: string): boolean {
+  if (/^typedef\b/.test(text)) {
+    return ATTRIBUTE.test(text);
+  }
+  const body = text.indexOf('{}');
+  return body >= 0 && (ATTRIBUTE.test(text.slice(0, body)) || /^\{\}\s*__attribute(?:__)?\b/.test(text.slice(body)));
+}
+
+/** Whether a typedef in this statement may change, after its layout, a type no body here stands for.
+ *  An attribute outside a body's specifier is applied to the type the typedef names (c-common.c:
+ *  392-399, 444-446, 623-624), whatever spelling it takes (`aligned`, `__aligned__`, :345-351): a
+ *  struct tag, a pointer or a scalar such as `unsigned int` is re-aligned, which lays anything that
+ *  holds it out anew, and an enum whose body comes later is packed. Compiled, `typedef struct R *RP
+ *  __attribute__((aligned(8)))` makes `struct { struct R *p; }` 8 bytes, and `typedef enum E EA
+ *  __attribute__((packed))` ahead of `enum E {…}` makes it 1. Which type that is, is not worked out
+ *  here. Where the statement's plain declarators name its own body, `attributesLayout` leaves that
+ *  body unread instead — unless one attribute is `mode`, which hands every attribute after it a
+ *  shared scalar type in place of the body (c-common.c:563, 996-1000): compiled, `typedef struct R
+ *  {…} A __attribute__((mode(SI), aligned(8)))` makes every `int` 8-aligned. */
+function realigns(text: string): boolean {
+  if (!/\btypedef\b/.test(text) || !ATTRIBUTE.test(text)) {
+    return false;
+  }
+  if (/\b(?:__)?mode(?:__)?\s*\(/.test(text)) {
+    return true;
+  }
+  const plain = withoutAttributes(text).replace(/\s+/g, ' ').trim();
+  const own = /^typedef (?:(?:const|volatile) )*(?:struct|union|enum)\b[^{]*\{\} ?(.*)$/.exec(plain);
+  return (
+    own === null || !/^(?:(?:const|volatile) )*[A-Za-z_]\w*(?: ?, ?(?:(?:const|volatile) )*[A-Za-z_]\w*)*$/.test(own[1])
+  );
+}
+
+/** The text with every `__attribute__((…))` taken out, its parentheses balanced; each one taken out
+ *  goes to `removed`. */
+function withoutAttributes(text: string, removed?: string[]): string {
+  let out = '';
+  let i = 0;
+  for (let m = ATTRIBUTE_AT.exec(text.slice(i)); m !== null; m = ATTRIBUTE_AT.exec(text.slice(i))) {
+    out += `${text.slice(i, i + m.index)} `;
+    let j = i + m.index + m[0].length;
+    for (let depth = 1; j < text.length && depth > 0; j++) {
+      depth += text[j] === '(' ? 1 : text[j] === ')' ? -1 : 0;
+    }
+    removed?.push(text.slice(i + m.index, j));
+    i = j;
+  }
+  return out + text.slice(i);
+}
+
+/** Whether agbcc may lay an enum with this body out wider than an int. It does for a value past 32
+ *  bits (c-decl.c:6116-6123): a literal past 32 bits or of type `long long`, or an enumerator of an
+ *  enum already that wide (`wide`). Compiled, `enum {B0, B1 = 0x100000000LL}` is 8 bytes, and so is
+ *  `enum {C0, C1 = B1}`, where `enum {N0 = -1, N1 = 0xFFFFFFFF}` is 4. */
+function enumMayWiden(body: string, wide: ReadonlySet<string>): boolean {
+  const literals = [...body.matchAll(/\b(?:0[xX]([0-9a-fA-F]+)|0([0-7]+)|(\d+))([uUlL]*)/g)].map((m) => ({
+    value: m[1] !== undefined ? BigInt(`0x${m[1]}`) : m[2] !== undefined ? BigInt(`0o${m[2]}`) : BigInt(m[3]),
+    suffix: m[4],
+  }));
+  return (
+    literals.some((l) => l.value > 0xffffffffn || /l.*l/i.test(l.suffix)) ||
+    /\blong\s+long\b/.test(body) ||
+    [...body.matchAll(/\b[A-Za-z_]\w*\b/g)].some((m) => wide.has(m[0]))
+  );
+}
+
+/** A struct body's member declarations: its `;`-separated statements, a nested body kept whole. */
+function splitMembers(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '{') {
+      depth++;
+    } else if (body[i] === '}') {
+      depth--;
+    } else if (body[i] === ';' && depth === 0) {
+      out.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(body.slice(start));
+  return out.map((d) => d.replace(/\s+/g, ' ').trim()).filter((d) => d !== '');
+}
+
+/** The index of the `}` closing the `{` at `open`, or -1. */
+function matchingBrace(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === '{') {
+      depth++;
+    } else if (s[i] === '}' && --depth === 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** A member declaration's base type and its declarators (`u8 a, *b, c[4]` → `u8`, three). */
+function baseAndDeclarators(decl: string): { base: string; declarators: string[] } | undefined {
+  const parts = topLevelCommas(decl);
+  const fnptr = /^(.+?)\s*(\(\s*\*.*)$/.exec(parts[0]);
+  const plain =
+    /^(.*?[^\s*])\s*((?:\*\s*(?:(?:const|volatile)\s*)*)*[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)*|[A-Za-z_]\w*\s*:\s*\w+|:\s*\w+)$/.exec(
+      parts[0],
+    );
+  const m = fnptr ?? plain;
+  if (!m || TYPE_WORDS.has(m[2].replace(/[\s*]/g, ''))) {
+    return undefined;
+  }
+  return { base: m[1].trim(), declarators: [m[2], ...parts.slice(1)] };
+}
+
+/** The value of an integer constant expression of literals, `+ - * /` and parentheses — the
+ *  `u8 pad3[0x4 - 0x3]` a decomp header sizes its padding with — or undefined for anything else. A
+ *  literal reads as C reads it: `0x` hexadecimal, a leading `0` octal. */
+function constantValue(text: string): number | undefined {
+  const tokens = text.match(/0x[0-9a-f]+[ul]*|\d+[ul]*|[-+*/()]|\S/gi) ?? [];
+  let at = 0;
+  const primary = (): number | undefined => {
+    const t = tokens[at++];
+    if (t === '(') {
+      const v = sum();
+      return tokens[at++] === ')' ? v : undefined;
+    }
+    if (t === '-') {
+      const v = primary();
+      return v === undefined ? undefined : -v;
+    }
+    return t !== undefined && /^(?:0x[0-9a-f]+|0[0-7]*|[1-9]\d*)[ul]*$/i.test(t)
+      ? Number.parseInt(t, /^0x/i.test(t) ? 16 : /^0\d/.test(t) ? 8 : 10)
+      : undefined;
+  };
+  const product = (): number | undefined => {
+    let v = primary();
+    while (v !== undefined && (tokens[at] === '*' || tokens[at] === '/')) {
+      const op = tokens[at++];
+      const r = primary();
+      v = r === undefined || (op === '/' && r === 0) ? undefined : op === '*' ? v * r : Math.trunc(v / r);
+    }
+    return v;
+  };
+  const sum = (): number | undefined => {
+    let v = product();
+    while (v !== undefined && (tokens[at] === '+' || tokens[at] === '-')) {
+      const op = tokens[at++];
+      const r = product();
+      v = r === undefined ? undefined : op === '+' ? v + r : v - r;
+    }
+    return v;
+  };
+  const v = sum();
+  return at === tokens.length ? v : undefined;
+}
+
+/** One member declarator: its name, whether it declares a pointer, its extents, its bit width. */
+function memberDeclarator(d: string): { name: string; pointer: boolean; dims?: number[]; bits?: number } | undefined {
+  const s = d.trim();
+  const literal = constantValue;
+  const fnptr = /^\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\(.*\)$/.exec(s);
+  if (fnptr) {
+    return { name: fnptr[1], pointer: true };
+  }
+  const bit = /^([A-Za-z_]\w*)?\s*:\s*(\w+)$/.exec(s);
+  if (bit) {
+    const bits = literal(bit[2]);
+    return bits === undefined ? undefined : { name: bit[1] ?? '', pointer: false, bits };
+  }
+  const plain = /^((?:\*\s*(?:(?:const|volatile)\s*)*)*)([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)$/.exec(s);
+  if (!plain) {
+    return undefined;
+  }
+  const dims = [...plain[3].matchAll(/\[([^\]]*)\]/g)].map((x) => literal(x[1]));
+  if (dims.some((n) => n === undefined || n === 0)) {
+    return undefined;
+  }
+  return {
+    name: plain[2],
+    pointer: plain[1].includes('*'),
+    ...(dims.length > 0 ? { dims: dims as number[] } : {}),
+  };
+}
+
 function readSignature(
   ret: string,
   params: string,
   language: 'c' | 'c++',
   typedefs: ReadonlyMap<string, string>,
+  layoutOf: (t: string) => AggregateLayout | undefined,
 ): FnProto {
   const proto: FnProto = {};
   const r = resolve(ret.trim(), typedefs);
+  // A struct or union returned by value is kept, spelled as the header spells it: it is the fact
+  // that moves every argument one register up on a target that returns it through a hidden pointer.
+  // A spelling that names one and reads as no type (`struct Blob64 EWRAM_FN`, a macro this never
+  // expands) still returns one, and says nothing else about it.
+  //
+  // A spelling that reads as no type and names no aggregate states nothing, and the parameters are
+  // kept: in a vendored context that is a float, a double or an enum typedef, whose arguments sit
+  // where they are declared. KNOWN GAP: a typedef this never saw (`Blob64T`, defined behind an
+  // `#include` that `clean` blanks) may be a struct returned through memory, whose hidden pointer
+  // is then read as argument 0; a symbol map that sizes the return closes it
+  // (`prototypesFromSymbols`).
+  const layout = declaredWidth(r) === undefined ? layoutOf(r) : undefined;
+  const keyword = /\b(struct|union|class)\b/.exec(r);
   if (r === 'void') {
     proto.returnsVoid = true;
   } else if (declaredWidth(r) !== undefined) {
     proto.returns = r;
+  } else if (layout !== undefined) {
+    proto.returns = r;
+    proto.returnLayout = layout;
+  } else if (keyword && !r.includes('*')) {
+    proto.returnLayout = { kind: keyword[1] === 'union' ? 'union' : 'struct' };
   }
   const list = params.trim();
   if (list === '' ? language === 'c++' : list === 'void') {
@@ -329,7 +784,12 @@ function readSignature(
  *  prototypes, which win per name — over the context's declarations less those the symbol map
  *  states better (`contextPrototypesUnder`). `own`'s declaration is left out, as the map's is
  *  (`asIfUndecompiled`): a header's signature for the function being decompiled is that kind of
- *  fact, and only what the caller states about it is kept. */
+ *  fact, and only what the caller states about it is kept.
+ *
+ *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
+ *  false` as nothing) keeps a struct return the context states: it is what says argument 0 may be
+ *  a hidden pointer, and an entry stating only the arity would otherwise hand that pointer to the
+ *  call as its first argument. */
 export function withContextPrototypes(
   stated: Prototypes | undefined,
   context: Prototypes,
@@ -337,7 +797,25 @@ export function withContextPrototypes(
   symbols: SymbolMap | undefined,
 ): Prototypes {
   const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols);
-  return { ...callees, ...stated };
+  const out: Prototypes = { ...callees, ...stated };
+  for (const [name, p] of Object.entries(stated ?? {})) {
+    const heard = Object.hasOwn(callees, name) ? callees[name] : undefined;
+    if (p && statesNoReturn(p)) {
+      out[name] = { ...p, ...aggregateReturnOf(heard) };
+    }
+  }
+  return out;
+}
+
+/** The keys that state `p`'s struct or union return, or none where it states no such return. */
+function aggregateReturnOf(p: FnProto | undefined): Pick<FnProto, 'returns' | 'returnLayout'> {
+  if (p === undefined || !declaresAggregateReturn(p)) {
+    return {};
+  }
+  return {
+    ...(p.returns !== undefined ? { returns: p.returns } : {}),
+    ...(p.returnLayout !== undefined ? { returnLayout: p.returnLayout } : {}),
+  };
 }
 
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
@@ -353,15 +831,26 @@ function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefi
   if (symbols === undefined) {
     return context;
   }
-  const mapped = new Set<string>();
+  const mapped = new Map<string, FnProto>();
   for (const infos of symbols.values()) {
     for (const info of infos) {
-      if (symbolPrototype(info) !== undefined) {
-        mapped.add(info.name);
+      const signed = symbolPrototype(info);
+      if (signed?.params !== undefined && !mapped.has(info.name)) {
+        mapped.set(info.name, signed);
       }
     }
   }
+  // An entry that yields keeps a struct return it states, over the map's parameters: DWARF names no
+  // struct, so the map states one only by its size (`symbolPrototype`), and never its members.
   return Object.fromEntries(
-    Object.entries(context).filter(([name, p]) => declaredArgWidths(p) !== undefined || !mapped.has(name)),
+    Object.entries(context).flatMap(([name, p]): [string, FnProto][] => {
+      const signed = mapped.get(name);
+      if (declaredArgWidths(p) !== undefined || signed === undefined) {
+        return [[name, p]];
+      }
+      return declaresAggregateReturn(p) && signed.returnsVoid !== true
+        ? [[name, { ...signed, ...aggregateReturnOf(p) }]]
+        : [];
+    }),
   );
 }

@@ -44,9 +44,10 @@ export interface SsaBuilder {
    *  what answers it. That answer already covers a register a call destroyed, and it covers it
    *  EXHAUSTIVELY: destroyed on any path means not written-since-the-call on that path, so the
    *  must-analysis drops it from the run and the operand goes — bar an argument register the ABI
-   *  ALIASES onto the return register, which `noteCall` cannot list as destroyed for that very
-   *  reason. So none of these reads can leave a destroyed value in the graph, and refusing the
-   *  function over one would cost a row the trim has already made correct.
+   *  ALIASES onto the return register, which a call that writes its result there does not list as
+   *  destroyed; one that writes none there does, and the trim reads that too. So none of these
+   *  reads can leave a destroyed value in the graph, and refusing the function over one would cost
+   *  a row the trim has already made correct.
    *
    *  THAT ALIASING IS A PER-TARGET FACT AND TWO TARGETS HERE DO NOT HAVE IT. ARM and PowerPC both
    *  pass argument 0 in the return register (r0/r0, r3/r3), so on them the exemption is the whole
@@ -99,9 +100,10 @@ export interface SsaBuilder {
    *  `clobbers` are the registers the callee DESTROYS and leaves holding nothing this function can
    *  name — {@link clobberedByCall} spells it, and it is the ABI's caller-saved set minus the
    *  return register precisely because of the ordering above: the frontend has already written the
-   *  callee's own result there, so that one register does have a name. Required rather than
-   *  optional: a frontend that omitted it would keep resolving a destroyed register to its
-   *  pre-call value, silently. */
+   *  callee's own result there, so that one register does have a name. A callee that hands a
+   *  STRUCT back in that register writes no value a caller may read as a word, so the frontend
+   *  writes none and lists the register here too. Required rather than optional: a frontend that
+   *  omitted it would keep resolving a destroyed register to its pre-call value, silently. */
   noteCall(b: number, clobbers: readonly string[]): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
@@ -747,13 +749,11 @@ export function makeSsaBuilder(
    *  compiler rematerialised in a way no `writeVar` saw reads as destroyed and the function
    *  declines. TOO LOOSE is the wrong value, and the MAY direction below is what rules it out — a
    *  register destroyed on ANY path into a block is destroyed there, so a join cannot launder one. */
-  const refuseStaleCallerSavedReads = () => {
-    if (staleCandidates.length === 0) {
-      return;
-    }
-    // Destroyed on SOME path: the UNION, against `trimClobberedCallArgs`'s intersection, and for
-    // the opposite reason. That one proves the caller set a register up, which needs every path to
-    // agree; this one proves nobody can name it, which one path is enough for.
+  /** Per block, the registers a call destroyed on SOME path into it with nothing written since:
+   *  the UNION, against `trimClobberedCallArgs`'s intersection, and for the opposite reason. That
+   *  one proves the caller set a register up, which needs every path to agree; this one proves
+   *  nobody can name it, which one path is enough for. Meaningful once every block is filled. */
+  const destroyedOnEntry = (): Array<Set<string>> => {
     const destroyedIn: Array<Set<string>> = irBlocks.map(() => new Set());
     const outOf = (b: number): Set<string> => {
       const out = new Set(clobberedLocal[b]);
@@ -777,6 +777,13 @@ export function makeSsaBuilder(
         }
       }
     }
+    return destroyedIn;
+  };
+  const refuseStaleCallerSavedReads = () => {
+    if (staleCandidates.length === 0) {
+      return;
+    }
+    const destroyedIn = destroyedOnEntry();
     for (const c of staleCandidates) {
       if (!c.local && !destroyedIn[c.block].has(c.reg)) {
         continue;
@@ -824,6 +831,11 @@ export function makeSsaBuilder(
         op,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
+        returnRegBefore: clobberedLocal[b].has(abi.returnReg)
+          ? 'destroyed'
+          : decidedLocal[b].has(abi.returnReg)
+            ? 'written'
+            : 'inherited',
       });
     },
     markFilled: (b: number) => {
@@ -845,9 +857,11 @@ export function makeSsaBuilder(
           }
         }
         trimClobberedCallArgs({
+          name,
           argRegs: abiSeen.argRegs,
           returnReg: abiSeen.returnReg,
           calleeResults,
+          destroyedIn: destroyedOnEntry(),
           preds,
           freshAtEnd: writtenSinceCall,
           callsIn,
@@ -966,9 +980,15 @@ export interface GuessedCallSite {
   freshBefore: Set<string>;
   /** did this block already make a call before this one? */
   afterCallInBlock: boolean;
+  /** what this block did to the return register before this call: a call here left it holding
+   *  nothing (`destroyed`), the block wrote it since (`written`), or neither, so the predecessors
+   *  decide (`inherited`) */
+  returnRegBefore: 'destroyed' | 'written' | 'inherited';
 }
 
 export interface CallArgTrim {
+  /** the function being lifted, for a refusal */
+  name: string;
   argRegs: string[];
   /** the ABI return register. Load-bearing only where it IS `argRegs[0]` (ARM r0, PPC r3) — that
    *  aliasing is what makes a callee's result indistinguishable from caller-side argument setup. */
@@ -976,6 +996,10 @@ export interface CallArgTrim {
   /** every value a `call` op produced. Tells a callee's own return apart from a join that merely
    *  PASSES THROUGH one, which the register file cannot: both leave argument 0 unfresh. */
   calleeResults: ReadonlySet<Value>;
+  /** per block, the registers a call destroyed on SOME path into it with nothing written since. A
+   *  call lists the return register there only when it leaves it holding nothing the caller can
+   *  name — a struct handed back in it ({@link SsaBuilder.noteCall}). */
+  destroyedIn: ReadonlyArray<ReadonlySet<string>>;
   /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
   preds: number[][];
   /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
@@ -1012,7 +1036,7 @@ export interface CallArgTrim {
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
 export function trimClobberedCallArgs(inp: CallArgTrim): void {
-  const { argRegs, returnReg, calleeResults, preds, freshAtEnd, callsIn, sites } = inp;
+  const { argRegs, returnReg, calleeResults, destroyedIn, preds, freshAtEnd, callsIn, sites } = inp;
   const blockCount = freshAtEnd.length;
   const all = () => new Set(argRegs);
   const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
@@ -1075,10 +1099,28 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // `f` to return a value and `g` to accept one — a spelling the project's own header rejects
   // outright when it does not. A declared prototype never reaches here, and stays the way `g(f())`
   // is recovered.
-  const argcAt = (fresh: Set<string>, op: Op): number => {
-    if (argRegs[0] !== returnReg || fresh.has(argRegs[0])) {
+  //
+  // THE EXEMPTION NEEDS A RESULT IN THE REGISTER. A call that hands a struct back in it (`struct W1
+  // mkw(s32)`) writes no value there — its bytes are a struct, not a word — so the register still
+  // names what it held BEFORE that call, and neither clause above can tell: that value is no callee
+  // result, which is the join clause's sign of a real argument. Destroyed on any path is no setup on
+  // that path, so the register is an ordinary unfresh one there, and the run stops below it —
+  // unless a later register is set up, which puts argument 0 below a proven one: that argument is
+  // then the struct itself (`other(mv(a), b)`), a value no register here names, and it declines.
+  const argcAt = (s: GuessedCallSite, fresh: Set<string>): number => {
+    const destroyed =
+      s.returnRegBefore === 'destroyed' || (s.returnRegBefore === 'inherited' && destroyedIn[s.block].has(returnReg));
+    if (argRegs[0] === returnReg && !fresh.has(argRegs[0]) && destroyed && setsUpLater(fresh)) {
+      const callee = s.op.attrs.target;
+      throw new FrontendUnsupportedError(
+        `cannot lift '${inp.name}': argument 1 of the call to ${typeof callee === 'string' ? `'${callee}'` : 'a callee'} ` +
+          `is a struct an earlier call handed back in ${returnReg}, and nothing here passes one on as an argument — not modelled`,
+      );
+    }
+    if (argRegs[0] !== returnReg || fresh.has(argRegs[0]) || destroyed) {
       return runOfFresh(fresh, 0);
     }
+    const op = s.op;
     if (setsUpLater(fresh) || !calleeResults.has(op.operands[0])) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
@@ -1086,7 +1128,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   };
   for (const s of sites) {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
-    const n = argcAt(fresh, s.op);
+    const n = argcAt(s, fresh);
     if (n < s.op.operands.length) {
       s.op.operands.length = n;
     }

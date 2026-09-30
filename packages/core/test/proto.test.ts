@@ -5,6 +5,8 @@
 // number every frontend walks its argument registers by.
 import { describe, expect, test } from 'vitest';
 
+import { returnsWithoutHiddenPointer } from '../src/aggregate';
+import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
 import {
@@ -13,7 +15,6 @@ import {
   declaredReturnWidth,
   declaredWidth,
   prototypesFromSymbols,
-  returnsWithoutHiddenPointer,
   spellableProto,
   spellableType,
   wordsOf,
@@ -127,12 +128,19 @@ describe('a void return, whichever key states it', () => {
   });
 
   test('a CALLEE stating a void return is one no hidden struct pointer is handed', () => {
-    expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } })).toBe(true);
-    expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } })).toBe(true);
-    expect(returnsWithoutHiddenPointer('g', { g: { params: [] } })).toBe(false);
-    // A struct NAME leaves it open: agbcc returns a one-word struct in r0 and a larger one through
-    // the hidden pointer, and the name carries no size (`stkextsret` is the row).
-    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'struct Blob64' } })).toBe(false);
+    expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } }, ARMV4T_AGBCC)).toBe(true);
+    expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } }, ARMV4T_AGBCC)).toBe(true);
+    expect(returnsWithoutHiddenPointer('g', { g: { params: [] } }, ARMV4T_AGBCC)).toBe(false);
+    // A struct return whose members nothing states leaves it open: whether it comes back through a
+    // hidden pointer is the target's rule over its layout (src/aggregate.ts `returnsInMemory`).
+    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'struct Blob64' } }, ARMV4T_AGBCC)).toBe(false);
+    expect(
+      returnsWithoutHiddenPointer(
+        'g',
+        { g: { params: 1, returns: 'P', returnLayout: { kind: 'struct' } } },
+        ARMV4T_AGBCC,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -182,6 +190,17 @@ describe('declaredReturnWidth', () => {
   test('a zero-argument count is the same declaration as an empty list', () => {
     expect(declaredReturnWidth({ params: 0, returns: 'long long' })).toBe(64);
     expect(spellableProto({ params: 0, returns: 'long long' })).toEqual({ params: [], returns: 'long long' });
+  });
+
+  // A struct return prints only as the struct a lifted call fills (`returned`, the IR type the lift
+  // laid it out as, which the declarations block defines).
+  test('a struct return prints as the struct its call fills, or not at all', () => {
+    const p = { params: ['s32'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };
+    const returned = T.struct('Blob', [{ off: 0, type: T.array(T.u(32), 16), name: 'w' }], 64);
+    expect(spellableProto(p, returned)).toEqual({ params: ['s32'], returns: 'struct Blob' });
+    expect(spellableProto(p)).toBeUndefined();
+    expect(spellableProto({ params: [], returns: 'struct S' })).toBeUndefined();
+    expect(declaredReturnWidth(p)).toBeUndefined();
   });
 
   // `returnsVoid` IS NOT CONSULTED. It is the other return key and it answers a different
@@ -370,6 +389,23 @@ describe('prototypesFromSymbols — the project DWARF fills in what the caller d
       codeAt(0x08001000, 'Callee', { returns: null, params: [{ size: 1, signed: false }] }),
     ]);
     expect(prototypesFromSymbols(map, { Callee: { params: 3 } })).toEqual({ Callee: { params: 3 } });
+  });
+
+  // DWARF's signless 64-byte return is a struct (`symbolPrototype`), and an entry that says nothing
+  // of its return — a stated arity, or a header whose return spelling nothing here reads — does not
+  // contradict it; one that states a return does
+  test('an entry that says nothing of the return takes the map struct return', () => {
+    const map: SymbolMap = new Map([
+      codeAt(0x08001000, 'mk', { returns: { size: 64, signed: null }, params: [{ size: 4, signed: true }] }),
+    ]);
+    const layout = { returnLayout: { kind: 'struct' } };
+    expect(prototypesFromSymbols(map, { mk: { params: 1 } })).toEqual({ mk: { params: 1, ...layout } });
+    expect(prototypesFromSymbols(map, { mk: { params: ['s32'], returnsVoid: false } })).toEqual({
+      mk: { params: ['s32'], returnsVoid: false, ...layout },
+    });
+    expect(prototypesFromSymbols(map, { mk: { params: 1, returns: 's32' } })).toEqual({
+      mk: { params: 1, returns: 's32' },
+    });
   });
 
   test('an unspellable parameter drops the WHOLE entry — a partial list would give a right arity with wrong widths', () => {

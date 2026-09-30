@@ -53,6 +53,7 @@
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
+import { type AggregateLayout, type AggregateMember, declaredWidth, spellableType } from './proto';
 import {
   ENUM_IS_SIGNED,
   type SymbolInfo,
@@ -136,6 +137,43 @@ function structDecl(tag: string, layout: SymbolStructField[] | undefined, size: 
   return renderStructDecl(tag, fields);
 }
 
+/** A struct the project's headers define, transcribed from their declaration so the compiler lays
+ *  it out as it lays out theirs: each member in order with its extents and bit width, a nested
+ *  struct or union inline, and every type spelled so that it needs nothing else declared — a
+ *  pointer as `void *`, an enum as an inline enum of its own, a scalar the prelude does not name
+ *  as the prelude's type of its width and signedness. Its members are what size it, not what is
+ *  read of it: no emitted expression names one (aggregate.ts `aggregateType`). */
+function declaredStructDecl(tag: string, layout: AggregateLayout): string {
+  let enums = 0;
+  const scalar = (spelling: string): string => {
+    const s = spelling
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (s.endsWith('*')) {
+      return 'void *';
+    }
+    if (/^enum\b/.test(s)) {
+      return `enum { asmlift_${tag}_enum${enums++} }`;
+    }
+    if (s === 'float' || s === 'double' || spellableType(s)) {
+      return s;
+    }
+    const bits = declaredWidth(s);
+    return `${/^u\d|\bunsigned\b/.test(s) ? 'u' : 's'}${bits}`;
+  };
+  const body = (members: readonly AggregateMember[]): string =>
+    members
+      .map((m) => {
+        const type = typeof m.type === 'string' ? scalar(m.type) : `${m.type.kind} { ${body(m.type.members!)} }`;
+        const declarator = `${m.name}${(m.dims ?? []).map((n) => `[${n}]`).join('')}`;
+        const bits = m.bits !== undefined ? ` : ${m.bits}` : '';
+        return `${type}${type.endsWith('*') || declarator === '' ? '' : ' '}${declarator}${bits};`;
+      })
+      .join(' ');
+  return `struct ${tag} { ${body(layout.members!)} };`;
+}
+
 /**
  * Render the declaration block for a candidate's recorded symbol references. Deterministic
  * (refs arrive name-sorted from core; struct decls dedupe by tag). The block is prepended by
@@ -146,7 +184,8 @@ function structDecl(tag: string, layout: SymbolStructField[] | undefined, size: 
 export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
-  for (const { name, info, access, proto } of refs) {
+  const declaredTypedefs = new Set<string>();
+  for (const { name, info, access, proto, returned } of refs) {
     // An address-cast macro declares itself: the header's own body, verbatim. It must NOT become
     // an `extern` — that is the whole point of the fact (an extern emits a relocated pool word
     // where the macro emits the numeric one the target shows).
@@ -161,6 +200,19 @@ export function renderDeclarations(refs: SymbolRef[]): string {
     // parameterless list is spelled `(void)`, never `()`, because `()` declares nothing about
     // the arguments and gcc-2.9 then promotes them.
     if (proto !== undefined) {
+      // A STRUCT IT RETURNS THROUGH MEMORY is the headers' type, spelled as they spell it, so it is
+      // defined here with the rest of what they own: by its tag, once, whoever else declares that
+      // tag — and a typedef name is bound to it on top.
+      if (returned?.declared !== undefined) {
+        if (!declaredTags.has(returned.name)) {
+          declaredTags.add(returned.name);
+          lines.push(declaredStructDecl(returned.name, returned.layout));
+        }
+        if (!/^(?:struct|union)\s/.test(returned.declared) && !declaredTypedefs.has(returned.declared)) {
+          declaredTypedefs.add(returned.declared);
+          lines.push(`typedef struct ${returned.name} ${returned.declared};`);
+        }
+      }
       lines.push(`${proto.returns} ${name}(${proto.params.length > 0 ? proto.params.join(', ') : 'void'});`);
       continue;
     }

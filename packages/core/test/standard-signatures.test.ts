@@ -4,8 +4,9 @@
 // argument registers were never written in this function keeps none of them.
 import { expect, test } from 'vitest';
 
+import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { decompile } from '../src/pipeline';
-import { type Prototypes, returnsWithoutHiddenPointer } from '../src/proto';
+import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // four incoming parameters, all live at the call — `r3` is kept by a copy so it has a reaching
@@ -33,13 +34,13 @@ test('the project`s own header still wins over the standard table', () => {
 // captured frame address handed over at argument 0 is an out-parameter or a hidden struct-return
 // pointer, and only a statement about the return tells them apart.
 test('the standard fixes `memcpy`s return, so nothing needs to declare it', () => {
-  expect(returnsWithoutHiddenPointer('memcpy', {})).toBe(true);
+  expect(returnsWithoutHiddenPointer('memcpy', {}, ARMV4T_AGBCC)).toBe(true);
 });
 
 test('a callee nobody has described returns nothing known, and the answer is no', () => {
-  expect(returnsWithoutHiddenPointer('g', {})).toBe(false);
-  expect(returnsWithoutHiddenPointer('g', { g: { params: 3 } })).toBe(false);
-  expect(returnsWithoutHiddenPointer('g', { g: { params: 3, returnsVoid: true } })).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', {}, ARMV4T_AGBCC)).toBe(false);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: 3 } }, ARMV4T_AGBCC)).toBe(false);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: 3, returnsVoid: true } }, ARMV4T_AGBCC)).toBe(true);
 });
 
 // A PROJECT'S OWN `returns` ANSWERS THE SAME QUESTION, through the same width reading, and it
@@ -48,21 +49,38 @@ test('a callee nobody has described returns nothing known, and the answer is no'
 // and not an overflow of a test meant for words — a pair travels in registers, and a pair is still
 // not a pointer the caller supplied.
 test('a project that spells its callee`s return answers the audit too', () => {
-  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'long long' } })).toBe(true);
-  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'void *' } })).toBe(true);
-  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'void' } })).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'long long' } }, ARMV4T_AGBCC)).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'void *' } }, ARMV4T_AGBCC)).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'void' } }, ARMV4T_AGBCC)).toBe(true);
   // …and a spelling nothing can size leaves the hidden pointer open, which is the whole point of
   // the field answering `false` for silence.
-  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'struct Vec' } })).toBe(false);
+  expect(returnsWithoutHiddenPointer('g', { g: { params: [], returns: 'struct Vec' } }, ARMV4T_AGBCC)).toBe(false);
   // The project's word beats the standard table's, in the direction that REFUSES: a `memcpy`
   // re-declared to return a struct is not `memcpy`, and the audit must not keep answering for it.
-  expect(returnsWithoutHiddenPointer('memcpy', { memcpy: { params: 3, returns: 'struct Vec' } })).toBe(false);
+  expect(returnsWithoutHiddenPointer('memcpy', { memcpy: { params: 3, returns: 'struct Vec' } }, ARMV4T_AGBCC)).toBe(
+    false,
+  );
+});
+
+// A struct or union return is the target's to place: agbcc hands a one-member word back in r0
+// (thumb.c:1423-1493), so no pointer is passed, and a second member puts it in memory
+test('a declared struct return answers by the target rule', () => {
+  const struct = (members: string[]) => ({
+    params: 1,
+    returns: 'struct S',
+    returnLayout: { kind: 'struct' as const, members: members.map((name) => ({ name, type: 'u8' })) },
+  });
+  expect(returnsWithoutHiddenPointer('g', { g: struct(['a']) }, ARMV4T_AGBCC)).toBe(true);
+  expect(returnsWithoutHiddenPointer('g', { g: struct(['a', 'b']) }, ARMV4T_AGBCC)).toBe(false);
+  // …and one whose members nothing states leaves it open
+  const bare = { params: 1, returns: 'struct S', returnLayout: { kind: 'struct' as const } };
+  expect(returnsWithoutHiddenPointer('g', { g: bare }, ARMV4T_AGBCC)).toBe(false);
 });
 
 test('a callee named after an `Object.prototype` member is not described by that', () => {
   // `'toString' in STANDARD_SIGNATURES` is true, and a decomp may well have a `valueOf`
-  expect(returnsWithoutHiddenPointer('toString', {})).toBe(false);
-  expect(returnsWithoutHiddenPointer('valueOf', { valueOf: { params: 1 } })).toBe(false);
+  expect(returnsWithoutHiddenPointer('toString', {}, ARMV4T_AGBCC)).toBe(false);
+  expect(returnsWithoutHiddenPointer('valueOf', { valueOf: { params: 1 } }, ARMV4T_AGBCC)).toBe(false);
 });
 
 // A TABLE THAT CAME FROM OUTSIDE. `decompile` is a published entry point and runs no
@@ -74,7 +92,7 @@ const captureAtArg0 =
   '\tmov\tr2, #0x10\n\tbl\tg\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
 
 test('a null entry says nothing about the return, like an absent one', () => {
-  expect(returnsWithoutHiddenPointer('g', JSON.parse('{"g": null}') as Prototypes)).toBe(false);
+  expect(returnsWithoutHiddenPointer('g', JSON.parse('{"g": null}') as Prototypes, ARMV4T_AGBCC)).toBe(false);
 });
 
 test('…and the lift declines through its own channel rather than crashing', () => {

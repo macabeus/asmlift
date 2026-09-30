@@ -37,10 +37,11 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
+import { returnedAggregate, returnsInMemory } from '../aggregate';
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredArgWidths, declaredReturnWidth } from '../proto';
+import { type Prototypes, declaredArgWidths, declaredReturnWidth, declaresAggregateReturn } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -1073,7 +1074,20 @@ export function lift(
           //
           // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
           // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
-          const widths = declaredArgWidths(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          const own = Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined;
+          // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE. One the target returns through
+          // memory is handed a hidden pointer in r3, with every argument one register up — a call
+          // this frontend does not lower. One it returns in r3/r3:r4 takes its arguments where they
+          // are declared, and those registers hold the struct's bytes, which nothing here reads as
+          // a struct: they are destroyed by the call, so a read of one past it refuses.
+          const aggregateInRegisters = declaresAggregateReturn(own);
+          if (aggregateInRegisters && returnsInMemory(returnedAggregate(own!), target) !== false) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': '${sym}' is declared to return ${own?.returns ?? 'a struct or union'} by value — ` +
+                'a struct returned through a hidden pointer, or one nothing here can size, is not modelled',
+            );
+          }
+          const widths = declaredArgWidths(own);
           let declared: number | undefined;
           if (widths !== undefined) {
             const wideAt = widths.findIndex((w) => w > 32);
@@ -1166,8 +1180,12 @@ export function lift(
           if (declared === undefined) {
             ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
           }
-          write(RET, res);
-          ssa.noteCall(bi, CALL_CLOBBERS);
+          if (aggregateInRegisters) {
+            ssa.noteCall(bi, [...CALL_CLOBBERS, RET]);
+          } else {
+            write(RET, res);
+            ssa.noteCall(bi, CALL_CLOBBERS);
+          }
           for (const cr of CR_VOLATILE) {
             cmpDef.set(
               cr,
