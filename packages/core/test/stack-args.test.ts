@@ -163,9 +163,10 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     // alone, six declared parameters size a two-word block and the code stages two words, so the
     // equality holds — and consuming it hands `fd` six arguments where the fifth `long long` spans
     // both staged words (`fd(a0, a1, a0, a1, a2, a3)`). Read as words it is SEVEN, and the third
-    // block word is never stored.
+    // block word is never stored. The refusal names both counts, since each is a number a reader
+    // checks against a different thing — the header, and the frame.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'long long', 's32'] } })).toThrow(
-      /declared with 7 arguments, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\], \[sp,#8\] — but \[sp,#8\] is not stored/,
+      /declared with 6 arguments in 7 argument words, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\], \[sp,#8\] — but \[sp,#8\] is not stored/,
     );
     // The declaration that really produced it agrees word for word, so the two staged words are
     // the pair: `concat(a0, a1)`, whose halves are also passed alone and so fuse into no parameter,

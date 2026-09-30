@@ -3630,6 +3630,7 @@ function liftOnce(
     widths: readonly number[];
     doubles: ReadonlySet<number>;
     block: readonly number[] | null;
+    params: number;
     returned?: StructReturn | 'register';
   } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
@@ -3677,6 +3678,7 @@ function liftOnce(
       widths,
       doubles,
       block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
+      params: params.length,
       ...(returned === undefined ? {} : { returned }),
     };
   };
@@ -3689,7 +3691,8 @@ function liftOnce(
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
-          return [{ kind: 'call', call: ins, callee, declared: declaredCall(callee)?.block ?? null }];
+          const declared = declaredCall(callee);
+          return [{ kind: 'call', call: ins, callee, declared: declared?.block ?? null, params: declared?.params }];
         }
         return [];
       }),

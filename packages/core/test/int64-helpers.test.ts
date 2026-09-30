@@ -227,16 +227,19 @@ describe('what refuses', () => {
       decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC, {
         prototypes: { sink: { params, returnsVoid: true } },
       });
-    for (const params of [
-      ['s32', 's32', 's32', 'long long'],
-      ['long long', 's32', 'long long'],
-    ]) {
-      expect(() => declared(params)).toThrow(
-        /`sink` is declared with 5 arguments, so its outgoing stack-argument block is \[sp,#0\] — but \[sp,#0\] is not stored/,
+    for (const [params, n] of [
+      [['s32', 's32', 's32', 'long long'], 4],
+      [['long long', 's32', 'long long'], 3],
+    ] as const) {
+      expect(() => declared([...params])).toThrow(
+        new RegExp(
+          `\`sink\` is declared with ${n} arguments in 5 argument words, so its outgoing stack-argument block is ` +
+            '\\[sp,#0\\] — but \\[sp,#0\\] is not stored',
+        ),
       );
     }
     expect(() => declared(['s32', 's32', 's32', 's32', 'long long'])).toThrow(
-      /declared with 6 arguments, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\]/,
+      /declared with 5 arguments in 6 argument words, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\]/,
     );
   });
 });
