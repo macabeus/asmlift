@@ -3487,6 +3487,27 @@ export const SYNTHETIC: SynthSpec[] = [
       stkwide: { returnsVoid: true },
     },
   },
+  // `stkwide`'s literal in the other two places agbcc puts a double argument (thumb.h:632/636): both
+  // words in r0:r1 (`dreg`), and split, the HIGH word in r3 and the low at [sp,#0] (`dsplit`). Each
+  // is its own branch of the call lowering (`frontend/thumb.ts`), and `stkwide` reaches only the
+  // outgoing-block one. The same caveat holds: the callee is `void` and undeclared in the candidate,
+  // so the score cannot tell `1.5` from the integer its words spell as a `long long`.
+  {
+    sym: 'dreg',
+    src: 'void g(double x);\nvoid dreg(void){ g(1.5); }',
+    features: ['double'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(double x); void dreg(void);',
+    proto: { g: { params: ['double'], returnsVoid: true }, dreg: { returnsVoid: true } },
+  },
+  {
+    sym: 'dsplit',
+    src: 'void f4(s32 a, s32 b, s32 c, double d);\nvoid dsplit(s32 a, s32 b){ f4(a, b, 7, 1.5); }',
+    features: ['multi-arg', 'double'],
+    toolchains: ['agbcc'],
+    ctx: 'void f4(s32 a, s32 b, s32 c, double d); void dsplit(s32 a, s32 b);',
+    proto: { f4: { params: ['s32', 's32', 's32', 'double'], returnsVoid: true }, dsplit: { returnsVoid: true } },
+  },
   {
     sym: 'stkaddr',
     src:
