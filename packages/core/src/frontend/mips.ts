@@ -35,7 +35,7 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { bothPrecisionsError, fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
+import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -1228,7 +1228,7 @@ export function lift(
         return;
       }
       if (fpType === null) {
-        throw bothPrecisionsError(name, ins.mnemonic);
+        refuseBothPrecisions(name, ins.mnemonic);
       }
       const [dst, ...srcs] = keys as string[];
       const { op } = FP_ARITH[ins.mnemonic];

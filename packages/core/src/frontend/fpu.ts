@@ -27,14 +27,15 @@ export function fpPrecision(
   return widths.size > 1 ? null : widths.has(64) ? T.f64() : widths.has(32) ? T.f32() : T.fUnstated();
 }
 
-/** The refusal of a function computing in both precisions, thrown where the frontend DECODES a float
- *  instruction of it, so a refusal the stream reaches first keeps its own reason. The SSA builder
- *  types a register per key, not per value, and the rounding between the precisions (a conversion,
- *  PowerPC's `frsp`, or a single op over a double operand) is not modelled. */
-export function bothPrecisionsError(name: string, mnemonic: string): FrontendUnsupportedError {
-  return new FrontendUnsupportedError(
-    `cannot lift '${name}': '${mnemonic}' is in a function that computes in both single and double ` +
-      'precision, and the rounding between them is not modelled',
+/** Refuse a function computing in both precisions, where the frontend DECODES a float instruction of
+ *  it, so a refusal the stream reaches first keeps its own reason. The SSA builder types a register
+ *  per key, not per value, and the rounding between the precisions (a conversion, PowerPC's `frsp`,
+ *  or a single op over a double operand) is not modelled. It throws here rather than handing the
+ *  error back, so the one throw site is the one `declines.test.ts` harvests. */
+export function refuseBothPrecisions(name: string, mnemonic: string): never {
+  throw new FrontendUnsupportedError(
+    `cannot lift '${name}': '${mnemonic}' is in a function that computes in ` +
+      'both single and double precision, and the rounding between them is not modelled',
   );
 }
 

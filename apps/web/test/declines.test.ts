@@ -142,6 +142,16 @@ describe('specific instruction families beat the generic opaque bucket', () => {
     expect(classOf(marker)).toBe('float');
   });
 
+  // A function computing in both precisions is a floating-point gap too, whichever instruction of it
+  // the refusal names. mwcc_242_81 compiles `double mixp(float a, float b, double c){ return a*b + c; }`
+  // to `fmuls f0,f1,f2; fadd f1,f3,f0; blr`, and the lift refuses at the `fmuls`.
+  test('a function computing in both precisions classifies as float', () => {
+    const marker =
+      "lift: cannot lift 'mixp__Fffd': 'fmuls' is in a function that computes in both single and double " +
+      'precision, and the rounding between them is not modelled';
+    expect(classOf(marker)).toBe('float');
+  });
+
   // The other half: `float` must not become "anything unmodelled". Every one of these is a real
   // opaque-ops inhabitant of the committed artifact, and each reaches the generic bucket through a
   // spelling core still emits.
@@ -1069,6 +1079,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['pic-globals', 'carries a small-data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'unmodelled floating-point instruction', 'packages/core/src/frontend/opaque.ts'],
+    ['float', 'both single and double precision', 'packages/core/src/frontend/fpu.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],

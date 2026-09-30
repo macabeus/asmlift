@@ -54,7 +54,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { bothPrecisionsError, fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
+import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
@@ -1602,7 +1602,7 @@ export function lift(
             );
           }
           if (fpType === null) {
-            throw bothPrecisionsError(name, ins.mnemonic);
+            refuseBothPrecisions(name, ins.mnemonic);
           }
           const [dst, ...srcs] = ins.ops;
           if (op === 'copy') {

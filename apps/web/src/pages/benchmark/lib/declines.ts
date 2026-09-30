@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 158 distinct decline messages (the texts reached by
+// `packages/core/src` throws 159 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
@@ -307,8 +307,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, and PowerPC's float-plus-
     // call refusal): the single-precision arithmetic lifts through the float homes, and what still
     // refuses there is the rest of the floating-point ABI — a float argument the homes cannot
-    // place, a call whose floating-point registers are unmodelled.
-    pattern: /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call/,
+    // place, a call whose floating-point registers are unmodelled, a function computing in both
+    // precisions (`fmuls` feeding an `fadd`: the rounding between them is unmodelled).
+    pattern:
+      /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision/,
   },
   {
     // UNINHABITED AT THE SOURCE NOW, RATHER THAN BY ARRAY ORDER. Until `fpReg` landed, all 13
