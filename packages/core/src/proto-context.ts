@@ -339,10 +339,9 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
       }
     }
     const unsizedEnum = enumDef && (attributed || wide);
-    const enumTag =
-      /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute(?:__)?\s*\(\s*\(.*?\)\s*\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
-        s.text,
-      );
+    const enumTag = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b\s*([A-Za-z_]\w*)\s*\{\}/.exec(
+      withoutAttributes(s.text).replace(/\s+/g, ' ').trim(),
+    );
     if (enumTag && unsizedEnum) {
       unsizedEnums.add(`enum ${enumTag[1]}`);
     }
@@ -482,10 +481,9 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   };
   const found = new Map<string, FnProto | null>();
   for (const s of stmts) {
-    const t = s.text
+    const t = withoutAttributes(s.text)
       .replace(/\bextern\s*"C(?:\+\+)?"/g, ' ')
       .replace(SPECIFIERS, ' ')
-      .replace(/__attribute(?:__)?\s*\(\s*\(.*?\)\s*\)/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
     // an `=` outside the parentheses is a variable's initializer; inside them, a default argument

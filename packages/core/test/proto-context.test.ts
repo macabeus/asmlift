@@ -309,6 +309,22 @@ describe('prototypes from a declaration context', () => {
     expect(p.mko?.returnLayout).toEqual({ kind: 'struct' });
   });
 
+  // an attribute's own arguments may nest parentheses, spaced or not (c-parse.in:1205-1207)
+  test('a declaration keeps its signature whatever parentheses its attribute nests', () => {
+    const p = prototypesFromContext(
+      `struct Big { int a, b, c; };
+       void h(void *p) __attribute__((nonnull(1)));
+       void h2(void *p) __attribute__((nonnull(1) ));
+       __attribute__((section(".text"))) struct Big mkbig(int);
+       __attribute__ ( (section (".text") ) ) struct Big mkbig2(int);`,
+      'c',
+    );
+    expect(p.h?.params).toEqual(['void *']);
+    expect(p.h2?.params).toEqual(['void *']);
+    expect(p.mkbig?.params).toEqual(['int']);
+    expect(p.mkbig2?.params).toEqual(['int']);
+  });
+
   // `mode` hands the attributes after it a shared scalar type (c-common.c:563, 996-1000); compiled,
   // `struct O { int a; }` is 8 bytes and comes back through memory
   test.each(['__attribute__((mode(SI), aligned(8)))', '__attribute__ ( ( __mode__ ( __SI__ ) , aligned ( 8 ) ) )'])(
