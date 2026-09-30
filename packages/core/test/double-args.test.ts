@@ -33,10 +33,19 @@ describe('a declared double argument', () => {
     expect(lift(name, own(callee, name))).toBe(source);
   });
 
+  // The frontend builds the pair afresh at each call it is handed to, and each is the one parameter.
+  test.each([
+    ['dtwice', G, 'void dtwice(double a0) {\n    g(a0);\n    g(a0);\n}\n'],
+    ['dboth', { ...F4, ...G }, 'void dboth(s32 a0, double a1) {\n    f4(a0, a0, a0, a1);\n    g(a1);\n}\n'],
+  ])('%s: a parameter handed to more than one call', (name, callee, source) => {
+    expect(lift(name, own(callee, name))).toBe(source);
+  });
+
   // A double parameter has no fallback: its words handed on as integers are another number, so a
-  // pair that is not a double moved whole declines the function.
-  test('a load declines', () => {
-    expect(() => lift('dmem', own(G, 'dmem'))).toThrow(
+  // pair that is not a double moved whole declines the function — a load, and a parameter this
+  // function also stores word by word.
+  test.each(['dmem', 'dstore'])('%s declines', (name) => {
+    expect(() => lift(name, own(G, name))).toThrow(
       "argument 1 of the call to 'g' is a floating-point argument its callee declares `double`",
     );
   });

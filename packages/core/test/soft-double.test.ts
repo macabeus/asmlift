@@ -39,6 +39,11 @@ describe('the double arithmetic helpers are the float ops', () => {
     expect(lift('dchain')).toBe('double dchain(double a0, double a1, double a2) {\n    return (a0 + a1) * a2;\n}\n');
   });
 
+  // Each argument register is read by two pairs of the same two slots, which are one parameter.
+  test('an argument passed twice', () => {
+    expect(lift('dsq')).toBe('double dsq(double a0) {\n    return a0 * a0;\n}\n');
+  });
+
   // Without `g`'s declaration its guessed arity reads the pair the helper left in r0:r1, and the
   // refusal says that a declaration is what settles it.
   test('a guessed arity that reads a double names the declaration that settles it', () => {
@@ -92,12 +97,6 @@ describe('what refuses', () => {
     expect(lift('dpass', { use: { params: ['double'], returnsVoid: true } })).toBe(
       'void dpass(double a0, double a1) {\n    use(a0 + a1);\n}\n',
     );
-  });
-
-  // Each argument register is read by two pairs, so neither pair is the argument alone. The 64-bit
-  // integer fusion refuses the same shape (`s64 sq(s64 a){ return a * a; }`).
-  test('an argument passed twice', () => {
-    expect(() => lift('dsq')).toThrow(/no model for the runtime helper '__muldf3'/);
   });
 
   // A double into a compare, a conversion or an ordinary callee is no long long, and the refusal

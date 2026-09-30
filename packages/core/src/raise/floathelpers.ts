@@ -76,14 +76,23 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const floatUse = (u: Op | null, v: Value, calls: ReadonlySet<Op>): boolean =>
     u !== null &&
     (calls.has(u) || (consumers.has(u) && u.operands.every((o, i) => o !== v || consumers.get(u)!.includes(i))));
+  const floatsOnly = (v: Value, calls: ReadonlySet<Op>) => (users.get(v) ?? []).every((u) => floatUse(u, v, calls));
   const entry = fn.blocks[0].params;
-  // The argument slot itself, or the pair of them `isArgumentPair` names; `arrivesAsDeclared` has
-  // already held each operand to its parameter's width.
+  // A `concat` of the same two slots in the same order as `d`: the frontend builds one afresh at each
+  // call it hands the pair to, so `g(x); g(x)` reads one parameter through two of them.
+  const samePair = (u: Op | null, d: Op): u is Op =>
+    u?.opcode === 'concat' && u.operands[0] === d.operands[0] && u.operands[1] === d.operands[1];
+  // The argument slot itself, or the pair of them `isArgumentPair` names, read by nothing but
+  // `concat`s of that pair, each taken as a float; `arrivesAsDeclared` has already held each operand
+  // to its parameter's width.
   const argument = (v: Value, calls: ReadonlySet<Op>): boolean => {
     const d = def.get(v);
+    if (d === undefined) {
+      return entry.includes(v) && floatsOnly(v, calls);
+    }
     return (
-      (d === undefined ? entry.includes(v) : isArgumentPair(entry, d, (p) => users.get(p)?.length ?? 0)) &&
-      users.get(v)!.every((u) => floatUse(u, v, calls))
+      isArgumentPair(entry, d, (p) => users.get(p)!.filter((u) => !samePair(u, d)).length + 1) &&
+      users.get(d.operands[0])!.every((u) => samePair(u, d) && floatsOnly(u.results[0], calls))
     );
   };
   const fromCall = (v: Value, calls: ReadonlySet<Op>) => {
@@ -105,8 +114,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     const bits = order === 'high-first' ? doubleBits(a, b) : doubleBits(b, a);
     return Number.isFinite(doubleOf(bits)) ? bits : undefined;
   };
-  const literal = (v: Value, calls: ReadonlySet<Op>) =>
-    literalBits(v) !== undefined && users.get(v)!.every((u) => floatUse(u, v, calls));
+  const literal = (v: Value, calls: ReadonlySet<Op>) => literalBits(v) !== undefined && floatsOnly(v, calls);
   const source = (v: Value, calls: ReadonlySet<Op>) => argument(v, calls) || fromCall(v, calls) || literal(v, calls);
   for (;;) {
     const calls = new Set(sites);
@@ -163,6 +171,11 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     const slots = d === undefined ? [o] : d.operands;
     const whole = float(bits);
     entry.splice(entry.indexOf(slots[0]), slots.length, whole);
+    for (const u of d === undefined ? [] : users.get(slots[0])!) {
+      if (samePair(u, d!)) {
+        floatOf.set(u.results[0], whole);
+      }
+    }
     floatOf.set(o, whole);
   };
   for (const op of sites) {

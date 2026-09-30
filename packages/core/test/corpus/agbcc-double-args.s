@@ -383,3 +383,62 @@ dmove5:
 	bx	r0
 .Lfe20:
 	.size	 dmove5,.Lfe20-dmove5
+	.align	2, 0
+	.globl	dtwice
+	.type	 dtwice,function
+	.thumb_func
+dtwice:
+	push	{r4, r5, lr}
+	add	r5, r1, #0
+	add	r4, r0, #0
+	bl	g
+	add	r1, r5, #0
+	add	r0, r4, #0
+	bl	g
+	pop	{r4, r5}
+	pop	{r0}
+	bx	r0
+.Lfe21:
+	.size	 dtwice,.Lfe21-dtwice
+	.align	2, 0
+	.globl	dboth
+	.type	 dboth,function
+	.thumb_func
+dboth:
+	push	{r4, r5, r6, lr}
+	add	sp, sp, #-0x4
+	add	r6, r0, #0
+	add	r5, r2, #0
+	add	r4, r1, #0
+	str	r5, [sp]
+	add	r3, r4, #0
+	add	r1, r6, #0
+	add	r2, r6, #0
+	bl	f4
+	add	r1, r5, #0
+	add	r0, r4, #0
+	bl	g
+	add	sp, sp, #0x4
+	pop	{r4, r5, r6}
+	pop	{r0}
+	bx	r0
+.Lfe22:
+	.size	 dboth,.Lfe22-dboth
+	.align	2, 0
+	.globl	dstore
+	.type	 dstore,function
+	.thumb_func
+dstore:
+	push	{lr}
+	ldr	r2, .L49
+	str	r0, [r2]
+	str	r1, [r2, #0x4]
+	bl	g
+	pop	{r0}
+	bx	r0
+.L50:
+	.align	2, 0
+.L49:
+	.word	gD
+.Lfe23:
+	.size	 dstore,.Lfe23-dstore
