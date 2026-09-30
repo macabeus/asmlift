@@ -272,36 +272,67 @@ describe('prototypes from a declaration context', () => {
     expect(p.mkpe?.returnLayout?.members).toEqual([{ name: 'e', type: 'enum E' }]);
   });
 
-  // agbcc reads `__attribute` as `__attribute__` (c-parse.gperf:22-23); a typedef's declarator
-  // attribute re-aligns the type it names (c-common.c:392-396, 623-624) — compiled, `struct O { struct
-  // R r; }` goes from 4 bytes to 8 and back through memory; one on a variable reaches only it, and
-  // compiled, `mkw` below still returns in r0
-  test('an attribute reaches the layout from wherever agbcc applies it, and only there', () => {
+  // agbcc reads `__attribute` as `__attribute__` (c-parse.gperf:22-23); compiled, `mkw` below
+  // returns in r0, since an attribute on a variable reaches only it, and so does `mkr`, since
+  // `packed` on a typedef comes after the layout (c-common.c:442-446)
+  test('an attribute reaches a body from its specifier, in either spelling', () => {
     const p = prototypesFromContext(
       `typedef unsigned short u16; typedef int s32;
        struct D { u16 x; } __attribute ((aligned(8))); struct D mkd(s32);
        enum __attribute ((packed)) K { KA, KB }; struct PK { enum K k[2]; }; struct PK mkpk(s32);
-       struct R { u16 x; }; typedef struct R A __attribute__((aligned(8))); struct O { struct R r; }; struct O mko(s32);
-       struct W { s32 v; } gW __attribute__((section(".ewram"))); struct W mkw(s32);`,
+       struct W { s32 v; } gW __attribute__((section(".ewram"))); struct W mkw(s32);
+       struct R { u16 x; }; typedef struct R PR __attribute__((packed)); struct R mkr(s32);
+       void nr(s32 a, s32 b) __attribute ((noreturn));`,
       'c',
     );
-    for (const name of ['mkd', 'mkpk', 'mko']) {
-      expect(p[name]?.returnLayout, name).toEqual({ kind: 'struct' });
-    }
+    expect(p.mkd?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.mkpk?.returnLayout).toEqual({ kind: 'struct' });
     expect(p.mkw?.returnLayout?.members).toEqual([{ name: 'v', type: 's32' }]);
+    expect(p.mkr?.returnLayout?.members).toEqual([{ name: 'x', type: 'u16' }]);
+    expect(p.nr?.params).toEqual(['s32', 's32']);
   });
 
-  // compiled, `struct SB { enum Big k; }` is 8 bytes, where `struct SN { Neg k; }` and `struct SI {
-  // enum Int k; }` are 4
+  // an `aligned` typedef re-aligns the type it names after layout (c-common.c:392-396, 623-624);
+  // compiled, each `struct O` below goes from 4 bytes to 8 and back through memory
+  test.each([
+    'typedef struct R A __attribute__((aligned(8))); struct O { struct R r; };',
+    'typedef struct R *RP __attribute__((aligned(8))); struct O { struct R *p; };',
+    'typedef unsigned int AU __attribute__((aligned(8))); struct O { unsigned int v; };',
+    'typedef __attribute__((aligned(8))) struct R A; struct O { struct R r; };',
+    '__attribute__((aligned(8))) typedef struct R A; struct O { struct R r; };',
+    'typedef struct Q { u16 y; } *QP __attribute__((aligned(8))); struct O { struct Q *q; };',
+  ])('an aligned typedef leaves every layout unread: %s', (decl) => {
+    const p = prototypesFromContext(
+      `typedef unsigned short u16; typedef int s32; struct R { u16 x; }; ${decl} struct O mko(s32);`,
+      'c',
+    );
+    expect(p.mko?.returnLayout).toEqual({ kind: 'struct' });
+  });
+
+  // compiled, `struct G2 { G g; }` is 8 bytes and `struct S { s32 v; }` still 4 and in r0
+  test('an aligned typedef of its own body leaves that body unread, and no other', () => {
+    const p = prototypesFromContext(
+      `typedef int s32; typedef struct { s32 v; } G __attribute__((aligned(8)));
+       struct G2 { G g; }; struct G2 mkg(s32); struct S { s32 v; }; struct S mks(s32);`,
+      'c',
+    );
+    expect(p.mkg?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.mks?.returnLayout?.members).toEqual([{ name: 'v', type: 's32' }]);
+  });
+
+  // compiled, `struct SB { enum Big k; }` and `struct SC { enum C k; }` are 8 bytes, where
+  // `struct SN { Neg k; }` and `struct SI { enum Int k; }` are 4
   test('an enum with a value an int cannot hold is not sized', () => {
     const p = prototypesFromContext(
       `typedef int s32;
        enum Big { B0 = 0, B1 = 0x100000000LL }; struct SB { enum Big k; }; struct SB mkb(s32);
+       enum C { C0, C1 = B1 }; struct SC { enum C k; }; struct SC mkc(s32);
        typedef enum { N0 = -1, N1 = 0x80000000 } Neg; struct SN { Neg k; }; struct SN mkn(s32);
        enum Int { I0 = 0, I1 = 0x80000000 }; struct SI { enum Int k; }; struct SI mki(s32);`,
       'c',
     );
     expect(p.mkb?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.mkc?.returnLayout).toEqual({ kind: 'struct' });
     expect(p.mkn?.returnLayout?.members).toEqual([{ name: 'k', type: 'enum Neg' }]);
     expect(p.mki?.returnLayout?.members).toEqual([{ name: 'k', type: 'enum Int' }]);
   });

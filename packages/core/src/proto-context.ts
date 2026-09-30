@@ -317,8 +317,11 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   // the smallest integer its values fit (agbcc c-common.c:446, c-decl.c:6123), and so does a value
   // an int cannot hold (`enumMayWiden`)
   const unsizedEnums = new Set<string>();
-  // a type a typedef with no body of its own attributes (`typedef struct R A __attribute__(…);`)
-  const retyped = new Set<string>();
+  // the enumerators of an enum wider than an int, which widen any enum that names one
+  const wideEnumerators = new Set<string>();
+  // a typedef re-aligned a type after its layout (`realigns`), which moves the layout of whatever
+  // holds it, so no layout is read
+  let realigned = false;
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
     const attributed = attributesLayout(s.text);
@@ -326,7 +329,16 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
       tagged.set(`${def[1]} ${def[2]}`, attributed ? undefined : s.bodies[0]);
     }
     const enumDef = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b[^{]*\{\}/.test(s.text);
-    const unsizedEnum = enumDef && (attributed || enumMayWiden(s.bodies[0]));
+    const wide = enumDef && enumMayWiden(s.bodies[0], wideEnumerators);
+    if (wide) {
+      for (const e of s.bodies[0].split(',')) {
+        const name = /^\s*([A-Za-z_]\w*)/.exec(e);
+        if (name) {
+          wideEnumerators.add(name[1]);
+        }
+      }
+    }
+    const unsizedEnum = enumDef && (attributed || wide);
     const enumTag =
       /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute(?:__)?\s*\(\(.*?\)\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
         s.text,
@@ -334,14 +346,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     if (enumTag && unsizedEnum) {
       unsizedEnums.add(`enum ${enumTag[1]}`);
     }
-    if (attributed && /^typedef\b/.test(s.text) && s.bodies.length === 0) {
-      const base = /^typedef\s+(?:(?:const|volatile)\s+)*((?:struct|union|enum)\s+[A-Za-z_]\w*|[A-Za-z_]\w*)/.exec(
-        s.text,
-      );
-      if (base) {
-        retyped.add(base[1]);
-      }
-    }
+    realigned ||= realigns(s.text);
     // In C++ a class is a struct too. Its body (access labels, member functions), or one after a
     // base clause, whose members start past the base's, is none this lays out: the kind is known and
     // the members are not. A forward declaration states the kind alone, so a definition after it
@@ -375,21 +380,6 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
       }
     }
   }
-  for (const t of retyped) {
-    const r = resolve(t, typedefs);
-    const tag = /^(struct|union) ([A-Za-z_]\w*)$/.exec(r);
-    if (tag) {
-      tagged.set(r, undefined);
-    }
-    const name = tag?.[2] ?? r;
-    const aggregate = named.get(name);
-    if (aggregate !== undefined) {
-      named.set(name, { kind: aggregate.kind, body: undefined });
-    }
-    if (/^enum [A-Za-z_]\w*$/.test(r) || enums.has(r)) {
-      unsizedEnums.add(r);
-    }
-  }
   // Memoised per type and depth: a body whose members point at bodies is walked once per depth,
   // not once per path to it — each pointer member lays its pointee out, and K of them to depth 8
   // is K^8 walks.
@@ -408,7 +398,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     let layout: AggregateLayout | undefined;
     if (kind !== undefined) {
       const body = tag ? tagged.get(bare) : named.get(bare)?.body;
-      const members = body === undefined ? undefined : readMembers(body, depth);
+      const members = body === undefined || realigned ? undefined : readMembers(body, depth);
       layout = members === undefined ? { kind } : { kind, members };
     }
     laidOut.set(key, layout);
@@ -495,7 +485,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     const t = s.text
       .replace(/\bextern\s*"C(?:\+\+)?"/g, ' ')
       .replace(SPECIFIERS, ' ')
-      .replace(/__attribute__\s*\(\(.*?\)\)/g, ' ')
+      .replace(/__attribute(?:__)?\s*\(\(.*?\)\)/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
     // an `=` outside the parentheses is a variable's initializer; inside them, a default argument
@@ -536,11 +526,10 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
 // agbcc reads both spellings (c-parse.gperf:22-23)
 const ATTRIBUTE = /\b__attribute(?:__)?\b/;
 
-/** Whether an attribute in this statement can move the layout of the type it defines or names. One
- *  in the specifier — ahead of the body or straight after it — lays that body out (c-parse.in:1464-1503).
- *  One on a typedef's declarator is applied to the type too, after layout (c-common.c:392-396,
- *  623-624): its size stands, but its alignment moves, and with it the layout of anything that holds
- *  it. One on a variable's declarator reaches that variable alone. */
+/** Whether an attribute in this statement can move the layout of the body it defines. One in the
+ *  specifier — ahead of the body or straight after it — lays that body out (c-parse.in:1464-1503).
+ *  One elsewhere on a variable reaches that variable alone; one elsewhere in a typedef is read as
+ *  moving it too, whatever it says (`realigns` is what it may do). */
 function attributesLayout(text: string): boolean {
   if (/^typedef\b/.test(text)) {
     return ATTRIBUTE.test(text);
@@ -549,16 +538,38 @@ function attributesLayout(text: string): boolean {
   return body >= 0 && (ATTRIBUTE.test(text.slice(0, body)) || /^\{\}\s*__attribute(?:__)?\b/.test(text.slice(body)));
 }
 
+/** Whether a typedef in this statement may re-align, after its layout, a type no body here stands
+ *  for. An `aligned` attribute outside a body's specifier is applied to the type the typedef names
+ *  (c-common.c:392-396, 623-624): its own size stands, but anything that holds it is laid out anew.
+ *  Where that type is the statement's own body, `attributesLayout` already leaves it unread; where
+ *  it is a tag declared elsewhere, a pointer or a scalar such as `unsigned int`, which one it is is
+ *  not worked out here. Compiled, `typedef struct R *RP __attribute__((aligned(8)))` makes `struct {
+ *  struct R *p; }` 8 bytes. */
+function realigns(text: string): boolean {
+  if (!/\btypedef\b/.test(text)) {
+    return false;
+  }
+  const spec = /\b(?:struct|union|enum)\b[^{;]*\{\}(?:\s*__attribute(?:__)?\s*\(\((?:[^()]|\([^()]*\))*\)\))*/.exec(
+    text,
+  );
+  const rest = spec ? text.slice(0, spec.index) + text.slice(spec.index + spec[0].length) : text;
+  return /\b__attribute(?:__)?\s*\(\([^;]*\baligned\b/.test(rest) && (spec === null || rest.includes('*'));
+}
+
 /** Whether agbcc may lay an enum with this body out wider than an int. It does for a value past 32
- *  bits (c-decl.c:6116-6123), which only a 64-bit operand spells, so a literal past 32 bits or one
- *  of type `long long` is read as one that may. Compiled, `enum {B0, B1 = 0x100000000LL}` is 8
- *  bytes, where `enum {N0 = -1, N1 = 0xFFFFFFFF}` is 4. */
-function enumMayWiden(body: string): boolean {
+ *  bits (c-decl.c:6116-6123): a literal past 32 bits or of type `long long`, or an enumerator of an
+ *  enum already that wide (`wide`). Compiled, `enum {B0, B1 = 0x100000000LL}` is 8 bytes, and so is
+ *  `enum {C0, C1 = B1}`, where `enum {N0 = -1, N1 = 0xFFFFFFFF}` is 4. */
+function enumMayWiden(body: string, wide: ReadonlySet<string>): boolean {
   const literals = [...body.matchAll(/\b(?:0[xX]([0-9a-fA-F]+)|0([0-7]+)|(\d+))([uUlL]*)/g)].map((m) => ({
     value: m[1] !== undefined ? BigInt(`0x${m[1]}`) : m[2] !== undefined ? BigInt(`0o${m[2]}`) : BigInt(m[3]),
     suffix: m[4],
   }));
-  return literals.some((l) => l.value > 0xffffffffn || /l.*l/i.test(l.suffix)) || /\blong\s+long\b/.test(body);
+  return (
+    literals.some((l) => l.value > 0xffffffffn || /l.*l/i.test(l.suffix)) ||
+    /\blong\s+long\b/.test(body) ||
+    [...body.matchAll(/\b[A-Za-z_]\w*\b/g)].some((m) => wide.has(m[0]))
+  );
 }
 
 /** A struct body's member declarations: its `;`-separated statements, a nested body kept whole. */
