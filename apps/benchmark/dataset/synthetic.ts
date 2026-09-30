@@ -1753,6 +1753,23 @@ export const SYNTHETIC: SynthSpec[] = [
       'the trailing-pointer idiom where the trailing value is DERIVED from the loop variable ' +
       '(`&f->v`) rather than being the variable itself, and is read after the loop has moved on',
   },
+  {
+    sym: 'listwalk',
+    src:
+      'struct E { u16 a, b, c; s8 next; u8 pad; };\n' +
+      '#define gBuf ((struct E *)0x03002000)\n' +
+      '#define gOut ((u8 *)0x03003000)\n' +
+      'void listwalk(s8 i){ u8 n = 0; while (i != -1) { gOut[i] = n++; i = gBuf[i].next; } }',
+    features: ['loop-preupdate', 'narrow'],
+    toolchains: ['agbcc'],
+    ctx: 'void listwalk(s8 i);',
+    proto: { listwalk: { params: ['s8'], returnsVoid: true } },
+    note:
+      'an `s8` walked down a list: agbcc carries it as `next << 24` and tests the `asr #24` of that, ' +
+      'which the cast idiom folds into a sign extension of the load, so the test reads what fed the ' +
+      'update unless it is re-rooted on the carried shift (raise/narrow.ts). agbcc only: IDO loads ' +
+      'the field with `lb` and carries no shift',
+  },
 
   // A CONTROL-FLOW short-circuit: an `&&`/`||` that produces no value, only a branch. `a && b`
   // guarding X and its De Morgan dual `!a || !b` guarding Y are the same program, and agbcc lays
@@ -6512,6 +6529,25 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void dmaptrsrc(s32 lo, s32 bg);',
     proto: { dmaptrsrc: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  {
+    sym: 'cpufill',
+    src:
+      'void CpuSet(const void *src, void *dest, u32 control);\n' +
+      'void cpufill(u16 x, u32 y){ volatile u16 a; volatile u32 b;\n' +
+      ' a = x; CpuSet((void *)(&a), (void *)0x03001000, 0x01000010);\n' +
+      ' b = y; CpuSet((void *)(&b), (void *)0x03001040, 0x05000008); }',
+    features: ['stack-addr'],
+    toolchains: ['agbcc'],
+    ctx: 'void CpuSet(const void *src, void *dest, u32 control); void cpufill(u16 x, u32 y);',
+    proto: {
+      CpuSet: { params: ['const void *', 'void *', 'u32'], returnsVoid: true },
+      cpufill: { params: ['u16', 'u32'], returnsVoid: true },
+    },
+    note:
+      "sa3's `CpuFill16` then `CpuFill32`: each hands the BIOS `CpuSet` the address of its own " +
+      '`volatile` tmp as a fixed source, which it reads one unit of and never writes, so the two ' +
+      'locals are two objects (target.ts `blockTransferCalls`)',
   },
   {
     sym: 'dmavolsrc',
