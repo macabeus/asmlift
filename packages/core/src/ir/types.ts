@@ -191,6 +191,9 @@ export function typeEquals(a: IrType, b: IrType): boolean {
   if (a.kind === 'int' && b.kind === 'int') {
     return a.width === b.width && a.signed === b.signed;
   }
+  if (a.kind === 'void' && b.kind === 'void') {
+    return true;
+  }
   if ((a.kind === 'unknown' && b.kind === 'unknown') || (a.kind === 'float' && b.kind === 'float')) {
     return a.width === b.width;
   }

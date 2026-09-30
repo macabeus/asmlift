@@ -53,6 +53,7 @@
 import { type StructFieldDecl, renderStructDecl } from './backend/cfamily';
 import { T } from './ir/types';
 import type { SymbolRef } from './l3/symbol-refs';
+import { type AggregateLayout, type AggregateMember, declaredWidth, spellableType } from './proto';
 import {
   ENUM_IS_SIGNED,
   type SymbolInfo,
@@ -136,6 +137,43 @@ function structDecl(tag: string, layout: SymbolStructField[] | undefined, size: 
   return renderStructDecl(tag, fields);
 }
 
+/** A struct the project's headers define, transcribed from their declaration so the compiler lays
+ *  it out as it lays out theirs: each member in order with its extents and bit width, a nested
+ *  struct or union inline, and every type spelled so that it needs nothing else declared — a
+ *  pointer as `void *`, an enum as an inline enum of its own, a scalar the prelude does not name
+ *  as the prelude's type of its width and signedness. Its members are what size it, not what is
+ *  read of it: no emitted expression names one (aggregate.ts `aggregateType`). */
+function declaredStructDecl(tag: string, layout: AggregateLayout): string {
+  let enums = 0;
+  const scalar = (spelling: string): string => {
+    const s = spelling
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (s.endsWith('*')) {
+      return 'void *';
+    }
+    if (/^enum\b/.test(s)) {
+      return `enum { asmlift_${tag}_enum${enums++} }`;
+    }
+    if (s === 'float' || s === 'double' || spellableType(s)) {
+      return s;
+    }
+    const bits = declaredWidth(s);
+    return `${/^u\d|\bunsigned\b/.test(s) ? 'u' : 's'}${bits}`;
+  };
+  const body = (members: readonly AggregateMember[]): string =>
+    members
+      .map((m) => {
+        const type = typeof m.type === 'string' ? scalar(m.type) : `${m.type.kind} { ${body(m.type.members!)} }`;
+        const declarator = `${m.name}${(m.dims ?? []).map((n) => `[${n}]`).join('')}`;
+        const bits = m.bits !== undefined ? ` : ${m.bits}` : '';
+        return `${type}${type.endsWith('*') || declarator === '' ? '' : ' '}${declarator}${bits};`;
+      })
+      .join(' ');
+  return `struct ${tag} { ${body(layout.members!)} };`;
+}
+
 /**
  * Render the declaration block for a candidate's recorded symbol references. Deterministic
  * (refs arrive name-sorted from core; struct decls dedupe by tag). The block is prepended by
@@ -168,7 +206,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       if (returned?.declared !== undefined) {
         if (!declaredTags.has(returned.name)) {
           declaredTags.add(returned.name);
-          lines.push(renderStructDecl(returned.name, returned.fields));
+          lines.push(declaredStructDecl(returned.name, returned.layout));
         }
         if (!/^(?:struct|union)\s/.test(returned.declared) && !declaredTypedefs.has(returned.declared)) {
           declaredTypedefs.add(returned.declared);

@@ -7,7 +7,6 @@
 import { expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
-import { T } from '../src/ir/types';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 
 const ref = (name: string, info: Omit<SymbolRef['info'], 'name'>): SymbolRef => ({
@@ -251,11 +250,9 @@ test('two struct refs sharing a tag declare it once; overlapping (union) members
 // same tag is too: the block defines the tag once, whichever reference comes first
 test('a returned struct and a global of its tag share one definition', () => {
   const returned = {
-    kind: 'struct' as const,
     name: 'Blob64',
-    fields: [{ off: 0, type: T.array(T.u(32), 16), name: 'w' }],
-    size: 64,
     declared: 'Blob64',
+    layout: { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] },
   };
   const out = renderDeclarations([
     ref('gSrc', {

@@ -17,7 +17,7 @@
 // stale ref, transitively reintroducing the hazards the collector excludes). Deriving at the
 // consumption point makes staleness impossible by construction.
 import type { IrType } from '../ir/types';
-import { type ParamType, type Prototypes, spellableProto } from '../proto';
+import { type AggregateLayout, type ParamType, type Prototypes, spellableProto } from '../proto';
 import type { SymbolInfo } from '../symbols';
 import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
 
@@ -56,10 +56,11 @@ export interface SymbolRef {
    *  happens at the table (`proto.ts` `prototypesFromSymbols`), so the frontend loses the same
    *  fact in the same place rather than acting on one this withheld. */
   proto?: { readonly params: readonly ParamType[]; readonly returns: ParamType };
-  /** The struct a call target returns through memory, as the lift typed the call — a type the
-   *  project's headers own (ir/types.ts `declared`), so `declare.ts` defines it beside `proto`, whose
-   *  `returns` spells it. */
-  returned?: Extract<IrType, { kind: 'struct' }>;
+  /** The struct a call target returns through memory — a type the project's headers own
+   *  (ir/types.ts `declared`), so `declare.ts` defines it beside `proto`, whose `returns` spells it:
+   *  by its tag (`name`), from the members the declaration lists (`layout`, which the lift laid out
+   *  to type the call). */
+  returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -153,6 +154,8 @@ export function collectSymbolRefs(
       // the shape, so nothing here is guessed about storage that does not exist.
       const info = symbols.get(n) ?? { name: n, kind: 'code' as const };
       const r = p ? returned.get(n) : undefined;
-      return { name: n, info, ...(p ? { proto: p } : {}), ...(r ? { returned: r } : {}) };
+      const layout = r?.declared !== undefined ? prototypes[n].returnLayout : undefined;
+      const definition = layout?.members !== undefined ? { name: r!.name, declared: r!.declared!, layout } : undefined;
+      return { name: n, info, ...(p ? { proto: p } : {}), ...(definition ? { returned: definition } : {}) };
     });
 }

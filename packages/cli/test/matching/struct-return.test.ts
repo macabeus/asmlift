@@ -31,6 +31,23 @@ struct W1 { u32 x; };
 struct W1 mkw(s32);
 struct W1 fillw(s32 *);
 extern void usei(s32);
+struct In { u8 a, b; };
+struct Out { struct In i; u32 w; };
+struct Out mko(s32);
+struct Bf { u32 lo : 4; u32 hi : 4; u32 w; };
+struct Bf mkb(s32);
+struct Ch { char name[8]; };
+struct Ch mkc(s32);
+typedef float f32;
+typedef enum { K0, K1 } Kind;
+struct V3 { f32 x, y, z; Kind k; void *p; };
+struct V3 mkv(s32);
+struct F1 { f32 x; };
+struct F1 getf(s32);
+struct BF { u32 a : 8; u32 b : 8; };
+struct BF mkbf(s32);
+typedef struct R { u32 a; u32 b; } R, *RP;
+RP getr4(struct R *, s32);
 `;
 
 const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
@@ -65,6 +82,16 @@ describe('a call to a function returning a struct', () => {
     ['a struct returned in r0, discarded', 'void f(s32 x) { mkw(x); usei(x + 1); }'],
     // …so a frame word it takes at argument 0 is an out-parameter
     ['an out-parameter of a callee returning a struct in r0', 'void f(void) { s32 v; fillw(&v); usei(v); }'],
+    // members the IR types no field for: the declarations block defines the struct from its declaration
+    ['a nested struct member', 'void f(s32 x) { mko(x); usei(x); }'],
+    ['bitfield members', 'void f(s32 x) { mkb(x); usei(x); }'],
+    ['a plain char array', 'void f(s32 x) { mkc(x); usei(x); }'],
+    ['float, enum and void pointer members', 'void f(s32 x) { mkv(x); usei(x); }'],
+    // agbcc returns these in r0: a float member, and bitfields packed into one word
+    ['a float struct returned in r0', 'void f(s32 x) { getf(x); usei(x + 1); }'],
+    ['a bitfield struct returned in r0', 'void f(s32 x) { mkbf(x); usei(x + 1); }'],
+    // a typedef naming a POINTER to a struct is a pointer return, with no hidden pointer
+    ['a pointer typedef of a struct', 'void f(s32 k) { struct R t; getr4(&t, k); }'],
   ])('%s', (_label, src) => {
     const r = best(src);
     expect(r.self, r.source).toBe(0);

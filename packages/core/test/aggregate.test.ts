@@ -60,7 +60,10 @@ describe('agbcc (thumb.c:1423-1493)', () => {
     const bf = (...widths: number[]) => widths.map((bits, i) => m(`b${i}`, 'u32', { bits }));
     expect(aggregateSize(struct(...bf(31, 31, 2)), ARMV4T_AGBCC)?.size).toBe(8);
     expect(aggregateSize(struct(...bf(20, 20, 20)), ARMV4T_AGBCC)?.size).toBe(8);
-    expect(aggregateType('P', 'struct P', struct(...bf(20, 20), m('c', 'u8')), ARMV4T_AGBCC)).toBeUndefined();
+    expect(aggregateType('P', 'struct P', struct(...bf(20, 20), m('c', 'u8')), ARMV4T_AGBCC)).toEqual({
+      ...T.struct('P', [{ off: 5, type: T.u(8), name: 'c' }], 8),
+      declared: 'struct P',
+    });
     expect(aggregateSize(struct(...bf(20, 20), m('c', 'u8')), ARMV4T_AGBCC)?.size).toBe(8);
     expect(aggregateSize(struct(m('a', 'u8'), m('b', 'u32', { bits: 30 })), ARMV4T_AGBCC)?.size).toBe(8);
     expect(aggregateSize(struct(m('a', 'u8'), m('b', 'u32', { bits: 4 })), ARMV4T_AGBCC)?.size).toBe(4);
@@ -107,7 +110,7 @@ test('a target that states no rule answers nothing', () => {
   expect(returnsInMemory(struct(m('w', 'u32', { dims: [16] })), unstated)).toBeUndefined();
 });
 
-// The struct a local of the returned type is declared as: every member a field at its offset, and
+// The struct a local of the returned type is declared as: every member it can type a field at its offset, and
 // spelled as the headers spell it, which marks it theirs
 test('a declared struct lays out as an IR struct, or not at all', () => {
   const s = struct(
@@ -131,13 +134,11 @@ test('a declared struct lays out as an IR struct, or not at all', () => {
     ),
     declared: 'S_t',
   });
-  for (const layout of [
-    union(m('a', 'u32')),
-    struct(m('a', 'u32', { bits: 3 })),
-    struct(m('in', struct(m('a', 'u8')))),
-    struct(m('c', 'char')),
-    { kind: 'struct' as const },
-  ]) {
+  // a member the IR cannot type has no field; the struct is still the size its members give it
+  expect(
+    aggregateType('S', 'struct S', struct(m('in', struct(m('a', 'u8'))), m('c', 'char'), m('w', 'u32')), ARMV4T_AGBCC),
+  ).toEqual({ ...T.struct('S', [{ off: 8, type: T.u(32), name: 'w' }], 12), declared: 'struct S' });
+  for (const layout of [union(m('a', 'u32')), struct(m('a', 'u8', { bits: 0 })), { kind: 'struct' as const }]) {
     expect(aggregateType('S', 'struct S', layout, ARMV4T_AGBCC)).toBeUndefined();
   }
 });

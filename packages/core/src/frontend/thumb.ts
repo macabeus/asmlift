@@ -3623,8 +3623,8 @@ function liftOnce(
     const type = aggregateType(tag!, spelling, layout, target);
     if (type === undefined) {
       refuse(
-        'it is a union, or one of its members is not a scalar, a pointer or an array of one (a nested struct or ' +
-          'union, a bitfield, a plain `char`) — the local it lands in has no type here',
+        'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
+          '(an enum, a bitfield) — the local it lands in has no type here',
       );
     }
     return { type: type! };

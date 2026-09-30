@@ -83,14 +83,50 @@ describe('a callee declared to return a struct through memory', () => {
     ).toThrow(/its parameters are not all sized/);
   });
 
-  test('a union, or a struct with a member the IR cannot type, declines', () => {
+  // `struct S { u8 a; u32 w[16]; } ` goes through memory on its second member alone, sized or not
+  test('a union, or a struct this target does not size, declines', () => {
     const union = { ...makeblob, returns: 'union U', returnLayout: { ...BLOB64, kind: 'union' as const } };
-    const nested = { ...makeblob, returnLayout: { kind: 'struct' as const, members: [{ name: 'in', type: BLOB64 }] } };
-    for (const p of [union, nested]) {
+    const unsized = {
+      ...makeblob,
+      returnLayout: {
+        kind: 'struct' as const,
+        members: [
+          { name: 'a', type: 'u8' },
+          { name: 'w', type: 'Opaque' },
+        ],
+      },
+    };
+    for (const p of [union, unsized]) {
       expect(() => decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: p } })).toThrow(
         /the local it lands in has no type here/,
       );
     }
+  });
+
+  // a 64-byte struct of members the IR mostly cannot type: it is the local all the same, and the
+  // declarations block defines it from the declaration
+  test('a struct with members the IR cannot type is still the local, defined from its declaration', () => {
+    const returnLayout = {
+      kind: 'struct' as const,
+      members: [
+        { name: 'i', type: { kind: 'struct' as const, members: ['a', 'b'].map((name) => ({ name, type: 'u8' })) } },
+        { name: 'lo', type: 'u32', bits: 4 },
+        { name: '', type: 'u32', bits: 3 },
+        { name: 'name', type: 'char', dims: [8] },
+        { name: 'k', type: 'enum Kind' },
+        { name: 'p', type: 'const struct In *' },
+        { name: 'n', type: 'int8_t' },
+        { name: 'pad', type: 'u8', dims: [39] },
+      ],
+    };
+    const [c] = enumerateCandidates('p1', P1, ARMV4T_AGBCC, {
+      prototypes: { makeblob: { ...makeblob, returnLayout } },
+    });
+    expect(c.source).toContain('struct Blob64 sp0;');
+    expect(renderDeclarations(c.symbolRefs ?? [])).toContain(
+      'struct Blob64 { struct { u8 a; u8 b; } i; u32 lo : 4; u32 : 3; char name[8]; ' +
+        'enum { asmlift_Blob64_enum0 } k; void *p; s8 n; u8 pad[39]; };',
+    );
   });
 
   test('every argument reads one register up, and each call fills its own local', () => {

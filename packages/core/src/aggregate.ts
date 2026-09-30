@@ -68,11 +68,13 @@ function place(
   return { size: roundUp(Math.ceil(bits / 8), align), align, offsets };
 }
 
-/** A declared struct as the IR types it: `name` with every member a field at the offset this target
- *  lays it at, and the struct's size, spelled as the headers spell it (`spelling`, which is what
- *  marks it theirs — ir/types.ts). Undefined for a union, whose IR type carries no name to declare
- *  it by; and where a member is not a scalar, a pointer or an array of either — a nested struct or
- *  union, a bitfield, or a plain `char`, whose signedness is the compiler's and stated nowhere. */
+/** A declared struct as the IR types it: `name` at the size this target lays it out at, spelled as
+ *  the headers spell it (`spelling`, which is what marks it theirs — ir/types.ts), with a field at
+ *  its offset for each member the IR can type: a scalar, a pointer, or an array of either. A member
+ *  it cannot — a nested struct or union, a bitfield, an enum, a plain `char`, whose signedness is
+ *  the compiler's and stated nowhere — has no field, and so no read of it is typed. The struct is
+ *  DEFINED from the declaration (declare.ts), not from these fields. Undefined for a union, whose IR
+ *  type carries no name to declare it by, and where this target does not size it. */
 export function aggregateType(
   name: string,
   spelling: string,
@@ -86,11 +88,10 @@ export function aggregateType(
   const fields: StructField[] = [];
   for (const [i, m] of layout.members!.entries()) {
     const scalar = m.bits === undefined && typeof m.type === 'string' ? scalarType(m.type) : undefined;
-    if (scalar === undefined) {
-      return undefined;
+    if (scalar !== undefined) {
+      const type = (m.dims ?? []).reduceRight<IrType>((elem, n) => T.array(elem, n), scalar);
+      fields.push({ off: placed.offsets[i], type, name: m.name });
     }
-    const type = (m.dims ?? []).reduceRight<IrType>((elem, n) => T.array(elem, n), scalar);
-    fields.push({ off: placed.offsets[i], type, name: m.name });
   }
   return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
 }
