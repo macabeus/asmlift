@@ -439,13 +439,51 @@ function baseAndDeclarators(decl: string): { base: string; declarators: string[]
   return { base: m[1].trim(), declarators: [m[2], ...parts.slice(1)] };
 }
 
+/** The value of an integer constant expression of literals, `+ - * /` and parentheses — the
+ *  `u8 pad3[0x4 - 0x3]` a decomp header sizes its padding with — or undefined for anything else. */
+function constantValue(text: string): number | undefined {
+  const tokens = text.match(/0x[0-9a-f]+[ul]*|\d+[ul]*|[-+*/()]|\S/gi) ?? [];
+  let at = 0;
+  const primary = (): number | undefined => {
+    const t = tokens[at++];
+    if (t === '(') {
+      const v = sum();
+      return tokens[at++] === ')' ? v : undefined;
+    }
+    if (t === '-') {
+      const v = primary();
+      return v === undefined ? undefined : -v;
+    }
+    return t !== undefined && /^(?:0x[0-9a-f]+|\d+)[ul]*$/i.test(t)
+      ? Number.parseInt(t, /^0x/i.test(t) ? 16 : 10)
+      : undefined;
+  };
+  const product = (): number | undefined => {
+    let v = primary();
+    while (v !== undefined && (tokens[at] === '*' || tokens[at] === '/')) {
+      const op = tokens[at++];
+      const r = primary();
+      v = r === undefined || (op === '/' && r === 0) ? undefined : op === '*' ? v * r : Math.trunc(v / r);
+    }
+    return v;
+  };
+  const sum = (): number | undefined => {
+    let v = product();
+    while (v !== undefined && (tokens[at] === '+' || tokens[at] === '-')) {
+      const op = tokens[at++];
+      const r = product();
+      v = r === undefined ? undefined : op === '+' ? v + r : v - r;
+    }
+    return v;
+  };
+  const v = sum();
+  return at === tokens.length ? v : undefined;
+}
+
 /** One member declarator: its name, whether it declares a pointer, its extents, its bit width. */
 function memberDeclarator(d: string): { name: string; pointer: boolean; dims?: number[]; bits?: number } | undefined {
   const s = d.trim();
-  const literal = (t: string): number | undefined =>
-    /^(?:0x[0-9a-f]+|\d+)[ul]*$/i.test(t.trim())
-      ? Number.parseInt(t.trim(), /^0x/i.test(t.trim()) ? 16 : 10)
-      : undefined;
+  const literal = constantValue;
   const fnptr = /^\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\(.*\)$/.exec(s);
   if (fnptr) {
     return { name: fnptr[1], pointer: true };

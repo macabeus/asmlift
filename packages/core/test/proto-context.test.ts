@@ -149,7 +149,9 @@ describe('prototypes from a declaration context', () => {
        Big mkbig(void);
        struct Nest { struct { u8 a; } inner; union { s32 w; u8 b[4]; } u; }; struct Nest mknest(void);
        struct Fl { float f; }; struct Fl mkfl(void);
-       struct Flex { s32 n; u8 tail[]; }; struct Flex mkflex(void);`,
+       struct Flex { s32 n; u8 tail[]; }; struct Flex mkflex(void);
+       struct Pad { u16 unk0; u8 unk2; u8 pad3[0x4 - 0x3]; u8 m[(2 + 1) * 2]; }; struct Pad mkpad(void);
+       struct Sym { u8 x[N]; }; struct Sym mksym(void);`,
       'c',
     );
     expect(p.mkbig?.returnLayout?.members).toEqual([
@@ -182,6 +184,14 @@ describe('prototypes from a declaration context', () => {
     // a float member, or an extent the header does not state, leaves the kind and nothing else
     expect(p.mkfl?.returnLayout).toEqual({ kind: 'struct' });
     expect(p.mkflex?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.mksym?.returnLayout).toEqual({ kind: 'struct' });
+    // …where an extent written as a constant expression is its value (kleod's `struct Unk_08014184`)
+    expect(p.mkpad?.returnLayout?.members).toEqual([
+      { name: 'unk0', type: 'u16' },
+      { name: 'unk2', type: 'u8' },
+      { name: 'pad3', type: 'u8', dims: [1] },
+      { name: 'm', type: 'u8', dims: [6] },
+    ]);
   });
 
   test('C++ default arguments and comments do not reach a spelling', () => {
