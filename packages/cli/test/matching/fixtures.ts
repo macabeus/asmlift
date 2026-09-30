@@ -681,4 +681,11 @@ export const FIXTURES: DecompFixture[] = [
     expectSource: 'double dchain(double a0, double a1, double a2) {\n    return -(a2 * (a0 - a1)) / a0;\n}\n',
     note: 'double-precision FPU arithmetic through f1..f3',
   },
+  {
+    symbol: 'dpoly',
+    toolchain: 'ido',
+    referenceC: 'double dpoly(double x, double y){ return -((x * x - y) / (x + y)); }',
+    expectSource: 'double dpoly(double a0, double a1) {\n    return -((a0 * a0 - a1) / (a0 + a1));\n}\n',
+    note: 'double-precision FPU arithmetic through $f12/$f14 and $f0 (MIPS)',
+  },
 ];

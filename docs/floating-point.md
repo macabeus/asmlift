@@ -1,9 +1,10 @@
 # Hardware floating point
 
-asmlift lifts the ARITHMETIC of the FPU's register file on MIPS o32 and the PowerPC EABI —
-`add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and `fadds`/`fsubs`/`fmuls`/`fdivs`/`fneg`/`fmr`,
-and on PowerPC the double-precision `fadd`/`fsub`/`fmul`/`fdiv` — through each ABI's float argument
-and return homes, and nothing else in that file.
+asmlift lifts the ARITHMETIC of the FPU's register file on MIPS o32 and the PowerPC EABI, in either
+precision — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and their `.d` twins, and
+`fadds`/`fsubs`/`fmuls`/`fdivs`, `fadd`/`fsub`/`fmul`/`fdiv`, `fneg`/`fmr` — through each ABI's float
+argument and return homes, and nothing else in that file; a function computing in both precisions
+refuses.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
 On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through
@@ -313,8 +314,9 @@ layer rests on**: the float RETURN is decided by scanning for a decoded write to
 op or `ret`. Both are sound only while no float can reach memory, so a store that lands before them
 lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
-from the value that reaches each `ret`. After it: doubles and `frsp`, the
-int/float conversions, and the compares and `bc1t`/`bc1f`, the fifth thing §1 named.
+from the value that reaches each `ret`. After it: `frsp` and the int/float conversions, which
+are what a function computing in both precisions needs, and the compares and `bc1t`/`bc1f`, the
+fifth thing §1 named.
 
 **A double on agbcc is the same type without the file.** agbcc has no FPU and emits every `double`
 operation as a libgcc call over the register pairs a long long uses (`optabs.c:4022`, `thumb.h:632`,

@@ -8,11 +8,32 @@
 // the decode and neither of these, `float fadd(float a, float b){ return a + b; }` lifts on every
 // FPU target as `void fadd(s32 a0, s32 a1) { return; }` — two phantom integer parameters and a dead
 // add. `docs/floating-point.md` §2 measures that.
+import { type IrType, T } from '../ir/types';
 import type { TargetDescription } from '../target';
 import { FrontendUnsupportedError } from './errors';
 import type { ArgSlots } from './ssa';
 
 export type Fpu = NonNullable<TargetDescription['fpu']>;
+
+/** The one float type a function's FPU registers hold: double where it decodes a double op, single
+ *  otherwise. `widthOf` is the frontend's reading of a mnemonic (null for one that carries no
+ *  precision, undefined for one it does not decode). BOTH REFUSES: the SSA builder types a register
+ *  per key, not per value, and a function computing in both precisions rounds between them (a
+ *  conversion, PowerPC's `frsp` or a single op over a double operand), which nothing models. */
+export function fpPrecision(
+  name: string,
+  instrs: readonly { mnemonic: string }[],
+  widthOf: (mnemonic: string) => 32 | 64 | null | undefined,
+): IrType {
+  const widths = new Set(instrs.map((ins) => widthOf(ins.mnemonic)).filter((w) => w !== null && w !== undefined));
+  if (widths.size > 1) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': it computes in both single and double precision, and the rounding between ` +
+        'them is not modelled',
+    );
+  }
+  return widths.has(64) ? T.f64() : T.f32();
+}
 
 /** THE ARGUMENT SLOTS OF BOTH REGISTER FILES, as the one `ArgSlots` the MIPS and PowerPC frontends
  *  hand to `mintArgSlotHoles` and `abiSortEntryParams` (frontend/ssa.ts). Naming is positional
@@ -49,22 +70,26 @@ export type Fpu = NonNullable<TargetDescription['fpu']>;
  *      depends on what the function reads, which is why `ArgSlots` asks for the holes of a read
  *      set rather than for the key of a slot: `int ib(int a, int b){ return b; }` reads only `a1`,
  *      and its first argument is `a0`, not `$f12`.
- *   4. Under `'leading'` a float argument still takes the INTEGER slot it shadows, so an integer
- *      argument register read in one of those slots is a contradiction the ABI does not produce,
- *      and is refused rather than ranked. */
+ *   4. Under `'leading'` a float argument still takes the INTEGER slots it shadows — one for a
+ *      single, two for a double (`floatType`) — so an integer argument register read in one of those
+ *      slots is a contradiction the ABI does not produce, and is refused rather than ranked. */
 export function fpuArgSlots(
   name: string,
   fpu: Fpu | undefined,
   argRegs: readonly string[],
   isFpKey: (key: string) => boolean,
+  floatType: IrType = T.f32(),
 ): ArgSlots {
+  // How many integer slots a float argument takes under `'leading'`: IDO reads the integer after a
+  // double two slots on (`double di(double a, int b)` reads b from a2).
+  const words = floatType.kind === 'float' && floatType.width === 64 ? 2 : 1;
   const slotOf = (key: string): { slot: number; float: boolean } | null => {
     const gpr = argRegs.indexOf(key);
     if (gpr >= 0) {
       return { slot: gpr, float: false };
     }
     const fp = fpu?.argRegs.indexOf(key) ?? -1;
-    return fp >= 0 ? { slot: fp, float: true } : null;
+    return fp >= 0 ? { slot: fpu?.slots === 'leading' ? fp * words : fp, float: true } : null;
   };
   return {
     slotOf: (key) => {
@@ -85,17 +110,21 @@ export function fpuArgSlots(
       const floatTop = top(true);
       const intTop = top(false);
       if (fpu?.slots === 'leading') {
-        const shadowed = read.find((s) => !s.float && s.slot <= floatTop);
+        // The last integer slot the floats read shadow: a double's second word is its too.
+        const floatEnd = floatTop < 0 ? -1 : floatTop + words - 1;
+        const shadowed = read.find((s) => !s.float && s.slot <= floatEnd);
         if (shadowed) {
           const k = shadowed.slot;
           throw new FrontendUnsupportedError(
-            `cannot lift '${name}': ${argRegs[k]} and ${fpu.argRegs[k]} both carry argument ${k} — a floating-point ` +
-              `argument takes the integer slot it shadows, so the ABI does not produce this — not modelled`,
+            `cannot lift '${name}': ${argRegs[k]} and ${fpu.argRegs[Math.floor(k / words)]} both carry argument ` +
+              `slot ${k} — a floating-point argument takes the integer slots it shadows, so the ABI does not ` +
+              'produce this — not modelled',
           );
         }
-        return Array.from({ length: Math.max(0, floatTop, intTop) }, (_, k) =>
-          k <= floatTop ? fpu.argRegs[k] : argRegs[k],
-        );
+        return [
+          ...fpu.argRegs.slice(0, Math.max(0, floatTop / words)),
+          ...argRegs.slice(floatEnd + 1, Math.max(floatEnd + 1, intTop)),
+        ];
       }
       return [...(fpu?.argRegs.slice(0, Math.max(0, floatTop)) ?? []), ...argRegs.slice(0, Math.max(0, intTop))];
     },

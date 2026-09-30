@@ -48,7 +48,7 @@ describe('an instruction that touches the FPU is refused by the FILE it needs', 
     // `abs.s` is single-precision arithmetic the decode does not lift (`fpu-lift.test.ts` has the
     // ones it does).
     ['MIPS single-precision arithmetic', 'abs.s\t$f0,$f12', '\\$f0, \\$f12', liftMips],
-    ['MIPS double-precision arithmetic', 'add.d\t$f0,$f12,$f14', '\\$f0, \\$f12, \\$f14', liftMips],
+    ['MIPS double-precision square root', 'sqrt.d\t$f0,$f12', '\\$f0, \\$f12', liftMips],
     ['a MIPS format conversion', 'cvt.s.w\t$f6,$f4', '\\$f6, \\$f4', liftMips],
     // `ops[0]` is an FP register a destination-only test would also have caught — but the operand
     // this one must not lose is the SOURCE, and the two shapes below pin that.
@@ -79,9 +79,9 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
   // everywhere else — which is what its own header promises ("normalises that dialect into the SAME
   // `DisasmInstr[]` the objdump parser yields"). Each case below is red if it strips it.
   test.each([
-    ['numbered arithmetic', 'add.d       $f0, $f12, $f14', '\\$f0, \\$f12, \\$f14'],
+    ['numbered arithmetic', 'sqrt.d      $f0, $f12', '\\$f0, \\$f12'],
     // THE ABI SPELLING, which objdump never prints and the `af`/`marioparty3` trees use throughout.
-    ['ABI-named arithmetic', 'add.d       $ft2, $ft2, $ft3', '\\$ft2, \\$ft3'],
+    ['ABI-named arithmetic', 'sqrt.d      $ft2, $ft3', '\\$ft2, \\$ft3'],
     ['an FPU load', 'lwc1        $fv0, 0($a1)', '\\$fv0'],
     ['an FPU store, ahead of the store-class arm', 'swc1        $fa0, 0($a1)', '\\$fa0'],
     ['a move out of the file', 'mfc1        $v0, $fs0', '\\$fs0'],

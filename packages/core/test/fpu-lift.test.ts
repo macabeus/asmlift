@@ -127,6 +127,65 @@ describe('MIPS o32: single-precision arithmetic through $f12/$f14 and $f0', () =
   });
 });
 
+// Compiled at IDO 7.1's synthetic flags (`-mips2 -O2 -32`) from
+//   double dpoly(double x, double y){ return -((x * x - y) / (x + y)); }
+//   double di(double a, int b){ return b ? a : -a; }
+// `dpoly`'s lift recompiles to this listing; `di` is `fi`'s shape at 64 bits.
+const IDO_DOUBLE = `00000000 <dpoly>:
+   0:\tmul.d\t$f4,$f12,$f12
+   4:\tadd.d\t$f8,$f12,$f14
+   8:\tsub.d\t$f6,$f4,$f14
+   c:\tdiv.d\t$f0,$f6,$f8
+  10:\tjr\tra
+  14:\tneg.d\t$f0,$f0
+
+00000018 <di>:
+  18:\tbeqzl\ta2,30 <di+0x18>
+  1c:\tneg.d\t$f2,$f12
+  20:\tmov.d\t$f2,$f12
+  24:\tjr\tra
+  28:\tmov.d\t$f0,$f12
+  2c:\tneg.d\t$f2,$f12
+  30:\tjr\tra
+  34:\tmov.d\t$f0,$f2
+`;
+
+describe('MIPS o32: double-precision arithmetic through the same homes', () => {
+  // `pnpm bench target synthetic:dadd:<tc>`'s own listing, on both toolchains.
+  test.each([
+    ['ido7.1', MIPS_IDO],
+    ['gcc2.7.2kmc', MIPS_GCC],
+  ])('the dadd row lifts to the program that compiled it (%s)', (_tc, target) => {
+    expect(lift('dadd', objdump('dadd', '   0:\tjr\tra\n   4:\tadd.d\t$f0,$f12,$f14\n'), target)).toBe(
+      'double dadd(double a0, double a1) {\n    return a0 + a1;\n}\n',
+    );
+  });
+
+  test('the four ops, negation and a nested expression', () => {
+    expect(lift('dpoly', IDO_DOUBLE)).toBe(
+      'double dpoly(double a0, double a1) {\n    return -((a0 * a0 - a1) / (a0 + a1));\n}\n',
+    );
+  });
+
+  // A DOUBLE TAKES TWO INTEGER SLOTS, so the integer after it is in `a2`, and is the SECOND
+  // parameter: counted one slot per float, `a1` would be minted as a hole between them.
+  test('an integer after a double is read two slots on, and is the second parameter', () => {
+    expect(lift('di', IDO_DOUBLE)).toContain('double di(double a0, s32 a1)');
+  });
+
+  test('a function computing in both precisions refuses', () => {
+    expect(() =>
+      lift('f', objdump('f', '   0:\tadd.d\t$f4,$f12,$f14\n   4:\tjr\tra\n   8:\tadd.s\t$f0,$f4,$f4\n')),
+    ).toThrow(/computes in both single and double precision/);
+  });
+
+  // `a1` is the second word of the double in `$f12`.
+  test('an integer register a double shadows refuses', () => {
+    const body = '   0:\tsw\ta1,0(a2)\n   4:\tjr\tra\n   8:\tadd.d\t$f0,$f12,$f12\n';
+    expect(() => lift('f', objdump('f', body))).toThrow(/a1 and \$f12 both carry argument slot 1/);
+  });
+});
+
 describe('the refusals the homes add', () => {
   const mips = (lines: string[]) => lines.map((l, i) => `${(i * 4).toString(16)}:\t${l}`).join('\n') + '\n';
 
@@ -147,8 +206,8 @@ describe('the refusals the homes add', () => {
   // RULE 3. A float argument takes the integer slot it shadows, so `a0` beside `$f12` is not a
   // layout the ABI produces.
   test.each([
-    ['a0 beside $f12', ['sw\ta1,0(a0)', 'jr\tra', 'add.s\t$f0,$f12,$f12'], /a0 and \$f12 both carry argument 0/],
-    ['a1 beside $f14', ['sw\ta2,0(a1)', 'jr\tra', 'add.s\t$f0,$f14,$f12'], /a1 and \$f14 both carry argument 1/],
+    ['a0 beside $f12', ['sw\ta1,0(a0)', 'jr\tra', 'add.s\t$f0,$f12,$f12'], /a0 and \$f12 both carry argument slot 0/],
+    ['a1 beside $f14', ['sw\ta2,0(a1)', 'jr\tra', 'add.s\t$f0,$f14,$f12'], /a1 and \$f14 both carry argument slot 1/],
   ])('%s refuses', (_label, lines, want) => {
     expect(() => lift('f', mips(lines))).toThrow(want);
   });

@@ -35,7 +35,7 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { fpuArgSlots, writesFloatReturn } from './fpu';
+import { fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -74,20 +74,28 @@ const LIKELY_BASE: Record<string, string> = {
 // code nor the compare is modelled, so these refuse whether or not they are also likely.
 const isFpCondBranch = (m: string) => m.startsWith('bc1');
 
-/** The single-precision FPU arithmetic this frontend lifts, onto the float opcodes (`mov.s` is a
- *  copy and has none). Every other FPU instruction — the doubles, the conversions, the moves to and
+/** The FPU arithmetic this frontend lifts, onto the float opcodes (`mov.s`/`mov.d` are copies and
+ *  have none), with the precision each computes in: `.s` single, `.d` double, one per function
+ *  (`frontend/fpu.ts` `fpPrecision`). Every other FPU instruction — the conversions, the moves to and
  *  from the integer file and memory, the compares — keeps the register-file refusal `opaqueDest`
- *  gives it, and so does one of these naming an odd register or a target with no `fpu` homes.
- *  `docs/floating-point.md` says what the next layer is. */
-const FP_SINGLE: Readonly<Record<string, Opcode | 'copy'>> = {
-  'add.s': 'fadd',
-  'sub.s': 'fsub',
-  'mul.s': 'fmul',
-  'div.s': 'fdiv',
-  'neg.s': 'fneg',
-  'mov.s': 'copy',
+ *  gives it, and so does one of these naming an odd register (a double's second half, or a single
+ *  this frontend does not key) or a target with no `fpu` homes. `docs/floating-point.md` says what
+ *  the next layer is. */
+const FP_ARITH: Readonly<Record<string, { op: Opcode | 'copy'; width: 32 | 64 }>> = {
+  'add.s': { op: 'fadd', width: 32 },
+  'sub.s': { op: 'fsub', width: 32 },
+  'mul.s': { op: 'fmul', width: 32 },
+  'div.s': { op: 'fdiv', width: 32 },
+  'neg.s': { op: 'fneg', width: 32 },
+  'mov.s': { op: 'copy', width: 32 },
+  'add.d': { op: 'fadd', width: 64 },
+  'sub.d': { op: 'fsub', width: 64 },
+  'mul.d': { op: 'fmul', width: 64 },
+  'div.d': { op: 'fdiv', width: 64 },
+  'neg.d': { op: 'fneg', width: 64 },
+  'mov.d': { op: 'copy', width: 64 },
 };
-const FP_SINGLE_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_SINGLE));
+const FP_ARITH_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_ARITH));
 /** A key the SSA builder holds for the FPU's file: `mipsEvenFpKey`'s canonical spelling. */
 const isFpKey = (k: string) => /^\$f\d+$/.test(k);
 
@@ -738,14 +746,15 @@ export function lift(
   // `[0,16)` as the caller-owned home area (in NEITHER range — caller-owned, but not an argument)
   // with stack arguments from 16 up, which is what `mips32be.cspec`'s `<localrange>` and stack
   // `<pentry offset="16">` encode.
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
+  const fpType = fpPrecision(name, instrs, (m) => FP_ARITH[m]?.width);
+  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? fpType : undefined));
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
   const fpu = target.fpu;
   const floatReturn = writesFloatReturn(
     blocks.flatMap((b) => (b.delay ? [...b.body, b.delay] : b.body)),
-    FP_SINGLE_MNEMONICS,
+    FP_ARITH_MNEMONICS,
     mipsEvenFpKey,
     fpu,
   );
@@ -1121,7 +1130,13 @@ export function lift(
         case 'div.s':
         case 'neg.s':
         case 'mov.s':
-          emitFpSingle(ins);
+        case 'add.d':
+        case 'sub.d':
+        case 'mul.d':
+        case 'div.d':
+        case 'neg.d':
+        case 'mov.d':
+          emitFpArith(ins);
           break;
         default:
           emitOpaqueDest(ins);
@@ -1201,22 +1216,22 @@ export function lift(
       write(od.dst, res);
     };
     const emitUn = kit.un;
-    // Single-precision arithmetic on the FPU's file, keyed by `mipsEvenFpKey` so both dialects'
-    // spellings of one register are one SSA variable. Anything it cannot key — an odd half, a
-    // target with no float homes — is the register-file refusal it always was.
-    const emitFpSingle = (ins: Instr) => {
+    // Arithmetic on the FPU's file, keyed by `mipsEvenFpKey` so both dialects' spellings of one
+    // register are one SSA variable. Anything it cannot key — an odd half, a target with no float
+    // homes — is the register-file refusal it always was.
+    const emitFpArith = (ins: Instr) => {
       const keys = ins.ops.map(mipsEvenFpKey);
       if (fpu === undefined || keys.length === 0 || keys.some((k) => k === null)) {
         emitOpaqueDest(ins);
         return;
       }
       const [dst, ...srcs] = keys as string[];
-      const op = FP_SINGLE[ins.mnemonic];
+      const { op } = FP_ARITH[ins.mnemonic];
       if (op === 'copy') {
         write(dst, read(srcs[0]));
         return;
       }
-      const v = mkValue(T.f32());
+      const v = mkValue(fpType);
       ops.push(mkOp(op, { operands: srcs.map(read), results: [v] }));
       write(dst, v);
     };
@@ -1393,7 +1408,7 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
-  const argSlots = fpuArgSlots(name, fpu, ARG_REGS, isFpKey);
+  const argSlots = fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
