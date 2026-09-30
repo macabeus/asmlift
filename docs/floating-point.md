@@ -10,8 +10,9 @@ argument slot the body never reads (`float f1(double a, float b){ return b + b; 
 no instruction states its width, whatever the function's precision typed it. On MIPS o32 that holds
 only while no integer argument follows the slot, because there the slot's width is what placed the
 integers after it (a double takes two integer slots), so a C++ declaration of the other width refuses;
-for the same reason a declared `double` over a lifted 32-bit integer slot refuses unless it is the last
-declared parameter and the body reads none of the slots from it on.
+for the same reason a declared `double` over a lifted 32-bit integer slot refuses when the body reads
+that slot, and when a lifted parameter follows it, unless it is the last declared parameter and the
+body reads none of the slots from it on.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
 On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through
