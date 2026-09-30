@@ -181,12 +181,14 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // three rules above all pass it: one object, no `undef` op, no slot above it.
   //
   // What licenses an answer is the frame being ACCOUNTED FOR, word by word. Every word of the
-  // reserved local area has to be an object this audit modelled or a slot the slot model keys;
-  // a word that is neither is storage nothing here describes, so the emitted C reserves less
-  // than the machine did and the writer reaches past what it allocated. A writer reaches the
-  // whole local area and not only the words above the object: a word below it is still frame
-  // the declaration has to account for. Word granularity, not byte — the stack is word-aligned, so a halfword object
-  // owns its word and the padding beside it is not a second local.
+  // reserved local area the escape reaches has to be an object this audit modelled or a slot the
+  // slot model keys; a word that is neither is storage nothing here describes, so the emitted C
+  // reserves less than the machine did and the writer reaches past what it allocated. A writer
+  // that may write anywhere through the address reaches the whole local area, below the object as
+  // well as above it; a callee handed only its own return storage writes the struct it returns
+  // and nothing else (`readWindow`), so a word outside that struct is one it never reaches. Word
+  // granularity, not byte — the stack is word-aligned, so a halfword object owns its word and the
+  // padding beside it is not a second local.
   //
   // …and on a READER as far as it reads, since a read past the object copies frame bytes the
   // source reserved and the recompile does not. `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`
@@ -816,15 +818,16 @@ export function auditFrameObjects({
     }
 
     // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
-    // that may write, and anything this cannot bound, reaches the whole frame. A device that only
-    // reads is bounded by its channel's control halfword (`readSourceControl`), per TRANSFER: the
-    // device reads the object on every arm of the channel from the store that handed it the
-    // address until a later word store to the same source register replaces it, so the control
-    // stores that bound it are the ones reachable in between. Each has to be a literal the target
-    // decodes. A store through a pointer this cannot resolve — one that is this frame's on only
-    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves the
-    // read unbounded — as does a transfer never armed here at all. An unbounded device read says
-    // which of those it met (`why`): each is a different capability to build. A block transfer
+    // that may write, and anything this cannot bound, reaches the whole frame — save a callee
+    // handed only its own return storage, which writes the struct it returns (`returnTemps`). A
+    // device that only reads is bounded by its channel's control halfword (`readSourceControl`),
+    // per TRANSFER: the device reads the object on every arm of the channel from the store that
+    // handed it the address until a later word store to the same source register replaces it, so
+    // the control stores that bound it are the ones reachable in between. Each has to be a literal
+    // the target decodes. A store through a pointer this cannot resolve — one that is this frame's
+    // on only some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves
+    // the read unbounded — as does a transfer never armed here at all. An unbounded device read
+    // says which of those it met (`why`): each is a different capability to build. A block transfer
     // that took the address as its source adds the bytes its control word reads (`calleeReads`).
     //
     // A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED WHERE THE SYMBOL MAP PLACES THE NAME, and then
