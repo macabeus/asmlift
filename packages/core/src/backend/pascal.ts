@@ -88,6 +88,8 @@ function makePrinter(vt: VarTypes) {
         throw new Error(`pascal backend: address-of global '${e.name}' has no IDO Pascal spelling yet`);
       case 'const':
         return String(e.value);
+      case 'fconst':
+        throw new Error('pascal backend: a double literal has no IDO Pascal spelling yet');
       case 'call':
         if (e.sret !== undefined) {
           throw new Error(

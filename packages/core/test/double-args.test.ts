@@ -35,14 +35,9 @@ describe('a declared double argument', () => {
 
   // A double parameter has no fallback: its words handed on as integers are another number, so a
   // pair that is not a double moved whole declines the function.
-  test.each([
-    ['dreg', G, 1, 'g'],
-    ['dsplit', F4, 4, 'f4'],
-    ['dstack', F5, 5, 'f5'],
-    ['dmem', G, 1, 'g'],
-  ])('%s: a literal or a load declines', (name, callee, arg, fn) => {
-    expect(() => lift(name, own(callee, name))).toThrow(
-      `argument ${arg} of the call to '${fn}' is a floating-point argument its callee declares \`double\``,
+  test('a load declines', () => {
+    expect(() => lift('dmem', own(G, 'dmem'))).toThrow(
+      "argument 1 of the call to 'g' is a floating-point argument its callee declares `double`",
     );
   });
 
@@ -62,6 +57,45 @@ describe('a declared double argument', () => {
     const h = { h: { params: ['double', 'int'], returnsVoid: true }, f: { returnsVoid: true } };
     expect(() => decompile('f', twice, ARMV4T_AGBCC, { prototypes: h })).toThrow(
       "argument 1 of the call to 'h' is a floating-point argument",
+    );
+  });
+
+  // A LITERAL is the two words agbcc staged from its pool, read high word first: `.long 0x3ff80000,
+  // 0x0` is 1.5, in each placement. Read as a `long long` it is 1073217536, which is the spelling
+  // that recompiles to the same bytes against an undeclared callee and is the wrong number
+  // (`void fived(…, double)` stages 1073217536.0 for it).
+  test.each([
+    ['dreg', G, 'g(1.5);'],
+    ['dsplit', F4, 'f4(a0, a1, 7, 1.5);'],
+    ['dstack', F5, 'f5(a0, a1, a0 + a1, a0 - a1, 1.5);'],
+    ['dgap', takes('f6', ['int', 'int', 'int', 'int', 'int', 'double']), 'f6(a0, a1, 1, 2, 3, -2.75);'],
+    ['dtenth', G, 'g(0.1);'],
+    ['dtwo', G, 'g(2.0);'],
+    ['dtiny', G, 'g(5e-324);'],
+    ['dnegzero', G, 'g(-0.0);'],
+  ])('%s: a literal is the double its words spell', (name, callee, call) => {
+    const source = lift(name, own(callee, name));
+    expect(source).toContain(call);
+    expect(source).not.toMatch(/1073217536|\(s64\)|\(u32\)/);
+  });
+
+  // The word order is the target's, not the frontend's: the same two words read low word first are
+  // a subnormal.
+  test('the words are read in the order the target states', () => {
+    const lowFirst = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, softDoubleWords: 'low-first' as const },
+    };
+    expect(lift('dreg', own(G, 'dreg'), lowFirst)).toContain('g(5.30239915e-315);');
+  });
+
+  // A NaN or an infinity has no C literal, so the pair is no literal.
+  test('a pair that is not a finite double declines', () => {
+    const nan =
+      'f:\n\tpush\t{lr}\n\tldr\tr1, .L1+0x4\n\tldr\tr0, .L1\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '\t.align\t2, 0\n.L1:\n\t.long 0x7ff80000, 0x0\n';
+    expect(() => decompile('f', nan, ARMV4T_AGBCC, { prototypes: own(G, 'f') })).toThrow(
+      "argument 1 of the call to 'g' is a floating-point argument",
     );
   });
 

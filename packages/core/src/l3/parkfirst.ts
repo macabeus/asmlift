@@ -51,6 +51,7 @@ const pureOverParams = (e: Expr, params: ReadonlySet<string>): boolean => {
     case 'var':
       return params.has(e.name);
     case 'const':
+    case 'fconst':
       return true;
     case 'un':
     case 'cast':

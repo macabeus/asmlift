@@ -54,6 +54,12 @@ describe('the double arithmetic helpers are the float ops', () => {
   });
 });
 
+// `a + 1.5` stages r2=0x3ff80000, r3=0: two constant words, read high word first as the double
+// they spell — a long long's naming of that pair is a different number.
+test('a literal operand is the double its words spell', () => {
+  expect(lift('dconst')).toBe('double dconst(double a0) {\n    return a0 + 1.5;\n}\n');
+});
+
 // The fold is its own pass and its own trace stage, ahead of the 64-bit integer helpers: the stage
 // that first shows the doubles is the float one, and the 64-bit one changes nothing after it.
 test('the double parameters appear at the soft-float stage', () => {
@@ -66,11 +72,6 @@ test('the double parameters appear at the soft-float stage', () => {
 });
 
 describe('what refuses', () => {
-  // `a + 1.5` stages r2=0x3ff80000, r3=0: a long long's naming of that pair is a different number.
-  test('a literal operand', () => {
-    expect(() => lift('dconst')).toThrow(/no model for the runtime helper '__adddf3'/);
-  });
-
   test('an operand loaded from memory', () => {
     expect(() => lift('dld')).toThrow(/no model for the runtime helper '__adddf3'/);
   });

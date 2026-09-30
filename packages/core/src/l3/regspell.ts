@@ -40,6 +40,7 @@ function isPure(e: Expr): boolean {
   switch (e.k) {
     case 'var':
     case 'const':
+    case 'fconst':
       return true;
     case 'un':
     case 'cast':

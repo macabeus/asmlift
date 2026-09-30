@@ -265,6 +265,8 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
     // folded to a shift — where `a / (s32)-2147483648` calls `__divsi3`.
     case 'const':
       return e.value > -2147483648 && e.value <= 2147483647;
+    case 'fconst':
+      return undefined;
     // `-x` / `~x` carry the PROMOTED type of the operand; `!x` is `int`. A float has no integer
     // signedness at all.
     case 'un':
@@ -358,6 +360,8 @@ export function exprCType(e: Expr, varType: (name: string) => IrType | undefined
     // recovered type was. This is the exact gap the emission guard exists to bridge.
     case 'const':
       return T.s(32);
+    case 'fconst':
+      return T.f64();
     case 'cast':
       return e.to;
     // `-`/`~` yield the promoted integer; `!` yields int. None yields a pointer. A float negation

@@ -5,7 +5,8 @@
 // that names no float helper folds nothing. What sets it apart from the integer helpers is the
 // value's KIND: the call's operands and result are bits in integer registers, and the fold re-types
 // them as floats, which only data flow may justify — see the function below.
-import { Fn, Op, Value, mkValue, replaceAllUsesWith } from '../ir/core';
+import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { doubleBits, doubleOf } from '../ir/float-bits';
 import { T } from '../ir/types';
 import { arrivesAsDeclared, helperOp, isFloatHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
@@ -25,8 +26,9 @@ import { isArgumentPair } from './pairparams';
  *  helpers' results — and may go only into another of them, the return, or a parameter a callee
  *  declares `double`. Anything else refuses, and the call stays for `refuseUnmodelledHelpers` to
  *  gap:
- *   - an operand built from a literal, a load, or two unrelated words, whose halves the int64
- *     naming would put in the wrong order (`a + 1.5` stages `0x3ff80000` in r2);
+ *   - an operand built from a load or two unrelated words, whose halves the int64 naming would put
+ *     in the wrong order. Two CONSTANT words are the exception: they are a literal, read in the
+ *     target's word order into an `fconst` (`a + 1.5` stages `0x3ff80000` in r2, its high word);
  *   - an argument the function also reads on its own, as a word or as one half of a pair;
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
  *     any other call, or carried across an edge.
@@ -88,11 +90,29 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     const d = def.get(v);
     return d !== undefined && calls.has(d);
   };
+  // A LITERAL IS TWO CONSTANT WORDS READ IN THE TARGET'S ORDER (`compilerBehaviors.softDoubleWords`):
+  // the pair's first word is its high word on agbcc, which is what makes the long long naming of
+  // the same pair another number. Its bits, or undefined where the pair is no literal, the target
+  // states no order, or the double is not finite — which no C literal spells.
+  const order = target.compilerBehaviors.softDoubleWords;
+  const literalBits = (v: Value): string | undefined => {
+    const d = def.get(v);
+    const [first, second] = (d?.opcode === 'concat' ? d.operands : []).map((o) => def.get(o));
+    if (order === undefined || first?.opcode !== 'const' || second?.opcode !== 'const') {
+      return undefined;
+    }
+    const [a, b] = [Number(first.attrs.value), Number(second.attrs.value)];
+    const bits = order === 'high-first' ? doubleBits(a, b) : doubleBits(b, a);
+    return Number.isFinite(doubleOf(bits)) ? bits : undefined;
+  };
+  const literal = (v: Value, calls: ReadonlySet<Op>) =>
+    literalBits(v) !== undefined && users.get(v)!.every((u) => floatUse(u, v, calls));
+  const source = (v: Value, calls: ReadonlySet<Op>) => argument(v, calls) || fromCall(v, calls) || literal(v, calls);
   for (;;) {
     const calls = new Set(sites);
     const kept = sites.filter(
       (op) =>
-        op.operands.every((o) => argument(o, calls) || fromCall(o, calls)) &&
+        op.operands.every((o) => source(o, calls)) &&
         (users.get(op.results[0]) ?? []).every(
           (u) => deadHalf(u) || floatUse(u, op.results[0], calls) || u?.opcode === 'ret',
         ),
@@ -109,11 +129,11 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // refuses the function.
   for (const [op, at] of consumers) {
     for (const i of at) {
-      if (!argument(op.operands[i], calls) && !fromCall(op.operands[i], calls)) {
+      if (!source(op.operands[i], calls)) {
         throw new RaiseUnsupportedError(
           `cannot lift '${fn.name}': argument ${i + 1} of the call to '${String(op.attrs.target)}' is a ` +
             'floating-point argument its callee declares `double`, and it is not a double this function ' +
-            'was handed or a runtime helper returned, moved whole',
+            'was handed, a runtime helper returned or a finite literal staged, moved whole',
         );
       }
     }
@@ -123,12 +143,23 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   }
   const floatOf = new Map<Value, Value>();
   const float = (bits: number) => mkValue(bits > 32 ? T.f64() : T.f32());
+  // the `fconst` each literal's `concat` becomes, and the constant words only it read
+  const literals = new Map<Op, Op>();
+  const spent = new Set<Op>();
   // One parameter in its first slot's place, which is where the ABI put the value.
   const retype = (o: Value, bits: number) => {
     if (floatOf.has(o) || fromCall(o, calls)) {
       return;
     }
     const d = def.get(o);
+    const pattern = literalBits(o);
+    if (pattern !== undefined) {
+      const whole = float(64);
+      literals.set(d!, mkOp('fconst', { results: [whole], attrs: { bits: pattern } }));
+      d!.operands.forEach((w) => users.get(w)!.every((u) => u === d) && spent.add(def.get(w)!));
+      floatOf.set(o, whole);
+      return;
+    }
     const slots = d === undefined ? [o] : d.operands;
     const whole = float(bits);
     entry.splice(entry.indexOf(slots[0]), slots.length, whole);
@@ -154,8 +185,11 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
           ),
         ];
       }
+      if (literals.has(op)) {
+        return [literals.get(op)!];
+      }
       const retired = op.results.length === 1 && floatOf.has(op.results[0]);
-      return retired || (deadHalf(op) && floatOf.has(op.operands[0])) ? [] : [op];
+      return retired || spent.has(op) || (deadHalf(op) && floatOf.has(op.operands[0])) ? [] : [op];
     });
   }
   for (const [was, now] of floatOf) {
