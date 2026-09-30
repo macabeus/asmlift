@@ -1321,9 +1321,9 @@ literal address, that address plus a runtime index, or a phi of those: agbcc del
 to an address a later store overwrites, so of two transfers armed back to back through one channel
 the first would never start, and it hoists a plain load out of a loop that stores nothing it may
 alias, so a poll of `REG_VCOUNT` would never see the register change. A function accepted object
-by object pins only the first kind, a device store a later store in its own block overwrites; its
-other device accesses are left to the `/vol-store` candidate, because a qualified base in the
-structured tree refuses the variations that home it.
+by object pins every device read, and of its stores only the first kind, a device store a later
+store in its own block overwrites; its other device stores are left to the `/vol-store` candidate,
+because a qualified base in the structured tree refuses the variations that home it.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

@@ -1045,19 +1045,19 @@ export function auditFrameObjects({
     // `deviceRegisters`, which has to cover every register a source reaches — an address outside
     // it stays plain; without one, it is the channels handed a frame address.
     //
-    // A FUNCTION ACCEPTED OBJECT BY OBJECT pins only the stores of the first kind (`overwritten`):
-    // a device store a later store in its own block overwrites, with no call between to clear
-    // flow.c's list of pending stores (flow.c:1962). A plain read of its bytes between does not
-    // keep it: of the same type, cse.c forwards the stored value to the read and the store is
-    // then dead; of another type, it does not alias. Only a `char` read would, and pinning the
-    // store agbcc keeps there costs a spelling. Two fills through one channel back to back is the
-    // shape, and plain, the first transfer is gone. Its
-    // other device accesses stay plain, their qualified spelling left to `/vol-store`'s candidate
-    // (l3/volstore.ts): pinned in the structured tree they are pinned in every variation, and the
-    // ones that home the base or un-reduce a loop refuse a qualified base, which costs
-    // `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches. KNOWN GAP: so an unranked
-    // lift of such a function still spells a device poll plain, and agbcc hoists it out of a loop
-    // that stores nothing.
+    // A FUNCTION ACCEPTED OBJECT BY OBJECT pins every device read, and of its device stores only
+    // those of the first kind (`overwritten`). A read is pinned because a plain one is lost either
+    // way: nothing uses the `dmaRegs[2];` that ends a DMA macro, so the lift drops it outright, and
+    // a poll is hoisted as above. The stores pinned are those a later store in their own block
+    // overwrites, with no call between to clear flow.c's list of pending stores (flow.c:1962). A
+    // plain read of its bytes between does not always keep it: one agbcc forwards the stored value
+    // to (cse.c) leaves the store dead, and one of another type does not alias. A read it does not
+    // forward — a `char` read, or one it extends — keeps it, and pinning a store agbcc keeps costs
+    // a spelling. Two fills through one channel back to back is the shape, and plain, the first
+    // transfer is gone. Its other device stores stay plain, their qualified spelling left to
+    // `/vol-store`'s candidate (l3/volstore.ts): pinned in the structured tree they are pinned in
+    // every variation, and the ones that home the base or un-reduce a loop refuse a qualified
+    // base, which costs `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches.
     const overwritten = (op: Op, blk: Block, at: number): boolean => {
       if (op.opcode !== 'store') {
         return false;
@@ -1590,7 +1590,7 @@ export function auditFrameObjects({
         op.attrs = { ...op.attrs, width, signed, count, ...(published.has(off) ? { volatile: true } : {}) };
       }
     }
-    pinDeviceAccesses(overwritten);
+    pinDeviceAccesses((op, blk, at) => op.opcode === 'load' || overwritten(op, blk, at));
   }
   return undefined;
 }

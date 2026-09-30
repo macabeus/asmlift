@@ -3106,7 +3106,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // A function accepted object by object pins the device stores a later store in their block
   // overwrites, which plain agbcc deletes. Verbatim agbcc, `REG_IME = 0; DmaFill16(3, 0x1111, a,
   // 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`: the first fill and `REG_IME = 0` are
-  // pinned, and the recompile keeps the target's 10 stores (7 plain). The rest stay plain.
+  // pinned, and the recompile keeps the target's 10 stores (7 plain). The other stores stay plain;
+  // each fill's closing read of the control is a read, and pinned.
   test('a function accepted object by object pins a device store its block overwrites', () => {
     const twoFills =
       'd3i:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr5, .L3\n\tmov\tr2, #0x0\n\tstrh\tr2, [r5]\n' +
@@ -3123,7 +3124,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '    *(volatile s32 *)67109076 = &sp0;\n    ((volatile s32 *)67109076)[1] = a0;\n' +
         '    ((volatile s32 *)67109076)[2] = -2130706400;\n',
     );
-    expect(src).toContain('    p0[2] = -2130706400;\n    *(u16 *)67109384 = 1;\n');
+    expect(src).toContain('    p0[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n    *(u16 *)67109384 = 1;\n');
   });
 
   // …and a read of the channel between the two fills does not stand for the first: agbcc forwards
@@ -3143,8 +3144,32 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t0x1111\n\t.word\t0x40000d4\n\t.word\t-0x7effffe0\n\t.word\tgY\n\t.word\t0x40000dc\n' +
       '\t.word\t0x2222\n';
     expect(decompile('e2', readBetween, ARMV4T_AGBCC).source).toContain(
-      '    ((volatile s32 *)67109076)[2] = -2130706400;\n    gY = *(s32 *)67109084;\n',
+      '    ((volatile s32 *)67109076)[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n' +
+        '    gY = *(volatile s32 *)67109084;\n',
     );
+  });
+
+  // …and every device READ of such a function is pinned: plain, the read that closes a DMA macro
+  // (`dmaRegs[2];`) is used by nothing and is not lifted at all, and agbcc hoists a poll out of a
+  // loop that stores nothing. Verbatim agbcc, two fills whose control the shift-built `REG_DISPCNT
+  // = d` does not re-arm, then `while (REG_VCOUNT != 160);`: plain, the recompile loses both
+  // closing reads and spins on a register copy of the first VCOUNT read.
+  test('a function accepted object by object keeps every device read', () => {
+    const pollAfterFills =
+      'd1:\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr1, r1, #0x10\n' +
+      '\tlsr\tr1, r1, #0x10\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n\tldr\tr2, .L7\n\tmov\tr0, sp\n' +
+      '\tstr\tr0, [r2]\n\tldr\tr0, .L7+0x4\n\tstr\tr0, [r2, #0x4]\n\tldr\tr0, .L7+0x8\n' +
+      '\tstr\tr0, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n' +
+      '\tadd\tr0, sp, #0x4\n\tstr\tr0, [r2]\n\tldr\tr0, .L7+0xc\n\tstr\tr0, [r2, #0x4]\n' +
+      '\tldr\tr0, .L7+0x10\n\tstr\tr0, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x80\n' +
+      '\tlsl\tr0, r0, #0x13\n\tstrh\tr1, [r0]\n\tldr\tr1, .L7+0x14\n.L3:\n\tldrh\tr0, [r1]\n' +
+      '\tcmp\tr0, #0xa0\n\tbne\t.L3\t@cond_branch\n\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L8:\n' +
+      '\t.align\t2, 0\n.L7:\n\t.word\t0x40000d4\n\t.word\tgDst\n\t.word\t-0x7effffe0\n' +
+      '\t.word\tgDst2\n\t.word\t-0x7affffe0\n\t.word\t0x4000006\n';
+    const src = decompile('d1', pollAfterFills, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src.match(/^ {4}\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(2);
+    expect(src).toContain('    do {\n        v0 = *(volatile u16 *)67108870;\n    } while (v0 != 160);\n');
   });
 
   // A device address agbcc builds without a pool word is placed too: 0x04000000 is `mov #0x80;
