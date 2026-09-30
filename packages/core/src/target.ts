@@ -17,6 +17,8 @@
 //     one of these reached a device that only reads through it, so it does not retract `undef`.
 //   • capabilities.readSourceControl → the same audit: which frame bytes beside the object that
 //     device may read, so a slot it cannot reach is not refused.
+//   • capabilities.blockTransferCalls → the same audit: a frame address handed to one of these
+//     as its SOURCE is read as far as the call's literal control word says, and never written.
 //   • capabilities.deviceRegisters → six readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the `/vol-store` variation's eligibility (l3/volstore.ts), rank.ts's volatility
@@ -64,6 +66,31 @@ import type { SwitchBoundCase } from './structure/switch-recover';
 /** What a compiler's OBJECT shows for a narrow declared parameter — see
  *  `compilerBehaviors.narrowParamWitness` for the compiled pair behind each value. */
 export type NarrowParamWitness = 'prologue-extension' | 'home-store-and-in-place' | 'none';
+
+/** How far a block-transfer call reads through its `source` argument, decoded from the argument
+ *  at `control`: `control & countMask` units, of `units[1]` bytes when `wideBit` is set and
+ *  `units[0]` when not, rounded up to a multiple of `countGranule` units — or ONE unit when
+ *  `fixedBit` is set, since a fill reads its source once. See `blockTransferRead`. */
+export interface BlockTransferCall {
+  source: number;
+  control: number;
+  countMask: number;
+  fixedBit: number;
+  wideBit: number;
+  units: readonly [number, number];
+  countGranule: number;
+}
+
+/** The bytes a block-transfer call reads from its source, `[0, bytes)`, for a literal control
+ *  word, and the unit it reads in — the alignment the machine may force the address down to. */
+export function blockTransferRead(call: BlockTransferCall, control: number): { unit: number; bytes: number } {
+  const unit = call.units[(control & call.wideBit) !== 0 ? 1 : 0];
+  if ((control & call.fixedBit) !== 0) {
+    return { unit, bytes: unit };
+  }
+  const count = (control & call.countMask) >>> 0;
+  return { unit, bytes: Math.ceil(count / call.countGranule) * call.countGranule * unit };
+}
 
 export interface TargetDescription {
   id: string; // the ISA — 'armv4t' / 'mips' / 'ppc'. Selects the frontend (registry.ts).
@@ -208,6 +235,16 @@ export interface TargetDescription {
     // ABSENT ⇒ the target claims nothing, and the one reader treats EVERY device write as a
     // possible memory write — the conservative direction, and what every non-GBA target takes.
     deviceMemoryWriters?: readonly (readonly [number, number])[];
+    // CALLS that only READ through one argument, as far as a control argument says — a platform's
+    // block-transfer services, bound to a name by the SDK's own stubs. The frame-object audit is
+    // the reader: a frame address handed to one as its `source`, with a literal control word,
+    // reaches the bytes `blockTransferRead` decodes and is not an address anything writes through.
+    // The destination needs no entry, since a frame address handed over anywhere else keeps
+    // escaping as one a callee may write through.
+    //
+    // ABSENT, or a callee it does not name ⇒ an address handed to a callee may be read and written
+    // without bound, the safe direction.
+    blockTransferCalls?: Readonly<Record<string, BlockTransferCall>>;
   };
   // COMPILER BEHAVIORS — the specific compiler's canonicalization decisions, distinct from
   // hardware `capabilities`. Mostly consumed by the structurer (threaded through StructureOptions);
@@ -695,6 +732,33 @@ export const ARMV4T_AGBCC: TargetDescription = {
       [0x040000d2, 0x040000d4],
       [0x040000de, 0x040000e0],
     ],
+    // The BIOS block transfers, SWI 0Bh CpuSet and SWI 0Ch CpuFastSet (GBATEK, "BIOS Memory
+    // Copy"): r0 the source, r1 the destination, r2 the control — a count in bits 0-20, bit 24 a
+    // FIXED source (a fill, reading one unit of r0), and for CpuSet bit 26 selecting 32-bit units
+    // over 16-bit ones; CpuFastSet moves words only, its count rounded up to eight. Neither writes
+    // through r0. The names are the SDK's: sa3's and pokeemerald's `libagbsyscall.s` bind
+    // `CpuSet: svc #11` and `CpuFastSet: svc #12`, kleod's `CpuSet: svc #0xb`, and each declares
+    // `void CpuSet(const void *src, void *dest, u32 control)`.
+    blockTransferCalls: {
+      CpuSet: {
+        source: 0,
+        control: 2,
+        countMask: 0x1fffff,
+        fixedBit: 0x01000000,
+        wideBit: 0x04000000,
+        units: [2, 4],
+        countGranule: 1,
+      },
+      CpuFastSet: {
+        source: 0,
+        control: 2,
+        countMask: 0x1fffff,
+        fixedBit: 0x01000000,
+        wideBit: 0,
+        units: [4, 4],
+        countGranule: 8,
+      },
+    },
   },
   compilerBehaviors: {
     coalesceLoopInit: false,

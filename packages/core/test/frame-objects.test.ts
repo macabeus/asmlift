@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, blockTransferRead } from '../src/target';
 
 // `laddr off` handed to `callee` at argument 0, stored through first when `written`
 const frame = (off: number, callee: string, written: boolean): { blk: Block; object: Op } => {
@@ -127,5 +127,22 @@ describe('an unbounded device read keeps the local area as one object', () => {
     const call = mkOp('call', { operands: [mkValue(T.unk(32))], attrs: { target: 'g' } });
     const { blk } = published([{ off: 0, width: 2 }], [call]);
     expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('a callee or a store may write through');
+  });
+});
+
+// The GBA BIOS block transfers, decoded from the control words the vendored projects' `CPU_FILL`,
+// `CPU_COPY` and `CPU_FAST_FILL` macros build (sa3 include/gba/cpuset_macros.h).
+describe('a block-transfer call reads as far as its control word says', () => {
+  const { CpuSet, CpuFastSet } = ARMV4T_AGBCC.capabilities.blockTransferCalls!;
+  test.each([
+    ['a 32-bit CpuSet fill of eight words reads one word', CpuSet, 0x05000008, { unit: 4, bytes: 4 }],
+    ['a 16-bit CpuSet fill reads one halfword', CpuSet, 0x01000010, { unit: 2, bytes: 2 }],
+    ['a 32-bit CpuSet copy reads every word it copies', CpuSet, 0x04000002, { unit: 4, bytes: 8 }],
+    ['a 16-bit CpuSet copy reads every halfword it copies', CpuSet, 0x00000003, { unit: 2, bytes: 6 }],
+    ['bits above the count are not a count', CpuSet, 0x04e00001, { unit: 4, bytes: 4 }],
+    ['a CpuFastSet fill reads one word', CpuFastSet, 0x01000008, { unit: 4, bytes: 4 }],
+    ['a CpuFastSet copy rounds its count up to eight words', CpuFastSet, 0x00000009, { unit: 4, bytes: 64 }],
+  ] as const)('%s', (_, call, control, read) => {
+    expect(blockTransferRead(call, control)).toEqual(read);
   });
 });
