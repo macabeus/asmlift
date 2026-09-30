@@ -1537,10 +1537,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  Either way what `op` is carried past is everything the iteration runs between `op` and the
    *  latch op the value is computed at.
    *
-   *  Never for a divide in a multi-block header the loop also leaves from: that header structures
-   *  as a test-at-top `while`, whose condition has no seat for the name (`multiBlockHeaders`), and
-   *  naming it there turns a loop that lifts into a decline. mwcc's `do { t = k / n; if (*q == 5)
-   *  break; … } while (--n);` puts the `divw` ahead of the header's `beq` out. */
+   *  Never for a divide in a multi-block loop header with an edge out of `L`: named, it is a
+   *  pre-update home (`preUpdateHomes`, below), and the structurer refuses a home in a loop whose
+   *  variable's name a block after the loop also holds (`sharesALoopName`), where the loop lifts
+   *  with the divide unnamed. mwcc's `do { t = k / n; if (*q == 5) break; … } while (--n);` puts
+   *  the `divw` ahead of the header's `beq` out. */
   const rebuiltPast = (op: Op, r: Value): boolean =>
     bottomTested.some((L) => {
       const ob = opBlock.get(op)!;
