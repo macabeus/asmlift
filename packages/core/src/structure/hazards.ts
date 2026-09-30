@@ -33,8 +33,9 @@
 // variable does: the update sits at the bottom, so anywhere ahead of it the name holds exactly the
 // value the edge read. A name the body itself defines does NOT, wherever the copy lands ahead of
 // the assignment that writes it — and `arg-reads-current-names` refuses every such name but one
-// shape it can place: a def the analysis named, in the latch, strictly ahead of the copy's home
-// (`writtenAheadOf`), whose statement has run on every iteration that reaches the copy.
+// shape it can place: a def the analysis named ahead of the copy's home — in the latch, or in a
+// block every iteration runs before it (`writtenAheadOf`) — whose statement has run on every
+// iteration that reaches the copy.
 //
 // KNOWN GAP: `body` is the natural-loop body, which EXCLUDES the blocks an early-return arm owns
 // even though their statements are emitted inside the loop. A name assigned only in such an arm is
@@ -47,7 +48,7 @@
 // The maps are captured as LIVE REFERENCES, deliberately: `varName` is still being populated by
 // the naming pipeline when the factory is created, and each hazard check reads whatever names
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
-import { Block, Op, Value } from '../ir/core';
+import { Block, Op, Value, successorsOf } from '../ir/core';
 import { EFFECTFUL_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
 import { Expr, Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -116,6 +117,7 @@ export interface LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates?: readonly Gate<SinkCandidate>[],
+    staleOnZeroTrip?: (slot: number) => boolean,
   ): Map<number, Op | null>;
   sameAtEntry(a: Value, b: Value, entry: Map<Value, Value>, negated?: boolean): boolean;
   loopWriteSet(updates: Stmt[], bodyBlocks: Iterable<Block>, header: Block): Set<string>;
@@ -156,18 +158,20 @@ export const PREUPDATE_SINK_GATES: readonly Gate<SinkCandidate>[] = [
     id: 'arg-safe-to-reevaluate',
     why: 'an effect, a memory read or a trap gives a different answer where the rebuilt copy lands',
     sound: true,
-    // Sound for a read or a call: rebuilt behind a store, a read answers with what the store wrote.
-    // The analysis names every read and call something would cross, and a named leaf is not
-    // rebuilt, so that half reaches the gate only from a hand-built analysis, which is its guard.
-    // What reaches it through the pipeline is a divide the asm ran ahead of a store
-    // (loop-preupdate-sink.test.ts, the preupdate_exit_div row). That is REACH and not a witness: the
-    // divisor there is the loop counter, never 0, so the refused program is correct on every input.
+    // Sound for a read, a call or a divide: rebuilt behind a store, a read answers with what the
+    // store wrote, and a call or a divide runs behind it. The analysis names a read or a call
+    // something would cross, a helper op an effect would cross, and a divide this move would carry
+    // past a memory access or an effect (`rebuiltPast`), and a named leaf is not rebuilt. What
+    // still reaches the gate through the pipeline is a divide the ISA computes in a body block
+    // that not every iteration runs, whose name would be stale where the copy lands
+    // (`arg-reads-current-names`). The rest of it is reached from a hand-built analysis, which is
+    // its guard.
     guardedBy: 'hazards.test.ts: ablating arg-safe-to-reevaluate admits an exit arg whose read crosses a store',
     rejects: (c) => c.argBlockers.has('order-sensitive'),
   },
   {
     id: 'arg-reads-current-names',
-    why: 'a value computed in the body may still hold the PREVIOUS iteration where the copy lands, unless its named def runs in the latch ahead of it',
+    why: 'a value computed in the body may still hold the PREVIOUS iteration where the copy lands, unless its named def runs ahead of it on every iteration',
     sound: true,
     guardedBy: 'hazards.test.ts: ablating arg-reads-current-names admits an arg over a body-computed name',
     rejects: (c) => c.argBlockers.has('stale-name'),
@@ -771,6 +775,12 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // op of the latch, or null for the copies that open the body — and the caller drops each one from
   // the post-loop copies.
   //
+  // `staleOnZeroTrip` offers the fused-guard emitter's other slots too: one whose post-loop copy
+  // would not reproduce the value the guard's exit edge carries past a loop that never ran, such as
+  // a value the body names (`t = g(i); h(4);` in `for (…)`, exiting with `t`). Moved into the body
+  // and seeded from that edge like a pre-update copy, it is the same program on both paths, and it
+  // is weighed by the same gates.
+  //
   // The idiom reaches here at all because the compiler DID keep a second register for the trailing
   // value and SSA construction folded the copy away, leaving the exit edge as the only place the
   // value is still named. Where the compiler kept two loop-carried registers instead, the value is
@@ -804,6 +814,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     sub: Map<Value, string>,
     updateWrites: Set<string>,
     gates: readonly Gate<SinkCandidate>[] = PREUPDATE_SINK_GATES,
+    staleOnZeroTrip: (slot: number) => boolean = () => false,
   ): Map<number, Op | null> => {
     const none = new Map<number, Op | null>();
     const headerNames = new Set(header.params.map((p) => varName.get(p)));
@@ -840,9 +851,9 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       }
       return (defs.get(w)?.operands ?? []).some((o) => rendersName(o, name, self, seen));
     };
-    const busyInLoop = (name: string, self: Value): boolean => {
+    const busyInLoop = (name: string, self: Value, alsoSelf?: Value): boolean => {
       for (const [v, n] of varName) {
-        if (n !== name || v === self || header.params.includes(v)) {
+        if (n !== name || v === self || v === alsoSelf || header.params.includes(v)) {
           continue;
         }
         if (liveIn.get(header)!.has(v) || definedInBody(v)) {
@@ -933,21 +944,47 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       return q === null || q.blk !== latch || q.idx > p;
     };
     // A body-defined name that IS current where the copy lands: a def the analysis NAMED (so it
-    // renders as a statement at its own index), in the latch, strictly ahead of the copy's home.
-    // `sideEffects` renders the latch in index order, so on every iteration that reaches the copy
-    // the statement writing the name has just run — the name holds this iteration's value, not the
-    // previous one's. That it is the ONLY write to the name is the other two conjuncts' job, which
-    // this leaves standing: a loop variable's name (`headerNames`) and a name any other value in
-    // the loop also answers to (`busyInLoop`) still refuse. So does every other body-defined name —
-    // one defined AFTER the home, in another body block, or not named by a def at all (a block
-    // param) — and the copy that opens the body (`home === null`) has no position to be behind.
+    // renders as a statement at its own position) that every iteration reaching the copy has just
+    // run — in the latch strictly ahead of the copy's home, which `sideEffects` renders in index
+    // order, or in another body block on every path from the header to the latch (`everyIteration`).
+    // The name holds this iteration's value, not the previous one's. That it is the ONLY write to
+    // the name is the other two conjuncts' job, which this leaves standing: a loop variable's name
+    // (`headerNames`) and a name any other value in the loop also answers to (`busyInLoop`) still
+    // refuse. So does every other body-defined name — one defined AFTER the home, in a block an
+    // iteration can skip, or not named by a def at all (a block param) — and the copy that opens
+    // the body (`home === null`) has no position to be behind. The home ITSELF counts as ahead:
+    // `sideEffects` spells a copy homed at an op after that op's own statement, so a copy of the
+    // named value its home computes reads what that statement just wrote.
     const writtenAheadOf = (x: Value, home: Op | null): boolean => {
       const d = defs.get(x);
       if (home === null || d === undefined || !materialize.has(d)) {
         return false;
       }
-      const i = latch.ops.indexOf(d);
-      return i >= 0 && i < latch.ops.indexOf(home);
+      const b = opBlock.get(d);
+      if (b !== latch) {
+        return b !== undefined && everyIteration(b);
+      }
+      return latch.ops.indexOf(d) <= latch.ops.indexOf(home);
+    };
+    // Does every path from the header to the latch, inside the body, run block `b`?
+    const everyIteration = (b: Block): boolean => {
+      if (b === header) {
+        return true;
+      }
+      if (!body.has(b)) {
+        return false;
+      }
+      const reached = new Set<Block>([header, b]);
+      const stack = [header];
+      while (stack.length > 0) {
+        for (const s of successorsOf(stack.pop()!)) {
+          if (body.has(s) && !reached.has(s)) {
+            reached.add(s);
+            stack.push(s);
+          }
+        }
+      }
+      return !reached.has(latch);
     };
     const blockersOf = (a: Value, home: Op | null): ReadonlySet<ArgBlocker> => {
       const seen = new Set<Value>();
@@ -989,7 +1026,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     };
     const cleared = new Map<number, { name: string; home: Op | null }>();
     exitArgs.forEach((a, j) => {
-      if (!readsClobbered(a, sub, updateWrites)) {
+      if (!readsClobbered(a, sub, updateWrites) && !staleOnZeroTrip(j)) {
         return; // no hazard on this slot — nothing to repair
       }
       const destName = varName.get(exit.params[j]);
@@ -999,7 +1036,13 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         destName,
         headerNames,
         updateWrites,
-        destBusyInLoop: destName !== undefined && busyInLoop(destName, exit.params[j]),
+        // An arg the BODY defines under the destination's name is the one write that name already
+        // has there: its own statement rewrites the name each iteration, so its copy is `dest =
+        // dest` and the seed is all the slot needs. An arg from outside the loop under that name
+        // (a parameter kmc keeps in the destination's register) is read by the body, and a seed
+        // ahead of the loop would overwrite it.
+        destBusyInLoop:
+          destName !== undefined && busyInLoop(destName, exit.params[j], definedInBody(a) ? a : undefined),
       };
       if (firstRejection(gates, c) === null) {
         cleared.set(j, { name: destName!, home });

@@ -15,9 +15,9 @@
 // cannot state: its match keys on a `call`'s STRING `target` attr, which the numeric `attrEquals`
 // cannot express. It is naturally inert on hardware-divide targets (which emit `div`/`divu`,
 // never `bl __divsi3`).
-import { Fn, mkOp } from '../ir/core';
+import type { Fn } from '../ir/core';
 import { wordsOf } from '../proto';
-import { type RuntimeHelper, isWideHelper } from '../runtime-helpers';
+import { type RuntimeHelper, helperOp, isWideHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** The 32-bit software divisions, off the target's own helper table. WHICH helpers a compiler emits
@@ -48,9 +48,7 @@ export function recognizeSoftDiv(fn: Fn, target: TargetDescription): boolean {
       if (op.operands.length !== wordsOf(helper.params) || op.results.length !== 1) {
         continue;
       }
-      // Reuse the SAME result Value → every existing use already points at it (no RAUW needed).
-      const div = mkOp(helper.op, { operands: [...op.operands], results: [op.results[0]] });
-      b.ops.splice(i, 1, div);
+      b.ops.splice(i, 1, helperOp(helper.op, op, op.attrs.target as string));
       changed = true;
     }
   }

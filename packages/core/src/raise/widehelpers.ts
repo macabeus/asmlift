@@ -14,7 +14,7 @@
 // (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
 // both spellings, so nothing here may read a signedness off it. See the table's own note.
 import { Fn, mkOp } from '../ir/core';
-import { arrivesAsDeclared, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { arrivesAsDeclared, helperOp, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** Rewrite each recognised 64-bit helper call to the op it computes, in place. Returns whether
@@ -51,7 +51,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
       ) {
         continue;
       }
-      b.ops.splice(i, 1, mkOp(helper.op, { operands: [...op.operands], results: [op.results[0]] }));
+      b.ops.splice(i, 1, helperOp(helper.op, op, String(op.attrs.target)));
       changed = true;
     }
   }

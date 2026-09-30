@@ -23,7 +23,8 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, MEM_BASE_OPS, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS, opSig } from '../ir/opcodes';
+import { raisedHelper } from '../runtime-helpers';
 
 export interface UseSite {
   blk: Block;
@@ -596,8 +597,10 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   // Every value an edge ARGUMENT renders — the argument itself plus its inlined operand cone,
   // memoized per value so one walk serves every slot. The walk stops DESCENDING at an
   // order-sensitive def: under a call or a memory read the value renders at that op's own position,
-  // never at this edge. It crosses a trapping divide, which nothing materializes — that renders
-  // inline at the copy site and its operands render there with it. The stopping op is still
+  // never at this edge. It crosses a trapping divide, which renders inline at the copy site with its
+  // operands. `analyze` names some divides at their def (the helper clause, the pre-update exit
+  // rule), after this walk, so their operands still count as rendered here: an extra render, which
+  // costs a candidate that homes a value rendered once. The stopping op is still
   // recorded, so a membership test over the cone sees it.
   const coneCache = new Map<Value, Set<Value>>();
   const coneOf = (root: Value): Set<Value> => {
@@ -726,7 +729,8 @@ export interface StructureAnalysis {
   /** defs that must emit as named temps at their own position — calls/loads for effect order,
    *  plus the pure defs the homing rules claim */
   materialize: Set<Op>;
-  /** the members of `materialize` the pre-update escape rule named (`escapesAheadOfUpdate`) */
+  /** the members of `materialize` that name a pre-update read: the escape rule's
+   *  (`escapesAheadOfUpdate`), and a helper op or exit divide named over one */
   preUpdateHomes: Set<Op>;
   /** cached forward reachability (successors-transitive, excluding the start block itself) */
   reachFrom: (b: Block) => Set<Block>;
@@ -1487,34 +1491,141 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  Asked only once every other rule has settled (`escapePhase` below), so the walk stops at each
    *  def those rules name: a materialized def renders as its name. It stops at a BACK-EDGE ARG too —
    *  reading it is reading the post-update value, which is what the name holds. */
-  const escapeLoops = loopBodies.flatMap((L) => {
+  const bottomTested = loopBodies.flatMap((L) => {
     const term = L.latch.ops[L.latch.ops.length - 1];
     const back = term.successors.find((sc) => sc.block === L.header);
-    return back && L.body.size === 1 ? [{ ...L, back }] : [];
+    return back ? [{ ...L, term, back }] : [];
   });
+  const escapeLoops = bottomTested.filter((L) => L.body.size === 1);
   const preUpdateHomes = new Set<Op>();
+  /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
+  const readsPreUpdate = (L: (typeof bottomTested)[number], op: Op, r: Value): boolean => {
+    const seen = new Set<Value>();
+    const readsUpdated = (x: Value): boolean => {
+      if (seen.has(x) || L.back.args.includes(x)) {
+        return false;
+      }
+      seen.add(x);
+      if (L.header.params.includes(x)) {
+        return true;
+      }
+      const d = defOf.get(x);
+      if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && materialize.has(d))) {
+        return false;
+      }
+      return d.operands.some(readsUpdated);
+    };
+    return readsUpdated(r);
+  };
   const escapesAheadOfUpdate = (op: Op, r: Value, consumers: Op[]): boolean =>
-    escapeLoops.some((L) => {
-      if (!L.body.has(opBlock.get(op)!) || consumers.every((c) => L.body.has(opBlock.get(c)!))) {
+    escapeLoops.some(
+      (L) =>
+        L.body.has(opBlock.get(op)!) &&
+        !consumers.every((c) => L.body.has(opBlock.get(c)!)) &&
+        readsPreUpdate(L, op, r),
+    );
+  /** Would a value that reads `op`'s result `r` past the update be rebuilt BEHIND a memory access
+   *  or an effect the asm ran after `op`? `op` sits in a block every iteration runs (the latch, or
+   *  one dominating it), and `r` reads a loop variable, so where that value renders the variable's
+   *  name no longer holds what `op` read, and the value is rebuilt from `op`'s operands:
+   *   • an arg of the latch's exit edge, rebuilt at the latch op computing it (`preUpdateCopyHome`,
+   *     hazards.ts) — by the sink, or where it is the back edge's arg too, by the update copy at
+   *     the foot of the body, which runs later still;
+   *   • a latch op read after the loop, rebuilt there. One the escape rule names first
+   *     (`escapesAheadOfUpdate`, a self-loop) is a materialized def this walk stops at, so it is
+   *     spelled at its own position with the divide inline.
+   *  Either way what `op` is carried past is everything the iteration runs between `op` and the
+   *  latch op the value is computed at.
+   *
+   *  Never for a divide in a multi-block loop header with an edge out of `L`: named, it is a
+   *  pre-update home (`preUpdateHomes`, below), and the structurer refuses a home in a loop whose
+   *  variable's name a block after the loop also holds (`sharesALoopName`), where the loop lifts
+   *  with the divide unnamed. mwcc's `do { t = k / n; if (*q == 5) break; … } while (--n);` puts
+   *  the `divw` ahead of the header's `beq` out. */
+  const rebuiltPast = (op: Op, r: Value): boolean =>
+    bottomTested.some((L) => {
+      const ob = opBlock.get(op)!;
+      if (!L.body.has(ob) || !dom!.get(L.latch)!.has(ob) || !readsPreUpdate(L, op, r)) {
+        return false;
+      }
+      if (ob !== L.latch && multiBlockHeaders.has(ob) && successorsOf(ob).some((s) => !L.body.has(s))) {
         return false;
       }
       const seen = new Set<Value>();
-      const readsUpdated = (x: Value): boolean => {
-        if (seen.has(x) || L.back.args.includes(x)) {
+      const reaches = (x: Value): boolean => {
+        if (x === r) {
+          return true;
+        }
+        if (seen.has(x)) {
           return false;
         }
         seen.add(x);
-        if (L.header.params.includes(x)) {
-          return true;
-        }
         const d = defOf.get(x);
-        if (!d || !L.body.has(opBlock.get(d)!) || (d !== op && materialize.has(d))) {
-          return false;
-        }
-        return d.operands.some(readsUpdated);
+        return !!d && L.body.has(opBlock.get(d)!) && !materialize.has(d) && d.operands.some(reaches);
       };
-      return readsUpdated(r);
+      // The ops between `op` and latch index `to`: the rest of `op`'s block, then every body block
+      // it reaches ahead of the latch, then the latch's own ops ahead of `to`.
+      const between = (to: number): Op[] => {
+        if (ob === L.latch) {
+          return L.latch.ops.slice(L.latch.ops.indexOf(op) + 1, to);
+        }
+        const mid = new Set<Block>();
+        const stack = successorsOf(ob);
+        while (stack.length > 0) {
+          const b = stack.pop()!;
+          if (b !== L.header && b !== L.latch && L.body.has(b) && !mid.has(b)) {
+            mid.add(b);
+            stack.push(...successorsOf(b));
+          }
+        }
+        return [
+          ...ob.ops.slice(ob.ops.indexOf(op) + 1),
+          ...[...mid].flatMap((b) => b.ops),
+          ...L.latch.ops.slice(0, to),
+        ];
+      };
+      const crossesAt = (home: Op): boolean =>
+        home !== op &&
+        opBlock.get(home) === L.latch &&
+        between(L.latch.ops.indexOf(home)).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) || namedHelper(x));
+      const exitArg = L.term.successors.some(
+        (sc) =>
+          !L.body.has(sc.block) &&
+          sc.args.some((a) => {
+            const home = defOf.get(a);
+            return !!home && reaches(a) && crossesAt(home);
+          }),
+      );
+      return (
+        exitArg ||
+        L.latch.ops.some(
+          (h) =>
+            h.results[0] !== undefined &&
+            consumersOf(h).some((c) => !L.body.has(opBlock.get(c)!)) &&
+            reaches(h.results[0]) &&
+            crossesAt(h),
+        )
+      );
     });
+  /** Is `r` read where the update has run: after the loop, or by its bottom test? */
+  const readAfterUpdate = (L: (typeof bottomTested)[number], r: Value, consumers: Op[]): boolean => {
+    if (!consumers.every((c) => L.body.has(opBlock.get(c)!))) {
+      return true;
+    }
+    const seen = new Set<Value>();
+    const inTest = (x: Value): boolean => {
+      if (x === r) {
+        return true;
+      }
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const d = defOf.get(x);
+      return !!d && L.body.has(opBlock.get(d)!) && !materialize.has(d) && d.operands.some(inTest);
+    };
+    return L.term.opcode === 'cond_br' && inTest(L.term.operands[0]);
+  };
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
@@ -1651,7 +1762,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *
    *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
-   *  materializes it there rather than letting C's short circuit skip it.
+   *  materializes it there rather than letting C's short circuit skip it. The same holds of an op
+   *  the asm reached by calling a runtime helper and the fold did not hoist — one it hoists loses
+   *  the stamp — and the helper clause names it by the same argument.
    *
    *  Only the guarded side is SEEDED. A connective's own operand[0] is evaluated whenever the
    *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
@@ -1724,6 +1837,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
+  /** the divides the pre-update exit rule below named (`rebuiltPast`) */
+  const exitDivides = new Set<Op>();
+  /** an op the asm reached by CALLING a runtime helper (runtime-helpers.ts `raisedHelper`) */
+  const isHelper = (op: Op): boolean => raisedHelper(op) !== null;
+  /** one the helper clause below named: a statement sequenced as a named call is */
+  const namedHelper = (op: Op): boolean => materialize.has(op) && isHelper(op);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -1785,6 +1904,58 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // cast-aware base materialization is separate), and consts are not in it at all: a
           // re-derived const is re-materialization, which is the compiler's own behavior.
           const pr = op.results[0];
+          // AN OP THE ASM CALLED A HELPER FOR is placed as the call it was (`isHelper`: `bl
+          // __divsi3` for `k / n` and `k / 5` on agbcc, `bl __ashrdi3` for a 64-bit `>>`, `bl
+          // __div2i` for a 64-bit `/` on mwcc). A call runs once, where the asm ran it, and agbcc,
+          // with no scheduler, EMITS the call where the source spells the operation, so naming it
+          // where the asm ran it recompiles to that asm; inlined at its use it moves there. One
+          // direction only, as target.ts `readsStayWhereWritten` says of reads: the asm's position
+          // is not always where the source computed it — loop.c hoists an invariant `bl __divsi3`
+          // into the loop's guarded preheader, and naming it there is what recompiles. So it is
+          // named at its def when:
+          //   • an effect, or another helper named there, lies between the def and a place it
+          //     renders — `t = k / n; *q = n; return t + 1;` is `bl; str`, and inlined it comes
+          //     back `*q = n; return k / n + 1;`, `str; bl`. A named one bars what the barrier
+          //     scan below places, as a named call does, so a call the asm ran ahead of it stays
+          //     ahead of it;
+          //   • it renders in a block other than its own, or rides a branch's edge copy
+          //     (`ridesEdge`): then it runs on the paths that render it, not where the asm ran it
+          //     once. `t = k / n; if (c) return t + 1; return t - 3;` is one `bl`
+          //     above the `cmp`, and inlined into both arms it recompiles to one per arm;
+          //   • it sits in a `&&`/`||` guarded cone. raise/shortcircuit.ts drops the stamp from a
+          //     helper op it hoists out of the arm it guards (`forgetHelperPlacement`), so one that
+          //     still carries it ran above the branch, and C's short circuit would skip it (the
+          //     guarded-call rule below).
+          // A divide the ISA computes is none of these: kmc, IDO and mwcc compile `t = k / n; *q
+          // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte. The rule
+          // after this one names it only where the loop's exit value needs the name.
+          if (isHelper(op) && pr && useSitesOf.has(pr)) {
+            const at = emitPositions(op);
+            if (
+              !at ||
+              shortCircuitGuarded.has(pr) ||
+              ridesEdge(op) ||
+              at.some((p) => p.blk !== b) ||
+              at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedHelper(x)))
+            ) {
+              materialize.add(op);
+              continue;
+            }
+          }
+          // A DIVIDE THE ISA COMPUTES, in a value read past the loop's update that reads a loop
+          // variable, is named at its def when that value would be rebuilt behind a memory access
+          // or an effect the asm ran after it (`rebuiltPast`) — once every other rule has settled
+          // (`escapePhase`), as the escape rule is. kmc's `do { t = k / n; *q = n; r = t + 1; }
+          // while (--n);` is `div; …; sw; …; addiu v0, v1, 1`. Unnamed, the loop declines —
+          // `arg-safe-to-reevaluate` (hazards.ts) refuses the sink's move, and a read after the loop
+          // re-reads the updated counter — or, where the back edge carries the value too, the
+          // update copy rebuilds the divide behind the store. Named, the value reads the name and
+          // the divide stays where the asm ran it.
+          if (escapePhase && opSig(op.opcode)?.traps && pr && useSitesOf.has(pr) && rebuiltPast(op, pr)) {
+            materialize.add(op);
+            exitDivides.add(op);
+            continue;
+          }
           if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
             const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
             if (cons.length > 1 && liveAcrossCall(op, cons)) {
@@ -2002,8 +2173,12 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           materialize.add(op);
           continue;
         }
+        // A named helper op bars it too, as it bars the single render below: it is the call the asm
+        // made, and a value read before it and used after it was read once and kept across it
+        // (`v = gB; t = v / n; … q[1] = v;` is one `ldr` ahead of the `bl __divsi3`).
         if (poss.length > 1) {
-          const isWrite = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
+          const writes = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
+          const isWrite = (x: Op): boolean => writes(x) || namedHelper(x);
           if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
             materialize.add(op);
           }
@@ -2090,7 +2265,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
             }
             return true;
           }
-          if (x.opcode === 'astore' || x.opcode === 'opaque') {
+          if (x.opcode === 'astore' || x.opcode === 'opaque' || namedHelper(x)) {
             return true;
           }
           if (x.opcode === 'call') {
@@ -2123,6 +2298,28 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           materialize.add(op);
         }
       }
+    }
+  }
+  // A helper op the helper clause named, or a divide the exit rule did, is a pre-update home too
+  // when its value reads a loop variable and is read where the update has run. Named, it lifts the
+  // loop the pre-update hazard declines, in a body of any size — so the structurer's refusal on
+  // homes (`preUpdateHomes`) must see it, as it sees the escape rule's.
+  // KNOWN GAP: `readAfterUpdate` asks of the op's own consumers, so a divide whose value leaves the
+  // loop only through a body op it feeds (`t + 1`) is not a home. Walked through that op, it would
+  // be one, and the refusal would decline every such loop over a counter the function takes as a
+  // parameter: its post-loop names include the entry block's.
+  for (const op of materialize) {
+    const r = op.results[0];
+    if (!r || preUpdateHomes.has(op) || !(isHelper(op) || exitDivides.has(op))) {
+      continue;
+    }
+    const consumers = consumersOf(op);
+    if (
+      bottomTested.some(
+        (L) => L.body.has(opBlock.get(op)!) && readAfterUpdate(L, r, consumers) && readsPreUpdate(L, op, r),
+      )
+    ) {
+      preUpdateHomes.add(op);
     }
   }
   return {

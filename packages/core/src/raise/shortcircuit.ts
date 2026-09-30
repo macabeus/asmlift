@@ -61,6 +61,7 @@ import {
 import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
+import { forgetHelperPlacement } from '../runtime-helpers';
 
 const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), 'logic_and', 'logic_or']);
 
@@ -244,7 +245,9 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         if (wantNeg && !negation) {
           continue;
         }
-        bfeed.ops.slice(0, -1).forEach(before); // hoist B's pure body (defines Vb; harmless if a dead const)
+        // hoist B's pure body (defines Vb; harmless if a dead const). A helper op it moves no longer
+        // sits where the asm called it (runtime-helpers.ts `forgetHelperPlacement`).
+        bfeed.ops.slice(0, -1).forEach((op) => before(forgetHelperPlacement(op)));
         foldWriteOrder(fn.writeOrder, bfeed, h); // …and its writes now follow H's (ir/core.ts)
         let condSide = cond;
         if (negation) {
@@ -648,7 +651,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           }
         }
         rereadInArm(fn, g, otherEdge.block, reread);
-        const body = g.ops.slice(0, -1);
+        const body = g.ops.slice(0, -1).map(forgetHelperPlacement);
         const second = negation ? negation.result : c2;
         const negated: Op[] = negation ? negation.ops : [];
         const res = mkValue(T.unk(32));

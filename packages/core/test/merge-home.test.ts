@@ -473,8 +473,8 @@ test('a trapping divide is refused as a feeder', () => {
 });
 
 // The same op on the other side of the question: a divide as the CONSUMER at one copy site, not as
-// the feeder. Nothing materializes a divide, so it renders inline on that edge and the shared value
-// under it renders there too — the cone walk stops descending only at an order-sensitive def.
+// the feeder. A divide the ISA computes renders inline there, and the shared value under it renders
+// there too — the cone walk stops descending only at an order-sensitive def.
 const DIVCONE = `fn divcone {
 ^bb0(%0: s32, %1: s32, %2: s32, %9: s32*):
   %c1: s32 = const {value=1}

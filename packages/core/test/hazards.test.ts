@@ -237,6 +237,15 @@ describe('sinkablePreUpdateSlots', () => {
     expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v9']))).toEqual(new Map());
   });
 
+  test('…unless the caller says its post-loop copy is stale on a zero-trip run', () => {
+    const { p, q, header, exit, latch, body } = scaffold();
+    const h = make({ varName: names([p, 'v0'], [q, 'v1']), liveIn: new Map([[header, new Set<Value>()]]) });
+    const stale = () => true;
+    expect(h.sinkablePreUpdateSlots(header, exit, [p], body, latch, empty, new Set(['v9']), undefined, stale)).toEqual(
+      new Map([[0, null]]),
+    );
+  });
+
   // The arg's def-tree, rebuilt inside the body. `bodyOp` registers an op the way analysis.ts does,
   // so `definedInBody` sees it where the fixture says it is.
   const bodyOp = (header: Block, op: Op) => {
@@ -466,32 +475,62 @@ describe('sinkablePreUpdateSlots', () => {
   // A DEF NAMED AHEAD OF THE HOME IS CURRENT THERE. The shape is `preupdate_exit_order`'s once the
   // analysis names its call: `v2 = cb(v0); v1 = *v0 + v2;`, the copy homed at the add, and the
   // statement writing `v2` rendered one index earlier on the same iteration; a read named there is
-  // current the same way. Each control changes ONE fact and is refused at `arg-reads-current-names`,
-  // which its own ablation then admits.
-  const namedAhead = (edit: { after?: boolean; unnamed?: boolean; otherBlock?: boolean; load?: boolean } = {}) => {
-    const { p, q, header, exit, latch } = scaffold();
+  // current the same way, and so is a def in a block every iteration runs before the latch. Each
+  // control changes ONE fact and is refused at `arg-reads-current-names`, which its own ablation
+  // then admits.
+  const namedAhead = (
+    edit: { after?: boolean; unnamed?: boolean; inHeader?: boolean; skippable?: boolean; load?: boolean } = {},
+  ) => {
+    const { p, q, header, exit } = scaffold();
     const mid = v();
     const e = v();
     const midOp = edit.load
       ? mkOp('load', { operands: [p], results: [mid], attrs: { off: 0, width: 4, signed: true } })
       : mkOp('call', { operands: [p], results: [mid], attrs: { target: 'cb' } });
     const op = mkOp('add', { operands: [mid, p], results: [e] });
-    const arm: Block = { params: [], ops: [] };
-    if (edit.otherBlock) {
-      arm.ops.push(midOp);
-      header.ops.push(op);
+    // `inHeader` and `skippable` give the add a latch of its own below the header, and put `v2`'s
+    // def in the header, or in an arm the header branches around.
+    let latch = header;
+    let midBlock = header;
+    const body = new Set([header]);
+    if (edit.inHeader || edit.skippable) {
+      latch = { params: [], ops: [op] };
+      latch.ops.push(
+        mkOp('cond_br', {
+          operands: [v()],
+          successors: [
+            { block: header, args: [p] },
+            { block: exit, args: [e] },
+          ],
+        }),
+      );
+      body.add(latch);
+      if (edit.skippable) {
+        midBlock = { params: [], ops: [midOp, mkOp('br', { successors: [{ block: latch, args: [] }] })] };
+        body.add(midBlock);
+        header.ops.push(
+          mkOp('cond_br', {
+            operands: [v()],
+            successors: [
+              { block: midBlock, args: [] },
+              { block: latch, args: [] },
+            ],
+          }),
+        );
+      } else {
+        header.ops.push(midOp, mkOp('br', { successors: [{ block: latch, args: [] }] }));
+      }
     } else {
       header.ops.push(...(edit.after ? [op, midOp] : [midOp, op]));
     }
-    const body = new Set([header, arm]);
     const h = make({
       defs: new Map([
         [mid, midOp],
         [e, op],
       ]),
       opBlock: new Map([
-        [midOp, edit.otherBlock ? arm : header],
-        [op, header],
+        [midOp, midBlock],
+        [op, latch],
       ]),
       materialize: edit.unnamed ? new Set() : new Set([midOp]),
       varName: names([p, 'v0'], [q, 'v1'], [mid, 'v2']),
@@ -505,6 +544,7 @@ describe('sinkablePreUpdateSlots', () => {
   test.each([
     ['a call', {}],
     ['a read', { load: true }],
+    ['a call in a block every iteration runs', { inHeader: true }],
   ])('%s named ahead of the home is current there', (_, edit) => {
     const { op, run } = namedAhead(edit);
     expect(run()).toEqual(new Map([[0, op]]));
@@ -513,7 +553,7 @@ describe('sinkablePreUpdateSlots', () => {
   test.each([
     ['written AFTER the home', { after: true }],
     ['not a def the analysis named', { unnamed: true }],
-    ['written in another body block', { otherBlock: true }],
+    ['written in a body block an iteration can skip', { skippable: true }],
   ])('a body name %s still refuses at arg-reads-current-names', (_, edit) => {
     const { op, run } = namedAhead(edit);
     expect(run()).toEqual(new Map());

@@ -32,12 +32,12 @@ import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
-import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { StructureError, structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, MIPS_GCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC, structureOptionsFor } from '../src/target';
 import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
@@ -168,9 +168,10 @@ const UNRELATED_GUARD = `fn badguard {
 }
 `;
 
-// REFUSAL — the guard→exit edge carries a value (const 5) that the post-loop copies do not
-// reproduce on a zero-trip run. That edge is not emitted at all once the guard is fused away, so
-// the zero-trip path would read the loop's value instead.
+// The guard→exit edge carries a value (const 5) that the post-loop copy does not reproduce on a
+// zero-trip run. That edge is not emitted at all once the guard is fused away, so the copy moves into
+// the body and the edge's value seeds it — or, where the sink refuses the slot, the loop declines
+// rather than let the zero-trip path read the loop's value.
 const ZERO_TRIP_VALUE_LOST = `fn fusedrop {
 ^bb0(%0: s32*):
   %1: s32* = gaddr {sym="head"}
@@ -213,9 +214,45 @@ test('a guard not provably the loop test is not sinkable — declines instead of
   expect(() => emit(UNRELATED_GUARD)).toThrow(StructureError);
 });
 
-test('a zero-trip value the post-loop copies cannot reproduce declines instead of being dropped', () => {
-  expect(() => emit(TRAILING_PTR)).not.toThrow();
-  expect(() => emit(ZERO_TRIP_VALUE_LOST)).toThrow(/zero-trip run/);
+test('a zero-trip value the post-loop copy cannot reproduce seeds a copy sunk into the body', () => {
+  // `return x == &head ? 5 : <head[2] read on the last iteration>`, spelled as the loop writes it.
+  expect(emit(ZERO_TRIP_VALUE_LOST)).toMatch(
+    /v1 = 5;\n\s+for \(v0 = \(s32 \*\)&head; a0 != v0; v0 = \(s32 \*\)\*v0\) \{\n\s+v1 = \(\(s32 \*\)&head\)\[2\];\n\s+\}\n\s+return v1;/,
+  );
+});
+
+test('where the sink refuses that slot, the loop declines instead of dropping the value', () => {
+  const refuseAll = { preUpdateSinkGates: [{ ...PREUPDATE_SINK_GATES[0], rejects: () => true }] };
+  expect(() => structured(ZERO_TRIP_VALUE_LOST, {}, refuseAll)).toThrow(/zero-trip run/);
+});
+
+// kmc forwards `q[i & 7] = m` into `u = q[i & 7]` and keeps `move a3,a1` in the back branch's
+// delay slot, so the header's exit edge carries the PARAMETER `a1` itself while the guard edge
+// carries 0. `int x50(int *q, int m, int n){ int i, u = 0; for (i = 1; i < n; i++) { q[i & 7] = m;
+// u = u + i; u = q[i & 7]; } return u + 3; }`. The parameter is read by the body under the name the
+// seed would write, so `a1 = 0` ahead of the loop would store 0 and return 3.
+const X50 = `00000000 <x50>:
+   0:\tli\tv1,1
+   4:\tslt\tv0,v1,a2
+   8:\tbeqz\tv0,30 <x50+0x30>
+   c:\tmove\ta3,zero
+  10:\tandi\tv0,v1,0x7
+  14:\tsll\tv0,v0,0x2
+  18:\taddu\tv0,v0,a0
+  1c:\tsw\ta1,0(v0)
+  20:\taddiu\tv1,v1,1
+  24:\tslt\tv0,v1,a2
+  28:\tbnez\tv0,10 <x50+0x10>
+  2c:\tmove\ta3,a1
+  30:\tjr\tra
+  34:\taddiu\tv0,a3,3
+`;
+
+test('a zero-trip seed never overwrites a parameter the loop reads under the same name', () => {
+  const fn = frontendFor(MIPS_GCC).lift('x50', X50, MIPS_GCC, { x50: { params: 3 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 3 });
+  expect(() => structure(fn, structureOptionsFor(MIPS_GCC, false))).toThrow(/zero-trip run/);
 });
 
 // The trailing variable may be the PARAMETER the list head came from: the guard→exit edge then
@@ -835,16 +872,15 @@ test('the gcc 2.7.2 listing whose exit runs into a second loop declines, through
   expect(run(withoutDestFree)).toMatch(/\n\s+a3 = v\d+ \+ v\d+;\n[^\n]*\(\(a3 & 3\) << 2\)/);
 });
 
-// WHERE `arg-safe-to-reevaluate` IS REACHED THROUGH THE WHOLE PIPELINE. Its ORDER half for a memory
-// read or a call never reaches it: the analysis names a read or a call wherever something would cross
-// it (the barrier scan, `ridesEdge`), and a named leaf is not rebuilt, so that half is guarded by a
-// hand-built analysis (hazards.test.ts). What the analysis does not name is a TRAPPING op. agbcc,
-// `do { int t = k / n; *q = n; r = t + 1; q = q - 1; } while (--n);`: `bl __divsi3` (a `sdiv` once
-// raise/softdiv.ts folds it) runs ahead of the store, and the exit value rebuilt at the add would
-// divide after it. So the edge declines; with the gate dropped the copy sinks
-// and spells the divide behind the store. This test shows the gate FIRES, not that it is needed here:
-// the divisor is the loop counter, in [1, n] wherever the divide runs, so the sunk program never
-// traps and is correct on every input.
+// `arg-safe-to-reevaluate` CAN BE REACHED THROUGH THE WHOLE PIPELINE BY A DIVIDE THE ISA
+// COMPUTES IN A BODY BLOCK NOT EVERY ITERATION RUNS. The analysis names a read or a call wherever
+// something would cross it, an op the asm called a runtime helper for wherever an effect would (the
+// barrier scan, `ridesEdge`, the helper clause), and a divide a value read past the update would be
+// rebuilt behind a memory access or an effect from (`rebuiltPast`); a named leaf is not rebuilt, so
+// the rest of the gate is guarded by a hand-built analysis (hazards.test.ts). agbcc, `do { int t = k / n; *q = n; r = t + 1; q = q - 1;
+// } while (--n);`: `bl __divsi3` (a `sdiv` once raise/softdiv.ts folds it) runs ahead of the store,
+// so the divide is named there, the exit value reads the name and not the counter, and the sink is
+// never asked.
 const DIVIDE_AHEAD_OF_STORE = `dv:
 	push	{r4, r5, r6, lr}
 	add	r5, r0, #0
@@ -871,14 +907,162 @@ const DIVIDE_AHEAD_OF_STORE = `dv:
 	bx	r1
 `;
 
-test('a divide the asm ran ahead of a store reaches arg-safe-to-reevaluate through the pipeline', () => {
-  const run = (hooks = {}): string => {
-    const fn = frontendFor(ARMV4T_AGBCC).lift('dv', DIVIDE_AHEAD_OF_STORE, ARMV4T_AGBCC, { dv: { params: 4 } });
-    applyIdiomPatterns(fn, ARMV4T_AGBCC);
-    raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
-    return cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false), hooks));
-  };
-  expect(() => run()).toThrow(/reads a pre-update loop variable/);
-  const ablated = run({ preUpdateSinkGates: without(PREUPDATE_SINK_GATES, 'arg-safe-to-reevaluate') });
-  expect(ablated).toMatch(/\*v\d+ = v\d+;\n\s+a2 = a3 \/ v\d+ \+ 1;/);
+test('a divide the asm ran ahead of a store is named there, so the exit value reads no pre-update variable', () => {
+  const fn = frontendFor(ARMV4T_AGBCC).lift('dv', DIVIDE_AHEAD_OF_STORE, ARMV4T_AGBCC, { dv: { params: 4 } });
+  applyIdiomPatterns(fn, ARMV4T_AGBCC);
+  raiseRecovered(fn, ARMV4T_AGBCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(ARMV4T_AGBCC, false)));
+  expect(src).toMatch(/(v\d+) = a3 \/ (v\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/);
+});
+
+/** gcc 2.7.2 (kmc) `-O2 -mips3` on the same `dv`. The divide is an instruction here, `div` with its
+ *  `break` checks ahead of the store, and the exit value `t + 1` is computed in the branch's delay
+ *  slot, behind the counter's update. Named where the asm ran it, as the helper is on agbcc, the
+ *  exit value reads the name; inline, the sink would rebuild the divide behind the store, and
+ *  `arg-safe-to-reevaluate` refuses it. */
+const DIVIDE_AHEAD_OF_STORE_KMC = `00000000 <dv>:
+   0:\tblez\ta1,50 <dv+0x50>
+   4:\tmove\tv0,a2
+   8:\tsll\tv0,a1,0x2
+   c:\taddu\ta0,a0,v0
+  10:\tdiv\tzero,a3,a1
+  14:\tbnez\ta1,20 <dv+0x20>
+  18:\tnop
+  1c:\tbreak\t0x7
+  20:\tli\tat,-1
+  24:\tbne\ta1,at,38 <dv+0x38>
+  28:\tlui\tat,0x8000
+  2c:\tbne\ta3,at,38 <dv+0x38>
+  30:\tnop
+  34:\tbreak\t0x6
+  38:\tmflo\tv1
+  3c:\tsw\ta1,0(a0)
+  40:\taddiu\ta0,a0,-4
+  44:\taddiu\ta1,a1,-1
+  48:\tbnez\ta1,10 <dv+0x10>
+  4c:\taddiu\tv0,v1,1
+  50:\tjr\tra
+  54:\tnop
+`;
+
+test('a divide the ISA computes ahead of a store is named there when the loop exits with it', () => {
+  const fn = frontendFor(MIPS_GCC).lift('dv', DIVIDE_AHEAD_OF_STORE_KMC, MIPS_GCC, { dv: { params: 4 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
+  expect(src).toMatch(/(v\d+) = a3 \/ (a\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/);
+});
+
+/** gcc 2.7.2 (kmc) `-O2 -mips3`, `if (n <= 0) return 0; q = p + n; do { int t = k / n; *q = n; r =
+ *  t + 1; q = q - 1; } while (--n); return r * 2;`. The exit edge carries no arg: the code after the
+ *  loop reads the delay slot's add directly, and the `break` checks make the body more than one
+ *  block, which the escape rule does not name in. Inline at that read the divide would run behind
+ *  the store, and read the counter after its update. */
+const DIVIDE_READ_AFTER_LOOP_KMC = `00000000 <ex>:
+   0:\tbgtz\ta1,10 <ex+0x10>
+   4:\tsll\tv0,a1,0x2
+   8:\tj\t58 <ex+0x58>
+   c:\tmove\tv0,zero
+  10:\taddu\ta0,a0,v0
+  14:\tdiv\tzero,a3,a1
+  18:\tbnez\ta1,24 <ex+0x24>
+  1c:\tnop
+  20:\tbreak\t0x7
+  24:\tli\tat,-1
+  28:\tbne\ta1,at,3c <ex+0x3c>
+  2c:\tlui\tat,0x8000
+  30:\tbne\ta3,at,3c <ex+0x3c>
+  34:\tnop
+  38:\tbreak\t0x6
+  3c:\tmflo\tv1
+  40:\tsw\ta1,0(a0)
+  44:\taddiu\ta0,a0,-4
+  48:\taddiu\ta1,a1,-1
+  4c:\tbnez\ta1,14 <ex+0x14>
+  50:\taddiu\tv0,v1,1
+  54:\tsll\tv0,v0,0x1
+  58:\tjr\tra
+  5c:\tnop
+`;
+
+test('a divide ahead of a store is named there when the code after the loop reads its value', () => {
+  const fn = frontendFor(MIPS_GCC).lift('ex', DIVIDE_READ_AFTER_LOOP_KMC, MIPS_GCC, { ex: { params: 4 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
+  expect(src).toMatch(/(v\d+) = a3 \/ (a\d+);\n\s+\*v\d+ = \2;[^]*\} while \(\2 != 0\);\n\s+v\d+ = \1 \+ 1 << 1;/);
+});
+
+/** gcc 2.7.2 (kmc) `-O2 -mips3`, `do { int t = k / n; if (*q > 3) *q = 0; r = t + 1; q++; } while
+ *  (--n);`. The divide's `mflo` is in the block ahead of the conditional store, which every
+ *  iteration runs; the add the loop exits with is in the latch. A name defined there holds this
+ *  iteration's value where the exit copy lands. */
+const DIVIDE_AHEAD_OF_ARM_KMC = `00000000 <db>:
+   0:\tblez\ta1,58 <db+0x58>
+   4:\tmove\tv0,a2
+   8:\tlw\tv0,0(a0)
+   c:\tdiv\tzero,a3,a1
+  10:\tbnez\ta1,1c <db+0x1c>
+  14:\tnop
+  18:\tbreak\t0x7
+  1c:\tli\tat,-1
+  20:\tbne\ta1,at,34 <db+0x34>
+  24:\tlui\tat,0x8000
+  28:\tbne\ta3,at,34 <db+0x34>
+  2c:\tnop
+  30:\tbreak\t0x6
+  34:\tmflo\ta2
+  38:\tslti\tv0,v0,4
+  3c:\tnop
+  40:\tbeqzl\tv0,48 <db+0x48>
+  44:\tsw\tzero,0(a0)
+  48:\taddiu\tv0,a2,1
+  4c:\taddiu\ta1,a1,-1
+  50:\tbnez\ta1,8 <db+0x8>
+  54:\taddiu\ta0,a0,4
+  58:\tjr\tra
+  5c:\tnop
+`;
+
+test('a divide in a block every iteration runs is named there when the loop exits with it', () => {
+  const fn = frontendFor(MIPS_GCC).lift('db', DIVIDE_AHEAD_OF_ARM_KMC, MIPS_GCC, { db: { params: 4 } });
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC, {}, { params: 4 });
+  const src = cBackend.emit(structure(fn, structureOptionsFor(MIPS_GCC, false)));
+  expect(src).toMatch(
+    /(v\d+) = a3 \/ (a\d+);\n\s+if \(\*a\d+ >= 4\) \*a\d+ = 0;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/,
+  );
+});
+
+/** mwcc 2.4.2 `-O4,p`, `if (n <= 0) return 0; do { t = k / n; if (*q == 5) break; *q = n; r = t +
+ *  1; q++; } while (--n); return r + t;`. The `divw` sits in the loop's header, ahead of the `beq`
+ *  that leaves the loop: a test-at-top `while` whose condition has no seat for a name. */
+const DIVIDE_IN_EXITING_HEADER_MWCC = `ref.o:     file format elf32-powerpc
+
+
+Disassembly of section .text:
+
+00000000 <f>:
+   0:\tcmpwi   r4,0
+   4:\taddi    r6,r6,-1
+   8:\tbgt-    14 <f+0x14>
+   c:\tli      r3,0
+  10:\tblr
+  14:\tdivw    r7,r5,r4
+  18:\tlwz     r0,0(r3)
+  1c:\tcmpwi   r0,5
+  20:\tbeq-    38 <f+0x38>
+  24:\tstw     r4,0(r3)
+  28:\taddic.  r4,r4,-1
+  2c:\taddi    r6,r7,1
+  30:\taddi    r3,r3,4
+  34:\tbne+    14 <f+0x14>
+  38:\tadd     r3,r6,r7
+  3c:\tblr
+`;
+
+test('a divide in a header the loop leaves from is not named, and the loop lifts as a while', () => {
+  const src = decompile('f', DIVIDE_IN_EXITING_HEADER_MWCC, PPC_MWCC, { prototypes: { f: { params: 4 } } }).source;
+  expect(src).toContain('while (*v1 != 5) {');
+  expect(src).toMatch(/v\d+ = a2 \/ v\d+ \+ 1;/);
 });

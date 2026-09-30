@@ -28,6 +28,7 @@
 // here: `wordsOf` (proto.ts, because a C declaration asks the same question) counts the argument
 // REGISTERS the list occupies, and `irWidthOf` gives the IR width one parameter ARRIVES at once a
 // frontend has paired those registers up.
+import { type Op, mkOp } from './ir/core';
 import { type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
 import { type Prototypes, wordsOf } from './proto';
@@ -99,6 +100,41 @@ export function arrivesAsDeclared(
  *  is for, and the ones no hardware capability can make unnecessary. */
 export function isWideHelper(h: RuntimeHelper): boolean {
   return h.returns > 32 || h.params.some((w) => w > 32);
+}
+
+/** The op a recognised helper call is rewritten to, STAMPED with the helper it was: the call's
+ *  operands, the SAME result value (so every use already points at it), and `helper` naming the
+ *  callee. `raise/softdiv.ts` and `raise/widehelpers.ts` build every one through here.
+ *
+ *  The stamp carries the one fact the op's opcode loses: the asm CALLED something here. A
+ *  `sdiv` is a `divw` on mwcc and a `bl __divsi3` on agbcc, and an `shr_s` is a shift everywhere
+ *  but a `bl __ashrdi3` where it is 64-bit on agbcc — which ops a compiler calls a helper for is a
+ *  compiler fact, not an ISA one, and it was known exactly once, at the rewrite. What reads it is
+ *  every rule that places a call: a call runs once, where the asm ran it (`raisedHelper`), and a pass
+ *  that moves the op elsewhere drops the stamp (`forgetHelperPlacement`). */
+export function helperOp(opcode: Opcode, call: Op, helper: string): Op {
+  return mkOp(opcode, { operands: [...call.operands], results: [call.results[0]], attrs: { helper } });
+}
+
+/** The runtime helper a value op was a call to (`helperOp`), or null. An `opaque` carries the same
+ *  attr for the helper call nothing could fold (`refuseUnmodelledHelpers`), and is no value op. */
+export function raisedHelper(op: Op): string | null {
+  const h = op.attrs.helper;
+  return op.opcode !== 'opaque' && typeof h === 'string' ? h : null;
+}
+
+/** Drop the stamp from an op a pass moves out of the block the asm called it in, and return the op.
+ *  The stamp is read as WHERE the call ran, so an op moved elsewhere must stop claiming it and
+ *  renders as the pure value it computes. raise/shortcircuit.ts hoists a `&&`/`||` guarded arm's
+ *  body above the branch, and there C's short circuit re-guards the op at its use: agbcc's `if (a >
+ *  0 && k / n != 0)` runs the `bl __divsi3` under the first compare, and named at its hoisted def
+ *  it would divide on the path the `&&` skips. */
+export function forgetHelperPlacement(op: Op): Op {
+  if (raisedHelper(op) !== null) {
+    const { helper: _, ...rest } = op.attrs;
+    op.attrs = rest;
+  }
+  return op;
 }
 
 /** Signatures for a target's helpers, in the WORD arity the frontend's prototype lookup speaks.

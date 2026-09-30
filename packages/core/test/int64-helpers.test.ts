@@ -117,7 +117,8 @@ describe('what refuses', () => {
 
   test('a pair held across a call and copied back is returned', () => {
     const src = decompile('llkeep', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 0 } } }).source;
-    expect(src).toBe('s64 llkeep(s64 a0, s64 a1) {\n    g();\n    return a0 * a1;\n}\n');
+    // `bl __muldi3` runs ahead of `bl g`, so the product is named there, as the source wrote it
+    expect(src).toBe('s64 llkeep(s64 a0, s64 a1) {\n    s64 v0;\n    v0 = a0 * a1;\n    g();\n    return v0;\n}\n');
   });
 
   // r3 is caller-saved too, so what it holds after the call is the callee's, whatever the value
