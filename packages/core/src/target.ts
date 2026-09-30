@@ -40,6 +40,7 @@
 //     Others are read off the target directly by a consumer that is not the structurer — among
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
+//     `aggregateReturn` and `largestAlignment` (aggregate.ts, for frontend/thumb.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
@@ -572,6 +573,23 @@ export interface TargetDescription {
     // value is safe to assume, since one too small mislays the fields after it on agbcc and one too
     // large drops the pad in front of them everywhere else.
     aggregateBoundary?: number;
+    // The largest alignment any member of a struct takes, in bytes (BIGGEST_ALIGNMENT): agbcc 4,
+    // thumb.h:358, so a `long long` member sits at a word. With `aggregateBoundary` it is what sizes
+    // a declared aggregate (`aggregate.ts`). ABSENT ⇒ unmeasured, and no aggregate is sized.
+    largestAlignment?: number;
+    // HOW A STRUCT OR UNION RETURNED BY VALUE COMES BACK, which decides whether a call to a function
+    // declared to return one hands it a hidden pointer as argument 0 and moves every declared
+    // argument one register up (`aggregate.ts` `returnsInMemory`, read by frontend/thumb.ts).
+    //   • 'apcs' — in memory when bigger than a word, when a struct has a second member that is not
+    //     a bitfield, or when a union has a member that would be; in the return register otherwise.
+    //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,
+    //     `{u32 a:8; u32 b:8;}` and `union {u32; u16;}` in r0).
+    //   • 'memory' — every aggregate, a one-word one included. IDO 7.1 (compiled: `struct {u32 x;}
+    //     mkw(s32)` is called `addiu a0,sp,28 / jal mkw / lw v0,28(sp)`).
+    // ABSENT ⇒ unmeasured, and such a call declines. mwcc_242_81 hands back up to 8 bytes in r3 or
+    // r3:r4 and anything larger through r3 (compiled), but PPC_MWCC also describes two builds nobody
+    // has compiled it on, and its frontend lowers no such call, so it claims nothing.
+    aggregateReturn?: 'apcs' | 'memory';
     // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
     // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
     // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
@@ -673,6 +691,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
     aggregateBoundary: 4,
+    largestAlignment: 4,
+    aggregateReturn: 'apcs',
     // agbcc 2.9 (gcc/varasm.c `assemble_variable`, gcc/thumb.h): an array takes its element's
     // alignment (no DATA_ALIGNMENT); a declaration initialized by a STRING_CST is word-aligned —
     // CONSTANT_ALIGNMENT (thumb.h:361) over DECL_INITIAL (varasm.c:1214-1216), so
@@ -753,6 +773,7 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
     aggregateBoundary: 1,
+    aggregateReturn: 'memory',
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
     // is both homed dead AND widened in its own argument register. raise/paramwidth.ts's header has
