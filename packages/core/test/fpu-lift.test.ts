@@ -210,7 +210,7 @@ const MWCC = `00000000 <sel>:
   60:\tblr
 `;
 
-describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
+describe('PowerPC EABI: the arithmetic through f1..f8', () => {
   const ppc = (sym: string, body: string) => lift(sym, objdump(sym, body), PPC_MWCC);
 
   test('the fadd row lifts to the program that compiled it', () => {
@@ -276,6 +276,27 @@ describe('PowerPC EABI: single-precision arithmetic through f1..f8', () => {
     const src = lift('pw', MWCC, PPC_MWCC);
     expect(src).toContain('float pw(s32 a0, float a1)');
     expect(src).toMatch(/float v\d;/);
+  });
+
+  // `pnpm bench target synthetic:dadd:mwcc_242_81`'s listing, and at the same flags
+  //   double dchain(double a, double b, double c){ return -((a - b) * c) / a; }
+  test('the double-precision ops lift at 64 bits', () => {
+    expect(ppc('dadd', '   0:\tfadd    f1,f1,f2\n   4:\tblr\n')).toBe(
+      'double dadd(double a0, double a1) {\n    return a0 + a1;\n}\n',
+    );
+    const dchain =
+      '   0:\tfsub    f0,f1,f2\n   4:\tfmul    f0,f3,f0\n   8:\tfneg    f0,f0\n   c:\tfdiv    f1,f0,f1\n  10:\tblr\n';
+    expect(ppc('dchain', dchain)).toBe(
+      'double dchain(double a0, double a1, double a2) {\n    return -(a2 * (a0 - a1)) / a0;\n}\n',
+    );
+  });
+
+  // `float fdmix(float a, double b){ return a + b; }` rounds through `frsp`, which keeps the
+  // register-file refusal; a single op over a double operand is the same rounding, unspelled.
+  test('a function computing in both precisions refuses', () => {
+    expect(() => ppc('f', '   0:\tfadd    f0,f1,f2\n   4:\tfmuls   f1,f0,f1\n   8:\tblr\n')).toThrow(
+      /computes in both single and double precision/,
+    );
   });
 
   test('a record form sets cr1, which is not modelled, and keeps the register-file refusal', () => {

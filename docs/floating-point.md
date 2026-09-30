@@ -1,8 +1,9 @@
 # Hardware floating point
 
-asmlift lifts the SINGLE-PRECISION ARITHMETIC of the FPU's register file on MIPS o32 and the
-PowerPC EABI — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and `fadds`/`fsubs`/`fmuls`/`fdivs`/
-`fneg`/`fmr` — through each ABI's float argument and return homes, and nothing else in that file.
+asmlift lifts the ARITHMETIC of the FPU's register file on MIPS o32 and the PowerPC EABI —
+`add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and `fadds`/`fsubs`/`fmuls`/`fdivs`/`fneg`/`fmr`,
+and on PowerPC the double-precision `fadd`/`fsub`/`fmul`/`fdiv` — through each ABI's float argument
+and return homes, and nothing else in that file.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
 On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through

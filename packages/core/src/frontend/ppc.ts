@@ -39,7 +39,7 @@
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
-import { T } from '../ir/types';
+import { type IrType, T } from '../ir/types';
 import { type Prototypes, declaredArgWidths, declaredReturnWidth } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
@@ -120,21 +120,43 @@ const isModeledBranch = (ins: Instr) => isXfer(ins) || ins.mnemonic === 'bl';
 
 const isReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
 
-/** The single-precision FPU arithmetic this frontend lifts, onto the float opcodes; `fmr` is a copy
- *  and has none. `fneg` and `fmr` carry no precision at all — an FPR holds a double either way — and
- *  are read as single because the float and double spellings of a negation or a copy compile to one
- *  object. Everything else in the file keeps the register-file refusal `opaqueDest` gives it: the
- *  double-precision ops, `frsp`, the loads and stores, the conversions, the compares, the fused
- *  multiply-adds, paired singles — and a record form (`fadds.`), which sets `cr1`. */
-const FP_SINGLE: Readonly<Record<string, Opcode | 'copy'>> = {
-  fadds: 'fadd',
-  fsubs: 'fsub',
-  fmuls: 'fmul',
-  fdivs: 'fdiv',
-  fneg: 'fneg',
-  fmr: 'copy',
+/** The FPU arithmetic this frontend lifts, onto the float opcodes, with the precision each computes
+ *  in; `fmr` is a copy and has no opcode. `fneg` and `fmr` carry no precision at all — an FPR holds a
+ *  double either way — so they take the function's (`fpPrecision`), and are single where nothing
+ *  else says, because the float and double spellings of a negation or a copy compile to one object.
+ *  Everything else in the file keeps the register-file refusal `opaqueDest` gives it: `frsp`, the
+ *  loads and stores, the conversions, the compares, the fused multiply-adds, paired singles — and a
+ *  record form (`fadds.`), which sets `cr1`. */
+const FP_ARITH: Readonly<Record<string, { op: Opcode | 'copy'; width: 32 | 64 | null }>> = {
+  fadds: { op: 'fadd', width: 32 },
+  fsubs: { op: 'fsub', width: 32 },
+  fmuls: { op: 'fmul', width: 32 },
+  fdivs: { op: 'fdiv', width: 32 },
+  fadd: { op: 'fadd', width: 64 },
+  fsub: { op: 'fsub', width: 64 },
+  fmul: { op: 'fmul', width: 64 },
+  fdiv: { op: 'fdiv', width: 64 },
+  fneg: { op: 'fneg', width: null },
+  fmr: { op: 'copy', width: null },
 };
-const FP_SINGLE_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_SINGLE));
+const FP_ARITH_MNEMONICS: ReadonlySet<string> = new Set(Object.keys(FP_ARITH));
+
+/** The one precision a function's floats are declared in: double where it decodes a double op,
+ *  single otherwise. BOTH REFUSES. A register's type is the SSA builder's per key, not per value, and
+ *  a function computing in both precisions rounds between them (`frsp`, or a single op over a double
+ *  operand), which nothing here models. */
+function fpPrecision(name: string, instrs: readonly { mnemonic: string }[]): IrType {
+  const widths = new Set(
+    instrs.map((ins) => FP_ARITH[ins.mnemonic]?.width).filter((w) => w !== null && w !== undefined),
+  );
+  if (widths.size > 1) {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': it computes in both single and double precision, and the rounding between ` +
+        'them is not modelled',
+    );
+  }
+  return widths.has(64) ? T.f64() : T.f32();
+}
 /** An FPU register: the token, and the key the SSA builder holds it under. ONE predicate for the
  *  decode above and the register-file refusal below (`fpReg`), so a token one of them reads as an
  *  FPR cannot be one the other does not. */
@@ -574,9 +596,10 @@ export function lift(
   // read the blocks the entry reaches: a `bl` on no path makes no call.
   const reached = blocks.flatMap((b) => b.body);
   const callInsn = reached.find((ins) => ins.mnemonic === 'bl');
-  const floatReturn = writesFloatReturn(reached, FP_SINGLE_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
+  const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
+  const fpType = fpPrecision(name, reached);
 
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? T.f32() : undefined));
+  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? fpType : undefined));
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
@@ -1573,9 +1596,13 @@ export function lift(
         case 'fsubs':
         case 'fmuls':
         case 'fdivs':
+        case 'fadd':
+        case 'fsub':
+        case 'fmul':
+        case 'fdiv':
         case 'fneg':
         case 'fmr': {
-          const op = FP_SINGLE[mnem];
+          const { op } = FP_ARITH[mnem];
           if (rc || fpu === undefined || ins.ops.length === 0 || !ins.ops.every(isFpKey)) {
             emitOpaqueDest(ins);
             break;
@@ -1592,7 +1619,7 @@ export function lift(
             writeVar(dst, bi, read(srcs[0]));
             break;
           }
-          const v = mkValue(T.f32());
+          const v = mkValue(fpType);
           ops.push(mkOp(op, { operands: srcs.map(read), results: [v] }));
           writeVar(dst, bi, v);
           break;

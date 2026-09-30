@@ -674,4 +674,11 @@ export const FIXTURES: DecompFixture[] = [
     expectSource: 'double dchain(double a0, double a1, double a2) {\n    return (a0 + a1) * a2;\n}\n',
     note: "soft double: one helper's result is the next one's operand, a third double on the stack",
   },
+  {
+    symbol: 'dchain',
+    toolchain: 'mwcc',
+    referenceC: 'double dchain(double a, double b, double c){ return -((a - b) * c) / a; }',
+    expectSource: 'double dchain(double a0, double a1, double a2) {\n    return -(a2 * (a0 - a1)) / a0;\n}\n',
+    note: 'double-precision FPU arithmetic through f1..f3',
+  },
 ];
