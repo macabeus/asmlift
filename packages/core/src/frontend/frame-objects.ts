@@ -661,6 +661,9 @@ export function auditFrameObjects({
     // …and with `oneObject`, every fixed-offset access as the frame bytes it touches, since then an
     // access at [+k] through a capture is a member of the one object rather than a second object
     const members: { at: number; width: number }[] = [];
+    // …and without it, the first such access, which the per-object model refuses once the model is
+    // chosen (below)
+    let memberRefusal: string | undefined;
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         op.operands.forEach((v, idx) => {
@@ -674,10 +677,9 @@ export function auditFrameObjects({
               return;
             }
             if ((op.attrs.off as number) !== 0) {
-              fail(
+              memberRefusal ??=
                 `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
-                  (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled'),
-              );
+                (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled');
             }
           };
           if (op.opcode === 'load' && idx === 0) {
@@ -752,6 +754,125 @@ export function auditFrameObjects({
           fail(`the captured address flows into \`${op.opcode}\` — not an access, an escape, or a phi`);
         });
       }
+    }
+
+    // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
+    // that may write, and anything this cannot bound, reaches the whole frame. A device that only
+    // reads is bounded by its channel's control halfword (`readSourceControl`), per TRANSFER: the
+    // device reads the object on every arm of the channel from the store that handed it the
+    // address until a later word store to the same source register replaces it, so the control
+    // stores that bound it are the ones reachable in between. Each has to be a literal the target
+    // decodes. A store through a pointer this cannot resolve — one that is this frame's on only
+    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves the
+    // read unbounded — as does a transfer never armed here at all. An unbounded device read says
+    // which of those it met (`why`): each is a different capability to build.
+    //
+    // A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED WHERE THE SYMBOL MAP PLACES THE NAME, and then
+    // exactly, by the overlap test below. agbcc's alias model never lets a C identifier plus a
+    // constant meet a literal address (alias.c:812-819, 1064-1068), but nothing in the asm says a
+    // name is a C identifier: a disassembly spells an I/O register the way it spells a global
+    // (`.word REG_VCOUNT`). So a name the map does not place is an unresolved pointer here.
+    //
+    // THE PREMISE, stated once and not checkable from one function: a callee or an interrupt
+    // handler arms only a transfer it set up itself, source register first. So a call on the path
+    // does not unbound the read, and neither does an interrupt at any instruction: whatever re-arms
+    // the channel with this frame's address still in the source register is this function's own
+    // store, and the walk sees every one of those.
+    const at = new Map<Op, { blk: Block; i: number }>();
+    for (const blk of irBlocks) {
+      blk.ops.forEach((op, i) => at.set(op, { blk, i }));
+    }
+    const unbounded = (why: string) => ({ lo: -Infinity, hi: Infinity, why });
+    const readWindow = (off: number): { lo: number; hi: number; why: string } => {
+      const control = target.capabilities.readSourceControl;
+      const stores = sourceStores.get(off);
+      if (mayWrite.has(off) || stores === undefined || control === undefined) {
+        return unbounded('that reads through it');
+      }
+      const little = target.capabilities.endianness === 'little';
+      const halves: number[] = [];
+      for (const { op: handed, sink } of stores) {
+        const cnt = sink + control.offset;
+        let armed = false;
+        const entered = new Set<Block>();
+        const work: [Block, number][] = [[at.get(handed)!.blk, at.get(handed)!.i + 1]];
+        walk: while (work.length > 0) {
+          const [blk, from] = work.pop()!;
+          for (let i = from; i < blk.ops.length; i++) {
+            const op = blk.ops[i];
+            if (op.opcode !== 'store') {
+              continue;
+            }
+            const base = literalAddrOf(op.operands[0]);
+            if (base === undefined) {
+              if (!frameOnEveryPath.has(op.operands[0])) {
+                return unbounded('a later store through an unresolved pointer may re-arm');
+              }
+              continue;
+            }
+            const a = base + (op.attrs.off as number);
+            const w = op.attrs.width as number;
+            if (a === sink && w === 4) {
+              continue walk;
+            }
+            if (a + w <= cnt || a >= cnt + 2) {
+              continue;
+            }
+            const v = defOf.get(op.operands[1]);
+            if (v?.opcode !== 'const' || a > cnt || a + w < cnt + 2) {
+              return unbounded('whose control word is not a literal');
+            }
+            const shift = 8 * (little ? cnt - a : a + w - cnt - 2);
+            halves.push(((v.attrs.value as number) >>> shift) & 0xffff);
+            armed = true;
+          }
+          for (const s of blk.ops[blk.ops.length - 1]?.successors ?? []) {
+            if (!entered.has(s.block)) {
+              entered.add(s.block);
+              work.push([s.block, 0]);
+            }
+          }
+        }
+        if (!armed) {
+          return unbounded('this function never arms');
+        }
+      }
+      let [lo, hi] = [0, 0];
+      for (const h of halves) {
+        const unit = control.units[(h & control.wideBit) !== 0 ? 1 : 0];
+        const mode = control.modes[(h >> control.modeShift) & (control.modes.length - 1)];
+        if (mode === null || mode === undefined) {
+          return unbounded('whose control word bounds nothing');
+        }
+        // A device may force the address down to a unit boundary — the GBA's does — so a 32-bit
+        // read of the halfword at [sp,#2] reads from [sp,#0], and the object below shares its
+        // unit. The frame base is at least unit-aligned, so the offset says how far down.
+        lo = Math.min(lo, mode === 'decrement' ? -Infinity : -(off % unit));
+        hi = Math.max(hi, mode === 'increment' ? Infinity : unit);
+      }
+      return { lo, hi, why: 'that reads through it' };
+    };
+    // THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where every escape only reads and one reads
+    // without bound, the one-object answer below is on offer, and the shapes the per-object model
+    // refuses are ones it can hold: a member at [+k] through a capture, two widths or two
+    // signednesses at one address, a runtime index, overlapping objects, an object over a slot. So
+    // there each of those refusals asks for that answer instead of declining (`shapeRefused`), and
+    // the second audit judges the bytes as one object by its own rules — two types at one byte
+    // still refuse there. Where the answer is not on offer, each refuses where it stands.
+    const windowOf = new Map([...escaped].map((off) => [off, readWindow(off)] as const));
+    const oneObjectOnOffer =
+      oneObject === undefined &&
+      mayWrite.size === 0 &&
+      [...windowOf.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
+    let perObjectRefused = false;
+    const shapeRefused = (why: string): void => {
+      if (!oneObjectOnOffer) {
+        fail(why);
+      }
+      perObjectRefused = true;
+    };
+    if (memberRefusal !== undefined) {
+      shapeRefused(memberRefusal);
     }
 
     // THE ACCEPTANCE'S PREMISE, RE-ASKED OF THE IR. `capturedObjectIsTheWholeFrame` is a reading
@@ -1001,8 +1122,12 @@ export function auditFrameObjects({
           `${kept} are reached by an address a callee or a store may write through, not only by a device that reads`,
         );
       }
-      if ([...indexed.values()].some((xs) => xs.length > 0)) {
-        fail(`a runtime index into ${kept} names no byte of it, so no access type can be checked`);
+      // A runtime index names no byte, so no access type can be checked against the others at the
+      // bytes it reaches — except a byte access, which needs none: character types alias every type.
+      if ([...indexed.values()].some((xs) => xs.some((x) => x.width !== 1))) {
+        fail(
+          `a runtime index into ${kept} accesses more than a byte, and names no byte whose type it can be checked against`,
+        );
       }
       // ONE TYPE PER BYTE. agbcc at -O2 turns on type-based alias analysis (toplev.c:3616), and
       // compiled, a `u32` read through a cast is served the earlier `u32` store straight past a
@@ -1152,7 +1277,8 @@ export function auditFrameObjects({
     // AN OBJECT OVER A SLOT IS REFUSED LAST, after the one-object answer below is asked: that
     // answer routes every word of the local area through `laddr`, so no slot is left for the
     // object to overlap, and refusing first would decline exactly the frames it exists for — an
-    // object at [sp,#0] whose first member is a word stored `str rN, [sp]`.
+    // object at [sp,#0] whose first member is a word stored `str rN, [sp]`. The other per-object
+    // refusals here go through `shapeRefused`, for the same reason.
     const extent = new Map<number, { width: number; count: number }>();
     const overSlot: [number, number][] = [];
     const slotKeys = (off: number, width: number): boolean =>
@@ -1170,7 +1296,7 @@ export function auditFrameObjects({
         }
         const why = notTheWholeArea(off, byIndex.length > 0);
         if (why !== null) {
-          fail(
+          shapeRefused(
             (byIndex.length > 0
               ? 'the captured address is addressed only through a runtime index'
               : 'the captured address is never dereferenced in this function') +
@@ -1182,13 +1308,15 @@ export function auditFrameObjects({
         // sign-extending read is not what `u8` spells.
         for (const a of byIndex) {
           if (a.width !== 1) {
-            fail(
+            shapeRefused(
               `a runtime index into the object at [sp,#${off}) accesses ${a.width} bytes, and the storage ` +
                 'nothing else types is declared as bytes — only a byte element is modelled',
             );
           }
           if (a.signed) {
-            fail(`a runtime index into the object at [sp,#${off}) sign-extends, and the storage is declared unsigned`);
+            shapeRefused(
+              `a runtime index into the object at [sp,#${off}) sign-extends, and the storage is declared unsigned`,
+            );
           }
         }
         // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
@@ -1212,14 +1340,14 @@ export function auditFrameObjects({
         continue;
       }
       if (byIndex.length > 0) {
-        fail(
+        shapeRefused(
           `a runtime index into the object at [sp,#${off}), which an access of its own types as one ` +
             'scalar — only the untyped storage of the whole reserved area is indexed',
         );
       }
       const widths = new Set(acc.map((a) => a.width));
       if (widths.size > 1) {
-        fail(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
+        shapeRefused(`the accesses through the captured address disagree on width (${[...widths].join(' vs ')})`);
       }
       // …and on SIGNEDNESS, over the loads, for the same reason: one declared type extends one
       // way, so an object read by both `ldrsb` and `ldrb` has no faithful declaration —
@@ -1227,7 +1355,9 @@ export function auditFrameObjects({
       // store extends nothing, and `strb` beside `ldrsb` is not a disagreement.
       const signs = new Set(acc.filter((a) => a.isLoad).map((a) => a.signed));
       if (signs.size > 1) {
-        fail('the loads through the captured address disagree on signedness — one declared type extends one way');
+        shapeRefused(
+          'the loads through the captured address disagree on signedness — one declared type extends one way',
+        );
       }
       // …and a scalar this function only READS is the callee's to fill, which is what a struct
       // return's hidden temp is: agbcc spells `s = mk(x)` above an outgoing block as `add r0, sp,
@@ -1255,105 +1385,9 @@ export function auditFrameObjects({
       const [off, obj] = objs[i];
       const [prev, prevObj] = objs[i - 1];
       if (overlaps(prev, span(prevObj), off, span(obj))) {
-        fail(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
+        shapeRefused(`the objects at [sp,#${prev}) and [sp,#${off}) overlap — one byte, two models`);
       }
     }
-    // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
-    // that may write, and anything this cannot bound, reaches the whole frame. A device that only
-    // reads is bounded by its channel's control halfword (`readSourceControl`), per TRANSFER: the
-    // device reads the object on every arm of the channel from the store that handed it the
-    // address until a later word store to the same source register replaces it, so the control
-    // stores that bound it are the ones reachable in between. Each has to be a literal the target
-    // decodes. A store through a pointer this cannot resolve — one that is this frame's on only
-    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves the
-    // read unbounded — as does a transfer never armed here at all. An unbounded device read says
-    // which of those it met (`why`): each is a different capability to build.
-    //
-    // A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED WHERE THE SYMBOL MAP PLACES THE NAME, and then
-    // exactly, by the overlap test below. agbcc's alias model never lets a C identifier plus a
-    // constant meet a literal address (alias.c:812-819, 1064-1068), but nothing in the asm says a
-    // name is a C identifier: a disassembly spells an I/O register the way it spells a global
-    // (`.word REG_VCOUNT`). So a name the map does not place is an unresolved pointer here.
-    //
-    // THE PREMISE, stated once and not checkable from one function: a callee or an interrupt
-    // handler arms only a transfer it set up itself, source register first. So a call on the path
-    // does not unbound the read, and neither does an interrupt at any instruction: whatever re-arms
-    // the channel with this frame's address still in the source register is this function's own
-    // store, and the walk sees every one of those.
-    const at = new Map<Op, { blk: Block; i: number }>();
-    for (const blk of irBlocks) {
-      blk.ops.forEach((op, i) => at.set(op, { blk, i }));
-    }
-    const unbounded = (why: string) => ({ lo: -Infinity, hi: Infinity, why });
-    const readWindow = (off: number): { lo: number; hi: number; why: string } => {
-      const control = target.capabilities.readSourceControl;
-      const stores = sourceStores.get(off);
-      if (mayWrite.has(off) || stores === undefined || control === undefined) {
-        return unbounded('that reads through it');
-      }
-      const little = target.capabilities.endianness === 'little';
-      const halves: number[] = [];
-      for (const { op: handed, sink } of stores) {
-        const cnt = sink + control.offset;
-        let armed = false;
-        const entered = new Set<Block>();
-        const work: [Block, number][] = [[at.get(handed)!.blk, at.get(handed)!.i + 1]];
-        walk: while (work.length > 0) {
-          const [blk, from] = work.pop()!;
-          for (let i = from; i < blk.ops.length; i++) {
-            const op = blk.ops[i];
-            if (op.opcode !== 'store') {
-              continue;
-            }
-            const base = literalAddrOf(op.operands[0]);
-            if (base === undefined) {
-              if (!frameOnEveryPath.has(op.operands[0])) {
-                return unbounded('a later store through an unresolved pointer may re-arm');
-              }
-              continue;
-            }
-            const a = base + (op.attrs.off as number);
-            const w = op.attrs.width as number;
-            if (a === sink && w === 4) {
-              continue walk;
-            }
-            if (a + w <= cnt || a >= cnt + 2) {
-              continue;
-            }
-            const v = defOf.get(op.operands[1]);
-            if (v?.opcode !== 'const' || a > cnt || a + w < cnt + 2) {
-              return unbounded('whose control word is not a literal');
-            }
-            const shift = 8 * (little ? cnt - a : a + w - cnt - 2);
-            halves.push(((v.attrs.value as number) >>> shift) & 0xffff);
-            armed = true;
-          }
-          for (const s of blk.ops[blk.ops.length - 1]?.successors ?? []) {
-            if (!entered.has(s.block)) {
-              entered.add(s.block);
-              work.push([s.block, 0]);
-            }
-          }
-        }
-        if (!armed) {
-          return unbounded('this function never arms');
-        }
-      }
-      let [lo, hi] = [0, 0];
-      for (const h of halves) {
-        const unit = control.units[(h & control.wideBit) !== 0 ? 1 : 0];
-        const mode = control.modes[(h >> control.modeShift) & (control.modes.length - 1)];
-        if (mode === null || mode === undefined) {
-          return unbounded('whose control word bounds nothing');
-        }
-        // A device may force the address down to a unit boundary — the GBA's does — so a 32-bit
-        // read of the halfword at [sp,#2] reads from [sp,#0], and the object below shares its
-        // unit. The frame base is at least unit-aligned, so the offset says how far down.
-        lo = Math.min(lo, mode === 'decrement' ? -Infinity : -(off % unit));
-        hi = Math.max(hi, mode === 'increment' ? Infinity : unit);
-      }
-      return { lo, hi, why: 'that reads through it' };
-    };
     // …computed ONCE, with whether the escape may write and how it left, and read by every rule an
     // escape retracts (`FRAME_ESCAPE_GATES`), so a new bound — a callee's declared extent — has one
     // place to go.
@@ -1374,7 +1408,7 @@ export function auditFrameObjects({
       unaccountedWord = accountedWords.has(w) ? undefined : w;
     }
     const escapes: FrameEscape[] = [...escaped].map((off) => {
-      const { lo, hi, why } = readWindow(off);
+      const { lo, hi, why } = windowOf.get(off)!;
       const writes = mayWrite.has(off);
       const objectReached = [...extent].find(([o, obj]) => o !== off && o < off + hi && off + lo < o + span(obj));
       let slotReached: FrameEscape['slotReached'];
@@ -1427,17 +1461,21 @@ export function auditFrameObjects({
           );
       }
     };
-    // …unless every escape only READS and one of them reads without bound. Then the reach is the
-    // whole local area, and what the device may read there is kept rather than refused: lift again
-    // with those bytes as one object in memory (`oneObject` above). Below the local area are the
-    // outgoing arguments and above it the saved registers, neither of them an object.
+    // …unless the one-object answer is on offer (every escape only READS and one of them reads
+    // without bound) and the per-object model does not describe the frame: it refused a shape, an
+    // object sits over a slot, or the unbounded read reaches another object or a slot. Then what
+    // the device may read is kept rather than refused: lift again with the local area as one object
+    // in memory (`oneObject` above). Below the local area are the outgoing arguments and above it
+    // the saved registers, neither of them an object. Where the per-object model does describe the
+    // frame — one object and nothing else in reach — it stands, and the object keeps its own type.
     if (
-      oneObject === undefined &&
-      escapes.every((e) => !e.writes) &&
-      escapes.some(
-        (e) =>
-          e.lo === -Infinity && e.hi === Infinity && (e.objectReached !== undefined || e.slotReached !== undefined),
-      )
+      oneObjectOnOffer &&
+      (perObjectRefused ||
+        overSlot.length > 0 ||
+        escapes.some(
+          (e) =>
+            e.lo === -Infinity && e.hi === Infinity && (e.objectReached !== undefined || e.slotReached !== undefined),
+        ))
     ) {
       return { oneObject: { from: declared.from, to: declared.to } };
     }

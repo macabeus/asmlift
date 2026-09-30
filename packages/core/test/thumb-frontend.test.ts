@@ -1044,6 +1044,68 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow('is accessed 4 and 2 bytes wide');
     });
 
+    // THE MODEL IS CHOSEN BEFORE THE SHAPE: where a device read nothing bounds is the only escape,
+    // a frame the per-object model cannot describe is kept as one object whatever the read reaches.
+    // Verbatim agbcc, `union V { u32 w; u8 b[8]; } v; v.w = x; REG_DMA3SAD = (u32)&v; …; *gCnt = 5;
+    // return v.b[0];` — the union's word is the only slot, at the object's own offset, and the
+    // recompile is instruction-identical.
+    test('an object over its own slot is one object when the read is unbounded', () => {
+      const unionAtBase =
+        'g5:\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr0, .L3\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n' +
+        '\tldr\tr1, .L3+0x4\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L3+0xc\n\tstr\tr0, [r1]\n\tldr\tr0, .L3+0x10\n\tldr\tr1, [r0]\n\tmov\tr0, #0x5\n' +
+        '\tstr\tr0, [r1]\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L4:\n' +
+        '\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n' +
+        '\t.word\t-0x7bfffffe\n\t.word\tgCnt\n';
+      const src = decompile('g5', unionAtBase, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('*(s32 *)sp0 = a0;');
+      expect(src).toContain('return *(u8 *)sp0;');
+      // …and bounded, the per-object refusal stands
+      const bounded = unionAtBase.replace(
+        '\tldr\tr0, .L3+0x10\n\tldr\tr1, [r0]\n\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n',
+        '',
+      );
+      expect(bounded).not.toBe(unionAtBase);
+      expect(() => decompile('g5', bounded, ARMV4T_AGBCC)).toThrow(
+        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+      );
+    });
+
+    // …a member at [+1] through the captured address. Verbatim agbcc, `union U { u16 h; u8 b[2]; }
+    // u; u.h = x; REG_DMA3SAD = (u32)&u; …; *gCnt = 5; return u.b[1];`.
+    test('a member through the captured address is one object when the read is unbounded', () => {
+      const unionMember =
+        'g1:\n\tadd\tsp, sp, #-0x4\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tldr\tr2, .L3\n' +
+        '\tldr\tr1, [sp]\n\tand\tr1, r1, r2\n\torr\tr1, r1, r0\n\tstr\tr1, [sp]\n\tldr\tr0, .L3+0x4\n' +
+        '\tmov\tr2, sp\n\tstr\tr2, [r0]\n\tldr\tr1, .L3+0x8\n\tldr\tr0, .L3+0xc\n\tstr\tr0, [r1]\n' +
+        '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L3+0x10\n\tstr\tr0, [r1]\n\tldr\tr0, .L3+0x14\n' +
+        '\tldr\tr1, [r0]\n\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n\tldrb\tr0, [r2, #0x1]\n' +
+        '\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7effffff\n\t.word\tgCnt\n';
+      const src = decompile('g1', unionMember, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[4];');
+      expect(src).toContain('return ((u8 *)sp0)[1];');
+    });
+
+    // …and a byte buffer filled through a runtime index, then handed to a transfer whose control
+    // word is a parameter. Verbatim agbcc, `u8 buf[8]; for (i = 0; i < 8; i++) buf[i] = src[i];
+    // REG_DMA3SAD = (u32)buf; …; REG_DMA3CNT = ctrl;` — a byte index names bytes of the storage and
+    // aliases every type, so nothing needs checking; the recompile is instruction-identical.
+    test('a byte index into one object is kept', () => {
+      const byteBuffer =
+        'g3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n' +
+        '\tmov\tr2, #0x0\n\tldr\tr5, .L14\n.L12:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n' +
+        '\tadd\tr1, r3, r2\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n\tadd\tr2, r2, #0x1\n' +
+        '\tcmp\tr2, #0x7\n\tble\t.L12\n\tldr\tr0, .L14+0x4\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n' +
+        '\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr4, [r0]\n' +
+        '\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.L15:\n' +
+        '\t.align\t2, 0\n.L14:\n\t.word\tgDst\n\t.word\t0x40000d4\n';
+      const src = decompile('g3', byteBuffer, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('((u8 *)sp0)[v0] = *(u8 *)(a1 + v0);');
+    });
+
     // Half an address is not the address: `strh` to a source register hands the device something
     // that is not this object, so the narrow answer stays the true one.
     test('a HALFWORD store to a source register is not vouched for', () => {
@@ -1921,9 +1983,18 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       });
 
       // …and the evidence is an agbcc compile table, exactly as for the callee escape: a second
-      // table, its own shapes, and the same declared layout gating both.
+      // table, its own shapes, and the same declared layout gating both. Asked of a transfer the
+      // function arms, with a fixed source that reads two bytes: a read nothing bounds is kept as
+      // one object in memory instead, which needs no layout proof — it declares every byte of the
+      // reserved area and keeps every store to it.
       test('an armv4t compiler that has not declared the layout does not get the publish proof', () => {
-        expect(() => decompile('f', PUBLISH, undeclared)).toThrow(TWO_MODELS);
+        const armed = PUBLISH.replace(
+          '\tstr\tr1, [r2]\n',
+          '\tstr\tr1, [r2]\n\tldr\tr3, .L4+0x4\n\tstr\tr3, [r2, #0x8]\n',
+        ).concat('\t.word\t0x81000001\n');
+        expect(armed).not.toBe(PUBLISH);
+        expect(() => decompile('f', armed, undeclared)).toThrow(TWO_MODELS);
+        expect(decompile('f', PUBLISH, undeclared).source).toContain('volatile u8 sp0[4];');
       });
 
       // The walk is kill-on-mention and a `bl` drops every held capture, including one in a
