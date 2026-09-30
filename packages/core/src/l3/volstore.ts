@@ -169,8 +169,17 @@ function qualify(lval: Expr, window: readonly [number, number] | undefined): Exp
   if (firstRejection(VOL_STORE_GATES, ctx) !== null) {
     return lval;
   }
-  // An existing scalar pointer cast takes the qualifier in place; a bare const gets one minted,
-  // exactly the node backend/cfamily.ts's own deref legalization would have synthesized.
+  return qualifiedAccess(lval);
+}
+
+/** An indexed access with `volatile` on the pointee of its deref cast. An existing scalar pointer
+ *  cast takes the qualifier in place; a bare base gets one minted, exactly the node
+ *  backend/cfamily.ts's own deref legalization would have synthesized. Also the spelling a store
+ *  the lift marked `volatile` lowers to (structure/structure.ts). */
+export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Expr, { k: 'index' }> {
+  if (qualifiedBase(lval.base)) {
+    return lval;
+  }
   const base: Expr =
     lval.base.k === 'cast' && lval.base.to.kind === 'ptr'
       ? { ...lval.base, volatile: true }

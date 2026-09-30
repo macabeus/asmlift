@@ -67,6 +67,7 @@ import {
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
+import { qualifiedAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -4911,8 +4912,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           continue;
         }
         // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
-        // inserted cast declares the same scalar the recovered pointee would have.
-        out.push({ k: 'store', lval: lval0, value: intoPtrCell(lval0, expr(op.operands[1])) });
+        // inserted cast declares the same scalar the recovered pointee would have. A store the lift
+        // marked `volatile` is one the recompile must make (frontend/frame-objects.ts).
+        const lval = op.attrs.volatile === true && lval0.k === 'index' ? qualifiedAccess(lval0) : lval0;
+        out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
         out.push({

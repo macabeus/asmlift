@@ -1314,7 +1314,10 @@ transfer. Where the read is still unbounded and nothing but devices holds the ad
 does not refuse: it answers with the local area, the frontend lifts once more with every word of it
 routed through `laddr`, and the second audit declares those bytes one `u8` array in memory, so every
 store the machine made there is a store the recompile makes. The asm cannot tell a member the
-device reads from a spill nobody reads, and keeping both in memory is right for both.
+device reads from a spill nobody reads, and keeping both in memory is right for both. The transfer
+has to run too, so every device store of a function kept this way is `volatile`: agbcc deletes a
+plain store to an address a later store overwrites, and of two transfers armed back to back
+through one channel the first would never start.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

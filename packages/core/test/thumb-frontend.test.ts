@@ -2731,7 +2731,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(kept).toContain('volatile u8 sp0[12];');
       expect(kept).toContain('((s32 *)sp0)[1] = a0;');
       expect(kept).toContain('((s32 *)sp0)[2] = a1;');
-      expect(kept).toContain('*(s32 *)67109084 = 129 << 24 | ((s32 *)sp0)[2];');
+      expect(kept).toContain('*(volatile s32 *)67109084 = 129 << 24 | ((s32 *)sp0)[2];');
     });
 
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one
@@ -2804,6 +2804,46 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(decompile('f', publishThenFill, ARMV4T_AGBCC).source).toBe(
       's32 f(void) {\n    volatile u16 sp0;\n    *(s32 *)67109076 = &sp0;\n    sp0 = 0;\n    return 0;\n}\n',
     );
+  });
+
+  // EVERY DEVICE STORE of a function kept as one object is `volatile`. Verbatim agbcc:
+  // `DmaFill16(3, 0, a, n); DmaFill32(3, 0, b, 0x40); DmaFill16(3, 0, c, 0x40);` — the runtime
+  // count leaves the first read unbounded over the second fill's temporary. Spelled plain, agbcc
+  // deletes the 32-bit fill's three channel stores, overwritten by the third fill's with only a
+  // `u16` member store between (compiled: 12 stores in this target, 9 in the plain lift's
+  // recompile, 12 in this one's).
+  test('a function kept as one object keeps every device store volatile', () => {
+    const threeFills =
+      'p3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr5, sp\n\tmov\tr4, #0x0\n' +
+      '\tstrh\tr4, [r5]\n\tldr\tr4, .L3\n\tstr\tr5, [r4]\n\tstr\tr0, [r4, #0x4]\n\tlsr\tr3, r3, #0x1\n' +
+      '\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n\torr\tr3, r3, r0\n\tstr\tr3, [r4, #0x8]\n' +
+      '\tldr\tr0, [r4, #0x8]\n\tmov\tr3, #0x0\n\tstr\tr3, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n' +
+      '\tstr\tr0, [r4]\n\tstr\tr1, [r4, #0x4]\n\tldr\tr0, .L3+0x4\n\tstr\tr0, [r4, #0x8]\n' +
+      '\tldr\tr0, [r4, #0x8]\n\tmov\tr0, sp\n\tstrh\tr3, [r0]\n\tstr\tr0, [r4]\n' +
+      '\tstr\tr2, [r4, #0x4]\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r4, #0x8]\n\tldr\tr0, [r4, #0x8]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+      '\t.word\t0x40000d4\n\t.word\t-0x7afffff0\n\t.word\t-0x7effffe0\n';
+    const src = decompile('p3', threeFills, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).not.toMatch(/\(s32 \*\)67109/);
+    expect(src.match(/\(volatile s32 \*\)67109076/g)).toHaveLength(9);
+  });
+
+  // KNOWN GAP: a function accepted object by object keeps them plain. Verbatim agbcc,
+  // `REG_IME = 0; DmaFill16(3, 0x1111, a, 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`:
+  // this lift recompiles to 7 stores of the target's 10.
+  test('KNOWN GAP: a function accepted object by object keeps its device stores plain', () => {
+    const twoFills =
+      'd3i:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr5, .L3\n\tmov\tr2, #0x0\n\tstrh\tr2, [r5]\n' +
+      '\tmov\tr3, sp\n\tldr\tr4, .L3+0x4\n\tadd\tr2, r4, #0\n\tstrh\tr2, [r3]\n\tldr\tr2, .L3+0x8\n\tstr\tr3, [r2]\n' +
+      '\tstr\tr0, [r2, #0x4]\n\tldr\tr4, .L3+0xc\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tldr\tr6, .L3+0x10\n' +
+      '\tadd\tr0, r6, #0\n\tstrh\tr0, [r3]\n\tstr\tr3, [r2]\n\tstr\tr1, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n' +
+      '\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x1\n\tstrh\tr0, [r5]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x4000208\n\t.word\t0x1111\n\t.word\t0x40000d4\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t0x2222\n';
+    const src = decompile('d3i', twoFills, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).not.toContain('(volatile s32 *)');
   });
 
   // one address-taken halfword frame object published to a DMA register — the shape that mints

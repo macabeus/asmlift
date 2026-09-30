@@ -889,6 +889,39 @@ export function auditFrameObjects({
       }
     };
 
+    // EVERY DEVICE STORE OF A FUNCTION KEPT AS ONE OBJECT (below) IS MARKED `volatile`, as the
+    // source's `REG_*` and `vu32 *dmaRegs` spell them. A plain store to a literal address is one agbcc
+    // deletes when a later store to the same address overwrites it and nothing between may alias
+    // it (flow.c:2041-2052), and at -O2 a store of another type does not (strict aliasing,
+    // toplev.c:3616) — so of two transfers armed back to back through one channel, with only a
+    // `u16` member store between, the first one's source, destination and control stores go and
+    // that transfer never runs; `REG_IME = 0; … REG_IME = saved;` loses its first store the same
+    // way. The window is the target's `deviceRegisters`, or the channels handed a frame address
+    // without one.
+    // KNOWN GAP: a function accepted object by object keeps its device stores plain — the pinned
+    // spelling is `/vol-store`'s candidate beside it (l3/volstore.ts) — so its unranked lift can
+    // lose a transfer the same way. Pinned in the structured tree, they are pinned in every
+    // variation too, and the ones that home the base or un-reduce a loop refuse a qualified base:
+    // `synthetic:dmastride` and `synthetic:dmaptrsrc` lose their matches.
+    const pinDeviceStores = (): void => {
+      const sinks = [...new Set([...sourceStores.values()].flat().map((s) => s.sink))];
+      if (sinks.length === 0) {
+        return;
+      }
+      const reach = (target.capabilities.readSourceControl?.offset ?? 2) + 2;
+      const window = target.capabilities.deviceRegisters;
+      const isDevice = (a: number, w: number): boolean =>
+        window !== undefined ? a >= window[0] && a + w <= window[1] : sinks.some((s) => a < s + reach && a + w > s);
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          const base = op.opcode === 'store' ? literalAddrOf(op.operands[0]) : undefined;
+          if (base !== undefined && isDevice(base + (op.attrs.off as number), op.attrs.width as number)) {
+            op.attrs = { ...op.attrs, volatile: true };
+          }
+        }
+      }
+    };
+
     // ONE OBJECT IN MEMORY, the answer a device read nothing bounds is given instead of a refusal
     // (`oneObject`, requested below where the escapes are judged). Every byte of `[from, to)` is
     // declared one `u8` array whose address the device holds, and every access inside it is a
@@ -999,6 +1032,7 @@ export function auditFrameObjects({
         });
       }
       irBlocks[0].ops.unshift(object);
+      pinDeviceStores();
       return undefined;
     }
 
