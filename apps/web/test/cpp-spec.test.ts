@@ -3,7 +3,7 @@
 import { cppBackend } from '@asmlift/core/backend/cpp';
 import { T } from '@asmlift/core/ir/types';
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
+import { MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -318,6 +318,51 @@ test.each([
 ])('an unread float slot binds a spec float of the other precision: %s', (_label, sym, asm, spec, source) => {
   expect(decompile(sym, asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) }).source).toBe(source);
   expect(cpp(sym, asm, PPC_MWCC)).toBe(source);
+});
+
+// …BUT ON o32 THE HOLE'S WIDTH PLACED THE INTEGERS AFTER IT. A single takes one integer slot and a
+// double two, counted at the function's precision, so the single-precision `m2` lays its unread
+// `double a` out as one slot and its `p` arrives in `a3` where the lift's position says `q`. Both
+// compiled at gcc2.7.2kmc's canonical flags.
+const M2_KMC =
+  '00000000 <m2__FdfPiPi>:\n   0:\tsw\tzero,0(a3)\n   4:\tjr\tra\n   8:\tadd.s\t$f0,$f14,$f14\n   c:\tnop\n';
+const M3_KMC = '00000000 <m3__Fdf>:\n   0:\tjr\tra\n   4:\tadd.s\t$f0,$f14,$f14\n';
+
+test('o32: an unread float hole of the other width refuses a spec with an integer after it', () => {
+  const spec = parseSpec(
+    JSON.stringify({
+      method: 'm2',
+      retType: { base: 'float', ptr: 0 },
+      params: [
+        { name: 'a', type: { base: 'double', ptr: 0 } },
+        { name: 'b', type: { base: 'float', ptr: 0 } },
+        { name: 'p', type: { base: 'int', ptr: 1 } },
+        { name: 'q', type: { base: 'int', ptr: 1 } },
+      ],
+    }),
+  );
+  expect(() => decompile('m2__FdfPiPi', M2_KMC, MIPS_GCC, { backend: cppBackend(spec, MIPS_GCC.fpu?.slots) })).toThrow(
+    /floating-point parameters do not match/,
+  );
+  expect(cpp('m2__FdfPiPi', M2_KMC, MIPS_GCC)).toBe(
+    'float m2__FdfPiPi(float a0, float a1, int a2, int *a3) {\n    *a3 = 0;\n    return a1 + a1;\n}\n',
+  );
+});
+
+test('o32: an unread float hole with no integer after it binds either width', () => {
+  const source = 'float m3(double a, float b) {\n    return b + b;\n}\n';
+  const spec = specOf(
+    'm3',
+    [
+      ['a', 'double'],
+      ['b', 'float'],
+    ],
+    'float',
+  );
+  expect(decompile('m3__Fdf', M3_KMC, MIPS_GCC, { backend: cppBackend(spec, MIPS_GCC.fpu?.slots) }).source).toBe(
+    source,
+  );
+  expect(cpp('m3__Fdf', M3_KMC, MIPS_GCC)).toBe(source);
 });
 
 test.each([

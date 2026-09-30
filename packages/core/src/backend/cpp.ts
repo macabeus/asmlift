@@ -59,7 +59,14 @@ export function cppSymbol(spec: CppFnSpec): string {
  *  it mints only to hold the later arguments' places: `float f1(double a, float b){ return b + b; }`
  *  is `fadds f1,f2,f2`, and its `a` is a single-precision hole that nothing states the width of. So
  *  is a lifted float of no stated precision (`T.fUnstated`) anywhere. Either binds a spec float of
- *  both widths, and the spec's is the one to print. */
+ *  both widths, and the spec's is the one to print.
+ *
+ *  EXCEPT WHERE THE HOLE'S WIDTH PLACED THE PARAMETERS AFTER IT. Under `'leading'` a float takes one
+ *  integer slot for a single and two for a double, counted at the function's precision
+ *  (`fpuArgSlots`), so an unread hole of the other width than the spec's moves every integer after
+ *  it: `float m2(double a, float b, int *p, int *q){ *p = 0; return b + b; }` (gcc2.7.2kmc) is
+ *  `sw zero,0(a3)` with `a` laid out as ONE slot, and binding by position would name `a3` `q`. So
+ *  there an unread float followed by an integer parameter keeps its precision. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
   lifted: Pick<SFn, 'params' | 'body'>,
@@ -73,20 +80,26 @@ export function bindSpecParams(
       read.add(e.name);
     }
   }
-  const stated = (p: SFn['params'][number]) =>
-    p.type.kind === 'float' && p.type.width !== null && read.has(p.name) ? p.type.width : null;
-  const clashes = (p: SFn['params'][number], t: CppType | undefined) =>
+  const clashes = (p: SFn['params'][number], t: CppType | undefined, laysOut: boolean) =>
     p.type.kind === 'float' &&
-    (t === undefined || floatBits(t) === null || (stated(p) !== null && floatBits(t) !== stated(p)));
+    (t === undefined ||
+      floatBits(t) === null ||
+      (p.type.width !== null && (laysOut || read.has(p.name)) && floatBits(t) !== p.type.width));
   const explicit = lifted.params.slice(spec.cls ? 1 : 0);
   if (floatSlots !== 'separate') {
-    const clash = explicit.some((p, i) => clashes(p, spec.params[i]?.type));
+    const clash = explicit.some((p, i) =>
+      clashes(
+        p,
+        spec.params[i]?.type,
+        explicit.slice(i + 1).some((q) => q.type.kind !== 'float'),
+      ),
+    );
     return clash ? null : spec.params.map((_, i) => explicit[i]?.name);
   }
   const floats = explicit.filter((p) => p.type.kind === 'float');
   const others = explicit.filter((p) => p.type.kind !== 'float');
   const specFloats = spec.params.filter((p) => isFloat(p.type));
-  if (specFloats.length < floats.length || floats.some((p, i) => clashes(p, specFloats[i].type))) {
+  if (specFloats.length < floats.length || floats.some((p, i) => clashes(p, specFloats[i].type, false))) {
     return null;
   }
   let f = 0;

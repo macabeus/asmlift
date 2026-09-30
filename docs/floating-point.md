@@ -7,7 +7,9 @@ argument and return homes, and nothing else in that file; a function computing i
 refuses. `fneg` and `fmr` state no precision, so a function made only of them lifts a float of none
 (`T.fUnstated`): C spells it `float`, and a C++ declaration binds it at either width. So does an
 argument slot the body never reads (`float f1(double a, float b){ return b + b; }` is `fadds f1,f2,f2`):
-no instruction states its width, whatever the function's precision typed it.
+no instruction states its width, whatever the function's precision typed it. On MIPS o32 that holds
+only while no integer argument follows the slot, because there the slot's width is what placed the
+integers after it (a double takes two integer slots), so a C++ declaration of the other width refuses.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
 On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through
