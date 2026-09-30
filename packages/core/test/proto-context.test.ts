@@ -325,6 +325,17 @@ describe('prototypes from a declaration context', () => {
     expect(p.mkbig2?.params).toEqual(['int']);
   });
 
+  // compiled, `f`'s `x` takes r0:r1 and `y` r2, as `long long x` would
+  test('a declaration whose attribute retypes a parameter with mode is not read', () => {
+    const p = prototypesFromContext(
+      `void f(int x __attribute__((mode(DI))), int y); void g(int x __attribute__ ((__mode__ (__QI__)))); int mode(int);`,
+      'c',
+    );
+    expect(p.f).toBeUndefined();
+    expect(p.g).toBeUndefined();
+    expect(p.mode).toEqual({ returns: 'int', params: ['int'] });
+  });
+
   // `mode` hands the attributes after it a shared scalar type (c-common.c:563, 996-1000); compiled,
   // `struct O { int a; }` is 8 bytes and comes back through memory
   test.each(['__attribute__((mode(SI), aligned(8)))', '__attribute__ ( ( __mode__ ( __SI__ ) , aligned ( 8 ) ) )'])(

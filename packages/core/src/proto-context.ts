@@ -481,7 +481,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   };
   const found = new Map<string, FnProto | null>();
   for (const s of stmts) {
-    const t = withoutAttributes(s.text)
+    const attributes: string[] = [];
+    const t = withoutAttributes(s.text, attributes)
       .replace(/\bextern\s*"C(?:\+\+)?"/g, ' ')
       .replace(SPECIFIERS, ' ')
       .replace(/\s+/g, ' ')
@@ -493,6 +494,12 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     }
     const m = /^(.+?)\b([A-Za-z_]\w*)\s*\((.*)\)\s*(?:const)?$/.exec(t);
     if (!m || /[(){}]/.test(m[1]) || TYPE_WORDS.has(m[2])) {
+      continue;
+    }
+    // `mode` gives a parameter the type it names in place of the one spelled (c-common.c:563),
+    // which this does not read: compiled, `int x __attribute__((mode(DI)))` takes a register pair
+    if (attributes.some((a) => /\b(?:__)?mode(?:__)?\s*\(/.test(a))) {
+      found.set(m[2], null);
       continue;
     }
     const proto = readSignature(m[1], m[3], language, typedefs, (t) => layoutOf(t, 0));
@@ -562,8 +569,9 @@ function realigns(text: string): boolean {
   );
 }
 
-/** The text with every `__attribute__((…))` taken out, its parentheses balanced. */
-function withoutAttributes(text: string): string {
+/** The text with every `__attribute__((…))` taken out, its parentheses balanced; each one taken out
+ *  goes to `removed`. */
+function withoutAttributes(text: string, removed?: string[]): string {
   let out = '';
   let i = 0;
   for (let m = ATTRIBUTE_AT.exec(text.slice(i)); m !== null; m = ATTRIBUTE_AT.exec(text.slice(i))) {
@@ -572,6 +580,7 @@ function withoutAttributes(text: string): string {
     for (let depth = 1; j < text.length && depth > 0; j++) {
       depth += text[j] === '(' ? 1 : text[j] === ')' ? -1 : 0;
     }
+    removed?.push(text.slice(i + m.index, j));
     i = j;
   }
   return out + text.slice(i);
