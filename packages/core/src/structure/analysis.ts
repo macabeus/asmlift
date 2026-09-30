@@ -1340,10 +1340,36 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
   // register the compiler used.
   const materialize = new Set<Op>();
+  /** Does `hit` hold of `call`'s value, or of any value it reaches through the ops it would be
+   *  inlined into? Such an op renders where its consumer does. The walk stops at a named op, which
+   *  renders at its own position, and at another effect, which these same rules place. That makes it
+   *  narrower than `!anchored`: a call or a load whose value is used is not anchored, and the walk
+   *  still stops there. */
+  const reachesThroughInline = (call: Op, hit: (x: Value, sites: readonly UseSite[]) => boolean): boolean => {
+    const seen = new Set<Value>();
+    const walk = (x: Value): boolean => {
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const sites = useSitesOf.get(x) ?? [];
+      return (
+        hit(x, sites) ||
+        sites.some(
+          (u) =>
+            !EFFECTFUL_OPS.has(u.op.opcode) &&
+            u.op.successors.length === 0 &&
+            !materialize.has(u.op) &&
+            u.op.results.length > 0 &&
+            walk(u.op.results[0]),
+        )
+      );
+    };
+    return walk(call.results[0]);
+  };
   /** Does `call`'s value reach an edge argument through the ops it would be inlined into, and
    *  so render where that edge copy does? Such an op renders where its consumer does, so a call under
-   *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does. The walk stops at a named op,
-   *  which renders at its own position, and at another effect, which these same rules place.
+   *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does.
    *
    *  A FORWARD edge's copy renders in an arm or after the loop, and a value two back-edge args carry
    *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once, in
@@ -1352,53 +1378,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  the barrier scan below already weighs exactly that: a store, a call or a read in another part of
    *  the terminator bars the call and names it, and a read in the same copy renders after the call,
    *  as every compiler evaluates it. So `s = s + g(i)` stays inline (`for (…) s = s + g(i);`). */
-  const ridesEdge = (call: Op): boolean => {
-    const seen = new Set<Value>();
-    const walk = (x: Value): boolean => {
-      if (seen.has(x)) {
-        return false;
-      }
-      seen.add(x);
+  const ridesEdge = (call: Op): boolean =>
+    reachesThroughInline(call, (x) => {
       const carried = backArgFed.get(x) ?? 0;
-      if (carried > 1 || (carried === 0 && branchArgFed.has(x))) {
-        return true;
-      }
-      return (useSitesOf.get(x) ?? []).some(
-        (u) =>
-          !EFFECTFUL_OPS.has(u.op.opcode) &&
-          u.op.successors.length === 0 &&
-          !materialize.has(u.op) &&
-          u.op.results.length > 0 &&
-          walk(u.op.results[0]),
-      );
-    };
-    return walk(call.results[0]);
-  };
+      return carried > 1 || (carried === 0 && branchArgFed.has(x));
+    });
   /** Does `call`'s value, through the ops it would be inlined into, reach ONE op that reads it
    *  twice? That op spells it twice — both operands of `s * s`, or both edge copies of a `br
    *  ^bb3(%9, %9)` — and the call runs once per spelling. A multi-successor terminator's arguments
    *  are `ridesEdge`'s question, which weighs a do-while's exit copy reading the loop variable its
-   *  update copy wrote. The walk continues through the same ops `ridesEdge` walks through. */
-  const spelledTwice = (call: Op): boolean => {
-    const seen = new Set<Value>();
-    const walk = (x: Value): boolean => {
-      if (seen.has(x)) {
-        return false;
-      }
-      seen.add(x);
-      const sites = useSitesOf.get(x) ?? [];
-      return sites.some(
-        (u, i) =>
-          (u.op.successors.length <= 1 && sites.findIndex((v) => v.op === u.op) !== i) ||
-          (!EFFECTFUL_OPS.has(u.op.opcode) &&
-            u.op.successors.length === 0 &&
-            !materialize.has(u.op) &&
-            u.op.results.length > 0 &&
-            walk(u.op.results[0])),
-      );
-    };
-    return walk(call.results[0]);
-  };
+   *  update copy wrote. */
+  const spelledTwice = (call: Op): boolean =>
+    reachesThroughInline(call, (_, sites) =>
+      sites.some((u, i) => u.op.successors.length <= 1 && sites.findIndex((v) => v.op === u.op) !== i),
+    );
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
   // terminator, materialized def) it inlines into, transitively through single-use pure ops.
