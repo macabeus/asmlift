@@ -1,6 +1,6 @@
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import {
-  declaredArgWidths,
+  declaredCallArgs,
   declaredWidth,
   declaresAggregateReturn,
   statesNoReturn,
@@ -8,6 +8,7 @@ import {
   validatePrototypes,
 } from './proto';
 import type { SymbolMap } from './symbols';
+import type { TargetDescription } from './target';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
 // candidate is compiled against (a decomp project's `ctx.h`, m2c's `--context`). The compiler
@@ -795,8 +796,9 @@ export function withContextPrototypes(
   context: Prototypes,
   own: string,
   symbols: SymbolMap | undefined,
+  target: Pick<TargetDescription, 'softDoubleWords'>,
 ): Prototypes {
-  const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols);
+  const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols, target);
   const out: Prototypes = { ...callees, ...stated };
   for (const [name, p] of Object.entries(stated ?? {})) {
     const heard = Object.hasOwn(callees, name) ? callees[name] : undefined;
@@ -827,7 +829,11 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  need; an entry that cannot size one yields to a map signature that can be spelled, which sizes by
  *  byte count what a declaration names (a by-value struct of a register's width); and where the map
  *  spells nothing either, the context entry stays. */
-function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefined): Prototypes {
+function contextPrototypesUnder(
+  context: Prototypes,
+  symbols: SymbolMap | undefined,
+  target: Pick<TargetDescription, 'softDoubleWords'>,
+): Prototypes {
   if (symbols === undefined) {
     return context;
   }
@@ -845,7 +851,7 @@ function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefi
   return Object.fromEntries(
     Object.entries(context).flatMap(([name, p]): [string, FnProto][] => {
       const signed = mapped.get(name);
-      if (declaredArgWidths(p) !== undefined || signed === undefined) {
+      if (declaredCallArgs(p, target) !== undefined || signed === undefined) {
         return [[name, p]];
       }
       return declaresAggregateReturn(p) && signed.returnsVoid !== true

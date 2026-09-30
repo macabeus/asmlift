@@ -378,7 +378,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   declared parameter type is consulted for exactly one thing, and it does not ask what a `*` points
   at: `declaredWidth`, which answers **32 for every pointer**. Everything downstream is that answer
   rebilled — `raise/paramwidth.ts` reads the function's OWN list per parameter to veto a narrowing,
-  and a callee's list goes through `proto.ts` `declaredArgWidths` to be summed into the ARGUMENT
+  and a callee's list goes through `proto.ts` `declaredCallArgs` to be summed into the ARGUMENT
   REGISTERS the call occupies. Neither can carry a pointee: a `Sprite *` and a `void *` are the
   same 32 bits, and both are readable, so they do not even reach the one branch where a spelling
   decides anything — the one where the width reader cannot size the type and the whole list stops

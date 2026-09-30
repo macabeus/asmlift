@@ -150,7 +150,7 @@ describe('an argument slot is owned storage that this function does not DECLARE'
 });
 
 describe('the declaration must say how many WORDS, and a parameter list is parameters', () => {
-  // The block is words, `declaredArgWidths` is words, and the lowering maps word k to slot
+  // The block is words, `declaredCallArgs` is words, and the lowering maps word k to slot
   // k - |argRegs|. A C PARAMETER COUNT is a fourth number and is the same as the other three only
   // while every parameter occupies one word — a `long long` or a by-value struct breaks it. A
   // `long long` is READ as two words; a by-value struct, a project typedef and a floating type

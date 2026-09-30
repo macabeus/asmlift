@@ -1,5 +1,6 @@
 import type { IrType } from './ir/types';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
+import type { TargetDescription } from './target';
 
 // asmlift — function prototypes: the single carrier for the caller-supplied facts a
 // matching-decomp project reads from its headers (arg counts, parameter widths, void-ness). One
@@ -11,7 +12,7 @@ import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 /** One declared parameter, as its C type text (`"u8"`, `"s32"`, `"void *"`, `"int"`). The lift reads
  *  ONE fact off it and derives everything else from that fact: the WIDTH it spells
  *  (`declaredWidth`). raise/paramwidth.ts checks its inference against that width, and
- *  `declaredArgWidths` sums the list's widths into the argument registers the call occupies. On a
+ *  `declaredCallArgs` sums the list's widths into the argument registers the call occupies. On a
  *  function compiled as C++ the printer reads the SPELLING too: a call argument is cast to it where
  *  C++ converts nothing implicitly (backend/cfamily.ts `argConversion`).
  *
@@ -29,7 +30,7 @@ export interface FnProto {
   /** declared parameters — either the typed parameter list a header extraction produces
    *  (`["u8", "s32"]`), which is a list of C PARAMETERS, or a bare COUNT, which is the user's word
    *  for how many argument REGISTERS the call occupies. The two are the same number only while
-   *  every parameter fits in a register, and `declaredArgWidths` is what converts the first into
+   *  every parameter fits in a register, and `declaredCallArgs` is what converts the first into
    *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
@@ -122,7 +123,7 @@ export type Prototypes = Record<string, FnProto>;
  *  The rule lives here rather than beside either caller because it has two, and they are the two
  *  vocabularies a declaration is written in. `runtime-helpers.ts` states a compiler's own helper
  *  signatures as widths (`__ashrdi3` is `[64, 32]` — two C parameters, three registers), and
- *  `declaredArgWidths` below reads the same widths off a project's C types. One ABI fact, one
+ *  `declaredCallArgs` below reads the same widths off a project's C types. One ABI fact, one
  *  copy of it; a second copy is a rule that can disagree with itself.
  *
  *  NO EVEN-REGISTER ALIGNMENT, and that is a measured agbcc fact rather than an omission: its
@@ -178,40 +179,24 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  pair as a confirmation of anything, and a witness that cannot fail is not a witness.
  *
  *  The COUNT form is the user's word for argument REGISTERS and says so at its declaration, so it
- *  expands to that many words and can never abstain. It is the way past a header this cannot size. */
-export function declaredArgWidths(p: FnProto | undefined): readonly number[] | undefined {
+ *  expands to that many words and can never abstain. It is the way past a header this cannot size.
+ *
+ *  A `double` IS A TARGET FACT. Where it crosses a call in general argument words
+ *  (`TargetDescription.softDoubleWords`) it is 64 bits of words and its index is in `doubles`, so a
+ *  reader can tell it from a `long long`, whose bits are the same words in another order; on an FPU
+ *  target it takes no general word, and the list abstains. A `float` states no layout on either: it
+ *  is one word on a soft-float target, but that word is a float only to a callee whose declaration
+ *  the candidate prints, and `spellableProto` prints no floating type — an undeclared callee is
+ *  handed a `float` promoted to a `double`, which is two words. */
+export function declaredCallArgs(
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'softDoubleWords'>,
+): { widths: readonly number[]; doubles: ReadonlySet<number> } | undefined {
   if (typeof p?.params === 'number') {
-    return Array.from({ length: p.params }, () => 32);
+    return { widths: Array.from({ length: p.params }, () => 32), doubles: new Set() };
   }
   if (!Array.isArray(p?.params)) {
     return undefined;
-  }
-  const widths: number[] = [];
-  for (const t of p.params) {
-    const w = declaredWidth(t);
-    if (w === undefined) {
-      return undefined;
-    }
-    widths.push(w);
-  }
-  return widths;
-}
-
-/** `declaredArgWidths` for a call on a target whose `double` crosses a call in general argument
- *  words (`TargetDescription.softDoubleWords`): there a `double` parameter is 64 bits of words and
- *  its index is in `doubles`, so a reader can tell it from a `long long`, whose bits are the same
- *  words in another order. Everything else abstains exactly as `declaredArgWidths` does.
- *
- *  A `float` STILL STATES NO LAYOUT. It is one word on such a target, but that word is a float only
- *  to a callee whose declaration the candidate prints, and `spellableProto` prints no floating
- *  type: an undeclared callee is handed a `float` promoted to a `double`, which is two words. */
-export function declaredCallArgs(
-  p: FnProto | undefined,
-  softDouble: boolean,
-): { widths: readonly number[]; doubles: ReadonlySet<number> } | undefined {
-  if (!softDouble || !Array.isArray(p?.params)) {
-    const widths = declaredArgWidths(p);
-    return widths && { widths, doubles: new Set() };
   }
   const widths: number[] = [];
   const doubles = new Set<number>();
@@ -219,7 +204,7 @@ export function declaredCallArgs(
     const w = declaredWidth(t);
     if (w !== undefined) {
       widths.push(w);
-    } else if (isDoubleSpelling(t)) {
+    } else if (target.softDoubleWords !== undefined && isDoubleSpelling(t)) {
       doubles.add(i);
       widths.push(64);
     } else {
@@ -308,9 +293,10 @@ export function declaresAggregateReturn(p: FnProto | undefined): boolean {
  *  register at all — compiled with the benchmark's own mwcc, `void g(int, double); void fa(int a,
  *  double b){ g(a,b); }` sets up r3 and nothing else. The one consumer that lays out argument
  *  registers would read a width here as "one register" or "a pair", and on those targets both are
- *  wrong; `long double` is absent for the neighbouring reason, 8 bytes on these ABIs and 10 or 16
+ *  wrong — so `declaredCallArgs` sizes a `double` from the target, and only where it states one;
+ *  `long double` is absent for the neighbouring reason, 8 bytes on these ABIs and 10 or 16
  *  on others with nothing having measured which one a target's compiler means. A spelling this
- *  table does not hold costs a caller nothing it was owed: `declaredArgWidths` abstains and the
+ *  table does not hold costs a caller nothing it was owed: `declaredCallArgs` abstains and the
  *  machine's own guess stands, which is what the declaration replaced.
  *
  *  THE FIXED-WIDTH NAMES ARE FIXED BY THE STANDARD, not by a project, which is the same reason
@@ -346,7 +332,7 @@ const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
  *  "wide": a consumer treats a width it can read as authority and a width it cannot as absence, so
  *  an unrecognized spelling leaves the asm's own inference standing. Its two readers differ in how
  *  far the absence spreads, and that is a property of what they are asking rather than of this
- *  answer: raise/paramwidth.ts abstains for that one parameter, and `declaredArgWidths` abstains
+ *  answer: raise/paramwidth.ts abstains for that one parameter, and `declaredCallArgs` abstains
  *  for the whole list, because one unknown width moves every later argument's home.
  *
  *  A pointer is register-wide whatever it points at, which is the fact the `*` test carries.
@@ -477,7 +463,7 @@ export function spellableType(t: ParamType): boolean {
  *  make that true rather than nearly true. Both were reachable and both killed the whole row:
  *
  *    `void` AS A PARAMETER. `spellableType` admits it for the RETURN, and `(void)` is C's
- *    parameterless list — but `declaredWidth('void')` is no width, so `declaredArgWidths` abstains
+ *    parameterless list — but `declaredWidth('void')` is no width, so `declaredCallArgs` abstains
  *    and the call is emitted at the arg-register GUESS while the declaration beside it says the
  *    callee takes nothing. Measured with the project agbcc: `long long DoThing(void);` over
  *    `DoThing(&DoThing)` is "too many arguments to function `DoThing'", exit 1. The empty list is
@@ -535,7 +521,7 @@ export function spellableProto(
  *  absence of a returned value, and the one consumer here asks how many registers come back with a
  *  value in them. `validatePrototypes` is what keeps the two from contradicting each other.
  *
- *  A DESIGNATED SAFE READER, the way `declaredArgWidths` is one: a frontend indexes `prototypes` by a
+ *  A DESIGNATED SAFE READER, the way `declaredCallArgs` is one: a frontend indexes `prototypes` by a
  *  callee's name, and a callee named `toString` reads a `Function` off `Object.prototype` — which
  *  has no `returns`, so it answers here what an undeclared callee answers. */
 export function declaredReturnWidth(p: FnProto | undefined): number | undefined {
@@ -545,7 +531,7 @@ export function declaredReturnWidth(p: FnProto | undefined): number | undefined 
 
 /** Problems with a HAND-WRITTEN prototype table — empty when it is well formed.
  *
- *  `declaredArgWidths` above falls back to the arg-register heuristic on a `params` it cannot
+ *  `declaredCallArgs` above falls back to the arg-register heuristic on a `params` it cannot
  *  read, which is right when `params` is omitted and silent when it is mistyped: `params: "2"` then
  *  decompiles at a guessed arity, and a misspelled `returnsVoid` does nothing at all. Neither is
  *  visible in the output, so a table that came from outside is checked before it reaches either. */

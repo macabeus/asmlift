@@ -11,6 +11,7 @@
 // and nothing here can change what is emitted.
 import { type Prototypes, declaredCallArgs } from '@asmlift/core/proto';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
+import type { TargetDescription } from '@asmlift/core/target';
 
 /** A label DEFINED in this asm — `foo:` at the start of a line. */
 const LABEL_DEF = /^\s*([A-Za-z_.$][\w.$]*)\s*:/;
@@ -58,10 +59,8 @@ export function calleeNames(asm: string, self?: string): string[] {
 /** Of those callees, the ones whose arity this run had to GUESS: no `--proto` entry this can
  *  convert into argument registers, and no signature in the project's own DWARF either.
  *
- *  `declaredCallArgs` IS THE READER, AND IT IS THE ONE THE FRONTEND ACTS ON — with the same
- *  `softDouble` answer, which is whether the target passes a `double` in general argument words
- *  (`TargetDescription.softDoubleWords`). Three declarations
- *  state nothing it can lay out — `params` omitted, `params` mistyped (`"2"`), and a typed list
+ *  `declaredCallArgs` IS THE READER, AND IT IS THE ONE THE FRONTEND ACTS ON, asked about the same
+ *  target. Three declarations state nothing it can lay out — `params` omitted, `params` mistyped (`"2"`), and a typed list
  *  holding a spelling asmlift cannot size — and all three leave the frontend at its own
  *  arg-register scan. A reader that answered "declared" for the third would stay silent about the
  *  one case where the user HAS a header, believes it was read, and is looking at a guess.
@@ -73,13 +72,13 @@ export function calleeNames(asm: string, self?: string): string[] {
 export function guessedArityCallees(
   asm: string,
   self: string,
+  target: Pick<TargetDescription, 'softDoubleWords'>,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
-  softDouble = false,
 ): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
   return calleeNames(asm, self).filter(
-    (n) => declaredCallArgs(prototypes?.[n], softDouble) === undefined && declared?.get(n)?.signature === undefined,
+    (n) => declaredCallArgs(prototypes?.[n], target) === undefined && declared?.get(n)?.signature === undefined,
   );
 }
 
@@ -87,11 +86,11 @@ export function guessedArityCallees(
 export function guessedArityNote(
   asm: string,
   self: string,
+  target: Pick<TargetDescription, 'softDoubleWords'>,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
-  softDouble = false,
 ): string {
-  const guessed = guessedArityCallees(asm, self, prototypes, symbols, softDouble);
+  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols);
   return guessed.length === 0
     ? ''
     : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +

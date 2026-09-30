@@ -1,9 +1,10 @@
 // validatePrototypes — the guard on a hand-written prototype table (the CLI's `--proto` JSON).
-// What each refusal is FOR: `declaredArgWidths` reads a malformed `params` as an omitted one and
+// What each refusal is FOR: `declaredCallArgs` reads a malformed `params` as an omitted one and
 // falls back to the arg-register heuristic, so anything accepted here decompiles at a guessed arity.
 import { describe, expect, test } from 'vitest';
 
-import { declaredArgWidths, validatePrototypes } from '../src/proto';
+import { declaredCallArgs, validatePrototypes } from '../src/proto';
+import { ARMV4T_AGBCC } from '../src/target';
 
 describe('accepts every form the type allows', () => {
   test.each([
@@ -40,8 +41,8 @@ describe('accepts every form the type allows', () => {
 });
 
 describe('refuses what would otherwise decompile at a guessed arity', () => {
-  test('a stringly-typed count — the case declaredArgWidths silently drops', () => {
-    expect(declaredArgWidths({ params: '2' } as never)).toBeUndefined();
+  test('a stringly-typed count — the case declaredCallArgs silently drops', () => {
+    expect(declaredCallArgs({ params: '2' } as never, ARMV4T_AGBCC)?.widths).toBeUndefined();
     expect(validatePrototypes({ f: { params: '2' } })).toEqual([
       'f: "params" must be a non-negative integer or a list of type strings',
     ]);

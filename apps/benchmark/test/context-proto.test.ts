@@ -3,6 +3,7 @@
 // assembly names before it is published.
 import { validatePrototypes } from '@asmlift/core/proto';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
+import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { gunzipSync } from 'node:zlib';
@@ -15,7 +16,7 @@ const CTX = 'typedef signed long s32; s32 callee(s32 a); s32 other(s32 a, s32 b)
 
 describe('a real row prototype table', () => {
   test('context declarations under the manifest, which wins per symbol, and never the row itself', () => {
-    const p = rowPrototypes({ other: { params: 3 } }, at(CTX), 'c', 'self', undefined);
+    const p = rowPrototypes({ other: { params: 3 } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC);
     expect(p).toEqual({ callee: { returns: 's32', params: ['s32'] }, other: { params: 3 } });
   });
 
@@ -33,21 +34,21 @@ describe('a real row prototype table', () => {
       // a signless narrow parameter spells nothing, so the map states no prototype for it
       [0x108, [code('opaque', [{ size: 2, signed: null }])]],
     ]);
-    expect(rowPrototypes(undefined, at(ctx, 'precedence.i'), 'c', 'self', map as never)).toEqual({
+    expect(rowPrototypes(undefined, at(ctx, 'precedence.i'), 'c', 'self', map as never, ARMV4T_AGBCC)).toEqual({
       callee: { returns: 's32', params: ['s32'] },
       opaque: { returnsVoid: true, params: ['S'] },
     });
   });
 
   test('an empty context leaves the manifest table as it is', () => {
-    expect(rowPrototypes(undefined, at(''), 'c', 'self', undefined)).toBeUndefined();
-    expect(rowPrototypes({ self: { returnsVoid: true } }, at(''), 'c', 'self', undefined)).toEqual({
+    expect(rowPrototypes(undefined, at(''), 'c', 'self', undefined, ARMV4T_AGBCC)).toBeUndefined();
+    expect(rowPrototypes({ self: { returnsVoid: true } }, at(''), 'c', 'self', undefined, ARMV4T_AGBCC)).toEqual({
       self: { returnsVoid: true },
     });
   });
 
   test('publishes only the entries the assembly names, plus the row own', () => {
-    const p = rowPrototypes({ self: { returnsVoid: true } }, at(CTX), 'c', 'self', undefined);
+    const p = rowPrototypes({ self: { returnsVoid: true } }, at(CTX), 'c', 'self', undefined, ARMV4T_AGBCC);
     const asm = 'self:\n  mflr r0\n  bl callee\n  blr\n';
     expect(referencedPrototypes(p, asm, 'self')).toEqual({
       self: { returnsVoid: true },

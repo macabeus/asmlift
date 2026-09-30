@@ -1,4 +1,5 @@
 import type { SymbolMap } from '@asmlift/core/symbols';
+import { ARMV4T_AGBCC, PPC_MWCC } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
 
 import { calleeNames, guessedArityCallees, guessedArityNote } from '../../src/callees';
@@ -56,12 +57,12 @@ glabel func_80012340
 
 describe('guessedArityCallees', () => {
   it('is every callee when nothing declares one', () => {
-    expect(guessedArityCallees(LBG, 'LoadBGTilemapData')).toEqual(['DecompressAlloc', 'thunk_HeapFree']);
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC)).toEqual(['DecompressAlloc', 'thunk_HeapFree']);
   });
 
   it('counts a --proto entry, in both the count and the typed-list form', () => {
     expect(
-      guessedArityCallees(LBG, 'LoadBGTilemapData', {
+      guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, {
         thunk_HeapFree: { params: 1 },
         DecompressAlloc: { params: ['void *', 'u32'] },
       }),
@@ -69,20 +70,19 @@ describe('guessedArityCallees', () => {
   });
 
   it('does NOT count a params the frontend cannot read — the same reader decides both', () => {
-    // `params: "1"` decompiles at a GUESSED arity (`declaredArgWidths` returns undefined), so a
+    // `params: "1"` decompiles at a GUESSED arity (`declaredCallArgs` returns undefined), so a
     // note that called it declared would be the exact false reassurance this line exists to prevent.
-    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', { thunk_HeapFree: { params: '1' } as never })).toEqual([
-      'DecompressAlloc',
-      'thunk_HeapFree',
-    ]);
+    expect(
+      guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, { thunk_HeapFree: { params: '1' } as never }),
+    ).toEqual(['DecompressAlloc', 'thunk_HeapFree']);
   });
 
   // A `double` is two general argument words where the target passes it in them, and no layout
   // where it does not, so the note asks the frontend's question with the target's answer.
   it('counts a double parameter only on a target that passes it in general words', () => {
     const typed = { thunk_HeapFree: { params: ['double'] }, DecompressAlloc: { params: 2 } };
-    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', typed, undefined, true)).toEqual([]);
-    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', typed)).toEqual(['thunk_HeapFree']);
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, typed)).toEqual([]);
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', PPC_MWCC, typed)).toEqual(['thunk_HeapFree']);
   });
 
   it('counts a signature the project ELF declares', () => {
@@ -99,19 +99,22 @@ describe('guessedArityCallees', () => {
         ],
       ],
     ]);
-    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', undefined, symbols)).toEqual(['thunk_HeapFree']);
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, undefined, symbols)).toEqual(['thunk_HeapFree']);
   });
 });
 
 describe('guessedArityNote', () => {
   it('is empty when every arity is declared — a clean run says nothing', () => {
     expect(
-      guessedArityNote(LBG, 'LoadBGTilemapData', { DecompressAlloc: { params: 2 }, thunk_HeapFree: { params: 1 } }),
+      guessedArityNote(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, {
+        DecompressAlloc: { params: 2 },
+        thunk_HeapFree: { params: 1 },
+      }),
     ).toBe('');
   });
 
   it('names the callees and shows the flag that fixes it', () => {
-    const note = guessedArityNote(LBG, 'LoadBGTilemapData', { DecompressAlloc: { params: 2 } });
+    const note = guessedArityNote(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, { DecompressAlloc: { params: 2 } });
     expect(note).toContain('asmlift: [proto] 1 callee(s)');
     expect(note).toContain('thunk_HeapFree');
     expect(note).toContain('--proto');

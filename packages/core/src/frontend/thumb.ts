@@ -3567,8 +3567,9 @@ function liftOnce(
   //
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
   // spell — including `long long`, which is why a pair no longer needs guessing at — and
-  // `undefined` for a project typedef, a by-value struct or a floating type. One such spelling and
-  // `declaredArgWidths` states no layout at all, because the question here is not how wide that
+  // `undefined` for a project typedef, a by-value struct or a floating type. `declaredCallArgs`
+  // sizes a `double` from the target (`TargetDescription.softDoubleWords`); one other such spelling
+  // and it states no layout at all, because the question here is not how wide that
   // parameter is but whether it occupies one argument register or two, and the choice moves every
   // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
   // the call is lifted at the arg-register guess, exactly as a callee the project never declared
@@ -3658,7 +3659,7 @@ function liftOnce(
     const own = known(prototypes);
     const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const declared = declaredCallArgs(proto, target.softDoubleWords !== undefined);
+    const declared = declaredCallArgs(proto, target);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from r0, which holds the hidden pointer
@@ -4627,7 +4628,7 @@ function liftOnce(
           // for the pairing rule and the arity rule to disagree.
           //
           // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
-          // `declaredArgWidths`), so `declared` is null for it and this falls to the guess below —
+          // `declaredCallArgs`), so `declared` is null for it and this falls to the guess below —
           // the same answer the callee would get with no prototype at all.
           const widths = wide?.params ?? declared?.widths ?? null;
           const argc = widths === null ? fallbackArgcHere(bi) : wordsOf(widths);
@@ -4701,7 +4702,7 @@ function liftOnce(
           //
           // SO THE MESSAGE IS ABOUT THE WIDTH AND NOT ABOUT A PROTOTYPE, because a supplied one
           // reaches here too: a typed list holding a spelling `declaredWidth` cannot size states
-          // no layout at all (`proto.ts` `declaredArgWidths`), and a bare COUNT states argument
+          // no layout at all (`proto.ts` `declaredCallArgs`), and a bare COUNT states argument
           // registers rather than widths. Both leave `widths` null with a `--proto` on the command
           // line, and blaming an absent prototype would be false about its own input.
           if (widths === null) {

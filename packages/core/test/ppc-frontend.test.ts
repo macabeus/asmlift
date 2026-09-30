@@ -208,7 +208,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
 
   // The other side of the same rule, and BOTH FRONTENDS CONVERT IT WITH THE SAME FUNCTION
-  // (`proto.ts` `declaredArgWidths`). A spelling `declaredWidth` cannot read is a parameter that
+  // (`proto.ts` `declaredCallArgs`). A spelling `declaredWidth` cannot read is a parameter that
   // occupies one argument register or two, and nothing a declaration holds says which — so the
   // list states no layout, and this call is lifted at the arg-register guess, exactly as a callee
   // the project never declared is. DECLARING MORE MAY NOT DO LESS.
@@ -228,7 +228,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
 
   test('and a prototype answers the question the gap cannot', () => {
-    // `declaredArgWidths` is consulted before the guess, so a declared callee is unaffected by the gap.
+    // `declaredCallArgs` is consulted before the guess, so a declared callee is unaffected by the gap.
     const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
     expect(decompile('proto', `0 <proto>:\n${asm}`, PPC_MWCC, { prototypes: { g: { params: 3 } } }).source).toContain(
       'g(a0, a1, 3)',
