@@ -1364,7 +1364,11 @@ export function auditFrameObjects({
       const temps = returnTemps.get(off);
       if (temps !== undefined) {
         // The callee writes the whole struct and this function names it once, as the call's
-        // destination. A read of a member, or any other use of the address, is not modelled yet.
+        // destination. A read of a member, or any other use of the address, is not modelled yet —
+        // and most such reads never arrive here: the Thumb slot model refuses a word of the temp
+        // read at a constant offset first ("stack pointer used as data"), a copy of the whole
+        // struct into a global (`gS8 = mk8(x)`, which agbcc stages through the temp) included. So
+        // modelling member reads starts with the slot model handing this audit a read return temp.
         const callee = temps[0].attrs.target as string;
         const type = temps[0].results[0].type;
         const spelling = type.kind === 'struct' ? (type.declared ?? `struct ${type.name}`) : typeToString(type);

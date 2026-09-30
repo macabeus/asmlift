@@ -539,8 +539,9 @@ export function protoFactProblems(
           `\`${normParam(decls[0].returnType)}\``,
       );
     }
-    // …and so does a returned struct's LAYOUT, printed as its definition ahead of the prototype
-    // (`proto.ts` `structDefinition`): it has to be the one the compiled text or the `ctx` reads to.
+    // …and so does a returned struct's LAYOUT, printed as its definition ahead of the prototype in
+    // the declarations block (core `declare.ts`): it has to be the one the compiled text or the
+    // `ctx` reads to.
     if (entry.returnLayout !== undefined) {
       const read = [tu, ctx].map((t) => prototypesFromContext(t, language)[callee]?.returnLayout);
       if (!read.some((l) => JSON.stringify(l) === JSON.stringify(entry.returnLayout))) {
