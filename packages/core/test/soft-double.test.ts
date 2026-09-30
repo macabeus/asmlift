@@ -1,6 +1,6 @@
 // agbcc's `double`: no instruction computes on one, so its arithmetic is a libgcc call over the
 // register pairs a long long travels in (`runtime-helpers.ts` AGBCC_RUNTIME_HELPERS), and
-// `raise/widehelpers.ts` `foldFloatHelpers` folds the call to the float op over `double`s.
+// `raise/floathelpers.ts` folds the call to the float op over `double`s.
 //
 // WHAT REFUSES IS EVERY PLACE THE PAIR'S WORD ORDER WOULD SHOW. agbcc puts a double's HIGH word in
 // the lower register (thumb.h:335 FLOAT_WORDS_BIG_ENDIAN), the opposite of a long long, so only a
@@ -13,7 +13,8 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { AGBCC_RUNTIME_HELPERS, isFloatHelper } from '../src/runtime-helpers';
-import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, type TargetDescription, targetFor } from '../src/target';
+import { decompileTraced } from '../src/trace';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-double.s'), 'utf8');
 const lift = (name: string, prototypes: Prototypes = {}) => decompile(name, asm, ARMV4T_AGBCC, { prototypes }).source;
@@ -51,6 +52,17 @@ describe('the double arithmetic helpers are the float ops', () => {
       'double dkeep(double a0, double a1) {\n    double v0;\n    v0 = a0 + a1;\n    g();\n    return v0;\n}\n',
     );
   });
+});
+
+// The fold is its own pass and its own trace stage, ahead of the 64-bit integer helpers: the stage
+// that first shows the doubles is the float one, and the 64-bit one changes nothing after it.
+test('the double parameters appear at the soft-float stage', () => {
+  const { report } = decompileTraced('dadd', asm, targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
+  const first = report.trace.find((s) => s.irDump?.includes('%0: f64'));
+  expect(first?.id).toBe('stage:floathelpers');
+  expect(first?.title).toBe('Soft-float helper lower (bl __adddf3 → float op)');
+  const at = (id: string) => report.trace.find((s) => s.id === id)?.irDump;
+  expect(at('stage:widehelpers') ?? at('stage:floathelpers')).toBe(at('stage:floathelpers'));
 });
 
 describe('what refuses', () => {

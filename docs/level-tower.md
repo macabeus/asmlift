@@ -728,8 +728,8 @@ that already typedefs `f32` are untouched.
 **A double without an FPU.** agbcc has no float instruction at all: its `double` arithmetic is a
 libgcc call (`__adddf3`, `__negdf2` …) over the register pairs a long long travels in, so it enters
 the IR the way a 64-bit integer does — a `concat` of two argument registers into the call, the
-result split back into r0:r1 — and `raise/widehelpers.ts` folds the call to the float op over
-`f64`s, in the pass that folds `__muldi3`. That fold is the only producer of an `f64` from integer
+result split back into r0:r1 — and `raise/floathelpers.ts` folds the call to the float op over
+`f64`s, in its own pass just ahead of the one that folds `__muldi3`. That fold is the only producer of an `f64` from integer
 words, and it is not an op: verify holds that a `concat` builds an integer, so a double may come only
 from a pair of this function's argument slots, fused into one parameter, or from another such
 helper's result. agbcc stores a double high word first (`FLOAT_WORDS_BIG_ENDIAN`), the opposite of a

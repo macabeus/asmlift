@@ -105,8 +105,8 @@ export function isWideHelper(h: RuntimeHelper): boolean {
 /** The op a recognised helper call is rewritten to, STAMPED with the helper it was: `helper` names
  *  the callee. An integer helper's op takes the call's own operands and the SAME result value, so
  *  every use already points at it; a float helper's takes them re-typed as floats
- *  (`raise/widehelpers.ts` `foldFloatHelpers`). `raise/softdiv.ts` and `raise/widehelpers.ts` build
- *  every one through here.
+ *  (`raise/floathelpers.ts`). `raise/softdiv.ts`, `raise/widehelpers.ts` and `raise/floathelpers.ts`
+ *  build every one through here.
  *
  *  The stamp carries the one fact the op's opcode loses: the asm CALLED something here. A
  *  `sdiv` is a `divw` on mwcc and a `bl __divsi3` on agbcc, and an `shr_s` is a shift everywhere
@@ -143,7 +143,7 @@ export function forgetHelperPlacement(op: Op): Op {
  *  of the widths its signature states, carried in integer registers by a soft-float runtime. THE
  *  ONE ANSWER every reader of the table asks, because the two families fold into different IR — an
  *  integer helper into its op over the same values, a float helper into a float op over values
- *  re-typed as floats (`raise/widehelpers.ts` `foldFloatHelpers`) — and a reader that answered by
+ *  re-typed as floats (`raise/floathelpers.ts`) — and a reader that answered by
  *  width alone would fold a single-precision helper into a float op over integers. */
 export function isFloatHelper(h: RuntimeHelper): boolean {
   return h.op !== undefined && FLOAT_OPS.has(h.op);
@@ -167,7 +167,7 @@ export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> 
  *  THE DOUBLE ARITHMETIC IS HERE, AND NOTHING ELSE OF THE SOFT FLOAT. `optabs.c:4022`
  *  `init_floating_libfuncs` names DFmode's add, sub, mul, div (4129-4140) and neg (4155), and
  *  `thumb.md` has no DF pattern but the move, so every one of them is a call; the ABI is a long
- *  long's (thumb.h:632, 655). `raise/widehelpers.ts` folds them to the float ops over a `double`.
+ *  long's (thumb.h:632, 655). `raise/floathelpers.ts` folds them to the float ops over a `double`.
  *
  *  NAMING THEM IS A TRADE, and these five make it: a call the fold refuses declines where an
  *  unnamed helper would publish as a pass-through that matches for free. So a function whose
@@ -196,7 +196,7 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __ashrdi3: { op: 'shr_s', params: [64, 32], returns: 64 },
   __lshrdi3: { op: 'shr_u', params: [64, 32], returns: 64 },
   __negdi2: { op: 'neg', params: [64], returns: 64 },
-  // Double arithmetic, which the same pair carries (`raise/widehelpers.ts` `foldFloatHelpers`).
+  // Double arithmetic, which the same pair carries (`raise/floathelpers.ts`).
   __adddf3: { op: 'fadd', params: [64, 64], returns: 64 },
   __subdf3: { op: 'fsub', params: [64, 64], returns: 64 },
   __muldf3: { op: 'fmul', params: [64, 64], returns: 64 },

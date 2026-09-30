@@ -25,7 +25,8 @@ import type { TargetDescription } from '../target';
  *  the question here, and it is the narrow one: a division the ISA has no instruction for. A helper
  *  that computes on a value wider than a register is a different question — no hardware capability
  *  can make one unnecessary — and `raise/widehelpers.ts` answers it, ungated. So is a float helper
- *  of any width, which computes on floats the ISA has no instruction for either. */
+ *  of any width, which computes on floats the ISA has no instruction for either, and
+ *  `raise/floathelpers.ts` answers it. */
 const softDivisions = (target: TargetDescription): Record<string, RuntimeHelper> =>
   Object.fromEntries(
     Object.entries(target.runtimeHelpers ?? {}).filter(([, h]) => h.op && !isWideHelper(h) && !isFloatHelper(h)),

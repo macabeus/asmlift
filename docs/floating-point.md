@@ -322,7 +322,7 @@ fifth thing §1 named.
 **A double on agbcc is the same type without the file.** agbcc has no FPU and emits every `double`
 operation as a libgcc call over the register pairs a long long uses (`optabs.c:4022`, `thumb.h:632`,
 `:655`), so the arithmetic ones — `__adddf3`, `__subdf3`, `__muldf3`, `__divdf3`, `__negdf2` — fold to
-the float ops over an `f64` in `raise/widehelpers.ts`, and `synthetic:dadd:agbcc` is its row. A double
+the float ops over an `f64` in `raise/floathelpers.ts`, and `synthetic:dadd:agbcc` is its row. A double
 reaches the fold only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its high word in the lower
 register, so a literal, a load, a store or a read of one word refuses (`test/soft-double.test.ts`). The
 compares and the conversions (`__gtdf2`, `__floatsidf` …) and every single-precision helper stay
