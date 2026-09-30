@@ -6550,6 +6550,23 @@ export const SYNTHETIC: SynthSpec[] = [
       'locals are two objects (target.ts `blockTransferCalls`)',
   },
   {
+    sym: 'cpuclear',
+    src:
+      'void CpuSet(const void *src, void *dest, u32 control);\n' +
+      'void cpuclear(void){ volatile u16 a; a = 0; CpuSet((void *)(&a), (void *)0x03001000, 0x01000800); }',
+    features: ['stack-addr'],
+    toolchains: ['agbcc'],
+    ctx: 'void CpuSet(const void *src, void *dest, u32 control); void cpuclear(void);',
+    proto: {
+      CpuSet: { params: ['const void *', 'void *', 'u32'], returnsVoid: true },
+      cpuclear: { params: [], returnsVoid: true },
+    },
+    note:
+      "`CpuFill16(0, dest, size)`, the shape of pokeemerald's `ClearSav1`: sa3's and pokeemerald's fill " +
+      'macros declare the tmp `vu16`, and a plain `u16` spelling of it recompiles with the zero and ' +
+      "the frame address in each other's registers, so the fill source is stamped `volatile`",
+  },
+  {
     sym: 'dmavolsrc',
     src:
       'struct Bg { void *pTiles; void *pTilemap; };\n' +
