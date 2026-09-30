@@ -4636,7 +4636,7 @@ function liftOnce(
               ? wide.returns
               : isRuntimeHelperName(targetSym)
                 ? undefined
-                : declaredReturnWidth(prototypes[targetSym])) === 64;
+                : declaredReturnWidth(prototypes[targetSym], target)) === 64;
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
           // A GUESSED arity reads argument registers to ASK whether the caller set them up, and

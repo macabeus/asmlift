@@ -186,8 +186,8 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  reader can tell it from a `long long`, whose bits are the same words in another order; on a
  *  target that states no such words the list abstains. A `float` states no layout on either: it
  *  is one word on a soft-float target, but that word is a float only to a callee whose declaration
- *  the candidate prints, and `spellableProto` prints no floating type — an undeclared callee is
- *  handed a `float` promoted to a `double`, which is two words. */
+ *  the candidate prints, and `spellableProto` prints no `float` — an undeclared callee is handed a
+ *  `float` promoted to a `double`, which is two words. */
 export function declaredCallArgs(
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'doubleArgWords'>,
@@ -487,6 +487,7 @@ export function spellableType(t: ParamType): boolean {
  *  TYPE, nothing carries it yet, and a project that wants the prototype emitted spells it. */
 export function spellableProto(
   p: FnProto | undefined,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
   returned?: IrType,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
   // A struct returned through memory prints as the headers spell the struct the lift typed its call
@@ -503,8 +504,14 @@ export function spellableProto(
   if (p.params === 0) {
     return { params: [], returns };
   }
-  const printableParam = (t: ParamType): boolean => spellableType(t) && declaredWidth(t) !== undefined;
-  return Array.isArray(p.params) && p.params.every(printableParam) ? { params: p.params, returns } : undefined;
+  // A parameter prints where the frontend lays it out (`declaredCallArgs`): a type this spells, or a
+  // `double` the target gives general words, which as a C keyword needs no typedef.
+  const laid = declaredCallArgs(p, target);
+  return Array.isArray(p.params) &&
+    laid !== undefined &&
+    p.params.every((t, i) => laid.doubles.has(i) || spellableType(t))
+    ? { params: p.params, returns }
+    : undefined;
 }
 
 /** The bit width a declaration states its callee RETURNS, or `undefined` when it states nothing a
@@ -524,8 +531,11 @@ export function spellableProto(
  *  A DESIGNATED SAFE READER, the way `declaredCallArgs` is one: a frontend indexes `prototypes` by a
  *  callee's name, and a callee named `toString` reads a `Function` off `Object.prototype` — which
  *  has no `returns`, so it answers here what an undeclared callee answers. */
-export function declaredReturnWidth(p: FnProto | undefined): number | undefined {
-  const spelled = spellableProto(p);
+export function declaredReturnWidth(
+  p: FnProto | undefined,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
+): number | undefined {
+  const spelled = spellableProto(p, target);
   return spelled === undefined ? undefined : declaredWidth(spelled.returns);
 }
 
@@ -608,7 +618,12 @@ export function validatePrototypes(value: unknown): string[] {
       typeof returns === 'string' && (params === undefined || countOk || listOk)
         ? { ...(params === undefined ? {} : { params: params as number | ParamType[] }), returns }
         : undefined;
-    if (shaped !== undefined && (declaredWidth(shaped.returns!) ?? 0) > 32 && spellableProto(shaped) === undefined) {
+    // A table is checked for no target, so a `double` parameter counts as one no target lays out.
+    if (
+      shaped !== undefined &&
+      (declaredWidth(shaped.returns!) ?? 0) > 32 &&
+      spellableProto(shaped, {}) === undefined
+    ) {
       problems.push(
         `${sym}: "returns": ${JSON.stringify(shaped.returns)} is wider than a register, and the pair it ` +
           'comes home in is read only where the whole prototype can be printed into the candidate — so ' +

@@ -1121,7 +1121,7 @@ export function lift(
           //
           // The other half of the pair already refuses (`r4 is read on a path where a call has
           // destroyed it`), so this is the arm that was left, not a second reading of one gap.
-          const returned = declaredReturnWidth(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          const returned = declaredReturnWidth(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined, target);
           if (returned !== undefined && returned > 32) {
             throw new PpcUnsupportedError(
               `cannot lift '${name}': '${sym}' would hand back one half of a 64-bit value — its return is ` +

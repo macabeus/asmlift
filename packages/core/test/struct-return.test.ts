@@ -57,6 +57,12 @@ const U3_UNDEF =
   '\tldr\tr0, [sp, #0x8]\n\tadd\tsp, sp, #0x10\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n' +
   '\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n';
 
+// `struct Blob64 mkd(double); void ps1(void){ struct Blob64 b = mkd(1.5); }` — the double is r1:r2,
+// high word first, one register up from where it would be without the hidden pointer
+const PS1 =
+  'ps1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tldr\tr2, .L3+0x4\n\tldr\tr1, .L3\n\tmov\tr0, sp\n' +
+  '\tbl\tmkd\n\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.long 0x3ff80000, 0x0\n';
+
 const BLOB64 = { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] };
 const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
 const makeblob = { params: ['const void *'], returns: 'struct Blob64', returnLayout: BLOB64 };
@@ -98,6 +104,17 @@ describe('a callee declared to return a struct through memory', () => {
         expect(decls).toContain(line);
       }
     }
+  });
+
+  // The frontend lays a declared `double` out, so the printed prototype carries it, and with it the
+  // struct the call returns: without either the candidate's own unit cannot compile the lift.
+  test('a callee that takes a double is declared with it', () => {
+    const mkd = { params: ['double'], returns: 'struct Blob64', returnLayout: BLOB64 };
+    const [c] = enumerateCandidates('ps1', PS1, ARMV4T_AGBCC, { prototypes: { mkd } });
+    expect(c.source).toContain('sp0 = mkd(1.5);');
+    const decls = renderDeclarations(c.symbolRefs ?? []);
+    expect(decls).toContain('struct Blob64 { u32 w[16]; };');
+    expect(decls).toContain('struct Blob64 mkd(double);');
   });
 
   // `struct Blob64 mke(enum E e);` — an enum parameter sizes to nothing, and a guessed arity would

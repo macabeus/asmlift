@@ -13,7 +13,7 @@ import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import type { Prototypes } from './proto';
 import { type SymbolInfo, accessSignedness } from './symbols';
-import { C_TYPEDEFS } from './target';
+import { C_TYPEDEFS, type TargetDescription } from './target';
 
 /** Bare-global ACCESS FACTS for name-only map symbols — the width/signedness authority the
  *  declaration synthesis (declare.ts) uses when the map has no shape. The map knows only the
@@ -205,10 +205,12 @@ export function makeRefCollector(ctx: {
   targetNames: ReadonlySet<string>;
   /** the project's prototype table — what lets a CALL TARGET be declared rather than refused */
   prototypes: Prototypes;
+  /** the target the lift ran for, whose ABI says which declared types a printed prototype carries */
+  target: Pick<TargetDescription, 'doubleArgWords'>;
   /** reports a refusal at most once per (name, reason); the caller owns the dedup */
   refuse: (name: string, reason: RefusedDeclarationReason) => void;
 }): (tree: SFn) => { symbolRefs?: SymbolRef[] } {
-  const { declSymbols, accessFacts, mapSymbols, targetNames, prototypes, refuse } = ctx;
+  const { declSymbols, accessFacts, mapSymbols, targetNames, prototypes, target, refuse } = ctx;
   return (tree: SFn): { symbolRefs?: SymbolRef[] } => {
     // The names THIS tree binds. Computed per tree because the emitter mints local names per
     // spelling — but the test below is NOT `bound` alone, and the difference is a wrong answer.
@@ -225,7 +227,7 @@ export function makeRefCollector(ctx: {
         );
       }
     }
-    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, refuse).flatMap((r) => {
+    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, target, refuse).flatMap((r) => {
       if (statics.has(r.name)) {
         return []; // defined in the body — the map's global of the same name is another object
       }

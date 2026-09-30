@@ -153,11 +153,11 @@ describe('a void return, whichever key states it', () => {
 // nothing in the assembly separates those two readings.
 describe('declaredReturnWidth', () => {
   test('a spelled return is read through the same widths a parameter is', () => {
-    expect(declaredReturnWidth({ params: [], returns: 'long long' })).toBe(64);
-    expect(declaredReturnWidth({ params: [], returns: 's64' })).toBe(64);
-    expect(declaredReturnWidth({ params: [], returns: 'int' })).toBe(32);
-    expect(declaredReturnWidth({ params: [], returns: 'void *' })).toBe(32);
-    expect(declaredReturnWidth({ params: ['u8', 's32'], returns: 'u8' })).toBe(8);
+    expect(declaredReturnWidth({ params: [], returns: 'long long' }, ARMV4T_AGBCC)).toBe(64);
+    expect(declaredReturnWidth({ params: [], returns: 's64' }, ARMV4T_AGBCC)).toBe(64);
+    expect(declaredReturnWidth({ params: [], returns: 'int' }, ARMV4T_AGBCC)).toBe(32);
+    expect(declaredReturnWidth({ params: [], returns: 'void *' }, ARMV4T_AGBCC)).toBe(32);
+    expect(declaredReturnWidth({ params: ['u8', 's32'], returns: 'u8' }, ARMV4T_AGBCC)).toBe(8);
   });
 
   // SILENCE IS SILENCE, and the ways to be silent must not be several answers. A frontend asks
@@ -170,7 +170,7 @@ describe('declaredReturnWidth', () => {
     ['a struct', { params: [], returns: 'struct Vec' }],
     ['void — an absence of a value, not a width of zero', { params: [], returns: 'void' }],
   ])('%s answers undefined', (_label, proto) => {
-    expect(declaredReturnWidth(proto)).toBeUndefined();
+    expect(declaredReturnWidth(proto, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // A WIDTH THIS READS AND CANNOT GET DECLARED IS NOT A WIDTH IT MAY REPORT, because the two are
@@ -185,14 +185,17 @@ describe('declaredReturnWidth', () => {
     ['a return this can size but not print', { params: [], returns: 'int64_t' }],
   ])('%s is silence even though the width is readable', (_label, proto) => {
     expect(declaredWidth(String(proto.returns))).toBe(64);
-    expect(declaredReturnWidth(proto)).toBeUndefined();
+    expect(declaredReturnWidth(proto, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // …and the zero-argument COUNT form is the one count that CAN be printed: `params: 0` and
   // `params: []` are the same `(void)`.
   test('a zero-argument count is the same declaration as an empty list', () => {
-    expect(declaredReturnWidth({ params: 0, returns: 'long long' })).toBe(64);
-    expect(spellableProto({ params: 0, returns: 'long long' })).toEqual({ params: [], returns: 'long long' });
+    expect(declaredReturnWidth({ params: 0, returns: 'long long' }, ARMV4T_AGBCC)).toBe(64);
+    expect(spellableProto({ params: 0, returns: 'long long' }, ARMV4T_AGBCC)).toEqual({
+      params: [],
+      returns: 'long long',
+    });
   });
 
   // A struct return prints only as the struct a lifted call fills (`returned`, the IR type the lift
@@ -200,25 +203,25 @@ describe('declaredReturnWidth', () => {
   test('a struct return prints as the struct its call fills, or not at all', () => {
     const p = { params: ['s32'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };
     const returned = T.struct('Blob', [{ off: 0, type: T.array(T.u(32), 16), name: 'w' }], 64);
-    expect(spellableProto(p, returned)).toEqual({ params: ['s32'], returns: 'struct Blob' });
-    expect(spellableProto(p)).toBeUndefined();
-    expect(spellableProto({ params: [], returns: 'struct S' })).toBeUndefined();
-    expect(declaredReturnWidth(p)).toBeUndefined();
+    expect(spellableProto(p, ARMV4T_AGBCC, returned)).toEqual({ params: ['s32'], returns: 'struct Blob' });
+    expect(spellableProto(p, ARMV4T_AGBCC)).toBeUndefined();
+    expect(spellableProto({ params: [], returns: 'struct S' }, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredReturnWidth(p, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // `returnsVoid` IS NOT CONSULTED. It is the other return key and it answers a different
   // question; reading it here would have to invent a width for a function that returns no value.
   test('returnsVoid is not a width', () => {
-    expect(declaredReturnWidth({ params: [], returnsVoid: true })).toBeUndefined();
-    expect(declaredReturnWidth({ params: [], returnsVoid: false })).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returnsVoid: true }, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returnsVoid: false }, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // THE SAME SAFE-READER CONTRACT `declaredCallArgs` HAS: a frontend indexes `prototypes` by a callee's
   // name, so a callee named `toString` reads a `Function` off `Object.prototype`.
   test('an entry that is not an FnProto answers as an undeclared callee does', () => {
     const table: Record<string, unknown> = {};
-    expect(declaredReturnWidth(table['toString'] as never)).toBeUndefined();
-    expect(declaredReturnWidth(null as never)).toBeUndefined();
+    expect(declaredReturnWidth(table['toString'] as never, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredReturnWidth(null as never, ARMV4T_AGBCC)).toBeUndefined();
   });
 });
 
@@ -355,6 +358,15 @@ describe('declaredCallArgs on a double', () => {
     const mixed = declaredCallArgs({ params: ['s32', 'const double', 'long long'] }, soft)!;
     expect(mixed.widths).toEqual([32, 64, 64]);
     expect([...mixed.doubles]).toEqual([1]);
+  });
+
+  // What the frontend lays out is what a candidate may declare, so the printer asks the same reader.
+  test('a double the target lays out is printed, and one it does not is not', () => {
+    const g = { params: ['s32', 'double'], returns: 'int' };
+    expect(spellableProto(g, soft)).toEqual({ params: ['s32', 'double'], returns: 'int' });
+    expect(spellableProto(g, PPC_MWCC)).toBeUndefined();
+    expect(declaredReturnWidth({ ...g, returns: 'long long' }, soft)).toBe(64);
+    expect(declaredReturnWidth({ ...g, returns: 'long long' }, PPC_MWCC)).toBeUndefined();
   });
 
   test('a target whose doubles take no general word abstains', () => {
