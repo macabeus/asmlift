@@ -20,7 +20,7 @@
   "dependencies": {
     "@asmlift/core": "workspace:^",
     "@gba-kit/debug-info": "^0.5.0",
-    "@match-kit/scoring": "link:../../../matchkit/packages/scoring",
+    "@match-kit/scoring": "0.1.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
