@@ -4,7 +4,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { declaredArgWidths, declaredWidth } from '../src/proto';
-import { prototypesFromContext } from '../src/proto-context';
+import { prototypesFromContext, withContextPrototypes } from '../src/proto-context';
 
 // the shape of the CARD block in Pikmin's context: its typedefs and an `extern "C"` block
 const PIKMIN_CARD = `
@@ -204,6 +204,40 @@ describe('prototypes from a declaration context', () => {
   test('C++ default arguments and comments do not reach a spelling', () => {
     const p = prototypesFromContext('/* a */ int f(int a = 3, /* b */ int b = 4); // c', 'c++');
     expect(p.f).toEqual({ returns: 'int', params: ['int', 'int'] });
+  });
+});
+
+// The struct return is what says argument 0 may be a hidden pointer; a source that states the
+// parameters better must not take it away with the rest of the entry.
+describe('a context struct return under a stated or mapped signature', () => {
+  const ctx = prototypesFromContext(
+    'enum E { E0, E1 }; struct Blob64 { u32 w[16]; }; struct Blob64 makeblob(const void *); struct Blob64 mke(enum E e);',
+    'c',
+  );
+  const blob = { returns: 'struct Blob64', returnLayout: ctx.makeblob!.returnLayout };
+
+  test('a stated entry that states only the arity keeps it', () => {
+    const p = withContextPrototypes({ makeblob: { params: ['const void *'] } }, ctx, 'f', undefined);
+    expect(p.makeblob).toEqual({ params: ['const void *'], ...blob });
+    // …and one that states a return of its own is taken whole
+    const own = withContextPrototypes({ makeblob: { params: 1, returns: 's32' } }, ctx, 'f', undefined);
+    expect(own.makeblob).toEqual({ params: 1, returns: 's32' });
+  });
+
+  test('an entry the symbol map sizes better keeps it', () => {
+    const symbols = new Map([
+      [
+        0x1000,
+        [
+          {
+            name: 'mke',
+            kind: 'code' as const,
+            signature: { returns: { size: 64, signed: null }, params: [{ size: 4, signed: null }] },
+          },
+        ],
+      ],
+    ]);
+    expect(withContextPrototypes(undefined, ctx, 'f', symbols).mke).toEqual({ params: ['s32'], ...blob });
   });
 });
 

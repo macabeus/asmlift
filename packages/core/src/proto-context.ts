@@ -1,5 +1,11 @@
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
-import { declaredArgWidths, declaredWidth, symbolPrototype, validatePrototypes } from './proto';
+import {
+  declaredArgWidths,
+  declaredWidth,
+  declaresAggregateReturn,
+  symbolPrototype,
+  validatePrototypes,
+} from './proto';
 import type { SymbolMap } from './symbols';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
@@ -557,7 +563,11 @@ function readSignature(
  *  prototypes, which win per name — over the context's declarations less those the symbol map
  *  states better (`contextPrototypesUnder`). `own`'s declaration is left out, as the map's is
  *  (`asIfUndecompiled`): a header's signature for the function being decompiled is that kind of
- *  fact, and only what the caller states about it is kept. */
+ *  fact, and only what the caller states about it is kept.
+ *
+ *  A stated entry that says nothing of the return keeps a struct return the context states: it is
+ *  what says argument 0 may be a hidden pointer, and an entry stating only the arity would
+ *  otherwise hand that pointer to the call as its first argument. */
 export function withContextPrototypes(
   stated: Prototypes | undefined,
   context: Prototypes,
@@ -565,7 +575,25 @@ export function withContextPrototypes(
   symbols: SymbolMap | undefined,
 ): Prototypes {
   const { [own]: _own, ...callees } = contextPrototypesUnder(context, symbols);
-  return { ...callees, ...stated };
+  const out: Prototypes = { ...callees, ...stated };
+  for (const [name, p] of Object.entries(stated ?? {})) {
+    const heard = Object.hasOwn(callees, name) ? callees[name] : undefined;
+    if (p && p.returns === undefined && p.returnsVoid === undefined && p.returnLayout === undefined) {
+      out[name] = { ...p, ...aggregateReturnOf(heard) };
+    }
+  }
+  return out;
+}
+
+/** The keys that state `p`'s struct or union return, or none where it states no such return. */
+function aggregateReturnOf(p: FnProto | undefined): Pick<FnProto, 'returns' | 'returnLayout'> {
+  if (p === undefined || !declaresAggregateReturn(p)) {
+    return {};
+  }
+  return {
+    ...(p.returns !== undefined ? { returns: p.returns } : {}),
+    ...(p.returnLayout !== undefined ? { returnLayout: p.returnLayout } : {}),
+  };
 }
 
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
@@ -581,15 +609,26 @@ function contextPrototypesUnder(context: Prototypes, symbols: SymbolMap | undefi
   if (symbols === undefined) {
     return context;
   }
-  const mapped = new Set<string>();
+  const mapped = new Map<string, FnProto>();
   for (const infos of symbols.values()) {
     for (const info of infos) {
-      if (symbolPrototype(info)?.params !== undefined) {
-        mapped.add(info.name);
+      const signed = symbolPrototype(info);
+      if (signed?.params !== undefined && !mapped.has(info.name)) {
+        mapped.set(info.name, signed);
       }
     }
   }
+  // An entry that yields keeps a struct return it states, over the map's parameters: DWARF names no
+  // struct, so the map states one only by its size (`symbolPrototype`), and never its members.
   return Object.fromEntries(
-    Object.entries(context).filter(([name, p]) => declaredArgWidths(p) !== undefined || !mapped.has(name)),
+    Object.entries(context).flatMap(([name, p]): [string, FnProto][] => {
+      const signed = mapped.get(name);
+      if (declaredArgWidths(p) !== undefined || signed === undefined) {
+        return [[name, p]];
+      }
+      return declaresAggregateReturn(p) && signed.returnsVoid !== true
+        ? [[name, { ...signed, ...aggregateReturnOf(p) }]]
+        : [];
+    }),
   );
 }
