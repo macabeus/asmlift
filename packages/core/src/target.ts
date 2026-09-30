@@ -597,8 +597,9 @@ export interface TargetDescription {
     // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
     // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
     // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
-    // and `enum {B0 = 300}` are both 4. ABSENT ⇒ unmeasured, and an aggregate with an enum member
-    // is not sized.
+    // and `enum {B0 = 300}` are both 4. `targetFor` drops it under `-fshort-enums`, and an enum
+    // declared with an attribute (`packed`) is not sized (proto-context.ts). ABSENT ⇒ unmeasured,
+    // and an aggregate with an enum member is not sized.
     enumBytes?: number;
     // How a struct's bitfields are placed (`aggregate.ts`). 'contiguous' — each at the bit after the
     // one before, straddling a byte or a word of its declared type, with the next member that is not
@@ -1130,7 +1131,7 @@ export interface ResolvedTarget {
   toolchain: ToolchainId;
   /** the flags the function's target and every candidate compile with */
   cflags: readonly string[];
-  /** the description asmlift decompiles against: the toolchain's, at every flag set */
+  /** the description asmlift decompiles against: the toolchain's, less a fact a flag changes */
   target: TargetDescription;
   /** what the flags make the compiler do */
   profile: CodegenProfile;
@@ -1142,7 +1143,14 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   const t: ToolchainTarget = TOOLCHAIN_TARGETS[toolchain];
   const profile = parseFlags(t.family, cflags);
   const cpp = dialectOf(profile.slots.lang) === 'c++';
-  return { toolchain, cflags, target: cpp ? { ...t.description, dialect: 'c++' } : t.description, profile };
+  let target: TargetDescription = cpp ? { ...t.description, dialect: 'c++' } : t.description;
+  if (profile.slots['-fshort-enums'] === 'on') {
+    // every enum is the smallest integer its values fit (c-decl.c:6064-6065, :6123; compiled,
+    // `sizeof(struct {enum {K0, K1} k[2];})` is 4 under the flag and 8 without), so none is enumBytes
+    const { enumBytes: _flagged, ...behaviors } = target.compilerBehaviors;
+    target = { ...target, compilerBehaviors: behaviors };
+  }
+  return { toolchain, cflags, target, profile };
 }
 
 /** Build the structurer's options for a target: the function's own `returnsVoid` plus every

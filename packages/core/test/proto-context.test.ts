@@ -254,6 +254,24 @@ describe('prototypes from a declaration context', () => {
     expect(p.mkp).toEqual({ returns: 'const struct R2 *', params: ['s32'] });
   });
 
+  // agbcc honours `packed` and `aligned` (c-common.c:446; compiled, a packed two-member enum array is
+  // 4 bytes, not 8, and `struct {u16 x;} __attribute__((aligned(8)))` is 8 and comes back in memory)
+  test('an attribute on a body, a member or an enum leaves the layout unread', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef unsigned short u16; typedef int s32;
+       enum __attribute__((packed)) K { KA, KB }; struct P { enum K k[2]; }; struct P mkp(s32 *);
+       enum K2 { K2A } __attribute__((packed)); typedef enum K2 K2T; struct P2 { K2T k; }; struct P2 mkp2(s32);
+       struct A { u16 x; } __attribute__((aligned(8))); struct A mka(s32);
+       struct M { u32 a; u32 b __attribute__((aligned(8))); }; struct M mkm(s32);
+       enum E { E0 }; struct PE { enum E e; }; struct PE mkpe(s32);`,
+      'c',
+    );
+    for (const name of ['mkp', 'mkp2', 'mka', 'mkm']) {
+      expect(p[name]?.returnLayout, name).toEqual({ kind: 'struct' });
+    }
+    expect(p.mkpe?.returnLayout?.members).toEqual([{ name: 'e', type: 'enum E' }]);
+  });
+
   // each member points at the struct itself: laying out every pointee on every path is 9^8 walks
   test('a struct whose members point back at it is laid out once per depth', () => {
     const ptrs = Array.from({ length: 8 }, (_, i) => `struct Node *p${i};`).join(' ');

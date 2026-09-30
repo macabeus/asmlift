@@ -305,17 +305,29 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   const typedefs = new Map<string, string>();
   // struct and union bodies: by `struct Tag` spelling, and by a typedef name bound to a body, which
   // resolves to itself and spells no keyword — as C++ spells every tag, a declared one with no body
-  // included
-  const tagged = new Map<string, string>();
+  // included. A body whose statement carries an `__attribute__` (`packed`, `aligned(8)`) has none
+  // here: this reads no attribute, and those move members and size the whole.
+  const tagged = new Map<string, string | undefined>();
   const named = new Map<string, { kind: AggregateLayout['kind']; body?: string }>();
   // a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own
   const unspelledPointers = new Set<string>();
   // a typedef name bound to an enum body
   const enums = new Set<string>();
+  // an `enum Tag` whose declaration carries an attribute: `packed` makes it the smallest integer
+  // its values fit (agbcc c-common.c:446, c-decl.c:6123), which the target's enumBytes is not
+  const attributedEnums = new Set<string>();
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
+    const attributed = /__attribute__/.test(s.text);
     if (def) {
-      tagged.set(`${def[1]} ${def[2]}`, s.bodies[0]);
+      tagged.set(`${def[1]} ${def[2]}`, attributed ? undefined : s.bodies[0]);
+    }
+    const enumTag =
+      /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute__\s*\(\(.*?\)\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
+        s.text,
+      );
+    if (enumTag && attributed) {
+      attributedEnums.add(`enum ${enumTag[1]}`);
     }
     // In C++ a class is a struct too. Its body (access labels, member functions), or one after a
     // base clause, whose members start past the base's, is none this lays out: the kind is known and
@@ -328,7 +340,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
           ) ?? /^(struct|union|class)\s+([A-Za-z_]\w*)$/.exec(s.text))
         : null;
     if (cpp && named.get(cpp[2])?.body === undefined) {
-      const layable = def !== null && cpp[1] !== 'class' && cpp[3] === undefined;
+      const layable = def !== null && cpp[1] !== 'class' && cpp[3] === undefined && !attributed;
       named.set(cpp[2], { kind: cpp[1] === 'union' ? 'union' : 'struct', body: layable ? s.bodies[0] : undefined });
     }
     if (/^typedef\b/.test(s.text)) {
@@ -373,13 +385,17 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   };
   // A body's members, or undefined when one of them is a type this cannot lay out — a project
   // typedef that resolves to nothing sized, a nested aggregate with no body here, a flexible extent
-  // or one that is not a constant expression. Bounded in depth, since a body may name its own tag.
+  // or one that is not a constant expression — or carries an attribute, which may place it anywhere.
+  // Bounded in depth, since a body may name its own tag.
   const readMembers = (body: string, depth: number): AggregateMember[] | undefined => {
     if (depth > 8) {
       return undefined;
     }
     const out: AggregateMember[] = [];
     for (const decl of splitMembers(body)) {
+      if (/__attribute__/.test(decl)) {
+        return undefined;
+      }
       let type: ParamType | AggregateLayout;
       let rest: string;
       const inline = /^(struct|union)\s*(?:[A-Za-z_]\w*)?\s*\{/.exec(decl);
@@ -401,6 +417,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
           type = base;
         } else if (unspelledPointers.has(base)) {
           type = 'void *';
+        } else if (attributedEnums.has(base)) {
+          return undefined;
         } else if (/^enum [A-Za-z_]\w*$/.test(base) || enums.has(base)) {
           // an enum, which the target sizes whatever it is called: spelled `enum` and its name
           type = enums.has(base) ? `enum ${base}` : base;
@@ -500,14 +518,7 @@ function splitMembers(body: string): string[] {
     }
   }
   out.push(body.slice(start));
-  return out
-    .map((d) =>
-      d
-        .replace(/__attribute__\s*\(\(.*?\)\)/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim(),
-    )
-    .filter((d) => d !== '');
+  return out.map((d) => d.replace(/\s+/g, ' ').trim()).filter((d) => d !== '');
 }
 
 /** The index of the `}` closing the `{` at `open`, or -1. */
