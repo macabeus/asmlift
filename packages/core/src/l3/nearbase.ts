@@ -11,11 +11,13 @@
 //
 // SCOPE (decline over approximate): cluster MEMBERSHIP comes from CONST deref bases only (a
 // struct-pointer cast base and everything inside a dot-form field subtree keep their spelling —
-// their stride is the struct's, not a byte's); a cluster needs at least two DISTINCT addresses
+// their stride is the struct's, not a byte's — and a `volatile`-qualified base keeps its spelling
+// and stays out of every cluster, since a `u8 *` base local would read and write the device
+// plainly); a cluster needs at least two DISTINCT addresses
 // within the target's declared derivation reach of its lowest (TargetDescription nearBaseSpan —
 // beyond it the derive costs more than the pool word it saves); every access the walk visits
-// rewrites, so a cluster splits only across the field-subtree and struct-pointer-cast
-// boundaries. A member basecse
+// rewrites, so a cluster splits only across the field-subtree, struct-pointer-cast and
+// `volatile` boundaries. A member basecse
 // already hoisted arrives as a `var` base and is invisible here — the reused-base and
 // neighbor-base spellings stay separate candidates. Once a cluster HAS formed, a bare const
 // VALUE inside its window re-spells too, as `(s32)(b + off)` — the address of a cell handed to
@@ -24,7 +26,7 @@
 // only coincidentally lands in the window, which is the stated cost of the variation (the `s32` cast
 // assumes addresses below 2^31, true of every target that declares nearBaseSpan today). Declines
 // (null) when no cluster forms.
-import { baseConst } from './address';
+import { baseConst, qualifiedBase } from './address';
 import type { Expr, SFn } from './ast';
 import { mapExprChildren, mapStmtExprs } from './ast';
 import { type BaseInit, nameAllocator, placeBaseLocals } from './hoist';
@@ -46,7 +48,7 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
       return e; // rewrite refuses these subtrees, so collecting under them would seed a cluster
     }
     const m = mapExprChildren(e, collect);
-    if (m.k === 'index') {
+    if (m.k === 'index' && !qualifiedBase(m.base)) {
       const c = baseConst(m.base);
       if (c !== null) {
         addrs.add(c);
@@ -91,6 +93,9 @@ export function nearBaseClusters(sfn: SFn, span: number): SFn | null {
   const rewrite = (e: Expr): Expr => {
     if (e.k === 'field') {
       return e;
+    }
+    if (e.k === 'index' && qualifiedBase(e.base)) {
+      return { ...e, idx: rewrite(e.idx) }; // the whole cast chain stays, so the access stays volatile
     }
     if (e.k === 'index') {
       const c = baseConst(e.base);

@@ -286,12 +286,12 @@ describe('a pattern keyed on an English word claims sentences that are not about
     // …and its recovered-dispatch refusal says BOTH "jump-table" and "not a block boundary", so
     // the two classes have to be told apart by phrase, not by which one is listed first.
     ["lift: cannot lift 'f': jump-table target is not a block boundary", 'switch-shapes'],
-    // `branch-form` must not reach the bare words `indirect` and `computed`. This is an
-    // address-taken-local refusal and a published marker of `sa3:ProcessOamBuffers`.
+    // `branch-form` must not reach the bare words `indirect` and `computed`. This is a loop-naming
+    // refusal `structure/structure.ts` throws, and it names no control transfer.
     [
-      "lift: cannot lift 'ProcessOamBuffers': stack pointer used as data — the address of a stack local is " +
-        'computed (`add r0, sp, #0x4`) — only a plain `mov rD, sp` capture is modelled',
-      'address-taken-local',
+      "structure: cannot structure 'f': a pre-update exit copy would rebuild a computed value inside a loop " +
+        "nested in another loop's post-loop naming",
+      'other',
     ],
     // `cross-block-flags` must not reach the bare headline `no reaching compare: `. Thumb
     // throws that headline for THREE subjects, and only one of them is an edge: the shapes its
@@ -981,7 +981,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 4],
     ['outgoing-stack-args > stack-frames', 2],
-    ['address-taken-local > stack-frames', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
@@ -1040,8 +1039,7 @@ describe('a class may not outlive the message it classifies', () => {
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
   const SPELT_BY: [key: string, phrase: string, file: string][] = [
-    ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/thumb.ts'],
-    ['address-taken-local', 'address of a stack local is', 'packages/core/src/frontend/thumb.ts'],
+    ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/frame-objects.ts'],
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/ppc.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
@@ -1161,8 +1159,8 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 27],
-    ['structure/structure.ts', 19],
+    ['frontend/thumb.ts', 28],
+    ['structure/structure.ts', 20],
     ['frontend/mips.ts', 9],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
@@ -1171,7 +1169,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/ssa.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 80;
+  const RESIDUE_TOTAL = 82;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

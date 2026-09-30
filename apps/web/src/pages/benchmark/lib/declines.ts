@@ -26,24 +26,26 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 155 distinct decline messages (the texts reached by
+// `packages/core/src` throws 157 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 80 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 82 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       27  ARM-mode function, raw data in the code stream, a base alignment the
-//                               input does not determine, pc used as a data base, `stm` with its own
-//                               base in the list, control falling off the end, a register spelled in
-//                               upper case, a `bl` whose target this asm defines as a data label, and
+//   frontend/thumb.ts       28  ARM-mode function, raw data in the code stream, a base alignment the
+//                               input does not determine, pc used as a data base, an operand that
+//                               names no register read as one, `stm` with its own base in the list,
+//                               control falling off the end, a register spelled in upper case, a
+//                               `bl` whose target this asm defines as a data label, and
 //                               the reaching-compare throw whose reason is interpolated
 //                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)
-//   structure/structure.ts  19  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  20  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
-//                               behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
+//                               behind a `&&`/`||`, a pinned device access reached through a pointer
+//                               with no type to qualify, the pass-through of a recovered switch's own `why`,
 //                               an access whose byte offset is not a whole number of its own elements
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
@@ -110,21 +112,20 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   // classes first — the classifier is first-match.
   {
     // THE LABEL NAMES A DISJUNCTION BECAUSE TWO OF THE THREE PRODUCERS DO. `frontend/thumb.ts`
-    // decides the cause at the throw and spells it ("address-taken stack local", "the address of a
-    // stack local is computed"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
+    // and the frame-object audit it calls (`frontend/frame-objects.ts`) decide the cause at the
+    // throw and spell it ("address-taken stack local"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
-    // disjunction is 17 of the 20 rows, so a pattern requiring the word only Thumb writes claims
-    // 3 of them and leaves the rest to a class whose label reads "other sp uses".
+    // disjunction is 17 of the 19 rows, so a pattern requiring the word only Thumb writes claims
+    // 2 of them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
     // `apps/web/test/declines.test.ts` ("the disjunction share this paragraph names is the share
     // the artifact has"), which reads this comment's own text back and fails on either number.
     key: 'address-taken-local',
     label: 'Address-taken stack locals (&local escapes, or frame arithmetic)',
-    pattern:
-      /address-taken stack local|address of a stack local is (taken|computed)|address-taken local \/ frame arithmetic/,
+    pattern: /address-taken stack local|address-taken local \/ frame arithmetic/,
   },
   {
     key: 'outgoing-stack-args',
@@ -590,8 +591,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // NOT a catch-all, and it may not become one. A pattern here reading `indirect|computed` as
     // bare lowercase words is a SECOND catch-all sitting ABOVE `other` — and `other` is the only
     // bucket the anchor watches, so whatever it absorbs goes unnamed for ever, control flow or not:
-    // `sa3:ProcessOamBuffers` declines because "the address of a stack local is computed", and a
-    // loop-naming refusal in `structure/structure.ts` says "rebuild a computed value inside a
+    // a loop-naming refusal in `structure/structure.ts` says "rebuild a computed value inside a
     // loop". So the pattern carries one producer phrase — the MIPS and PPC frontends' denylist for
     // a branch mnemonic no frontend models — and the label names that and nothing else. Everything
     // a wider pattern would swallow falls to `other`, where the residue list names it.

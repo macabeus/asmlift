@@ -942,13 +942,32 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // The three fixtures differ by one hex digit — the offset from the DMA base — which is what makes
   // this a test of the direction rather than of the address.
   describe('an escape that the hardware only READS through keeps the undef', () => {
-    // one object at [sp,#0] escaping to DMA3<reg>, and an `undef` at [sp,#4] the switch never writes
-    const escapeTo = (regOff: string) =>
+    // one object at [sp,#0] escaping to DMA3<reg>, and an `undef` at [sp,#4] the switch never
+    // writes. The control word is `DMA_SRC_FIXED`, so the device reads [sp,#0) alone.
+    const escapeTo = (regOff: string, control = '0x81000001') =>
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tldr\tr2, .L9\n' +
-      `\tstr\tr4, [r2, #${regOff}]\n` +
+      `\tstr\tr4, [r2, #${regOff}]\n\tldr\tr0, .L9+4\n\tstr\tr0, [r2, #0x8]\n` +
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr3, [sp, #4]\n\tadd\tr0, r1, r3\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
-      '.L9:\n\t.word\t0x040000D4\n';
+      `.L9:\n\t.word\t0x040000D4\n\t.word\t${control}\n`;
+
+    // …and it is the CONTROL WORD that keeps [sp,#4] out of the device's reach: an incrementing
+    // source reads upward from the object.
+    test('an incrementing source may read the slot above the object', () => {
+      expect(() => decompile('f', escapeTo('0x00', '0x80000001'), ARMV4T_AGBCC)).toThrow(
+        'the captured address at [sp,#0) is handed to a device that reads through it, which may read the slot at [sp,#4]',
+      );
+    });
+
+    // …and a control word this function never states bounds nothing at all, so the whole local
+    // area is kept as ONE object in memory: the slot at [sp,#4] is a member the device may read,
+    // and its store stays a store.
+    test('a control word that is not a literal keeps the whole local area as one object', () => {
+      const src = decompile('f', escapeTo('0x00', 'gCtl'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('if (v0 != 0) ((s32 *)sp0)[1] = v0;');
+      expect(src).toContain('return v0 + ((s32 *)sp0)[1];');
+    });
 
     test('DMA3SAD (+0) — the hardware reads the object, so the undef stands', () => {
       const src = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC).source;
@@ -956,8 +975,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // …but nothing can write [sp,#4], so its merge still has an undefined arm: `v0` is that
       // uninitialised local, declared and assigned only where the store runs.
       expect(src).toBe(
-        's32 f(void) {\n    s32 v0;\n    volatile s32 sp0;\n    *(s32 *)67109076 = &sp0;\n' +
-          '    if (sp0 != 0) v0 = sp0;\n    return sp0 + v0;\n}\n',
+        's32 f(void) {\n    s32 v0;\n    volatile s32 sp0;\n    s32 *p0;\n    p0 = (s32 *)67109076;\n' +
+          '    *p0 = &sp0;\n    p0[2] = 2164260865;\n    if (sp0 != 0) v0 = sp0;\n    return sp0 + v0;\n}\n',
       );
     });
 
@@ -971,18 +990,120 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // A SECOND OBJECT still refuses, and this rule is NOT narrowed with the other one. Its argument
-    // is about layout, which is symmetric: a device reading past the object it was given is as
-    // wrong as a callee writing past it. `DmaCopy` of two halfwords off `&sp0` transfers `[sp,#2]`
-    // too — and the store to that second object is DELETED, since only the escaping one is
-    // `volatile`, so the emitted source transfers whatever follows `sp0` instead.
-    test('a second object still refuses, even when the escape only reads', () => {
+    // A SECOND OBJECT a device may read is not declared as a second local. Two locals have no
+    // guaranteed adjacency, so a device reading past the one it was given reads whatever the
+    // recompile put there. Where nothing bounds the read — here no control word is written at all —
+    // both are members of ONE object in memory, and each store is a store into it.
+    test('a second object an unbounded read reaches is a member of one object', () => {
       const twoObjects =
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr4, sp\n\tstrh\tr0, [r4]\n' +
         '\tmov\tr5, sp\n\tstrh\tr1, [r5, #0x2]\n\tldr\tr2, .L9\n\tstr\tr4, [r2, #0x0]\n' +
         '\tstr\tr3, [r2, #0x4]\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
         '.L9:\n\t.word\t0x040000D4\n';
-      expect(() => decompile('f', twoObjects, ARMV4T_AGBCC)).toThrow(/including another object/);
+      const src = decompile('f', twoObjects, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[16];');
+      expect(src).toContain('p0 = (u16 *)sp0;');
+      expect(src).toContain('*p0 = a0;');
+      expect(src).toContain('p0[1] = a1;');
+    });
+
+    // …and the object may start at [sp,#0] with its first member a word the slot model keyed, the
+    // overlap the one object dissolves. Verbatim agbcc: `struct Q { u32 a, b, c; } s; s.a = x;
+    // s.b = y; s.c = z; REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst; REG_DMA3CNT = 0x84000001;
+    // *gCnt = 0x84000003;` — its recompile is instruction-identical, all three member stores kept.
+    test('an object at the frame base over a keyed slot is still one object', () => {
+      const atBase =
+        'u1:\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n' +
+        '\tldr\tr0, .L9\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tldr\tr1, .L9+0x4\n\tldr\tr0, .L9+0x8\n\tstr\tr0, [r1]\n' +
+        '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L9+0xc\n\tstr\tr0, [r1]\n\tldr\tr0, .L9+0x10\n\tldr\tr1, [r0]\n' +
+        '\tldr\tr0, .L9+0x14\n\tstr\tr0, [r1]\n\tadd\tsp, sp, #0xc\n\tbx\tlr\n.L10:\n\t.align\t2, 0\n.L9:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7bffffff\n\t.word\tgCnt\n' +
+        '\t.word\t-0x7bfffffd\n';
+      const src = decompile('u1', atBase, ARMV4T_AGBCC, {
+        prototypes: { u1: { params: 3, returnsVoid: true } },
+      }).source;
+      expect(src).toContain('volatile u8 sp0[12];');
+      expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;');
+      // …and where the read is bounded, the overlap is still refused, by the refusal it always had
+      const bounded = atBase.replace(
+        '\tldr\tr0, .L9+0x10\n\tldr\tr1, [r0]\n\tldr\tr0, .L9+0x14\n\tstr\tr0, [r1]\n',
+        '',
+      );
+      expect(() => decompile('u1', bounded, ARMV4T_AGBCC)).toThrow(
+        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+      );
+    });
+
+    // …but a slot word and a narrower member through the captured address at the same bytes are
+    // two types at one byte, which the one object refuses rather than cast-spell
+    test('a slot word under a halfword member is refused as two widths at one byte', () => {
+      const twoWidths =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr2, sp\n' +
+        '\tstrh\tr0, [r2]\n\tldr\tr3, .L9\n\tstr\tr2, [r3]\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n' +
+        '\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\t0x040000D4\n';
+      expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow('is accessed 4 and 2 bytes wide');
+    });
+
+    // THE MODEL IS CHOSEN BEFORE THE SHAPE: where a device read nothing bounds is the only escape,
+    // a frame the per-object model cannot describe is kept as one object whatever the read reaches.
+    // Verbatim agbcc, `union V { u32 w; u8 b[8]; } v; v.w = x; REG_DMA3SAD = (u32)&v; …; *gCnt = 5;
+    // return v.b[0];` — the union's word is the only slot, at the object's own offset, and the
+    // recompile is instruction-identical.
+    test('an object over its own slot is one object when the read is unbounded', () => {
+      const unionAtBase =
+        'g5:\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr0, .L3\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n' +
+        '\tldr\tr1, .L3+0x4\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L3+0xc\n\tstr\tr0, [r1]\n\tldr\tr0, .L3+0x10\n\tldr\tr1, [r0]\n\tmov\tr0, #0x5\n' +
+        '\tstr\tr0, [r1]\n\tmov\tr0, sp\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L4:\n' +
+        '\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n' +
+        '\t.word\t-0x7bfffffe\n\t.word\tgCnt\n';
+      const src = decompile('g5', unionAtBase, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('*(s32 *)sp0 = a0;');
+      expect(src).toContain('return *(u8 *)sp0;');
+      // …and bounded, the per-object refusal stands
+      const bounded = unionAtBase.replace(
+        '\tldr\tr0, .L3+0x10\n\tldr\tr1, [r0]\n\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n',
+        '',
+      );
+      expect(bounded).not.toBe(unionAtBase);
+      expect(() => decompile('g5', bounded, ARMV4T_AGBCC)).toThrow(
+        'the object at [sp,#0) overlaps the SSA slot at [sp,#0] — one byte, two models',
+      );
+    });
+
+    // …a member at [+1] through the captured address. Verbatim agbcc, `union U { u16 h; u8 b[2]; }
+    // u; u.h = x; REG_DMA3SAD = (u32)&u; …; *gCnt = 5; return u.b[1];`.
+    test('a member through the captured address is one object when the read is unbounded', () => {
+      const unionMember =
+        'g1:\n\tadd\tsp, sp, #-0x4\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tldr\tr2, .L3\n' +
+        '\tldr\tr1, [sp]\n\tand\tr1, r1, r2\n\torr\tr1, r1, r0\n\tstr\tr1, [sp]\n\tldr\tr0, .L3+0x4\n' +
+        '\tmov\tr2, sp\n\tstr\tr2, [r0]\n\tldr\tr1, .L3+0x8\n\tldr\tr0, .L3+0xc\n\tstr\tr0, [r1]\n' +
+        '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L3+0x10\n\tstr\tr0, [r1]\n\tldr\tr0, .L3+0x14\n' +
+        '\tldr\tr1, [r0]\n\tmov\tr0, #0x5\n\tstr\tr0, [r1]\n\tldrb\tr0, [r2, #0x1]\n' +
+        '\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7effffff\n\t.word\tgCnt\n';
+      const src = decompile('g1', unionMember, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[4];');
+      expect(src).toContain('return ((u8 *)sp0)[1];');
+    });
+
+    // …and a byte buffer filled through a runtime index, then handed to a transfer whose control
+    // word is a parameter. Verbatim agbcc, `u8 buf[8]; for (i = 0; i < 8; i++) buf[i] = src[i];
+    // REG_DMA3SAD = (u32)buf; …; REG_DMA3CNT = ctrl;` — a byte index names bytes of the storage and
+    // aliases every type, so nothing needs checking; the recompile is instruction-identical.
+    test('a byte index into one object is kept', () => {
+      const byteBuffer =
+        'g3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n' +
+        '\tmov\tr2, #0x0\n\tldr\tr5, .L14\n.L12:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n' +
+        '\tadd\tr1, r3, r2\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n\tadd\tr2, r2, #0x1\n' +
+        '\tcmp\tr2, #0x7\n\tble\t.L12\n\tldr\tr0, .L14+0x4\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n' +
+        '\tadd\tr0, r0, #0x4\n\tstr\tr5, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr4, [r0]\n' +
+        '\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.L15:\n' +
+        '\t.align\t2, 0\n.L14:\n\t.word\tgDst\n\t.word\t0x40000d4\n';
+      const src = decompile('g3', byteBuffer, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('((u8 *)sp0)[v0] = *(u8 *)(a1 + v0);');
     });
 
     // Half an address is not the address: `strh` to a source register hands the device something
@@ -1001,8 +1122,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         [0x040000d4, [{ name: 'REG_DMA3SAD', kind: 'data' as const, macroBody: '(*(vu32 *)0x040000D4)' }]],
       ]);
       const withMap = decompile('f', escapeTo('0x00'), ARMV4T_AGBCC, { symbols }).source;
-      expect(withMap).toContain('REG_DMA3SAD = &sp0;'); // the map really did rename it
+      expect(withMap).toContain('p0 = (s32 *)&REG_DMA3SAD;'); // the map really did rename it
       expect(withMap).toContain('if (sp0 != 0) v0 = sp0;'); // …and the undef still stands
+    });
+
+    // …nor on which side of which operator the constant sits: `DMA3DAD - 4` is DMA3SAD
+    test('a source register reached by subtracting a constant is the same source register', () => {
+      const bySub = escapeTo('0x00')
+        .replace('\tldr\tr2, .L9\n', '\tldr\tr2, .L9\n\tsub\tr2, #0x4\n')
+        .replace('\t.word\t0x040000D4\n', '\t.word\t0x040000D8\n');
+      expect(decompile('f', bySub, ARMV4T_AGBCC).source).toContain('if (sp0 != 0) v0 = sp0;');
     });
 
     // A LITERAL register offset folds, because the predicate resolves an ADDRESS and `[r2, r5]`
@@ -1028,6 +1157,49 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         /address-taken stack local/,
       );
     });
+
+    // …and the same bound keeps a SECOND object private. agbcc's own output for two fills in one
+    // function, `DMA_FILL16(0, a, 16); DMA_FILL32(0, b, 8);` with the macros writing a `vu16`/`vu32`
+    // tmp and a fixed-source control: each device read stays inside its own object.
+    const twoFills = (control16: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n\tstrh\tr2, [r3]\n' +
+      '\tldr\tr4, .L3\n\tstr\tr3, [r4]\n\tldr\tr3, .L3+0x4\n\tstr\tr0, [r3]\n\tldr\tr2, .L3+0x8\n' +
+      '\tldr\tr0, .L3+0xc\n\tstr\tr0, [r2]\n\tldr\tr0, [r2]\n\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n' +
+      '\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n\tstr\tr1, [r3]\n\tldr\tr0, .L3+0x10\n\tstr\tr0, [r2]\n' +
+      '\tldr\tr0, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\t0x40000d4\n' +
+      `\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\t${control16}\n\t.word\t-0x7afffff8\n`;
+
+    test('two fixed-source fills each read their own object', () => {
+      const src = decompile('f', twoFills('-0x7efffff0'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u16 sp0;');
+      expect(src).toContain('volatile u32 sp4;');
+    });
+
+    // …and a fixed source reads the unit-ALIGNED word holding its address, because the GBA drops
+    // the low bits: agbcc's `void al(u16 x, u16 y){ vu16 a; vu16 b; a = x; b = y; … REG_DMA3SAD =
+    // &b; … REG_DMA3CNT = 0x85000004; }` puts `b` at [sp,#2], and a 32-bit read of it reads `a`.
+    const aligned = (control: string) =>
+      'al:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n\tmov\tr5, sp\n' +
+      '\tadd\tr5, r5, #0x2\n\tstrh\tr1, [r5]\n\tldr\tr4, .L3\n\tmov\tr0, sp\n\tstr\tr0, [r4]\n\tldr\tr3, .L3+0x4\n' +
+      '\tldr\tr1, .L3+0x8\n\tstr\tr1, [r3]\n\tldr\tr2, .L3+0xc\n\tldr\tr0, .L3+0x10\n\tstr\tr0, [r2]\n\tstr\tr5, [r4]\n' +
+      '\tstr\tr1, [r3]\n\tldr\tr0, .L3+0x14\n\tstr\tr0, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n' +
+      `\t.word\t0x40000dc\n\t.word\t-0x7efffffc\n\t.word\t${control}\n`;
+
+    test('a fixed source reads the whole aligned unit holding its address', () => {
+      expect(() => decompile('al', aligned('-0x7afffffc'), ARMV4T_AGBCC)).toThrow(
+        /the captured address at \[sp,#2\) is handed to a device that reads through it, which may read the object at \[sp,#0\)/,
+      );
+      // CONTROL: 16-bit units, and the halfword at [sp,#2] is a unit of its own
+      expect(decompile('al', aligned('-0x7efffffc'), ARMV4T_AGBCC).source).toContain('volatile u16 sp2;');
+    });
+
+    test('an incrementing fill reads the object above its own', () => {
+      expect(() => decompile('f', twoFills('0x80000010'), ARMV4T_AGBCC)).toThrow(
+        /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the object at \[sp,#4\)/,
+      );
+    });
   });
 
   test('an ESCAPED frame address retracts the undef argument — a callee may have written the slot', () => {
@@ -1041,7 +1213,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr0, r4\n\tbl\tg\n' +
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
-    expect(() => decompile('f', escaped, ARMV4T_AGBCC)).toThrow(
+    // `g` declared `void`: an object only READ here and taken at argument 0 is otherwise a struct
+    // return's temp, which refuses first
+    const voidG = { prototypes: { g: { params: 1, returnsVoid: true } } };
+    expect(() => decompile('f', escaped, ARMV4T_AGBCC, voidG)).toThrow(
       /address-taken stack local — the captured address escapes/,
     );
     // DISCRIMINATING CONTROL — the one that makes the title true. The same captured address,
@@ -1310,34 +1485,33 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', deadReload, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
-  // A COMPUTED CAPTURE IS TWO GAPS. `add rD, sp, #k` names a fixed frame offset — an object the
-  // `laddr`/audit model could already represent, missing only its lowering — and `add rD, sp, rX`
-  // names no offset at all, so there is no extent and nothing for the audit to prove. One refusal
-  // covering both is how several gaps come to look like one, and whichever is lifted first the
-  // other has to keep refusing where a reader can see it do so.
-  test('the computed capture names WHICH computed form it refuses', () => {
+  // A COMPUTED CAPTURE IS A CAPTURE. `add rD, sp, #k` names a fixed frame offset, and `add rD, sp,
+  // rX` (or the two-operand `add rD, sp`) is agbcc's one-instruction spelling of a runtime index
+  // into the frame — the same address as `mov rB, sp / add rD, rB, rX`, lowered to the same IR, so
+  // one audit rule judges both spellings.
+  test('each computed capture is the capture it spells', () => {
     const frame = (capture: string) =>
-      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr0, [r4]\n` +
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tldrb\tr0, [r4]\n` +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    // the constant form says it is constant, and says what IS modelled
-    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(
-      /computed \(`add r4, sp, #0x4`\) — a CONSTANT frame offset; only `mov rD, sp` is modelled/,
-    );
+    // the constant form is a capture at that offset
+    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).not.toThrow();
     // There is no SIGNED row here and the reason is at the predicate: Thumb-1 ADD(6) has no
     // negative form, the assembler refuses `add r4, sp, #-0x4`, and the one negative spelling
     // agbcc does write has sp as its destination and never reaches this guard. A row for it would
     // be a row for an input no assembler accepts.
-    // the runtime form says the thing that makes it a DIFFERENT gap: no offset, so no extent
-    expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(
-      /computed \(`add r4, sp, r1`\) — a RUNTIME index into the frame, which has no extent to model/,
-    );
-    // …and so does the two-operand high-register form, which adds the frame base to whatever rD
-    // already held. It has no immediate operand at all, so a split keyed on "is there a `#`"
-    // would put it on the constant arm and claim an offset nothing names.
-    expect(() => decompile('f', frame('\tadd\tr4, sp\n'), ARMV4T_AGBCC)).toThrow(/a RUNTIME index into the frame/);
-    // both keep the class prefix, so the published marker still classifies as address-taken-local
-    expect(() => decompile('f', frame('\tadd\tr4, sp, #0x4\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-    expect(() => decompile('f', frame('\tadd\tr4, sp, r1\n'), ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // the runtime forms are the frame base plus the index, whichever operand holds sp
+    const twoInsn = decompile('f', frame('\tmov\tr2, sp\n\tadd\tr4, r2, r1\n'), ARMV4T_AGBCC).source;
+    expect(twoInsn).toContain('((u8 *)sp0)[a1]');
+    for (const oneInsn of ['\tadd\tr4, sp, r1\n', '\tadd\tr4, r1, sp\n', '\tadd\tr4, r1, #0\n\tadd\tr4, sp\n']) {
+      expect(decompile('f', frame(oneInsn), ARMV4T_AGBCC).source).toBe(twoInsn);
+    }
+    // An immediate the constant form cannot evaluate is not the runtime form's register: read as
+    // one, `#(4)` is an entry parameter and the load `sp0[a0]`.
+    for (const imm of ['#(4)', '#OFF']) {
+      expect(() => decompile('f', `\t.set\tOFF, 4\n${frame(`\tadd\tr4, sp, ${imm}\n`)}`, ARMV4T_AGBCC)).toThrow(
+        `operand '${imm}' read as a register`,
+      );
+    }
   });
 
   // WHAT THE BENCHMARK ACTUALLY SLICES is the diagnostic's REASON, and the stage word is prepended
@@ -1354,22 +1528,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // the artifact, the longest symbol is 37 characters:
   //   python3 -c "import json;a=json.load(open('apps/benchmark/results/results.json'));\
   //     print(max((r['id'].split(':')[1] for r in a['results'] if r['id'].endswith(':agbcc')),key=len))"
-  // and at that name, with the widest immediate ADD(6) can encode, the constant arm's reason is
-  // 202 characters and the runtime arm's 204 — each loses its last few in the artifact. That is
-  // acceptable and it is why the assertion below is about CONTENT and not length: both readers of
-  // a marker look at the front of it. The class pattern (`apps/web/.../declines.ts`) matches the
-  // opening phrase, and the word saying which of the two gaps this is ends at 158 and 153. What
-  // must never be true is a marker whose ARM word is cut off, because two different capabilities
-  // then publish the same string — so the bound is on where that word ENDS, with 20 characters of
-  // margin, rather than on a total length no caller controls.
+  // and at that name the runtime refusal's reason loses its last few characters in the artifact.
+  // That is acceptable and it is why the assertion below is about CONTENT and not length: both
+  // readers of a marker look at the front of it. The class pattern (`apps/web/.../declines.ts`)
+  // matches the opening phrase, and the word saying which gap this is comes next. What must never
+  // be true is a marker whose deciding word is cut off, so the bound is on where that word ENDS,
+  // with 20 characters of margin, rather than on a total length no caller controls.
   const LONGEST_AGBCC_SYMBOL = 'AnimTask_FlashHealthboxOnLevelUp_Step';
-  // the widest `add rD, sp, #k` Thumb-1 can encode: ADD(6)'s immediate is 8 bits, word-scaled
-  const WIDEST_OFFSET = '#0x3fc';
 
-  test.each([
-    ['CONSTANT', `\tadd\tr0, sp, ${WIDEST_OFFSET}\n`],
-    ['RUNTIME', '\tadd\tr0, sp, r1\n'],
-  ])('the computed-capture refusal survives the slice the artifact applies: %s', (arm, capture) => {
+  test('the runtime-index refusal survives the slice the artifact applies', () => {
+    const [arm, capture] = ['runtime index', '\tadd\tr0, sp, r1\n'];
     const sym = LONGEST_AGBCC_SYMBOL;
     const worst =
       `${sym}:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${capture}\tstr\tr1, [r0]\n` +
@@ -1383,38 +1551,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const sliced = reason.slice(0, REASON_CHARS);
     // the class phrase and the arm word both survive, with the margin stated so a rewording that
     // eats it is a red test rather than a silently truncated marker
-    expect(sliced).toContain('the address of a stack local is computed');
+    expect(sliced).toContain('address-taken stack local');
     expect(sliced).toContain(arm);
     expect(sliced.indexOf(arm) + arm.length).toBeLessThanOrEqual(REASON_CHARS - 20);
-  });
-
-  // …and on the one row the corpus actually publishes this from, nothing is lost at all. The
-  // assertion is the BOUND, not today's length: pinned to an exact number, the one way to make
-  // this green after lengthening the message is to update the number — the failure it exists to
-  // prevent — and an improvement that SHORTENS the message fails it for nothing.
-  test('the corpus instance loses nothing to the slice', () => {
-    const real =
-      'ProcessOamBuffers:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr0, sp, #0x4\n\tstr\tr1, [r0]\n' +
-      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    let reason = '';
-    try {
-      decompile('ProcessOamBuffers', real, ARMV4T_AGBCC);
-    } catch (e) {
-      reason = (e as Error).message.split('\n')[0];
-    }
-    expect(reason).toMatch(/a CONSTANT frame offset; only `mov rD, sp` is modelled$/);
-    expect(reason.length).toBeLessThanOrEqual(REASON_CHARS);
   });
 
   test('a refused function names the capability actually missing', () => {
     // The gap histogram is the improvement loop's work-list; "local stack frames not supported" was
     // a false attribution that sent the loop to build a thing that already works. Each blocker now
     // names itself. The generic message survives only for sp uses no sub-family claims.
-    // (the plain `mov rD, sp` capture is now the laddr capability — its refusals carry their own
-    // attributed messages, tested with the capability below; the COMPUTED capture still refuses)
+    // (the `mov rD, sp`, `add rD, sp, #k` and `add rD, sp, rX` captures are the laddr capability —
+    // their refusals carry their own attributed messages, from the frame-object audit)
     const addrComputed =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, r1\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(
+      /address-taken stack local — a runtime index into the object at \[sp,#0\) accesses 4 bytes/,
+    );
     const outgoing =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
@@ -1425,7 +1577,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       /declared with 5 arguments/,
     );
     // every attributed sp message keeps the class prefix, so nothing keyed on it breaks
-    expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 
   // A ONE-WORD FRAME WHOSE BASE IS PASSED TO A CALLEE — the only thing in this file that makes the
@@ -1474,8 +1626,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // argument 5 at [sp,#0] and the address-taken local moves ABOVE it — so `&w` is COMPUTED and
     // there is no bare `mov rD, sp` anywhere. Compiled, `void f(u32 i, s32 a, s32 b){ s32 w;
     // w = gEnts[i].h; five(a,b,a+b,a-b,a*b); use(&w); }` is this, verbatim. A frame with a genuine
-    // outgoing area must keep declining, and it does — one gate earlier, on the spelling the
-    // layout forces.
+    // outgoing area must keep declining, and it does — on the argument itself, since `five` is
+    // declared nowhere.
     test('a frame with a GENUINE outgoing argument area still declines', () => {
       const withArea =
         'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r2, #0\n\tlsl\tr2, r0, #0x2\n\tadd\tr2, r2, r0\n' +
@@ -1484,8 +1636,268 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tr0, r1, #0\n\tadd\tr1, r4, #0\n\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tbl\tuse\n' +
         '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x8057acc\n';
       expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-      // and the message stays TRUE for what it refuses: the local really is at a computed address
-      expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/address of a stack local is computed/);
+      expect(() => decompile('f', withArea, ARMV4T_AGBCC)).toThrow(/it may be an outgoing stack argument/);
+    });
+
+    // …and with the call DECLARED, the block is licensed and the local above it is the object its
+    // computed address names. agbcc's own output for `s32 f(s32 a, s32 b){ u16 h; five(a, b, a, b,
+    // a); geth(&h); return h; }`, at the corpus's flags.
+    test('a local above a licensed outgoing block is the object `add rD, sp, #k` names', () => {
+      const above =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r0, #0\n\tadd\tr3, r1, #0\n\tstr\tr2, [sp]\n' +
+        '\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tbl\tgeth\n\tadd\tr0, sp, #0x4\n\tldrh\tr0, [r0]\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        geth: { params: ['u16 *'], returnsVoid: true },
+      };
+      expect(decompile('f', above, ARMV4T_AGBCC, { prototypes }).source).toBe(
+        's32 f(s32 a0, s32 a1) {\n    u16 sp4;\n    five(a0, a1, a0, a1, a0);\n    geth(&sp4);\n    return sp4;\n}\n',
+      );
+    });
+
+    // …and a WORD local there is stored with `str rX, [sp, #0x4]`, which the slot model would key
+    // as an SSA slot and the outgoing-argument analysis would read as a sixth staged argument. The
+    // capture names it, so it is the object. agbcc's own output for `void f(s32 a, s32 b){ s32 w;
+    // five(a, b, a, b, a); w = b; getw(&w); five(w, a, a, a, a); }`, at the corpus's flags.
+    describe('a word the capture names is the object at every access', () => {
+      const word = (capture: string) =>
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tstr\tr4, [sp]\n\tadd\tr2, r4, #0\n\tadd\tr3, r5, #0\n\tbl\tfive\n\tstr\tr5, [sp, #0x4]\n' +
+        `${capture}\tbl\tgetw\n\tldr\tr0, [sp, #0x4]\n\tstr\tr4, [sp]\n\tadd\tr1, r4, #0\n` +
+        '\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tfive\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n' +
+        '\tpop\t{r0}\n\tbx\tr0\n';
+      const prototypes = {
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        getw: { params: ['s32 *'], returnsVoid: true },
+      };
+
+      test('the store, the capture and the reload are one local', () => {
+        expect(decompile('f', word('\tadd\tr0, sp, #0x4\n'), ARMV4T_AGBCC, { prototypes }).source).toBe(
+          'void f(s32 a0, s32 a1) {\n    s32 sp4;\n    five(a0, a1, a0, a1, a0);\n    sp4 = a1;\n    getw(&sp4);\n' +
+            '    five(sp4, a0, a0, a0, a0);\n}\n',
+        );
+      });
+
+      // TWO SPELLINGS OF ONE COPY MUST NOT GIVE TWO VERDICTS: the offsets set aside for the object
+      // and the capture the lift folds come off one walk (`heldFrameWalk`), so a register copy or
+      // a move is the same capture whichever way it is written.
+      test.each([
+        ['a register copy', '\tmov\tr0, sp\n\tmov\tr1, r0\n\tadd\tr0, r1, #0x4\n'],
+        ["agbcc's copy idiom", '\tmov\tr0, sp\n\tadd\tr1, r0, #0\n\tadd\tr0, r1, #0x4\n'],
+        ['a two-operand move', '\tmov\tr0, sp\n\tadd\tr0, #0x4\n'],
+      ])('%s is the same capture', (_, capture) => {
+        expect(decompile('f', word(capture), ARMV4T_AGBCC, { prototypes }).source).toBe(
+          decompile('f', word('\tadd\tr0, sp, #0x4\n'), ARMV4T_AGBCC, { prototypes }).source,
+        );
+      });
+    });
+
+    // …and a value that is one object on one path and another on the other names neither. agbcc's
+    // own output for `s32 a, b; five(x, y, x, y, x); a = x; b = y; return get(c ? &a : &b);`.
+    test('a phi of two objects refuses', () => {
+      const select =
+        'f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tadd\tr6, r2, #0\n\tstr\tr4, [sp]\n\tadd\tr2, r4, #0\n\tadd\tr3, r5, #0\n\tbl\tfive\n' +
+        '\tstr\tr4, [sp, #0x8]\n\tstr\tr5, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tcmp\tr6, #0\n\tbeq\t.L3\n' +
+        '\tadd\tr0, sp, #0x8\n.L3:\n\tbl\tget\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const prototypes = {
+        five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+        get: { params: ['const s32 *'], returns: 's32' },
+      };
+      expect(() => decompile('f', select, ARMV4T_AGBCC, { prototypes })).toThrow(
+        /a phi merges the frame objects at \[sp,#4\] and \[sp,#8\] — one value, two objects/,
+      );
+    });
+
+    // A MOVE THE WALK DOES NOT FOLLOW IS STILL THE CAPTURE AT THE SUM, because the IR holds the
+    // constant exactly: the register-offset spelling sa3's `sub_807A2AC` uses, `mov r0, sp / movs
+    // r2, #4 / ldrsh r0, [r0, r2]`, is the object `add r0, sp, #4 / ldrsh r0, [r0]` names.
+    test('a capture moved by a constant held in a register is the capture at the sum', () => {
+      const half = (store: string, load: string) =>
+        `f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n${store}\tbl\tg\n${load}\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n`;
+      const g = { params: 0, returnsVoid: true };
+      const byRegister = decompile(
+        'f',
+        half(
+          '\tmov\tr1, sp\n\tmovs\tr2, #4\n\tstrh\tr0, [r1, r2]\n',
+          '\tmov\tr0, sp\n\tmovs\tr2, #4\n\tldrsh\tr0, [r0, r2]\n',
+        ),
+        ARMV4T_AGBCC,
+        { prototypes: { g } },
+      ).source;
+      expect(byRegister).toBe(
+        decompile(
+          'f',
+          half('\tadd\tr1, sp, #4\n\tstrh\tr0, [r1]\n', '\tadd\tr0, sp, #4\n\tldrsh\tr0, [r0]\n'),
+          ARMV4T_AGBCC,
+          {
+            prototypes: { g },
+          },
+        ).source,
+      );
+      expect(byRegister).toContain('s16 sp4;');
+    });
+
+    // …but the walk is what routes a `[sp,#k]` word to the object rather than to a slot, so a move
+    // it cannot follow — the capture in one block, the move in the next — that lands on a keyed
+    // slot is refused by that name, not as the slot overlap alone.
+    test('a capture moved in another block is refused as the move', () => {
+      const crossBlock =
+        'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tmov\tr5, sp\n' +
+        '\tstr\tr4, [sp, #0x8]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tadd\tr5, r5, #0x8\n\tadd\tr0, r5, #0\n' +
+        '\tbl\tget\n\tb\t.L3\n.L2:\n\tadd\tr0, r5, #0x8\n\tbl\tget\n.L3:\n\tadd\tsp, sp, #0xc\n' +
+        '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+      const get = { params: ['const s32 *'], returns: 's32' };
+      expect(() => decompile('f', crossBlock, ARMV4T_AGBCC, { prototypes: { get } })).toThrow(
+        /the capture moved by a constant to \[sp,#8\) is a move the pre-lift walk does not follow, so the slot model keys \[sp,#8\] too/,
+      );
+    });
+
+    // …and a pointer a phi carries around a loop, stepped by a constant each trip (sa3's
+    // `sub_80B59E4`), names a different byte on each: no fold makes it one object.
+    test('a capture stepped around a loop is refused as the stepped pointer', () => {
+      const stepped =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tmovs\tr2, #0\n.L1:\n\tstrb\tr2, [r1]\n' +
+        '\tadds\tr1, #1\n\tadds\tr2, #1\n\tcmp\tr2, #8\n\tblt\t.L1\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0x8\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() =>
+        decompile('f', stepped, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }),
+      ).toThrow('the captured address at [sp,#0) reaches a phi and is then moved by a constant');
+    });
+
+    // …but a phi that merges the capture with a PARAMETER steps nothing: agbcc's own output for
+    // `u32 known(struct Info *info, u32 i){ struct Info local; if (!info) { info = &local;
+    // ReadInfo(info); } return info->bits[i]; }` (FE7J's `GGM_IsCharacterKnown` shape).
+    test('a capture merged with a parameter and then moved is refused as the merge', () => {
+      const merged =
+        'known:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x48\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        '\tcmp\tr4, #0\n\tbne\t.L3\n\tmov\tr4, sp\n\tmov\tr0, sp\n\tbl\tReadInfo\n.L3:\n\tadd\tr0, r4, #0\n' +
+        '\tadd\tr0, r0, #0x40\n\tadd\tr0, r0, r5\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x48\n\tpop\t{r4, r5}\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() =>
+        decompile('known', merged, ARMV4T_AGBCC, { prototypes: { ReadInfo: { params: 1, returnsVoid: true } } }),
+      ).toThrow(
+        'the captured address at [sp,#0) reaches a phi that merges it with a pointer from outside the frame, and is then moved by a constant',
+      );
+    });
+
+    // …and a READ of the capture between two moves does not end the walk: sa3's `sub_8068E5C`
+    // addresses through a capture and then moves it (`mov r2, sp / adds r2, #5 / strb r0, [r2] /
+    // … / adds r2, #2`). The move after the store is the capture at the sum, as the direct spelling
+    // of that offset is.
+    test('a capture moved after an access through it is the capture at the sum', () => {
+      const bytes = (second: string) =>
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n\tadd\tr2, #0x4\n\tstrb\tr0, [r2]\n' +
+        `${second}\tstrb\tr1, [r2]\n\tmov\tr3, sp\n\tadd\tr3, #0x4\n\tldrb\tr0, [r3]\n\tldrb\tr1, [r2]\n` +
+        '\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+      const moved = decompile('f', bytes('\tadd\tr2, #0x1\n'), ARMV4T_AGBCC).source;
+      expect(moved).toBe(decompile('f', bytes('\tadd\tr2, sp, #0x5\n'), ARMV4T_AGBCC).source);
+      expect(moved).toContain('return sp4 + sp5;');
+    });
+
+    // …and an address ABOVE the reserved area is not a local's. agbcc's own output for `s32 f(s32
+    // a, s32 b, s32 c, s32 d, s32 e){ s32 t = a; g(&t); g(&e); return e + t; }`: [sp,#8] is the
+    // fifth parameter, over one local word and the saved `lr`, and the refusal says so rather than
+    // judging it as a local nothing types.
+    test('the address of an incoming stack argument is refused as one', () => {
+      const inArg =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tr0, sp, #0x8\n' +
+        '\tbl\tg\n\tldr\tr0, [sp, #0x8]\n\tldr\tr1, [sp]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
+      const g = { params: 1, returnsVoid: true };
+      expect(() => decompile('f', inArg, ARMV4T_AGBCC, { prototypes: { g } })).toThrow(
+        /the captured address at \[sp,#8\) is above the reserved local area of 4 bytes — an incoming stack argument/,
+      );
+      // …while the TOP of the area is also C's one-past-the-end pointer: agbcc's `u32 r1(void){ u8
+      // buf[8]; fill(buf); return count(buf, buf + 8); }`, where the saved `lr` sits at [sp,#8]
+      const endPtr =
+        'r1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr0, sp\n\tbl\tfill\n\tadd\tr1, sp, #0x8\n\tmov\tr0, sp\n' +
+        '\tbl\tcount\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+      expect(() => decompile('r1', endPtr, ARMV4T_AGBCC, { prototypes: { fill: g, count: { params: 2 } } })).toThrow(
+        'is the top of the reserved local area of 8 bytes — one past the end of a local array',
+      );
+      // …and the write-back of a block copy through a capture lands on the top too, but nothing
+      // reads it, so it is no pointer at all: agbcc's `struct U { u32 a, b, c; }; void c4(void){
+      // struct U s = gU; g(&s); }` declines at the multi-word store it really is
+      const copied =
+        'c4:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr1, sp\n\tldr\tr0, .L12\n\tldmia\tr0!, {r2, r3, r4}\n' +
+        '\tstmia\tr1!, {r2, r3, r4}\n\tmov\tr0, sp\n\tbl\tg\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n\tpop\t{r0}\n' +
+        '\tbx\tr0\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\tgU\n';
+      expect(() => decompile('c4', copied, ARMV4T_AGBCC, { prototypes: { g } })).toThrow(
+        'a store at [+4] through the captured address',
+      );
+    });
+
+    // …and the same frame word READ back after a call that took its address at argument 0 is,
+    // instruction for instruction, a struct return's hidden temp. agbcc's own output for
+    // `struct S4 { char a, b, c, d; }; s32 f(s32 x){ struct S4 s; five(x, x, x, x, x); s = mk(x);
+    // return s.a; }`, at the corpus's flags. Lifted as a local it is `mk(&sp4, a0)` — the call the
+    // real prototype rejects — so it declines until `mk`'s return is declared.
+    test('an object only read after a call took it at argument 0 is a struct return until declared', () => {
+      const sret =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tstr\tr4, [sp]\n\tadd\tr1, r4, #0\n' +
+        '\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tfive\n\tadd\tr0, sp, #0x4\n\tadd\tr1, r4, #0\n\tbl\tmk\n' +
+        '\tldr\tr0, [sp, #0x4]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n' +
+        '\tpop\t{r1}\n\tbx\tr1\n';
+      const five = { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true };
+      expect(() => decompile('f', sret, ARMV4T_AGBCC, { prototypes: { five } })).toThrow(
+        /the object at \[sp,#4\) is never written here, and `mk` takes it at argument 0 and nothing says what that callee returns/,
+      );
+      // an out-parameter the project declares as one is the local it looks like
+      const mk = { params: ['s32 *', 's32'], returnsVoid: true };
+      expect(decompile('f', sret, ARMV4T_AGBCC, { prototypes: { five, mk } }).source).toContain('mk(&sp4, a0);');
+    });
+
+    // A slot beside an escaped object may be part of it, and the slot model keeps that word in a
+    // register. agbcc's own output at the corpus's flags, each against the control that differs
+    // only in the slot.
+    describe('a slot beside an escaped object refuses, above it and below it', () => {
+      const five = { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true };
+      // `struct P { u32 a, b; } s; five(x, y, x, y, x); s.a = x; s.b = y; REG_DMA3SAD = (u32)&s;
+      // REG_DMA3DAD = (u32)dst; REG_DMA3CNT = 0x84000002;` — a device READS through the address,
+      // so nothing writes the frame back, yet it reads `s.b`, which the slot model keeps in a
+      // register
+      const dma = (frame: string, stores: string, ctl: string) =>
+        `f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-${frame}\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n` +
+        '\tadd\tr6, r2, #0\n\tstr\tr4, [sp]\n\tadd\tr2, r4, #0\n\tadd\tr3, r5, #0\n\tbl\tfive\n' +
+        `${stores}\tldr\tr0, .L3\n\tadd\tr1, sp, #0x4\n\tstr\tr1, [r0]\n\tadd\tr0, r0, #0x4\n\tstr\tr6, [r0]\n` +
+        `\tldr\tr1, .L3+0x4\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r1]\n\tadd\tsp, sp, #${frame}\n` +
+        '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n' +
+        `\t.word\t0x40000dc\n\t.word\t${ctl}\n`;
+
+      test('above: a word a device may read past the object', () => {
+        const two = dma('0xc', '\tstr\tr4, [sp, #0x4]\n\tstr\tr5, [sp, #0x8]\n', '-0x7bfffffe');
+        expect(() => decompile('f', two, ARMV4T_AGBCC, { prototypes: { five } })).toThrow(
+          /the captured address at \[sp,#4\) is handed to a device that reads through it, which may read the slot at \[sp,#8\]/,
+        );
+        // the one-word object, `u32 s` — nothing above it
+        const one = dma('0x8', '\tstr\tr4, [sp, #0x4]\n', '-0x7bffffff');
+        expect(decompile('f', one, ARMV4T_AGBCC, { prototypes: { five } }).source).toContain('volatile u32 sp4;');
+      });
+
+      // `vu32 buf[2]; buf[0] = x; buf[1] = h(buf[0]); g(&buf[1]); return buf[0];` — `g` may reach
+      // `buf[0]` through `p[-1]`, and the slot model forwards the reload across the call
+      const g = { params: ['vu32 *'], returnsVoid: true };
+      const h = { params: ['s32'], returns: 's32' };
+      test('below: the captured address may point into an object that starts lower', () => {
+        const below =
+          'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tldr\tr0, [sp]\n\tbl\th\n' +
+          '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tbl\tg\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x8\n' +
+          '\tpop\t{r1}\n\tbx\tr1\n';
+        expect(() => decompile('f', below, ARMV4T_AGBCC, { prototypes: { g, h } })).toThrow(
+          /the captured address at \[sp,#4\) is passed to a callee, and it may point INTO an object that starts lower — the slot at \[sp,#0\]/,
+        );
+      });
+
+      test('…but not into the outgoing block below it, which is the callee’s', () => {
+        // `vu32 b; five(x, x, x, x, x); b = h(x); g(&b); return b;` — [sp,#0] is `five`'s fifth
+        // argument
+        const aboveBlock =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tstr\tr4, [sp]\n\tadd\tr1, r4, #0\n' +
+          '\tadd\tr2, r4, #0\n\tadd\tr3, r4, #0\n\tbl\tfive\n\tadd\tr0, r4, #0\n\tbl\th\n\tstr\tr0, [sp, #0x4]\n' +
+          '\tadd\tr0, sp, #0x4\n\tbl\tg\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+        expect(decompile('f', aboveBlock, ARMV4T_AGBCC, { prototypes: { five, g, h } }).source).toContain('g(&sp4);');
+      });
     });
 
     // THE OTHER ESCAPE: PUBLISHED TO MEMORY, not handed to a callee. `*(vu32 *)REG_DMA3SAD =
@@ -1571,9 +1983,18 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       });
 
       // …and the evidence is an agbcc compile table, exactly as for the callee escape: a second
-      // table, its own shapes, and the same declared layout gating both.
+      // table, its own shapes, and the same declared layout gating both. Asked of a transfer the
+      // function arms, with a fixed source that reads two bytes: a read nothing bounds is kept as
+      // one object in memory instead, which needs no layout proof — it declares every byte of the
+      // reserved area and keeps every store to it.
       test('an armv4t compiler that has not declared the layout does not get the publish proof', () => {
-        expect(() => decompile('f', PUBLISH, undeclared)).toThrow(TWO_MODELS);
+        const armed = PUBLISH.replace(
+          '\tstr\tr1, [r2]\n',
+          '\tstr\tr1, [r2]\n\tldr\tr3, .L4+0x4\n\tstr\tr3, [r2, #0x8]\n',
+        ).concat('\t.word\t0x81000001\n');
+        expect(armed).not.toBe(PUBLISH);
+        expect(() => decompile('f', armed, undeclared)).toThrow(TWO_MODELS);
+        expect(decompile('f', PUBLISH, undeclared).source).toContain('volatile u8 sp0[4];');
       });
 
       // The walk is kill-on-mention and a `bl` drops every held capture, including one in a
@@ -2078,11 +2499,132 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('pubw', publishedTwoSlots, ARMV4T_AGBCC, protos)).toThrow(
         /is stored to memory, which may write the slot at \[sp,#4\]/,
       );
-      // CONTROL, and it is what makes `mayWrite` the right predicate rather than `escaped`: the
-      // SAME publish to a DMA source register keeps lifting, because the device reads through the
-      // address and never writes it (`readsThrough`). Only the sink word differs from `pub`.
-      const dmaSink = publishedSlot.replace('.word\tgp', '.word\t0x40000d4');
-      expect(decompile('pub', dmaSink, ARMV4T_AGBCC, protos).source).toContain('volatile u8 sp0;');
+      // CONTROL: the same object published to a DMA source register lifts, because the device
+      // reads through the address and never writes it (`readsThrough`), and its control word says
+      // it re-reads the one object. Verbatim agbcc for `struct M { vu8 b; u8 pad[3]; s32 t; }; s32
+      // pubd(s32 x){ struct M m; m.b = x; m.t = h(1); g2(); REG_DMA3[0] = (u32)&m; REG_DMA3[2] =
+      // 0x81000001; return m.t; }`.
+      const dmaSink = (tail: string) =>
+        'pubd:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tldrb\tr2, [r1]\n\tstrb\tr0, [r1]\n' +
+        '\tmov\tr0, #0x1\n\tbl\th\n\tstr\tr0, [sp, #0x4]\n' +
+        tail +
+        '\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffff\n';
+      const dmaStores =
+        '\tldr\tr0, .L3\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tldr\tr1, .L3+0x4\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r1]\n';
+      const dmaProtos = { prototypes: { h: { params: 1 }, g2: { params: 0, returnsVoid: true } } };
+      expect(decompile('pubd', dmaSink(`\tbl\tg2\n${dmaStores}`), ARMV4T_AGBCC, dmaProtos).source).toContain(
+        'volatile u8 sp0;',
+      );
+      // …and a call AFTER the control store bounds nothing away: a callee arms only a transfer it
+      // set up itself, source register first (the premise `readWindow` states), so `g2` does not
+      // re-read `&m` — agbcc's `pubc`, the same body with `g2()` moved below the control store.
+      expect(decompile('pubd', dmaSink(`${dmaStores}\tbl\tg2\n`), ARMV4T_AGBCC, dmaProtos).source).toContain(
+        'volatile u8 sp0;',
+      );
+      // …but a store through a pointer this cannot resolve may BE the control halfword, re-arming
+      // the channel to read `m.t` as well — agbcc's `pube(s32 x, vu32 *cnt)`, the same body ending
+      // `*cnt = 0x84000002`. Nothing bounds the read, so the local area is kept as ONE object in
+      // memory and `m.t`'s store is a store into it, which is what agbcc emitted: recompiled, the
+      // lift keeps `strb r0, [r1]` and `str r0, [sp, #0x4]` both.
+      const unresolved =
+        'pube:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r1, #0\n\tmov\tr1, sp\n\tldrb\tr2, [r1]\n' +
+        '\tstrb\tr0, [r1]\n\tmov\tr0, #0x1\n\tbl\th\n\tstr\tr0, [sp, #0x4]\n\tldr\tr0, .L15\n\tmov\tr1, sp\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L15+0x4\n\tldr\tr0, .L15+0x8\n\tstr\tr0, [r1]\n\tldr\tr0, .L15+0xc\n' +
+        '\tstr\tr0, [r4]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffff\n' +
+        '\t.word\t-0x7bfffffe\n';
+      const pube = decompile('pube', unresolved, ARMV4T_AGBCC, dmaProtos).source;
+      expect(pube).toContain('volatile u8 sp0[8];');
+      expect(pube).toContain('*(u8 *)sp0 = a0;');
+      expect(pube).toContain('((s32 *)sp0)[1] = h(1);');
+      expect(pube).toContain('return ((s32 *)sp0)[1];');
+      // …and so is a pointer that is this frame's on only SOME paths: `p = cnt ? cnt : &o;
+      // *p = 0x84000002` may be the control halfword, and `o` is then a member too. Hand-written —
+      // the `pube` shape with that phi before the transfer; [sp,#4] is the object the device reads,
+      // [sp,#8] a slot, [sp,#0xc] `o` — and it assembles with GNU as.
+      const phiRearm = (pick: string) =>
+        'e9:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n' +
+        pick +
+        '\tmov\tr0, #0x5\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n' +
+        '\tbl\tfive\n\tstr\tr4, [sp, #0x4]\n\tstr\tr5, [sp, #0x8]\n\tldr\tr0, .L6\n\tadd\tr1, sp, #0x4\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr0, .L6+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L6+0xc\n\tstr\tr0, [r1]\n\tldr\tr0, .L6+0x10\n\tstr\tr0, [r6]\n\tadd\tsp, sp, #0x10\n' +
+        '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x40000d4\n' +
+        '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7affffff\n\t.word\t-0x7bfffffe\n';
+      const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
+      const e9 = decompile(
+        'e9',
+        phiRearm('\tadd\tr6, r2, #0\n\tcmp\tr6, #0\n\tbne\t.L1\n\tadd\tr6, sp, #0xc\n.L1:\n'),
+        ARMV4T_AGBCC,
+        five,
+      ).source;
+      expect(e9).toContain('volatile u8 sp4[12];');
+      expect(e9).toContain('if (a2 == 0) a2 = (s32 *)((u32)sp4 + 8);');
+      expect(e9).toContain('p0[1] = a1;');
+      expect(e9).toContain('*a2 = -2080374782;');
+      // CONTROL: `o` on every path is this frame's own store, which re-arms nothing
+      expect(decompile('e9', phiRearm('\tadd\tr6, sp, #0xc\n'), ARMV4T_AGBCC, five).source).toContain(
+        'volatile u32 sp4;',
+      );
+    });
+
+    // A STORE TO A NAMED SYMBOL PLUS A CONSTANT does not re-arm the channel where a symbol map
+    // places the name away from the control halfword, and the overlap test decides it exactly.
+    // A name no map places may be a device register the disassembly spelled by name, and an
+    // index or a pointer loaded from the symbol may be the control halfword: each leaves the read
+    // unbounded, and then `s.b` at [sp,#8] is kept in memory with `s.a`. Verbatim agbcc, one body
+    // with three endings: `struct P { u32 a, b; } s; five(1,2,3,4,5); s.a = x; s.b = y;
+    // REG_DMA3SAD = (u32)&s; REG_DMA3DAD = (u32)gDst; REG_DMA3CNT = 0x85000001;` then
+    // `gNamed.g = y` (n1), `gArr[x] = y` (n3), or `*gCnt = 0x84000002` with `extern vu32 *gCnt`
+    // (e4); and e4's re-arm stored through `.word REG_DMA3CNT`, as sa2 spells an I/O register (e4s).
+    test('a placed symbol plus a constant cannot re-arm the channel, an unplaced name, an index or a loaded pointer can', () => {
+      const armed = (name: string, tail: string, pool: string) =>
+        `${name}:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n` +
+        '\tmov\tr0, #0x5\n\tstr\tr0, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n' +
+        '\tbl\tfive\n\tstr\tr4, [sp, #0x4]\n\tstr\tr5, [sp, #0x8]\n\tldr\tr0, .L6\n\tadd\tr1, sp, #0x4\n' +
+        '\tstr\tr1, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr0, .L6+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n' +
+        '\tldr\tr0, .L6+0xc\n\tstr\tr0, [r1]\n' +
+        tail +
+        '\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n' +
+        '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7affffff\n' +
+        pool;
+      const five = { prototypes: { five: { params: 5, returnsVoid: true } } };
+      const n1 = armed('n1', '\tldr\tr0, .L6+0x10\n\tstr\tr5, [r0, #0x4]\n', '\t.word\tgNamed\n');
+      const inIwram = new Map([[0x03000000, [{ name: 'gNamed', kind: 'data' as const }]]]);
+      const bounded = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: inIwram }).source;
+      expect(bounded).toContain('volatile u32 sp4;');
+      expect(bounded).toContain('((s32 *)&gNamed)[1] = a1;');
+      // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word
+      const onControl = new Map([[0x040000d8, [{ name: 'gNamed', kind: 'data' as const }]]]);
+      const kept = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl }).source;
+      expect(kept).toContain('volatile u8 sp4[8];');
+      expect(kept).toContain('p0[1] = a1;');
+      const n3 = armed(
+        'n3',
+        '\tldr\tr0, .L6+0x10\n\tlsl\tr4, r4, #0x2\n\tadd\tr4, r4, r0\n\tstr\tr5, [r4]\n',
+        '\t.word\tgArr\n',
+      );
+      const e4 = armed(
+        'e4',
+        '\tldr\tr0, .L6+0x10\n\tldr\tr1, [r0]\n\tldr\tr0, .L6+0x14\n\tstr\tr0, [r1]\n',
+        '\t.word\tgCnt\n\t.word\t-0x7bfffffe\n',
+      );
+      const e4s = armed(
+        'e4s',
+        '\tldr\tr1, .L6+0x10\n\tldr\tr0, .L6+0x14\n\tstr\tr0, [r1]\n',
+        '\t.word\tREG_DMA3CNT\n\t.word\t-0x7bfffffe\n',
+      );
+      for (const [name, asm] of [
+        ['n1', n1],
+        ['n3', n3],
+        ['e4', e4],
+        ['e4s', e4s],
+      ]) {
+        const src = decompile(name, asm, ARMV4T_AGBCC, five).source;
+        expect(src).toContain('volatile u8 sp4[8];');
+        expect(src).toContain('p0[1] = a1;');
+      }
     });
 
     // THE MULTI-WORD ANALOGUE of the same hazard, which declines LOUDLY — but at the first gate it
@@ -2234,24 +2776,21 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // …AND THE OTHER CONJUNCT, which is the one a wide frame actually meets. This gate needs the
     // base LIVE IN AN ARGUMENT REGISTER AT A `bl`; the DMA-fill idiom PUBLISHES the base to a
     // device register instead, and that path never asks the gate anything. So a published capture
-    // in a frame far wider than one word lifts today, slots above it and all — which is why no
-    // widening of `localArea === 4` can reach klonoa's `LoadBGTilemapData` (instrumented:
-    // localArea=60, frameBasePassedToCallee=false, and its lift is byte-identical with the
-    // conjunct widened).
+    // in a frame far wider than one word lifts, slots above it and all.
     //
     // The slots above it survive on the DEVICE, not on the frame: a word store to a DMA SOURCE
-    // register is `readsThrough`, so this capture is never in `mayWrite` and neither the slot rule
-    // nor the frame-accounting rule looks at it. Publish the same base to an ordinary global and
-    // both refuse — the test above.
+    // register is `readsThrough`, so this capture is never in `mayWrite`, and a literal control
+    // word saying the source is FIXED keeps the slots above it out of what the device reads. Publish
+    // the same base to an ordinary global and both refuse — the test above.
     //
     // Compiled, frame 0xc, with the two incoming pointers spilled into the slots above the object:
     // `void dmawide(u16 *dst, s32 n){ vu16 tmp; s32 t0..t7; tmp = 0; t0 = h(0); … t7 = h(7);
-    // REG_DMA3[0] = (u32)&tmp; REG_DMA3[1] = (u32)dst; REG_DMA3[2] = n | 0x81000000;
-    // use2(t0 + … + t7); }`. The arities are declared because a GUESSED four-argument `h` reads the
-    // register that still holds the base as an argument, and the object is then "passed to a
+    // use2(t0 + … + t7 + n); REG_DMA3[0] = (u32)&tmp; REG_DMA3[1] = (u32)dst; REG_DMA3[2] =
+    // 0x81000010; }`. The arities are declared because a GUESSED four-argument `h` reads
+    // the register that still holds the base as an argument, and the object is then "passed to a
     // callee" on the strength of a guess — the same lower-bound trap `--proto` exists for.
     test('a PUBLISHED capture in a wider frame lifts — this gate governs the callee-passed one', () => {
-      const dmawide =
+      const dmawide = (sum: string, dma: string) =>
         'dmawide:\n' +
         '\tpush\t{r4, r5, r6, r7, lr}\n' +
         '\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n\tpush\t{r5, r6, r7}\n' +
@@ -2269,26 +2808,38 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tmov\tr0, #0x5\n\tbl\th\n\tadd\tr6, r0, #0\n' +
         '\tmov\tr0, #0x6\n\tbl\th\n\tadd\tr5, r0, #0\n' +
         '\tmov\tr0, #0x7\n\tbl\th\n' +
-        '\tldr\tr1, .L3\n' +
-        '\tmov\tr2, sp\n' +
-        '\tstr\tr2, [r1]\n' +
-        '\tadd\tr1, r1, #0x4\n' +
-        '\tldr\tr3, [sp, #0x4]\n' +
-        '\tstr\tr3, [r1]\n' +
-        '\tldr\tr2, .L3+0x4\n' +
-        '\tmov\tr1, #0x81\n\tlsl\tr1, r1, #0x18\n' +
-        '\tldr\tr3, [sp, #0x8]\n\torr\tr1, r1, r3\n\tstr\tr1, [r2]\n' +
         '\tadd\tr4, r4, r7\n\tadd\tr4, r4, sl\n\tadd\tr4, r4, r9\n\tadd\tr4, r4, r8\n' +
-        '\tadd\tr4, r4, r6\n\tadd\tr4, r4, r5\n\tadd\tr4, r4, r0\n\tadd\tr0, r4, #0\n\tbl\tuse2\n' +
+        '\tadd\tr4, r4, r6\n\tadd\tr4, r4, r5\n\tadd\tr4, r4, r0\n' +
+        sum +
+        '\tadd\tr0, r4, #0\n\tbl\tuse2\n' +
+        '\tldr\tr0, .L9\n\tmov\tr1, sp\n\tstr\tr1, [r0]\n\tadd\tr0, r0, #0x4\n' +
+        dma +
         '\tadd\tsp, sp, #0xc\n' +
         '\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n\tmov\tr9, r4\n\tmov\tsl, r5\n' +
         '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n' +
-        '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n';
-      const src = decompile('dmawide', dmawide, ARMV4T_AGBCC, {
-        prototypes: { h: { params: 1 }, use2: { params: 1 } },
-      }).source;
+        '.L10:\n\t.align\t2, 0\n.L9:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7efffff0\n';
+      const protos = { prototypes: { h: { params: 1 }, use2: { params: 1 } } };
+      const literal = dmawide(
+        '\tldr\tr0, [sp, #0x8]\n\tadd\tr4, r4, r0\n',
+        '\tldr\tr1, [sp, #0x4]\n\tstr\tr1, [r0]\n\tldr\tr1, .L9+0x4\n\tldr\tr0, .L9+0x8\n\tstr\tr0, [r1]\n',
+      );
+      const src = decompile('dmawide', literal, ARMV4T_AGBCC, protos).source;
       expect(src).toContain('volatile u16 sp0;');
       expect(src).toContain('*(s32 *)67109076 = &sp0;');
+      // …and a count ORed in at run time bounds nothing: `n | 0x81000000` may carry any source
+      // mode, so the device may read the spilled `dst` and `n` above the object, and all three are
+      // kept as one object in memory. Verbatim agbcc again, the same body with `n` moved from the
+      // sum into `REG_DMA3[2] = n | 0x81000000`.
+      const runtimeCount = dmawide(
+        '',
+        '\tldr\tr2, [sp, #0x4]\n\tstr\tr2, [r0]\n\tldr\tr1, .L9+0x4\n\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n' +
+          '\tldr\tr2, [sp, #0x8]\n\torr\tr0, r0, r2\n\tstr\tr0, [r1]\n',
+      );
+      const kept = decompile('dmawide', runtimeCount, ARMV4T_AGBCC, protos).source;
+      expect(kept).toContain('volatile u8 sp0[12];');
+      expect(kept).toContain('((s32 *)sp0)[1] = a0;');
+      expect(kept).toContain('((s32 *)sp0)[2] = a1;');
+      expect(kept).toContain('*(volatile s32 *)67109084 = 129 << 24 | ((s32 *)sp0)[2];');
     });
 
     // `volatile` IS NOT FREE, so it goes only where the source writes one. The structurer emits one
@@ -2338,10 +2889,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       's32 f(void) {\n    volatile u16 sp0;\n    sp0 = 0;\n    *(s32 *)67109076 = &sp0;\n    return 0;\n}\n',
     );
     // …and the object co-exists with SSA slots at higher offsets, each model owning its own bytes
+    // (the channel's control word says `DMA_SRC_FIXED`, so the device reads the object alone)
     const mixed =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp, #0x4]\n\tmov\tr4, sp\n\tstrh\tr1, [r4]\n' +
-      '\tldr\tr2, .L1\n\tstr\tr4, [r2]\n\tldr\tr0, [sp, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
-      '.L1:\n\t.word\t0x40000D4\n';
+      '\tldr\tr2, .L1\n\tstr\tr4, [r2]\n\tldr\tr3, .L1+4\n\tstr\tr3, [r2, #0x8]\n\tldr\tr0, [sp, #0x4]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\t0x40000D4\n\t.word\t0x81000001\n';
     const src = decompile('f', mixed, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u16 sp0;');
     expect(src).toContain('&sp0');
@@ -2358,6 +2911,284 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tmov\tr0, #0\n\tstrh\tr0, [r4]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L1:\n\t.word\t0x40000D4\n';
     expect(decompile('f', publishThenFill, ARMV4T_AGBCC).source).toBe(
       's32 f(void) {\n    volatile u16 sp0;\n    *(s32 *)67109076 = &sp0;\n    sp0 = 0;\n    return 0;\n}\n',
+    );
+  });
+
+  // EVERY DEVICE STORE of a function kept as one object is `volatile`. Verbatim agbcc:
+  // `DmaFill16(3, 0, a, n); DmaFill32(3, 0, b, 0x40); DmaFill16(3, 0, c, 0x40);` — the runtime
+  // count leaves the first read unbounded over the second fill's temporary. Spelled plain, agbcc
+  // deletes the 32-bit fill's three channel stores, overwritten by the third fill's with only a
+  // `u16` member store between (compiled: 12 stores in this target, 9 in the plain lift's
+  // recompile, 12 in this one's). Each fill's `dmaRegs[2];` read of the control is kept too.
+  test('a function kept as one object keeps every device store volatile', () => {
+    const threeFills =
+      'p3:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr5, sp\n\tmov\tr4, #0x0\n' +
+      '\tstrh\tr4, [r5]\n\tldr\tr4, .L3\n\tstr\tr5, [r4]\n\tstr\tr0, [r4, #0x4]\n\tlsr\tr3, r3, #0x1\n' +
+      '\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n\torr\tr3, r3, r0\n\tstr\tr3, [r4, #0x8]\n' +
+      '\tldr\tr0, [r4, #0x8]\n\tmov\tr3, #0x0\n\tstr\tr3, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n' +
+      '\tstr\tr0, [r4]\n\tstr\tr1, [r4, #0x4]\n\tldr\tr0, .L3+0x4\n\tstr\tr0, [r4, #0x8]\n' +
+      '\tldr\tr0, [r4, #0x8]\n\tmov\tr0, sp\n\tstrh\tr3, [r0]\n\tstr\tr0, [r4]\n' +
+      '\tstr\tr2, [r4, #0x4]\n\tldr\tr0, .L3+0x8\n\tstr\tr0, [r4, #0x8]\n\tldr\tr0, [r4, #0x8]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+      '\t.word\t0x40000d4\n\t.word\t-0x7afffff0\n\t.word\t-0x7effffe0\n';
+    const src = decompile('p3', threeFills, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).not.toMatch(/\(s32 \*\)67109/);
+    expect(src.match(/\(volatile s32 \*\)67109076\S* = /g)).toHaveLength(9);
+    expect(src.match(/^ +\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(3);
+  });
+
+  // …and every device access, however the lift names the register. Verbatim agbcc, `vu32 *d =
+  // (vu32 *)(0x40000B0 + ch * 12)` armed twice with only a `u16` store to the fill's temporary
+  // between: spelled plain, the first arm's three stores are deleted (compiled: 15 stores in this
+  // target, 12 in the plain lift's recompile, 15 in this one's).
+  test('a device register plus a runtime index is a device store too', () => {
+    const runtimeChannel =
+      'q4:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr3, r2, #0x1\n\tadd\tr3, r3, r2\n' +
+      '\tlsl\tr3, r3, #0x2\n\tldr\tr2, .L3\n\tadd\tr3, r3, r2\n\tmov\tr4, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r4]\n\tmov\tr2, #0x0\n\tstr\tr2, [sp, #0x4]\n\tldr\tr6, .L3+0x4\n' +
+      '\tadd\tr2, sp, #0x4\n\tstr\tr2, [r6]\n\tldr\tr5, .L3+0x8\n\tstr\tr1, [r5]\n\tldr\tr4, .L3+0xc\n' +
+      '\tldr\tr2, .L3+0x10\n\tstr\tr2, [r4]\n\tldr\tr2, [r4]\n\tmov\tr2, sp\n\tstr\tr2, [r6]\n' +
+      '\tstr\tr0, [r5]\n\tldr\tr2, .L3+0x14\n\tstr\tr2, [r4]\n\tstr\tr0, [r3]\n\tstr\tr1, [r3, #0x4]\n' +
+      '\tldr\tr5, .L3+0x18\n\tstr\tr5, [r3, #0x8]\n\tmov\tr4, sp\n\tmov\tr2, #0x1\n\tstrh\tr2, [r4]\n' +
+      '\tstr\tr1, [r3]\n\tstr\tr0, [r3, #0x4]\n\tstr\tr5, [r3, #0x8]\n\tadd\tsp, sp, #0x8\n' +
+      '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000b0\n' +
+      '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\t-0x7afffff0\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t-0x7fffffe0\n';
+    const src = decompile('q4', runtimeChannel, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).not.toMatch(/\(struct Elem0 \*\)67109040/);
+    expect(src.match(/\(volatile struct Elem0 \*\)67109040\)\[a2\]/g)).toHaveLength(6);
+  });
+
+  // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
+  // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here).
+  test('a phi of device registers is a device store too', () => {
+    const eitherChannel =
+      'q7:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr6, r0, #0\n\tadd\tr5, r1, #0\n' +
+      '\tmov\tr1, sp\n\tmov\tr0, #0x0\n\tstrh\tr0, [r1]\n\tldr\tr4, .L5\n\tstr\tr1, [r4]\n' +
+      '\tldr\tr3, .L5+0x4\n\tstr\tr6, [r3]\n\tldr\tr1, .L5+0x8\n\tldr\tr0, .L5+0xc\n\tstr\tr0, [r1]\n' +
+      '\tldr\tr0, [r1]\n\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n' +
+      '\tstr\tr5, [r3]\n\tldr\tr0, .L5+0x10\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n\tsub\tr1, r1, #0x20\n' +
+      '\tcmp\tr2, #0\n\tbeq\t.L3\n\tadd\tr1, r1, #0xc\n.L3:\n\tstr\tr6, [r1]\n\tstr\tr5, [r1, #0x4]\n' +
+      '\tldr\tr0, .L5+0x14\n\tstr\tr0, [r1, #0x8]\n\tstr\tr5, [r1]\n\tstr\tr6, [r1, #0x4]\n' +
+      '\tstr\tr0, [r1, #0x8]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L6:\n' +
+      '\t.align\t2, 0\n.L5:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t-0x7fffffe0\n';
+    const src = decompile('q7', eitherChannel, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
+  });
+
+  // A device LOAD too: plain, `while (REG_VCOUNT != 160);` is loop-invariant to agbcc, which hoists
+  // the `ldrh` and spins on a register copy forever (compiled).
+  test('a function kept as one object keeps a device poll volatile', () => {
+    const poll =
+      'q5:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr5, r2, #0\n\tmov\tr3, sp\n' +
+      '\tmov\tr2, #0x0\n\tstrh\tr2, [r3]\n\tldr\tr4, .L7\n\tstr\tr3, [r4]\n\tldr\tr3, .L7+0x4\n' +
+      '\tstr\tr0, [r3]\n\tldr\tr2, .L7+0x8\n\tldr\tr0, .L7+0xc\n\tstr\tr0, [r2]\n\tldr\tr0, [r2]\n' +
+      '\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n\tstr\tr1, [r3]\n' +
+      '\tldr\tr0, .L7+0x10\n\tstr\tr0, [r2]\n\tldr\tr0, [r2]\n\tmov\tr0, #0x1\n\tstr\tr0, [r5]\n' +
+      '\tldr\tr1, .L7+0x14\n.L3:\n\tldrh\tr0, [r1]\n\tcmp\tr0, #0xa0\n\tbne\t.L3\n\tmov\tr0, #0x2\n' +
+      '\tstr\tr0, [r5]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n' +
+      '\t.align\t2, 0\n.L7:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t0x4000006\n';
+    const src = decompile('q5', poll, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('while (*(volatile u16 *)67108870 != 160);');
+  });
+
+  // …and through a variable the struct recovery typed as the device's struct pointer: a channel
+  // chosen by a branch, `d = c ? (struct Snd *)0x4000060 : (struct Snd *)0x4000068`, spelled
+  // `v1->field_0`, carries the qualifier on a cast of that variable (compiled: plain, agbcc hoists
+  // the `ldrh` out of `while (d->lo != 0);` and the recompile never exits the loop).
+  test('a device access through a struct-typed pointer variable is volatile', () => {
+    const phiPoll =
+      'f3:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x1\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr6, .L9\n\tstr\tr3, [r6]\n\tldr\tr5, .L9+0x4\n\tstr\tr0, [r5]\n' +
+      '\tldr\tr4, .L9+0x8\n\tldr\tr2, .L9+0xc\n\tldr\tr3, [r2]\n\tstr\tr3, [r4]\n' +
+      '\tmov\tr2, #0x2\n\tstr\tr2, [sp, #0x4]\n\tadd\tr2, sp, #0x4\n\tstr\tr2, [r6]\n' +
+      '\tstr\tr0, [r5]\n\tstr\tr3, [r4]\n\tldr\tr2, .L9+0x10\n\tcmp\tr1, #0\n\tbeq\t.L3\n' +
+      '\tsub\tr2, r2, #0x8\n.L3:\n\tmov\tr0, #0x5\n\tstr\tr0, [r2, #0x4]\n.L5:\n' +
+      '\tldrh\tr0, [r2]\n\tcmp\tr0, #0\n\tbne\t.L5\n\tldr\tr0, [r2, #0x4]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n.L10:\n\t.align\t2, 0\n' +
+      '.L9:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\tgCnt\n' +
+      '\t.word\t0x4000068\n';
+    const src = decompile('f3', phiPoll, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('((volatile struct Struct1 *)v1)->field_4 = 5;');
+    expect(src).toContain('} while (((volatile struct Struct1 *)v1)->field_0 != 0);');
+    expect(src).toContain('return ((volatile struct Struct1 *)v1)->field_4;');
+  });
+
+  // A marked read executes once, as a call does: `v = REG_VCOUNT; return v * v;` is one `ldrh`,
+  // and inlined at both operands the qualifier makes it two (compiled: 2 `ldrh`, x*y for x*x).
+  test('a volatile device read with two uses is read once', () => {
+    const square =
+      'sv1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr5, .L3\n\tstr\tr3, [r5]\n\tldr\tr4, .L3+0x4\n' +
+      '\tldr\tr3, .L3+0x8\n\tstr\tr3, [r4]\n\tldr\tr2, .L3+0xc\n\tstr\tr0, [r2]\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r5]\n' +
+      '\tstr\tr3, [r4]\n\tstr\tr1, [r2]\n\tldr\tr0, .L3+0x10\n\tldrh\tr0, [r0]\n\tmov\tr1, r0\n' +
+      '\tmul\tr1, r1, r0\n\tadd\tr0, r1, #0\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n' +
+      '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n\t.word\t0x4000006\n';
+    const src = decompile('sv1', square, ARMV4T_AGBCC).source;
+    expect(src).toContain('    v0 = *(volatile u16 *)67108870;\n    return v0 * v0;\n');
+  });
+
+  // …and it stays in the arm it was read in: `if (k && (v = REG_VCOUNT) > 5) h(v);` is not folded
+  // into a `&&`, which would re-guard a read whose place the fold does not record.
+  test('a volatile device read a branch guards stays in its arm', () => {
+    const guarded =
+      'sc1:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tldr\tr6, .L4\n\tstr\tr4, [r6]\n\tldr\tr5, .L4+0x4\n' +
+      '\tldr\tr4, .L4+0x8\n\tstr\tr4, [r5]\n\tldr\tr3, .L4+0xc\n\tstr\tr0, [r3]\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r6]\n' +
+      '\tstr\tr4, [r5]\n\tstr\tr1, [r3]\n\tcmp\tr2, #0\n\tbeq\t.L3\n\tldr\tr0, .L4+0x10\n' +
+      '\tldrh\tr0, [r0]\n\tcmp\tr0, #0x5\n\tbls\t.L3\n\tbl\th\n.L3:\n\tadd\tsp, sp, #0x8\n' +
+      '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L5:\n\t.align\t2, 0\n.L4:\n' +
+      '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x4000006\n';
+    const src = decompile('sc1', guarded, ARMV4T_AGBCC).source;
+    expect(src).toContain('    if (a2 != 0) {\n        v0 = *(volatile u16 *)67108870;\n        if (v0 > 5) h(v0');
+  });
+
+  // A marked read nothing consumes is still one the machine made: `REG_IF;` stays a statement.
+  test('a dead volatile device read is spelled', () => {
+    const ack =
+      'd1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr5, .L3\n\tstr\tr3, [r5]\n\tldr\tr4, .L3+0x4\n' +
+      '\tldr\tr3, .L3+0x8\n\tstr\tr3, [r4]\n\tldr\tr2, .L3+0xc\n\tstr\tr0, [r2]\n' +
+      '\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r5]\n' +
+      '\tstr\tr3, [r4]\n\tstr\tr1, [r2]\n\tldr\tr0, .L3+0x10\n\tldrh\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n' +
+      '.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x4000202\n';
+    const src = decompile('d1', ack, ARMV4T_AGBCC).source;
+    expect(src).toContain('    *(volatile u16 *)67109378;\n}');
+  });
+
+  // Two device reads stay in the order the machine made them, and neither passes a device store.
+  // Verbatim agbcc: `a = TM0CNT_L; b = VCOUNT; gY = b - a;` in one expression lets the recompile
+  // read VCOUNT first, and `v = r->ifl; r->ie = d; gY = v;` inlined at `gY` reads REG_IF after
+  // writing REG_IE (compiled, both reversed).
+  test('a volatile device read keeps its place against the device accesses after it', () => {
+    const twoReads =
+      'o12:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr5, .L3\n\tstr\tr3, [r5]\n\tldr\tr4, .L3+0x4\n\tldr\tr3, .L3+0x8\n' +
+      '\tstr\tr3, [r4]\n\tldr\tr2, .L3+0xc\n\tstr\tr0, [r2]\n\tmov\tr0, #0x5\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r5]\n\tstr\tr3, [r4]\n' +
+      '\tstr\tr1, [r2]\n\tldr\tr0, .L3+0x10\n\tldrh\tr2, [r0]\n\tsub\tr0, r0, #0xfa\n' +
+      '\tldrh\tr0, [r0]\n\tldr\tr1, .L3+0x14\n\tsub\tr0, r0, r2\n\tstr\tr0, [r1]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+      '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x4000100\n\t.word\tgY\n';
+    expect(decompile('o12', twoReads, ARMV4T_AGBCC).source).toContain(
+      '    v0 = *(volatile u16 *)67109120;\n    gY = *(volatile u16 *)(67109120 - 250) - v0;\n',
+    );
+    const readThenWrite =
+      'o14:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tadd\tsp, sp, #-0x8\n' +
+      '\tlsl\tr2, r2, #0x10\n\tlsr\tr2, r2, #0x10\n\tldr\tr5, .L3\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tldr\tr3, .L3+0x4\n\tmov\tr8, r3\n\tstr\tr4, [r3]\n\tldr\tr6, .L3+0x8\n' +
+      '\tldr\tr4, .L3+0xc\n\tstr\tr4, [r6]\n\tadd\tr3, r3, #0x8\n\tstr\tr0, [r3]\n\tmov\tr0, #0x5\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tmov\tr7, r8\n\tstr\tr0, [r7]\n' +
+      '\tstr\tr4, [r6]\n\tstr\tr1, [r3]\n\tldrh\tr1, [r5, #0x2]\n\tldrh\tr0, [r5]\n' +
+      '\tstrh\tr2, [r5]\n\tldr\tr0, .L3+0x10\n\tstr\tr1, [r0]\n\tadd\tsp, sp, #0x8\n\tpop\t{r3}\n' +
+      '\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+      '\t.word\t0x4000200\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\tgY\n';
+    expect(decompile('o14', readThenWrite, ARMV4T_AGBCC).source).toContain(
+      '    v0 = ((volatile u16 *)67109376)[1];\n    *(volatile u16 *)67109376;\n' +
+        '    *(volatile u16 *)67109376 = a2;\n    gY = v0;\n',
+    );
+  });
+
+  // A function accepted object by object pins the device stores a later store in their block
+  // overwrites, which plain agbcc deletes. Verbatim agbcc, `REG_IME = 0; DmaFill16(3, 0x1111, a,
+  // 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`: the first fill and `REG_IME = 0` are
+  // pinned, and the recompile keeps the target's 10 stores (7 plain). The other stores stay plain;
+  // each fill's closing read of the control is a read, and pinned.
+  test('a function accepted object by object pins a device store its block overwrites', () => {
+    const twoFills =
+      'd3i:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr5, .L3\n\tmov\tr2, #0x0\n\tstrh\tr2, [r5]\n' +
+      '\tmov\tr3, sp\n\tldr\tr4, .L3+0x4\n\tadd\tr2, r4, #0\n\tstrh\tr2, [r3]\n\tldr\tr2, .L3+0x8\n\tstr\tr3, [r2]\n' +
+      '\tstr\tr0, [r2, #0x4]\n\tldr\tr4, .L3+0xc\n\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tldr\tr6, .L3+0x10\n' +
+      '\tadd\tr0, r6, #0\n\tstrh\tr0, [r3]\n\tstr\tr3, [r2]\n\tstr\tr1, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n' +
+      '\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x1\n\tstrh\tr0, [r5]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x4000208\n\t.word\t0x1111\n\t.word\t0x40000d4\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t0x2222\n';
+    const src = decompile('d3i', twoFills, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).toContain('    *(volatile u16 *)67109384 = 0;\n');
+    expect(src).toContain(
+      '    *(volatile s32 *)67109076 = &sp0;\n    ((volatile s32 *)67109076)[1] = a0;\n' +
+        '    ((volatile s32 *)67109076)[2] = -2130706400;\n',
+    );
+    expect(src).toContain('    p0[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n    *(u16 *)67109384 = 1;\n');
+  });
+
+  // …and a read of the channel between the two fills does not stand for the first: agbcc forwards
+  // the stored control to a `u32` read of it and deletes the store (a `u16` read would not alias
+  // it). Verbatim agbcc, the same two fills with `gY = *(vu32 *)0x40000DC;` between: 11 stores in
+  // the target, 10 in a recompile that leaves the first control store plain, 11 in this one's.
+  test('a read of an overwritten device store does not unpin it', () => {
+    const readBetween =
+      'e2:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr5, .L3\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r5]\n\tmov\tr3, sp\n\tldr\tr4, .L3+0x4\n\tadd\tr2, r4, #0\n\tstrh\tr2, [r3]\n' +
+      '\tldr\tr2, .L3+0x8\n\tstr\tr3, [r2]\n\tstr\tr0, [r2, #0x4]\n\tldr\tr4, .L3+0xc\n' +
+      '\tstr\tr4, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tldr\tr3, .L3+0x10\n\tldr\tr0, .L3+0x14\n' +
+      '\tldr\tr0, [r0]\n\tstr\tr0, [r3]\n\tmov\tr3, sp\n\tldr\tr6, .L3+0x18\n\tadd\tr0, r6, #0\n' +
+      '\tstrh\tr0, [r3]\n\tstr\tr3, [r2]\n\tstr\tr1, [r2, #0x4]\n\tstr\tr4, [r2, #0x8]\n' +
+      '\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x1\n\tstrh\tr0, [r5]\n\tadd\tsp, sp, #0x4\n' +
+      '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x4000208\n' +
+      '\t.word\t0x1111\n\t.word\t0x40000d4\n\t.word\t-0x7effffe0\n\t.word\tgY\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x2222\n';
+    expect(decompile('e2', readBetween, ARMV4T_AGBCC).source).toContain(
+      '    ((volatile s32 *)67109076)[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n' +
+        '    gY = *(volatile s32 *)67109084;\n',
+    );
+  });
+
+  // …and every device READ of such a function is pinned: plain, the read that closes a DMA macro
+  // (`dmaRegs[2];`) is used by nothing and is not lifted at all, and agbcc hoists a poll out of a
+  // loop that stores nothing. Verbatim agbcc, two fills whose control the shift-built `REG_DISPCNT
+  // = d` does not re-arm, then `while (REG_VCOUNT != 160);`: plain, the recompile loses both
+  // closing reads and spins on a register copy of the first VCOUNT read.
+  test('a function accepted object by object keeps every device read', () => {
+    const pollAfterFills =
+      'd1:\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr1, r1, #0x10\n' +
+      '\tlsr\tr1, r1, #0x10\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n\tldr\tr2, .L7\n\tmov\tr0, sp\n' +
+      '\tstr\tr0, [r2]\n\tldr\tr0, .L7+0x4\n\tstr\tr0, [r2, #0x4]\n\tldr\tr0, .L7+0x8\n' +
+      '\tstr\tr0, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x5\n\tstr\tr0, [sp, #0x4]\n' +
+      '\tadd\tr0, sp, #0x4\n\tstr\tr0, [r2]\n\tldr\tr0, .L7+0xc\n\tstr\tr0, [r2, #0x4]\n' +
+      '\tldr\tr0, .L7+0x10\n\tstr\tr0, [r2, #0x8]\n\tldr\tr0, [r2, #0x8]\n\tmov\tr0, #0x80\n' +
+      '\tlsl\tr0, r0, #0x13\n\tstrh\tr1, [r0]\n\tldr\tr1, .L7+0x14\n.L3:\n\tldrh\tr0, [r1]\n' +
+      '\tcmp\tr0, #0xa0\n\tbne\t.L3\t@cond_branch\n\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L8:\n' +
+      '\t.align\t2, 0\n.L7:\n\t.word\t0x40000d4\n\t.word\tgDst\n\t.word\t-0x7effffe0\n' +
+      '\t.word\tgDst2\n\t.word\t-0x7affffe0\n\t.word\t0x4000006\n';
+    const src = decompile('d1', pollAfterFills, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src.match(/^ {4}\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(2);
+    expect(src).toContain('    do {\n        v0 = *(volatile u16 *)67108870;\n    } while (v0 != 160);\n');
+  });
+
+  // A device address agbcc builds without a pool word is placed too: 0x04000000 is `mov #0x80;
+  // lsl #0x13`. Verbatim agbcc, two fills whose control nothing bounds, then `REG_DISPCNT = 0x80;
+  // gY = 5; REG_DISPCNT = d;`: spelled plain, the recompile drops the first DISPCNT store (11 -> 10).
+  test('a shift-built device address is pinned', () => {
+    const shiftBuilt =
+      'o4:\n\tpush\t{r4, r5, r6, lr}\n\tmov\tr6, r8\n\tpush\t{r6}\n\tadd\tsp, sp, #-0x8\n' +
+      '\tlsl\tr2, r2, #0x10\n\tlsr\tr2, r2, #0x10\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tldr\tr6, .L3\n\tstr\tr4, [r6]\n\tldr\tr5, .L3+0x4\n\tldr\tr4, .L3+0x8\n' +
+      '\tstr\tr4, [r5]\n\tldr\tr3, .L3+0xc\n\tstr\tr0, [r3]\n\tmov\tr0, #0x5\n\tmov\tr8, r0\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r6]\n\tstr\tr4, [r5]\n' +
+      '\tstr\tr1, [r3]\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x13\n\tmov\tr0, #0x80\n' +
+      '\tstrh\tr0, [r1]\n\tldr\tr0, .L3+0x10\n\tmov\tr3, r8\n\tstr\tr3, [r0]\n\tstrh\tr2, [r1]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n' +
+      '\t.word\tgDst\n\t.word\t0x40000dc\n\t.word\tgY\n';
+    expect(decompile('o4', shiftBuilt, ARMV4T_AGBCC).source).toContain(
+      '    *(volatile u16 *)(128 << 19) = 128;\n    gY = 5;\n    *(volatile u16 *)(128 << 19) = a2;\n',
     );
   });
 
@@ -2408,8 +3239,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
-    // address arithmetic on the capture: the object's extent stops being one scalar
-    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tadd\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+    // address arithmetic on the capture that is not a constant move: the object's extent stops
+    // being one scalar
+    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tsub\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
     // an access at a nonzero offset through the capture
@@ -2422,9 +3254,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ARMV4T_AGBCC,
       ),
     ).toThrow(laddr);
-    // a COMPUTED capture is not the modelled shape at all
-    expect(() => decompile('f', wrap('\tadd\tr4, sp, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
-      /address of a stack local is computed/,
+    // a RUNTIME offset from sp is an index, and a word element is not the one modelled
+    expect(() => decompile('f', wrap('\tadd\tr4, sp, r1\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      /a runtime index into the object at \[sp,#0\) accesses 4 bytes/,
     );
   });
 

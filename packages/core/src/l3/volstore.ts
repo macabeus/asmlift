@@ -92,8 +92,8 @@
 // both configurations and with any window. No row demands the read spelling, and a variation with no
 // inhabitant is what "earn the level" forbids.
 import { type IrType, T, scalarTypeForAccess } from '../ir/types';
-import { cellAddress, inRange } from './address';
-import { type Expr, type SFn, type Stmt, stmtChildren } from './ast';
+import { cellAddress, inRange, qualifiedBase } from './address';
+import { type Expr, type SFn, type Stmt, dotBase, stmtChildren } from './ast';
 import { type Gate, firstRejection } from './gates';
 
 /** One STORE lvalue as the gates read it. */
@@ -141,9 +141,6 @@ export const VOL_STORE_GATES: readonly Gate<AccessCtx>[] = [
   },
 ];
 
-/** Does this base already assert volatility — a `volatile` cast at any depth of the cast chain? */
-const qualifiedBase = (e: Expr): boolean => e.k === 'cast' && (e.volatile === true || qualifiedBase(e.e));
-
 /** The pointee the deref cast carries: the access's own scalar type. */
 const pointee = (ix: Extract<Expr, { k: 'index' }>): IrType => scalarTypeForAccess(ix.width, ix.signed);
 
@@ -169,13 +166,66 @@ function qualify(lval: Expr, window: readonly [number, number] | undefined): Exp
   if (firstRejection(VOL_STORE_GATES, ctx) !== null) {
     return lval;
   }
-  // An existing scalar pointer cast takes the qualifier in place; a bare const gets one minted,
-  // exactly the node backend/cfamily.ts's own deref legalization would have synthesized.
+  return qualifiedAccess(lval);
+}
+
+/** An indexed access with `volatile` on the pointee of its deref cast. An existing scalar pointer
+ *  cast takes the qualifier in place; a bare base gets one minted, exactly the node
+ *  backend/cfamily.ts's own deref legalization would have synthesized. Also how
+ *  {@link qualifiedMemoryAccess} spells an indexed access the lift marked `volatile`. */
+export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Expr, { k: 'index' }> {
+  if (qualifiedBase(lval.base)) {
+    return lval;
+  }
   const base: Expr =
     lval.base.k === 'cast' && lval.base.to.kind === 'ptr'
       ? { ...lval.base, volatile: true }
       : { k: 'cast', to: T.ptr(pointee(lval)), volatile: true, e: lval.base };
   return { ...lval, base };
+}
+
+/** A memory access the lift marked `volatile` (frontend/frame-objects.ts), spelled through a
+ *  `volatile` pointee: an indexed access by {@link qualifiedAccess}; a recovered struct member
+ *  through the struct pointer it is reached by — `((volatile struct S *)0x40000B0)[ch].field_0`,
+ *  `((volatile struct S *)p)->field_0` — whether that pointer is already a cast or a variable
+ *  `typeOf` types as one; and a union view through the member it views. A named global — `gSym`,
+ *  `gSym.field` — is returned unchanged, since its declaration owns its qualifiers. Null when the
+ *  pointer the access is reached by has no type to cast it to, for the caller to refuse rather
+ *  than drop the qualifier. */
+export function qualifiedMemoryAccess(e: Expr, typeOf: (x: Expr) => IrType | undefined): Expr | null {
+  if (e.k === 'index') {
+    return qualifiedAccess(e);
+  }
+  if (e.k !== 'field') {
+    return e;
+  }
+  const element = dotBase(e);
+  if (element !== undefined) {
+    const base = qualifiedPointer(element.base, typeOf);
+    return base === null ? null : { ...e, base: { ...element, base } };
+  }
+  if (e.dot === true) {
+    if (e.base.k !== 'field') {
+      return e;
+    }
+    const member = qualifiedMemoryAccess(e.base, typeOf);
+    return member === null ? null : { ...e, base: member };
+  }
+  const base = qualifiedPointer(e.base, typeOf);
+  return base === null ? null : { ...e, base };
+}
+
+/** A pointer expression carrying `volatile` on its pointee: a pointer cast takes it in place, and
+ *  any other pointer is cast to its own type with it. */
+function qualifiedPointer(p: Expr, typeOf: (x: Expr) => IrType | undefined): Expr | null {
+  if (qualifiedBase(p)) {
+    return p;
+  }
+  if (p.k === 'cast' && p.to.kind === 'ptr') {
+    return { ...p, volatile: true };
+  }
+  const t = typeOf(p);
+  return t?.kind === 'ptr' ? { k: 'cast', to: t, volatile: true, e: p } : null;
 }
 
 /** How many stores this tree would qualify — the enumeration gate, so a function with no device

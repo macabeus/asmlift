@@ -596,6 +596,20 @@ describe('docs/bench-cost.md', () => {
       `docs/bench-cost.md §3 disagrees with apps/benchmark/results/results.json. Every figure there is ` +
         `derived from the artifact, so re-read it rather than re-typing it — expected: ${expected.join(' · ')}`,
     ).toEqual([]);
+
+    // §1's `--only` row prices its dearest case with the same artifact's dearest row, so it is
+    // derived the same way.
+    const onlyRow = tableRows().rows.find((r) => cellOf(r, 1).includes('--only <sym>'));
+    expect(onlyRow, 'docs/bench-cost.md §1 has no `--only <sym>` row').toBeDefined();
+    const onlyExpected = [
+      `${Math.round(dearest.asmlift.rankSeconds)} s on the dearest`,
+      `\`${dearest.id}\`, ${dearest.asmlift.rankSeconds.toFixed(1)} s of \`rankSeconds\``,
+    ];
+    expect(
+      onlyExpected.filter((e) => !onlyRow!.includes(e)),
+      `docs/bench-cost.md §1's \`--only\` row quotes a dearest row other than the artifact's — expected: ` +
+        onlyExpected.join(' · '),
+    ).toEqual([]);
   });
 });
 

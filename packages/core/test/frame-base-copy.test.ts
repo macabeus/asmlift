@@ -102,6 +102,20 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tand\tr3, r1\n'))).toThrow(CAPTURE);
   });
 
+  test('a capture MOVED BY A CONSTANT is the capture of that offset', () => {
+    // `mov r2, sp / add r2, r2, #0x8` is how `sa3:ProcessOamBuffers` spells `&local` at [sp,#8];
+    // the two-operand `add rD, #k` moves rD itself. Either way the object is at the sum, and the
+    // `mov` left behind names nothing.
+    const moved = (move: string) =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n${move}\tstrh\tr0, [r2]\n\tbl\tg\n` +
+      `\tmov\tr2, sp\n${move}\tldrh\tr0, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    const want = 's32 f(s32 a0) {\n    u16 sp4;\n    sp4 = a0;\n    g(a0);\n    return sp4;\n}\n';
+    expect(lift(moved('\tadd\tr2, r2, #0x4\n')).source).toBe(want);
+    expect(lift(moved('\tadd\tr2, #0x4\n')).source).toBe(want);
+    // a move DOWN is not one: nothing spells a negative frame offset, and `sub` stays arithmetic
+    expect(() => lift(moved('\tsub\tr2, #0x4\n'))).toThrow(/the captured address flows into `sub`/);
+  });
+
   test('a WORD access through a capture is not this shape — the outgoing arguments live there', () => {
     // `ldr`/`str` DO have an `[sp,#imm]` encoding, so a word access through a copy is some other
     // shape. What makes it matter is the outgoing-argument area: agbcc stages arguments 5+ at the
@@ -124,6 +138,40 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
 \tbx\tr1
 `;
     expect(() => lift(outgoing)).toThrow(CAPTURE);
+  });
+
+  // A capture that was not split is refused with ITS OWN reason. Two captures here: [sp,#0]'s word
+  // access is the word refusal, and [sp,#8]'s byte access is refused because that capture also
+  // escapes — which the word refusal, reported against it, would misname.
+  test('an access through a capture is refused with that capture’s reason', () => {
+    const two =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr5, sp, #0x8\n\tstrb\tr1, [r5, #0x1]\n' +
+      '\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n\tmov\tr0, r5\n\tbl\tg\n\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', two, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
+      /a store at \[\+1\] through the captured address — only a scalar at the captured address is modelled/,
+    );
+  });
+
+  // …and two captures at ONE offset are two captures. Every direct `[sp,#4]` word access is one of
+  // its own, refused for its width; the escaping `add r4, sp, #0x4` beside them reads `[r4, #0x2]`,
+  // which no word access touches. agbcc's own output for `struct Q { u8 a; u8 b; u16 c; }; u32
+  // e1(u32 x, u32 y){ struct Q q; q.a = x; q.b = y; q.c = x + y; five(x, y, x, y, x); g(&q);
+  // return q.a + q.c; }`, at the corpus's flags.
+  test('a capture at an offset another capture shares is refused with its own reason', () => {
+    const e1 =
+      'e1:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r0, #0\n\tadd\tr3, r1, #0\n\tlsl\tr1, r2, #0x18\n' +
+      '\tlsr\tr1, r1, #0x18\n\tldr\tr4, .L3\n\tldr\tr0, [sp, #0x4]\n\tand\tr0, r0, r4\n\torr\tr0, r0, r1\n' +
+      '\tlsl\tr1, r3, #0x18\n\tlsr\tr1, r1, #0x10\n\tldr\tr4, .L3+0x4\n\tand\tr0, r0, r4\n\torr\tr0, r0, r1\n' +
+      '\tadd\tr1, r2, r3\n\tlsl\tr1, r1, #0x10\n\tldr\tr4, .L3+0x8\n\tand\tr0, r0, r4\n\torr\tr0, r0, r1\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tstr\tr2, [sp]\n\tadd\tr0, r2, #0\n\tadd\tr1, r3, #0\n\tbl\tfive\n' +
+      '\tadd\tr4, sp, #0x4\n\tadd\tr0, r4, #0\n\tbl\tg\n\tadd\tr0, sp, #0x4\n\tldrb\tr0, [r0]\n' +
+      '\tldrh\tr1, [r4, #0x2]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x100\n\t.word\t-0xff01\n\t.word\t0xffff\n';
+    const prototypes = { five: { params: 5, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
+    expect(() => decompile('e1', e1, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled/,
+    );
   });
 
   test('a capture that ESCAPES keeps the frame base', () => {
@@ -423,18 +471,71 @@ describe('the audit judges each frame object on its own bytes', () => {
       );
     });
 
+    // A RUNTIME INDEX into the untyped storage. agbcc's own output for `u32 pick(u32 i){ u8 a[8];
+    // memcpy(a, tbl, 8); return a[i]; }` (and `a[i] = v` for the store), at the corpus's flags.
+    describe('a runtime index reads one byte element of the untyped storage', () => {
+      const indexed = (access: string) =>
+        copy(
+          '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x8\n\tbl\tmemcpy\n' +
+            `\tmov\tr1, sp\n\tadd\tr0, r1, r4\n${access}`,
+          '0x8',
+        ) + '.L3:\n\t.word\ttbl\n';
+
+      test('a byte load at the indexed address is an element of the declared bytes', () => {
+        expect(lift(indexed('\tldrb\tr0, [r0]\n')).source).toContain('u8 sp0[8];');
+        expect(lift(indexed('\tldrb\tr0, [r0]\n')).source).toContain('((u8 *)sp0)[a0]');
+      });
+
+      test('a byte store at the indexed address is one too', () => {
+        expect(lift(indexed('\tstrb\tr5, [r0]\n\tmov\tr0, #0x0\n')).source).toContain('((u8 *)sp0)[a0] = a1;');
+      });
+
+      test('a wider element is another array over the same bytes, and declines naming its width', () => {
+        // `u16 a[4]; … return a[i];` — agbcc scales the index and reads a halfword
+        expect(() => lift(indexed('\tldrh\tr0, [r0]\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\) accesses 2 bytes/,
+        );
+      });
+
+      test('an indexed address that is not only accessed declines', () => {
+        expect(() => lift(indexed('\tbl\tuse\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\) flows into `call`/,
+        );
+        expect(() => lift(indexed('\tldrb\tr0, [r0, #0x1]\n'))).toThrow(/flows into `load`/);
+      });
+
+      // …and the storage need not escape: its own indexed stores write it. agbcc's own output for
+      // `u32 f(u32 i){ u8 a[8]; u32 j; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i]; }`.
+      test('an indexed object that never escapes is written by its own indexed stores', () => {
+        const local =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tmov\tr2, #0x0\n\tldr\tr3, .L8\n' +
+          '.L6:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tadd\tr1, r2, r3\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n' +
+          '\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n\tbls\t.L6\n\tmov\tr1, sp\n\tadd\tr0, r1, r4\n\tldrb\tr0, [r0]\n' +
+          '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L8:\n\t.word\ttbl\n';
+        const src = lift(local).source;
+        expect(src).toContain('u8 sp0[8];');
+        expect(src).toContain('((u8 *)sp0)[v0] = ((u8 *)&tbl)[v0];');
+        expect(src).toContain('return ((u8 *)sp0)[a0];');
+      });
+
+      test('an object an access of its own types as a scalar is not indexed', () => {
+        expect(() => lift(indexed('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\), which an access of its own types as one scalar/,
+        );
+      });
+    });
+
+    test('an object that does not start at the bottom of the area is not the whole area', () => {
+      // `add rD, sp, #k` names an object at [sp,#k), so the bytes below it are something else
+      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
+        /the object does not start at the bottom of the reserved area/,
+      );
+    });
+
     // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
     // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
     // the shape — these assert that the earlier refusal is the one that fires, so a change that
     // relaxes one of them shows up here as a message that moved.
-    test('a computed capture declines before the extent is ever considered', () => {
-      // `off` can only be 0 for an untyped object because this is what happens to any other
-      // spelling — the clause guarding a nonzero offset is precaution, not a live rule
-      expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
-        /a CONSTANT frame offset; only `mov rD, sp` is modelled/,
-      );
-    });
-
     test('a capture that neither accesses nor escapes declines where its uses are classified', () => {
       expect(() => lift(copy('\tmov\tr0, sp\n'))).toThrow(
         /the captured address flows into `ret` — not an access, an escape, or a phi/,
@@ -445,7 +546,14 @@ describe('the audit judges each frame object on its own bytes', () => {
   test('an object past the reserved local area declines', () => {
     // above the local area is the callee-saved block the epilogue pops, then the caller's frame
     expect(() => lift(DISJOINT)).not.toThrow();
-    expect(() => lift(frame(OBJ.replace(/#0x4/g, '#0x8')))).toThrow(/outside the reserved local area/);
+    expect(() => lift(frame(OBJ.replace(/#0x4/g, '#0x8')))).toThrow(
+      /the captured address at \[sp,#8\) is the top of the reserved local area of 8 bytes — one past the end/,
+    );
+    // …and one that STARTS inside it and runs past its top is refused for its width
+    const straddle = '\tmov\tr3, sp\n\tstrh\tr1, [r3, #0x7]\n\tmov\tr3, sp\n\tldrh\tr0, [r3, #0x7]\n';
+    expect(() => lift(frame(straddle))).toThrow(
+      /the object at \[sp,#7\) of width 2 lies outside the reserved local area/,
+    );
   });
 
   test('two objects of different widths are declared separately', () => {

@@ -58,7 +58,7 @@ import {
   replaceAllUsesWith,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS } from '../ir/opcodes';
+import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, isPinnedAccess } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 import { forgetHelperPlacement } from '../runtime-helpers';
@@ -227,8 +227,10 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // value ops (arith, loads, icmp) are safe: the structurer inlines them back into the `&&`/`||` RHS
         // expression, where C's own short-circuit re-guards them. Any side effect ⇒ DECLINE the fold — the
         // merge-variable spelling the fall-through leaves is correct (the side effect stays in B's block),
-        // just possibly non-matching.
-        if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
+        // just possibly non-matching. A read the lift pinned `volatile` is an access, not a value, and
+        // stays in its arm the same way: re-guarded, it is the same access only if the fold said
+        // where it was, and nothing records that (structure/analysis.ts, `volatileGuardedRead`).
+        if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode) || isPinnedAccess(op))) {
           continue;
         }
         // NEGATABLE only when the orientation actually inverts the head — asked here rather than up
@@ -583,7 +585,8 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // HOIST_UNSAFE_OPS includes `opaque`: an instruction asmlift could not model, and moving it
         // out of the arm that guards it is the reordering this refuses. Loud either way today — a
         // decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`.
-        if (g.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode))) {
+        // A read the lift pinned `volatile` stays in its arm too, as in the value form above.
+        if (g.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode) || isPinnedAccess(op))) {
           continue;
         }
         // Which of ^g's edges rejoins ^h's other successor? That is the shared block. A DIRECT edge

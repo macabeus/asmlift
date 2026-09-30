@@ -48,6 +48,31 @@ test('the lowest member derefs the bare base, the rest carry their offsets', () 
   });
 });
 
+// A pinned device access is `volatile` on its cast. Re-spelled off a `u8 *` local it is a plain
+// access, which agbcc deletes when nothing uses it (expr.c:4615-4620) and hoists out of a poll loop
+// (loop.c:8934): compiled, the `/nearbase` candidate of two DMA fills and a `REG_VCOUNT` poll lost
+// both closing reads and spun forever, and it was the ranked winner.
+test('declined: a volatile-qualified base stays out of every cluster, with its cast', () => {
+  const pinned = (addr: number): Expr => ({
+    k: 'index',
+    base: { k: 'cast', to: { kind: 'ptr', to: s32 }, e: c(addr), volatile: true },
+    idx: c(2),
+    width: 4,
+    signed: true,
+  });
+  const body: Stmt[] = [
+    { k: 'exprstmt', value: pinned(0x40000d4) },
+    { k: 'exprstmt', value: pinned(0x40000d4) },
+    { k: 'exprstmt', value: pinned(0x4000006) },
+  ];
+  expect(nearBaseClusters255(fn(body))).toBeNull();
+  // …and beside a plain cluster, it keeps its spelling while the plain cells re-spell
+  const r = nearBaseClusters255(
+    fn([...body, { k: 'exprstmt', value: deref(100, 2) }, { k: 'exprstmt', value: deref(102, 2) }]),
+  )!;
+  expect(r.body.slice(1, 4)).toEqual(body);
+});
+
 test('declined: a single address forms no cluster', () => {
   expect(nearBaseClusters255(fn([{ k: 'exprstmt', value: deref(0x03001048, 2) }]))).toBeNull();
 });

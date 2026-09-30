@@ -3,6 +3,7 @@
 // A closed table of signatures. The verifier and the parser are driven by it, so a mnemonic
 // typo or an operand-count mismatch fails at its source instead of surfacing as wrong output
 // several stages later.
+import type { Op } from './core';
 
 export interface OpSig {
   /** exact operand count, or "variadic" (e.g. ret takes 0 or 1). */
@@ -198,7 +199,7 @@ export const OPCODES = {
   //     merely "owns the storage", because a frame the function owns can still be written by
   //     someone else once an address into it escapes to a callee, which fills a wider object than
   //     any in-function access reveals. Whoever mints one owes the retraction on escape
-  //     (frontend/thumb.ts, after the frame-object audit).
+  //     (the frame-object audit, frontend/frame-objects.ts).
   //   • a REGISTER the ABI does not pass arguments in AND this function's prologue SAVED cannot
   //     carry a value a caller handed over, and has no address for anything else to reach it by, so
   //     there is nothing to retract. The save is half of the premise, not a corroboration of it:
@@ -359,6 +360,11 @@ export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
  *  is here and not next to either: `structure/analysis.ts` uses it for the address-home variation's slot
  *  model, and `raise/const.ts` to recognise a folded literal that IS an address. */
 export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aload', 'astore']);
+
+/** A memory access the lift marked `volatile` — a device register access the recompile must make
+ *  exactly where, and exactly as often as, the machine did (frontend/frame-objects.ts). The one
+ *  predicate every reader of the mark asks. */
+export const isPinnedAccess = (op: Op): boolean => MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true;
 
 /** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
  *  observable) or a memory read (it answers whichever stores ran before it). The question a pass

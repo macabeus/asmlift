@@ -33,6 +33,11 @@ export const baseConst = (e: Expr): number | null =>
       ? baseConst(e.e)
       : null;
 
+/** Does this base already assert volatility — a `volatile` cast at any depth of the cast chain? A
+ *  respell variation that replaces such a base drops the qualifier with it, and every access
+ *  through it becomes a plain one agbcc may delete or hoist. */
+export const qualifiedBase = (e: Expr): boolean => e.k === 'cast' && (e.volatile === true || qualifiedBase(e.e));
+
 /** the numeric address an expression IS, through any number of pointer casts */
 export const addrConst = (e: Expr): number | null =>
   e.k === 'const' ? e.value : e.k === 'cast' && e.to.kind === 'ptr' ? addrConst(e.e) : null;

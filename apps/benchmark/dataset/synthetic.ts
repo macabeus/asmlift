@@ -3361,16 +3361,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // refuses nothing, because a call whose callee's declaration and whose staging stores agree word
   // for word is now consumed, and every disagreement declines naming what it saw.
   //
-  // STILL MISSING, and what these rows will pin next: any frame with a second word in it. The
-  // object's real extent is inferred from the accesses this function makes, so a wider frame has
-  // bytes no model describes, and the refusal stands there. An OUTPUT-only parameter taken at
+  // STILL MISSING, and what these rows will pin next: a frame word that is neither an object, a
+  // keyed slot, nor a licensed outgoing argument. The object's real extent is inferred from the
+  // accesses this function makes, so a wider object has bytes no model describes, and the refusal
+  // stands there. An OUTPUT-only parameter taken at
   // argument 0 is the other gap, and it is not narrowable from the assembly at all: it is
   // instruction-for-instruction the struct return above.
   //
-  // Coverage: 0 of the corpus's rows carried this decline. ONE real row declines with
-  // `stack pointer used as data`, for a reason this capability leaves untouched —
-  // `sa3:ProcessOamBuffers:agbcc`, `the address of a stack local is computed (\`add r0, sp, #0x4\`)
-  // — a CONSTANT frame offset`. Recompute rather than read:
+  // Coverage: 0 of the corpus's rows carried this decline. `sa3:ProcessOamBuffers:agbcc` is the
+  // real row that spells its locals as `add r0, sp, #0x4`, and `stkoff` is that spelling at its
+  // smallest: a capture at a CONSTANT frame offset lowers to an `laddr` there, and the audit
+  // judges it like any other. What still declines `ProcessOamBuffers` is the rest of its frame —
+  // three objects, a capture spilled to a slot, the addresses handed to `CpuSet` and to DMA.
+  // Recompute the rows declining on the sp guard rather than read them:
   //   python3 -c "import json; a=json.load(open('apps/benchmark/results/results.json'));
   //   print([r['id'] for r in a['results'] if r['asmlift']['outcome']=='declined' and
   //     any('stack pointer used as data' in m for m in (r['asmlift']['errorMarkers'] or []))])"
@@ -3378,14 +3381,6 @@ export const SYNTHETIC: SynthSpec[] = [
   // blocker is the structurer's `unrecovered back-edge into block #8 (loop-recovery declined this
   // shape: multi-latch, irreducible/overlapping loops, a conditional continue, or an unsafe
   // break)`.
-  //
-  // AND THE COMPUTED SPELLING IS NOT A MISSING LOWERING, which is what makes `ProcessOamBuffers` a
-  // bad row to chase this from. Measured with that refusal REMOVED and the constant form lowered
-  // to an `laddr`, seven agbcc shapes naming a local at a nonzero frame offset all still decline —
-  // on the multi-object frame, on an object-vs-SSA-slot overlap, or on the outgoing-argument
-  // dataflow. agbcc emits `add rD, sp, #k` only when something ELSE occupies the frame, so the
-  // spelling is a symptom of frame occupancy and a row selected for it pins three capabilities
-  // rather than one.
   //
   // A TRAP IN THE MESSAGE QUOTED BELOW. `callee \`SetupOAMSprite\` is declared with 9 arguments` is
   // emitted verbatim, but it is the OPENING of a licence refusal that goes on to name the
@@ -7245,6 +7240,53 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['stack-addr'],
     toolchains: ['agbcc'],
     ctx: 'void *memcpy(void *, const void *, unsigned long);\nvoid stkext(void);',
+  },
+  {
+    sym: 'stkidx',
+    // `stkext`'s buffer, read back through a RUNTIME index: `mov r1, sp / add r0, r1, r4 /
+    // ldrb r0, [r0]`. The index names no offset, so no access types the buffer, and the byte it
+    // reads is one element of the storage the reservation sizes. `sa3:sa2__sub_8004418` is this
+    // shape in a real project. Sixty-four bytes for the reason `stkext` gives, and one more: the
+    // table is fitted from the asm as a word, and gcc open-codes a copy of 32 bytes or fewer from
+    // an aligned source as `ldmia`/`stmia` — a different function around the same index.
+    src:
+      'void *memcpy(void *, const void *, unsigned long);\nextern const u8 gBlob[64];\n' +
+      'u32 stkidx(u32 i){ u8 a[64]; memcpy(&a[0], gBlob, sizeof a); return a[i]; }',
+    features: ['stack-addr', 'array', 'variable-index'],
+    toolchains: ['agbcc'],
+    ctx: 'void *memcpy(void *, const void *, unsigned long);\nu32 stkidx(u32 i);',
+  },
+  {
+    sym: 'stkoff',
+    // A local ABOVE an outgoing argument block, so agbcc spells its address `add r0, sp, #0x4`
+    // rather than `mov r0, sp`: `five`'s fifth argument owns [sp,#0]. Both callees are declared,
+    // so the block is licensed and the capture names the one object left in the frame.
+    src:
+      'extern void five(s32, s32, s32, s32, s32);\nextern void geth(u16 *);\n' +
+      's32 stkoff(s32 a, s32 b){ u16 h; five(a, b, a, b, a); geth(&h); return h; }',
+    features: ['stack-addr', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'void five(s32, s32, s32, s32, s32);\nvoid geth(u16 *);\ns32 stkoff(s32 a, s32 b);',
+    proto: {
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+      geth: { params: ['u16 *'], returnsVoid: true },
+    },
+  },
+  {
+    sym: 'stkslot',
+    // `stkoff` with a WORD local: `str r5, [sp, #0x4]` is a store the slot model would key and the
+    // outgoing-argument analysis would read as a staged argument, and `add r0, sp, #0x4` names it
+    // as the object `getw` is handed, so it is that object at every access.
+    src:
+      'extern void five(s32, s32, s32, s32, s32);\nextern void getw(s32 *);\n' +
+      'void stkslot(s32 a, s32 b){ s32 w; five(a, b, a, b, a); w = b; getw(&w); five(w, a, a, a, a); }',
+    features: ['stack-addr', 'multi-arg'],
+    toolchains: ['agbcc'],
+    ctx: 'void five(s32, s32, s32, s32, s32);\nvoid getw(s32 *);\nvoid stkslot(s32 a, s32 b);',
+    proto: {
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true },
+      getw: { params: ['s32 *'], returnsVoid: true },
+    },
   },
   {
     sym: 'stkextsret',
