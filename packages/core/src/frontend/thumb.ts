@@ -18,7 +18,7 @@
 // incoming stack argument at `[sp, #N]` locatable at all. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
-import { aggregateSize, returnsInMemory } from '../aggregate';
+import { aggregateSize, returnedAggregate, returnsInMemory } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -3590,15 +3590,17 @@ function liftOnce(
   // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
   // memory: the caller hands it the storage in r0 and every declared argument one register up
   // (agbcc thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in r0
-  // is not a value the caller reads (calls.c: the struct is the memory at the address). Every other
-  // struct-returning call refuses, naming why.
-  const structReturnOf = (callee: string, own: FnProto): StructReturn => {
+  // is not a value the caller reads (calls.c: the struct is the memory at the address). One the
+  // target returns in r0 takes its arguments where they are declared, and its r0 is the struct's
+  // bytes, which nothing here reads as a struct: the call is `'register'` and a read of r0 after it
+  // refuses. Every other struct-returning call refuses, naming why.
+  const structReturnOf = (callee: string, own: FnProto): StructReturn | 'register' => {
     const refuse = (why: string): never => {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': \`${callee}\` is declared to return ${own.returns ?? 'a struct or union'} by value, and ${why}`,
       );
     };
-    const layout = own.returnLayout ?? { kind: /\bunion\b/.test(own.returns ?? '') ? 'union' : 'struct' };
+    const layout = returnedAggregate(own);
     const inMemory = returnsInMemory(layout, target);
     if (inMemory === undefined) {
       refuse(
@@ -3606,7 +3608,7 @@ function liftOnce(
       );
     }
     if (inMemory === false) {
-      refuse('it comes back in the return register, which is not modelled as a struct value');
+      return 'register';
     }
     const size = aggregateSize(layout, target)?.size;
     if (size === undefined) {
@@ -3622,7 +3624,7 @@ function liftOnce(
   };
   const declaredCall = (
     callee: string,
-  ): { widths: readonly number[]; block: readonly number[] | null; returned?: StructReturn } | null => {
+  ): { widths: readonly number[]; block: readonly number[] | null; returned?: StructReturn | 'register' } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
@@ -3642,7 +3644,7 @@ function liftOnce(
     if (params === undefined) {
       return null;
     }
-    const widths = returned === undefined ? params : [32, ...params];
+    const widths = returned === undefined || returned === 'register' ? params : [32, ...params];
     // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
     // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
     // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
@@ -4736,7 +4738,9 @@ function liftOnce(
             results: [res],
             attrs: {
               target: targetSym,
-              ...(returned === undefined ? {} : { sret: returned.spelling, sretSize: returned.size }),
+              ...(returned === undefined || returned === 'register'
+                ? {}
+                : { sret: returned.spelling, sretSize: returned.size }),
             },
           });
           irb.ops.push(callOp);
@@ -4757,7 +4761,8 @@ function liftOnce(
             break;
           }
           if (returned !== undefined) {
-            // the struct is the memory at argument 0; r0 holds nothing the caller may read
+            // the struct is the memory at argument 0, or r0's bytes as a struct; either way r0
+            // holds nothing the caller may read as a value
             ssa.noteCall(bi, [...callClobbers, target.returnReg]);
             break;
           }

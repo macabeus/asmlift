@@ -2,7 +2,7 @@
 // by value hands it back through a hidden pointer. The members come from a declaration
 // (`proto.ts` AggregateLayout); the layout rules and the return rule are the target's
 // (`compilerBehaviors.aggregateBoundary`, `largestAlignment`, `aggregateReturn`).
-import { type AggregateLayout, type AggregateMember, declaredWidth } from './proto';
+import { type AggregateLayout, type AggregateMember, type FnProto, declaredWidth } from './proto';
 import type { TargetDescription } from './target';
 
 /** The size and alignment of a laid-out aggregate in bytes, or undefined where the declaration or
@@ -52,6 +52,12 @@ function memberSize(m: AggregateMember, target: TargetDescription): { size: numb
 
 const roundUp = (n: number, to: number): number => Math.ceil(n / to) * to;
 
+/** The aggregate a declaration says `p` returns by value (`declaresAggregateReturn`): its stated
+ *  layout, or the bare kind its `returns` spells. */
+export function returnedAggregate(p: FnProto): AggregateLayout {
+  return p.returnLayout ?? { kind: /\bunion\b/.test(p.returns ?? '') ? 'union' : 'struct' };
+}
+
 /** Whether a function declared to return `layout` by value hands it back through memory — so its
  *  caller passes the address as argument 0 — or `undefined` where the target states no rule or the
  *  rule needs a size the layout does not give. */
@@ -62,6 +68,10 @@ export function returnsInMemory(layout: AggregateLayout, target: TargetDescripti
   }
   if (rule === 'memory') {
     return true;
+  }
+  if (rule === 'svr4') {
+    const size = aggregateSize(layout, target)?.size;
+    return size === undefined ? undefined : size > 8;
   }
   // agbcc thumb.c:1423-1493: a struct's second member that is not a bitfield puts it in memory
   // whatever its size; otherwise anything over a word does

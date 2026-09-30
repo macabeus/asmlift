@@ -1,9 +1,9 @@
-// A CALL TO A FUNCTION RETURNING A STRUCT THROUGH MEMORY, end to end through the real agbcc: the
-// reference C calls it → target → lift, with the callee's prototype read out of the declarations
-// the reference was compiled against → every candidate compiled with the declaration block the
-// scorer prepends → the best one matches. agbcc hands the callee the storage in r0 and moves every
-// declared argument one register up (thumb.h:644-645, 672), so a lift that got either wrong scores
-// a different call.
+// A CALL TO A FUNCTION RETURNING A STRUCT, end to end through the real agbcc: the reference C calls
+// it → target → lift, with the callee's prototype read out of the declarations the reference was
+// compiled against → every candidate compiled with the declaration block the scorer prepends → the
+// best one matches. Where agbcc returns the struct through memory it hands the callee the storage in
+// r0 and moves every declared argument one register up (thumb.h:644-645, 672); where it returns it
+// in r0 nothing moves. A lift that got either wrong scores a different call.
 import { renderDeclarations } from '@asmlift/core/declare';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { enumerateCandidates } from '@asmlift/core/rank';
@@ -18,6 +18,9 @@ struct S4 { u8 a, b, c, d; };
 struct S4 mk4(s32);
 struct S8 { u32 a, b; };
 struct S8 mk8r(s32, s32, s32, s32);
+struct W1 { u32 x; };
+struct W1 mkw(s32);
+extern void usei(s32);
 `;
 
 const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
@@ -38,13 +41,15 @@ function best(src: string): { score: number; source: string } {
   return out;
 }
 
-describe('a struct returned through memory', () => {
+describe('a call to a function returning a struct', () => {
   test.each([
     ['a 64-byte struct whose storage is never read', 'void f(void) { struct Blob64 b = makeblob(gBlob); }'],
     ['a one-word struct of four members, discarded', 'void f(s32 x) { mk4(x); }'],
     ['the storage above an outgoing stack argument', 'void f(s32 x, s32 y, s32 z, s32 w) { mk8r(x, y, z, w); }'],
     ['two calls, two stores', 'void f(s32 x, s32 y) { mk4(x); mk4(y); }'],
     ['two calls in two arms', 'void f(s32 x) { if (x) mk4(x); else makeblob(gBlob); }'],
+    // agbcc returns a one-member word in r0: no hidden pointer, no argument moves
+    ['a struct returned in r0, discarded', 'void f(s32 x) { mkw(x); usei(x + 1); }'],
   ])('%s', (_label, src) => {
     const r = best(src);
     expect(r.score, r.source).toBe(0);

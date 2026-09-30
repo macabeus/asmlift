@@ -40,7 +40,7 @@
 //     Others are read off the target directly by a consumer that is not the structurer — among
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
-//     `aggregateReturn` and `largestAlignment` (aggregate.ts, for frontend/thumb.ts),
+//     `aggregateReturn` and `largestAlignment` (aggregate.ts, for frontend/thumb.ts and frontend/ppc.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
@@ -586,10 +586,12 @@ export interface TargetDescription {
     //     `{u32 a:8; u32 b:8;}` and `union {u32; u16;}` in r0).
     //   • 'memory' — every aggregate, a one-word one included. IDO 7.1 (compiled: `struct {u32 x;}
     //     mkw(s32)` is called `addiu a0,sp,28 / jal mkw / lw v0,28(sp)`).
-    // ABSENT ⇒ unmeasured, and such a call declines. mwcc_242_81 hands back up to 8 bytes in r3 or
-    // r3:r4 and anything larger through r3 (compiled), but PPC_MWCC also describes two builds nobody
-    // has compiled it on, and its frontend lowers no such call, so it claims nothing.
-    aggregateReturn?: 'apcs' | 'memory';
+    //   • 'svr4' — in r3, or r3:r4, when it is 8 bytes or less, whatever its members (a float's
+    //     included); in memory otherwise. mwcc_242_81, mwcc_233_163n and mwcc_247_107 alike
+    //     (compiled: 1 to 8 bytes, `{float}`, `{double}` and a union come back in r3/r3:r4; a 9- and a
+    //     12-byte struct are handed `addi r3,…` ahead of the call).
+    // ABSENT ⇒ unmeasured, and such a call declines.
+    aggregateReturn?: 'apcs' | 'memory' | 'svr4';
     // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
     // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
     // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
@@ -945,6 +947,10 @@ export const PPC_MWCC: TargetDescription = {
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
     aggregateBoundary: 1,
+    // MEASURED on all three builds: `struct {u8 a; double d;}` and its `long long` twin put the
+    // member at 8 and size 16
+    largestAlignment: 8,
+    aggregateReturn: 'svr4',
     // MEASURED on mwcc_242_81 through the `.comment` alignment record: an array or a struct is at
     // 4 at least (`u8[1]`, a struct of two bytes), a scalar at its width; a string-literal
     // initializer gets no more than the array does (`char s[] = "hello!"` and a `u8` list both 4);

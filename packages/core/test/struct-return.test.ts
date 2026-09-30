@@ -79,16 +79,6 @@ describe('a callee declared to return a struct or union by value', () => {
     expect(() => decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob: typedefd } })).toThrow(
       /`makeblob` is declared to return Blob by value/,
     );
-    // one agbcc hands back in r0 (`struct W1 { u32 x; } mkw(s32)` is called `bl mkw` with no frame)
-    const mkw = {
-      params: ['s32'],
-      returns: 'struct W1',
-      returnLayout: { kind: 'struct' as const, members: [{ name: 'x', type: 'u32' }] },
-    };
-    const q2 = 'q2:\n\tpush\t{lr}\n\tbl\tmkw\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('q2', q2, ARMV4T_AGBCC, { prototypes: { mkw } })).toThrow(
-      /comes back in the return register, which is not modelled as a struct value/,
-    );
     // a typedef name has no definition to print into the candidate
     const named = { ...makeblob, returns: 'Blob64', returnLayout: BLOB64 };
     expect(() => decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: named } })).toThrow(
@@ -129,6 +119,43 @@ describe('a callee declared to return a struct or union by value', () => {
       [0x1000, [{ name: 'mke', kind: 'code' as const, signature: { returns: { size: 4, signed: null }, params: [] } }]],
     ]);
     expect(symbolPrototype(word.get(0x1000)![0])).toEqual({ params: [] });
+  });
+
+  // `struct W1 { u32 x; }; void q2(s32 i){ mkw(i); usei(i + 1); }` — agbcc hands a one-member
+  // word back in r0 (thumb.c:1423-1493), so there is no hidden pointer and no argument moves
+  test('one that comes back in the return register takes its arguments where they are declared', () => {
+    const mkw = {
+      params: ['s32'],
+      returns: 'struct W1',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'x', type: 'u32' }] },
+    };
+    const q2 =
+      'q2:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tbl\tmkw\n\tadd\tr4, r4, #0x1\n\tadd\tr0, r4, #0\n' +
+      '\tbl\tusei\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('q2', q2, ARMV4T_AGBCC, { prototypes: { mkw } }).source).toContain('mkw(a0);');
+    // r0 is the struct's bytes, which nothing reads as a struct (hand-written: r0 returned as-is)
+    const q3 = 'q3:\n\tpush\t{lr}\n\tbl\tmkw\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('q3', q3, ARMV4T_AGBCC, { prototypes: { mkw } })).toThrow(
+      /r0 is read on a path where a call has destroyed it/,
+    );
+    // mwcc hands back up to 8 bytes in r3/r3:r4 — `typedef struct { u8 r, g, b, a; } GXColor;`
+    const getcol = {
+      params: ['s32'],
+      returns: 'GXColor',
+      returnLayout: { kind: 'struct' as const, members: ['r', 'g', 'b', 'a'].map((name) => ({ name, type: 'u8' })) },
+    };
+    const f =
+      '00000000 <f>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n   c:\tstw     r31,12(r1)\n' +
+      '  10:\tmr      r31,r3\n  14:\tbl      14 <f+0x14>\n\t\t\t14: R_PPC_REL24\tgetcol\n  18:\taddi    r3,r31,1\n' +
+      '  1c:\tbl      1c <f+0x1c>\n\t\t\t1c: R_PPC_REL24\tusei\n  20:\tlwz     r0,20(r1)\n  24:\tlwz     r31,12(r1)\n' +
+      '  28:\tmtlr    r0\n  2c:\taddi    r1,r1,16\n  30:\tblr\n';
+    const usei = { params: ['s32'], returnsVoid: true as const };
+    expect(decompile('f', f, PPC_MWCC, { prototypes: { getcol, usei } }).source).toContain('getcol(a0);');
+    // …and r3 past it is the struct's bytes (hand-written: the call's result read as a word)
+    const u = f.replace('<f>', '<u>').replace('addi    r3,r31,1', 'addi    r3,r3,1');
+    expect(() => decompile('u', u, PPC_MWCC, { prototypes: { getcol, usei } })).toThrow(
+      /r3 is read on a path where a call has destroyed it/,
+    );
   });
 
   test('a PowerPC call to one declines', () => {
