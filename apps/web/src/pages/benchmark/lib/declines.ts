@@ -30,7 +30,7 @@
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 81 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 82 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -42,9 +42,10 @@
 //                               the reaching-compare throw whose reason is interpolated
 //                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)
-//   structure/structure.ts  19  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  20  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
-//                               behind a `&&`/`||`, the pass-through of a recovered switch's own `why`,
+//                               behind a `&&`/`||`, a pinned device access reached through a pointer
+//                               with no type to qualify, the pass-through of a recovered switch's own `why`,
 //                               an access whose byte offset is not a whole number of its own elements
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
