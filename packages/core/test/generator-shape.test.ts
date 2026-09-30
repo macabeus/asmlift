@@ -74,6 +74,6 @@ test('depth 2 reaches a loop inside a loop', () => {
 // which is reach, and reach only: see this file's header.
 test('depth 3 reaches a do-while with SEVERAL child loops', () => {
   const { structured, loops } = census(3, 3);
-  expect(structured, 'seeds that structure at depth 3').toBe(3478);
-  expect(loops, 'of those, seeds emitting >= 3 bottom-tested loops — every one').toBe(3478);
+  expect(structured, 'seeds that structure at depth 3').toBe(3479);
+  expect(loops, 'of those, seeds emitting >= 3 bottom-tested loops — every one').toBe(3479);
 });

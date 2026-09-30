@@ -23,16 +23,7 @@ import type { SFn } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { CARRIER_NAME_GATES, type CarrierName, structure } from '../src/structure/structure';
-import {
-  BREATHE_EVERY,
-  type Event,
-  IR_RESIDUAL_SEEDS,
-  breathe,
-  generateSsaFn,
-  irTraceOf,
-  traceOf,
-  tracesDiffer,
-} from './helpers';
+import { BREATHE_EVERY, type Event, breathe, generateSsaFn, irTraceOf, traceOf, tracesDiffer } from './helpers';
 
 // Same load sensitivity as the sibling fuzz: solo these run in a couple of seconds, and under a
 // full parallel suite the 5 s default times out on machine load rather than on a defect.
@@ -113,14 +104,9 @@ function spellings(
   }
 }
 
-// WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
-// `namecoalesce-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
-// file. Its docblock carries the three defects behind it and the measurement that folded the two
-// copies together.
-
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES. `spellings` returns null — silently, by design — when
 // a seed declines or runs the tree interpreter past its step cap, and everything below then skips
-// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 653: a change
+// it. Pinned rather than floored at `judged > SEEDS / 10`, because depth 3 sits at 655: a change
 // that pushed another 250 seeds past the cap would leave both arms green over nothing, which is
 // exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
 // spells moves these populations by a few seeds at a time, which a floor does not record.
@@ -139,7 +125,7 @@ function spellings(
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
 // whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2740, 2: 1556, 3: 653 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2740, 2: 1557, 3: 655 };
 
 describe.each([
   ['acyclic', 0],
@@ -176,9 +162,7 @@ describe.each([
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
     expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
-    // THE SEEDS, not how many: a count is green on a change that fixes one defect and adds
-    // another. A fix is meant to shorten this list, and a swap is meant to redden it.
-    expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
+    expect(bad).toEqual([]);
   });
 });
 

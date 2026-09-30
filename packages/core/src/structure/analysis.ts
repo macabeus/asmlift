@@ -1374,6 +1374,31 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     };
     return walk(call.results[0]);
   };
+  /** Does `call`'s value, through the ops it would be inlined into, reach ONE op that reads it
+   *  twice? That op spells it twice — both operands of `s * s`, or both edge copies of a `br
+   *  ^bb3(%9, %9)` — and the call runs once per spelling. A multi-successor terminator's arguments
+   *  are `ridesEdge`'s question, which weighs a do-while's exit copy reading the loop variable its
+   *  update copy wrote. The walk continues through the same ops `ridesEdge` walks through. */
+  const spelledTwice = (call: Op): boolean => {
+    const seen = new Set<Value>();
+    const walk = (x: Value): boolean => {
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const sites = useSitesOf.get(x) ?? [];
+      return sites.some(
+        (u, i) =>
+          (u.op.successors.length <= 1 && sites.findIndex((v) => v.op === u.op) !== i) ||
+          (!EFFECTFUL_OPS.has(u.op.opcode) &&
+            u.op.successors.length === 0 &&
+            !materialize.has(u.op) &&
+            u.op.results.length > 0 &&
+            walk(u.op.results[0])),
+      );
+    };
+    return walk(call.results[0]);
+  };
   const { reachFrom, reachAvoiding } = makeReach();
   // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
   // terminator, materialized def) it inlines into, transitively through single-use pure ops.
@@ -2100,8 +2125,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // And the same under the ops it is inlined into (`ridesEdge`): `f1(a0) - v` riding a
         // do-while's exit edge renders the call after the loop, once, where the body ran it every
         // iteration; riding the back edge of a loop that also exits elsewhere it renders in an arm;
-        // riding two edge args it renders twice.
-        if (once && (branchArgFed.has(r) || ridesEdge(op))) {
+        // riding two edge args it renders twice. And one op reading it twice spells it twice
+        // (`spelledTwice`).
+        if (once && (branchArgFed.has(r) || ridesEdge(op) || spelledTwice(op))) {
           materialize.add(op);
           continue;
         }

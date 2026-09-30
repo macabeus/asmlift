@@ -24,16 +24,7 @@ import { without } from '../src/l3/gates';
 import { recoverTypes } from '../src/raise/recover';
 import { NAME_COALESCE_GATES } from '../src/structure/namecoalesce';
 import { structure } from '../src/structure/structure';
-import {
-  BREATHE_EVERY,
-  type Event,
-  IR_RESIDUAL_SEEDS,
-  breathe,
-  generateSsaFn,
-  irTraceOf,
-  traceOf,
-  tracesDiffer,
-} from './helpers';
+import { BREATHE_EVERY, type Event, breathe, generateSsaFn, irTraceOf, traceOf, tracesDiffer } from './helpers';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
 // budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
@@ -81,14 +72,9 @@ function spellings(
   }
 }
 
-// WHAT THE IR ORACLE STILL DISAGREES WITH is `IR_RESIDUAL_SEEDS` in `helpers.ts`, shared with
-// `carrier-name-fuzz` — a LIST of seeds rather than a count, and one quantity rather than a copy per
-// file. Its docblock carries the three defects behind it and the measurement that folded the two
-// copies together.
-
 // HOW MANY SEEDS EACH DEPTH ACTUALLY JUDGES — `spellings` returns null silently on a decline or a
 // step cap, and every arm below then skips the seed. Pinned rather than floored (`> SEEDS / 10`)
-// because depth 3 judges 653: another 250 seeds over the cap would leave both arms green over
+// because depth 3 judges 655: another 250 seeds over the cap would leave both arms green over
 // nothing.
 //
 // DIFFERENT FROM `carrier-name-fuzz`'s BY FIVE AT DEPTH 1 (2,745 here, 2,740 there), and the files
@@ -96,9 +82,9 @@ function spellings(
 // spelling structures (291, 1089, 1489, 1504, 1724, 2921, 3923) and its `spellings` needs both, so
 // it judges seven fewer. This file's second `structure()` call declines on 2 the shipped spelling
 // structures (3601, 3947), so it judges two fewer. Measured per depth, `coalesceMergeNames` declines
-// on the shipped set and those: 975 against 973 at depth 1, 224/224 at depth 2, 524 against
-// 522 at depth 3 (1443 and 2832, which the step cap already drops from both files).
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2745, 2: 1556, 3: 653 };
+// on the shipped set and those: 975 against 973 at depth 1, 224/224 at depth 2, 523 against
+// 521 at depth 3 (1443 and 2832, which the step cap already drops from both files).
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2745, 2: 1557, 3: 655 };
 
 // All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
 // the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an
@@ -138,9 +124,7 @@ describe.each([
       if (tracesDiffer({ off: r.ir, on: r.on })) bad.push(seed);
     }
     expect(judged, 'the sweep judges the population it measured').toBe(JUDGED[depth]);
-    // THE SEEDS, not how many: a count is green on a change that fixes one defect and adds
-    // another. A fix is meant to shorten this list, and a swap is meant to redden it.
-    expect(bad).toEqual(IR_RESIDUAL_SEEDS[depth]);
+    expect(bad).toEqual([]);
   });
 });
 
