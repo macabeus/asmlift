@@ -547,10 +547,15 @@ function attributesLayout(text: string): boolean {
  *  __attribute__((aligned(8)))` makes `struct { struct R *p; }` 8 bytes, and `typedef enum E EA
  *  __attribute__((packed))` ahead of `enum E {…}` makes it 1. Which type that is, is not worked out
  *  here. Where the statement's plain declarators name its own body, `attributesLayout` leaves that
- *  body unread instead. */
+ *  body unread instead — unless one attribute is `mode`, which hands every attribute after it a
+ *  shared scalar type in place of the body (c-common.c:563, 996-1000): compiled, `typedef struct R
+ *  {…} A __attribute__((mode(SI), aligned(8)))` makes every `int` 8-aligned. */
 function realigns(text: string): boolean {
   if (!/\btypedef\b/.test(text) || !ATTRIBUTE.test(text)) {
     return false;
+  }
+  if (/\b__attribute(?:__)?\s*\(\([^;]*\b(?:__)?mode(?:__)?\s*\(/.test(text)) {
+    return true;
   }
   const plain = withoutAttributes(text).replace(/\s+/g, ' ').trim();
   const own = /^typedef (?:(?:const|volatile) )*(?:struct|union|enum)\b[^{]*\{\} ?(.*)$/.exec(plain);
