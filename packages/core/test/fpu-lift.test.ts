@@ -176,7 +176,7 @@ describe('MIPS o32: double-precision arithmetic through the same homes', () => {
   test('a function computing in both precisions refuses', () => {
     expect(() =>
       lift('f', objdump('f', '   0:\tadd.d\t$f4,$f12,$f14\n   4:\tjr\tra\n   8:\tadd.s\t$f0,$f4,$f4\n')),
-    ).toThrow(/computes in both single and double precision/);
+    ).toThrow(/in a function that computes in both single and double precision/);
   });
 
   // `a1` is the second word of the double in `$f12`.
@@ -354,8 +354,15 @@ describe('PowerPC EABI: the arithmetic through f1..f8', () => {
   // register-file refusal; a single op over a double operand is the same rounding, unspelled.
   test('a function computing in both precisions refuses', () => {
     expect(() => ppc('f', '   0:\tfadd    f0,f1,f2\n   4:\tfmuls   f1,f0,f1\n   8:\tblr\n')).toThrow(
-      /computes in both single and double precision/,
+      /in a function that computes in both single and double precision/,
     );
+  });
+
+  // …at the float instruction, so a refusal the stream reaches first keeps its own reason: two real
+  // mwcc rows that mix precisions decline on an `stfd` and a constant-pool `lis` ahead of it.
+  test('a refusal ahead of the first float op in a mixed function keeps its reason', () => {
+    const body = '   0:\tstfs    f1,0(r3)\n   4:\tfadd    f0,f1,f2\n   8:\tfmuls   f1,f0,f1\n   c:\tblr\n';
+    expect(() => ppc('f', body)).toThrow(/unmodelled floating-point instruction 'stfs'/);
   });
 
   test('a record form sets cr1, which is not modelled, and keeps the register-file refusal', () => {

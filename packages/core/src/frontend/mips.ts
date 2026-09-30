@@ -35,7 +35,7 @@ import {
 import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
-import { fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
+import { bothPrecisionsError, fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -746,8 +746,10 @@ export function lift(
   // `[0,16)` as the caller-owned home area (in NEITHER range — caller-owned, but not an argument)
   // with stack arguments from 16 up, which is what `mips32be.cspec`'s `<localrange>` and stack
   // `<pentry offset="16">` encode.
-  const fpType = fpPrecision(name, instrs, (m) => FP_ARITH[m]?.width);
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? fpType : undefined));
+  const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
+  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
+    isFpKey(k) ? (fpType ?? T.f32()) : undefined,
+  );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
@@ -1224,6 +1226,9 @@ export function lift(
       if (fpu === undefined || keys.length === 0 || keys.some((k) => k === null)) {
         emitOpaqueDest(ins);
         return;
+      }
+      if (fpType === null) {
+        throw bothPrecisionsError(name, ins.mnemonic);
       }
       const [dst, ...srcs] = keys as string[];
       const { op } = FP_ARITH[ins.mnemonic];

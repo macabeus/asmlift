@@ -54,7 +54,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
+import { bothPrecisionsError, fpPrecision, fpuArgSlots, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
@@ -581,9 +581,11 @@ export function lift(
   const reached = blocks.flatMap((b) => b.body);
   const callInsn = reached.find((ins) => ins.mnemonic === 'bl');
   const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
-  const fpType = fpPrecision(name, reached, (m) => FP_ARITH[m]?.width);
+  const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) => (isFpKey(k) ? fpType : undefined));
+  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
+    isFpKey(k) ? (fpType ?? T.f32()) : undefined,
+  );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
@@ -1597,6 +1599,9 @@ export function lift(
                 `0x${callInsn.addr.toString(16)} makes a call — the floating-point registers a call reads, returns ` +
                 `in and destroys are not modelled`,
             );
+          }
+          if (fpType === null) {
+            throw bothPrecisionsError(name, ins.mnemonic);
           }
           const [dst, ...srcs] = ins.ops;
           if (op === 'copy') {
