@@ -1,19 +1,19 @@
 // agbcc's `double`: no instruction computes on one, so its arithmetic is a libgcc call over the
 // register pairs a long long travels in (`runtime-helpers.ts` AGBCC_RUNTIME_HELPERS), and
-// `raise/widehelpers.ts` `foldDoubleHelpers` folds the call to the float op over `double`s.
+// `raise/widehelpers.ts` `foldFloatHelpers` folds the call to the float op over `double`s.
 //
 // WHAT REFUSES IS EVERY PLACE THE PAIR'S WORD ORDER WOULD SHOW. agbcc puts a double's HIGH word in
 // the lower register (thumb.h:335 FLOAT_WORDS_BIG_ENDIAN), the opposite of a long long, so only a
-// pair moved whole may be read as a double. Each refusal below declines naming the helper, where
-// before the fold the call passed through as `__adddf3()` or the function declined on its epilogue.
+// pair moved whole may be read as a double. Each refusal below declines naming the helper rather
+// than passing the call through as `__adddf3()`.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
-import { AGBCC_RUNTIME_HELPERS } from '../src/runtime-helpers';
-import { ARMV4T_AGBCC } from '../src/target';
+import { AGBCC_RUNTIME_HELPERS, isFloatHelper } from '../src/runtime-helpers';
+import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-double.s'), 'utf8');
 const lift = (name: string, prototypes: Prototypes = {}) => decompile(name, asm, ARMV4T_AGBCC, { prototypes }).source;
@@ -76,11 +76,47 @@ describe('what refuses', () => {
   });
 });
 
+// THE FOLD READS EACH VALUE'S WIDTH OFF THE HELPER'S SIGNATURE, so a single-precision row is a
+// table entry and nothing else. The shipped table leaves the singles out (its note says why), so
+// these rows are stated here, over agbcc's own listings of the same four shapes.
+describe('a single-precision helper folds through the same path', () => {
+  const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
+  const withSingles: TargetDescription = {
+    ...ARMV4T_AGBCC,
+    runtimeHelpers: {
+      ...AGBCC_RUNTIME_HELPERS,
+      __addsf3: { op: 'fadd', params: [32, 32], returns: 32 },
+      __mulsf3: { op: 'fmul', params: [32, 32], returns: 32 },
+      __negsf2: { op: 'fneg', params: [32], returns: 32 },
+    },
+  };
+  const liftSingle = (name: string, prototypes: Prototypes = {}) =>
+    decompile(name, single, withSingles, { prototypes }).source;
+
+  test.each([
+    ['fadd', 'float fadd(float a0, float a1) {\n    return a0 + a1;\n}\n'],
+    ['fchain', 'float fchain(float a0, float a1, float a2) {\n    return (a0 + a1) * a2;\n}\n'],
+    ['fneg', 'float fneg(float a0) {\n    return -a0;\n}\n'],
+  ])('%s', (name, source) => {
+    expect(liftSingle(name)).toBe(source);
+  });
+
+  // The declaration is what makes `fuse` read r0 at all: a guessed arity after a call reads none.
+  test('a result passed to an ordinary callee refuses', () => {
+    expect(() => liftSingle('fpass', { fuse: { params: 1 } })).toThrow(/no model for the runtime helper '__addsf3'/);
+  });
+});
+
 describe('what the table names', () => {
   // The IR has no int<->float op to fold a compare or a conversion into, and nothing folds a single.
   test('only the double arithmetic', () => {
     for (const name of ['__addsf3', '__mulsf3', '__gtdf2', '__eqdf2', '__floatsidf', '__fixdfsi', '__extendsfdf2']) {
       expect(AGBCC_RUNTIME_HELPERS[name], name).toBeUndefined();
     }
+  });
+
+  test('the double arithmetic is float helpers, and nothing else in the table is', () => {
+    const floats = Object.keys(AGBCC_RUNTIME_HELPERS).filter((name) => isFloatHelper(AGBCC_RUNTIME_HELPERS[name]));
+    expect(floats).toEqual(['__adddf3', '__subdf3', '__muldf3', '__divdf3', '__negdf2']);
   });
 });

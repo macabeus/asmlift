@@ -14,9 +14,15 @@
 // (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
 // both spellings, so nothing here may read a signedness off it. See the table's own note.
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { FLOAT_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type RuntimeHelper, arrivesAsDeclared, helperOp, isWideHelper, lookupHelper } from '../runtime-helpers';
+import {
+  type RuntimeHelper,
+  arrivesAsDeclared,
+  helperOp,
+  isFloatHelper,
+  isWideHelper,
+  lookupHelper,
+} from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { isArgumentPair } from './pairparams';
 
@@ -24,7 +30,7 @@ import { isArgumentPair } from './pairparams';
  *  anything changed. Runs BEFORE type recovery, so the operands get their signedness there. */
 export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean {
   const table = target.runtimeHelpers ?? {};
-  let changed = foldDoubleHelpers(fn, table);
+  let changed = foldFloatHelpers(fn, table);
   for (const b of fn.blocks) {
     for (let i = 0; i < b.ops.length; i++) {
       const op = b.ops[i];
@@ -32,7 +38,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
         continue;
       }
       const helper = lookupHelper(table, String(op.attrs.target));
-      if (!helper?.op || !isWideHelper(helper) || FLOAT_OPS.has(helper.op)) {
+      if (!helper?.op || !isWideHelper(helper) || isFloatHelper(helper)) {
         continue;
       }
       // ITS C PARAMETERS AT THEIR STATED WIDTHS, not its argument registers and not their count:
@@ -61,37 +67,39 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
   return changed;
 }
 
-/** Rewrite the double-arithmetic helper calls to the float ops over `double`s, in place. Returns
- *  whether anything changed.
+/** Rewrite the float-arithmetic helper calls to the float ops, in place, each value at the width its
+ *  helper's signature states. Returns whether anything changed.
  *
- *  A PAIR CARRIES A DOUBLE'S BITS, AND ONLY DATA FLOW MAY READ THEM AS ONE. The frontend builds the
- *  pair the way it builds a long long's, `concat(lo = r0, hi = r1)`, but agbcc stores a double
+ *  A SOFT-FLOAT VALUE IS BITS IN INTEGER REGISTERS, AND ONLY DATA FLOW MAY READ THEM AS A FLOAT. A
+ *  single travels in one register; a double in the pair a long long travels in, which the frontend
+ *  builds the way it builds a long long's, `concat(lo = r0, hi = r1)` — but agbcc stores a double
  *  high word first (thumb.h:335 `FLOAT_WORDS_BIG_ENDIAN`): r0 holds the sign and exponent. Moving
- *  the pair whole keeps it right, so a double may come only from where the ABI hands one over
- *  whole — two consecutive argument slots of this function, or another of these helpers' results
- *  — and may go only into another of them or the return. Anything else refuses, and the call stays
- *  for `refuseUnmodelledHelpers` to gap:
- *   - an operand pair built from a literal, a load, or two unrelated words, whose halves the int64
+ *  the value whole keeps it right, so a float may come only from where the ABI hands one over
+ *  whole — this function's argument slot, or two consecutive ones for a double, or another of these
+ *  helpers' results — and may go only into another of them or the return. Anything else refuses,
+ *  and the call stays for `refuseUnmodelledHelpers` to gap:
+ *   - an operand built from a literal, a load, or two unrelated words, whose halves the int64
  *     naming would put in the wrong order (`a + 1.5` stages `0x3ff80000` in r2);
- *   - an argument half the function also reads on its own, or two slots that are not consecutive;
- *   - a result read as a word or a half (`*(int *)&c` is the HIGH word, in r0), passed to any other
- *     call, or carried across an edge.
+ *   - an argument the function also reads on its own, as a word or as one half of a pair;
+ *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
+ *     any other call, or carried across an edge.
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
- *  set of doubles and verify's float rule holds by construction. */
-function foldDoubleHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>>): boolean {
+ *  set of floats and verify's float rule holds by construction. */
+function foldFloatHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>>): boolean {
   let sites: Op[] = [];
   const def = new Map<Value, Op>();
   const users = new Map<Value, Array<Op | null>>(); // null: an edge argument
   const use = (v: Value, by: Op | null) => users.set(v, [...(users.get(v) ?? []), by]);
+  const helperOf = (op: Op) => (op.opcode === 'call' ? lookupHelper(table, String(op.attrs.target)) : undefined);
   for (const block of fn.blocks) {
     for (const op of block.ops) {
       op.results.forEach((r) => def.set(r, op));
       op.operands.forEach((o) => use(o, op));
       op.successors.forEach((s) => s.args.forEach((a) => use(a, null)));
-      const helper = op.opcode === 'call' ? lookupHelper(table, String(op.attrs.target)) : undefined;
+      const helper = helperOf(op);
       if (
-        helper?.op &&
-        FLOAT_OPS.has(helper.op) &&
+        helper &&
+        isFloatHelper(helper) &&
         arrivesAsDeclared(
           helper,
           op.operands.map((o) => o.type),
@@ -110,11 +118,12 @@ function foldDoubleHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>
   const deadHalf = (u: Op | null) =>
     u !== null && (u.opcode === 'lo32' || u.opcode === 'hi32') && !users.has(u.results[0]);
   const entry = fn.blocks[0].params;
-  const argPair = (v: Value, calls: ReadonlySet<Op>): boolean => {
+  // The argument slot itself, or the pair of them `isArgumentPair` names; `arrivesAsDeclared` has
+  // already held each operand to its parameter's width.
+  const argument = (v: Value, calls: ReadonlySet<Op>): boolean => {
     const d = def.get(v);
     return (
-      d !== undefined &&
-      isArgumentPair(entry, d, (p) => users.get(p)?.length ?? 0) &&
+      (d === undefined ? entry.includes(v) : isArgumentPair(entry, d, (p) => users.get(p)?.length ?? 0)) &&
       users.get(v)!.every((u) => u !== null && calls.has(u))
     );
   };
@@ -126,7 +135,7 @@ function foldDoubleHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>
     const calls = new Set(sites);
     const kept = sites.filter(
       (op) =>
-        op.operands.every((o) => argPair(o, calls) || fromCall(o, calls)) &&
+        op.operands.every((o) => argument(o, calls) || fromCall(o, calls)) &&
         (users.get(op.results[0]) ?? []).every(
           (u) => deadHalf(u) || (u !== null && (calls.has(u) || u.opcode === 'ret')),
         ),
@@ -140,32 +149,38 @@ function foldDoubleHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>
     return false;
   }
   const calls = new Set(sites);
-  const double = new Map<Value, Value>();
+  const floatOf = new Map<Value, Value>();
+  const float = (bits: number) => mkValue(bits > 32 ? T.f64() : T.f32());
   for (const op of sites) {
-    for (const o of op.operands) {
-      const d = def.get(o)!;
-      if (d.opcode === 'concat' && !double.has(o)) {
-        // One parameter in the LOW slot's place, which is where the ABI put the double.
-        const whole = mkValue(T.f64());
-        entry.splice(entry.indexOf(d.operands[0]), 2, whole);
-        double.set(o, whole);
+    const helper = helperOf(op)!;
+    op.operands.forEach((o, i) => {
+      if (floatOf.has(o) || fromCall(o, calls)) {
+        return;
       }
-    }
-    double.set(op.results[0], mkValue(T.f64()));
+      // One parameter in its first slot's place, which is where the ABI put the value.
+      const d = def.get(o);
+      const slots = d === undefined ? [o] : d.operands;
+      const whole = float(helper.params[i]);
+      entry.splice(entry.indexOf(slots[0]), slots.length, whole);
+      floatOf.set(o, whole);
+    });
+    floatOf.set(op.results[0], float(helper.returns));
   }
   for (const block of fn.blocks) {
     block.ops = block.ops.flatMap((op) => {
       if (calls.has(op)) {
-        const helper = lookupHelper(table, String(op.attrs.target))!;
         return [
-          mkOp(helper.op!, { operands: op.operands.map((o) => double.get(o)!), results: [double.get(op.results[0])!] }),
+          mkOp(helperOf(op)!.op!, {
+            operands: op.operands.map((o) => floatOf.get(o)!),
+            results: [floatOf.get(op.results[0])!],
+          }),
         ];
       }
-      const retired = op.results.length === 1 && double.has(op.results[0]);
-      return retired || (deadHalf(op) && double.has(op.operands[0])) ? [] : [op];
+      const retired = op.results.length === 1 && floatOf.has(op.results[0]);
+      return retired || (deadHalf(op) && floatOf.has(op.operands[0])) ? [] : [op];
     });
   }
-  for (const [was, now] of double) {
+  for (const [was, now] of floatOf) {
     replaceAllUsesWith(fn, was, now);
   }
   return true;

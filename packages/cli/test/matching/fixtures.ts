@@ -655,7 +655,7 @@ export const FIXTURES: DecompFixture[] = [
     note: 'address-taken frame local (laddr): capture hoisted, store through it, address escapes',
   },
   // agbcc's double arithmetic is libgcc calls over register pairs (raise/widehelpers.ts
-  // `foldDoubleHelpers`); a double past the registers arrives in the caller's stack words.
+  // `foldFloatHelpers`); a double past the registers arrives in the caller's stack words.
   {
     symbol: 'dadd',
     referenceC: 'double dadd(double a, double b){ return a + b; }',

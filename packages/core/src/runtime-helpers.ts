@@ -29,7 +29,7 @@
 // REGISTERS the list occupies, and `irWidthOf` gives the IR width one parameter ARRIVES at once a
 // frontend has paired those registers up.
 import { type Op, mkOp } from './ir/core';
-import { type Opcode, WIDE_BITS } from './ir/opcodes';
+import { FLOAT_OPS, type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
 import { type Prototypes, wordsOf } from './proto';
 
@@ -137,6 +137,16 @@ export function forgetHelperPlacement(op: Op): Op {
   return op;
 }
 
+/** Whether a helper computes on floats: its op is a float op, so its operands and result are floats
+ *  of the widths its signature states, carried in integer registers by a soft-float runtime. THE
+ *  ONE ANSWER every reader of the table asks, because the two families fold into different IR — an
+ *  integer helper into its op over the same values, a float helper into a float op over values
+ *  re-typed as floats (`raise/widehelpers.ts` `foldFloatHelpers`) — and a reader that answered by
+ *  width alone would fold a single-precision helper into a float op over integers. */
+export function isFloatHelper(h: RuntimeHelper): boolean {
+  return h.op !== undefined && FLOAT_OPS.has(h.op);
+}
+
 /** Signatures for a target's helpers, in the WORD arity the frontend's prototype lookup speaks.
  *  Consumed behind any caller-supplied prototype — the project's own headers win. */
 export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> | undefined): Prototypes {
@@ -179,7 +189,7 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __ashrdi3: { op: 'shr_s', params: [64, 32], returns: 64 },
   __lshrdi3: { op: 'shr_u', params: [64, 32], returns: 64 },
   __negdi2: { op: 'neg', params: [64], returns: 64 },
-  // Double arithmetic, which the same pair carries (`raise/widehelpers.ts` `foldDoubleHelpers`).
+  // Double arithmetic, which the same pair carries (`raise/widehelpers.ts` `foldFloatHelpers`).
   __adddf3: { op: 'fadd', params: [64, 64], returns: 64 },
   __subdf3: { op: 'fsub', params: [64, 64], returns: 64 },
   __muldf3: { op: 'fmul', params: [64, 64], returns: 64 },
