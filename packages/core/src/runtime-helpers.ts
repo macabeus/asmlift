@@ -28,7 +28,7 @@
 // here: `wordsOf` (proto.ts, because a C declaration asks the same question) counts the argument
 // REGISTERS the list occupies, and `irWidthOf` gives the IR width one parameter ARRIVES at once a
 // frontend has paired those registers up.
-import { type Op, mkOp } from './ir/core';
+import { type Op, type Value, mkOp } from './ir/core';
 import { FLOAT_OPS, type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
 import { type Prototypes, wordsOf } from './proto';
@@ -102,9 +102,11 @@ export function isWideHelper(h: RuntimeHelper): boolean {
   return h.returns > 32 || h.params.some((w) => w > 32);
 }
 
-/** The op a recognised helper call is rewritten to, STAMPED with the helper it was: the call's
- *  operands, the SAME result value (so every use already points at it), and `helper` naming the
- *  callee. `raise/softdiv.ts` and `raise/widehelpers.ts` build every one through here.
+/** The op a recognised helper call is rewritten to, STAMPED with the helper it was: `helper` names
+ *  the callee. An integer helper's op takes the call's own operands and the SAME result value, so
+ *  every use already points at it; a float helper's takes them re-typed as floats
+ *  (`raise/widehelpers.ts` `foldFloatHelpers`). `raise/softdiv.ts` and `raise/widehelpers.ts` build
+ *  every one through here.
  *
  *  The stamp carries the one fact the op's opcode loses: the asm CALLED something here. A
  *  `sdiv` is a `divw` on mwcc and a `bl __divsi3` on agbcc, and an `shr_s` is a shift everywhere
@@ -112,8 +114,8 @@ export function isWideHelper(h: RuntimeHelper): boolean {
  *  compiler fact, not an ISA one, and it was known exactly once, at the rewrite. What reads it is
  *  every rule that places a call: a call runs once, where the asm ran it (`raisedHelper`), and a pass
  *  that moves the op elsewhere drops the stamp (`forgetHelperPlacement`). */
-export function helperOp(opcode: Opcode, call: Op, helper: string): Op {
-  return mkOp(opcode, { operands: [...call.operands], results: [call.results[0]], attrs: { helper } });
+export function helperOp(opcode: Opcode, helper: string, operands: readonly Value[], result: Value): Op {
+  return mkOp(opcode, { operands: [...operands], results: [result], attrs: { helper } });
 }
 
 /** The runtime helper a value op was a call to (`helperOp`), or null. An `opaque` carries the same

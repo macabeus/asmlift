@@ -60,7 +60,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
       ) {
         continue;
       }
-      b.ops.splice(i, 1, helperOp(helper.op, op, String(op.attrs.target)));
+      b.ops.splice(i, 1, helperOp(helper.op, String(op.attrs.target), op.operands, op.results[0]));
       changed = true;
     }
   }
@@ -170,10 +170,12 @@ function foldFloatHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>>
     block.ops = block.ops.flatMap((op) => {
       if (calls.has(op)) {
         return [
-          mkOp(helperOf(op)!.op!, {
-            operands: op.operands.map((o) => floatOf.get(o)!),
-            results: [floatOf.get(op.results[0])!],
-          }),
+          helperOp(
+            helperOf(op)!.op!,
+            String(op.attrs.target),
+            op.operands.map((o) => floatOf.get(o)!),
+            floatOf.get(op.results[0])!,
+          ),
         ];
       }
       const retired = op.results.length === 1 && floatOf.has(op.results[0]);

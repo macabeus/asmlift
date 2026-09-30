@@ -51,7 +51,7 @@ export function recognizeSoftDiv(fn: Fn, target: TargetDescription): boolean {
       if (op.operands.length !== wordsOf(helper.params) || op.results.length !== 1) {
         continue;
       }
-      b.ops.splice(i, 1, helperOp(helper.op, op, op.attrs.target as string));
+      b.ops.splice(i, 1, helperOp(helper.op, op.attrs.target as string, op.operands, op.results[0]));
       changed = true;
     }
   }

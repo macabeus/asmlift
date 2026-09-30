@@ -38,9 +38,11 @@ describe('the double arithmetic helpers are the float ops', () => {
     expect(lift('dchain')).toBe('double dchain(double a0, double a1, double a2) {\n    return (a0 + a1) * a2;\n}\n');
   });
 
-  test('a result held across a call in callee-saved registers is returned', () => {
+  // The helper runs where the asm called it, before `g` (runtime-helpers.ts `helperOp`): inline at
+  // the return, `a0 + a1` recompiles with `bl g` first.
+  test('a result held across a call in callee-saved registers is computed before the call', () => {
     expect(lift('dkeep', { g: { params: 0 } })).toBe(
-      'double dkeep(double a0, double a1) {\n    g();\n    return a0 + a1;\n}\n',
+      'double dkeep(double a0, double a1) {\n    double v0;\n    v0 = a0 + a1;\n    g();\n    return v0;\n}\n',
     );
   });
 });
