@@ -1270,7 +1270,10 @@ export function auditFrameObjects({
       }
       // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
       // at `k - from` off the object, and a member address used any other way becomes the object's
-      // address moved by that constant.
+      // address moved by that constant. `volatile` keys on `published` alone, and a block
+      // transfer's fill source (`filledFrom`) needs no second key here: this answer is asked for
+      // only where a read is unbounded, a call's read is always bounded, so the unbounded one is
+      // a device's, handed the address by a store — which publishes it.
       const object = mkOp('laddr', {
         results: [mkValue(T.unk(32))],
         attrs: {
@@ -1278,7 +1281,7 @@ export function auditFrameObjects({
           width: 1,
           signed: false,
           count: to - from,
-          ...(published.size > 0 || filledFrom.size > 0 ? { volatile: true } : {}),
+          ...(published.size > 0 ? { volatile: true } : {}),
         },
       });
       const base = object.results[0];
