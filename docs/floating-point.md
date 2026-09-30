@@ -319,7 +319,7 @@ typed memory access (a float element, a float struct member), and it owns an `lf
 constant, which is how a float LITERAL arrives on PowerPC. **It must first replace two rules this
 layer rests on**: the float RETURN is decided by scanning for a decoded write to `$f0`/`f1`
 (`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that a float reaches only a float
-op or `ret`. Both are sound only while no float can reach memory, so a store that lands before them
+op, `ret` or a call argument its callee declares `double`. Both are sound only while no float can reach memory, so a store that lands before them
 lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
 from the value that reaches each `ret`. After it: `frsp` and the int/float conversions, which
@@ -329,9 +329,12 @@ fifth thing §1 named.
 **A double on agbcc is the same type without the file.** agbcc has no FPU and emits every `double`
 operation as a libgcc call over the register pairs a long long uses (`optabs.c:4022`, `thumb.h:632`,
 `:655`), so the arithmetic ones — `__adddf3`, `__subdf3`, `__muldf3`, `__divdf3`, `__negdf2` — fold to
-the float ops over an `f64` in `raise/floathelpers.ts`, and `synthetic:dadd:agbcc` is its row. A double
-reaches the fold only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its high word in the lower
-register, so a literal, a load, a store or a read of one word refuses (`test/soft-double.test.ts`). The
+the float ops over an `f64` in `raise/floathelpers.ts`, and `synthetic:dadd:agbcc` is its row. The same
+pass hands a double to a parameter an ordinary callee is declared to take as one, placed in the next
+two argument words wherever they fall (`synthetic:stkwide:agbcc`, `dreg`, `dsplit`). A double
+reaches either only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its high word in the lower
+register, so a load, a store or a read of one word refuses (`test/soft-double.test.ts`,
+`test/double-args.test.ts`), and two constant words are a literal read high word first, an `fconst`. The
 compares and the conversions (`__gtdf2`, `__floatsidf` …) and every single-precision helper stay
 ordinary calls: the IR has no int<->float op to fold them into, and naming one would decline the
 functions that pass through them.
