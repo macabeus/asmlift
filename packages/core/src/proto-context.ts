@@ -204,22 +204,69 @@ function parameterType(p: string): string | null {
   return tokens.join(' ').replace(/ \*/g, ' *').replace(/\* \*/g, '**').trim();
 }
 
-/** `typedef` statements → the name and the type it stands for (as a spelling, before resolution). */
-function readTypedef(t: string): [string, string] | null {
+/** One name a `typedef` declares: the type it stands for (as a spelling, before resolution), and
+ *  whether it names the struct, union or enum body the statement defines, or a pointer to one that
+ *  has no other name to spell it by. */
+interface TypedefName {
+  name: string;
+  type: string;
+  names: 'body' | 'unspelled pointer' | 'other';
+}
+
+/** A `typedef` statement → every name it declares (`typedef struct R {…} R, *RP;` declares two). A
+ *  plain declarator of a body names that body and resolves to itself. A pointer declarator is a
+ *  pointer to the base, spelled by the base's tag or by a plain name the same statement gives it,
+ *  and resolves to itself where the body has neither (`typedef struct {…} *PS;`). An array
+ *  declarator is not read. */
+function readTypedef(t: string): TypedefName[] {
   const body = t.replace(/^typedef\s+/, '');
   const fn = /^(.+?)\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\((.*)\)$/.exec(body);
   if (fn) {
-    return [fn[2], `${fn[1].trim()} (*)(${fn[3].trim()})`];
+    return [{ name: fn[2], type: `${fn[1].trim()} (*)(${fn[3].trim()})`, names: 'other' }];
   }
   if (/[()]/.test(body)) {
-    return null;
+    return [];
   }
-  const m = /^(.*?)\s*\b([A-Za-z_]\w*)\s*$/.exec(body.replace(/\*/g, ' * '));
-  if (!m || m[1].trim() === '') {
-    return null;
+  const declarator = /^((?:\*\s*(?:(?:const|volatile)\b\s*)*)*)([A-Za-z_]\w*)$/;
+  const withBody = /^((?:(?:const|volatile)\s+)*(?:struct|union|enum)\b[^{]*\{\})\s*(.*)$/.exec(body);
+  let base: string;
+  let declarators: string[];
+  if (withBody) {
+    base = withBody[1];
+    declarators = topLevelCommas(withBody[2]);
+  } else {
+    const parts = topLevelCommas(body);
+    const first = /^(.*?[^\s*])\s*((?:\*\s*(?:(?:const|volatile)\b\s*)*)*[A-Za-z_]\w*)$/.exec(parts[0]);
+    if (!first) {
+      return [];
+    }
+    base = first[1];
+    declarators = [first[2], ...parts.slice(1)];
   }
-  // a typedef of a struct/enum body names an aggregate: it resolves to itself
-  return [m[2], m[1].includes('{}') ? m[2] : m[1].replace(/\s+/g, ' ').replace(/ \*/g, ' *').trim()];
+  const read = declarators.map((d) => declarator.exec(d.trim()));
+  const plain = read.find((m) => m !== null && m[1] === '')?.[2];
+  const tag = /^(?:(?:const|volatile)\s+)*((?:struct|union|enum)\s+[A-Za-z_]\w*)\s*\{\}$/.exec(base)?.[1];
+  const out: TypedefName[] = [];
+  for (const m of read) {
+    if (m === null) {
+      continue;
+    }
+    const stars = m[1].replace(/\s+/g, ' ').trim();
+    if (withBody && stars === '') {
+      out.push({ name: m[2], type: m[2], names: 'body' });
+    } else if (withBody) {
+      const pointee = tag ?? plain;
+      out.push(
+        pointee === undefined
+          ? { name: m[2], type: m[2], names: 'unspelled pointer' }
+          : { name: m[2], type: `${pointee} ${stars}`, names: 'other' },
+      );
+    } else {
+      const spelled = `${base.replace(/\s+/g, ' ').trim()}${stars === '' ? '' : ` ${stars}`}`;
+      out.push({ name: m[2], type: spelled.replace(/\*\s+\*/g, '**'), names: 'other' });
+    }
+  }
+  return out;
 }
 
 /** Resolve a spelling through the typedef table until `declaredWidth` can size it, keeping it the
@@ -256,6 +303,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   // included
   const tagged = new Map<string, string>();
   const named = new Map<string, { kind: AggregateLayout['kind']; body?: string }>();
+  // a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own
+  const unspelledPointers = new Set<string>();
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
     if (def) {
@@ -275,12 +324,14 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
       named.set(cpp[2], { kind: cpp[1] === 'union' ? 'union' : 'struct', body: layable ? s.bodies[0] : undefined });
     }
     if (/^typedef\b/.test(s.text)) {
-      const td = readTypedef(s.text);
-      if (td) {
-        typedefs.set(td[0], td[1]);
-        const body = /^typedef\s+(struct|union)\b[^{]*\{\}/.exec(s.text);
-        if (body && td[1] === td[0]) {
-          named.set(td[0], { kind: body[1] as AggregateLayout['kind'], body: s.bodies[0] });
+      const aggregate = /^typedef\s+(struct|union)\b[^{]*\{\}/.exec(s.text);
+      for (const td of readTypedef(s.text)) {
+        typedefs.set(td.name, td.type);
+        if (aggregate && td.names === 'body') {
+          named.set(td.name, { kind: aggregate[1] as AggregateLayout['kind'], body: s.bodies[0] });
+        }
+        if (td.names === 'unspelled pointer') {
+          unspelledPointers.add(td.name);
         }
       }
     }
@@ -337,6 +388,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
         const base = resolve(split.base, typedefs);
         if (declaredWidth(base) !== undefined) {
           type = base;
+        } else if (unspelledPointers.has(base)) {
+          type = 'void *';
         } else {
           const nested = layoutOf(base, depth + 1);
           if (nested?.members === undefined) {

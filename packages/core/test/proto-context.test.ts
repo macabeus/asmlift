@@ -201,6 +201,31 @@ describe('prototypes from a declaration context', () => {
     expect(p.mknine?.returnLayout).toEqual({ kind: 'struct' });
   });
 
+  test('a typedef declares every name in its list, and a pointer name is a pointer, not the struct', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef int s32;
+       typedef struct R { u32 a; u32 b; } R, *RP; RP getr(s32); R byval(s32); void taker(RP, s32);
+       typedef struct { u32 w[16]; } Blob, *BlobPtr; Blob mkblob(s32); BlobPtr blobp(s32);
+       typedef struct { u32 v; u32 w; } *NodeP; NodeP node(s32);
+       struct W { NodeP p; RP q; }; struct W getw(s32);
+       typedef u32 Word, *WordP; WordP wordp(Word);`,
+      'c',
+    );
+    expect(p.getr).toEqual({ returns: 'struct R *', params: ['s32'] });
+    expect(p.byval?.returnLayout?.members).toHaveLength(2);
+    expect(p.taker?.params).toEqual(['struct R *', 's32']);
+    expect(p.mkblob?.returnLayout?.members).toEqual([{ name: 'w', type: 'u32', dims: [16] }]);
+    expect(p.blobp).toEqual({ returns: 'Blob *', params: ['s32'] });
+    // a pointer to a body with no name to spell it by is the typedef name, which sizes to nothing
+    expect(p.node).toEqual({ params: ['s32'] });
+    // …and a member of it is a word all the same
+    expect(p.getw?.returnLayout?.members).toEqual([
+      { name: 'p', type: 'void *' },
+      { name: 'q', type: 'struct R *' },
+    ]);
+    expect(p.wordp).toEqual({ returns: 'u32 *', params: ['u32'] });
+  });
+
   // each member points at the struct itself: laying out every pointee on every path is 9^8 walks
   test('a struct whose members point back at it is laid out once per depth', () => {
     const ptrs = Array.from({ length: 8 }, (_, i) => `struct Node *p${i};`).join(' ');
