@@ -120,10 +120,19 @@ export function deriveSpec(
   if (sfn.params.length !== (sig.cls ? 1 : 0) + sig.params.length || !bound) {
     return freeFn();
   }
+  // A RESULT OF NO STATED PRECISION takes the widest float the signature binds. Its code converts
+  // nothing, and narrowing a double to a float is a conversion (PowerPC's `frsp`) the lift would have
+  // read; so the result is no narrower than the float it came from, and the widest one the signature
+  // takes spells it without one. `double dneg(double a)` is `fneg f1,f1` where `float dneg(double a)`
+  // needs an `frsp` after it.
+  const unstated = sfn.retType.kind === 'float' && sfn.retType.width === null;
+  const retType = unstated
+    ? { base: sig.params.some((t) => t.ptr === 0 && t.base === 'double') ? 'double' : 'float', ptr: 0 }
+    : irToCpp(sfn.retType);
   const letters = 'abcdefghij';
   const spec: CppFnSpec = {
     method: sig.name,
-    retType: irToCpp(sfn.retType),
+    retType,
     params: sig.params.map((t, i) => ({ name: letters[i] ?? `p${i}`, type: t })),
   };
   if (sig.cls) {

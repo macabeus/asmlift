@@ -37,8 +37,11 @@ export type IrType =
   // FPU's own register file, or in a soft-float runtime's register pair, and are computed only by
   // the float opcodes (`fadd` …); `docs/floating-point.md` says which frontends mint one and what
   // they still refuse. Two floats of different widths are different types (`typeEquals`), so a
-  // float op mixing them fails `ir/verify.ts`.
-  | { kind: 'float'; width: 32 | 64 }
+  // float op mixing them fails `ir/verify.ts`. A null width is a float whose code states no precision:
+  // a PowerPC FPR holds a double whichever the source declared, and `fneg`/`fmr` are one instruction
+  // for both, so `double dneg(double a){ return -a; }` and its `float` twin compile to one object.
+  // Either spelling reproduces it, and a declaration the caller supplies decides between them.
+  | { kind: 'float'; width: 32 | 64 | null }
   | { kind: 'void' }; // a function that returns nothing
 
 /** The scalar type of a memory access of `width` bytes: word ⇒ the s32 integer default;
@@ -81,6 +84,7 @@ export const T = {
   },
   f32: (): IrType => ({ kind: 'float', width: 32 }),
   f64: (): IrType => ({ kind: 'float', width: 64 }),
+  fUnstated: (): IrType => ({ kind: 'float', width: null }),
   void: (): IrType => ({ kind: 'void' }),
 };
 
@@ -150,7 +154,7 @@ export function typeToString(t: IrType): string {
     case 'union':
       return `union{${t.members.map((m) => `${typeToString(m.type)} ${m.name}`).join(';')}}`;
     case 'float':
-      return `f${t.width}`;
+      return `f${t.width ?? '?'}`;
     case 'void':
       return 'void';
   }
@@ -161,8 +165,8 @@ export function parseType(s: string): IrType {
   if (s.endsWith('*')) {
     return T.ptr(parseType(s.slice(0, -1)));
   }
-  if (s === 'f32' || s === 'f64') {
-    return s === 'f32' ? T.f32() : T.f64();
+  if (s === 'f32' || s === 'f64' || s === 'f?') {
+    return s === 'f32' ? T.f32() : s === 'f64' ? T.f64() : T.fUnstated();
   }
   const m = s.match(/^(unk|s|u)(\d+)$/);
   if (!m) {

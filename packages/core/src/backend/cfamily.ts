@@ -91,6 +91,7 @@ export function cType(t: IrType): string {
   // The C89 KEYWORDS, not the `f32`/`f64` typedefs a decomp project declares: the candidate prelude
   // (`C_TYPEDEFS`) holds the integer family only, and a keyword needs no declaration in any
   // translation unit — so no project context that already typedefs `f32` can collide with it.
+  // A float of no stated precision compiles the same under either keyword; `float` is its spelling.
   if (t.kind === 'float') {
     return t.width === 64 ? 'double' : 'float';
   }

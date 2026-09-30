@@ -16,14 +16,15 @@ import type { ArgSlots } from './ssa';
 export type Fpu = NonNullable<TargetDescription['fpu']>;
 
 /** The one float type a function's FPU registers hold: double where it decodes a double op, single
- *  otherwise, and null where it decodes both. `widthOf` is the frontend's reading of a mnemonic (null
- *  for one that carries no precision, undefined for one it does not decode). */
+ *  where it decodes a single one, of no stated precision (`T.fUnstated`) where every op it decodes
+ *  carries none, and null where it decodes both. `widthOf` is the frontend's reading of a mnemonic
+ *  (null for one that carries no precision, undefined for one it does not decode). */
 export function fpPrecision(
   instrs: readonly { mnemonic: string }[],
   widthOf: (mnemonic: string) => 32 | 64 | null | undefined,
 ): IrType | null {
   const widths = new Set(instrs.map((ins) => widthOf(ins.mnemonic)).filter((w) => w !== null && w !== undefined));
-  return widths.size > 1 ? null : widths.has(64) ? T.f64() : T.f32();
+  return widths.size > 1 ? null : widths.has(64) ? T.f64() : widths.has(32) ? T.f32() : T.fUnstated();
 }
 
 /** The refusal of a function computing in both precisions, thrown where the frontend DECODES a float

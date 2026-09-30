@@ -227,6 +227,41 @@ test.each([
   );
 });
 
+// …AND WHERE THE CODE STATES NO PRECISION, THE SPEC'S IS THE ONE PRINTED. `fneg` and `fmr` are one
+// instruction for a float and a double, so `double dneg(double a){ return -a; }` is `fneg f1,f1; blr`
+// and so is its float twin (both compiled at mwcc_242_81's canonical flags). The lift's float states
+// no width, and a double spec binds it.
+const DNEG_MWCC = '00000000 <dneg__Fd>:\n   0:\tfneg\tf1,f1\n   4:\tblr\n';
+const DSND_MWCC = '00000000 <dsnd__Fdd>:\n   0:\tfmr\tf1,f2\n   4:\tblr\n';
+
+test.each([
+  ['a negation', 'dneg__Fd', DNEG_MWCC, specOf('dneg', [['p0', 'double']], 'double'), 'return -p0;'],
+  [
+    'a copy',
+    'dsnd__Fdd',
+    DSND_MWCC,
+    specOf(
+      'dsnd',
+      [
+        ['a', 'double'],
+        ['b', 'double'],
+      ],
+      'double',
+    ),
+    'return b;',
+  ],
+  ['a negation, as a float', 'dneg__Fd', DNEG_MWCC, specOf('dneg', [['p0', 'float']], 'float'), 'return -p0;'],
+])('a user spec binds %s of no stated precision', (_label, sym, asm, spec, body) => {
+  expect(decompile(sym, asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) }).source).toContain(body);
+});
+
+// The demangled path declares the result at the widest float the signature binds: `float dneg(double
+// a)` compiles to `fneg f1,f1; frsp f1,f1`, one instruction more than the target.
+test('a demangled signature of doubles over a precision-free body is all double', () => {
+  expect(cpp('dneg__Fd', DNEG_MWCC, PPC_MWCC)).toBe('double dneg(double a) {\n    return -a;\n}\n');
+  expect(cpp('dsnd__Fdd', DSND_MWCC, PPC_MWCC)).toBe('double dsnd(double a, double b) {\n    return b;\n}\n');
+});
+
 test.each([
   [
     'EABI: a trailing unread float',

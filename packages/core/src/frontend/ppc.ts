@@ -122,8 +122,9 @@ const isReg = (s: string | undefined): s is string => /^r\d+$/.test(s ?? '');
 
 /** The FPU arithmetic this frontend lifts, onto the float opcodes, with the precision each computes
  *  in; `fmr` is a copy and has no opcode. `fneg` and `fmr` carry no precision at all — an FPR holds a
- *  double either way — so they take the function's (`frontend/fpu.ts` `fpPrecision`), and are single where nothing
- *  else says, because the float and double spellings of a negation or a copy compile to one object.
+ *  double either way — so they take the function's (`frontend/fpu.ts` `fpPrecision`), and where nothing
+ *  else says the function's floats are of no stated precision (`T.fUnstated`), because the float and
+ *  double spellings of a negation or a copy compile to one object.
  *  Everything else in the file keeps the register-file refusal `opaqueDest` gives it: `frsp`, the
  *  loads and stores, the conversions, the compares, the fused multiply-adds, paired singles — and a
  *  record form (`fadds.`), which sets `cr1`. */

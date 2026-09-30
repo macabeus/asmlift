@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vitest';
 
 import { writesFloatReturn } from '../src/frontend/fpu';
 import { mipsEvenFpKey } from '../src/frontend/splat';
+import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
@@ -314,6 +315,25 @@ describe('PowerPC EABI: the arithmetic through f1..f8', () => {
     expect(lift('neg2', MWCC, PPC_MWCC)).toContain('return -(a0 - a1);');
     expect(lift('poly', MWCC, PPC_MWCC)).toContain('return (v0 - a1) / (a0 + a1);');
     expect(lift('second', MWCC, PPC_MWCC)).toBe('float second(float a0, float a1) {\n    return a1;\n}\n');
+  });
+
+  // `fneg` and `fmr` are one instruction for both precisions, so a function made only of them states
+  // none: its floats are `T.fUnstated`, which a declaration may bind at either width (backend/cpp.ts
+  // `bindSpecParams`), and C spells them `float`.
+  test('a function made only of fneg and fmr states no precision', () => {
+    for (const [sym, body, src] of [
+      ['dneg', '   0:\tfneg    f1,f1\n   4:\tblr\n', 'float dneg(float a0) {\n    return -a0;\n}\n'],
+      ['dsnd', '   0:\tfmr     f1,f2\n   4:\tblr\n', 'float dsnd(float a0, float a1) {\n    return a1;\n}\n'],
+    ]) {
+      const r = decompile(sym, objdump(sym, body), PPC_MWCC);
+      expect(r.source).toBe(src);
+      expect([...r.sfn.params.map((p) => p.type), r.sfn.retType]).toEqual(
+        Array(r.sfn.params.length + 1).fill(T.fUnstated()),
+      );
+    }
+    expect(
+      decompile('n', objdump('n', '   0:\tfneg    f1,f1\n   4:\tfadds   f1,f1,f2\n   8:\tblr\n'), PPC_MWCC).sfn.retType,
+    ).toEqual(T.f32());
   });
 
   // f1 is both the first float argument and the float return, so the conditional return that leaves

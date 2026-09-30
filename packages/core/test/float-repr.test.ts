@@ -38,6 +38,8 @@ describe('a float is its own kind, not an integer width', () => {
     expect(parseType('f32')).toEqual(T.f32());
     expect(typeToString(T.f64())).toBe('f64');
     expect(parseType('f64')).toEqual(T.f64());
+    expect(typeToString(T.fUnstated())).toBe('f?');
+    expect(parseType('f?')).toEqual(T.fUnstated());
   });
 
   // THE PREDICATE BOTH WIDTH READERS SHARE (ir/types.ts `intWidth`). The verifier reads a null as
@@ -54,6 +56,7 @@ describe('a float is its own kind, not an integer width', () => {
     expect(typeEquals(T.f32(), T.unk(32))).toBe(false);
     expect(typeEquals(T.f64(), T.s(64))).toBe(false);
     expect(typeEquals(T.f32(), T.f64())).toBe(false);
+    expect(typeEquals(T.fUnstated(), T.f32())).toBe(false);
   });
 
   // Recovery types only `unknown`s, so a value the frontend minted as a float leaves it one: the s32

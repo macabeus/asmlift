@@ -51,7 +51,8 @@ export function cppSymbol(spec: CppFnSpec): string {
  *  precision for. No binding of the rest is then trustworthy. The precision is part of the
  *  contradiction because the body is spelled over the spec's types: a lifted `double` bound to a
  *  `float a, float b` prints `a + b`, which is a single-precision add where the machine did a
- *  double one. */
+ *  double one. A lifted float of no stated precision (`T.fUnstated`) binds a spec float of either:
+ *  its code compiles the same under both, so the spec's is the one to print. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
   lifted: SFn['params'],
@@ -60,7 +61,8 @@ export function bindSpecParams(
   const floatBits = (t: CppType) => (t.ptr !== 0 ? null : t.base === 'float' ? 32 : t.base === 'double' ? 64 : null);
   const isFloat = (t: CppType) => floatBits(t) !== null;
   const clashes = (p: SFn['params'][number], t: CppType | undefined) =>
-    p.type.kind === 'float' && (t === undefined || floatBits(t) !== p.type.width);
+    p.type.kind === 'float' &&
+    (t === undefined || floatBits(t) === null || (p.type.width !== null && floatBits(t) !== p.type.width));
   const explicit = lifted.slice(spec.cls ? 1 : 0);
   if (floatSlots !== 'separate') {
     const clash = explicit.some((p, i) => clashes(p, spec.params[i]?.type));
