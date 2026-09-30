@@ -151,7 +151,8 @@ describe('prototypes from a declaration context', () => {
        struct Fl { float f; }; struct Fl mkfl(void);
        struct Flex { s32 n; u8 tail[]; }; struct Flex mkflex(void);
        struct Pad { u16 unk0; u8 unk2; u8 pad3[0x4 - 0x3]; u8 m[(2 + 1) * 2]; }; struct Pad mkpad(void);
-       struct Sym { u8 x[N]; }; struct Sym mksym(void);`,
+       struct Sym { u8 x[N]; }; struct Sym mksym(void);
+       struct Oct { u8 a[010]; u8 b[0]; }; struct Oct mkoct(void); struct Nine { u8 a[09]; }; struct Nine mknine(void);`,
       'c',
     );
     expect(p.mkbig?.returnLayout?.members).toEqual([
@@ -192,6 +193,12 @@ describe('prototypes from a declaration context', () => {
       { name: 'pad3', type: 'u8', dims: [1] },
       { name: 'm', type: 'u8', dims: [6] },
     ]);
+    // a leading zero is octal, and `09` is no literal at all
+    expect(p.mkoct?.returnLayout).toEqual({ kind: 'struct' });
+    expect(
+      prototypesFromContext('struct O { u8 a[010]; }; struct O mko(void);', 'c').mko?.returnLayout?.members,
+    ).toEqual([{ name: 'a', type: 'u8', dims: [8] }]);
+    expect(p.mknine?.returnLayout).toEqual({ kind: 'struct' });
   });
 
   test('C++ default arguments and comments do not reach a spelling', () => {

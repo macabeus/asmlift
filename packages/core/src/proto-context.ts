@@ -440,7 +440,8 @@ function baseAndDeclarators(decl: string): { base: string; declarators: string[]
 }
 
 /** The value of an integer constant expression of literals, `+ - * /` and parentheses — the
- *  `u8 pad3[0x4 - 0x3]` a decomp header sizes its padding with — or undefined for anything else. */
+ *  `u8 pad3[0x4 - 0x3]` a decomp header sizes its padding with — or undefined for anything else. A
+ *  literal reads as C reads it: `0x` hexadecimal, a leading `0` octal. */
 function constantValue(text: string): number | undefined {
   const tokens = text.match(/0x[0-9a-f]+[ul]*|\d+[ul]*|[-+*/()]|\S/gi) ?? [];
   let at = 0;
@@ -454,8 +455,8 @@ function constantValue(text: string): number | undefined {
       const v = primary();
       return v === undefined ? undefined : -v;
     }
-    return t !== undefined && /^(?:0x[0-9a-f]+|\d+)[ul]*$/i.test(t)
-      ? Number.parseInt(t, /^0x/i.test(t) ? 16 : 10)
+    return t !== undefined && /^(?:0x[0-9a-f]+|0[0-7]*|[1-9]\d*)[ul]*$/i.test(t)
+      ? Number.parseInt(t, /^0x/i.test(t) ? 16 : /^0\d/.test(t) ? 8 : 10)
       : undefined;
   };
   const product = (): number | undefined => {
