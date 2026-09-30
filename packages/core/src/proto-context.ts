@@ -366,8 +366,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     return layout;
   };
   // A body's members, or undefined when one of them is a type this cannot lay out — a project
-  // typedef that resolves to nothing sized, a nested aggregate with no body here, a flexible or
-  // non-literal extent. Bounded in depth, since a body may name its own tag.
+  // typedef that resolves to nothing sized, a nested aggregate with no body here, a flexible extent
+  // or one that is not a constant expression. Bounded in depth, since a body may name its own tag.
   const readMembers = (body: string, depth: number): AggregateMember[] | undefined => {
     if (depth > 8) {
       return undefined;
@@ -665,9 +665,9 @@ function readSignature(
  *  fact, and only what the caller states about it is kept.
  *
  *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
- *  false` as nothing) keeps a struct return the context states: it is
- *  what says argument 0 may be a hidden pointer, and an entry stating only the arity would
- *  otherwise hand that pointer to the call as its first argument. */
+ *  false` as nothing) keeps a struct return the context states: it is what says argument 0 may be
+ *  a hidden pointer, and an entry stating only the arity would otherwise hand that pointer to the
+ *  call as its first argument. */
 export function withContextPrototypes(
   stated: Prototypes | undefined,
   context: Prototypes,

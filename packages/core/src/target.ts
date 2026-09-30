@@ -41,7 +41,7 @@
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
 //     `aggregateReturn`, `largestAlignment`, `enumBytes` and `bitfieldPacking` (aggregate.ts, for
-//     frontend/thumb.ts and frontend/ppc.ts),
+//     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
@@ -580,7 +580,8 @@ export interface TargetDescription {
     largestAlignment?: number;
     // HOW A STRUCT OR UNION RETURNED BY VALUE COMES BACK, which decides whether a call to a function
     // declared to return one hands it a hidden pointer as argument 0 and moves every declared
-    // argument one register up (`aggregate.ts` `returnsInMemory`, read by frontend/thumb.ts).
+    // argument one register up (`aggregate.ts` `returnsInMemory`, read by frontend/thumb.ts and
+    // frontend/ppc.ts).
     //   • 'apcs' — in memory when bigger than a word, when a struct has a second member that is not
     //     a bitfield, or when a union has a member that would be; in the return register otherwise.
     //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,

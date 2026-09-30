@@ -56,10 +56,10 @@ export type Expr =
   // SPELLING or the whole row rather than leaving this stamp standing over an implicitly-`int`
   // callee.
   //
-  // `sret` is the struct a callee declared to return one BY VALUE returns through memory: `args[0]`
-  // is then the hidden pointer the frontend read from the first argument register — the address of
-  // the struct the call fills — and the rest are the declared arguments. A C spelling exists only as
-  // a statement, `dest = fn(rest)`, so such a call stands alone.
+  // `sret` is the type of a struct the callee returns BY VALUE through memory. `args[0]` is then the
+  // hidden pointer the frontend read from the first argument register — the address of the struct
+  // the call fills — and the rest are the declared arguments. The only C spelling is a statement,
+  // `dest = fn(rest)`, so such a call stands alone.
   | { k: 'call'; fn: string; args: Expr[]; wide64?: true; sret?: IrType }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`

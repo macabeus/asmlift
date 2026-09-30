@@ -963,9 +963,9 @@ export function auditFrameObjects({
     // third is answered, from the project's own `returnsVoid`, from a struct its declaration returns
     // that the target hands back in a register, or from the `returns` of a signature the C standard
     // fixes — the same table whose `params` this file already trusts to decide a call's arity. It is
-    // asked of EVERY callee that took the address
-    // at argument 0, because the object gets one decision: one callee about whose return nothing
-    // is known leaves the ambiguity standing and the refusal fires.
+    // asked of EVERY callee that took the address at argument 0, because the object gets one
+    // decision: one callee about whose return nothing is known leaves the ambiguity standing and the
+    // refusal fires.
     //
     // AN ARITY CANNOT ANSWER IT, which is worth saying because the count is right there and looks
     // like evidence: a hidden pointer does set one argument register more than the callee
@@ -1364,7 +1364,7 @@ export function auditFrameObjects({
       const temps = returnTemps.get(off);
       if (temps !== undefined) {
         // The callee writes the whole struct and this function names it once, as the call's
-        // destination. A read of a member, or any other use of the address, is not modelled yet —
+        // destination. A read of a member, or any other use of the address, is not modelled —
         // and most such reads never arrive here: the Thumb slot model refuses a word of the temp
         // read at a constant offset first ("stack pointer used as data"), a copy of the whole
         // struct into a global (`gS8 = mk8(x)`, which agbcc stages through the temp) included. So

@@ -784,9 +784,8 @@ bytes in r3/r3:r4 and passes a pointer in r3 past that. `compilerBehaviors.aggre
 `aggregateBoundary` and `largestAlignment` state it, with `enumBytes` and `bitfieldPacking` for the
 members whose size or place is the compiler's (agbcc states both; a float is 4 bytes and a double 8
 everywhere, a storage size that is not `declaredWidth`'s register count). `aggregate.ts` is the one
-reading of them:
-`returnsInMemory`, asked by the call lowering, and `returnsWithoutHiddenPointer`, asked by the
-frame-object audit, so the two cannot disagree about one call.
+reading of them: `returnsInMemory`, asked by the call lowering, and `returnsWithoutHiddenPointer`,
+asked by the frame-object audit, so the two cannot disagree about one call.
 
 **Whether a callee returns a struct at all is a declaration**, never an inference: the
 out-parameter call `add sp,#-4 / mov r0,sp / bl f` and the struct return are the same instructions,
@@ -797,9 +796,10 @@ symbol map by size alone (a layout with no members), or from `--proto`.
 **L1 — the call's value is the struct.** A memory return types the call's result as the declared
 struct, laid out on the target (`aggregateType`), with a field for each member the IR can type and
 none for the rest (a nested aggregate, a bitfield, an enum, a plain `char`); `attrs.sret` says
-argument 0 is where it lands; the frame temp's `laddr` is a pointer to it. A register return keeps the declared arguments
-where they are and writes no value: its bytes are a struct, so the return register is listed as
-destroyed, a read of it refuses, and a guessed arity after the call does not take it.
+argument 0 is where it lands; the frame temp's `laddr` is a pointer to it. A register return keeps
+the declared arguments where they are and writes no value: its bytes are a struct, so the return
+register is listed as destroyed, a read of it refuses, and a guessed arity after the call does not
+take it.
 
 **L3 and the backend.** The structurer stamps the call (`Expr` `call.sret`, as it stamps
 `wide64`), and the temp is a local declared with the headers' own spelling of the type:

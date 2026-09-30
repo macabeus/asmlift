@@ -193,7 +193,7 @@ describe('declaredReturnWidth', () => {
   });
 
   // A struct return prints only as the struct a lifted call fills (`returned`, the IR type the lift
-  // laid it out as, which the function's own source defines).
+  // laid it out as, which the declarations block defines).
   test('a struct return prints as the struct its call fills, or not at all', () => {
     const p = { params: ['s32'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };
     const returned = T.struct('Blob', [{ off: 0, type: T.array(T.u(32), 16), name: 'w' }], 64);

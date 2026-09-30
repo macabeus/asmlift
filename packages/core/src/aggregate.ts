@@ -205,9 +205,9 @@ export function returnsInMemory(layout: AggregateLayout, target: TargetDescripti
  *  TWO SOURCES AND NEITHER RANKS ABOVE THE OTHER, because on this one question they cannot
  *  disagree: the project's own headers — `returnsVoid`, or a struct or union `target` hands back
  *  in a register — and the `returns` of a signature the C standard fixes, which is as known as its
- *  parameters. That a project may re-declare a standard
- *  function differently is real and is why `declaredCall` ranks the two for ARITY — but a
- *  re-declaration that changed `memcpy` into a struct-returning function would not be `memcpy`.
+ *  parameters. That a project may re-declare a standard function differently is real and is why
+ *  `declaredCall` ranks the two for ARITY — but a re-declaration that changed `memcpy` into a
+ *  struct-returning function would not be `memcpy`.
  *
  *  `Object.hasOwn`, not `in`: `prototypes` is caller-supplied JSON and the table is an object
  *  literal, so `in` would answer for `toString` and every other name on `Object.prototype`. The

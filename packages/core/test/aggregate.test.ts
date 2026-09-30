@@ -110,8 +110,8 @@ test('a target that states no rule answers nothing', () => {
   expect(returnsInMemory(struct(m('w', 'u32', { dims: [16] })), unstated)).toBeUndefined();
 });
 
-// The struct a local of the returned type is declared as: every member it can type a field at its offset, and
-// spelled as the headers spell it, which marks it theirs
+// The IR struct a return temp is declared as: a field at its offset for each member the IR can type,
+// and the headers' own spelling, which marks it theirs
 test('a declared struct lays out as an IR struct, or not at all', () => {
   const s = struct(
     m('a', 'u8'),

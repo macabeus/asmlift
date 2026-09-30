@@ -84,7 +84,8 @@ export interface FnProto {
    *  (thumb.h:644-645) — so the declared `params` do not say which registers the call reads, and a
    *  lift that reads them from r0 names the hidden pointer as the first argument. A `returns` that
    *  spells `struct Tag` or `union Tag` states the same fact ({@link declaresAggregateReturn});
-   *  this key is how a declaration says it of a typedef name, which spells no keyword. */
+   *  this key also says it of a typedef name, which spells no keyword, and carries the members
+   *  whose layout decides whether the target returns it through memory at all (`aggregate.ts`). */
   returnLayout?: AggregateLayout;
 }
 

@@ -136,8 +136,8 @@ export interface StructFieldDecl {
 /** THE struct-declaration spelling — every `struct N { ... };` asmlift recovers or synthesizes
  *  comes from here, so the backend's recovered-struct decls and the scoring layer's synthesized
  *  decls cannot drift apart. A struct the headers own is transcribed from their declaration
- *  instead (declare.ts `declaredStructDecl`). One line, fields in caller order (the type is self-describing: padding is the
- *  caller's discipline, already present as real fields). */
+ *  instead (declare.ts `declaredStructDecl`). One line, fields in caller order (the type is
+ *  self-describing: padding is the caller's discipline, already present as real fields). */
 export function renderStructDecl(name: string, fields: StructFieldDecl[]): string {
   const one = (f: StructFieldDecl) =>
     `${f.volatile ? 'volatile ' : ''}${cDeclare(f.type, f.name)}${f.bits !== undefined ? ` : ${f.bits}` : ''};`;

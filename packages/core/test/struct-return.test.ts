@@ -1,8 +1,8 @@
 // A call to a function declared to return a struct or union BY VALUE. agbcc hands such a callee a
 // hidden pointer in r0 and moves every declared argument one register up (thumb.h:644-645, 672), so a
 // lift that reads the declared parameters from r0 names the pointer as the first argument. Every
-// fixture is agbcc's own output at the corpus flags (`-mthumb-interwork -O2 -fhex-asm
-// -fprologue-bugfix`), or mwcc_242_81's at the synthetic tier's.
+// fixture not marked hand-written is agbcc's own output at the corpus flags (`-mthumb-interwork -O2
+// -fhex-asm -fprologue-bugfix`), or mwcc_242_81's at the synthetic tier's.
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';
@@ -83,7 +83,8 @@ describe('a callee declared to return a struct through memory', () => {
     ).toThrow(/its parameters are not all sized/);
   });
 
-  // `struct S { u8 a; u32 w[16]; } ` goes through memory on its second member alone, sized or not
+  // a struct with a second member goes through memory whether or not anything sizes it, and one
+  // nothing sizes has no type to declare the local by; nor has a union, whose IR type has no name
   test('a union, or a struct this target does not size, declines', () => {
     const union = { ...makeblob, returns: 'union U', returnLayout: { ...BLOB64, kind: 'union' as const } };
     const unsized = {
@@ -165,8 +166,7 @@ describe('a callee declared to return a struct or union by value', () => {
     expect(() => decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob: typedefd } })).toThrow(
       /`makeblob` is declared to return Blob by value/,
     );
-    // Told only an arity, nothing separates the pointer from an argument: `gBlob` is dropped. The
-    // declaration is the whole of the fix.
+    // told only an arity, nothing separates the pointer from an argument, and `gBlob` is dropped
     expect(decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob: { params: 1 } } }).source).toContain(
       'makeblob(&gDst);',
     );
@@ -317,7 +317,7 @@ describe('a callee declared to return a struct or union by value', () => {
     );
   });
 
-  test('a PowerPC call to one declines', () => {
+  test('a PowerPC call to one not known to come back in registers declines', () => {
     const asm =
       '7c <p4>:\n7c:\tstwu    r1,-16(r1)\n80:\tmflr    r0\n84:\tlis     r3,0\n\t\t\t86: R_PPC_ADDR16_HA\tgDst\n' +
       '88:\tlis     r4,0\n\t\t\t8a: R_PPC_ADDR16_HA\tgBlob\n8c:\tstw     r0,20(r1)\n90:\taddi    r3,r3,0\n' +
