@@ -22,3 +22,6 @@ void dkeep(int a, int b, int c, double x) { f4(a, b, c, x); }
 void lsplit(int a, int b) { l4(a, b, 7, 0x1122334455667788LL); }
 void lstack(int a, int b) { l5(a, b, a + b, a - b, 0x1122334455667788LL); }
 void lgap(int a, int b) { l6(a, b, 1, 2, 3, 0x1122334455667788LL); }
+void lmove(int a, long long x) { l4(a, a, a, x); }
+void lmove5(long long x, int a) { l5(a, a, a, a, x); }
+void dmove5(double x, int a) { f5(a, a, a, a, x); }

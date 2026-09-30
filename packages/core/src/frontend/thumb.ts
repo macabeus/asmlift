@@ -3673,40 +3673,14 @@ function liftOnce(
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const widths = hidden === 0 ? params : [32, ...params];
     const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
-    // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
-    // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
-    // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
-    // refusal is what keeps the walk below from reading `r4`, which is an argument register on no
-    // target here. (`wideHelper` bounds the same placement for the helper table, where it can fall
-    // back to the declared path instead; a declaration has nothing to fall back to.)
-    //
-    // THE UPPER HALF IS NOT SPELT "high half" ON PURPOSE. `DECLINE_CLASSES` is an ordered list and
-    // the first pattern that matches wins, so `reloc-halves` — whose subject is a `%hi`/`@ha`
-    // relocation and whose pattern holds `/high half/` — claims this sentence on any ordering that
-    // puts it first, and a 64-bit argument gap is then published as a relocation gap on the
-    // blocker Pareto. A classification that rests on the order of a list is a classification
-    // nothing states.
-    //
-    // THE ORDINAL IS THE PARAMETER'S AND THE POSITION IS THE WORD'S, and they are different
-    // numbers the moment an earlier parameter is wide — which is the only way to get here past the
-    // first parameter, so printing one for the other would be wrong in exactly the population this
-    // message has.
-    let at = 0;
-    for (const [i, w] of widths.entries()) {
-      if (w > 32 && at + 2 > target.argRegs.length) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': one half of a 64-bit value would be handed to \`${callee}\` outside ` +
-            `the argument registers — its parameter ${i + 1} is 64 bits wide and takes argument words ` +
-            `${at + 1} and ${at + 2} of a call with ${target.argRegs.length} argument register(s), so ` +
-            (at < target.argRegs.length
-              ? `the low half is in ${target.argRegs[at]} and the upper half in this frame's outgoing ` + 'stack block'
-              : "both halves are in this frame's outgoing stack block") +
-            ' — this frontend assembles a pair out of two argument registers and out of nothing else',
-        );
-      }
-      at += w > 32 ? 2 : 1;
-    }
-    const words = at - target.argRegs.length;
+    // A 64-BIT PARAMETER TAKES THE NEXT TWO ARGUMENT WORDS WHEREVER THEY FALL, with no even
+    // alignment: two registers, r3 and [sp,#0], or two words of the outgoing block. That is agbcc's
+    // placement for a `long long` and a `double` alike — FUNCTION_ARG places by word offset
+    // (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack (:636),
+    // FUNCTION_ARG_ADVANCE rounds to a word (:647) — and it is the one the register walk below has
+    // always assumed; `test/corpus/agbcc-double-args.s` compiles all three. The walk reads each word
+    // where it falls, so the block counts both of a pair's stack words.
+    const words = wordsOf(widths) - target.argRegs.length;
     // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
     // not claim to stage arguments inside the caller's own frame at all.
     const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
@@ -4692,30 +4666,33 @@ function liftOnce(
           // they exist, so a destroyed register read for it is a wrong value nothing retracts. A
           // guess is a list of single words by construction — `fallbackArgcHere` counts registers.
           const readArg = widths === null ? ssa.readGuessedArg : readVar;
+          // ARGUMENT WORD `j`: a register, or past the registers a word of this frame's outgoing
+          // area, at [sp,#0] upward — the block `analyzeOutgoingArgs` licensed for THIS call, and
+          // only that block. `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed
+          // stack word can only come from a stated width; reaching one with no block means the slot
+          // model is off for another reason, and the decline names it rather than reading `r4` as if
+          // it were argument 5.
+          const word = (j: number): Value => {
+            if (j < target.argRegs.length) {
+              return readVar(`r${j}`, bi);
+            }
+            const off = stackArgs?.[j - target.argRegs.length];
+            if (off === undefined) {
+              throw spAsDataError();
+            }
+            usedSlotOffsets.add(off);
+            return readVar(slotKey(off), bi);
+          };
           let k = 0;
           for (const w of widths ?? Array.from({ length: argc }, () => 32)) {
-            if (k >= target.argRegs.length) {
-              // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
-              // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that
-              // block. `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack
-              // argument can only come from a stated width, and `declaredCall` has already refused
-              // the one stated width that could put a PAIR here; reaching this with no block means
-              // the slot model is off for another reason, and the decline names it rather than
-              // reading `r4` as if it were argument 5.
-              const off = stackArgs?.[k - target.argRegs.length];
-              if (off === undefined) {
-                throw spAsDataError();
-              }
-              usedSlotOffsets.add(off);
-              args.push(readVar(slotKey(off), bi));
-            } else if (w > 32) {
-              // A 64-BIT PARAMETER IS TWO ARGUMENT REGISTERS AND ONE VALUE, so the pair is built
-              // here rather than recovered from two 32-bit arguments later — `contracts.ts` would
-              // fire on the second reading anyway, since the structurer materialises an effectful
-              // call once per result.
-              args.push(fuseHalves(irb, readVar(`r${k}`, bi), readVar(`r${k + 1}`, bi)));
+            if (w > 32) {
+              // A 64-BIT PARAMETER IS TWO ARGUMENT WORDS AND ONE VALUE, so the pair is built here
+              // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
+              // the second reading anyway, since the structurer materialises an effectful call once
+              // per result. Its words are wherever `declaredCall` placed them.
+              args.push(fuseHalves(irb, word(k), word(k + 1)));
             } else {
-              args.push(readArg(`r${k}`, bi));
+              args.push(k < target.argRegs.length ? readArg(`r${k}`, bi) : word(k));
             }
             k += w > 32 ? 2 : 1;
           }

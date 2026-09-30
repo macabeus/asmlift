@@ -158,24 +158,21 @@ describe('the declaration must say how many WORDS, and a parameter list is param
   // and a list holding one states no layout, so the block is laid out from the machine instead.
   const TWO = HEAD + '\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tfd\n' + TAIL('0x8');
 
-  test('a declared pair the block would split refuses, naming the parameter', () => {
+  test('a declared pair is two words of the block, and the words must agree', () => {
     // The dangerous case, because the two witnesses agree by coincidence: read for its LENGTH
     // alone, six declared parameters size a two-word block and the code stages two words, so the
     // equality holds — and consuming it hands `fd` six arguments where the fifth `long long` spans
-    // both staged words (`fd(a0, a1, a0, a1, a2, a3)`). The fifth parameter's halves are both in
-    // the block and the refusal names it.
-    for (const params of [
-      ['s32', 's32', 's32', 's32', 'long long', 's32'],
-      // Same assembly, the declaration `void fd(s32, s32, s32, s32, long long)` that really
-      // produced it. The word counts disagree here, so the may-set check would refuse anyway — but
-      // on `[sp,#4] also reaches the call unread`, which sends a reader hunting for a store when
-      // the fact to know is the parameter.
-      ['s32', 's32', 's32', 's32', 'long long'],
-    ]) {
-      expect(() => src(TWO, { fd: { params } })).toThrow(
-        /handed to `fd` outside the argument registers — its parameter 5 is 64 bits wide .* both halves are in this frame's outgoing stack block/,
-      );
-    }
+    // both staged words (`fd(a0, a1, a0, a1, a2, a3)`). Read as words it is SEVEN, and the third
+    // block word is never stored.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'long long', 's32'] } })).toThrow(
+      /declared with 7 arguments, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\], \[sp,#8\] — but \[sp,#8\] is not stored/,
+    );
+    // The declaration that really produced it agrees word for word, so the two staged words are
+    // the pair: `concat(a0, a1)`, whose halves are also passed alone and so fuse into no parameter,
+    // is a 64-bit value with no spelling, and says so.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'long long'] } })).toThrow(
+      /no lowering for op 'concat'/,
+    );
   });
 
   // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so it licenses no block and the verdict is
@@ -191,9 +188,9 @@ describe('the declaration must say how many WORDS, and a parameter list is param
       /stack pointer used as data/,
     );
     // …where a `double` is two words on agbcc (`compilerBehaviors.softDoubleWords`), so it lays the
-    // block out and the verdict is about the pair.
+    // block out and the verdict is about the double.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
-      /its parameter 5 is 64 bits wide .* both halves are in this frame's outgoing stack block/,
+      /`fd` is declared to take a double as argument word 5/,
     );
     // …and a COUNT, which states argument registers directly, is what gets past it.
     expect(src(TWO, { fd: { params: 6 } })).toContain('fd(a0, a1, a2, a3, a0, a1)');

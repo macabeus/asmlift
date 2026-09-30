@@ -328,3 +328,58 @@ lgap:
 	.word	0x11223344
 .Lfe17:
 	.size	 lgap,.Lfe17-lgap
+	.align	2, 0
+	.globl	lmove
+	.type	 lmove,function
+	.thumb_func
+lmove:
+	push	{r4, lr}
+	add	sp, sp, #-0x4
+	add	r4, r0, #0
+	str	r2, [sp]
+	add	r3, r1, #0
+	add	r1, r4, #0
+	add	r2, r4, #0
+	bl	l4
+	add	sp, sp, #0x4
+	pop	{r4}
+	pop	{r0}
+	bx	r0
+.Lfe18:
+	.size	 lmove,.Lfe18-lmove
+	.align	2, 0
+	.globl	lmove5
+	.type	 lmove5,function
+	.thumb_func
+lmove5:
+	push	{lr}
+	add	sp, sp, #-0x8
+	add	r3, r2, #0
+	str	r0, [sp]
+	str	r1, [sp, #0x4]
+	add	r0, r3, #0
+	add	r1, r3, #0
+	bl	l5
+	add	sp, sp, #0x8
+	pop	{r0}
+	bx	r0
+.Lfe19:
+	.size	 lmove5,.Lfe19-lmove5
+	.align	2, 0
+	.globl	dmove5
+	.type	 dmove5,function
+	.thumb_func
+dmove5:
+	push	{lr}
+	add	sp, sp, #-0x8
+	add	r3, r2, #0
+	str	r0, [sp]
+	str	r1, [sp, #0x4]
+	add	r0, r3, #0
+	add	r1, r3, #0
+	bl	f5
+	add	sp, sp, #0x8
+	pop	{r0}
+	bx	r0
+.Lfe20:
+	.size	 dmove5,.Lfe20-dmove5

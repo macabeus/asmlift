@@ -24,8 +24,8 @@ describe('a declared double argument', () => {
     expect(() => lift('dreg', G)).toThrow(
       '`g` is declared to take a double as argument word 1, and a floating-point argument to a declared callee is not modelled',
     );
-    expect(() => lift('dsplit', F4)).toThrow(/`f4` outside the argument registers — its parameter 4 is 64 bits wide/);
-    expect(() => lift('dstack', F5)).toThrow(/`f5` outside the argument registers — its parameter 5 is 64 bits wide/);
+    expect(() => lift('dsplit', F4)).toThrow('`f4` is declared to take a double as argument word 4');
+    expect(() => lift('dstack', F5)).toThrow('`f5` is declared to take a double as argument word 5');
   });
 
   // An FPU target passes a double in a float register and no general word, so the declaration
@@ -35,5 +35,31 @@ describe('a declared double argument', () => {
     expect(softDoubleWords).toBe('high-first');
     const fpu = { ...ARMV4T_AGBCC, compilerBehaviors: rest };
     expect(lift('dreg', G, fpu)).toBe(lift('dreg'));
+  });
+});
+
+// agbcc places a 64-bit argument in the next two words wherever they fall, with no even alignment
+// (thumb.h:632/636/647): the low half of a `long long` in r3 and its high half at [sp,#0], or both
+// in the outgoing block, behind a word at [sp,#0] when one is there.
+describe('a declared 64-bit argument past the registers', () => {
+  const L = {
+    ...takes('l4', ['int', 'int', 'int', 'long long']),
+    ...takes('l5', ['int', 'int', 'int', 'int', 'long long']),
+    ...takes('l6', ['int', 'int', 'int', 'int', 'int', 'long long']),
+  };
+  const own = (name: string): Prototypes => ({ ...L, [name]: { returnsVoid: true } });
+
+  test('split across r3 and [sp,#0]', () => {
+    expect(lift('lmove', own('lmove'))).toBe('void lmove(s32 a0, s64 a1) {\n    l4(a0, a0, a0, a1);\n}\n');
+  });
+
+  test('in two words of the outgoing block', () => {
+    expect(lift('lmove5', own('lmove5'))).toBe('void lmove5(s64 a0, s32 a1) {\n    l5(a1, a1, a1, a1, a0);\n}\n');
+  });
+
+  // The pair is read from the words the call staged, so a literal is the two words agbcc loaded from
+  // its pool — a 64-bit literal, which has no spelling and says so, in every placement.
+  test.each(['lsplit', 'lstack', 'lgap'])('%s: a literal pair is read from where it was staged', (name) => {
+    expect(() => lift(name, own(name))).toThrow(/no lowering for op 'concat'/);
   });
 });
