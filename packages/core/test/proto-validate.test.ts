@@ -16,6 +16,22 @@ describe('accepts every form the type allows', () => {
     ['a return spelling nothing can size — silence, which the frontend already handles', { f: { returns: 'Fixed64' } }],
     ['the two return keys agreeing', { f: { returnsVoid: true, returns: 'void' } }],
     ['a struct return', { f: { params: ['s32'], returns: 'Pair', returnLayout: { kind: 'struct' } } }],
+    [
+      'a struct return with its members',
+      {
+        f: {
+          returns: 'struct Blob64',
+          returnLayout: {
+            kind: 'struct',
+            members: [
+              { name: 'w', type: 'u32', dims: [16] },
+              { name: '', type: 'u32', bits: 3 },
+              { name: 'in', type: { kind: 'union', members: [{ name: 'a', type: 'u8' }] } },
+            ],
+          },
+        },
+      },
+    ],
     ['an empty proto — the frontend then guesses, which is a choice not a mistake', { f: {} }],
     ['an empty table', {}],
   ])('%s', (_label, table) => {
@@ -46,6 +62,20 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
     ['a proto that is not an object', { f: 2 }],
     ['a proto that is an array', { f: [] }],
     ['a layout of no known kind', { f: { returnLayout: { kind: 'class' } } }],
+    ['members that are not a list', { f: { returnLayout: { kind: 'struct', members: {} } } }],
+    ['a member with no name', { f: { returnLayout: { kind: 'struct', members: [{ type: 'u8' }] } } }],
+    [
+      'a member extent of zero',
+      { f: { returnLayout: { kind: 'struct', members: [{ name: 'a', type: 'u8', dims: [0] }] } } },
+    ],
+    [
+      'a bitfield with extents',
+      { f: { returnLayout: { kind: 'struct', members: [{ name: 'a', type: 'u8', bits: 1, dims: [2] }] } } },
+    ],
+    [
+      'a nested layout of no known kind',
+      { f: { returnLayout: { kind: 'struct', members: [{ name: 'a', type: { kind: 'x' } }] } } },
+    ],
     ['a layout beside a void return', { f: { returnsVoid: true, returnLayout: { kind: 'struct' } } }],
     ['a layout beside a scalar return', { f: { returns: 'u32', returnLayout: { kind: 'union' } } }],
   ])('%s', (_label, table) => {

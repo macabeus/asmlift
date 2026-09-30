@@ -87,9 +87,27 @@ export interface FnProto {
   returnLayout?: AggregateLayout;
 }
 
-/** A struct or union a declaration spells. */
+/** A struct or union a declaration spells: what it is, and its members as the header lists them.
+ *  No offset or size is stored, because both are the TARGET's — agbcc rounds every struct and
+ *  union to a word (thumb.h:367 STRUCTURE_SIZE_BOUNDARY 32) where mwcc does not — and are computed
+ *  where a target is in hand (`aggregate.ts`). */
 export interface AggregateLayout {
   kind: 'struct' | 'union';
+  /** every member in declaration order; absent when one of them could not be read, which leaves
+   *  the aggregate known to exist and nothing known about its shape */
+  members?: AggregateMember[];
+}
+
+/** One member of an {@link AggregateLayout}. */
+export interface AggregateMember {
+  /** empty only for an unnamed bitfield, which pads */
+  name: string;
+  /** a scalar or pointer type as C spells it (`u32`, `u8 *`), or a nested struct or union */
+  type: ParamType | AggregateLayout;
+  /** an array member's extents, outermost first */
+  dims?: number[];
+  /** a bitfield's width in bits */
+  bits?: number;
 }
 
 /** symbol → prototype. The function under decompilation and its callees share one table. */
@@ -618,14 +636,49 @@ function layoutProblems(where: string, value: unknown): string[] {
   }
   const problems: string[] = [];
   for (const key of Object.keys(value)) {
-    if (key !== 'kind') {
-      problems.push(`${where}: unknown key "${key}" (expected "kind")`);
+    if (key !== 'kind' && key !== 'members') {
+      problems.push(`${where}: unknown key "${key}" (expected "kind" or "members")`);
     }
   }
-  const { kind } = value as { kind?: unknown };
+  const { kind, members } = value as { kind?: unknown; members?: unknown };
   if (kind !== 'struct' && kind !== 'union') {
     problems.push(`${where}: "kind" must be "struct" or "union"`);
   }
+  if (members === undefined) {
+    return problems;
+  }
+  if (!Array.isArray(members)) {
+    return [...problems, `${where}: "members" must be a list`];
+  }
+  members.forEach((m: unknown, i) => {
+    const at = `${where}: member ${i + 1}`;
+    if (typeof m !== 'object' || m === null || Array.isArray(m)) {
+      problems.push(`${at} must be an object, e.g. {"name": "w", "type": "u32", "dims": [16]}`);
+      return;
+    }
+    for (const key of Object.keys(m)) {
+      if (key !== 'name' && key !== 'type' && key !== 'dims' && key !== 'bits') {
+        problems.push(`${at}: unknown key "${key}" (expected "name", "type", "dims" or "bits")`);
+      }
+    }
+    const { name, type, dims, bits } = m as { name?: unknown; type?: unknown; dims?: unknown; bits?: unknown };
+    const positive = (n: unknown): boolean => typeof n === 'number' && Number.isInteger(n) && n > 0;
+    if (typeof name !== 'string' || !(/^[A-Za-z_]\w*$/.test(name) || (name === '' && bits !== undefined))) {
+      problems.push(`${at}: "name" must be a C identifier (empty only for an unnamed bitfield)`);
+    }
+    if (typeof type !== 'string') {
+      problems.push(...layoutProblems(`${at}: "type"`, type));
+    }
+    if (dims !== undefined && !(Array.isArray(dims) && dims.length > 0 && dims.every(positive))) {
+      problems.push(`${at}: "dims" must be a list of positive integers`);
+    }
+    if (bits !== undefined && !(typeof bits === 'number' && Number.isInteger(bits) && bits >= 0 && bits <= 64)) {
+      problems.push(`${at}: "bits" must be an integer from 0 to 64`);
+    }
+    if (bits !== undefined && dims !== undefined) {
+      problems.push(`${at}: a bitfield has no extents`);
+    }
+  });
   return problems;
 }
 

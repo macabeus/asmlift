@@ -1,4 +1,4 @@
-import type { AggregateLayout, FnProto, ParamType, Prototypes } from './proto';
+import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import { declaredArgWidths, declaredWidth, symbolPrototype, validatePrototypes } from './proto';
 import type { SymbolMap } from './symbols';
 
@@ -28,6 +28,8 @@ interface Statement {
   text: string;
   /** it ended in a block, not a `;` — a function definition's header */
   definition: boolean;
+  /** the text of each block collapsed to `{}` in `text`, in order */
+  bodies: string[];
 }
 
 /** The source with every comment and preprocessor line (continuation lines included) blanked, and
@@ -84,12 +86,14 @@ function statements(src: string): Statement[] {
   const text = clean(src);
   const out: Statement[] = [];
   let cur = '';
+  let bodies: string[] = [];
   const flush = (definition: boolean): void => {
     const t = cur.replace(/\s+/g, ' ').trim();
     if (t !== '') {
-      out.push({ text: t, definition });
+      out.push({ text: t, definition, bodies });
     }
     cur = '';
+    bodies = [];
   };
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
@@ -112,6 +116,7 @@ function statements(src: string): Statement[] {
           depth--;
         }
       }
+      const body = text.slice(i + 1, j - 1);
       i = j - 1;
       if (/^\s*(?:namespace\b|extern\s*"C\+\+")/.test(cur)) {
         // a namespace or C++-linkage block ends with its brace, not a `;`
@@ -120,6 +125,7 @@ function statements(src: string): Statement[] {
         flush(true);
       } else {
         cur += ' {} ';
+        bodies.push(body);
       }
     } else {
       cur += ch;
@@ -238,20 +244,105 @@ function resolve(t: string, typedefs: ReadonlyMap<string, string>): string {
 export function prototypesFromContext(src: string, language: 'c' | 'c++'): Prototypes {
   const stmts = statements(src);
   const typedefs = new Map<string, string>();
-  // typedef names bound to a struct or union BODY, which resolve to themselves and spell no keyword
-  const aggregates = new Map<string, AggregateLayout['kind']>();
+  // struct and union bodies: by `struct Tag` spelling, and by a typedef name bound to a body, which
+  // resolves to itself and spells no keyword
+  const tagged = new Map<string, string>();
+  const named = new Map<string, { kind: AggregateLayout['kind']; body: string }>();
   for (const s of stmts) {
+    const def = /^(?:typedef\s+)?(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
+    if (def) {
+      tagged.set(`${def[1]} ${def[2]}`, s.bodies[0]);
+    }
     if (/^typedef\b/.test(s.text)) {
       const td = readTypedef(s.text);
       if (td) {
         typedefs.set(td[0], td[1]);
         const body = /^typedef\s+(struct|union)\b[^{]*\{\}/.exec(s.text);
         if (body && td[1] === td[0]) {
-          aggregates.set(td[0], body[1] as AggregateLayout['kind']);
+          named.set(td[0], { kind: body[1] as AggregateLayout['kind'], body: s.bodies[0] });
         }
       }
     }
   }
+  const layoutOf = (t: string, depth: number): AggregateLayout | undefined => {
+    const bare = t
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const tag = /^(struct|union) [A-Za-z_]\w*$/.exec(bare);
+    const kind = (tag?.[1] as AggregateLayout['kind'] | undefined) ?? named.get(bare)?.kind;
+    if (kind === undefined) {
+      return undefined;
+    }
+    const body = tag ? tagged.get(bare) : named.get(bare)?.body;
+    const members = body === undefined ? undefined : readMembers(body, depth);
+    return members === undefined ? { kind } : { kind, members };
+  };
+  // A body's members, or undefined when one of them is a type this cannot lay out — a float, an
+  // enum, a project typedef that resolves to nothing sized, a nested aggregate with no body here, a
+  // flexible or non-literal extent. Bounded in depth, since a body may name its own tag.
+  const readMembers = (body: string, depth: number): AggregateMember[] | undefined => {
+    if (depth > 8) {
+      return undefined;
+    }
+    const out: AggregateMember[] = [];
+    for (const decl of splitMembers(body)) {
+      let type: ParamType | AggregateLayout;
+      let rest: string;
+      const inline = /^(struct|union)\s*(?:[A-Za-z_]\w*)?\s*\{/.exec(decl);
+      if (inline) {
+        const close = matchingBrace(decl, inline[0].length - 1);
+        const members = close < 0 ? undefined : readMembers(decl.slice(inline[0].length, close), depth + 1);
+        if (members === undefined) {
+          return undefined;
+        }
+        type = { kind: inline[1] as AggregateLayout['kind'], members };
+        rest = decl.slice(close + 1);
+      } else {
+        const split = baseAndDeclarators(decl);
+        if (split === undefined) {
+          return undefined;
+        }
+        const base = resolve(split.base, typedefs);
+        if (declaredWidth(base) !== undefined) {
+          type = base;
+        } else {
+          const nested = layoutOf(base, depth + 1);
+          if (nested?.members === undefined) {
+            // a pointer to it is still a word; anything else of it cannot be laid out
+            type = `${base} *`;
+            if (!split.declarators.every((d) => /^\*|^\(/.test(d.trim()))) {
+              return undefined;
+            }
+          } else {
+            type = nested;
+          }
+        }
+        rest = split.declarators.join(',');
+      }
+      for (const d of topLevelCommas(rest)) {
+        const m = memberDeclarator(d);
+        if (m === undefined) {
+          return undefined;
+        }
+        const t: ParamType | AggregateLayout = m.pointer
+          ? typeof type === 'string'
+            ? `${type.replace(/ \*$/, '')} *`
+            : 'void *'
+          : type;
+        if (typeof t !== 'string' && m.bits !== undefined) {
+          return undefined;
+        }
+        out.push({
+          name: m.name,
+          type: t,
+          ...(m.dims ? { dims: m.dims } : {}),
+          ...(m.bits !== undefined ? { bits: m.bits } : {}),
+        });
+      }
+    }
+    return out;
+  };
   const found = new Map<string, FnProto | null>();
   for (const s of stmts) {
     const t = s.text
@@ -268,7 +359,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     if (!m || /[(){}]/.test(m[1]) || TYPE_WORDS.has(m[2])) {
       continue;
     }
-    const proto = readSignature(m[1], m[3], language, typedefs, aggregates);
+    const proto = readSignature(m[1], m[3], language, typedefs, (t) => layoutOf(t, 0));
     const prior = found.get(m[2]);
     found.set(m[2], prior === undefined || same(prior, proto) ? proto : null);
   }
@@ -294,26 +385,110 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
   return validatePrototypes({ [name]: rest }).length === 0 ? rest : undefined;
 }
 
+/** A struct body's member declarations: its `;`-separated statements, a nested body kept whole. */
+function splitMembers(body: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < body.length; i++) {
+    if (body[i] === '{') {
+      depth++;
+    } else if (body[i] === '}') {
+      depth--;
+    } else if (body[i] === ';' && depth === 0) {
+      out.push(body.slice(start, i));
+      start = i + 1;
+    }
+  }
+  out.push(body.slice(start));
+  return out
+    .map((d) =>
+      d
+        .replace(/__attribute__\s*\(\(.*?\)\)/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    )
+    .filter((d) => d !== '');
+}
+
+/** The index of the `}` closing the `{` at `open`, or -1. */
+function matchingBrace(s: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < s.length; i++) {
+    if (s[i] === '{') {
+      depth++;
+    } else if (s[i] === '}' && --depth === 0) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** A member declaration's base type and its declarators (`u8 a, *b, c[4]` → `u8`, three). */
+function baseAndDeclarators(decl: string): { base: string; declarators: string[] } | undefined {
+  const parts = topLevelCommas(decl);
+  const fnptr = /^(.+?)\s*(\(\s*\*.*)$/.exec(parts[0]);
+  const plain =
+    /^(.*?[^\s*])\s*((?:\*\s*(?:(?:const|volatile)\s*)*)*[A-Za-z_]\w*\s*(?:\[[^\]]*\]\s*)*|[A-Za-z_]\w*\s*:\s*\w+|:\s*\w+)$/.exec(
+      parts[0],
+    );
+  const m = fnptr ?? plain;
+  if (!m || TYPE_WORDS.has(m[2].replace(/[\s*]/g, ''))) {
+    return undefined;
+  }
+  return { base: m[1].trim(), declarators: [m[2], ...parts.slice(1)] };
+}
+
+/** One member declarator: its name, whether it declares a pointer, its extents, its bit width. */
+function memberDeclarator(d: string): { name: string; pointer: boolean; dims?: number[]; bits?: number } | undefined {
+  const s = d.trim();
+  const literal = (t: string): number | undefined =>
+    /^(?:0x[0-9a-f]+|\d+)[ul]*$/i.test(t.trim())
+      ? Number.parseInt(t.trim(), /^0x/i.test(t.trim()) ? 16 : 10)
+      : undefined;
+  const fnptr = /^\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\(.*\)$/.exec(s);
+  if (fnptr) {
+    return { name: fnptr[1], pointer: true };
+  }
+  const bit = /^([A-Za-z_]\w*)?\s*:\s*(\w+)$/.exec(s);
+  if (bit) {
+    const bits = literal(bit[2]);
+    return bits === undefined ? undefined : { name: bit[1] ?? '', pointer: false, bits };
+  }
+  const plain = /^((?:\*\s*(?:(?:const|volatile)\s*)*)*)([A-Za-z_]\w*)\s*((?:\[[^\]]*\]\s*)*)$/.exec(s);
+  if (!plain) {
+    return undefined;
+  }
+  const dims = [...plain[3].matchAll(/\[([^\]]*)\]/g)].map((x) => literal(x[1]));
+  if (dims.some((n) => n === undefined || n === 0)) {
+    return undefined;
+  }
+  return {
+    name: plain[2],
+    pointer: plain[1].includes('*'),
+    ...(dims.length > 0 ? { dims: dims as number[] } : {}),
+  };
+}
+
 function readSignature(
   ret: string,
   params: string,
   language: 'c' | 'c++',
   typedefs: ReadonlyMap<string, string>,
-  aggregates: ReadonlyMap<string, AggregateLayout['kind']>,
+  layoutOf: (t: string) => AggregateLayout | undefined,
 ): FnProto {
   const proto: FnProto = {};
   const r = resolve(ret.trim(), typedefs);
   // A struct or union returned by value is kept, spelled as the header spells it: it is the fact
   // that moves every argument one register up on a target that returns it through a hidden pointer.
-  const bare = r.replace(/\b(?:const|volatile)\b/g, ' ').trim();
-  const kind = /^(struct|union)\s+[A-Za-z_]\w*$/.exec(bare)?.[1] ?? aggregates.get(bare);
+  const layout = declaredWidth(r) === undefined ? layoutOf(r) : undefined;
   if (r === 'void') {
     proto.returnsVoid = true;
   } else if (declaredWidth(r) !== undefined) {
     proto.returns = r;
-  } else if (kind !== undefined) {
+  } else if (layout !== undefined) {
     proto.returns = r;
-    proto.returnLayout = { kind: kind as AggregateLayout['kind'] };
+    proto.returnLayout = layout;
   }
   const list = params.trim();
   if (list === '' ? language === 'c++' : list === 'void') {

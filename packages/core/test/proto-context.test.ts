@@ -100,27 +100,88 @@ describe('prototypes from a declaration context', () => {
     expect(p.fmod?.params).toEqual(['double', 'double']);
   });
 
-  test('a struct or union returned by value is kept, and marked as one', () => {
+  test('a struct or union returned by value is kept, with its members as the header lists them', () => {
     const p = prototypesFromContext(
-      `struct Blob64 { u32 w[16]; };
+      `typedef unsigned int u32; typedef unsigned short u16; typedef unsigned char u8; typedef int s32;
+       struct Blob64 { u32 w[16]; };
        struct Blob64 makeblob(const void *);
        typedef struct { u32 a, b; } Pair; Pair mkpair(s32);
        typedef struct Tagged Alias; Alias mkalias(void);
        union U4 { u32 a; u16 b; }; union U4 mku(s32);
+       struct BF { u32 a : 8; u32 : 4; u32 b : 0x4; }; struct BF mkbf(void);
        typedef enum { A, B } E; E mke(void);`,
       'c',
     );
     expect(p.makeblob).toEqual({
       returns: 'struct Blob64',
-      returnLayout: { kind: 'struct' },
+      returnLayout: { kind: 'struct', members: [{ name: 'w', type: 'u32', dims: [16] }] },
       params: ['const void *'],
     });
     // a typedef of a struct body spells no keyword, so the layout key is what says it
-    expect(p.mkpair).toEqual({ returns: 'Pair', returnLayout: { kind: 'struct' }, params: ['s32'] });
+    expect(p.mkpair).toEqual({
+      returns: 'Pair',
+      returnLayout: {
+        kind: 'struct',
+        members: [
+          { name: 'a', type: 'u32' },
+          { name: 'b', type: 'u32' },
+        ],
+      },
+      params: ['s32'],
+    });
+    // a tag with no body in the context is known to be a struct and nothing more
     expect(p.mkalias).toEqual({ returns: 'struct Tagged', returnLayout: { kind: 'struct' }, params: [] });
-    expect(p.mku?.returnLayout).toEqual({ kind: 'union' });
+    expect(p.mku?.returnLayout?.kind).toBe('union');
+    expect(p.mkbf?.returnLayout?.members).toEqual([
+      { name: 'a', type: 'u32', bits: 8 },
+      { name: '', type: 'u32', bits: 4 },
+      { name: 'b', type: 'u32', bits: 4 },
+    ]);
     // an enum is not an aggregate: its return stays unstated
     expect(p.mke).toEqual({ params: [] });
+  });
+
+  test('a member reads through typedefs, pointers, nested bodies and extents, or the layout abstains', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned char u8; typedef unsigned short u16; typedef int s32;
+       struct S4 { u8 a, b, c, d; };
+       typedef struct { u16 x; struct S4 in; u8 *p; void (*cb)(int); s32 m[2][3]; struct Opaque *o; } Big;
+       Big mkbig(void);
+       struct Nest { struct { u8 a; } inner; union { s32 w; u8 b[4]; } u; }; struct Nest mknest(void);
+       struct Fl { float f; }; struct Fl mkfl(void);
+       struct Flex { s32 n; u8 tail[]; }; struct Flex mkflex(void);`,
+      'c',
+    );
+    expect(p.mkbig?.returnLayout?.members).toEqual([
+      { name: 'x', type: 'u16' },
+      {
+        name: 'in',
+        type: {
+          kind: 'struct',
+          members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })),
+        },
+      },
+      { name: 'p', type: 'u8 *' },
+      { name: 'cb', type: 'void *' },
+      { name: 'm', type: 's32', dims: [2, 3] },
+      { name: 'o', type: 'struct Opaque *' },
+    ]);
+    expect(p.mknest?.returnLayout?.members).toEqual([
+      { name: 'inner', type: { kind: 'struct', members: [{ name: 'a', type: 'u8' }] } },
+      {
+        name: 'u',
+        type: {
+          kind: 'union',
+          members: [
+            { name: 'w', type: 's32' },
+            { name: 'b', type: 'u8', dims: [4] },
+          ],
+        },
+      },
+    ]);
+    // a float member, or an extent the header does not state, leaves the kind and nothing else
+    expect(p.mkfl?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.mkflex?.returnLayout).toEqual({ kind: 'struct' });
   });
 
   test('C++ default arguments and comments do not reach a spelling', () => {
