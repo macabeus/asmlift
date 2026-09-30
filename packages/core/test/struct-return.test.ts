@@ -156,6 +156,19 @@ describe('a callee declared to return a struct through memory', () => {
 });
 
 describe('a callee declared to return a struct or union by value', () => {
+  // `struct One { s32 a; }; struct One mv(s32 x, ...); s32 cv(s32 a) { return mv(a).a; }` — agbcc
+  // hands the one-word struct back in r0, and nothing sizes the variadic call's arguments
+  test("a struct returned in r0 is not a value r0 holds when the call's arity is guessed", () => {
+    const CV = 'cv:\n\tpush\t{lr}\n\tbl\tmv\n\tpop\t{r1}\n\tbx\tr1\n';
+    const mv = {
+      returns: 'struct One',
+      returnLayout: { kind: 'struct' as const, members: [{ name: 'a', type: 's32' }] },
+    };
+    expect(() => decompile('cv', CV, ARMV4T_AGBCC, { prototypes: { mv } })).toThrow(
+      /r0 is read on a path where a call has destroyed it/,
+    );
+  });
+
   test('a Thumb call to one declines where nothing says it comes back through memory', () => {
     const makeblob = { params: ['const void *'], returns: 'struct Blob64' };
     expect(() => decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob } })).toThrow(

@@ -3629,6 +3629,12 @@ function liftOnce(
     }
     return { type: type! };
   };
+  // A callee the project declares to return a struct in r0, asked where `declaredCall` has no
+  // arity to answer with: the return is the declaration's, and needs none.
+  const registerStructReturn = (callee: string | undefined): 'register' | undefined => {
+    const own = callee !== undefined && Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
+    return declaresAggregateReturn(own) && structReturnOf(callee!, own!) === 'register' ? 'register' : undefined;
+  };
   const declaredCall = (
     callee: string,
   ): { widths: readonly number[]; block: readonly number[] | null; returned?: StructReturn | 'register' } | null => {
@@ -4745,8 +4751,10 @@ function liftOnce(
               }
             }
           }
-          // a struct returned through memory is the call's value, and argument 0 is where it lands
-          const returned = declared?.returned;
+          // a struct returned through memory is the call's value, and argument 0 is where it lands; one
+          // returned in r0 is r0's bytes, whether or not anything states the call's arity
+          const returned =
+            declared?.returned ?? (declared === null && !wide ? registerStructReturn(targetSym) : undefined);
           const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
           const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
           const callOp = mkOp('call', {
