@@ -2063,8 +2063,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // Under the value-home variation: which named global cell this op reads, if any. A constant-
         // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
         // everything. Null ⇒ every write bars, exactly as before.
+        const pinned = isPinnedAccess(op);
         const cell =
-          rereadGlobals && defs && op.opcode === 'load'
+          rereadGlobals && defs && op.opcode === 'load' && !pinned
             ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
             : null;
         const barsThisRead =
@@ -2079,8 +2080,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // A device read the lift marked `volatile` executes once too: each spelling of it is a read
         // the recompile makes, where a plain duplicate is one agbcc CSEs away. It takes the call's
         // two-site, edge and one-position rules below; in a `&&`/`||` cone `volatileGuardedRead`
-        // declines it instead.
-        const once = isCall || isPinnedAccess(op);
+        // declines it instead. And it stays in order against every other device access, which
+        // `isBarrier` says.
+        const once = isCall || pinned;
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (once && sites.length > 1) {
           materialize.add(op);
@@ -2277,8 +2279,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           if (x.opcode === 'store') {
             // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load
-            // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars.
-            if (!isCall && op.opcode === 'load' && disjointConstSlots(op, x)) {
+            // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars — and so does every
+            // store to a pinned read: a device register answers by when it is read, not only by
+            // which bytes were last written (REG_IF read after the REG_IE write it preceded).
+            if (!once && op.opcode === 'load' && disjointConstSlots(op, x)) {
               return false;
             }
             return true;
@@ -2295,9 +2299,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               !onlyFeedsCall(x)
             );
           }
+          // Two pinned reads are two device accesses in an order. Rendered in one expression, the
+          // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
+          // pinned read spelled as a bare statement because nothing uses it is an access too.
+          if (pinned && (x.opcode === 'load' || x.opcode === 'aload') && isPinnedAccess(x)) {
+            return true;
+          }
           if (!isCall) {
             return false;
-          } // a load never bars a load
+          } // a plain load never bars a load
           if (x.opcode === 'load' || x.opcode === 'aload') {
             return !x.results.length || !useSitesOf.has(x.results[0])
               ? false // dead load: never emitted at all

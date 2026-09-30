@@ -3069,6 +3069,40 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('    *(volatile u16 *)67109378;\n}');
   });
 
+  // Two device reads stay in the order the machine made them, and neither passes a device store.
+  // Verbatim agbcc: `a = TM0CNT_L; b = VCOUNT; gY = b - a;` in one expression lets the recompile
+  // read VCOUNT first, and `v = r->ifl; r->ie = d; gY = v;` inlined at `gY` reads REG_IF after
+  // writing REG_IE (compiled, both reversed).
+  test('a volatile device read keeps its place against the device accesses after it', () => {
+    const twoReads =
+      'o12:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr3, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r3]\n\tldr\tr5, .L3\n\tstr\tr3, [r5]\n\tldr\tr4, .L3+0x4\n\tldr\tr3, .L3+0x8\n' +
+      '\tstr\tr3, [r4]\n\tldr\tr2, .L3+0xc\n\tstr\tr0, [r2]\n\tmov\tr0, #0x5\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r5]\n\tstr\tr3, [r4]\n' +
+      '\tstr\tr1, [r2]\n\tldr\tr0, .L3+0x10\n\tldrh\tr2, [r0]\n\tsub\tr0, r0, #0xfa\n' +
+      '\tldrh\tr0, [r0]\n\tldr\tr1, .L3+0x14\n\tsub\tr0, r0, r2\n\tstr\tr0, [r1]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+      '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t0x40000dc\n' +
+      '\t.word\t0x4000100\n\t.word\tgY\n';
+    expect(decompile('o12', twoReads, ARMV4T_AGBCC).source).toContain(
+      '    v0 = *(volatile u16 *)67109120;\n    gY = *(volatile u16 *)(67109120 - 250) - v0;\n',
+    );
+    const readThenWrite =
+      'o14:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tadd\tsp, sp, #-0x8\n' +
+      '\tlsl\tr2, r2, #0x10\n\tlsr\tr2, r2, #0x10\n\tldr\tr5, .L3\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tldr\tr3, .L3+0x4\n\tmov\tr8, r3\n\tstr\tr4, [r3]\n\tldr\tr6, .L3+0x8\n' +
+      '\tldr\tr4, .L3+0xc\n\tstr\tr4, [r6]\n\tadd\tr3, r3, #0x8\n\tstr\tr0, [r3]\n\tmov\tr0, #0x5\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tmov\tr7, r8\n\tstr\tr0, [r7]\n' +
+      '\tstr\tr4, [r6]\n\tstr\tr1, [r3]\n\tldrh\tr1, [r5, #0x2]\n\tldrh\tr0, [r5]\n' +
+      '\tstrh\tr2, [r5]\n\tldr\tr0, .L3+0x10\n\tstr\tr1, [r0]\n\tadd\tsp, sp, #0x8\n\tpop\t{r3}\n' +
+      '\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+      '\t.word\t0x4000200\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\tgY\n';
+    expect(decompile('o14', readThenWrite, ARMV4T_AGBCC).source).toContain(
+      '    v0 = ((volatile u16 *)67109376)[1];\n    *(volatile u16 *)67109376;\n' +
+        '    *(volatile u16 *)67109376 = a2;\n    gY = v0;\n',
+    );
+  });
+
   // A function accepted object by object pins the device stores a later store in their block
   // overwrites, which plain agbcc deletes. Verbatim agbcc, `REG_IME = 0; DmaFill16(3, 0x1111, a,
   // 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`: the first fill and `REG_IME = 0` are

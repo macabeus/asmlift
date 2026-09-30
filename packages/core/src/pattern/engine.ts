@@ -605,8 +605,9 @@ function validatePattern(pat: RewritePattern): void {
  *  A cone's members are weighed by ORDER_SENSITIVE_OPS, not EFFECTFUL_OPS: a memory read answers
  *  whichever stores ran before it, so hoisting a `load` over a `call` — one asmlift may itself be
  *  passing the loaded pointer to — changes the answer as surely as swapping two calls. Two READS
- *  are the exception and commute, the same fact the structurer states as "a load never bars a
- *  load", so a hazard needs an EFFECT on at least one side; `*p % *q` is admitted.
+ *  are the exception and commute, the same fact the structurer states as "a plain load never bars
+ *  a load", so a hazard needs an EFFECT on at least one side; `*p % *q` is admitted. Two `volatile`
+ *  device reads do not commute, and the structurer names the first of them itself.
  *
  *  Refuses only what it must — the alternative spelling (the idiom written out) names the operands
  *  and states the order, so a refusal is a loud, correct, slightly-worse-scoring answer. */
