@@ -31,6 +31,24 @@ function useCounts(fn: Fn): Map<Value, number> {
   return n;
 }
 
+/** Whether `op` is the `concat` of two entry parameters that ARRIVED as one 64-bit argument: the two
+ *  consecutive argument slots, in slot order, each read by nothing else (`uses` counts occurrences).
+ *
+ *  SLOT ORDER, because a pair built in any other order is a different value. `s64 f(s64 a, s64 b){
+ *  return rot32(a) * b; }` hands `__muldi3` a's words swapped (`add r1,r5; add r0,r4` from r0:r1),
+ *  so its `concat(r1, r0)` is not `a`, and a fusion that took it would print `a * b`. Consecutive,
+ *  because the frontends mint every slot below the highest one read (`mintArgSlotHoles`), so two
+ *  neighbouring parameters are two neighbouring slots — including r3 and the first stack word,
+ *  which is where agbcc splits a 64-bit argument. */
+export function isArgumentPair(entry: readonly Value[], op: Op, uses: (v: Value) => number): boolean {
+  if (op.opcode !== 'concat') {
+    return false;
+  }
+  const [lo, hi] = op.operands;
+  const at = entry.indexOf(lo);
+  return at >= 0 && entry[at + 1] === hi && uses(lo) === 1 && uses(hi) === 1;
+}
+
 /** Fuse each entry-parameter pair that a `concat` names into one 64-bit parameter. Returns whether
  *  anything changed. */
 export function fuseParamPairs(fn: Fn): boolean {
@@ -43,23 +61,14 @@ export function fuseParamPairs(fn: Fn): boolean {
   for (const b of fn.blocks) {
     for (let i = 0; i < b.ops.length; i++) {
       const op: Op = b.ops[i];
-      if (op.opcode !== 'concat') {
+      if (!isArgumentPair(entry.params, op, (v) => uses.get(v) ?? 0)) {
         continue;
       }
-      const [lo, hi] = op.operands;
-      const at = entry.params.indexOf(lo);
-      if (at < 0 || !entry.params.includes(hi) || lo === hi) {
-        continue;
-      }
-      if (uses.get(lo) !== 1 || uses.get(hi) !== 1) {
-        continue; // a half this function also uses on its own is a word, not half of a value
-      }
-      // The pair takes the LOW half's position, which is its position in the ABI order the
+      // The pair takes its first slot's position, which is its position in the ABI order the
       // frontend already sorted these into — so the signature keeps the argument order the
       // machine passed them in.
       const whole = op.results[0];
-      entry.params.splice(at, 1, whole);
-      entry.params.splice(entry.params.indexOf(hi), 1);
+      entry.params.splice(entry.params.indexOf(op.operands[0]), 2, whole);
       // The `concat`'s RESULT becomes the parameter — the same Value, so every existing use
       // already points at it and nothing has to be rewritten. The op itself goes: a block
       // parameter has no defining op, and leaving one would define the value twice.

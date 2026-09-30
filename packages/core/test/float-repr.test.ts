@@ -8,7 +8,7 @@ import { MIPS_FP_REG } from '../src/frontend/splat';
 import { mkOp, mkValue } from '../src/ir/core';
 import { isDceSafe } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
-import { T, intWidth, parseType, typeEquals, typeToString } from '../src/ir/types';
+import { type IrType, T, intWidth, parseType, typeEquals, typeToString } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import type { Expr } from '../src/l3/ast';
 import { exprCType, renderedIntSignedness } from '../src/l3/typing';
@@ -33,14 +33,13 @@ const emitC = (text: string): string => {
 };
 
 describe('a float is its own kind, not an integer width', () => {
-  test('it round-trips through the IR text', () => {
+  test('it round-trips through the IR text, at either width', () => {
     expect(typeToString(T.f32())).toBe('f32');
     expect(parseType('f32')).toEqual(T.f32());
-  });
-
-  // No frontend mints a double, so the IR has no spelling for one to trust.
-  test('a double is not a type yet', () => {
-    expect(() => parseType('f64')).toThrow(/bad type 'f64'/);
+    expect(typeToString(T.f64())).toBe('f64');
+    expect(parseType('f64')).toEqual(T.f64());
+    expect(typeToString(T.fUnstated())).toBe('f?');
+    expect(parseType('f?')).toEqual(T.fUnstated());
   });
 
   // THE PREDICATE BOTH WIDTH READERS SHARE (ir/types.ts `intWidth`). The verifier reads a null as
@@ -48,12 +47,16 @@ describe('a float is its own kind, not an integer width', () => {
   // right for a float, and a float that answered a width would enter integer arithmetic in both.
   test('it carries no integer width', () => {
     expect(intWidth(T.f32())).toBeNull();
+    expect(intWidth(T.f64())).toBeNull();
   });
 
-  test('it is not the integer of its width', () => {
+  test('it is not the integer of its width, nor the float of another', () => {
     expect(typeEquals(T.f32(), T.f32())).toBe(true);
     expect(typeEquals(T.f32(), T.s(32))).toBe(false);
     expect(typeEquals(T.f32(), T.unk(32))).toBe(false);
+    expect(typeEquals(T.f64(), T.s(64))).toBe(false);
+    expect(typeEquals(T.f32(), T.f64())).toBe(false);
+    expect(typeEquals(T.fUnstated(), T.f32())).toBe(false);
   });
 
   // Recovery types only `unknown`s, so a value the frontend minted as a float leaves it one: the s32
@@ -74,7 +77,7 @@ describe('a float is its own kind, not an integer width', () => {
 });
 
 describe('what the backends can spell', () => {
-  const sfn = (t: ReturnType<typeof T.f32>) => ({
+  const sfn = (t: IrType) => ({
     name: 'f',
     params: [{ name: 'a0', type: t }],
     locals: [],
@@ -86,11 +89,13 @@ describe('what the backends can spell', () => {
   // and a project context that already typedefs `f32` cannot collide with it.
   test('C spells the keyword, and the prelude declares no float typedef', () => {
     expect(cBackend.emit(sfn(T.f32()))).toContain('float f(float a0)');
+    expect(cBackend.emit(sfn(T.f64()))).toContain('double f(double a0)');
     expect(C_TYPEDEFS).not.toMatch(/float|double/);
   });
 
   test('the Pascal backend refuses a float rather than spelling it as an integer', () => {
     expect(() => pascalBackend.emit(sfn(T.f32()))).toThrow(/no faithful spelling for a float-typed value/);
+    expect(() => pascalBackend.emit(sfn(T.f64()))).toThrow(/no faithful spelling for a float-typed value/);
   });
 });
 
@@ -98,6 +103,15 @@ describe('the float opcodes compute on floats, and nothing else does', () => {
   test.each(['fadd', 'fsub', 'fmul', 'fdiv'])('%s over two floats verifies', (op) => {
     expect(() =>
       verify(parse(`fn f {\n^bb0(%0: f32, %1: f32):\n  %2: f32 = ${op} %0, %1\n  ret %2\n}\n`)),
+    ).not.toThrow();
+  });
+
+  test('a float op over two floats of different widths is rejected', () => {
+    expect(() => verify(parse('fn f {\n^bb0(%0: f32, %1: f64):\n  %2: f64 = fadd %0, %1\n  ret %2\n}\n'))).toThrow(
+      /'fadd' computes on floats only, got f32, f64, f64/,
+    );
+    expect(() =>
+      verify(parse('fn f {\n^bb0(%0: f64, %1: f64):\n  %2: f64 = fmul %0, %1\n  ret %2\n}\n')),
     ).not.toThrow();
   });
 
@@ -121,10 +135,11 @@ describe('the float opcodes compute on floats, and nothing else does', () => {
     );
   });
 
-  test('a float crosses an edge only into a float parameter', () => {
+  test('a float crosses an edge only into a float parameter of its width', () => {
     const text = (param: string) => `fn f {\n^bb0(%0: f32):\n  br ^bb1(%0)\n^bb1(%1: ${param}):\n  ret %1\n}\n`;
     expect(() => verify(parse(text('f32')))).not.toThrow();
     expect(() => verify(parse(text('s32')))).toThrow(/passes a f32 to a s32 block parameter/);
+    expect(() => verify(parse(text('f64')))).toThrow(/passes a f32 to a f64 block parameter/);
   });
 
   test('a dead float op is reaped like any pure op', () => {

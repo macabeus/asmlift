@@ -1,12 +1,23 @@
 # Hardware floating point
 
-asmlift lifts the SINGLE-PRECISION ARITHMETIC of the FPU's register file on MIPS o32 and the
-PowerPC EABI — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and `fadds`/`fsubs`/`fmuls`/`fdivs`/
-`fneg`/`fmr` — through each ABI's float argument and return homes, and nothing else in that file.
+asmlift lifts the ARITHMETIC of the FPU's register file on MIPS o32 and the PowerPC EABI, in either
+precision — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and their `.d` twins, and
+`fadds`/`fsubs`/`fmuls`/`fdivs`, `fadd`/`fsub`/`fmul`/`fdiv`, `fneg`/`fmr` — through each ABI's float
+argument and return homes, and nothing else in that file; a function computing in both precisions
+refuses. `fneg` and `fmr` state no precision, so a function made only of them lifts a float of none
+(`T.fUnstated`): C spells it `float`, and a C++ declaration binds it at either width. So does an
+argument slot the body never reads (`float f1(double a, float b){ return b + b; }` is `fadds f1,f2,f2`):
+no instruction states its width, whatever the function's precision typed it. On MIPS o32 that holds
+only while no integer argument follows the slot, because there the slot's width is what placed the
+integers after it (a double takes two integer slots), so a C++ declaration of the other width refuses;
+for the same reason a declared `double` over a lifted 32-bit integer slot refuses when the body reads
+that slot, and when a lifted parameter follows it, unless it is the last declared parameter and the
+body reads none of the slots from it on.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
-On the GBA none of this shows up at all, because agbcc routes every `float` through soft-float
-helper calls that asmlift already models as ordinary calls.
+On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through
+soft-float helper calls; asmlift folds the double arithmetic ones to float ops (§6) and passes the
+rest through as ordinary calls.
 
 This document exists because hardware floating point is the largest single gap between asmlift and
 m2c, and because the obvious first move — decode the FPU instructions — is the wrong one. It
@@ -311,5 +322,16 @@ layer rests on**: the float RETURN is decided by scanning for a decoded write to
 op or `ret`. Both are sound only while no float can reach memory, so a store that lands before them
 lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
-from the value that reaches each `ret`. After it: doubles and `frsp`, the
-int/float conversions, and the compares and `bc1t`/`bc1f`, the fifth thing §1 named.
+from the value that reaches each `ret`. After it: `frsp` and the int/float conversions, which
+are what a function computing in both precisions needs, and the compares and `bc1t`/`bc1f`, the
+fifth thing §1 named.
+
+**A double on agbcc is the same type without the file.** agbcc has no FPU and emits every `double`
+operation as a libgcc call over the register pairs a long long uses (`optabs.c:4022`, `thumb.h:632`,
+`:655`), so the arithmetic ones — `__adddf3`, `__subdf3`, `__muldf3`, `__divdf3`, `__negdf2` — fold to
+the float ops over an `f64` in `raise/floathelpers.ts`, and `synthetic:dadd:agbcc` is its row. A double
+reaches the fold only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its high word in the lower
+register, so a literal, a load, a store or a read of one word refuses (`test/soft-double.test.ts`). The
+compares and the conversions (`__gtdf2`, `__floatsidf` …) and every single-precision helper stay
+ordinary calls: the IR has no int<->float op to fold them into, and naming one would decline the
+functions that pass through them.

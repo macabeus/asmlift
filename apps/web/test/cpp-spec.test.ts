@@ -3,7 +3,7 @@
 import { cppBackend } from '@asmlift/core/backend/cpp';
 import { T } from '@asmlift/core/ir/types';
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -193,6 +193,241 @@ const specOf = (method: string, params: [string, string][], ret = 'int') =>
       params: params.map(([name, base]) => ({ name, type: { base, ptr: 0 } })),
     }),
   );
+
+// THE PRECISION IS PART OF THE TYPE. mwcc compiles `double addf(float a, float b){ return (double)a +
+// (double)b; }` to a bare `fadd f1,f1,f2`: the object records a double add and nothing of the
+// parameters' precision, so the lift's parameters are doubles. A spec that binds them to `float a,
+// float b` prints `a + b`, a single-precision add that recompiles to `fadds`.
+const ADDF_MWCC = '00000000 <addf__Fff>:\n   0:\tfadd\tf1,f1,f2\n   4:\tblr\n';
+
+test('a double is declared double, in the free function and in the demangled fallback', () => {
+  expect(irToCpp(T.f64())).toEqual({ base: 'double', ptr: 0 });
+  expect(cpp('dadd', ADDF_MWCC.replace('addf__Fff', 'dadd'), PPC_MWCC)).toBe(
+    'double dadd(double a0, double a1) {\n    return a0 + a1;\n}\n',
+  );
+  expect(cpp('addf__Fff', ADDF_MWCC, PPC_MWCC)).toBe(
+    'double addf__Fff(double a0, double a1) {\n    return a0 + a1;\n}\n',
+  );
+});
+
+test.each([
+  ['float parameters for a double add', ADDF_MWCC, 'double', 'float'],
+  ['double parameters for a single add', ADDF_MWCC.replace('fadd\t', 'fadds\t'), 'float', 'double'],
+])('a user spec with %s is refused', (_label, asm, ret, param) => {
+  const spec = specOf(
+    'addf',
+    [
+      ['a', param],
+      ['b', param],
+    ],
+    ret,
+  );
+  expect(() => decompile('addf__Fff', asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) })).toThrow(
+    /the spec's floating-point parameters do not match the lifted function's/,
+  );
+});
+
+// …AND WHERE THE CODE STATES NO PRECISION, THE SPEC'S IS THE ONE PRINTED. `fneg` and `fmr` are one
+// instruction for a float and a double, so `double dneg(double a){ return -a; }` is `fneg f1,f1; blr`
+// and so is its float twin (both compiled at mwcc_242_81's canonical flags). The lift's float states
+// no width, and a double spec binds it.
+const DNEG_MWCC = '00000000 <dneg__Fd>:\n   0:\tfneg\tf1,f1\n   4:\tblr\n';
+const DSND_MWCC = '00000000 <dsnd__Fdd>:\n   0:\tfmr\tf1,f2\n   4:\tblr\n';
+
+test.each([
+  ['a negation', 'dneg__Fd', DNEG_MWCC, specOf('dneg', [['p0', 'double']], 'double'), 'return -p0;'],
+  [
+    'a copy',
+    'dsnd__Fdd',
+    DSND_MWCC,
+    specOf(
+      'dsnd',
+      [
+        ['a', 'double'],
+        ['b', 'double'],
+      ],
+      'double',
+    ),
+    'return b;',
+  ],
+  ['a negation, as a float', 'dneg__Fd', DNEG_MWCC, specOf('dneg', [['p0', 'float']], 'float'), 'return -p0;'],
+])('a user spec binds %s of no stated precision', (_label, sym, asm, spec, body) => {
+  expect(decompile(sym, asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) }).source).toContain(body);
+});
+
+// The demangled path declares the result at the widest float the signature binds: `float dneg(double
+// a)` compiles to `fneg f1,f1; frsp f1,f1`, one instruction more than the target.
+test('a demangled signature of doubles over a precision-free body is all double', () => {
+  expect(cpp('dneg__Fd', DNEG_MWCC, PPC_MWCC)).toBe('double dneg(double a) {\n    return -a;\n}\n');
+  expect(cpp('dsnd__Fdd', DSND_MWCC, PPC_MWCC)).toBe('double dsnd(double a, double b) {\n    return b;\n}\n');
+});
+
+// …AND A SLOT THE BODY NEVER READS STATES NONE EITHER. The lift types every float register at the
+// function's precision, including a slot minted only to hold a later float argument's place, so the
+// `a` of these is a single in a single-precision function and a double in a double one. All three compiled at
+// mwcc_242_81's canonical flags.
+const F1_MWCC = '00000000 <f1__Fdf>:\n   0:\tfadds\tf1,f2,f2\n   4:\tblr\n';
+const F3_MWCC = '00000000 <f3__Fdff>:\n   0:\tfmuls\tf1,f2,f3\n   4:\tblr\n';
+const H2_MWCC = '00000000 <h2__Ffdd>:\n   0:\tfadd\tf1,f2,f3\n   4:\tblr\n';
+
+test.each([
+  [
+    'float f1(double a, float b)',
+    'f1__Fdf',
+    F1_MWCC,
+    specOf(
+      'f1',
+      [
+        ['a', 'double'],
+        ['b', 'float'],
+      ],
+      'float',
+    ),
+    'float f1(double a, float b) {\n    return b + b;\n}\n',
+  ],
+  [
+    'float f3(double a, float b, float c)',
+    'f3__Fdff',
+    F3_MWCC,
+    specOf(
+      'f3',
+      [
+        ['a', 'double'],
+        ['b', 'float'],
+        ['c', 'float'],
+      ],
+      'float',
+    ),
+    'float f3(double a, float b, float c) {\n    return b * c;\n}\n',
+  ],
+  [
+    'double h2(float a, double b, double c)',
+    'h2__Ffdd',
+    H2_MWCC,
+    specOf(
+      'h2',
+      [
+        ['a', 'float'],
+        ['b', 'double'],
+        ['c', 'double'],
+      ],
+      'double',
+    ),
+    'double h2(float a, double b, double c) {\n    return b + c;\n}\n',
+  ],
+])('an unread float slot binds a spec float of the other precision: %s', (_label, sym, asm, spec, source) => {
+  expect(decompile(sym, asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) }).source).toBe(source);
+  expect(cpp(sym, asm, PPC_MWCC)).toBe(source);
+});
+
+// …BUT ON o32 THE HOLE'S WIDTH PLACED THE INTEGERS AFTER IT. A single takes one integer slot and a
+// double two, counted at the function's precision, so the single-precision `m2` lays its unread
+// `double a` out as one slot and its `p` arrives in `a3` where the lift's position says `q`. Both
+// compiled at gcc2.7.2kmc's canonical flags.
+const M2_KMC =
+  '00000000 <m2__FdfPiPi>:\n   0:\tsw\tzero,0(a3)\n   4:\tjr\tra\n   8:\tadd.s\t$f0,$f14,$f14\n   c:\tnop\n';
+const M3_KMC = '00000000 <m3__Fdf>:\n   0:\tjr\tra\n   4:\tadd.s\t$f0,$f14,$f14\n';
+
+test('o32: an unread float hole of the other width refuses a spec with an integer after it', () => {
+  const spec = parseSpec(
+    JSON.stringify({
+      method: 'm2',
+      retType: { base: 'float', ptr: 0 },
+      params: [
+        { name: 'a', type: { base: 'double', ptr: 0 } },
+        { name: 'b', type: { base: 'float', ptr: 0 } },
+        { name: 'p', type: { base: 'int', ptr: 1 } },
+        { name: 'q', type: { base: 'int', ptr: 1 } },
+      ],
+    }),
+  );
+  expect(() => decompile('m2__FdfPiPi', M2_KMC, MIPS_GCC, { backend: cppBackend(spec, MIPS_GCC.fpu?.slots) })).toThrow(
+    /floating-point parameters do not match/,
+  );
+  expect(cpp('m2__FdfPiPi', M2_KMC, MIPS_GCC)).toBe(
+    'float m2__FdfPiPi(float a0, float a1, int a2, int *a3) {\n    *a3 = 0;\n    return a1 + a1;\n}\n',
+  );
+});
+
+// A DOUBLE THE BODY NEVER READS IS TWO INTEGER HOLES when no FPU register is read at all, so a spec
+// `double` bound by position to the first of them names every later parameter one slot early.
+// Compiled at gcc2.7.2kmc's canonical flags: `n1` stores through `a2` (its `q`) and `n2` returns
+// `a2` (its `c`). A `float` over one such hole is one slot, and still binds.
+const N1_KMC = '00000000 <n1__FdPiPi>:\n   0:\tjr\tra\n   4:\tsw\tzero,0(a2)\n';
+const N2_KMC = '00000000 <n2__Fdii>:\n   0:\tjr\tra\n   4:\tmove\tv0,a2\n';
+const K_KMC = '00000000 <k__Ffi>:\n   0:\tjr\tra\n   4:\tmove\tv0,a1\n';
+
+test.each([
+  ['n1__FdPiPi', N1_KMC, 1, 'void n1__FdPiPi(int a0, int a1, int *a2) {\n    *a2 = 0;\n}\n'],
+  ['n2__Fdii', N2_KMC, 0, 'int n2__Fdii(int a0, int a1, int a2) {\n    return a2;\n}\n'],
+])('o32: a spec double over a lifted integer hole with a parameter after it refuses (%s)', (sym, asm, ptr, free) => {
+  const spec = parseSpec(
+    JSON.stringify({
+      method: sym.slice(0, 2),
+      retType: { base: 'int', ptr: 0 },
+      params: [
+        { name: 'd', type: { base: 'double', ptr: 0 } },
+        { name: 'b', type: { base: 'int', ptr } },
+        { name: 'c', type: { base: 'int', ptr } },
+      ],
+    }),
+  );
+  expect(() => decompile(sym, asm, MIPS_GCC, { backend: cppBackend(spec, MIPS_GCC.fpu?.slots) })).toThrow(
+    /floating-point parameters do not match/,
+  );
+  expect(cpp(sym, asm, MIPS_GCC)).toBe(free);
+});
+
+// …EXCEPT A TRAILING DOUBLE NOTHING READS. IDO 7.1 at its canonical flags homes it (`sw a2,8(sp); sw
+// a3,12(sp)`), so the lift keeps both slots as parameters the body never reads, and no spec
+// parameter follows the double to be named one slot early.
+const O1_IDO = '00000000 <o1__Fid>:\n   0:\tsw\ta2,8(sp)\n   4:\tsw\ta3,12(sp)\n   8:\tjr\tra\n   c:\tmove\tv0,a0\n';
+
+test('o32: a trailing spec double over integer holes the body never reads binds', () => {
+  const spec = specOf('o1', [
+    ['a', 'int'],
+    ['d', 'double'],
+  ]);
+  expect(decompile('o1__Fid', O1_IDO, MIPS_IDO, { backend: cppBackend(spec, MIPS_IDO.fpu?.slots) }).source).toBe(
+    'int o1(int a, double d) {\n    return a;\n}\n',
+  );
+});
+
+// A READ HALF IS NOT THE DOUBLE. agbcc passes a double in two integer registers, and `int u1(int a,
+// double d)` returning the first word of `d` through a union compiles to `add r0,r1,#0`: the lift
+// reads one 32-bit slot, and a spec `double` over it would print that word as the whole value.
+const U1_AGBCC = 'u1__Fid:\n\tadd\tr0, r1, #0\n\tbx\tlr\n';
+
+test('agbcc: a spec double over a 32-bit slot the body reads refuses, and the auto path falls back', () => {
+  const spec = specOf('u1', [
+    ['a', 'int'],
+    ['d', 'double'],
+  ]);
+  expect(() =>
+    decompile('u1__Fid', U1_AGBCC, ARMV4T_AGBCC, { backend: cppBackend(spec, ARMV4T_AGBCC.fpu?.slots) }),
+  ).toThrow(/floating-point parameters do not match/);
+  expect(cpp('u1__Fid', U1_AGBCC, ARMV4T_AGBCC)).toBe('int u1__Fid(int a0, int a1) {\n    return a1;\n}\n');
+});
+
+test('o32: a spec float over a lifted integer hole takes its one slot', () => {
+  expect(cpp('k__Ffi', K_KMC, MIPS_GCC)).toBe('int k(float a, int b) {\n    return b;\n}\n');
+});
+
+test('o32: an unread float hole with no integer after it binds either width', () => {
+  const source = 'float m3(double a, float b) {\n    return b + b;\n}\n';
+  const spec = specOf(
+    'm3',
+    [
+      ['a', 'double'],
+      ['b', 'float'],
+    ],
+    'float',
+  );
+  expect(decompile('m3__Fdf', M3_KMC, MIPS_GCC, { backend: cppBackend(spec, MIPS_GCC.fpu?.slots) }).source).toBe(
+    source,
+  );
+  expect(cpp('m3__Fdf', M3_KMC, MIPS_GCC)).toBe(source);
+});
 
 test.each([
   [

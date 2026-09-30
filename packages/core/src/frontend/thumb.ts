@@ -29,7 +29,7 @@ import {
   declaresParams,
   wordsOf,
 } from '../proto';
-import { type RuntimeHelper, helperPrototypes, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { type RuntimeHelper, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
@@ -2854,6 +2854,8 @@ function liftOnce(
   // nothing above it would recognise; the instruction is what `wideReturn` walks forward from,
   // since half of the question it asks is about the machine rather than about the value graph.
   const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi'; at: Instr }>();
+  /** The callee that handed back each pair a call returned, by the pair's value. */
+  const pairCallee = new Map<Value, string>();
   const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value => {
     const v = mkValue(T.unk(32));
     irb.ops.push(mkOp(half === 'lo' ? 'lo32' : 'hi32', { operands: [whole], results: [v] }));
@@ -3809,9 +3811,9 @@ function liftOnce(
         isReg: isThumbReg,
         normalize: reg,
         // ARMv4T HAS NO FPU, and that is a decision rather than an omission — the fields are
-        // required so it has to be written down. agbcc routes every `float` through the soft-float
-        // helpers (`__addsf3` and friends), which asmlift models as ordinary calls, so a GBA float
-        // never reaches this path as an instruction at all.
+        // required so it has to be written down. agbcc routes every `float` and `double` through the
+        // soft-float helpers (`__addsf3`, `__adddf3` and friends), which reach the lift as calls, so
+        // a GBA float never reaches this path as an instruction at all.
         fpReg: null,
         fpControl: null,
         storeClass: /^(str|stm)/i,
@@ -4645,6 +4647,24 @@ function liftOnce(
           if (widths === null) {
             for (const [j, v] of args.entries()) {
               const half = halfOf.get(v);
+              // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
+              // reader to a declaration that cannot help: a double leaves a soft-float helper only
+              // into another one or the return (`raise/floathelpers.ts`), and a pair built here for a
+              // callee declared to take one is refused there. What a declaration still settles is a
+              // guessed arity that read the pair and never took it.
+              const producer = half && pairCallee.get(half.whole);
+              const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
+              if (half && helper && isFloatHelper(helper)) {
+                throw new FrontendUnsupportedError(
+                  `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
+                    `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
+                    `returned, and nothing states how wide '${targetSym}'s parameters are. A double is ` +
+                    "modelled only into the runtime's arithmetic helpers and the return, so a callee that " +
+                    'takes one declines whatever its prototype says (a compare, a conversion, any other ' +
+                    'call); a callee that takes fewer arguments than its registers suggest lifts once a ' +
+                    `prototype states them (\`{"${targetSym}": {"params": [...]}}\`)`,
+                );
+              }
               if (half) {
                 throw new FrontendUnsupportedError(
                   `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
@@ -4672,6 +4692,7 @@ function liftOnce(
             // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
             writeData(target.returnReg, bi, projectHalf(irb, res, 'lo', ins));
             writeData(target.argRegs[1], bi, projectHalf(irb, res, 'hi', ins));
+            pairCallee.set(res, targetSym);
             ssa.noteCall(bi, pairReturnClobbers);
             break;
           }

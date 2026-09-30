@@ -48,16 +48,16 @@ describe('an instruction that touches the FPU is refused by the FILE it needs', 
     // `abs.s` is single-precision arithmetic the decode does not lift (`fpu-lift.test.ts` has the
     // ones it does).
     ['MIPS single-precision arithmetic', 'abs.s\t$f0,$f12', '\\$f0, \\$f12', liftMips],
-    ['MIPS double-precision arithmetic', 'add.d\t$f0,$f12,$f14', '\\$f0, \\$f12, \\$f14', liftMips],
+    ['MIPS double-precision square root', 'sqrt.d\t$f0,$f12', '\\$f0, \\$f12', liftMips],
     ['a MIPS format conversion', 'cvt.s.w\t$f6,$f4', '\\$f6, \\$f4', liftMips],
     // `ops[0]` is an FP register a destination-only test would also have caught — but the operand
     // this one must not lose is the SOURCE, and the two shapes below pin that.
     ['a MIPS FPU load', 'lwc1\t$f0,0(a1)', '\\$f0', liftMips],
-    // …AND THE REGISTER LIST IS A SET. `fadd f1,f1,f2` reads two registers and writes one of
+    // …AND THE REGISTER LIST IS A SET. `fmadd f1,f1,f2,f1` reads two registers and writes one of
     // them; an undeduped filter published `(f1, f1, f2)` in five markers of the committed
     // artifact, which reads as three registers in a file the reader is being told does not exist.
-    // Double precision, because the single-precision `fadds` lifts (`fpu-lift.test.ts`).
-    ['PowerPC double-precision arithmetic', 'fadd    f1,f1,f2', 'f1, f2', liftPpc],
+    // A fused multiply-add, because the plain arithmetic lifts (`fpu-lift.test.ts`).
+    ['a PowerPC fused multiply-add', 'fmadd   f1,f1,f2,f1', 'f1, f2', liftPpc],
     ['a PowerPC FPU load', 'lfs     f1,0(r4)', 'f1', liftPpc],
     ['a PowerPC float absolute value', 'fabs    f0,f2', 'f0, f2', liftPpc],
   ])('%s', (_label, insn, regs, lift) => {
@@ -79,9 +79,9 @@ describe('…on BOTH MIPS dialects, which spell the same register two ways', () 
   // everywhere else — which is what its own header promises ("normalises that dialect into the SAME
   // `DisasmInstr[]` the objdump parser yields"). Each case below is red if it strips it.
   test.each([
-    ['numbered arithmetic', 'add.d       $f0, $f12, $f14', '\\$f0, \\$f12, \\$f14'],
+    ['numbered arithmetic', 'sqrt.d      $f0, $f12', '\\$f0, \\$f12'],
     // THE ABI SPELLING, which objdump never prints and the `af`/`marioparty3` trees use throughout.
-    ['ABI-named arithmetic', 'add.d       $ft2, $ft2, $ft3', '\\$ft2, \\$ft3'],
+    ['ABI-named arithmetic', 'sqrt.d      $ft2, $ft3', '\\$ft2, \\$ft3'],
     ['an FPU load', 'lwc1        $fv0, 0($a1)', '\\$fv0'],
     ['an FPU store, ahead of the store-class arm', 'swc1        $fa0, 0($a1)', '\\$fa0'],
     ['a move out of the file', 'mfc1        $v0, $fs0', '\\$fs0'],

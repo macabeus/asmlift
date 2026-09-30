@@ -30,14 +30,18 @@ export type IrType =
   // `size` is the one the target's compiler gives it — which is not always its widest view
   // (`T.union` computes it from the compiler's aggregate boundary).
   | { kind: 'union'; members: StructField[]; size: number }
-  // A hardware floating-point value, IEEE single. A KIND and not an `int` width, which is the one
-  // exception to the 64-bit rule at `ir/opcodes.ts` `concat` ("widen the number that is already
+  // An IEEE floating-point value, single (32) or double (64). A KIND and not an `int` width, which is
+  // the one exception to the 64-bit rule at `ir/opcodes.ts` `concat` ("widen the number that is already
   // there"): a float is not an integer of any width, so every pass that tests `kind === 'int'` must
   // SKIP it rather than compute on it, and skipping is what a new kind buys. Its values live in the
-  // FPU's own register file and are computed only by the float opcodes (`fadd` …);
-  // `docs/floating-point.md` says which frontends mint one and what they still refuse. `width` is
-  // 32 only: nothing decodes a double yet, and the doubles layer (§6 there) widens it.
-  | { kind: 'float'; width: 32 }
+  // FPU's own register file, or in a soft-float runtime's register pair, and are computed only by
+  // the float opcodes (`fadd` …); `docs/floating-point.md` says which frontends mint one and what
+  // they still refuse. Two floats of different widths are different types (`typeEquals`), so a
+  // float op mixing them fails `ir/verify.ts`. A null width is a float whose code states no precision:
+  // a PowerPC FPR holds a double whichever the source declared, and `fneg`/`fmr` are one instruction
+  // for both, so `double dneg(double a){ return -a; }` and its `float` twin compile to one object.
+  // Either spelling reproduces it, and a declaration the caller supplies decides between them.
+  | { kind: 'float'; width: 32 | 64 | null }
   | { kind: 'void' }; // a function that returns nothing
 
 /** The scalar type of a memory access of `width` bytes: word ⇒ the s32 integer default;
@@ -79,6 +83,8 @@ export const T = {
     return { kind: 'union', members, size: Math.ceil(extent / boundary) * boundary };
   },
   f32: (): IrType => ({ kind: 'float', width: 32 }),
+  f64: (): IrType => ({ kind: 'float', width: 64 }),
+  fUnstated: (): IrType => ({ kind: 'float', width: null }),
   void: (): IrType => ({ kind: 'void' }),
 };
 
@@ -148,7 +154,7 @@ export function typeToString(t: IrType): string {
     case 'union':
       return `union{${t.members.map((m) => `${typeToString(m.type)} ${m.name}`).join(';')}}`;
     case 'float':
-      return `f${t.width}`;
+      return `f${t.width ?? '?'}`;
     case 'void':
       return 'void';
   }
@@ -159,8 +165,8 @@ export function parseType(s: string): IrType {
   if (s.endsWith('*')) {
     return T.ptr(parseType(s.slice(0, -1)));
   }
-  if (s === 'f32') {
-    return T.f32();
+  if (s === 'f32' || s === 'f64' || s === 'f?') {
+    return s === 'f32' ? T.f32() : s === 'f64' ? T.f64() : T.fUnstated();
   }
   const m = s.match(/^(unk|s|u)(\d+)$/);
   if (!m) {

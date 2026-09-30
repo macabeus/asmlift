@@ -28,8 +28,8 @@
 // here: `wordsOf` (proto.ts, because a C declaration asks the same question) counts the argument
 // REGISTERS the list occupies, and `irWidthOf` gives the IR width one parameter ARRIVES at once a
 // frontend has paired those registers up.
-import { type Op, mkOp } from './ir/core';
-import { type Opcode, WIDE_BITS } from './ir/opcodes';
+import { type Op, type Value, mkOp } from './ir/core';
+import { FLOAT_OPS, type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
 import { type Prototypes, wordsOf } from './proto';
 
@@ -102,9 +102,11 @@ export function isWideHelper(h: RuntimeHelper): boolean {
   return h.returns > 32 || h.params.some((w) => w > 32);
 }
 
-/** The op a recognised helper call is rewritten to, STAMPED with the helper it was: the call's
- *  operands, the SAME result value (so every use already points at it), and `helper` naming the
- *  callee. `raise/softdiv.ts` and `raise/widehelpers.ts` build every one through here.
+/** The op a recognised helper call is rewritten to, STAMPED with the helper it was: `helper` names
+ *  the callee. An integer helper's op takes the call's own operands and the SAME result value, so
+ *  every use already points at it; a float helper's takes them re-typed as floats
+ *  (`raise/floathelpers.ts`). `raise/softdiv.ts`, `raise/widehelpers.ts` and `raise/floathelpers.ts`
+ *  build every one through here.
  *
  *  The stamp carries the one fact the op's opcode loses: the asm CALLED something here. A
  *  `sdiv` is a `divw` on mwcc and a `bl __divsi3` on agbcc, and an `shr_s` is a shift everywhere
@@ -112,8 +114,8 @@ export function isWideHelper(h: RuntimeHelper): boolean {
  *  compiler fact, not an ISA one, and it was known exactly once, at the rewrite. What reads it is
  *  every rule that places a call: a call runs once, where the asm ran it (`raisedHelper`), and a pass
  *  that moves the op elsewhere drops the stamp (`forgetHelperPlacement`). */
-export function helperOp(opcode: Opcode, call: Op, helper: string): Op {
-  return mkOp(opcode, { operands: [...call.operands], results: [call.results[0]], attrs: { helper } });
+export function helperOp(opcode: Opcode, helper: string, operands: readonly Value[], result: Value): Op {
+  return mkOp(opcode, { operands: [...operands], results: [result], attrs: { helper } });
 }
 
 /** The runtime helper a value op was a call to (`helperOp`), or null. An `opaque` carries the same
@@ -137,6 +139,15 @@ export function forgetHelperPlacement(op: Op): Op {
   return op;
 }
 
+/** Whether a helper computes on floats: its op is a float op, so its operands and result are floats
+ *  of the widths its signature states, carried in integer registers by a soft-float runtime. Every
+ *  reader of the table asks this and not the width, because the two families fold into different
+ *  IR: an integer helper into its op over the same values, a float helper into a float op over
+ *  values re-typed as floats (`raise/floathelpers.ts`). */
+export function isFloatHelper(h: RuntimeHelper): boolean {
+  return h.op !== undefined && FLOAT_OPS.has(h.op);
+}
+
 /** Signatures for a target's helpers, in the WORD arity the frontend's prototype lookup speaks.
  *  Consumed behind any caller-supplied prototype — the project's own headers win. */
 export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> | undefined): Prototypes {
@@ -152,10 +163,20 @@ export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> 
  *  operand SET-UP instead — `asr rN,rM,#31` per half for signed, `mov rN,#0` for unsigned. The
  *  DIVISIONS do split, and their entries say so.
  *
- *  THE SOFT-FLOAT HELPERS ARE NOT HERE, deliberately. asmlift has no float model to fold one into,
- *  so naming `__addsf3` would decline every function that adds two floats where today it publishes
- *  `__addsf3()` — a pass-through, and one that scores against a call the machine made with two
- *  arguments. That is a trade to make with a measurement of the float rows, not on the way past. */
+ *  THE DOUBLE ARITHMETIC IS HERE, AND NOTHING ELSE OF THE SOFT FLOAT. `optabs.c:4022`
+ *  `init_floating_libfuncs` names DFmode's add, sub, mul, div (4129-4140) and neg (4155), and
+ *  `thumb.md` has no DF pattern but the move, so every one of them is a call; the ABI is a long
+ *  long's (thumb.h:632, 655). `raise/floathelpers.ts` folds them to the float ops over a `double`.
+ *
+ *  NAMING THEM IS A TRADE, and these five make it: a call the fold refuses declines where an
+ *  unnamed helper would publish as a pass-through that matches for free. So a function whose
+ *  double arithmetic feeds a compare (`__gtdf2`…), a conversion (`__fixdfsi`…) or any other call
+ *  declines, where unnamed it would print `__muldf3(); return __fixdfsi();`. The compares and
+ *  conversions of both precisions stay out, because the IR has no int<->float op to fold one into;
+ *  the single-precision arithmetic stays out because its pass-throughs are what the float rows
+ *  score on (`synthetic:fadd:agbcc`), and declining them is the same trade, to be made with a
+ *  measurement of those rows. Making it is a table row: the fold reads each value's width off the
+ *  signature. */
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
@@ -174,6 +195,12 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __ashrdi3: { op: 'shr_s', params: [64, 32], returns: 64 },
   __lshrdi3: { op: 'shr_u', params: [64, 32], returns: 64 },
   __negdi2: { op: 'neg', params: [64], returns: 64 },
+  // Double arithmetic, which the same pair carries (`raise/floathelpers.ts`).
+  __adddf3: { op: 'fadd', params: [64, 64], returns: 64 },
+  __subdf3: { op: 'fsub', params: [64, 64], returns: 64 },
+  __muldf3: { op: 'fmul', params: [64, 64], returns: 64 },
+  __divdf3: { op: 'fdiv', params: [64, 64], returns: 64 },
+  __negdf2: { op: 'fneg', params: [64], returns: 64 },
 };
 
 /** CodeWarrior's PowerPC runtime (`Runtime.PPCEABI.H`), as the GameCube projects vendor it.

@@ -695,18 +695,21 @@ FPU target: the entry reads of `$f12`/`f1` mint phantom integer parameters, and 
 register that is not the return, so the add is dead ([`floating-point.md`](floating-point.md) §2).
 So it was built downwards, and each level is a layer that document prices.
 
-**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32}` is the one exception to the
+**L1 — a kind, and opcodes of its own.** `{kind:'float', width: 32 | 64 | null}` is the one exception to the
 64-bit section's rule ("for TYPES, widen the number that is already there"): a float is not an integer
 of any width, so every pass that tests `kind === 'int'` must SKIP it, and a new kind is what makes it
-skip. Its width is 32 alone until a frontend mints a double: a width nothing produces is the
-scaffolding "earn the level" forbids. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the
+skip. Its width says single or double, or, where null (`T.fUnstated`, IR text `f?`), that no
+instruction of the function states one: PowerPC's `fneg` and `fmr` are one instruction for both, so
+a function of only those compiles to one object whichever the source declared. The three widths are
+three types, so a float op mixing them fails verify. The arithmetic is `fadd`/`fsub`/`fmul`/`fdiv`/`fneg` for the
 same reason `concat` is its own opcode: every pass that matches `add` is an integer rewrite. `ir/verify.ts` holds both directions — a
 float op computes on floats only, and a float is an operand of nothing else but `ret` — so a
 pass that matched an opcode without asking what it computes on fails where it did it.
 
 **The ABI homes are target DATA.** `TargetDescription.fpu` names the float argument registers, the
 float return and how the two files COUNT: o32 is `'leading'` (argument k is in `$f12`/`$f14` only
-while arguments 0..k are all floating, and it still takes integer slot k), the PowerPC EABI is
+while arguments 0..k are all floating, and it still takes its integer slots — one for a float, two for
+a double, so the integer after `double a` is read from `a2`), the PowerPC EABI is
 `'separate'` (f1..f8 count on their own). `frontend/fpu.ts` is the one reading of them, shared by both
 frontends, and the SSA builder types every parameter and phi of the FPU's file a float where it mints
 it (`keyType`), so recovery's s32 default never reaches one — a float carried round a loop is declared
@@ -721,19 +724,31 @@ before it. A float product read by a float add or subtract is NAMED on a compile
 fuses a multiply into an add only within one expression, so the inline spelling recompiles to a
 fused multiply-add that rounds once, where the temp compiles to the unfused pair under either
 setting. MIPS II and III have no fused multiply-add, and there the product stays inline. **The
-backend** spells the C89 keyword `float`, which no translation unit has to declare, so the candidate prelude and every project context
+backend** spells the C89 keywords `float` and `double`, which no translation unit has to declare, so the candidate prelude and every project context
 that already typedefs `f32` are untouched.
+
+**A double without an FPU.** agbcc has no float instruction at all: its `double` arithmetic is a
+libgcc call (`__adddf3`, `__negdf2` …) over the register pairs a long long travels in, so it enters
+the IR the way a 64-bit integer does — a `concat` of two argument registers into the call, the
+result split back into r0:r1 — and `raise/floathelpers.ts` folds the call to the float op over
+`f64`s, in its own pass just ahead of the one that folds `__muldi3`. That fold is the only producer of an `f64` from integer
+words, and it is not an op: verify holds that a `concat` builds an integer, so a double may come only
+from a pair of this function's argument slots, fused into one parameter, or from another such
+helper's result. agbcc stores a double high word first (`FLOAT_WORDS_BIG_ENDIAN`), the opposite of a
+long long, which is why a pair moved whole is the only one that may be read as a double.
 
 **What refuses, and why each refusal is where it is.**
 
-| level    | refusal                                                                                                                 | because                                                                                                                                                                                                     |
-| -------- | ----------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| frontend | every FPU instruction but the single-precision arithmetic and its copies (register-file refusal)                        | a double, a conversion, a move to memory or the integer file, a compare: each would let a float reach something that is not another float op or the return, which is what makes the return rule below sound |
-| frontend | an FPU register read before any write that is not a float argument home                                                 | it would mint a parameter no caller passes — including a return path that never writes `$f0`, since a function returns a float on every path or on none                                                     |
-| frontend | an integer argument register in a slot a float shadows (o32)                                                            | `'leading'` gives a float argument its integer slot too, so `a0` beside `$f12` is not a layout the ABI produces                                                                                             |
-| frontend | PowerPC: a function that computes on a float and makes a call; a record form (`fadds.` sets `cr1`)                      | which FPRs a callee reads, returns in and destroys is unmodelled (`a * g2()` would read g2's return as `a`); MIPS refuses every call already                                                                |
-| verify   | a float operand of any op but a float op or `ret`; a float op over a non-float; a float edge into a non-float parameter | the two silent wrongs a new kind invites, stated where they happen                                                                                                                                          |
-| backend  | Pascal, on a float type, operator or negation                                                                           | it throws rather than spelling an integer                                                                                                                                                                   |
+| level    | refusal                                                                                                                                                   | because                                                                                                                                                                                           |
+| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| frontend | every FPU instruction but the arithmetic and its copies, in either precision (register-file refusal)                                                      | a conversion, a move to memory or the integer file, a compare: each would let a float reach something that is not another float op or the return, which is what makes the return rule below sound |
+| frontend | an FPU register read before any write that is not a float argument home                                                                                   | it would mint a parameter no caller passes — including a return path that never writes `$f0`, since a function returns a float on every path or on none                                           |
+| frontend | an integer argument register in a slot a float shadows (o32)                                                                                              | `'leading'` gives a float argument its integer slots too, so `a0` beside `$f12` is not a layout the ABI produces                                                                                  |
+| frontend | PowerPC: a function that computes on a float and makes a call; a record form (`fadds.` sets `cr1`)                                                        | which FPRs a callee reads, returns in and destroys is unmodelled (`a * g2()` would read g2's return as `a`); MIPS refuses every call already                                                      |
+| frontend | a function computing in both precisions                                                                                                                   | the SSA builder types an FPU register once per function (`fpPrecision`), and the rounding between precisions (a conversion, `frsp`) is not modelled                                               |
+| verify   | a float operand of any op but a float op or `ret`; a float op over a non-float; a float edge into a non-float parameter                                   | the two silent wrongs a new kind invites, stated where they happen                                                                                                                                |
+| raise    | agbcc: a double helper whose operand is not a pair of argument slots or another double helper's result, or whose result reaches anything but one or `ret` | the pair's word order is the reverse of a long long's, so a literal, a load, a half read or a store would name the wrong double; the call is gapped as an unmodelled runtime helper               |
+| backend  | Pascal, on a float type, operator or negation                                                                                                             | it throws rather than spelling an integer                                                                                                                                                         |
 
 **What a decompiler may NOT infer.** On PowerPC an FPR holds a double whatever it carries, so the
 float-versus-double choice of a parameter or return is not in the object where only `fmr`/`fneg`

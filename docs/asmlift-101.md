@@ -421,7 +421,8 @@ packages/core/            @asmlift/core — the pipeline
   src/pattern/            rewrite-patterns-as-data + the greedy driver
   src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, widehelpers — the
                           64-bit sibling of softdiv, gated on the target's runtime-helper TABLE
-                          rather than on a hardware capability — pairparams, extscale, arrays,
+                          rather than on a hardware capability — floathelpers, its soft-float
+                          sibling, pairparams, extscale, arrays,
                           struct-arrays, memberarrays, structs, shortcircuit, narrow, narrowlocal,
                           paramwidth, retsink, latch, gvn, globalshape — the one whose subject is a
                           DECLARATION rather than an instruction shape: it reads base-vs-index

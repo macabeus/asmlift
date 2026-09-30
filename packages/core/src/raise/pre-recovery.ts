@@ -27,6 +27,7 @@ import {
   poolOrderOf,
   restoreUnclaimedScales,
 } from './extscale';
+import { recognizeFloatHelpers } from './floathelpers';
 import { numberPureValues } from './gvn';
 import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
@@ -131,7 +132,16 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     dce: false,
     gate: (t) => !t.capabilities.hwDivide,
   },
-  // NOT gated, where its neighbour above is, and the asymmetry is the argument: a soft DIVISION is
+  // NOT gated, where `softdiv` is: a float helper computes on floats, which an ISA with no FPU has no
+  // instruction for, and the target's runtime table is what says whether it calls one. A pass apart
+  // from `widehelpers` because it re-types the call's words as floats, with its own closed-set
+  // refusal, and a single-precision helper is a float helper that is not wide.
+  {
+    id: 'floathelpers',
+    run: (fn, _self, _opts, target) => recognizeFloatHelpers(fn, target),
+    dce: false,
+  },
+  // NOT gated, where `softdiv` is, and the asymmetry is the argument: a soft DIVISION is
   // a division the ISA has no instruction for, so a target with a divider never emits one — while
   // no ISA this repo targets has 64-bit integer arithmetic at all, so a 64-bit helper is software
   // on every one of them whatever `hwDivide` says.
@@ -140,8 +150,9 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     run: (fn, _self, _opts, target) => recognizeWideHelpers(fn, target),
     dce: false,
   },
-  // AFTER both helper recognizers, because what it refuses is precisely what they declined: a call
-  // to a name the target's runtime table carries that neither `softdiv` nor `widehelpers` folded.
+  // AFTER the three helper recognizers, because what it refuses is precisely what they declined: a
+  // call to a name the target's runtime table carries that none of `softdiv`, `floathelpers` and
+  // `widehelpers` folded.
   // Re-emitting the compiler's own runtime call as source is the one failure that MATCHES, so the
   // gap has to be written here rather than left to the backend. See raise/widehelpers.ts.
   //

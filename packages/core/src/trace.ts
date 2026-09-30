@@ -115,6 +115,7 @@ const PRE_RECOVERY_TRACE: Record<string, { stage: string; title: (result: number
   const: { stage: 'stage:const', title: () => 'Const materialize (lui;ori → one 32-bit const)' },
   magicdiv: { stage: 'stage:magicdiv', title: () => 'Magic-number division recovery (mulh/mulhu → sdiv/udiv)' },
   softdiv: { stage: 'stage:softdiv', title: () => 'Soft-division lower (bl __divsi3 → division op)' },
+  floathelpers: { stage: 'stage:floathelpers', title: () => 'Soft-float helper lower (bl __adddf3 → float op)' },
   widehelpers: { stage: 'stage:widehelpers', title: () => '64-bit helper lower (bl __muldi3 → 64-bit op)' },
   pairparams: { stage: 'stage:pairparams', title: () => 'Parameter pairs (two argument registers → one s64)' },
   arrays: { stage: 'stage:legalize', title: (r) => `Array legalize (${r} scaled access(es) → aload/astore)` },

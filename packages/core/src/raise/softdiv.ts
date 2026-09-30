@@ -17,16 +17,20 @@
 // never `bl __divsi3`).
 import type { Fn } from '../ir/core';
 import { wordsOf } from '../proto';
-import { type RuntimeHelper, helperOp, isWideHelper } from '../runtime-helpers';
+import { type RuntimeHelper, helperOp, isFloatHelper, isWideHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** The 32-bit software divisions, off the target's own helper table. WHICH helpers a compiler emits
  *  is a compiler fact and lives there (runtime-helpers.ts); which of them THIS pass answers for is
  *  the question here, and it is the narrow one: a division the ISA has no instruction for. A helper
  *  that computes on a value wider than a register is a different question — no hardware capability
- *  can make one unnecessary — and `raise/widehelpers.ts` answers it, ungated. */
+ *  can make one unnecessary — and `raise/widehelpers.ts` answers it, ungated. So is a float helper
+ *  of any width, which computes on floats the ISA has no instruction for either, and
+ *  `raise/floathelpers.ts` answers it. */
 const softDivisions = (target: TargetDescription): Record<string, RuntimeHelper> =>
-  Object.fromEntries(Object.entries(target.runtimeHelpers ?? {}).filter(([, h]) => h.op && !isWideHelper(h)));
+  Object.fromEntries(
+    Object.entries(target.runtimeHelpers ?? {}).filter(([, h]) => h.op && !isWideHelper(h) && !isFloatHelper(h)),
+  );
 
 /** Rewrite each recognised soft-division helper call to its division op, in place. Returns whether
  *  anything changed. Runs BEFORE type recovery so the new op's operands get signed/unsigned typing. */
@@ -48,7 +52,7 @@ export function recognizeSoftDiv(fn: Fn, target: TargetDescription): boolean {
       if (op.operands.length !== wordsOf(helper.params) || op.results.length !== 1) {
         continue;
       }
-      b.ops.splice(i, 1, helperOp(helper.op, op, op.attrs.target as string));
+      b.ops.splice(i, 1, helperOp(helper.op, op.attrs.target as string, op.operands, op.results[0]));
       changed = true;
     }
   }

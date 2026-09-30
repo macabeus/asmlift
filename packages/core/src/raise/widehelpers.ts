@@ -14,7 +14,7 @@
 // (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
 // both spellings, so nothing here may read a signedness off it. See the table's own note.
 import { Fn, mkOp } from '../ir/core';
-import { arrivesAsDeclared, helperOp, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { arrivesAsDeclared, helperOp, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 
 /** Rewrite each recognised 64-bit helper call to the op it computes, in place. Returns whether
@@ -29,7 +29,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
         continue;
       }
       const helper = lookupHelper(table, String(op.attrs.target));
-      if (!helper?.op || !isWideHelper(helper)) {
+      if (!helper?.op || !isWideHelper(helper) || isFloatHelper(helper)) {
         continue;
       }
       // ITS C PARAMETERS AT THEIR STATED WIDTHS, not its argument registers and not their count:
@@ -51,7 +51,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
       ) {
         continue;
       }
-      b.ops.splice(i, 1, helperOp(helper.op, op, String(op.attrs.target)));
+      b.ops.splice(i, 1, helperOp(helper.op, String(op.attrs.target), op.operands, op.results[0]));
       changed = true;
     }
   }
@@ -59,7 +59,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
 }
 
 /** Turn every surviving call to one of the target's runtime helpers into a gap. Returns whether
- *  anything changed. Runs after the two recognisers, so what it sees is what they declined.
+ *  anything changed. Runs after the helper recognisers, so what it sees is what they declined.
  *
  *  RE-EMITTING A COMPILER'S OWN RUNTIME CALL IS NOT A RECOVERY, and it is worse than a plain
  *  miss: it MATCHES. Hand `mwcceppc` the source `return __div2i(a, b);` and it emits the `bl

@@ -13,7 +13,7 @@
 // Scope: free functions and non-virtual member functions with scalar/pointer params and named
 // field access. Virtual dispatch, references, and constructors/destructors are deliberately not
 // built ahead of an inhabitant.
-import { Expr, LanguageBackend, SFn } from '../l3/ast';
+import { Expr, LanguageBackend, SFn, walkExprs } from '../l3/ast';
 import { type CppType, declareCpp, mangle, spellType } from '../mangle';
 import type { TargetDescription } from '../target';
 import { LeafHook, cComment, emitCFamily } from './cfamily';
@@ -47,22 +47,83 @@ export function cppSymbol(spec: CppFnSpec): string {
  *   - `'leading'` (MIPS o32), and a target with no float file: by POSITION. The lifted order is the
  *     slot order, which is the source order, and an unread leading float is minted as an integer
  *     hole — so binding by file would hand `int k(float x, int n)`'s `n` the hole `a0`.
- *  NULL when the two contradict: a lifted float the spec has no float for. No binding of the rest is
- *  then trustworthy. */
+ *  NULL when the two contradict: a lifted float the spec has no float for, or has one of the other
+ *  precision for. No binding of the rest is then trustworthy. The precision is part of the
+ *  contradiction because the body is spelled over the spec's types: a lifted `double` bound to a
+ *  `float a, float b` prints `a + b`, which is a single-precision add where the machine did a
+ *  double one.
+ *
+ *  THE PRECISION IS AN OPERATION'S, so only a parameter the body reads has one to contradict. A
+ *  frontend types every float register of a function at the function's one precision
+ *  (frontend/fpu.ts `fpPrecision`), and that includes an argument slot the body never reads, which
+ *  it mints only to hold the later arguments' places: `float f1(double a, float b){ return b + b; }`
+ *  is `fadds f1,f2,f2`, and its `a` is a single-precision hole that nothing states the width of. So
+ *  is a lifted float of no stated precision (`T.fUnstated`) anywhere. Either binds a spec float of
+ *  both widths, and the spec's is the one to print.
+ *
+ *  EXCEPT WHERE THE HOLE'S WIDTH PLACED THE PARAMETERS AFTER IT. Under `'leading'` a float takes one
+ *  integer slot for a single and two for a double, counted at the function's precision
+ *  (`fpuArgSlots`), so an unread hole of the other width than the spec's moves every integer after
+ *  it: `float m2(double a, float b, int *p, int *q){ *p = 0; return b + b; }` (gcc2.7.2kmc) is
+ *  `sw zero,0(a3)` with `a` laid out as ONE slot, and binding by position would name `a3` `q`. So
+ *  there an unread float followed by an integer parameter keeps its precision.
+ *
+ *  A spec `double` bound to a lifted NON-float is the same misplacement. A double takes two integer
+ *  slots under o32 and on a target with no float file (agbcc passes one in r0:r1), so a body that
+ *  reads no FPU register mints it as two 32-bit holes: `void n1(double d, int *p, int *q){ *p = 0; }`
+ *  (gcc2.7.2kmc) is `sw zero,0(a2)` and lifts as `(s32 a0, s32 a1, s32 *a2)`, where binding by
+ *  position would name `a2` `q`. Only a lifted 64-bit parameter holds both slots, so a spec double
+ *  over a narrower one refuses when a lifted parameter follows it, and when the body reads it — a
+ *  read half would print as the whole double (agbcc `int u1(int a, double d)` returning the word
+ *  `((int *)&d)[0]` is `add r0,r1,#0`). A lifted parameter after it is not a refusal when the double
+ *  is the spec's last and the body reads none of the slots from it on, which is IDO homing a
+ *  trailing double it never uses (`int o1(int a, double d){ return a; }` spills `a2`/`a3`): nothing
+ *  then binds past it. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
-  lifted: SFn['params'],
+  lifted: Pick<SFn, 'params' | 'body'>,
   floatSlots: FloatSlots | undefined,
 ): (string | undefined)[] | null {
-  const isFloat = (t: CppType) => t.ptr === 0 && (t.base === 'float' || t.base === 'double');
-  const explicit = lifted.slice(spec.cls ? 1 : 0);
+  const floatBits = (t: CppType) => (t.ptr !== 0 ? null : t.base === 'float' ? 32 : t.base === 'double' ? 64 : null);
+  const isFloat = (t: CppType) => floatBits(t) !== null;
+  const read = new Set<string>();
+  for (const e of walkExprs(lifted.body)) {
+    if (e.k === 'var') {
+      read.add(e.name);
+    }
+  }
+  const clashes = (p: SFn['params'][number], t: CppType | undefined, laysOut: boolean) =>
+    p.type.kind === 'float' &&
+    (t === undefined ||
+      floatBits(t) === null ||
+      (p.type.width !== null && (laysOut || read.has(p.name)) && floatBits(t) !== p.type.width));
+  const explicit = lifted.params.slice(spec.cls ? 1 : 0);
+  const lastAndUnread = (i: number) =>
+    i === spec.params.length - 1 && explicit.slice(i).every((p) => !read.has(p.name));
   if (floatSlots !== 'separate') {
-    const clash = explicit.some((p, i) => p.type.kind === 'float' && !(spec.params[i] && isFloat(spec.params[i].type)));
+    const clash = explicit.some((p, i) => {
+      const t = spec.params[i]?.type;
+      const later = explicit.slice(i + 1);
+      const oneSlot = p.type.kind !== 'float' && !('width' in p.type && p.type.width === 64);
+      return (
+        clashes(
+          p,
+          t,
+          later.some((q) => q.type.kind !== 'float'),
+        ) ||
+        (t !== undefined &&
+          floatBits(t) === 64 &&
+          oneSlot &&
+          (later.length > 0 || read.has(p.name)) &&
+          !lastAndUnread(i))
+      );
+    });
     return clash ? null : spec.params.map((_, i) => explicit[i]?.name);
   }
   const floats = explicit.filter((p) => p.type.kind === 'float');
   const others = explicit.filter((p) => p.type.kind !== 'float');
-  if (spec.params.filter((p) => isFloat(p.type)).length < floats.length) {
+  const specFloats = spec.params.filter((p) => isFloat(p.type));
+  if (specFloats.length < floats.length || floats.some((p, i) => clashes(p, specFloats[i].type, false))) {
     return null;
   }
   let f = 0;
@@ -87,7 +148,7 @@ export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined):
         rename.set(thisVar, 'this');
         recv.set(thisVar, { cls: spec.cls!, via: 'this' });
       }
-      const bound = bindSpecParams(spec, fn.params, floatSlots);
+      const bound = bindSpecParams(spec, fn, floatSlots);
       if (!bound) {
         throw new Error(
           `cpp backend: the spec's floating-point parameters do not match the lifted function's — ` +
