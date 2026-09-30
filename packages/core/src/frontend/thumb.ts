@@ -3658,7 +3658,7 @@ function liftOnce(
     const own = known(prototypes);
     const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const declared = declaredCallArgs(proto, target.compilerBehaviors.softDoubleWords !== undefined);
+    const declared = declaredCallArgs(proto, target.softDoubleWords !== undefined);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from r0, which holds the hidden pointer
@@ -4743,7 +4743,7 @@ function liftOnce(
           const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
           const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
           // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
-          // sign and exponent (`compilerBehaviors.softDoubleWords`), so the pair read as an integer
+          // sign and exponent (`TargetDescription.softDoubleWords`), so the pair read as an integer
           // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
           // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
           const doubles = declared?.doubles.size ? [...declared.doubles] : undefined;

@@ -60,7 +60,7 @@ export function calleeNames(asm: string, self?: string): string[] {
  *
  *  `declaredCallArgs` IS THE READER, AND IT IS THE ONE THE FRONTEND ACTS ON — with the same
  *  `softDouble` answer, which is whether the target passes a `double` in general argument words
- *  (`compilerBehaviors.softDoubleWords`). Three declarations
+ *  (`TargetDescription.softDoubleWords`). Three declarations
  *  state nothing it can lay out — `params` omitted, `params` mistyped (`"2"`), and a typed list
  *  holding a spelling asmlift cannot size — and all three leave the frontend at its own
  *  arg-register scan. A reader that answered "declared" for the third would stay silent about the

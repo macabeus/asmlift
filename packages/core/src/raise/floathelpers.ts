@@ -99,19 +99,17 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     const d = def.get(v);
     return d !== undefined && calls.has(d);
   };
-  // A LITERAL IS TWO CONSTANT WORDS READ IN THE TARGET'S ORDER (`compilerBehaviors.softDoubleWords`):
-  // the pair's first word is its high word on agbcc, which is what makes the long long naming of
-  // the same pair another number. Its bits, or undefined where the pair is no literal, the target
-  // states no order, or the double is not finite — which no C literal spells.
-  const order = target.compilerBehaviors.softDoubleWords;
+  // A LITERAL IS TWO CONSTANT WORDS, HIGH WORD FIRST on a target whose double crosses a call in
+  // general words (`TargetDescription.softDoubleWords`) — the order that makes the long long naming
+  // of the same pair another number. Its bits, or undefined where the pair is no literal, the target
+  // states no such double, or the double is not finite — which no C literal spells.
   const literalBits = (v: Value): string | undefined => {
     const d = def.get(v);
     const [first, second] = (d?.opcode === 'concat' ? d.operands : []).map((o) => def.get(o));
-    if (order === undefined || first?.opcode !== 'const' || second?.opcode !== 'const') {
+    if (target.softDoubleWords === undefined || first?.opcode !== 'const' || second?.opcode !== 'const') {
       return undefined;
     }
-    const [a, b] = [Number(first.attrs.value), Number(second.attrs.value)];
-    const bits = order === 'high-first' ? doubleBits(a, b) : doubleBits(b, a);
+    const bits = doubleBits(Number(first.attrs.value), Number(second.attrs.value));
     return Number.isFinite(doubleOf(bits)) ? bits : undefined;
   };
   const literal = (v: Value, calls: ReadonlySet<Op>) => literalBits(v) !== undefined && floatsOnly(v, calls);

@@ -1,6 +1,6 @@
 // A `double` handed to a declared callee on agbcc. It crosses the call in the two general argument
 // words a `long long` takes, wherever they fall, with its HIGH word first
-// (`compilerBehaviors.softDoubleWords`), so the pair read as an integer is another number —
+// (`TargetDescription.softDoubleWords`), so the pair read as an integer is another number —
 // `g(1.5)` as `g(1073217536, 0)`. The asm is agbcc's own (`scripts/regen-double-arg-probes.ts`).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
-import { ARMV4T_AGBCC, type TargetDescription } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-double-args.s'), 'utf8');
 const lift = (name: string, prototypes: Prototypes = {}, target: TargetDescription = ARMV4T_AGBCC) =>
@@ -88,16 +88,6 @@ describe('a declared double argument', () => {
     expect(source).not.toMatch(/1073217536|\(s64\)|\(u32\)/);
   });
 
-  // The word order is the target's, not the frontend's: the same two words read low word first are
-  // a subnormal.
-  test('the words are read in the order the target states', () => {
-    const lowFirst = {
-      ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, softDoubleWords: 'low-first' as const },
-    };
-    expect(lift('dreg', own(G, 'dreg'), lowFirst)).toContain('g(5.30239915e-315);');
-  });
-
   // A NaN or an infinity has no C literal, so the pair is no literal.
   test('a pair that is not a finite double declines', () => {
     const nan =
@@ -111,10 +101,15 @@ describe('a declared double argument', () => {
   // An FPU target passes a double in a float register and no general word, so the declaration
   // states no layout there and the call is lifted as a callee nobody declared is.
   test('on a target that does not claim soft doubles the declaration abstains', () => {
-    const { softDoubleWords, ...rest } = ARMV4T_AGBCC.compilerBehaviors;
+    const { softDoubleWords, ...fpu } = ARMV4T_AGBCC;
     expect(softDoubleWords).toBe('high-first');
-    const fpu = { ...ARMV4T_AGBCC, compilerBehaviors: rest };
     expect(lift('dreg', G, fpu)).toBe(lift('dreg'));
+  });
+
+  test('no target states both a soft double and an FPU', () => {
+    for (const t of [ARMV4T_AGBCC, MIPS_IDO, MIPS_GCC, PPC_MWCC]) {
+      expect(t.softDoubleWords === undefined || t.fpu === undefined).toBe(true);
+    }
   });
 });
 

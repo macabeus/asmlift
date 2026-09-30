@@ -3461,7 +3461,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // `str r5, [sp, #0x4]`, the literal in the pool as `.long 0x3ff80000, 0x0`, HIGH word first
   // (agbcc thumb.h:335 FLOAT_WORDS_BIG_ENDIAN). The proto states the `double` the row's ctx gives
   // m2c, so the block is two words and the pair is read as the literal its words spell, `1.5`
-  // (`compilerBehaviors.softDoubleWords`). Read as a `long long`, the same words are `1073217536`,
+  // (`TargetDescription.softDoubleWords`). Read as a `long long`, the same words are `1073217536`,
   // and that C scores a MATCH too: the callee is `void`, so the candidate never declares it, and an
   // unprototyped call stages a long long exactly as it stages a high-word-first double. The score
   // cannot referee the literal on this row, so `packages/core/test/double-args.test.ts` pins its

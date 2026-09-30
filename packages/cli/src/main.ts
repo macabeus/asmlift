@@ -762,7 +762,7 @@ export async function runCli(
     name,
     prototypes,
     symbols,
-    unitTarget.compilerBehaviors.softDoubleWords !== undefined,
+    unitTarget.softDoubleWords !== undefined,
   );
 
   // --score-against: compile the output (and every ranked candidate) with the project's own

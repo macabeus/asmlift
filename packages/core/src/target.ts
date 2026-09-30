@@ -161,6 +161,21 @@ export interface TargetDescription {
    *     slot — `float g(int *p, float b)` and `float g(float b, int *p)` are one object, `r3` and
    *     `f1` either way. */
   fpu?: { argRegs: readonly string[]; returnReg: string; slots: 'leading' | 'separate' };
+  /** The SOFT-FLOAT ABI's double: it crosses a call in the two consecutive general argument words a
+   *  `long long` takes, wherever they fall — two registers, the last register and [sp,#0], or two
+   *  words of the outgoing block, with no even alignment — HIGH word first, so the sign and exponent
+   *  are in the first word and the pair is not a `long long`'s naming of the same bits. Its readers
+   *  are `proto.ts` `declaredCallArgs` (the call's layout) and `raise/floathelpers.ts` (a literal's
+   *  bits). ABSENT ⇒ a declared `double` parameter states no layout and the call takes the
+   *  arg-register guess. A target states this or `fpu`, never both: with an FPU the value travels
+   *  in a float register and takes no general word.
+   *
+   *  agbcc: FLOAT_WORDS_BIG_ENDIAN 1 (gcc/config/arm/thumb.h:335); FUNCTION_ARG (:632) places by
+   *  word offset, FUNCTION_ARG_PARTIAL_NREGS (:636) splits a pair across r3 and the stack,
+   *  FUNCTION_ARG_ADVANCE (:647) rounds to a word and PARM_BOUNDARY is 32 (:354). Compiled at the
+   *  rows' flags: `f(a, b, 7, -2.75)` stages r3 = 0xc0060000 and [sp] = 0, and a fifth-word double
+   *  is at [sp,#4] and [sp,#8] behind a word at [sp]. */
+  softDoubleWords?: 'high-first';
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
@@ -346,21 +361,6 @@ export interface TargetDescription {
     // returned through memory). Read by `frontend/thumb.ts`'s `refuseWordReturns` directly, not by
     // the structurer. Absent ⇒ the epilogue states nothing.
     eightByteReturnScratch?: string;
-    // A `double` CROSSES A CALL IN GENERAL ARGUMENT WORDS: the two consecutive words a `long long`
-    // takes, wherever they fall — two registers, the last register and [sp,#0], or two words of the
-    // outgoing block, with no even alignment — and the value says which half is in the FIRST word.
-    // `'high-first'` puts the sign and exponent there, so the pair is not a `long long`'s naming of
-    // the same bits. Its readers are `proto.ts` `declaredCallArgs` (the call's layout) and
-    // `raise/floathelpers.ts` (a literal's bits). Absent ⇒ a declared `double` parameter states no
-    // layout and the call takes the arg-register guess, which is right on an FPU target, where the
-    // value travels in a float register and takes no general word.
-    //
-    // agbcc: FLOAT_WORDS_BIG_ENDIAN 1 (gcc/config/arm/thumb.h:335); FUNCTION_ARG (:632) places by
-    // word offset, FUNCTION_ARG_PARTIAL_NREGS (:636) splits a pair across r3 and the stack,
-    // FUNCTION_ARG_ADVANCE (:647) rounds to a word and PARM_BOUNDARY is 32 (:354). Compiled at the
-    // rows' flags: `f(a, b, 7, -2.75)` stages r3 = 0xc0060000 and [sp] = 0, and a fifth-word double
-    // is at [sp,#4] and [sp,#8] behind a word at [sp].
-    softDoubleWords?: 'high-first' | 'low-first';
     // WHAT, IN THIS COMPILER'S OBJECT, WITNESSES A NARROW DECLARED PARAMETER — the fact
     // raise/paramwidth.ts needs before it may retype `s32 a0` to `s8 a0`. Three answers, because
     // the compilers measured give three, and the pass refuses wherever the object is silent. Each
@@ -726,6 +726,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compiler: 'agbcc',
   argRegs: ['r0', 'r1', 'r2', 'r3'],
   returnReg: 'r0',
+  softDoubleWords: 'high-first',
   // AAPCS passes four in r0-r3, so nothing above them can be an argument. The ATPCS aliases are
   // the spellings this ISA's asm actually uses: censused over the vendored ARM asm, `sb`/`sl`/`ip`/
   // `fp` all occur as operands and no `v<n>`/`a<n>` form does. `sp`, `lr` and `pc` are deliberately
@@ -822,7 +823,6 @@ export const ARMV4T_AGBCC: TargetDescription = {
     switchRequiresFrontLoadedTests: true,
     hoistsSingleSetArm: true,
     eightByteReturnScratch: 'r2',
-    softDoubleWords: 'high-first',
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
     aggregateBoundary: 4,

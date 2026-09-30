@@ -198,7 +198,7 @@ export function declaredArgWidths(p: FnProto | undefined): readonly number[] | u
 }
 
 /** `declaredArgWidths` for a call on a target whose `double` crosses a call in general argument
- *  words (`compilerBehaviors.softDoubleWords`): there a `double` parameter is 64 bits of words and
+ *  words (`TargetDescription.softDoubleWords`): there a `double` parameter is 64 bits of words and
  *  its index is in `doubles`, so a reader can tell it from a `long long`, whose bits are the same
  *  words in another order. Everything else abstains exactly as `declaredArgWidths` does.
  *
