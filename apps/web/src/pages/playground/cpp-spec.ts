@@ -49,7 +49,7 @@ export function irToCpp(t: IrType): CppType {
     case 'void':
       return { base: 'void', ptr: 0 };
     case 'float':
-      return { base: 'float', ptr: 0 };
+      return { base: t.width === 64 ? 'double' : 'float', ptr: 0 };
     default:
       return INT; // unknown/array — the playground's safe default
   }

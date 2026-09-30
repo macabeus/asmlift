@@ -194,6 +194,39 @@ const specOf = (method: string, params: [string, string][], ret = 'int') =>
     }),
   );
 
+// THE PRECISION IS PART OF THE TYPE. mwcc compiles `double addf(float a, float b){ return (double)a +
+// (double)b; }` to a bare `fadd f1,f1,f2`: the object records a double add and nothing of the
+// parameters' precision, so the lift's parameters are doubles. A spec that binds them to `float a,
+// float b` prints `a + b`, a single-precision add that recompiles to `fadds`.
+const ADDF_MWCC = '00000000 <addf__Fff>:\n   0:\tfadd\tf1,f1,f2\n   4:\tblr\n';
+
+test('a double is declared double, in the free function and in the demangled fallback', () => {
+  expect(irToCpp(T.f64())).toEqual({ base: 'double', ptr: 0 });
+  expect(cpp('dadd', ADDF_MWCC.replace('addf__Fff', 'dadd'), PPC_MWCC)).toBe(
+    'double dadd(double a0, double a1) {\n    return a0 + a1;\n}\n',
+  );
+  expect(cpp('addf__Fff', ADDF_MWCC, PPC_MWCC)).toBe(
+    'double addf__Fff(double a0, double a1) {\n    return a0 + a1;\n}\n',
+  );
+});
+
+test.each([
+  ['float parameters for a double add', ADDF_MWCC, 'double', 'float'],
+  ['double parameters for a single add', ADDF_MWCC.replace('fadd\t', 'fadds\t'), 'float', 'double'],
+])('a user spec with %s is refused', (_label, asm, ret, param) => {
+  const spec = specOf(
+    'addf',
+    [
+      ['a', param],
+      ['b', param],
+    ],
+    ret,
+  );
+  expect(() => decompile('addf__Fff', asm, PPC_MWCC, { backend: cppBackend(spec, PPC_MWCC.fpu?.slots) })).toThrow(
+    /the spec's floating-point parameters do not match the lifted function's/,
+  );
+});
+
 test.each([
   [
     'EABI: a trailing unread float',

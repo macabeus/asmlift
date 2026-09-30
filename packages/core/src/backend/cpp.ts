@@ -47,22 +47,29 @@ export function cppSymbol(spec: CppFnSpec): string {
  *   - `'leading'` (MIPS o32), and a target with no float file: by POSITION. The lifted order is the
  *     slot order, which is the source order, and an unread leading float is minted as an integer
  *     hole — so binding by file would hand `int k(float x, int n)`'s `n` the hole `a0`.
- *  NULL when the two contradict: a lifted float the spec has no float for. No binding of the rest is
- *  then trustworthy. */
+ *  NULL when the two contradict: a lifted float the spec has no float for, or has one of the other
+ *  precision for. No binding of the rest is then trustworthy. The precision is part of the
+ *  contradiction because the body is spelled over the spec's types: a lifted `double` bound to a
+ *  `float a, float b` prints `a + b`, which is a single-precision add where the machine did a
+ *  double one. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
   lifted: SFn['params'],
   floatSlots: FloatSlots | undefined,
 ): (string | undefined)[] | null {
-  const isFloat = (t: CppType) => t.ptr === 0 && (t.base === 'float' || t.base === 'double');
+  const floatBits = (t: CppType) => (t.ptr !== 0 ? null : t.base === 'float' ? 32 : t.base === 'double' ? 64 : null);
+  const isFloat = (t: CppType) => floatBits(t) !== null;
+  const clashes = (p: SFn['params'][number], t: CppType | undefined) =>
+    p.type.kind === 'float' && (t === undefined || floatBits(t) !== p.type.width);
   const explicit = lifted.slice(spec.cls ? 1 : 0);
   if (floatSlots !== 'separate') {
-    const clash = explicit.some((p, i) => p.type.kind === 'float' && !(spec.params[i] && isFloat(spec.params[i].type)));
+    const clash = explicit.some((p, i) => clashes(p, spec.params[i]?.type));
     return clash ? null : spec.params.map((_, i) => explicit[i]?.name);
   }
   const floats = explicit.filter((p) => p.type.kind === 'float');
   const others = explicit.filter((p) => p.type.kind !== 'float');
-  if (spec.params.filter((p) => isFloat(p.type)).length < floats.length) {
+  const specFloats = spec.params.filter((p) => isFloat(p.type));
+  if (specFloats.length < floats.length || floats.some((p, i) => clashes(p, specFloats[i].type))) {
     return null;
   }
   let f = 0;
