@@ -66,7 +66,14 @@ export function cppSymbol(spec: CppFnSpec): string {
  *  (`fpuArgSlots`), so an unread hole of the other width than the spec's moves every integer after
  *  it: `float m2(double a, float b, int *p, int *q){ *p = 0; return b + b; }` (gcc2.7.2kmc) is
  *  `sw zero,0(a3)` with `a` laid out as ONE slot, and binding by position would name `a3` `q`. So
- *  there an unread float followed by an integer parameter keeps its precision. */
+ *  there an unread float followed by an integer parameter keeps its precision.
+ *
+ *  A spec `double` bound to a lifted NON-float is the same misplacement. A double takes two integer
+ *  slots under o32 and on a target with no float file (agbcc passes one in r0:r1), so a body that
+ *  reads no FPU register mints it as two 32-bit holes: `void n1(double d, int *p, int *q){ *p = 0; }`
+ *  (gcc2.7.2kmc) is `sw zero,0(a2)` and lifts as `(s32 a0, s32 a1, s32 *a2)`, where binding by
+ *  position would name `a2` `q`. Only a lifted 64-bit parameter holds both slots, so a spec double
+ *  over a narrower one refuses once any lifted parameter follows it. */
 export function bindSpecParams(
   spec: Pick<CppFnSpec, 'cls' | 'params'>,
   lifted: Pick<SFn, 'params' | 'body'>,
@@ -87,13 +94,19 @@ export function bindSpecParams(
       (p.type.width !== null && (laysOut || read.has(p.name)) && floatBits(t) !== p.type.width));
   const explicit = lifted.params.slice(spec.cls ? 1 : 0);
   if (floatSlots !== 'separate') {
-    const clash = explicit.some((p, i) =>
-      clashes(
-        p,
-        spec.params[i]?.type,
-        explicit.slice(i + 1).some((q) => q.type.kind !== 'float'),
-      ),
-    );
+    const clash = explicit.some((p, i) => {
+      const t = spec.params[i]?.type;
+      const later = explicit.slice(i + 1);
+      const oneSlot = p.type.kind !== 'float' && !('width' in p.type && p.type.width === 64);
+      return (
+        clashes(
+          p,
+          t,
+          later.some((q) => q.type.kind !== 'float'),
+        ) ||
+        (t !== undefined && floatBits(t) === 64 && oneSlot && later.length > 0)
+      );
+    });
     return clash ? null : spec.params.map((_, i) => explicit[i]?.name);
   }
   const floats = explicit.filter((p) => p.type.kind === 'float');

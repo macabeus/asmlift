@@ -349,6 +349,39 @@ test('o32: an unread float hole of the other width refuses a spec with an intege
   );
 });
 
+// A DOUBLE THE BODY NEVER READS IS TWO INTEGER HOLES when no FPU register is read at all, so a spec
+// `double` bound by position to the first of them names every later parameter one slot early.
+// Compiled at gcc2.7.2kmc's canonical flags: `n1` stores through `a2` (its `q`) and `n2` returns
+// `a2` (its `c`). A `float` over one such hole is one slot, and still binds.
+const N1_KMC = '00000000 <n1__FdPiPi>:\n   0:\tjr\tra\n   4:\tsw\tzero,0(a2)\n';
+const N2_KMC = '00000000 <n2__Fdii>:\n   0:\tjr\tra\n   4:\tmove\tv0,a2\n';
+const K_KMC = '00000000 <k__Ffi>:\n   0:\tjr\tra\n   4:\tmove\tv0,a1\n';
+
+test.each([
+  ['n1__FdPiPi', N1_KMC, 1, 'void n1__FdPiPi(int a0, int a1, int *a2) {\n    *a2 = 0;\n}\n'],
+  ['n2__Fdii', N2_KMC, 0, 'int n2__Fdii(int a0, int a1, int a2) {\n    return a2;\n}\n'],
+])('o32: a spec double over a lifted integer hole with a parameter after it refuses (%s)', (sym, asm, ptr, free) => {
+  const spec = parseSpec(
+    JSON.stringify({
+      method: sym.slice(0, 2),
+      retType: { base: 'int', ptr: 0 },
+      params: [
+        { name: 'd', type: { base: 'double', ptr: 0 } },
+        { name: 'b', type: { base: 'int', ptr } },
+        { name: 'c', type: { base: 'int', ptr } },
+      ],
+    }),
+  );
+  expect(() => decompile(sym, asm, MIPS_GCC, { backend: cppBackend(spec, MIPS_GCC.fpu?.slots) })).toThrow(
+    /floating-point parameters do not match/,
+  );
+  expect(cpp(sym, asm, MIPS_GCC)).toBe(free);
+});
+
+test('o32: a spec float over a lifted integer hole takes its one slot', () => {
+  expect(cpp('k__Ffi', K_KMC, MIPS_GCC)).toBe('int k(float a, int b) {\n    return b;\n}\n');
+});
+
 test('o32: an unread float hole with no integer after it binds either width', () => {
   const source = 'float m3(double a, float b) {\n    return b + b;\n}\n';
   const spec = specOf(
