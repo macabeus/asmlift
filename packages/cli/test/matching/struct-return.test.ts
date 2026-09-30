@@ -48,6 +48,12 @@ struct BF { u32 a : 8; u32 b : 8; };
 struct BF mkbf(s32);
 typedef struct R { u32 a; u32 b; } R, *RP;
 RP getr4(struct R *, s32);
+typedef struct Rc { u32 w[4]; } const CR;
+CR mkcr(s32);
+typedef const struct Rq { u32 w[4]; } QR;
+QR mkqr(s32);
+typedef struct { u32 w[4]; } volatile VR;
+VR mkvr(s32);
 `;
 
 const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
@@ -92,6 +98,10 @@ describe('a call to a function returning a struct', () => {
     ['a bitfield struct returned in r0', 'void f(s32 x) { mkbf(x); usei(x + 1); }'],
     // a typedef naming a POINTER to a struct is a pointer return, with no hidden pointer
     ['a pointer typedef of a struct', 'void f(s32 k) { struct R t; getr4(&t, k); }'],
+    // a typedef that qualifies the struct names it all the same, the qualifier before or after the body
+    ['a const typedef after the body', 'void f(s32 x) { CR r = mkcr(x); }'],
+    ['a const typedef before the body', 'void f(s32 x) { QR r = mkqr(x); }'],
+    ['a volatile typedef of a tagless body', 'void f(s32 x) { VR r = mkvr(x); }'],
   ])('%s', (_label, src) => {
     const r = best(src);
     expect(r.self, r.source).toBe(0);

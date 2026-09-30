@@ -236,6 +236,24 @@ describe('prototypes from a declaration context', () => {
     expect(p.wordp).toEqual({ returns: 'u32 *', params: ['u32'] });
   });
 
+  test('a qualified typedef of a body names the body, the qualifier before or after it', () => {
+    const w4 = [{ name: 'w', type: 'u32', dims: [4] }];
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef int s32;
+       typedef struct R { u32 w[4]; } const CR; CR mk(s32);
+       typedef struct { u32 w[4]; } volatile VR, *VRP; VR mkv(s32); VRP mkvp(s32);
+       typedef const struct Q { u32 w[4]; } QR; QR mkq(s32); struct Q mkq2(s32);
+       typedef struct R2 { u32 w; } R2T, const *CR2P; CR2P mkp(s32);`,
+      'c',
+    );
+    expect(p.mk).toEqual({ returns: 'CR', returnLayout: { kind: 'struct', members: w4 }, params: ['s32'] });
+    expect(p.mkv?.returnLayout?.members).toEqual(w4);
+    expect(p.mkvp).toEqual({ returns: 'VR *', params: ['s32'] });
+    expect(p.mkq?.returnLayout?.members).toEqual(w4);
+    expect(p.mkq2?.returnLayout?.members).toEqual(w4);
+    expect(p.mkp).toEqual({ returns: 'const struct R2 *', params: ['s32'] });
+  });
+
   // each member points at the struct itself: laying out every pointee on every path is 9^8 walks
   test('a struct whose members point back at it is laid out once per depth', () => {
     const ptrs = Array.from({ length: 8 }, (_, i) => `struct Node *p${i};`).join(' ');

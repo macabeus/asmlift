@@ -214,10 +214,10 @@ interface TypedefName {
 }
 
 /** A `typedef` statement → every name it declares (`typedef struct R {…} R, *RP;` declares two). A
- *  plain declarator of a body names that body and resolves to itself. A pointer declarator is a
- *  pointer to the base, spelled by the base's tag or by a plain name the same statement gives it,
- *  and resolves to itself where the body has neither (`typedef struct {…} *PS;`). An array
- *  declarator is not read. */
+ *  plain declarator of a body names that body, qualified or not (`} const CR;`), and resolves to
+ *  itself. A pointer declarator is a pointer to the base, spelled by the base's tag or by a plain
+ *  name the same statement gives it, and resolves to itself where the body has neither
+ *  (`typedef struct {…} *PS;`). An array declarator is not read. */
 function readTypedef(t: string): TypedefName[] {
   const body = t.replace(/^typedef\s+/, '');
   const fn = /^(.+?)\(\s*\*\s*([A-Za-z_]\w*)\s*\)\s*\((.*)\)$/.exec(body);
@@ -227,7 +227,8 @@ function readTypedef(t: string): TypedefName[] {
   if (/[()]/.test(body)) {
     return [];
   }
-  const declarator = /^((?:\*\s*(?:(?:const|volatile)\b\s*)*)*)([A-Za-z_]\w*)$/;
+  // qualifiers of the base, then the stars and their own qualifiers, then the name
+  const declarator = /^((?:(?:const|volatile)\b\s*)*)((?:\*\s*(?:(?:const|volatile)\b\s*)*)*)([A-Za-z_]\w*)$/;
   const withBody = /^((?:(?:const|volatile)\s+)*(?:struct|union|enum)\b[^{]*\{\})\s*(.*)$/.exec(body);
   let base: string;
   let declarators: string[];
@@ -243,27 +244,31 @@ function readTypedef(t: string): TypedefName[] {
     base = first[1];
     declarators = [first[2], ...parts.slice(1)];
   }
-  const read = declarators.map((d) => declarator.exec(d.trim()));
-  const plain = read.find((m) => m !== null && m[1] === '')?.[2];
+  const read = declarators
+    .map((d) => declarator.exec(d.trim()))
+    .map((m) => (m === null || /^(?:const|volatile)$/.test(m[3]) ? null : m));
+  const plain = read.find((m) => m !== null && m[2] === '')?.[3];
   const tag = /^(?:(?:const|volatile)\s+)*((?:struct|union|enum)\s+[A-Za-z_]\w*)\s*\{\}$/.exec(base)?.[1];
   const out: TypedefName[] = [];
   for (const m of read) {
     if (m === null) {
       continue;
     }
-    const stars = m[1].replace(/\s+/g, ' ').trim();
+    const qualifiers = m[1].replace(/\s+/g, ' ').trim();
+    const stars = m[2].replace(/\s+/g, ' ').trim();
+    const name = m[3];
     if (withBody && stars === '') {
-      out.push({ name: m[2], type: m[2], names: 'body' });
+      out.push({ name, type: name, names: 'body' });
     } else if (withBody) {
       const pointee = tag ?? plain;
       out.push(
         pointee === undefined
-          ? { name: m[2], type: m[2], names: 'unspelled pointer' }
-          : { name: m[2], type: `${pointee} ${stars}`, names: 'other' },
+          ? { name, type: name, names: 'unspelled pointer' }
+          : { name, type: [qualifiers, pointee, stars].filter((w) => w !== '').join(' '), names: 'other' },
       );
     } else {
-      const spelled = `${base.replace(/\s+/g, ' ').trim()}${stars === '' ? '' : ` ${stars}`}`;
-      out.push({ name: m[2], type: spelled.replace(/\*\s+\*/g, '**'), names: 'other' });
+      const spelled = [qualifiers, base.replace(/\s+/g, ' ').trim(), stars].filter((w) => w !== '').join(' ');
+      out.push({ name, type: spelled.replace(/\*\s+\*/g, '**'), names: 'other' });
     }
   }
   return out;
@@ -308,7 +313,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   // a typedef name bound to an enum body
   const enums = new Set<string>();
   for (const s of stmts) {
-    const def = /^(?:typedef\s+)?(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
+    const def = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
     if (def) {
       tagged.set(`${def[1]} ${def[2]}`, s.bodies[0]);
     }
@@ -318,15 +323,16 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     // replaces it, and nothing replaces a definition.
     const cpp =
       language === 'c++'
-        ? (/^(?:typedef\s+)?(struct|union|class)\s+([A-Za-z_]\w*)\s*(:[^{]*)?\{\}/.exec(s.text) ??
-          /^(struct|union|class)\s+([A-Za-z_]\w*)$/.exec(s.text))
+        ? (/^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union|class)\s+([A-Za-z_]\w*)\s*(:[^{]*)?\{\}/.exec(
+            s.text,
+          ) ?? /^(struct|union|class)\s+([A-Za-z_]\w*)$/.exec(s.text))
         : null;
     if (cpp && named.get(cpp[2])?.body === undefined) {
       const layable = def !== null && cpp[1] !== 'class' && cpp[3] === undefined;
       named.set(cpp[2], { kind: cpp[1] === 'union' ? 'union' : 'struct', body: layable ? s.bodies[0] : undefined });
     }
     if (/^typedef\b/.test(s.text)) {
-      const aggregate = /^typedef\s+(struct|union)\b[^{]*\{\}/.exec(s.text);
+      const aggregate = /^typedef\s+(?:(?:const|volatile)\s+)*(struct|union)\b[^{]*\{\}/.exec(s.text);
       for (const td of readTypedef(s.text)) {
         typedefs.set(td.name, td.type);
         if (aggregate && td.names === 'body') {
