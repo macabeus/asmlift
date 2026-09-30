@@ -26,22 +26,22 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 162 distinct decline messages (the texts reached by
+// `packages/core/src` throws 163 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 85 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 86 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       30  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, a base alignment the
 //                               input does not determine, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
 //                               `bl` whose target this asm defines as a data label, a call to a
 //                               function declared to return a struct it cannot lower (its
-//                               interpolated reason) and one returning it into anything but a
-//                               local, and
+//                               interpolated reason), one returning it into anything but a
+//                               local, one whose parameters nothing sizes, and
 //                               the reaching-compare throw whose reason is interpolated
 //                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)

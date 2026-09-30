@@ -3646,6 +3646,13 @@ function liftOnce(
     const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
     const params = declaredArgWidths(proto);
+    if (params === undefined && returned !== undefined && returned !== 'register') {
+      // a guessed arity reads argument registers from r0, which holds the hidden pointer
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${callee}\` returns struct ${typeToString(returned.type)} through a hidden ` +
+          'pointer in r0, and its parameters are not all sized, so which registers carry its arguments is not known',
+      );
+    }
     if (params === undefined) {
       return null;
     }
