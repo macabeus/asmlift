@@ -67,7 +67,7 @@ import {
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
-import { qualifiedAccess } from '../l3/volstore';
+import { qualifiedMemoryAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
@@ -4251,7 +4251,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return { k: 'addr', name: d.attrs.sym as string };
     }
     if (d.opcode === 'load') {
-      return memAccess(
+      const access = memAccess(
         d.operands[0],
         e(d.operands[0]),
         d.attrs.off as number,
@@ -4263,11 +4263,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         false,
         advanceStepOf(d.operands[0]),
       );
+      // A load the lift marked `volatile` is one the recompile must make where the machine did
+      // (frontend/frame-objects.ts).
+      return d.attrs.volatile === true ? qualifiedMemoryAccess(access) : access;
     }
     // aload carries a runtime index operand (variable-index array access) — `base[index]`, or
     // `base[index].field_K` when it carries a `fieldOff` (array-of-STRUCT element access).
     if (d.opcode === 'aload') {
-      return arrayAccess(
+      const access = arrayAccess(
         d.operands[0],
         e(d.operands[0]),
         e(d.operands[1]),
@@ -4278,6 +4281,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ctype,
         symCtx,
       );
+      return d.attrs.volatile === true ? qualifiedMemoryAccess(access) : access;
     }
     return d.opcode === 'opaque'
       ? mkGap(gapReasonFor(d.attrs), d.operands.map(e))
@@ -4914,25 +4918,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
         // inserted cast declares the same scalar the recovered pointee would have. A store the lift
         // marked `volatile` is one the recompile must make (frontend/frame-objects.ts).
-        const lval = op.attrs.volatile === true && lval0.k === 'index' ? qualifiedAccess(lval0) : lval0;
+        const lval = op.attrs.volatile === true ? qualifiedMemoryAccess(lval0) : lval0;
         out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
+        const lval = arrayAccess(
+          op.operands[0],
+          expr(op.operands[0]),
+          expr(op.operands[1]),
+          op.attrs.fieldOff as number | undefined,
+          op.attrs.memberOff as number | undefined,
+          elemSize,
+          // a member array's store spells through the member's OWN declaration, which the
+          // recognizer records; every other astore keeps the width===4 convention
+          (op.attrs.signed as boolean | undefined) ?? elemSize === 4,
+          ctype,
+          symCtx,
+        );
         out.push({
           k: 'store',
-          lval: arrayAccess(
-            op.operands[0],
-            expr(op.operands[0]),
-            expr(op.operands[1]),
-            op.attrs.fieldOff as number | undefined,
-            op.attrs.memberOff as number | undefined,
-            elemSize,
-            // a member array's store spells through the member's OWN declaration, which the
-            // recognizer records; every other astore keeps the width===4 convention
-            (op.attrs.signed as boolean | undefined) ?? elemSize === 4,
-            ctype,
-            symCtx,
-          ),
+          lval: op.attrs.volatile === true ? qualifiedMemoryAccess(lval) : lval,
           value: expr(op.operands[2]),
         });
       } else if (rendersAtOwnPosition(op)) {

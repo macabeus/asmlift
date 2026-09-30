@@ -2866,6 +2866,66 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src.match(/\(volatile s32 \*\)67109076/g)).toHaveLength(9);
   });
 
+  // …and every device access, however the lift names the register. Verbatim agbcc, `vu32 *d =
+  // (vu32 *)(0x40000B0 + ch * 12)` armed twice with only a `u16` store to the fill's temporary
+  // between: spelled plain, the first arm's three stores are deleted (compiled: 15 stores in this
+  // target, 12 in the plain lift's recompile, 15 in this one's).
+  test('a device register plus a runtime index is a device store too', () => {
+    const runtimeChannel =
+      'q4:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr3, r2, #0x1\n\tadd\tr3, r3, r2\n' +
+      '\tlsl\tr3, r3, #0x2\n\tldr\tr2, .L3\n\tadd\tr3, r3, r2\n\tmov\tr4, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrh\tr2, [r4]\n\tmov\tr2, #0x0\n\tstr\tr2, [sp, #0x4]\n\tldr\tr6, .L3+0x4\n' +
+      '\tadd\tr2, sp, #0x4\n\tstr\tr2, [r6]\n\tldr\tr5, .L3+0x8\n\tstr\tr1, [r5]\n\tldr\tr4, .L3+0xc\n' +
+      '\tldr\tr2, .L3+0x10\n\tstr\tr2, [r4]\n\tldr\tr2, [r4]\n\tmov\tr2, sp\n\tstr\tr2, [r6]\n' +
+      '\tstr\tr0, [r5]\n\tldr\tr2, .L3+0x14\n\tstr\tr2, [r4]\n\tstr\tr0, [r3]\n\tstr\tr1, [r3, #0x4]\n' +
+      '\tldr\tr5, .L3+0x18\n\tstr\tr5, [r3, #0x8]\n\tmov\tr4, sp\n\tmov\tr2, #0x1\n\tstrh\tr2, [r4]\n' +
+      '\tstr\tr1, [r3]\n\tstr\tr0, [r3, #0x4]\n\tstr\tr5, [r3, #0x8]\n\tadd\tsp, sp, #0x8\n' +
+      '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000b0\n' +
+      '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\t-0x7afffff0\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t-0x7fffffe0\n';
+    const src = decompile('q4', runtimeChannel, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).not.toMatch(/\(struct Elem0 \*\)67109040/);
+    expect(src.match(/\(volatile struct Elem0 \*\)67109040\)\[a2\]/g)).toHaveLength(6);
+  });
+
+  // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
+  // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here).
+  test('a phi of device registers is a device store too', () => {
+    const eitherChannel =
+      'q7:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr6, r0, #0\n\tadd\tr5, r1, #0\n' +
+      '\tmov\tr1, sp\n\tmov\tr0, #0x0\n\tstrh\tr0, [r1]\n\tldr\tr4, .L5\n\tstr\tr1, [r4]\n' +
+      '\tldr\tr3, .L5+0x4\n\tstr\tr6, [r3]\n\tldr\tr1, .L5+0x8\n\tldr\tr0, .L5+0xc\n\tstr\tr0, [r1]\n' +
+      '\tldr\tr0, [r1]\n\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n' +
+      '\tstr\tr5, [r3]\n\tldr\tr0, .L5+0x10\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n\tsub\tr1, r1, #0x20\n' +
+      '\tcmp\tr2, #0\n\tbeq\t.L3\n\tadd\tr1, r1, #0xc\n.L3:\n\tstr\tr6, [r1]\n\tstr\tr5, [r1, #0x4]\n' +
+      '\tldr\tr0, .L5+0x14\n\tstr\tr0, [r1, #0x8]\n\tstr\tr5, [r1]\n\tstr\tr6, [r1, #0x4]\n' +
+      '\tstr\tr0, [r1, #0x8]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L6:\n' +
+      '\t.align\t2, 0\n.L5:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t-0x7fffffe0\n';
+    const src = decompile('q7', eitherChannel, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
+  });
+
+  // A device LOAD too: plain, `while (REG_VCOUNT != 160);` is loop-invariant to agbcc, which hoists
+  // the `ldrh` and spins on a register copy forever (compiled).
+  test('a function kept as one object keeps a device poll volatile', () => {
+    const poll =
+      'q5:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr5, r2, #0\n\tmov\tr3, sp\n' +
+      '\tmov\tr2, #0x0\n\tstrh\tr2, [r3]\n\tldr\tr4, .L7\n\tstr\tr3, [r4]\n\tldr\tr3, .L7+0x4\n' +
+      '\tstr\tr0, [r3]\n\tldr\tr2, .L7+0x8\n\tldr\tr0, .L7+0xc\n\tstr\tr0, [r2]\n\tldr\tr0, [r2]\n' +
+      '\tmov\tr0, #0x0\n\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r4]\n\tstr\tr1, [r3]\n' +
+      '\tldr\tr0, .L7+0x10\n\tstr\tr0, [r2]\n\tldr\tr0, [r2]\n\tmov\tr0, #0x1\n\tstr\tr0, [r5]\n' +
+      '\tldr\tr1, .L7+0x14\n.L3:\n\tldrh\tr0, [r1]\n\tcmp\tr0, #0xa0\n\tbne\t.L3\n\tmov\tr0, #0x2\n' +
+      '\tstr\tr0, [r5]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n' +
+      '\t.align\t2, 0\n.L7:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
+      '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t0x4000006\n';
+    const src = decompile('q5', poll, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('while (*(volatile u16 *)67108870 != 160);');
+  });
+
   // KNOWN GAP: a function accepted object by object keeps them plain. Verbatim agbcc,
   // `REG_IME = 0; DmaFill16(3, 0x1111, a, 0x40); DmaFill16(3, 0x2222, b, 0x40); REG_IME = 1;`:
   // this lift recompiles to 7 stores of the target's 10.

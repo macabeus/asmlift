@@ -1315,9 +1315,11 @@ does not refuse: it answers with the local area, the frontend lifts once more wi
 routed through `laddr`, and the second audit declares those bytes one `u8` array in memory, so every
 store the machine made there is a store the recompile makes. The asm cannot tell a member the
 device reads from a spill nobody reads, and keeping both in memory is right for both. The transfer
-has to run too, so every device store of a function kept this way is `volatile`: agbcc deletes a
-plain store to an address a later store overwrites, and of two transfers armed back to back
-through one channel the first would never start.
+has to run too, so every device access of a function kept this way is `volatile` — at a register's
+literal address, that address plus a runtime index, or a phi of those: agbcc deletes a plain store
+to an address a later store overwrites, so of two transfers armed back to back through one channel
+the first would never start, and it hoists a plain load out of a loop that stores nothing it may
+alias, so a poll of `REG_VCOUNT` would never see the register change.
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

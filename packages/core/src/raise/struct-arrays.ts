@@ -259,12 +259,18 @@ export function recognizeStructArrays(fn: Fn): number {
               signed: op.attrs.signed as boolean,
               fieldOff: op.attrs.off as number,
               ...(op.attrs.listOrder === true && { listOrder: true }),
+              ...(op.attrs.volatile === true && { volatile: true }),
             },
           });
         } else if (op.opcode === 'store') {
+          // `volatile` rides along too: the lift marked an access the recompile must make
           bb.ops[i] = mkOp('astore', {
             operands: [base, index, op.operands[1]],
-            attrs: { elemSize: stride, fieldOff: op.attrs.off as number },
+            attrs: {
+              elemSize: stride,
+              fieldOff: op.attrs.off as number,
+              ...(op.attrs.volatile === true && { volatile: true }),
+            },
           });
         }
       }

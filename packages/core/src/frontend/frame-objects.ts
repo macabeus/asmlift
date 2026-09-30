@@ -889,21 +889,30 @@ export function auditFrameObjects({
       }
     };
 
-    // EVERY DEVICE STORE OF A FUNCTION KEPT AS ONE OBJECT (below) IS MARKED `volatile`, as the
-    // source's `REG_*` and `vu32 *dmaRegs` spell them. A plain store to a literal address is one agbcc
-    // deletes when a later store to the same address overwrites it and nothing between may alias
-    // it (flow.c:2041-2052), and at -O2 a store of another type does not (strict aliasing,
-    // toplev.c:3616) — so of two transfers armed back to back through one channel, with only a
-    // `u16` member store between, the first one's source, destination and control stores go and
-    // that transfer never runs; `REG_IME = 0; … REG_IME = saved;` loses its first store the same
-    // way. The window is the target's `deviceRegisters`, or the channels handed a frame address
-    // without one.
-    // KNOWN GAP: a function accepted object by object keeps its device stores plain — the pinned
-    // spelling is `/vol-store`'s candidate beside it (l3/volstore.ts) — so its unranked lift can
-    // lose a transfer the same way. Pinned in the structured tree, they are pinned in every
+    // EVERY DEVICE ACCESS OF A FUNCTION KEPT AS ONE OBJECT (below) IS MARKED `volatile`, as the
+    // source's `REG_*` and `vu32 *dmaRegs` spell them — store and load alike, because agbcc drops
+    // or moves either when it is plain:
+    //   • a plain store to an address a later store overwrites, with nothing between that may alias
+    //     it, is deleted (flow.c:2041-2052), and at -O2 a store of another type does not alias
+    //     (strict aliasing, toplev.c:3616) — so of two transfers armed back to back through one
+    //     channel, with only a `u16` member store between, the first one's source, destination and
+    //     control stores go and that transfer never runs; `REG_IME = 0; … REG_IME = saved;` loses
+    //     its first store the same way;
+    //   • a plain load in a loop that stores nothing it may alias is invariant, so
+    //     `while (REG_VCOUNT != 160);` is hoisted into a loop that never reads the register again.
+    // The address may be a literal, a literal plus a runtime index — `(vu32 *)(0x40000B0 + ch*12)`,
+    // a channel chosen at run time — or a phi each of whose incoming values is one of those: every
+    // way the lift names a device register and not a pointer loaded, passed or computed from
+    // nothing it can place. Over-reach costs a spelling and never a store: `volatile` only keeps
+    // accesses the machine made. The window is the target's `deviceRegisters`, which has to cover
+    // every register a source reaches — an address outside it stays plain — or the channels
+    // handed a frame address without one.
+    // KNOWN GAP: a function accepted object by object keeps its device accesses plain — the pinned
+    // store spelling is `/vol-store`'s candidate beside it (l3/volstore.ts) — so its unranked lift
+    // can lose a transfer the same way. Pinned in the structured tree, they are pinned in every
     // variation too, and the ones that home the base or un-reduce a loop refuse a qualified base:
     // `synthetic:dmastride` and `synthetic:dmaptrsrc` lose their matches.
-    const pinDeviceStores = (): void => {
+    const pinDeviceAccesses = (): void => {
       const sinks = [...new Set([...sourceStores.values()].flat().map((s) => s.sink))];
       if (sinks.length === 0) {
         return;
@@ -912,10 +921,51 @@ export function auditFrameObjects({
       const window = target.capabilities.deviceRegisters;
       const isDevice = (a: number, w: number): boolean =>
         window !== undefined ? a >= window[0] && a + w <= window[1] : sinks.some((s) => a < s + reach && a + w > s);
+      const incoming = new Map<Value, Value[]>();
       for (const blk of irBlocks) {
         for (const op of blk.ops) {
-          const base = op.opcode === 'store' ? literalAddrOf(op.operands[0]) : undefined;
-          if (base !== undefined && isDevice(base + (op.attrs.off as number), op.attrs.width as number)) {
+          for (const sx of op.successors ?? []) {
+            sx.args.forEach((arg, i) => {
+              const param = sx.block.params[i];
+              if (param !== undefined) {
+                (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(arg);
+              }
+            });
+          }
+        }
+      }
+      // The literal a pointer is a device register plus a runtime index from. `'cycle'` is a phi
+      // already on the walk — a pointer stepped around a loop — which contradicts nothing, so a phi
+      // is placed by the incoming values that are not its own back edge.
+      const placed = (v: Value, onWalk: Set<Value>, depth = 0): number | 'cycle' | undefined => {
+        const lit = literalAddrOf(v);
+        if (lit !== undefined || depth > 8) {
+          return lit;
+        }
+        const d = defOf.get(v);
+        if (d?.opcode === 'add' && d.operands.length === 2) {
+          const [x, y] = d.operands.map((o) => placed(o, onWalk, depth + 1));
+          return typeof x === 'number' ? x : typeof y === 'number' ? y : (x ?? y);
+        }
+        const ins = d === undefined ? incoming.get(v) : undefined;
+        if (ins === undefined || onWalk.has(v)) {
+          return ins === undefined ? undefined : 'cycle';
+        }
+        onWalk.add(v);
+        const each = ins.map((a) => placed(a, onWalk, depth + 1));
+        onWalk.delete(v);
+        if (each.some((a) => a === undefined || (typeof a === 'number' && !isDevice(a, 1)))) {
+          return undefined;
+        }
+        return each.find((a) => typeof a === 'number') ?? 'cycle';
+      };
+      for (const blk of irBlocks) {
+        for (const op of blk.ops) {
+          if (op.opcode !== 'store' && op.opcode !== 'load') {
+            continue;
+          }
+          const base = placed(op.operands[0], new Set());
+          if (typeof base === 'number' && isDevice(base + (op.attrs.off as number), op.attrs.width as number)) {
             op.attrs = { ...op.attrs, volatile: true };
           }
         }
@@ -1031,7 +1081,7 @@ export function auditFrameObjects({
         });
       }
       irBlocks[0].ops.unshift(object);
-      pinDeviceStores();
+      pinDeviceAccesses();
       return undefined;
     }
 

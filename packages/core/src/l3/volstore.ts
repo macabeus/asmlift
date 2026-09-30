@@ -187,6 +187,28 @@ export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Ex
   return { ...lval, base };
 }
 
+/** A memory access the lift marked `volatile` (frontend/frame-objects.ts), spelled through a
+ *  `volatile` pointee: an indexed access by {@link qualifiedAccess}, and a recovered struct
+ *  member through its struct pointer cast — `((volatile struct S *)0x40000B0)[ch].field_0`, the
+ *  dot form, or `((volatile struct S *)p)->field_0`. Any other spelling is returned unchanged:
+ *  it carries no pointer the qualifier could sit on. */
+export function qualifiedMemoryAccess(e: Expr): Expr {
+  if (e.k === 'index') {
+    return qualifiedAccess(e);
+  }
+  if (e.k !== 'field') {
+    return e;
+  }
+  const ptrCast = (x: Expr): x is Extract<Expr, { k: 'cast' }> => x.k === 'cast' && x.to.kind === 'ptr';
+  if (e.base.k === 'index' && ptrCast(e.base.base)) {
+    return qualifiedBase(e.base.base) ? e : { ...e, base: { ...e.base, base: { ...e.base.base, volatile: true } } };
+  }
+  if (ptrCast(e.base)) {
+    return qualifiedBase(e.base) ? e : { ...e, base: { ...e.base, volatile: true } };
+  }
+  return e;
+}
+
 /** How many stores this tree would qualify — the enumeration gate, so a function with no device
  *  store costs one walk and no candidate.
  *
