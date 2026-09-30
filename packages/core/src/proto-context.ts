@@ -480,6 +480,12 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     return out;
   };
   const found = new Map<string, FnProto | null>();
+  // a function one of whose declarations retypes a parameter with `mode`, which gives it the type
+  // the mode names in place of the one spelled (c-common.c:563): compiled, `int x
+  // __attribute__((mode(DI)))` takes a register pair. Its parameters are not read, in any
+  // declaration of it; its return is.
+  const unreadParams = new Set<string>();
+  const returnOnly = ({ params: _unread, ...rest }: FnProto): FnProto => rest;
   for (const s of stmts) {
     const attributes: string[] = [];
     const t = withoutAttributes(s.text, attributes)
@@ -496,15 +502,14 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     if (!m || /[(){}]/.test(m[1]) || TYPE_WORDS.has(m[2])) {
       continue;
     }
-    // `mode` gives a parameter the type it names in place of the one spelled (c-common.c:563),
-    // which this does not read: compiled, `int x __attribute__((mode(DI)))` takes a register pair
     if (attributes.some((a) => /\b(?:__)?mode(?:__)?\s*\(/.test(a))) {
-      found.set(m[2], null);
-      continue;
+      unreadParams.add(m[2]);
     }
-    const proto = readSignature(m[1], m[3], language, typedefs, (t) => layoutOf(t, 0));
+    const read = readSignature(m[1], m[3], language, typedefs, (t) => layoutOf(t, 0));
+    const proto = unreadParams.has(m[2]) ? returnOnly(read) : read;
     const prior = found.get(m[2]);
-    found.set(m[2], prior === undefined || same(prior, proto) ? proto : null);
+    const had = prior && unreadParams.has(m[2]) ? returnOnly(prior) : prior;
+    found.set(m[2], had === undefined || same(had, proto) ? proto : null);
   }
   const out: Prototypes = {};
   for (const [name, p] of found) {

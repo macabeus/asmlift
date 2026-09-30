@@ -326,13 +326,18 @@ describe('prototypes from a declaration context', () => {
   });
 
   // compiled, `f`'s `x` takes r0:r1 and `y` r2, as `long long x` would
-  test('a declaration whose attribute retypes a parameter with mode is not read', () => {
+  test('a declaration whose attribute retypes a parameter with mode keeps its return and no params', () => {
     const p = prototypesFromContext(
-      `void f(int x __attribute__((mode(DI))), int y); void g(int x __attribute__ ((__mode__ (__QI__)))); int mode(int);`,
+      `struct Big { int a, b, c; };
+       void f(int x __attribute__((mode(DI))), int y); void g(int x __attribute__ ((__mode__ (__QI__))));
+       struct Big mk(int x); struct Big mk(int x __attribute__((mode(SI)))); struct Big mk(int x);
+       int mode(int);`,
       'c',
     );
-    expect(p.f).toBeUndefined();
-    expect(p.g).toBeUndefined();
+    expect(p.f).toEqual({ returnsVoid: true });
+    expect(p.g).toEqual({ returnsVoid: true });
+    expect(p.mk?.returns).toBe('struct Big');
+    expect(p.mk?.params).toBeUndefined();
     expect(p.mode).toEqual({ returns: 'int', params: ['int'] });
   });
 
