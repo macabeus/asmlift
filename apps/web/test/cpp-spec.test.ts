@@ -3,7 +3,7 @@
 import { cppBackend } from '@asmlift/core/backend/cpp';
 import { T } from '@asmlift/core/ir/types';
 import { decompile } from '@asmlift/core/pipeline';
-import { MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '@asmlift/core/target';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test } from 'vitest';
@@ -391,6 +391,22 @@ test('o32: a trailing spec double over integer holes the body never reads binds'
   expect(decompile('o1__Fid', O1_IDO, MIPS_IDO, { backend: cppBackend(spec, MIPS_IDO.fpu?.slots) }).source).toBe(
     'int o1(int a, double d) {\n    return a;\n}\n',
   );
+});
+
+// A READ HALF IS NOT THE DOUBLE. agbcc passes a double in two integer registers, and `int u1(int a,
+// double d)` returning the first word of `d` through a union compiles to `add r0,r1,#0`: the lift
+// reads one 32-bit slot, and a spec `double` over it would print that word as the whole value.
+const U1_AGBCC = 'u1__Fid:\n\tadd\tr0, r1, #0\n\tbx\tlr\n';
+
+test('agbcc: a spec double over a 32-bit slot the body reads refuses, and the auto path falls back', () => {
+  const spec = specOf('u1', [
+    ['a', 'int'],
+    ['d', 'double'],
+  ]);
+  expect(() =>
+    decompile('u1__Fid', U1_AGBCC, ARMV4T_AGBCC, { backend: cppBackend(spec, ARMV4T_AGBCC.fpu?.slots) }),
+  ).toThrow(/floating-point parameters do not match/);
+  expect(cpp('u1__Fid', U1_AGBCC, ARMV4T_AGBCC)).toBe('int u1__Fid(int a0, int a1) {\n    return a1;\n}\n');
 });
 
 test('o32: a spec float over a lifted integer hole takes its one slot', () => {
