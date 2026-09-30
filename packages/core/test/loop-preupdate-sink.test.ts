@@ -32,12 +32,12 @@ import { defOpMap, dominators } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
-import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile, raiseRecovered } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { analyze } from '../src/structure/analysis';
 import { PREUPDATE_SINK_GATES } from '../src/structure/hazards';
 import { StructureError, structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, MIPS_GCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC, structureOptionsFor } from '../src/target';
 import { irAgreement } from './helpers';
 
 const emit = (ir: string): string => {
@@ -1032,4 +1032,37 @@ test('a divide in a block every iteration runs is named there when the loop exit
   expect(src).toMatch(
     /(v\d+) = a3 \/ (a\d+);\n\s+if \(\*a\d+ >= 4\) \*a\d+ = 0;[^]*\} while \(\2 != 0\);\n\s+a2 = \1 \+ 1;/,
   );
+});
+
+/** mwcc 2.4.2 `-O4,p`, `if (n <= 0) return 0; do { t = k / n; if (*q == 5) break; *q = n; r = t +
+ *  1; q++; } while (--n); return r + t;`. The `divw` sits in the loop's header, ahead of the `beq`
+ *  that leaves the loop: a test-at-top `while` whose condition has no seat for a name. */
+const DIVIDE_IN_EXITING_HEADER_MWCC = `ref.o:     file format elf32-powerpc
+
+
+Disassembly of section .text:
+
+00000000 <f>:
+   0:\tcmpwi   r4,0
+   4:\taddi    r6,r6,-1
+   8:\tbgt-    14 <f+0x14>
+   c:\tli      r3,0
+  10:\tblr
+  14:\tdivw    r7,r5,r4
+  18:\tlwz     r0,0(r3)
+  1c:\tcmpwi   r0,5
+  20:\tbeq-    38 <f+0x38>
+  24:\tstw     r4,0(r3)
+  28:\taddic.  r4,r4,-1
+  2c:\taddi    r6,r7,1
+  30:\taddi    r3,r3,4
+  34:\tbne+    14 <f+0x14>
+  38:\tadd     r3,r6,r7
+  3c:\tblr
+`;
+
+test('a divide in a header the loop leaves from is not named, and the loop lifts as a while', () => {
+  const src = decompile('f', DIVIDE_IN_EXITING_HEADER_MWCC, PPC_MWCC, { prototypes: { f: { params: 4 } } }).source;
+  expect(src).toContain('while (*v1 != 5) {');
+  expect(src).toMatch(/v\d+ = a2 \/ v\d+ \+ 1;/);
 });
