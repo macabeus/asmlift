@@ -319,8 +319,8 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
   const unsizedEnums = new Set<string>();
   // the enumerators of an enum wider than an int, which widen any enum that names one
   const wideEnumerators = new Set<string>();
-  // a typedef re-aligned a type after its layout (`realigns`), which moves the layout of whatever
-  // holds it, so no layout is read
+  // a typedef changed a type after its layout (`realigns`), which moves the layout of whatever holds
+  // it, so no layout is read
   let realigned = false;
   for (const s of stmts) {
     const def = /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*(struct|union)\s+([A-Za-z_]\w*)\s*\{\}/.exec(s.text);
@@ -525,11 +525,12 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
 
 // agbcc reads both spellings (c-parse.gperf:22-23)
 const ATTRIBUTE = /\b__attribute(?:__)?\b/;
+const ATTRIBUTE_AT = /\b__attribute(?:__)?\s*\(/;
 
 /** Whether an attribute in this statement can move the layout of the body it defines. One in the
  *  specifier — ahead of the body or straight after it — lays that body out (c-parse.in:1464-1503).
  *  One elsewhere on a variable reaches that variable alone; one elsewhere in a typedef is read as
- *  moving it too, whatever it says (`realigns` is what it may do). */
+ *  moving it too, whatever it says (`realigns` has what it may do). */
 function attributesLayout(text: string): boolean {
   if (/^typedef\b/.test(text)) {
     return ATTRIBUTE.test(text);
@@ -538,22 +539,39 @@ function attributesLayout(text: string): boolean {
   return body >= 0 && (ATTRIBUTE.test(text.slice(0, body)) || /^\{\}\s*__attribute(?:__)?\b/.test(text.slice(body)));
 }
 
-/** Whether a typedef in this statement may re-align, after its layout, a type no body here stands
- *  for. An `aligned` attribute outside a body's specifier is applied to the type the typedef names
- *  (c-common.c:392-396, 623-624): its own size stands, but anything that holds it is laid out anew.
- *  Where that type is the statement's own body, `attributesLayout` already leaves it unread; where
- *  it is a tag declared elsewhere, a pointer or a scalar such as `unsigned int`, which one it is is
- *  not worked out here. Compiled, `typedef struct R *RP __attribute__((aligned(8)))` makes `struct {
- *  struct R *p; }` 8 bytes. */
+/** Whether a typedef in this statement may change, after its layout, a type no body here stands for.
+ *  An attribute outside a body's specifier is applied to the type the typedef names (c-common.c:
+ *  392-399, 444-446, 623-624), whatever spelling it takes (`aligned`, `__aligned__`, :345-351): a
+ *  struct tag, a pointer or a scalar such as `unsigned int` is re-aligned, which lays anything that
+ *  holds it out anew, and an enum whose body comes later is packed. Compiled, `typedef struct R *RP
+ *  __attribute__((aligned(8)))` makes `struct { struct R *p; }` 8 bytes, and `typedef enum E EA
+ *  __attribute__((packed))` ahead of `enum E {…}` makes it 1. Which type that is, is not worked out
+ *  here. Where the statement's plain declarators name its own body, `attributesLayout` leaves that
+ *  body unread instead. */
 function realigns(text: string): boolean {
-  if (!/\btypedef\b/.test(text)) {
+  if (!/\btypedef\b/.test(text) || !ATTRIBUTE.test(text)) {
     return false;
   }
-  const spec = /\b(?:struct|union|enum)\b[^{;]*\{\}(?:\s*__attribute(?:__)?\s*\(\((?:[^()]|\([^()]*\))*\)\))*/.exec(
-    text,
+  const plain = withoutAttributes(text).replace(/\s+/g, ' ').trim();
+  const own = /^typedef (?:(?:const|volatile) )*(?:struct|union|enum)\b[^{]*\{\} ?(.*)$/.exec(plain);
+  return (
+    own === null || !/^(?:(?:const|volatile) )*[A-Za-z_]\w*(?: ?, ?(?:(?:const|volatile) )*[A-Za-z_]\w*)*$/.test(own[1])
   );
-  const rest = spec ? text.slice(0, spec.index) + text.slice(spec.index + spec[0].length) : text;
-  return /\b__attribute(?:__)?\s*\(\([^;]*\baligned\b/.test(rest) && (spec === null || rest.includes('*'));
+}
+
+/** The text with every `__attribute__((…))` taken out, its parentheses balanced. */
+function withoutAttributes(text: string): string {
+  let out = '';
+  let i = 0;
+  for (let m = ATTRIBUTE_AT.exec(text.slice(i)); m !== null; m = ATTRIBUTE_AT.exec(text.slice(i))) {
+    out += `${text.slice(i, i + m.index)} `;
+    let j = i + m.index + m[0].length;
+    for (let depth = 1; j < text.length && depth > 0; j++) {
+      depth += text[j] === '(' ? 1 : text[j] === ')' ? -1 : 0;
+    }
+    i = j;
+  }
+  return out + text.slice(i);
 }
 
 /** Whether agbcc may lay an enum with this body out wider than an int. It does for a value past 32
