@@ -339,11 +339,12 @@ export function auditFrameObjects({
       }
     }
     // The literal address a value denotes, or undefined when this cannot say. `const` is the
-    // bare pool word, `gaddr` is the same word after the symbol map named it, and `add` or `sub`
-    // of a constant, on either side, is the base+displacement form an interior attribution or a
-    // member access produces — spellings of one address, which is the point: the answer must not
-    // turn on which one the assembly happened to use. A runtime index is not a constant, and
-    // neither is a pointer loaded from memory, a parameter or a phi.
+    // bare pool word, `gaddr` is the same word after the symbol map named it, a constant shifted
+    // by a constant is the word agbcc builds without a pool (`mov r0, #0x80; lsl r0, #0x13` is
+    // 0x04000000), and `add` or `sub` of a constant, on either side, is the base+displacement
+    // form an interior attribution or a member access produces — spellings of one address, which
+    // is the point: the answer must not turn on which one the assembly happened to use. A runtime
+    // index is not a constant, and neither is a pointer loaded from memory, a parameter or a phi.
     const literalAddrOf = (v: Value, depth = 0): number | undefined => {
       const d = defOf.get(v);
       if (d === undefined || depth > 8) {
@@ -354,6 +355,11 @@ export function auditFrameObjects({
       }
       if (d.opcode === 'gaddr') {
         return addrOfName.get(d.attrs.sym as string) ?? undefined;
+      }
+      if (d.opcode === 'shl') {
+        const shifted = constOfValue(d.operands[0]);
+        const by = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : constOfValue(d.operands[1]);
+        return shifted === undefined || by === undefined || by < 0 || by > 31 ? undefined : (shifted << by) >>> 0;
       }
       if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
         const [x, y] = d.operands;

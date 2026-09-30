@@ -3113,6 +3113,26 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  // A device address agbcc builds without a pool word is placed too: 0x04000000 is `mov #0x80;
+  // lsl #0x13`. Verbatim agbcc, two fills whose control nothing bounds, then `REG_DISPCNT = 0x80;
+  // gY = 5; REG_DISPCNT = d;`: spelled plain, the recompile drops the first DISPCNT store (11 -> 10).
+  test('a shift-built device address is pinned', () => {
+    const shiftBuilt =
+      'o4:\n\tpush\t{r4, r5, r6, lr}\n\tmov\tr6, r8\n\tpush\t{r6}\n\tadd\tsp, sp, #-0x8\n' +
+      '\tlsl\tr2, r2, #0x10\n\tlsr\tr2, r2, #0x10\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tldr\tr6, .L3\n\tstr\tr4, [r6]\n\tldr\tr5, .L3+0x4\n\tldr\tr4, .L3+0x8\n' +
+      '\tstr\tr4, [r5]\n\tldr\tr3, .L3+0xc\n\tstr\tr0, [r3]\n\tmov\tr0, #0x5\n\tmov\tr8, r0\n' +
+      '\tstr\tr0, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r6]\n\tstr\tr4, [r5]\n' +
+      '\tstr\tr1, [r3]\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x13\n\tmov\tr0, #0x80\n' +
+      '\tstrh\tr0, [r1]\n\tldr\tr0, .L3+0x10\n\tmov\tr3, r8\n\tstr\tr3, [r0]\n\tstrh\tr2, [r1]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n' +
+      '\t.word\tgDst\n\t.word\t0x40000dc\n\t.word\tgY\n';
+    expect(decompile('o4', shiftBuilt, ARMV4T_AGBCC).source).toContain(
+      '    *(volatile u16 *)(128 << 19) = 128;\n    gY = 5;\n    *(volatile u16 *)(128 << 19) = a2;\n',
+    );
+  });
+
   // one address-taken halfword frame object published to a DMA register — the shape that mints
   // an `sp<off>` name, reused by the two shadowing tests below
   const declaresSp0 =
