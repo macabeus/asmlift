@@ -3541,6 +3541,32 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int callee(int); int spill10(int k, int *p);',
     proto: { callee: { params: 1 } },
   },
+  // `spillarg` is `spill10` with a genuine outgoing argument under the spills: `five(i, 1, 2, 3,
+  // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
+  // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
+  // word) and the staged words disagree until the words reloaded after the call are read as the
+  // locals they are — the licence's NOTHING EXTRA, bounded by `survivorBound`. It is the row that
+  // bound protects: without it the row declines on `[sp,#12], … also reaches the call unread`, and
+  // the winner must keep `five(…, v0)`'s fifth argument. m2c noncompiles it (`request for member
+  // \`unk0' in something not a structure or union`).
+  {
+    sym: 'spillarg',
+    src:
+      'int five(int a, int b, int c, int d, int e);\n' +
+      'int one(int);\n' +
+      'int spillarg(int k, int *p) {\n' +
+      '    int v0, v1, v2, v3, v4, v5, v6, v7, v8, v9; int i, s = 0;\n' +
+      '    v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9];\n' +
+      '    for (i = 0; i < k; i++) {\n' +
+      '        s += five(i, 1, 2, 3, v0) + one(i) + v0 * 3 + v1 * 5 + v2 * 7 + v3 * 11 + v4 * 13 + v5 * 17 + v6 * 19 + v7 * 23 + v8 * 29 + v9 * 31;\n' +
+      '    }\n' +
+      '    return s;\n' +
+      '}',
+    features: ['multi-arg', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'int five(int a, int b, int c, int d, int e); int one(int); int spillarg(int k, int *p);',
+    proto: { five: { params: 5 }, one: { params: 1 } },
+  },
 
   // WHERE A CONSTANT OFFSET LIVES. The value-home family above asks which register or slot holds a
   // value; this one asks whether a constant ADDED to it is part of the home or part of each use.
