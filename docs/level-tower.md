@@ -781,7 +781,10 @@ parameters from the argument registers names the pointer as the first of them, a
 it is wider than a word or has a second member that is not a bitfield (thumb.c:1423-1493), passes
 the address in r0 and shifts the arguments (thumb.h:644-645, 672); mwcc hands back up to eight
 bytes in r3/r3:r4 and passes a pointer in r3 past that. `compilerBehaviors.aggregateReturn`,
-`aggregateBoundary` and `largestAlignment` state it, and `aggregate.ts` is the one reading of them:
+`aggregateBoundary` and `largestAlignment` state it, with `enumBytes` and `bitfieldPacking` for the
+members whose size or place is the compiler's (agbcc states both; a float is 4 bytes and a double 8
+everywhere, a storage size that is not `declaredWidth`'s register count). `aggregate.ts` is the one
+reading of them:
 `returnsInMemory`, asked by the call lowering, and `returnsWithoutHiddenPointer`, asked by the
 frame-object audit, so the two cannot disagree about one call.
 
@@ -792,8 +795,9 @@ and `returnLayout` state it — from a context's declaration and the struct it d
 symbol map by size alone (a layout with no members), or from `--proto`.
 
 **L1 — the call's value is the struct.** A memory return types the call's result as the declared
-struct, laid out on the target (`aggregateType`), and `attrs.sret` says argument 0 is where it
-lands; the frame temp's `laddr` is a pointer to it. A register return keeps the declared arguments
+struct, laid out on the target (`aggregateType`), with a field for each member the IR can type and
+none for the rest (a nested aggregate, a bitfield, an enum, a plain `char`); `attrs.sret` says
+argument 0 is where it lands; the frame temp's `laddr` is a pointer to it. A register return keeps the declared arguments
 where they are and writes no value: its bytes are a struct, so the return register is listed as
 destroyed, a read of it refuses, and a guessed arity after the call does not take it.
 
@@ -801,20 +805,21 @@ destroyed, a read of it refuses, and a guessed arity after the call does not tak
 `wide64`), and the temp is a local declared with the headers' own spelling of the type:
 `struct Blob64 sp0; sp0 = makeblob(&gBlob);`, or `BlobT sp0;` for a tagless typedef. The struct is
 the headers' type (`ir/types.ts` `declared`), so the lifted source never defines it: the
-declarations block does, beside the callee's prototype (declare.ts), and a candidate compiled
+declarations block does, beside the callee's prototype, transcribed from the declaration's own
+members rather than from the IR's fields (declare.ts `declaredStructDecl`), and a candidate compiled
 inside the project's headers drops that block.
 
 **What refuses, and why each refusal is where it is.**
 
-| level       | refusal                                                                                   | because                                                              |
-| ----------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| frontend    | a declared struct return whose members are not all known, or a target that states no rule | where the pointer goes decides where every argument is read from     |
-| frontend    | a memory return whose parameters nothing sizes                                            | a guessed arity reads from argument 0, which holds the pointer       |
-| frontend    | a memory-returned struct with a union, nested aggregate, bitfield or plain `char` member  | the local it lands in has no IR type                                 |
-| frontend    | a pointer at argument 0 that is not a local of this frame                                 | a struct returned into a global or through a pointer is not modelled |
-| frontend    | PowerPC: a memory return                                                                  | only the register return is lowered there                            |
-| frame audit | a read, a write or any other use of the return temp                                       | a member of a returned struct is not modelled                        |
-| frontend    | the return register read after a struct came back in it                                   | its bytes are a struct, not a word this function named               |
+| level       | refusal                                                                                                               | because                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| frontend    | a declared struct return whose members are not all known or not sized on this target, or a target that states no rule | where the pointer goes decides where every argument is read from     |
+| frontend    | a memory return whose parameters nothing sizes                                                                        | a guessed arity reads from argument 0, which holds the pointer       |
+| frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
+| frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
+| frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
+| frame audit | a read, a write or any other use of the return temp                                                                   | a member of a returned struct is not modelled                        |
+| frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
 
 **What is NOT built.** Member reads of a returned struct: most of them decline in the Thumb slot
 model (`stack pointer used as data`) before the frame audit is asked, so building them in
