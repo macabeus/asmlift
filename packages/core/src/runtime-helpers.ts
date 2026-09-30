@@ -152,10 +152,15 @@ export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> 
  *  operand SET-UP instead — `asr rN,rM,#31` per half for signed, `mov rN,#0` for unsigned. The
  *  DIVISIONS do split, and their entries say so.
  *
- *  THE SOFT-FLOAT HELPERS ARE NOT HERE, deliberately. asmlift has no float model to fold one into,
- *  so naming `__addsf3` would decline every function that adds two floats where today it publishes
- *  `__addsf3()` — a pass-through, and one that scores against a call the machine made with two
- *  arguments. That is a trade to make with a measurement of the float rows, not on the way past. */
+ *  THE DOUBLE ARITHMETIC IS HERE, AND NOTHING ELSE OF THE SOFT FLOAT. `optabs.c:4022`
+ *  `init_floating_libfuncs` names DFmode's add, sub, mul, div (4129-4140) and neg (4155), and
+ *  `thumb.md` has no DF pattern but the move, so every one of them is a call; the ABI is a long
+ *  long's (thumb.h:632, 655). `raise/widehelpers.ts` folds them to the float ops over a `double`.
+ *  The single-precision helpers, and the compares (`__gtdf2`…) and conversions (`__floatsidf`…)
+ *  of both, stay out: the IR has no int<->float op to fold a compare or a conversion into, and
+ *  naming one would decline every function that uses it where today it publishes a pass-through
+ *  (`__addsf3()`). That is a trade to make with a measurement of the float rows, not on the way
+ *  past. */
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
@@ -174,6 +179,12 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __ashrdi3: { op: 'shr_s', params: [64, 32], returns: 64 },
   __lshrdi3: { op: 'shr_u', params: [64, 32], returns: 64 },
   __negdi2: { op: 'neg', params: [64], returns: 64 },
+  // Double arithmetic, which the same pair carries (`raise/widehelpers.ts` `foldDoubleHelpers`).
+  __adddf3: { op: 'fadd', params: [64, 64], returns: 64 },
+  __subdf3: { op: 'fsub', params: [64, 64], returns: 64 },
+  __muldf3: { op: 'fmul', params: [64, 64], returns: 64 },
+  __divdf3: { op: 'fdiv', params: [64, 64], returns: 64 },
+  __negdf2: { op: 'fneg', params: [64], returns: 64 },
 };
 
 /** CodeWarrior's PowerPC runtime (`Runtime.PPCEABI.H`), as the GameCube projects vendor it.

@@ -3809,9 +3809,9 @@ function liftOnce(
         isReg: isThumbReg,
         normalize: reg,
         // ARMv4T HAS NO FPU, and that is a decision rather than an omission — the fields are
-        // required so it has to be written down. agbcc routes every `float` through the soft-float
-        // helpers (`__addsf3` and friends), which asmlift models as ordinary calls, so a GBA float
-        // never reaches this path as an instruction at all.
+        // required so it has to be written down. agbcc routes every `float` and `double` through the
+        // soft-float helpers (`__addsf3`, `__adddf3` and friends), which reach the lift as calls, so
+        // a GBA float never reaches this path as an instruction at all.
         fpReg: null,
         fpControl: null,
         storeClass: /^(str|stm)/i,

@@ -654,4 +654,24 @@ export const FIXTURES: DecompFixture[] = [
     expectMatch: false,
     note: 'address-taken frame local (laddr): capture hoisted, store through it, address escapes',
   },
+  // agbcc's double arithmetic is libgcc calls over register pairs (raise/widehelpers.ts
+  // `foldDoubleHelpers`); a double past the registers arrives in the caller's stack words.
+  {
+    symbol: 'dadd',
+    referenceC: 'double dadd(double a, double b){ return a + b; }',
+    expectSource: 'double dadd(double a0, double a1) {\n    return a0 + a1;\n}\n',
+    note: 'soft double: __adddf3 is a + b over two doubles',
+  },
+  {
+    symbol: 'dneg',
+    referenceC: 'double dneg(double a){ return -a; }',
+    expectSource: 'double dneg(double a0) {\n    return -a0;\n}\n',
+    note: 'soft double: __negdf2 is a negation',
+  },
+  {
+    symbol: 'dchain',
+    referenceC: 'double dchain(double a, double b, double c){ return (a + b) * c; }',
+    expectSource: 'double dchain(double a0, double a1, double a2) {\n    return (a0 + a1) * a2;\n}\n',
+    note: "soft double: one helper's result is the next one's operand, a third double on the stack",
+  },
 ];

@@ -13,15 +13,18 @@
 // The signedness of the OPERATION comes from the helper name where the name splits it
 // (`__divdi3`/`__udivdi3`) and from the operands where it does not — agbcc's `__muldi3` serves
 // both spellings, so nothing here may read a signedness off it. See the table's own note.
-import { Fn, mkOp } from '../ir/core';
-import { arrivesAsDeclared, helperOp, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { FLOAT_OPS } from '../ir/opcodes';
+import { T } from '../ir/types';
+import { type RuntimeHelper, arrivesAsDeclared, helperOp, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
+import { isArgumentPair } from './pairparams';
 
 /** Rewrite each recognised 64-bit helper call to the op it computes, in place. Returns whether
  *  anything changed. Runs BEFORE type recovery, so the operands get their signedness there. */
 export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean {
   const table = target.runtimeHelpers ?? {};
-  let changed = false;
+  let changed = foldDoubleHelpers(fn, table);
   for (const b of fn.blocks) {
     for (let i = 0; i < b.ops.length; i++) {
       const op = b.ops[i];
@@ -29,7 +32,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
         continue;
       }
       const helper = lookupHelper(table, String(op.attrs.target));
-      if (!helper?.op || !isWideHelper(helper)) {
+      if (!helper?.op || !isWideHelper(helper) || FLOAT_OPS.has(helper.op)) {
         continue;
       }
       // ITS C PARAMETERS AT THEIR STATED WIDTHS, not its argument registers and not their count:
@@ -56,6 +59,116 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
     }
   }
   return changed;
+}
+
+/** Rewrite the double-arithmetic helper calls to the float ops over `double`s, in place. Returns
+ *  whether anything changed.
+ *
+ *  A PAIR CARRIES A DOUBLE'S BITS, AND ONLY DATA FLOW MAY READ THEM AS ONE. The frontend builds the
+ *  pair the way it builds a long long's, `concat(lo = r0, hi = r1)`, but agbcc stores a double
+ *  high word first (thumb.h:335 `FLOAT_WORDS_BIG_ENDIAN`): r0 holds the sign and exponent. Moving
+ *  the pair whole keeps it right, so a double may come only from where the ABI hands one over
+ *  whole — two consecutive argument slots of this function, or another of these helpers' results
+ *  — and may go only into another of them or the return. Anything else refuses, and the call stays
+ *  for `refuseUnmodelledHelpers` to gap:
+ *   - an operand pair built from a literal, a load, or two unrelated words, whose halves the int64
+ *     naming would put in the wrong order (`a + 1.5` stages `0x3ff80000` in r2);
+ *   - an argument half the function also reads on its own, or two slots that are not consecutive;
+ *   - a result read as a word or a half (`*(int *)&c` is the HIGH word, in r0), passed to any other
+ *     call, or carried across an edge.
+ *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
+ *  set of doubles and verify's float rule holds by construction. */
+function foldDoubleHelpers(fn: Fn, table: Readonly<Record<string, RuntimeHelper>>): boolean {
+  let sites: Op[] = [];
+  const def = new Map<Value, Op>();
+  const users = new Map<Value, Array<Op | null>>(); // null: an edge argument
+  const use = (v: Value, by: Op | null) => users.set(v, [...(users.get(v) ?? []), by]);
+  for (const block of fn.blocks) {
+    for (const op of block.ops) {
+      op.results.forEach((r) => def.set(r, op));
+      op.operands.forEach((o) => use(o, op));
+      op.successors.forEach((s) => s.args.forEach((a) => use(a, null)));
+      const helper = op.opcode === 'call' ? lookupHelper(table, String(op.attrs.target)) : undefined;
+      if (
+        helper?.op &&
+        FLOAT_OPS.has(helper.op) &&
+        arrivesAsDeclared(
+          helper,
+          op.operands.map((o) => o.type),
+          op.results.map((r) => r.type),
+        )
+      ) {
+        sites.push(op);
+      }
+    }
+  }
+  if (!sites.length) {
+    return false;
+  }
+  // A projection nothing reads is not a read of a half: without an idiom fold ahead of this pass
+  // nothing has run `dce` since the frontend split the result back into its registers.
+  const deadHalf = (u: Op | null) =>
+    u !== null && (u.opcode === 'lo32' || u.opcode === 'hi32') && !users.has(u.results[0]);
+  const entry = fn.blocks[0].params;
+  const argPair = (v: Value, calls: ReadonlySet<Op>): boolean => {
+    const d = def.get(v);
+    return (
+      d !== undefined &&
+      isArgumentPair(entry, d, (p) => users.get(p)?.length ?? 0) &&
+      users.get(v)!.every((u) => u !== null && calls.has(u))
+    );
+  };
+  const fromCall = (v: Value, calls: ReadonlySet<Op>) => {
+    const d = def.get(v);
+    return d !== undefined && calls.has(d);
+  };
+  for (;;) {
+    const calls = new Set(sites);
+    const kept = sites.filter(
+      (op) =>
+        op.operands.every((o) => argPair(o, calls) || fromCall(o, calls)) &&
+        (users.get(op.results[0]) ?? []).every(
+          (u) => deadHalf(u) || (u !== null && (calls.has(u) || u.opcode === 'ret')),
+        ),
+    );
+    if (kept.length === sites.length) {
+      break;
+    }
+    sites = kept;
+  }
+  if (!sites.length) {
+    return false;
+  }
+  const calls = new Set(sites);
+  const double = new Map<Value, Value>();
+  for (const op of sites) {
+    for (const o of op.operands) {
+      const d = def.get(o)!;
+      if (d.opcode === 'concat' && !double.has(o)) {
+        // One parameter in the LOW slot's place, which is where the ABI put the double.
+        const whole = mkValue(T.f64());
+        entry.splice(entry.indexOf(d.operands[0]), 2, whole);
+        double.set(o, whole);
+      }
+    }
+    double.set(op.results[0], mkValue(T.f64()));
+  }
+  for (const block of fn.blocks) {
+    block.ops = block.ops.flatMap((op) => {
+      if (calls.has(op)) {
+        const helper = lookupHelper(table, String(op.attrs.target))!;
+        return [
+          mkOp(helper.op!, { operands: op.operands.map((o) => double.get(o)!), results: [double.get(op.results[0])!] }),
+        ];
+      }
+      const retired = op.results.length === 1 && double.has(op.results[0]);
+      return retired || (deadHalf(op) && double.has(op.operands[0])) ? [] : [op];
+    });
+  }
+  for (const [was, now] of double) {
+    replaceAllUsesWith(fn, was, now);
+  }
+  return true;
 }
 
 /** Turn every surviving call to one of the target's runtime helpers into a gap. Returns whether

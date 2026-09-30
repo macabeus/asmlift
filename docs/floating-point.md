@@ -5,8 +5,9 @@ PowerPC EABI — `add.s`/`sub.s`/`mul.s`/`div.s`/`neg.s`/`mov.s` and `fadds`/`fs
 `fneg`/`fmr` — through each ABI's float argument and return homes, and nothing else in that file.
 §6 says what is built and what the next layer is; `docs/level-tower.md` ("A float, across the
 tower") carries the refusal table. Every other FPU instruction declines, naming the register file.
-On the GBA none of this shows up at all, because agbcc routes every `float` through soft-float
-helper calls that asmlift already models as ordinary calls.
+On the GBA none of this shows up at all, because agbcc routes every `float` and `double` through
+soft-float helper calls; asmlift folds the double arithmetic ones to float ops (§6) and passes the
+rest through as ordinary calls.
 
 This document exists because hardware floating point is the largest single gap between asmlift and
 m2c, and because the obvious first move — decode the FPU instructions — is the wrong one. It
@@ -313,3 +314,13 @@ lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; re
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
 from the value that reaches each `ret`. After it: doubles and `frsp`, the
 int/float conversions, and the compares and `bc1t`/`bc1f`, the fifth thing §1 named.
+
+**A double on agbcc is the same type without the file.** agbcc has no FPU and emits every `double`
+operation as a libgcc call over the register pairs a long long uses (`optabs.c:4022`, `thumb.h:632`,
+`:655`), so the arithmetic ones — `__adddf3`, `__subdf3`, `__muldf3`, `__divdf3`, `__negdf2` — fold to
+the float ops over an `f64` in `raise/widehelpers.ts`, and `synthetic:dadd:agbcc` is its row. A double
+reaches the fold only whole: `FLOAT_WORDS_BIG_ENDIAN` (`thumb.h:335`) puts its high word in the lower
+register, so a literal, a load, a store or a read of one word refuses (`test/soft-double.test.ts`). The
+compares and the conversions (`__gtdf2`, `__floatsidf` …) and every single-precision helper stay
+ordinary calls: the IR has no int<->float op to fold them into, and naming one would decline the
+functions that pass through today.
