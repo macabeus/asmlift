@@ -71,7 +71,7 @@ export interface FrameEscape {
   readonly slotReached: { readonly slot: number; readonly above: boolean } | undefined;
   /** the function holds an `undef` of a frame slot */
   readonly frameUndef: boolean;
-  /** the lowest owned word no object and no slot accounts for */
+  /** the lowest owned word inside that reach that no object and no slot accounts for */
   readonly unaccountedWord: number | undefined;
 }
 
@@ -183,22 +183,26 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // What licenses an answer is the frame being ACCOUNTED FOR, word by word. Every word of the
   // reserved local area has to be an object this audit modelled or a slot the slot model keys;
   // a word that is neither is storage nothing here describes, so the emitted C reserves less
-  // than the machine did and the writer reaches past what it allocated. Whole local area and
-  // not only the words above the object: a word below it is still frame the declaration has to
-  // account for. Word granularity, not byte — the stack is word-aligned, so a halfword object
+  // than the machine did and the writer reaches past what it allocated. A writer reaches the
+  // whole local area and not only the words above the object: a word below it is still frame
+  // the declaration has to account for. Word granularity, not byte — the stack is word-aligned, so a halfword object
   // owns its word and the padding beside it is not a second local.
   //
-  // On a WRITER, as the undef rule is: a device SOURCE register reads through the address and
-  // cannot write the frame back, and an unwritten word it reads holds nothing.
+  // …and on a READER as far as it reads, since a read past the object copies frame bytes the
+  // source reserved and the recompile does not. `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`
+  // reads the sixteen bytes its control word names, and a DMA copy incrementing from `buf` reads
+  // every word above it; lifted as `u16 sp0`, the recompile's frame is four bytes wide and the
+  // transfer copies the saved `lr` and the caller's frame out with it. A read unbounded both ways
+  // meets this rule only beside a writer, which reaches the same word: alone, the audit keeps the
+  // local area as one object instead (`oneObjectOnOffer`).
   //
-  // WHAT IT LEAVES, since this is the extent question the gate comment above is about: a
-  // `mayWrite` escape is accepted only where the modelled objects and the keyed slots tile the
-  // reserved area between them — a word above the object is a slot (refused above), a second
-  // object (refused above), or unaccounted (refused here). That is not a wider extent model; it
-  // is the same one-scalar `extent`, made to say when it does not fit. An object of two words
-  // cannot be built here at all — the second access that would reach it is a `[+4]` the
-  // `scalar()` guard refuses — so no widening of the frame licence admits a shape this rule
-  // would then have to judge.
+  // WHAT IT LEAVES, since this is the extent question the gate comment above is about: an escape
+  // is accepted only where the modelled objects and the keyed slots tile the reserved area it
+  // reaches — a word above the object is a slot (refused above), a second object (refused above),
+  // or unaccounted (refused here). That is not a wider extent model; it is the same one-scalar
+  // `extent`, made to say when it does not fit. An object of two words cannot be built here at
+  // all — the second access that would reach it is a `[+4]` the `scalar()` guard refuses — so no
+  // widening of the frame licence admits a shape this rule would then have to judge.
   //
   // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
   // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
@@ -206,11 +210,11 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
   // that reaches memory rather than a callee, and the callee's declared return.
   {
-    id: 'writer-over-unaccounted-word',
-    why: 'a writer reaching a frame word no declaration covers writes past what the recompile allocates',
+    id: 'reaches-an-unaccounted-word',
+    why: 'an escape reaching a frame word no declaration covers reaches past what the recompile allocates',
     sound: true,
     guardedBy: 'thumb-frontend.test.ts: an array whose top nothing bounds declines rather than shrinking the frame',
-    rejects: (e) => e.writes && e.unaccountedWord !== undefined,
+    rejects: (e) => e.unaccountedWord !== undefined,
   },
 ];
 
@@ -1543,10 +1547,14 @@ export function auditFrameObjects({
     for (const slot of usedSlotOffsets) {
       accountedWords.add(slot - (slot % 4));
     }
-    let unaccountedWord: number | undefined;
-    for (let w = owned.from; w < owned.to && unaccountedWord === undefined; w += 4) {
-      unaccountedWord = accountedWords.has(w) ? undefined : w;
-    }
+    const unaccountedIn = (lo: number, hi: number): number | undefined => {
+      for (let w = owned.from; w < owned.to; w += 4) {
+        if (!accountedWords.has(w) && w < hi && w + 4 > lo) {
+          return w;
+        }
+      }
+      return undefined;
+    };
     const escapes: FrameEscape[] = [...escaped].map((off) => {
       const { lo, hi, why } = windowOf.get(off)!;
       const writes = mayWrite.has(off);
@@ -1575,7 +1583,7 @@ export function auditFrameObjects({
         objectReached: objectReached?.[0],
         slotReached,
         frameUndef,
-        unaccountedWord,
+        unaccountedWord: unaccountedIn(off + lo, off + hi),
       };
     });
     const escapeRefusal = (id: string, e: FrameEscape): string => {
@@ -1596,14 +1604,15 @@ export function auditFrameObjects({
         default:
           return (
             `the word at [sp,#${e.unaccountedWord}] is neither an object this lift models nor a slot it keys, ` +
-            'and the captured address reaches something that may write it — nothing accounts for the ' +
+            `and the captured address reaches something that may ${e.writes ? 'write' : 'read'} it — nothing accounts for the ` +
             "rest of the frame, so nothing bounds the captured object's extent"
           );
       }
     };
     // …unless the one-object answer is on offer (every escape only READS and one of them reads
     // without bound) and the per-object model does not describe the frame: it refused a shape, an
-    // object sits over a slot, or the unbounded read reaches another object or a slot. Then what
+    // object sits over a slot, or the unbounded read reaches another object, a slot or a word
+    // nothing accounts for. Then what
     // the device may read is kept rather than refused: lift again with the local area as one object
     // in memory (`oneObject` above). Below the local area are the outgoing arguments and above it
     // the saved registers, neither of them an object. Where the per-object model does describe the
@@ -1614,7 +1623,9 @@ export function auditFrameObjects({
         overSlot.length > 0 ||
         escapes.some(
           (e) =>
-            e.lo === -Infinity && e.hi === Infinity && (e.objectReached !== undefined || e.slotReached !== undefined),
+            e.lo === -Infinity &&
+            e.hi === Infinity &&
+            (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined),
         ))
     ) {
       return { oneObject: { from: declared.from, to: declared.to } };

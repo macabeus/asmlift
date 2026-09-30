@@ -120,11 +120,11 @@ describe('the gate census seam', () => {
     const uninstall = pass.install(wrapped.map((w) => w.gates));
     expect(FRAME_OBJECT_AUDIT.run).not.toBe(before);
     lift();
-    expect(wrapped[0].refusals()).toEqual([['writer-over-unaccounted-word', 1]]);
+    expect(wrapped[0].refusals()).toEqual([['reaches-an-unaccounted-word', 1]]);
     uninstall();
     expect(FRAME_OBJECT_AUDIT.run).toBe(before);
     lift();
-    expect(wrapped[0].refusals()).toEqual([['writer-over-unaccounted-word', 1]]);
+    expect(wrapped[0].refusals()).toEqual([['reaches-an-unaccounted-word', 1]]);
   });
 
   it('refuses a pass it cannot reach, rather than censusing zero', () => {

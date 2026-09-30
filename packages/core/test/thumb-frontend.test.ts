@@ -1248,6 +1248,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(() => decompile('f', fast, ARMV4T_AGBCC)).toThrow(/which may read the slot at \[sp,#4\]/);
     });
 
+    test('a copy that reads past its object into a word nothing accounts for declines', () => {
+      // `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`: sixteen bytes read, two of them declared
+      const wide = (count: string) =>
+        'r1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr1, .L3\n\tmov\tr0, sp\n' +
+        `\tmov\tr2, #${count}\n\tbl\tCpuSet\n\tadd\tsp, sp, #0x10\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n` +
+        '\t.word\tgDst\n';
+      expect(() => decompile('r1', wide('0x8'), ARMV4T_AGBCC)).toThrow(
+        /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys, and the captured address reaches something that may read it/,
+      );
+      // CONTROL: two halfwords stay inside the object's own word, and the frame's other words are
+      // read by nothing
+      expect(decompile('r1', wide('0x2'), ARMV4T_AGBCC).source).toContain('CpuSet(&sp0, &gDst, 2);');
+      // …and a DMA copy that increments from `buf` reads every word above it: `REG_DMA3SAD =
+      // (u32)buf; REG_DMA3DAD = (u32)gDst; REG_DMA3CNT = 0x80000008;`
+      const dma =
+        'd1:\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr0, .L15\n\tstr\tr1, [r0]\n' +
+        '\tldr\tr1, .L15+0x4\n\tldr\tr0, .L15+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n\tldr\tr0, .L15+0xc\n' +
+        '\tstr\tr0, [r1]\n\tadd\tsp, sp, #0x10\n\tbx\tlr\n.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t0x40000d4\n' +
+        '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7ffffff8\n';
+      expect(() => decompile('d1', dma, ARMV4T_AGBCC)).toThrow(
+        /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys, and the captured address reaches something that may read it/,
+      );
+    });
+
     test('a frame address the transfer writes through is a writer, as any callee is', () => {
       // `CpuSet((void *)&a, (void *)&b, 0x01000002); CpuSet((void *)&b, gB, 0x05000008);`
       const asDest =
