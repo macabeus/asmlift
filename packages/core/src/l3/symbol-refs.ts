@@ -16,7 +16,7 @@
 // to recompute it (a dead-store DCE that drops a tree's only reference would otherwise leave a
 // stale ref, transitively reintroducing the hazards the collector excludes). Deriving at the
 // consumption point makes staleness impossible by construction.
-import { type ParamType, type Prototypes, spellableProto } from '../proto';
+import { type Prototypes, type SpelledProto, spellableProto } from '../proto';
 import type { SymbolInfo } from '../symbols';
 import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
 
@@ -54,7 +54,7 @@ export interface SymbolRef {
    *  something other than code — two facts that disagree are not one fact — and that subtraction
    *  happens at the table (`proto.ts` `prototypesFromSymbols`), so the frontend loses the same
    *  fact in the same place rather than acting on one this withheld. */
-  proto?: { readonly params: readonly ParamType[]; readonly returns: ParamType };
+  proto?: SpelledProto;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the

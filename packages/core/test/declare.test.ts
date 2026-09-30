@@ -245,3 +245,14 @@ test('two struct refs sharing a tag declare it once; overlapping (union) members
   ]);
   expect(out).toBe('struct Shared { u32 x; };\nextern struct Shared gA;\nextern struct Shared gB;\n');
 });
+
+test('a callee returning a struct by value is declared after the struct, once per tag', () => {
+  const blob = { params: ['const void *'], returns: 'struct Blob64', definition: 'struct Blob64 { u32 w[16]; };' };
+  const out = renderDeclarations([
+    { name: 'makeblob', info: { name: 'makeblob', kind: 'code' }, proto: blob },
+    { name: 'makeblob2', info: { name: 'makeblob2', kind: 'code' }, proto: blob },
+  ]);
+  expect(out).toBe(
+    'struct Blob64 { u32 w[16]; };\nstruct Blob64 makeblob(const void *);\nstruct Blob64 makeblob2(const void *);\n',
+  );
+});

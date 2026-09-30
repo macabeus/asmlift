@@ -251,9 +251,18 @@ function spellsAccessType(declared: boolean | undefined, width: number, signed: 
  *  no access pins an element type there, so the audit stamps bytes and this declares the array
  *  that spells them. Both arms are the audit's own facts; neither infers anything here. */
 function laddrType(op: Op): IrType {
+  if (typeof op.attrs.aggregate === 'string') {
+    return declaredStruct(op.attrs.aggregate, op.attrs.count as number);
+  }
   const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
   const count = op.attrs.count as number;
   return count === 1 ? elem : T.array(elem, count);
+}
+
+/** A struct a declaration names (`struct Tag`), whose members are the declaration's to state: the
+ *  type a return temp is declared with, and the destination type of the call that fills it. */
+function declaredStruct(spelling: string, size: number): IrType {
+  return T.struct(spelling.replace(/^struct\s+/, ''), [], size);
 }
 
 /** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
@@ -4243,6 +4252,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         fn: d.attrs.target as string,
         args: d.operands.map(e),
         ...(wide64 ? { wide64: true as const } : {}),
+        ...(typeof d.attrs.sret === 'string' ? { sret: declaredStruct(d.attrs.sret, d.attrs.sretSize as number) } : {}),
       };
     }
     if (d.opcode === 'laddr') {

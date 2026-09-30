@@ -89,6 +89,11 @@ function makePrinter(vt: VarTypes) {
       case 'const':
         return String(e.value);
       case 'call':
+        if (e.sret !== undefined) {
+          throw new Error(
+            `pascal backend: the call to '${e.fn}' returns a struct through memory, which has no spelling here`,
+          );
+        }
         return `${e.fn}(${e.args.map(pe).join(', ')})`;
       case 'index': {
         // The width-carrying access node (l3/ast.ts): each backend legalizes its own derefs. The

@@ -10,7 +10,7 @@
 // below the signature is this file's: declarations, statements, expressions, precedence, the
 // legalizing casts, and the recovered-struct declaration spelling (which is why that lives here
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
-import { IrType, T, scalarTypeForAccess, typeToString } from '../ir/types';
+import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
@@ -323,6 +323,9 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return parentPrec < 2 ? `(${g})` : g;
     }
     case 'call': {
+      if (e.sret !== undefined) {
+        throw new Error(`the call to '${e.fn}' returns a struct through memory and is spelled only as a statement`);
+      }
       const declared = vt.declaredArgs(e.fn);
       return `${e.fn}(${e.args
         .map((a, i) => {
@@ -437,6 +440,19 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
   }
 }
 
+/** `dest = fn(args)` for a call whose `args[0]` is the address of the struct it returns: a local
+ *  declared with that struct type, named by its address. Any other destination has no spelling
+ *  that hands the callee the same pointer — compiled, `*(struct Blob64 *)&gDst = makeblob(gBlob);`
+ *  is a frame temp and a `memcpy`, where `gDst = makeblob(gBlob);` hands over `&gDst` itself. */
+function structReturnCall(call: Extract<Expr, { k: 'call' }>, vt: PrintEnv, leaf?: LeafHook): string {
+  const [dest, ...rest] = call.args;
+  const declared = dest?.k === 'addr' ? vt.type(dest.name) : undefined;
+  if (dest?.k !== 'addr' || declared === undefined || !typeEquals(declared, call.sret!)) {
+    throw new Error(`the call to '${call.fn}' returns a struct into something other than a local of its type`);
+  }
+  return `${dest.name} = ${printExpr({ k: 'call', fn: call.fn, args: rest }, 99, vt, leaf)}`;
+}
+
 function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): string[] {
   const pe = (e: Expr, p: number) => printExpr(e, p, vt, leaf);
   switch (s.k) {
@@ -447,6 +463,9 @@ function printStmt(s: Stmt, indent: string, vt: PrintEnv, leaf?: LeafHook): stri
       // (`this->x = …`) exactly as it spells a member read.
       return [`${indent}${pe(s.lval, 2)} = ${printConverted(s.value, vt, leaf)};`];
     case 'exprstmt':
+      if (s.value.k === 'call' && s.value.sret !== undefined) {
+        return [`${indent}${structReturnCall(s.value, vt, leaf)};`];
+      }
       return [`${indent}${pe(s.value, 99)};`];
     case 'return':
       return [`${indent}return${s.value ? ' ' + printConverted(s.value, vt, leaf) : ''};`];
