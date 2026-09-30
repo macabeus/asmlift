@@ -1341,9 +1341,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   // register the compiler used.
   const materialize = new Set<Op>();
   /** Does `hit` hold of `call`'s value, or of any value it reaches through the ops it would be
-   *  inlined into? Such an op renders where its consumer does. The walk stops at a named op, which
-   *  renders at its own position, and at another effect, which these same rules place. That makes it
-   *  narrower than `!anchored`: a call or a load whose value is used is not anchored, and the walk
+   *  inlined into? Such an op renders where its consumer does. A load is a read, not an effect, so
+   *  the walk passes through it: `*f()` read twice spells `f()` twice. The walk stops at a named op,
+   *  which renders at its own position, and at another effect, which these same rules place. That
+   *  makes it narrower than `!anchored`: a call whose value is used is not anchored, and the walk
    *  still stops there. */
   const reachesThroughInline = (call: Op, hit: (x: Value, sites: readonly UseSite[]) => boolean): boolean => {
     const seen = new Set<Value>();
