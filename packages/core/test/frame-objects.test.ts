@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC, blockTransferRead } from '../src/target';
+import { ARMV4T_AGBCC, blockTransferRead, sourceControlRead, sourceReach } from '../src/target';
 
 // `laddr off` handed to `callee` at argument 0, stored through first when `written`
 const frame = (off: number, callee: string, written: boolean): { blk: Block; object: Op } => {
@@ -135,14 +135,45 @@ describe('an unbounded device read keeps the local area as one object', () => {
 describe('a block-transfer call reads as far as its control word says', () => {
   const { CpuSet, CpuFastSet } = ARMV4T_AGBCC.capabilities.blockTransferCalls!;
   test.each([
-    ['a 32-bit CpuSet fill of eight words reads one word', CpuSet, 0x05000008, { unit: 4, bytes: 4 }],
-    ['a 16-bit CpuSet fill reads one halfword', CpuSet, 0x01000010, { unit: 2, bytes: 2 }],
-    ['a 32-bit CpuSet copy reads every word it copies', CpuSet, 0x04000002, { unit: 4, bytes: 8 }],
-    ['a 16-bit CpuSet copy reads every halfword it copies', CpuSet, 0x00000003, { unit: 2, bytes: 6 }],
-    ['bits above the count are not a count', CpuSet, 0x04e00001, { unit: 4, bytes: 4 }],
-    ['a CpuFastSet fill reads one word', CpuFastSet, 0x01000008, { unit: 4, bytes: 4 }],
-    ['a CpuFastSet copy rounds its count up to eight words', CpuFastSet, 0x00000009, { unit: 4, bytes: 64 }],
+    ['a 32-bit CpuSet fill of eight words reads one word', CpuSet, 0x05000008, { unit: 4, walk: 'fixed' }],
+    ['a 16-bit CpuSet fill reads one halfword', CpuSet, 0x01000010, { unit: 2, walk: 'fixed' }],
+    ['a 32-bit CpuSet copy reads every word it copies', CpuSet, 0x04000002, { unit: 4, walk: 'increment', bytes: 8 }],
+    [
+      'a 16-bit CpuSet copy reads every halfword it copies',
+      CpuSet,
+      0x00000003,
+      { unit: 2, walk: 'increment', bytes: 6 },
+    ],
+    ['bits above the count are not a count', CpuSet, 0x04e00001, { unit: 4, walk: 'increment', bytes: 4 }],
+    ['a CpuFastSet fill reads one word', CpuFastSet, 0x01000008, { unit: 4, walk: 'fixed' }],
+    [
+      'a CpuFastSet copy rounds its count up to eight words',
+      CpuFastSet,
+      0x00000009,
+      { unit: 4, walk: 'increment', bytes: 64 },
+    ],
   ] as const)('%s', (_, call, control, read) => {
     expect(blockTransferRead(call, control)).toEqual(read);
+  });
+});
+
+// …and the DMA channel's control halfword decodes into the same read, so one rule turns either
+// into frame bytes: the unit-aligned address at or below the object's, then the way it walks.
+describe('a source read reaches the frame bytes its walk and unit say', () => {
+  const control = ARMV4T_AGBCC.capabilities.readSourceControl!;
+  const { CpuSet } = ARMV4T_AGBCC.capabilities.blockTransferCalls!;
+  test.each([
+    ['a 16-bit fixed DMA source reads its own halfword', 0x8100, 2, { lo: 0, hi: 2 }],
+    ['a 32-bit fixed DMA source reads the word holding it', 0x8500, 2, { lo: -2, hi: 4 }],
+    ['an incrementing DMA source reads every byte above it', 0x8000, 0, { lo: 0, hi: Infinity }],
+    ['a decrementing DMA source reads every byte below it', 0x8080, 0, { lo: -Infinity, hi: 2 }],
+  ] as const)('%s', (_, half, off, reach) => {
+    expect(sourceReach(sourceControlRead(control, half)!, off)).toEqual(reach);
+  });
+  test('a prohibited DMA source mode bounds nothing', () => {
+    expect(sourceControlRead(control, 0x8180)).toBeNull();
+  });
+  test('a CpuSet copy reads its count from the unit-aligned address', () => {
+    expect(sourceReach(blockTransferRead(CpuSet, 0x04000002), 2)).toEqual({ lo: -2, hi: 8 });
   });
 });

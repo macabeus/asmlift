@@ -17,7 +17,7 @@ import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
-import { type TargetDescription, blockTransferRead } from '../target';
+import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
 import { FrontendUnsupportedError } from './errors';
 import { type LiveInModel, slotKeyOffset } from './ssa';
 
@@ -642,9 +642,8 @@ export function auditFrameObjects({
       if (call === undefined || word === undefined) {
         return undefined;
       }
-      // the machine reads in whole units, from the unit-aligned address at or below the object's
-      const { unit, bytes } = blockTransferRead(call, word);
-      return { lo: -(off % unit), hi: bytes, fill: (word & call.fixedBit) !== 0 };
+      const read = blockTransferRead(call, word);
+      return { ...sourceReach(read, off), fill: read.walk === 'fixed' };
     };
     // …and the two escapes SPLIT, because each decides something the other does not.
     // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
@@ -907,16 +906,13 @@ export function auditFrameObjects({
       }
       let { lo, hi } = called ?? { lo: 0, hi: 0 };
       for (const h of halves) {
-        const unit = control.units[(h & control.wideBit) !== 0 ? 1 : 0];
-        const mode = control.modes[(h >> control.modeShift) & (control.modes.length - 1)];
-        if (mode === null || mode === undefined) {
+        const read = sourceControlRead(control, h);
+        if (read === null) {
           return unbounded('whose control word bounds nothing');
         }
-        // A device may force the address down to a unit boundary — the GBA's does — so a 32-bit
-        // read of the halfword at [sp,#2] reads from [sp,#0], and the object below shares its
-        // unit. The frame base is at least unit-aligned, so the offset says how far down.
-        lo = Math.min(lo, mode === 'decrement' ? -Infinity : -(off % unit));
-        hi = Math.max(hi, mode === 'increment' ? Infinity : unit);
+        const reach = sourceReach(read, off);
+        lo = Math.min(lo, reach.lo);
+        hi = Math.max(hi, reach.hi);
       }
       return { lo, hi, why: 'that reads through it' };
     };

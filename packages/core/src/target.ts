@@ -67,6 +67,49 @@ import type { SwitchBoundCase } from './structure/switch-recover';
  *  `compilerBehaviors.narrowParamWitness` for the compiled pair behind each value. */
 export type NarrowParamWitness = 'prologue-extension' | 'home-store-and-in-place' | 'none';
 
+/** What one transfer reads from its SOURCE, as its control bits say: the `unit` it reads in, and
+ *  which way it `walk`s from the address — `fixed` re-reading one unit, `increment` upward for
+ *  `bytes` when the control says how many and without end when it does not, `decrement` downward
+ *  without end. Each transfer source decodes its own bit layout into this (`sourceControlRead`,
+ *  `blockTransferRead`), and `sourceReach` alone turns it into frame bytes. */
+export interface SourceRead {
+  unit: number;
+  walk: 'fixed' | 'increment' | 'decrement';
+  bytes?: number;
+}
+
+/** The bytes a source read reaches from an address `off` bytes into the frame, as `[lo, hi)`
+ *  relative to that address. The machine may force the address down to a unit boundary — the
+ *  GBA's DMA and BIOS both do — so a 32-bit read of the halfword at [sp,#2] reads from [sp,#0],
+ *  and the object below shares its unit. The frame base is at least unit-aligned, so the offset
+ *  says how far down. */
+export function sourceReach(read: SourceRead, off: number): { lo: number; hi: number } {
+  return {
+    lo: read.walk === 'decrement' ? -Infinity : 0 - (off % read.unit),
+    hi: read.walk === 'increment' ? (read.bytes ?? Infinity) : read.unit,
+  };
+}
+
+/** A device channel's source control, read off the halfword at `sink + offset` of a
+ *  `readOnlyAddressSinks` register: `modes`, indexed by `(control >> modeShift) & (modes.length -
+ *  1)`, is the way the source address steps per unit, null for a setting that bounds nothing; a
+ *  unit is `units[1]` bytes when `wideBit` is set and `units[0]` when not. See `sourceControlRead`. */
+export interface SourceControl {
+  offset: number;
+  modeShift: number;
+  modes: readonly ('increment' | 'decrement' | 'fixed' | null)[];
+  wideBit: number;
+  units: readonly [number, number];
+}
+
+/** The source read one control halfword arms, or null for a mode that bounds nothing. The count
+ *  lives in another register, so an incrementing read carries no `bytes`. */
+export function sourceControlRead(control: SourceControl, half: number): SourceRead | null {
+  const unit = control.units[(half & control.wideBit) !== 0 ? 1 : 0];
+  const walk = control.modes[(half >> control.modeShift) & (control.modes.length - 1)];
+  return walk === null || walk === undefined ? null : { unit, walk };
+}
+
 /** How far a block-transfer call reads through its `source` argument, decoded from the argument
  *  at `control`: `control & countMask` units, of `units[1]` bytes when `wideBit` is set and
  *  `units[0]` when not, rounded up to a multiple of `countGranule` units — or ONE unit when
@@ -81,15 +124,14 @@ export interface BlockTransferCall {
   countGranule: number;
 }
 
-/** The bytes a block-transfer call reads from its source, `[0, bytes)`, for a literal control
- *  word, and the unit it reads in — the alignment the machine may force the address down to. */
-export function blockTransferRead(call: BlockTransferCall, control: number): { unit: number; bytes: number } {
+/** The source read a block-transfer call makes for a literal control word. */
+export function blockTransferRead(call: BlockTransferCall, control: number): SourceRead {
   const unit = call.units[(control & call.wideBit) !== 0 ? 1 : 0];
   if ((control & call.fixedBit) !== 0) {
-    return { unit, bytes: unit };
+    return { unit, walk: 'fixed' };
   }
   const count = (control & call.countMask) >>> 0;
-  return { unit, bytes: Math.ceil(count / call.countGranule) * call.countGranule * unit };
+  return { unit, walk: 'increment', bytes: Math.ceil(count / call.countGranule) * call.countGranule * unit };
 }
 
 export interface TargetDescription {
@@ -191,19 +233,11 @@ export interface TargetDescription {
     // direction and what every other target gets.
     readOnlyAddressSinks?: readonly number[];
     // HOW FAR a device reads from the address a `readOnlyAddressSinks` register was handed, read
-    // off the control halfword at `sink + offset`. `modes`, indexed by `(control >> modeShift) &
-    // (modes.length - 1)`, is the way the source address steps per unit, null for a setting that
-    // bounds nothing; a unit is `units[1]` bytes when `wideBit` is set and `units[0]` when not. A
-    // fixed source re-reads one unit — the unit-aligned one holding the address, since the device
-    // may drop its low bits — so the frame bytes outside that unit are provably not read.
+    // off the control halfword at `sink + offset` (`SourceControl`). A fixed source re-reads one
+    // unit — the unit-aligned one holding the address, since the device may drop its low bits — so
+    // the frame bytes outside that unit are provably not read.
     // ABSENT ⇒ the read is unbounded in both directions, the safe direction.
-    readSourceControl?: {
-      offset: number;
-      modeShift: number;
-      modes: readonly ('increment' | 'decrement' | 'fixed' | null)[];
-      wideBit: number;
-      units: readonly [number, number];
-    };
+    readSourceControl?: SourceControl;
     // The device-register window, `[start, end)`. A cell in it changes under the program's feet,
     // so a source that touched one all but certainly declared it `volatile`. Its readers all ask
     // the same SPELLING question — "would a source have written `volatile` here" — and the file
