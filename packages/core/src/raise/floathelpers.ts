@@ -147,9 +147,9 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     for (const i of at) {
       if (!source(op.operands[i], calls)) {
         throw new RaiseUnsupportedError(
-          `cannot lift '${fn.name}': argument ${i + 1} of the call to '${String(op.attrs.target)}' is a ` +
-            'floating-point argument its callee declares `double`, and it is not a double this function ' +
-            'was handed, a runtime helper returned or a finite literal staged, moved whole',
+          `cannot lift '${fn.name}': argument ${i + 1} of the call to '${String(op.attrs.target)}' ` +
+            'is a `double` its callee declares, and its two words are not a double this function was ' +
+            'handed, a runtime helper returned or a finite literal staged, moved whole',
         );
       }
     }

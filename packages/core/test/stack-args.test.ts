@@ -192,7 +192,7 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     // block out, and the verdict is about the double: its words are `a0` and `a1`, which are also
     // passed as words, so it is no double moved whole.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
-      /argument 5 of the call to 'fd' is a floating-point argument its callee declares `double`/,
+      /argument 5 of the call to 'fd' is a `double` its callee declares/,
     );
     // …and a COUNT, which states argument registers directly, is what gets past it.
     expect(src(TWO, { fd: { params: 6 } })).toContain('fd(a0, a1, a2, a3, a0, a1)');

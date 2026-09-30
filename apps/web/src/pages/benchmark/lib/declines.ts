@@ -345,14 +345,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     //   the CALL BOUNDARY — a pair reaching a callee whose parameter widths nothing states, where
     //   both answers (the low half alone, or the two halves as two arguments) recompile to the
-    //   `bl` being lifted, so nothing downstream can referee either; and a pair the ABI splits
-    //   across the register/stack boundary, which this frontend does not assemble. The PowerPC
-    //   arm is the same gap seen from a frontend with no pair at all, and it is the class's one
-    //   inhabitant today (`synthetic:llpass:mwcc_242_81`).
-    //
-    // THE SPLIT-PAIR ARM SAYS "upper half" AND NOT "high half", and thumb.ts says why at the
-    // throw: `reloc-halves` holds `/high half/`, this list is ordered, and a classification that
-    // depends on which entry comes first is a classification nothing states.
+    //   `bl` being lifted, so nothing downstream can referee either; and the two words of a
+    //   parameter a callee declares `double` on a target with no FPU (`raise/floathelpers.ts`),
+    //   which are no double moved whole. That arm names no floating-point register and must not
+    //   read as `float`, whose subject is the FPU. The PowerPC arm is the same gap seen from a
+    //   frontend with no pair at all, and it is the class's one inhabitant today
+    //   (`synthetic:llpass:mwcc_242_81`).
     //
     //   the RETURN — a pair another block built reaching the return, and an epilogue that says the
     //   return type is 5 to 8 bytes over an r0:r1 that is no pair this lift built (both
@@ -374,7 +372,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'wide-call-arg',
     label: 'A 64-bit value the lift could not carry as one',
     pattern:
-      /(?:half|halves) of a 64-bit (?:value|pair)|return type is 5 to 8 bytes|no lowering for op 'concat'|no upper half to shift out/,
+      /(?:half|halves) of a 64-bit (?:value|pair)|is a `double` its callee declares|return type is 5 to 8 bytes|no lowering for op 'concat'|no upper half to shift out/,
   },
   {
     // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody

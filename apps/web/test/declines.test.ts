@@ -789,7 +789,9 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   // caps a marker at 200 characters, so a phrase further in than that is one the artifact does not
   // carry. All three reach their class inside the first 80.
   test.each([
-    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to `llsink` outside the argument registers — its parameter 1 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argu",
+    // A soft double's two words handed to a callee declaring `double`: no FPU is involved, so the
+    // gap is the pair's and not `float`'s.
+    "raise: cannot lift 'dmem': argument 1 of the call to 'g' is a `double` its callee declares, and its two words are not a double this function was handed, a runtime helper returned or a finite literal",
     "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register, and this frontend passes each argument register as its own value r",
     "lift: cannot lift 'llpass': argument 1 of the call to 'llsink' is the low half of a 64-bit value, and nothing states how wide 'llsink's parameters are, so a pair cannot be told from two ordinary argument",
     "structure: 1 unresolvable value(s) in 'llpass' — no lowering for op 'concat'",
@@ -1086,6 +1088,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
+    ['wide-call-arg', 'is a `double` its callee declares', 'packages/core/src/raise/floathelpers.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],

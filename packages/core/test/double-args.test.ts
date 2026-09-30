@@ -45,9 +45,7 @@ describe('a declared double argument', () => {
   // pair that is not a double moved whole declines the function — a load, and a parameter this
   // function also stores word by word.
   test.each(['dmem', 'dstore'])('%s declines', (name) => {
-    expect(() => lift(name, own(G, name))).toThrow(
-      "argument 1 of the call to 'g' is a floating-point argument its callee declares `double`",
-    );
+    expect(() => lift(name, own(G, name))).toThrow("argument 1 of the call to 'g' is a `double` its callee declares");
   });
 
   // agbcc keeps a double's high word first, so the halves of this function's own parameter handed
@@ -56,7 +54,7 @@ describe('a declared double argument', () => {
     const swapped =
       'f:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tadd\tr0, r1, #0\n\tadd\tr1, r2, #0\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n';
     expect(() => decompile('f', swapped, ARMV4T_AGBCC, { prototypes: own(G, 'f') })).toThrow(
-      "argument 1 of the call to 'g' is a floating-point argument",
+      "argument 1 of the call to 'g' is a `double` its callee declares",
     );
   });
 
@@ -65,7 +63,7 @@ describe('a declared double argument', () => {
     const twice = 'f:\n\tpush\t{lr}\n\tadd\tr2, r0, #0\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n';
     const h = { h: { params: ['double', 'int'], returnsVoid: true }, f: { returnsVoid: true } };
     expect(() => decompile('f', twice, ARMV4T_AGBCC, { prototypes: h })).toThrow(
-      "argument 1 of the call to 'h' is a floating-point argument",
+      "argument 1 of the call to 'h' is a `double` its callee declares",
     );
   });
 
@@ -94,7 +92,7 @@ describe('a declared double argument', () => {
       'f:\n\tpush\t{lr}\n\tldr\tr1, .L1+0x4\n\tldr\tr0, .L1\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n' +
       '\t.align\t2, 0\n.L1:\n\t.long 0x7ff80000, 0x0\n';
     expect(() => decompile('f', nan, ARMV4T_AGBCC, { prototypes: own(G, 'f') })).toThrow(
-      "argument 1 of the call to 'g' is a floating-point argument",
+      "argument 1 of the call to 'g' is a `double` its callee declares",
     );
   });
 
