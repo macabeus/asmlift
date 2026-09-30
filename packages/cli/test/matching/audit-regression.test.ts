@@ -115,7 +115,7 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
-      /stack pointer used as data/,
+      /address-taken stack local/,
     );
   });
 
@@ -127,7 +127,7 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     });
     expect(r.diagnostics.length).toBe(1);
     expect(r.diagnostics[0].stage).toBe('lift');
-    expect(r.diagnostics[0].reason).toMatch(/stack pointer used as data/);
+    expect(r.diagnostics[0].reason).toMatch(/address-taken stack local/);
   });
 
   // the sp guard must not over-fire: a plain push/pop frame (no sp-as-data) stays liftable
