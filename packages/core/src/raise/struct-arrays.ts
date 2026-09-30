@@ -102,7 +102,7 @@ export function recognizeStructArrays(fn: Fn): number {
   // time, because this pass runs once per function and nothing else mints the prefix, and
   // ir/struct-names.ts states why the computed 0 is kept over the assumed one.
   let name = nextStructIndex(
-    [...collectStructs(fn)].map((s) => s.name),
+    [...collectStructs(fn, true)].map((s) => s.name),
     'Elem',
   );
 

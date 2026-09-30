@@ -79,7 +79,7 @@ export function cType(t: IrType): string {
     return `${cType(t.to)} *`;
   }
   if (t.kind === 'struct') {
-    return `struct ${t.name}`;
+    return t.declared ?? `struct ${t.name}`;
   }
   // Declared inline, where the struct member that holds it is declared (ir/types.ts).
   if (t.kind === 'union') {

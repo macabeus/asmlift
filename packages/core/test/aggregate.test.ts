@@ -74,11 +74,12 @@ test('a target that states no rule answers nothing', () => {
   expect(returnsInMemory(struct(m('w', 'u32', { dims: [16] })), unstated)).toBeUndefined();
 });
 
-// The struct a local of the returned type is declared as: every member a field at its offset
+// The struct a local of the returned type is declared as: every member a field at its offset, and
+// spelled as the headers spell it, which marks it theirs
 test('a declared struct lays out as an IR struct, or not at all', () => {
   const s = struct(m('a', 'u8'), m('w', 's16', { dims: [2, 3] }), m('p', 'const u8 *'), m('o', 'struct Opaque *'));
-  expect(aggregateType('S', s, ARMV4T_AGBCC)).toEqual(
-    T.struct(
+  expect(aggregateType('S', 'S_t', s, ARMV4T_AGBCC)).toEqual({
+    ...T.struct(
       'S',
       [
         { off: 0, type: T.u(8), name: 'a' },
@@ -88,7 +89,8 @@ test('a declared struct lays out as an IR struct, or not at all', () => {
       ],
       24,
     ),
-  );
+    declared: 'S_t',
+  });
   for (const layout of [
     union(m('a', 'u32')),
     struct(m('a', 'u32', { bits: 3 })),
@@ -96,6 +98,6 @@ test('a declared struct lays out as an IR struct, or not at all', () => {
     struct(m('c', 'char')),
     { kind: 'struct' as const },
   ]) {
-    expect(aggregateType('S', layout, ARMV4T_AGBCC)).toBeUndefined();
+    expect(aggregateType('S', 'struct S', layout, ARMV4T_AGBCC)).toBeUndefined();
   }
 });

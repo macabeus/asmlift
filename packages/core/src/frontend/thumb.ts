@@ -3608,17 +3608,17 @@ function liftOnce(
     if (inMemory === false) {
       return 'register';
     }
-    // the local it lands in is declared `struct Tag`, and a typedef name is that tag too
-    const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(
-      (own.returns ?? '')
-        .replace(/\b(?:const|volatile)\b/g, ' ')
-        .trim()
-        .replace(/\s+/g, ' '),
-    )?.[1];
+    // the local it lands in is declared as the header spells the type, qualifiers aside; the tag
+    // is what the declarations block defines it by, and a typedef name is that tag too
+    const spelling = (own.returns ?? '')
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+    const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
     if (tag === undefined) {
       refuse('it names no type a local of it could be declared with');
     }
-    const type = aggregateType(tag!, layout, target);
+    const type = aggregateType(tag!, spelling, layout, target);
     if (type === undefined) {
       refuse(
         'it is a union, or one of its members is not a scalar, a pointer or an array of one (a nested struct or ' +
@@ -3649,7 +3649,7 @@ function liftOnce(
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from r0, which holds the hidden pointer
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': \`${callee}\` returns struct ${typeToString(returned.type)} through a hidden ` +
+        `cannot lift '${name}': \`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden ` +
           'pointer in r0, and its parameters are not all sized, so which registers carry its arguments is not known',
       );
     }

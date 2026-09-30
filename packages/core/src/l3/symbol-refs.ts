@@ -56,6 +56,10 @@ export interface SymbolRef {
    *  happens at the table (`proto.ts` `prototypesFromSymbols`), so the frontend loses the same
    *  fact in the same place rather than acting on one this withheld. */
   proto?: { readonly params: readonly ParamType[]; readonly returns: ParamType };
+  /** The struct a call target returns through memory, as the lift typed the call — a type the
+   *  project's headers own (ir/types.ts `declared`), so `declare.ts` defines it beside `proto`, whose
+   *  `returns` spells it. */
+  returned?: Extract<IrType, { kind: 'struct' }>;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -90,13 +94,13 @@ export function collectSymbolRefs(
 ): SymbolRef[] {
   const called = new Set<string>();
   // the struct a callee returns through memory, as the lift typed it
-  const returned = new Map<string, IrType>();
+  const returned = new Map<string, Extract<IrType, { kind: 'struct' }>>();
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
     if (e.k === 'call') {
       called.add(e.fn);
-      if (e.sret !== undefined) {
+      if (e.sret?.kind === 'struct') {
         returned.set(e.fn, e.sret);
       }
     } else if (named !== undefined && symbols.has(named)) {
@@ -148,6 +152,7 @@ export function collectSymbolRefs(
       // and that is all this knows about it. `declare.ts` prints the prototype and never reaches
       // the shape, so nothing here is guessed about storage that does not exist.
       const info = symbols.get(n) ?? { name: n, kind: 'code' as const };
-      return { name: n, info, ...(p ? { proto: p } : {}) };
+      const r = p ? returned.get(n) : undefined;
+      return { name: n, info, ...(p ? { proto: p } : {}), ...(r ? { returned: r } : {}) };
     });
 }

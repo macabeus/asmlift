@@ -5,8 +5,10 @@
 // -fprologue-bugfix`), or mwcc_242_81's at the synthetic tier's.
 import { describe, expect, test } from 'vitest';
 
+import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
 import { declaresAggregateReturn, symbolPrototype } from '../src/proto';
+import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 // `struct Blob64 { u32 w[16]; }; struct Blob64 makeblob(const void *); extern struct Blob64 gDst;
@@ -43,13 +45,30 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('sp0 = makeblob(&gBlob);');
   });
 
-  // `typedef struct { u32 w[16]; } Blob64;` names no tag: the local is declared by the typedef name,
-  // as the tag of a struct the candidate defines
-  test('a typedef name is the tag the local is declared with', () => {
+  // `typedef struct { u32 w[16]; } Blob64;` names no tag: the local is declared by the typedef name
+  // the header spells it with
+  test('a typedef name is the spelling the local is declared with', () => {
     const named = { ...makeblob, returns: 'Blob64' };
     const { source } = decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: named } });
-    expect(source).toContain('struct Blob64 sp0;');
+    expect(source).toContain('    Blob64 sp0;');
     expect(source).toContain('sp0 = makeblob(&gBlob);');
+  });
+
+  // The struct is the headers' type: the source this lift prints never defines it — a project
+  // compiling it inside its headers would see it twice — and the declarations block does, which a
+  // candidate compiled inside those headers drops
+  test('its definition is in the declarations block, not in the source', () => {
+    for (const [returns, lines] of [
+      ['struct Blob64', ['struct Blob64 { u32 w[16]; };', 'struct Blob64 makeblob(const void *);']],
+      ['BlobT', ['struct BlobT { u32 w[16]; };', 'typedef struct BlobT BlobT;', 'BlobT makeblob(const void *);']],
+    ] as const) {
+      const [c] = enumerateCandidates('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: { ...makeblob, returns } } });
+      expect(c.source).not.toMatch(/^struct /m);
+      const decls = renderDeclarations(c.symbolRefs ?? []);
+      for (const line of lines) {
+        expect(decls).toContain(line);
+      }
+    }
   });
 
   // `struct Blob64 mke(enum E e);` — an enum parameter sizes to nothing, and a guessed arity would

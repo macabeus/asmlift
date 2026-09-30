@@ -466,10 +466,10 @@ export function spellableProto(
   p: FnProto | undefined,
   returned?: IrType,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
-  // A struct returned through memory prints as the struct the lift typed its call as (`returned`),
-  // which the function's own source defines as it defines every struct type its IR carries
-  // (raise/structs.ts `collectStructs`). With no such call it is a return this cannot print.
-  const returns = returned?.kind === 'struct' ? `struct ${returned.name}` : p?.returns;
+  // A struct returned through memory prints as the headers spell the struct the lift typed its call
+  // as (`returned`), which the declarations block defines beside this prototype (declare.ts). With
+  // no such call it is a return this cannot print.
+  const returns = returned?.kind === 'struct' ? (returned.declared ?? `struct ${returned.name}`) : p?.returns;
   if (
     p === undefined ||
     returns === undefined ||

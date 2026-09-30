@@ -56,10 +56,16 @@ function place(
 }
 
 /** A declared struct as the IR types it: `name` with every member a field at the offset this target
- *  lays it at, and the struct's size. Undefined for a union, whose IR type carries no name to declare
+ *  lays it at, and the struct's size, spelled as the headers spell it (`spelling`, which is what
+ *  marks it theirs — ir/types.ts). Undefined for a union, whose IR type carries no name to declare
  *  it by; and where a member is not a scalar, a pointer or an array of either — a nested struct or
  *  union, a bitfield, or a plain `char`, whose signedness is the compiler's and stated nowhere. */
-export function aggregateType(name: string, layout: AggregateLayout, target: TargetDescription): IrType | undefined {
+export function aggregateType(
+  name: string,
+  spelling: string,
+  layout: AggregateLayout,
+  target: TargetDescription,
+): IrType | undefined {
   const placed = layout.kind === 'struct' ? place(layout, target) : undefined;
   if (placed === undefined) {
     return undefined;
@@ -73,7 +79,7 @@ export function aggregateType(name: string, layout: AggregateLayout, target: Tar
     const type = (m.dims ?? []).reduceRight<IrType>((elem, n) => T.array(elem, n), scalar);
     fields.push({ off: placed.offsets[i], type, name: m.name });
   }
-  return T.struct(name, fields, placed.size);
+  return { kind: 'struct', name, fields, size: placed.size, declared: spelling };
 }
 
 /** The IR type of a scalar or pointer member spelling: a pointer to a scalar keeps its pointee, any

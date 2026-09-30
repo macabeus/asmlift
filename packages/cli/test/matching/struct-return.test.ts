@@ -4,6 +4,11 @@
 // best one matches. Where agbcc returns the struct through memory it hands the callee the storage in
 // r0 and moves every declared argument one register up (thumb.h:644-645, 672); where it returns it
 // in r0 nothing moves. A lift that got either wrong scores a different call.
+//
+// Scored in BOTH worlds a candidate is compiled in: self-declared (the declaration block asmlift
+// renders, then the source) and inside the project's headers (the headers, then the source, and no
+// block). The returned struct is the headers' type, so the source must not define it: a definition
+// there is a redefinition in the second world.
 import { renderDeclarations } from '@asmlift/core/declare';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { enumerateCandidates } from '@asmlift/core/rank';
@@ -24,23 +29,25 @@ struct Mix { u8 a; s16 w[2][3]; const u8 *p; };
 struct Mix mkmix(s32);
 struct W1 { u32 x; };
 struct W1 mkw(s32);
+struct W1 fillw(s32 *);
 extern void usei(s32);
 `;
 
 const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
 
-/** The best candidate's score for one reference function `f`, and its source. */
-function best(src: string): { score: number; source: string } {
+/** The best candidate's score for one reference function `f` in each world, and its source. */
+function best(src: string): { self: number; headers: number; source: string } {
   const targetAsm = compileTargetAsm(DECLS + src, FLAGS);
   const obj = assembleTarget(targetAsm);
   const prototypes = prototypesFromContext(DECLS, 'c');
-  let out = { score: Number.POSITIVE_INFINITY, source: '' };
+  let out = { self: Number.POSITIVE_INFINITY, headers: Number.POSITIVE_INFINITY, source: '' };
   for (const c of enumerateCandidates('f', targetAsm, ARMV4T_AGBCC, { prototypes })) {
     const decls = c.symbolRefs?.length ? renderDeclarations(c.symbolRefs) : '';
-    const { score } = scoreC(decls + c.source, 'f', obj, FLAGS);
-    if (score < out.score) {
-      out = { score, source: c.source };
+    const self = scoreC(decls + c.source, 'f', obj, FLAGS).score;
+    if (self < out.self) {
+      out = { ...out, self, source: c.source };
     }
+    out.headers = Math.min(out.headers, scoreC(DECLS + c.source, 'f', obj, FLAGS).score);
   }
   return out;
 }
@@ -56,8 +63,11 @@ describe('a call to a function returning a struct', () => {
     ['members of several widths, an array of arrays and a pointer', 'void f(s32 x) { mkmix(x); }'],
     // agbcc returns a one-member word in r0: no hidden pointer, no argument moves
     ['a struct returned in r0, discarded', 'void f(s32 x) { mkw(x); usei(x + 1); }'],
+    // …so a frame word it takes at argument 0 is an out-parameter
+    ['an out-parameter of a callee returning a struct in r0', 'void f(void) { s32 v; fillw(&v); usei(v); }'],
   ])('%s', (_label, src) => {
     const r = best(src);
-    expect(r.score, r.source).toBe(0);
+    expect(r.self, r.source).toBe(0);
+    expect(r.headers, r.source).toBe(0);
   });
 });

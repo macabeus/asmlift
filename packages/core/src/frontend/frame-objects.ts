@@ -1367,7 +1367,7 @@ export function auditFrameObjects({
         // destination. A read of a member, or any other use of the address, is not modelled yet.
         const callee = temps[0].attrs.target as string;
         const type = temps[0].results[0].type;
-        const spelling = `struct ${typeToString(type)}`;
+        const spelling = type.kind === 'struct' ? (type.declared ?? `struct ${type.name}`) : typeToString(type);
         if (temps.some((t) => !typeEquals(t.results[0].type, type))) {
           fail(`the object at [sp,#${off}) is the struct-return storage of calls declared to return different types`);
         }
