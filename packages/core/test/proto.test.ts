@@ -130,9 +130,12 @@ describe('a void return, whichever key states it', () => {
     expect(returnsWithoutHiddenPointer('g', { g: { returns: 'void' } })).toBe(true);
     expect(returnsWithoutHiddenPointer('g', { g: { returnsVoid: true } })).toBe(true);
     expect(returnsWithoutHiddenPointer('g', { g: { params: [] } })).toBe(false);
-    // A struct NAME leaves it open: agbcc returns a one-word struct in r0 and a larger one through
-    // the hidden pointer, and the name carries no size (`stkextsret` is the row).
+    // A struct return leaves it open: whether it comes back through a hidden pointer is the
+    // target's rule over its layout (src/aggregate.ts), which this table-level answer cannot ask.
     expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'struct Blob64' } })).toBe(false);
+    expect(returnsWithoutHiddenPointer('g', { g: { params: 1, returns: 'P', returnLayout: { kind: 'struct' } } })).toBe(
+      false,
+    );
   });
 });
 

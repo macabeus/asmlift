@@ -29,6 +29,7 @@
 import { demangledName } from '@asmlift/core/mangle';
 import { STANDARD_SIGNATURES, declaredWidth } from '@asmlift/core/proto';
 import type { Prototypes } from '@asmlift/core/proto';
+import { prototypesFromContext } from '@asmlift/core/proto-context';
 
 import type { RealFunction } from './manifests';
 
@@ -537,6 +538,17 @@ export function protoFactProblems(
         `${where}: proto says \`${callee}\` returns \`${normParam(entry.returns)}\`; it is declared ` +
           `\`${normParam(decls[0].returnType)}\``,
       );
+    }
+    // …and so does a returned struct's LAYOUT, printed as its definition ahead of the prototype
+    // (`proto.ts` `structDefinition`): it has to be the one the compiled text or the `ctx` reads to.
+    if (entry.returnLayout !== undefined) {
+      const read = [tu, ctx].map((t) => prototypesFromContext(t, language)[callee]?.returnLayout);
+      if (!read.some((l) => JSON.stringify(l) === JSON.stringify(entry.returnLayout))) {
+        problems.push(
+          `${where}: proto's \`returnLayout\` for \`${callee}\` is not the layout its declaration reads to ` +
+            `(${JSON.stringify(read.find((l) => l !== undefined) ?? null)})`,
+        );
+      }
     }
   }
   return problems;
