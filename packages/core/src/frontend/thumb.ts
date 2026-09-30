@@ -4647,18 +4647,22 @@ function liftOnce(
           if (widths === null) {
             for (const [j, v] of args.entries()) {
               const half = halfOf.get(v);
-              // A DOUBLE THE RUNTIME RETURNED IS NO long long, so no width stated for this callee
-              // answers it: a double leaves a soft-float helper only into another one or the return
-              // (`raise/widehelpers.ts` `foldFloatHelpers`), and a pair built here for a callee
-              // declared to take one is refused there instead.
+              // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
+              // reader to a declaration that cannot help: a double leaves a soft-float helper only
+              // into another one or the return (`raise/widehelpers.ts` `foldFloatHelpers`), and a
+              // pair built here for a callee declared to take one is refused there. What a
+              // declaration still settles is a guessed arity that read the pair and never took it.
               const producer = half && pairCallee.get(half.whole);
               const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
               if (half && helper && isFloatHelper(helper)) {
                 throw new FrontendUnsupportedError(
                   `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
                     `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
-                    'returned, and a double the runtime computes is modelled only as it goes into its ' +
-                    'arithmetic helpers or the return — not into a compare, a conversion, or any other call',
+                    `returned, and nothing states how wide '${targetSym}'s parameters are. A double is ` +
+                    "modelled only into the runtime's arithmetic helpers and the return, so a callee that " +
+                    'takes one declines whatever its prototype says (a compare, a conversion, any other ' +
+                    'call); a callee that takes fewer arguments than its registers suggest lifts once a ' +
+                    `prototype states them (\`{"${targetSym}": {"params": [...]}}\`)`,
                 );
               }
               if (half) {

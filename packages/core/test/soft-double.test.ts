@@ -38,6 +38,12 @@ describe('the double arithmetic helpers are the float ops', () => {
     expect(lift('dchain')).toBe('double dchain(double a0, double a1, double a2) {\n    return (a0 + a1) * a2;\n}\n');
   });
 
+  // Without `g`'s declaration its guessed arity reads the pair the helper left in r0:r1, and the
+  // refusal says that a declaration is what settles it.
+  test('a guessed arity that reads a double names the declaration that settles it', () => {
+    expect(() => lift('dkeep')).toThrow(`lifts once a prototype states them (\`{"g": {"params": [...]}}\`)`);
+  });
+
   // The helper runs where the asm called it, before `g` (runtime-helpers.ts `helperOp`): inline at
   // the return, `a0 + a1` recompiles with `bl g` first.
   test('a result held across a call in callee-saved registers is computed before the call', () => {
