@@ -441,9 +441,8 @@ function arithScale(t: IrType | undefined): number | null {
  *
  *  MEASURED, so this is a stated zero and not an assumption: instrumented at the deletion site, it
  *  fires on none of the three agbcc rows that spill AND lift — `spillorder`, `dma_fill_uninit`,
- *  `uninit_spill` — so the clause costs no candidate today. (`spill10` spills too but declines in the
- *  Thumb frontend, so it never reaches this pass and its zero says nothing.) It is here for the day
- *  one does. */
+ *  `uninit_spill` — so the clause costs no candidate today. (`spill10` spills and lifts too, but no
+ *  local of it reaches these gates, so its zero says nothing.) It is here for the day one does. */
 function declarationPins(l: SFn['locals'][number]): boolean {
   return (
     l.volatile !== undefined ||

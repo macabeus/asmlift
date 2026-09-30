@@ -56,6 +56,10 @@ export interface StackArgsInput<C> {
   readonly argRegs: number;
   /** The frontend's verdict that the whole frame is one addressable object handed to a callee. */
   readonly capturedWholeFrame: boolean;
+  /** The compiler keeps ONE outgoing area at the bottom of the frame, sized for its widest call and
+   *  below every local, and never reads a word of it back after a call. Only then does a word
+   *  loaded after a call prove itself a local — see `survivorBound`. */
+  readonly localsAboveOutgoingArea: boolean;
 }
 
 /** What this function's calls do with the BOTTOM of its frame — the outgoing stack-argument area
@@ -74,6 +78,52 @@ export interface OutgoingArgs<C> {
 }
 
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
+
+/** THE LOWEST FRAME WORD THAT SURVIVES A CALL, or `Infinity` when none does. A word LOADED on some
+ *  path out of a live call before anything re-stores it held a value across that call — and a
+ *  caller whose outgoing area belongs to the callee never reads that area back after a call (the
+ *  callee may assign to its stack parameters; agbcc re-stages an argument before every call rather
+ *  than trust the word to survive). So the word is a local, and since the area is one region at
+ *  the frame bottom that every call shares, no call's block reaches it: every word at or above the
+ *  bound is proven not to be an argument.
+ *
+ *  A backward liveness over the live blocks: a load makes its offset live, a store kills it, and a
+ *  call is transparent — a word read after two calls survived both. Dead blocks contribute nothing:
+ *  a load that cannot run proves nothing, and a call that cannot run is not a call it survived. */
+function survivorBound<C>(
+  blocks: readonly StackArgsBlock<C>[],
+  succs: readonly (readonly number[])[],
+  live: ReadonlySet<number>,
+): number {
+  const liveIn = blocks.map(() => new Set<number>());
+  const liveOut = (b: number): Set<number> => new Set(succs[b].flatMap((s) => [...liveIn[s]]));
+  let bound = Infinity;
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = blocks.length - 1; b >= 0; b--) {
+      if (!live.has(b)) {
+        continue;
+      }
+      const cur = liveOut(b);
+      for (const ev of [...blocks[b].events].reverse()) {
+        if (isCallEvent(ev)) {
+          for (const o of cur) {
+            bound = Math.min(bound, o);
+          }
+        } else if (ev.kind === 'load') {
+          cur.add(ev.off);
+        } else {
+          cur.delete(ev.off);
+        }
+      }
+      if ([...cur].some((o) => !liveIn[b].has(o))) {
+        liveIn[b] = cur;
+        changed = true;
+      }
+    }
+  }
+  return bound;
+}
 
 // THE OUTGOING STACK-ARGUMENT AREA, AND WHO MAY CONSUME IT.
 //
@@ -123,8 +173,7 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 // WHAT "NOTHING EXTRA" COSTS, because the reach is narrower than the disappearance of the old
 // decline suggests. A genuine SPILL that is live across a licensed call sits in the may set and is
 // not in the declared block, so the call refuses — and that is agbcc's commonest frame with an
-// outgoing area. Tolerating it means arguing that a pending word which is RELOADED later is a
-// local rather than argument n+1, which needs a gate and a row that gate protects; none exists.
+// outgoing area. `survivorBound` proves such a word a local, but only condition (b) reads it.
 // The cost is in attribution, not correctness: the decline such a function gets names a STORE
 // ("[sp,#k] also reaches the call unread") rather than the capability, so a gap histogram groups
 // this class under that message and not under anything about stack arguments.
@@ -150,6 +199,7 @@ export function analyzeOutgoingArgs<C>({
   localArea,
   argRegs,
   capturedWholeFrame,
+  localsAboveOutgoingArea,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
@@ -190,6 +240,17 @@ export function analyzeOutgoingArgs<C>({
     // through the pointer.
     return { blocker: null, blocks: new Map(), area: 0 };
   }
+
+  const succs = asmBlocks.map((): number[] => []);
+  for (const b of live) {
+    for (const q of preds[b]) {
+      if (live.has(q)) {
+        succs[q].push(b);
+      }
+    }
+  }
+  // Every pending word at or above this is a proven local, so it is no call's argument.
+  const bound = localsAboveOutgoingArea ? survivorBound(asmBlocks, succs, live) : Infinity;
 
   const everySlot: number[] = [];
   for (let o = 0; o + 4 <= localArea; o += 4) {
@@ -362,7 +423,8 @@ export function analyzeOutgoingArgs<C>({
   // (b) — no slot store may reach a `bl` unread ALONG A PATH. For a call the licence covered,
   // the equality above already answered this; what is left are the calls no declaration sizes,
   // where a plausible argument block reaching one unread is an argument this analysis cannot
-  // size, and the answer is the decline.
+  // size, and the answer is the decline. A word at or above `bound` is not a candidate: some word
+  // at or below it outlived a call, so the area every call shares ends beneath it.
   //
   // THE OFFSET THIS NAMES IS THE LOWEST PENDING ONE, because `may` is reported through `asc`. The
   // verdict does not depend on it — any one of them refuses — but the message is what a gap
@@ -375,7 +437,7 @@ export function analyzeOutgoingArgs<C>({
     const may = mayAt.get(ev) ?? new Set<number>();
     const stored = storedAt.get(ev) ?? new Set<number>();
     for (const k of asc(may)) {
-      if (prefixStored(k, stored)) {
+      if (k < bound && prefixStored(k, stored)) {
         return refuse(
           `the store to [sp,#${k}] reaches \`bl ${ev.callee}\` unread with its lower slots supplied — it may be that call's outgoing stack argument`,
         );
@@ -399,16 +461,8 @@ export function analyzeOutgoingArgs<C>({
   // declines at L2: "unrecovered back-edge into block #1 (loop-recovery declined this shape)". So
   // the loud answer is preserved by a DIFFERENT family's refusal, not by this one. Closing it needs
   // a backward "can this word still be consumed?" pass, which no row in the corpus asks for.
-  const hasLiveSucc = asmBlocks.map(() => false);
   for (let b = 0; b < asmBlocks.length; b++) {
-    if (live.has(b)) {
-      for (const q of preds[b]) {
-        hasLiveSucc[q] = true;
-      }
-    }
-  }
-  for (let b = 0; b < asmBlocks.length; b++) {
-    if (!live.has(b) || hasLiveSucc[b]) {
+    if (!live.has(b) || succs[b].length > 0) {
       continue;
     }
     for (const off of asc(mayOut[b])) {

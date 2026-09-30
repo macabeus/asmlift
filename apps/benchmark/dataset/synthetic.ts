@@ -3390,33 +3390,33 @@ export const SYNTHETIC: SynthSpec[] = [
   // `--proto '{"SetupOAMSprite":{"params":9}}'`). A function whose declaration and stores AGREE
   // emits no message at all, so the sibling counts below are an upper bound on that shape.
   //
-  // `spill10` is the DECLINING row for the multi-word shape the STILL MISSING paragraph names,
-  // selected by residual shape rather than by subject: ten locals loaded from `p[0..9]` and read
-  // across a `callee(i)` loop, no address taken anywhere. agbcc gives three user locals a frame
-  // slot — two of the ten, `v3` at [sp] and `v4` at [sp,#4], plus the accumulator `s` at [sp,#8] —
-  // and the 0x18 frame's other three slots are compiler temporaries: the loop-invariant products
-  // `p[0]*3` / `p[1]*5` at [sp,#0xc] / [sp,#0x10] and a caller-save of `v9` at [sp,#0x14] around
-  // the `bl`. So every slot is a spill, none is address-taken, and each store reaches the `bl`
-  // unread with its lower slots supplied — the exact outgoing-argument ambiguity the refusal
-  // models, and here a false alarm. asmlift declines it with `stack pointer used as data — the
-  // store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied — it may be that
-  // call's outgoing stack argument`. That line is the first blocker of 7 of the 51 klonoa
-  // functions selected in the LoadBGTilemapData round (11 of the 51 declined; two more decline on
-  // sibling sp refusals, one address-taken and one declared-arity), so the row pins a population,
-  // not one function. The four stack-heavy siblings that round also ran decline on OTHER links of
-  // the same stack-addr chain, which this row does not measure: two on the declared-arity refusal
-  // (`callee \`SetupOAMSprite\` is declared with 9 arguments`, `stkarg`'s shape), one address-taken
-  // (`a store at [+4] through the captured address`), one `sp moves in a block that neither
-  // returns nor is the entry`.
-  // What sits behind the refusal was MEASURED by ablating it (the `prefixStored` branch in
-  // frontend/thumb.ts forced false, bundle rebuilt, cache OFF): the row then lifts and ranks 16
-  // candidates, best 24 — 19 register rows and 5 loop-entry rows (a `[sp,#8]` store deleted and
-  // a reload replaced, an inserted `mov`, `cmp r1,r10` vs `cmp r0,#0`, `bge` vs `ble`: the `for`
-  // rendered as `if (0 >= a0)` + `do {} while`) and NO row whose difference is a `[sp,#k]`
-  // offset. The naming walk emits `v0..v9, v10, v11` and the target's slots are `v3@[sp]
-  // v4@[sp,#4] s@[sp,#8]`, the same order. So this row pins the multi-word refusal ONLY; it is
-  // NOT a spill-slot-order inhabitant (`spillorder`, in the uninit-local block, is), and once the
-  // gate opens its residual belongs to the register half of value-home.
+  // `spill10` is the row for a frame of SPILLS live across a call, selected by residual shape
+  // rather than by subject: ten locals loaded from `p[0..9]` and read across a `callee(i)` loop, no
+  // address taken anywhere. agbcc gives three user locals a frame slot — two of the ten, `v3` at
+  // [sp] and `v4` at [sp,#4], plus the accumulator `s` at [sp,#8] — and the 0x18 frame's other
+  // three slots are compiler temporaries: the loop-invariant products `p[0]*3` / `p[1]*5` at
+  // [sp,#0xc] / [sp,#0x10] and a caller-save of `v9` at [sp,#0x14] around the `bl`. So every slot
+  // is a spill, none is address-taken, and each store reaches the `bl` unread with its lower slots
+  // supplied — the outgoing-argument shape, and here a false alarm. What tells them apart is that
+  // every slot is RELOADED after `bl callee` before anything re-stores it: agbcc's outgoing area
+  // belongs to the callee across a call and sits below every local, so a word that outlives a call
+  // is a local and bounds the area of every call (`frontend/stackargs.ts`, `survivorBound`). The
+  // declared arity cannot decide it — `callee` takes one argument, and a declared list is a lower
+  // bound on the words a call is handed. The refusal this row pins open — `stack pointer used as
+  // data — the store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied` — was
+  // the first blocker of 7 of the 51 klonoa functions selected in the LoadBGTilemapData round, so
+  // the row pins a population, not one function. The four stack-heavy siblings that round also
+  // ran decline on OTHER links of the same stack-addr chain, which this row does not measure: two
+  // on the declared-arity refusal (`callee \`SetupOAMSprite\` is declared with 9 arguments`,
+  // `stkarg`'s shape), one address-taken (`a store at [+4] through the captured address`), one
+  // `sp moves in a block that neither returns nor is the entry`.
+  // Lifted, it ranks 16 candidates, best 24 of 93 — 19 register rows and 5 loop-entry rows (a
+  // `[sp,#8]` store deleted and a reload replaced, an inserted `mov`, `cmp r1,r10` vs `cmp r0,#0`,
+  // `bge` vs `ble`: the `for` rendered as `if (0 >= a0)` + `do {} while`) and NO row whose
+  // difference is a `[sp,#k]` offset. The naming walk emits `v0..v9, v10, v11` and the target's
+  // slots are `v3@[sp] v4@[sp,#4] s@[sp,#8]`, the same order. So it is NOT a spill-slot-order
+  // inhabitant (`spillorder`, in the uninit-local block, is), and its residual belongs to the
+  // register half of value-home.
   // agbcc only, by measurement: ido7.1 and gcc2.7.2kmc decline it at the call (`function call
   // 'jal' … MIPS calls not yet modelled`, a blocker of 6 ido / 32 kmc declined rows), and on
   // mwcc_242_81 asmlift declines it at the PPC frontend's frame gate before any candidate is
