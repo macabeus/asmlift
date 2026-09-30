@@ -25,8 +25,9 @@ export interface StackArgsSlot {
 
 /** A call, and what its callee's DECLARATION says it takes on the stack. `declared` is the block
  *  `[0, 4*(n - argRegs))` as an ascending offset list, or null when nothing declares this call —
- *  an indirect call, a callee with no prototype, or one whose arity fits in registers. A null
- *  declaration can only ever lead to a refusal: the code alone cannot say where a block ENDS. */
+ *  an indirect call, a callee with no prototype, or one whose arity fits in registers. The code
+ *  alone cannot say where a null declaration's block ENDS; under a one-area compiler a word that
+ *  survives a call says where the AREA ends (`survivorBound`), and that is all it can accept. */
 export interface StackArgsCall<C> {
   readonly kind: 'call';
   /** The frontend's own handle for this call — the key of `OutgoingArgs.blocks`. */
@@ -83,7 +84,8 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
  *  path out of a live call before anything re-stores it held a value across that call — and a
  *  caller whose outgoing area belongs to the callee never reads that area back after a call (the
  *  callee may assign to its stack parameters; agbcc re-stages an argument before every call rather
- *  than trust the word to survive). So the word is a local, and since the area is one region at
+ *  than trust the word to survive — both compiled in `test/corpus/agbcc-restage.s`). So the word is
+ *  a local, and since the area is one region at
  *  the frame bottom that every call shares, no call's block reaches it: every word at or above the
  *  bound is proven not to be an argument.
  *
@@ -136,7 +138,7 @@ function survivorBound<C>(
 // CreateEntity_Platform_0_0 (platform.c:734) forwards SIX arguments and came out as
 // `CreateEntity_Platform(0, 0, a0, (u16)a1)`.
 //
-// TWO INDEPENDENT WITNESSES MUST AGREE, and that agreement is the whole licence:
+// TWO INDEPENDENT WITNESSES MUST AGREE for a call to CONSUME words — the licence:
 //   * the DECLARATION says how many words a call takes. AAPCS lays arguments 5..n at [sp,#0]
 //     upward, one word each, so the block is `[0, 4*(n - |argRegs|))`, contiguous from zero.
 //   * the CODE says which words are staged for it — the offsets stored and not yet reloaded when
@@ -158,8 +160,18 @@ function survivorBound<C>(
 // stack arguments deleted. Under the rule here the four words `sprintf` is really handed are four
 // offsets reaching the call that its declaration does not account for, the witnesses disagree, and the answer is the decline again. And the CODE
 // alone cannot say where a block ENDS — a store never reloaded is an argument's signature, but
-// so is a dead local, which is why reading the code alone could only ever refuse (conditions (a)
+// so is a dead local, which is why reading the code alone never licenses a word (conditions (a)
 // and (b) below, kept for every call no declaration covers).
+//
+// A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
+// keeps one outgoing area below every local and never reads it back after a call
+// (`localsAboveOutgoingArea`), a word LOADED after a call before any re-store is a local, and so
+// is every word above it (`survivorBound`). Code plus that layout premise accepts an undeclared
+// call once no pending word below the bound could open an argument block, and the call then takes
+// no stack word. Hand-written
+// asm that reads its own outgoing argument back after a call defeats it, and lifts with that
+// argument dropped — a producer assumption of the same kind as CONTIGUITY below, which is why the
+// premise is declared per compiler (`target.ts` `stagesOutgoingArgsInFrame`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -176,9 +188,9 @@ function survivorBound<C>(
 // words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
 // check of its own: the block is contiguous words from zero, so it holds the bound's word, which
 // this function loads — "this function also LOADS it" below refuses it if nothing earlier does.
-// A spill never reloaded
-// after any call still refuses, and its decline names a STORE ("[sp,#k] also reaches the call
-// unread") rather than the capability, so a gap histogram groups it under that message.
+// A spill never reloaded after any call still refuses, and its decline names a STORE ("[sp,#k]
+// also reaches the call unread") rather than the capability, so a gap histogram groups it under
+// that message.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
 // site needs: agbcc does tail-merge (`Task_BonusFlower_Spawn`, sa3 bonus_game_enemies, stores
 // argument 5 in both predecessors with the `bl` in the join), and a one-armed store — the same

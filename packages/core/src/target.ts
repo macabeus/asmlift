@@ -347,18 +347,30 @@ export interface TargetDescription {
     // argument INDISTINGUISHABLE by code alone from a dead local: the words sit inside this
     // frame's reservation and nothing this function does ever reloads one.
     //
-    // Absent ⇒ no outgoing area is claimed and the Thumb frontend's stack-argument licence never
-    // fires, so a `[sp,#k]` store reaching a call unread declines exactly as it did before that
-    // licence existed. Read off the target by the frontend (`frontend/thumb.ts` `declaredCall`),
-    // not by the structurer.
+    // Setting it claims the whole layout, not only where the words go: ONE area at the frame
+    // bottom, sized for the widest call and shared by every call, with every local and spill above
+    // it, and never read back after a call — the callee may assign to its stack parameters, so the
+    // caller re-stages an argument before every call. A compiler can stage in its frame and still
+    // break the rest: mwcc may put a local in the words its outgoing parameters use
+    // (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY ARGUMENT REGISTER").
     //
-    // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured —
-    // the corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's
-    // `sub_0804C300` all stage their words at [sp,#0] upward inside the prologue's own
-    // reservation. NOT set anywhere else: a push-based caller would stage nothing inside the
-    // frame, and `docs/level-tower.md`'s rule for an unmeasured compiler behavior is to claim
-    // nothing. No other frontend calls the analysis today, so the field claims a premise rather
-    // than changing a verdict — which is the point: a second armv4t compiler must state it.
+    // Two readers in the Thumb frontend (`frontend/thumb.ts`), neither of them the structurer:
+    //   • `declaredCall` — the stack-argument licence: a declared call consumes the words it stages.
+    //   • `localsAboveOutgoingArea` — the survivor bound (`frontend/stackargs.ts` `survivorBound`):
+    //     a word loaded after a call is a local and ends the area, which lets a call NO declaration
+    //     covers lift. Hand-written asm that reads its outgoing argument back after a call defeats
+    //     it and loses that argument silently; the premise is this compiler's, not the ISA's.
+    // Absent ⇒ neither fires, and a `[sp,#k]` store reaching a call unread declines.
+    //
+    // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` (ACCUMULATE_OUTGOING_ARGS,
+    // locals at sp + outgoing_args_size) and `calls.c` (the area is the maximum over all calls), and
+    // then measured — the corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's
+    // `sub_0804C300` all stage their words at [sp,#0] upward inside the prologue's own reservation,
+    // `spill10` and `spillarg` keep their spills above it, and `test/corpus/agbcc-restage.s` holds
+    // the re-staging and the callee's write. NOT set anywhere else: a push-based caller would stage
+    // nothing inside the frame, and `docs/level-tower.md`'s rule for an unmeasured compiler behavior
+    // is to claim nothing. No other frontend calls the analysis today, so a second armv4t compiler
+    // must state this premise rather than inherit it.
     stagesOutgoingArgsInFrame?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability

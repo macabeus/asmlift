@@ -132,7 +132,7 @@ describe('a licensed call consumes its block, which is what lets one frame serve
   });
 });
 
-describe('an undeclared call can only ever refuse', () => {
+describe('an undeclared call is never handed a word', () => {
   test('a pending store reaching an indirect call refuses rather than guessing its arity', () => {
     // The earlier load is what keeps the whole-function condition (a) quiet, so this reaches the
     // PATH condition: the word is staged when the indirect call executes, and nothing here can
