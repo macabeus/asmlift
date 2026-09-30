@@ -114,9 +114,6 @@ export function returnsInMemory(layout: AggregateLayout, target: TargetDescripti
   if (rule === undefined) {
     return undefined;
   }
-  if (rule === 'memory') {
-    return true;
-  }
   if (rule === 'svr4') {
     const size = aggregateSize(layout, target)?.size;
     return size === undefined ? undefined : size > 8;

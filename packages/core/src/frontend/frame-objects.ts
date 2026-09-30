@@ -955,12 +955,13 @@ export function auditFrameObjects({
     // somewhere leaves the call that takes it at argument 0 exactly as ambiguous as before, so
     // position acquits a call rather than an object.
     //
-    // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and with the struct return it answers the other
-    // way (`returnTemps`, whose call the frontend stamps from a declared return) these are the
-    // refusals this frontend switches off on something other than the instruction stream. `returnsWithoutHiddenPointer`
-    // (proto.ts) is where it is answered, from the project's own `returnsVoid` or from the
-    // `returns` of a signature the C standard fixes — the same table whose `params` this file
-    // already trusts to decide a call's arity. It is asked of EVERY callee that took the address
+    // THE THIRD IS A DECLARATION, NOT AN INFERENCE, and so is its converse: a callee declared to
+    // return a struct through memory, whose call the frontend stamps `sret`, makes the object that
+    // call's return storage (`returnTemps`). Those two are the only answers here read off something
+    // other than the instruction stream. `returnsWithoutHiddenPointer` (proto.ts) is where the third
+    // is answered, from the project's own `returnsVoid` or from the `returns` of a signature the C
+    // standard fixes — the same table whose `params` this file already trusts to decide a call's
+    // arity. It is asked of EVERY callee that took the address
     // at argument 0, because the object gets one decision: one callee about whose return nothing
     // is known leaves the ambiguity standing and the refusal fires.
     //
@@ -990,8 +991,7 @@ export function auditFrameObjects({
     //
     // The residual cost is stated rather than hidden: an OUTPUT-only parameter taken at argument
     // 0 of a callee the project has NOT declared is still byte-for-byte a struct return, and
-    // still declines with it. A callee declared to return a struct through memory is the positive
-    // answer: its call is stamped `sret`, and the object is its return storage (`returnTemps`).
+    // still declines with it.
     //
     // ONE SOURCE FOR THE DECISION AND ITS REASON, because both arms of this audit ask it and a
     // predicate beside a message is two things that can disagree. Returns why the pointer is not

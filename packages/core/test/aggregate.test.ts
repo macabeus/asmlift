@@ -7,7 +7,7 @@ import { describe, expect, test } from 'vitest';
 import { aggregateSize, aggregateType, returnsInMemory } from '../src/aggregate';
 import { T } from '../src/ir/types';
 import type { AggregateLayout, AggregateMember } from '../src/proto';
-import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 const struct = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'struct', members });
 const union = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'union', members });
@@ -46,11 +46,6 @@ describe('agbcc (thumb.c:1423-1493)', () => {
     expect(aggregateSize(struct(m('a', 'u8')), ARMV4T_AGBCC)).toEqual({ size: 4, align: 4 });
     expect(aggregateSize(struct(m('w', 'u32', { dims: [16] })), ARMV4T_AGBCC)?.size).toBe(64);
   });
-});
-
-test('IDO returns every aggregate through memory, a one-word one included', () => {
-  expect(returnsInMemory(struct(m('x', 'u32')), MIPS_IDO)).toBe(true);
-  expect(returnsInMemory({ kind: 'union' }, MIPS_IDO)).toBe(true);
 });
 
 // compiled on mwcc_242_81, mwcc_233_163n and mwcc_247_107: `gT = mkT(i)` stores r3 (and r4) after

@@ -584,14 +584,14 @@ export interface TargetDescription {
     //     a bitfield, or when a union has a member that would be; in the return register otherwise.
     //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,
     //     `{u32 a:8; u32 b:8;}` and `union {u32; u16;}` in r0).
-    //   • 'memory' — every aggregate, a one-word one included. IDO 7.1 (compiled: `struct {u32 x;}
-    //     mkw(s32)` is called `addiu a0,sp,28 / jal mkw / lw v0,28(sp)`).
     //   • 'svr4' — in r3, or r3:r4, when it is 8 bytes or less, whatever its members (a float's
     //     included); in memory otherwise. mwcc_242_81, mwcc_233_163n and mwcc_247_107 alike
     //     (compiled: 1 to 8 bytes, `{float}`, `{double}` and a union come back in r3/r3:r4; a 9- and a
     //     12-byte struct are handed `addi r3,…` ahead of the call).
-    // ABSENT ⇒ unmeasured, and such a call declines.
-    aggregateReturn?: 'apcs' | 'memory' | 'svr4';
+    // ABSENT ⇒ unmeasured, and such a call declines. IDO 7.1 returns every aggregate through memory,
+    // a one-word one included (compiled: `struct {u32 x;} mkw(s32)` is called `addiu a0,sp,28 / jal
+    // mkw / lw v0,28(sp)`), and states nothing: the MIPS frontend lowers no call to read it.
+    aggregateReturn?: 'apcs' | 'svr4';
     // Can this compiler CONTRACT a float multiply and the add or subtract that reads it into one
     // fused instruction, which rounds once? mwcc can: `-fp_contract on` (set on some pikmin,
     // marioparty4 and ac-decomp units) turns `a * b + c` into `fmadds` and `-(a * b) + c` into
@@ -775,7 +775,6 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
     aggregateBoundary: 1,
-    aggregateReturn: 'memory',
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
     // is both homed dead AND widened in its own argument register. raise/paramwidth.ts's header has
