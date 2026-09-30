@@ -23,6 +23,16 @@
 // A signed and an unsigned right shift of the same value by the same amount differ only in the bits
 // the shift brings in, so `%134` is `sext(%133, 32 - 16)` — the same rewrite, and the reason this
 // pass matches the pair rather than either extension on its own.
+//
+// And a third, where the variable is carried SHIFTED and never extended at all: an `s8` walked down
+// a list, `i = buf[i].next`, is kept as `next << 24` and the test reads it back with `asr #24`.
+// The cast idiom folds that `asr` of the `lsl` into a `sext` of the load, which is the same bits
+// and no longer reads the carried value:
+//
+//     %41 = shl %40 {imm=24}    what `i` holds next iteration, shifted
+//     %42 = sext %40 {8}        the loop test
+//
+// `sext(v, 32 - k) === shr_s(shl(v, k), k)`, so `%42` is re-rooted as `shr_s %41 {k}`.
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { CAST_WIDTHS, Opcode } from '../ir/opcodes';
 
@@ -41,8 +51,8 @@ const domainOf = (op: Op, low: Opcode, high: Opcode): { key: string; width: numb
   return null;
 };
 
-/** Re-root a sign extension on the co-existing zero extension of the same bits. Returns the number
- *  of rewrites. */
+/** Re-root a sign extension on the co-existing zero extension of the same bits, or on the carried
+ *  left shift that holds them. Returns the number of rewrites. */
 export function rerootNarrowReads(fn: Fn): number {
   // LOOP-CARRIED edge arguments only. The rewrite is sound for ANY co-existing pair — it only
   // re-associates two extensions of the same bits — so this gate is about what it BUYS, not about
@@ -87,12 +97,29 @@ export function rerootNarrowReads(fn: Fn): number {
     // else this could be a use before a def. That is the shape the idiom emits — one increment,
     // both extensions of it, in the block that computes it.
     const unsigned = new Map<Value, Map<string, Value>>();
+    // …and the carried left shifts, by operand and then by amount, under the same two rules
+    const shifted = new Map<Value, Map<number, Value>>();
     for (const op of b.ops) {
       const u = domainOf(op, 'zext', 'shr_u');
       if (u !== null && carried.has(op.results[0])) {
         const byDomain = unsigned.get(op.operands[0]) ?? new Map<string, Value>();
         byDomain.set(u.key, op.results[0]);
         unsigned.set(op.operands[0], byDomain);
+        continue;
+      }
+      if (op.opcode === 'shl' && typeof op.attrs.imm === 'number' && carried.has(op.results[0])) {
+        const byAmount = shifted.get(op.operands[0]) ?? new Map<number, Value>();
+        byAmount.set(op.attrs.imm, op.results[0]);
+        shifted.set(op.operands[0], byAmount);
+        continue;
+      }
+      const k = 32 - (op.attrs.width as number);
+      const sh = op.opcode === 'sext' && CAST_WIDTHS.has(32 - k) ? shifted.get(op.operands[0])?.get(k) : undefined;
+      if (sh !== undefined) {
+        op.opcode = 'shr_s';
+        op.operands = [sh];
+        op.attrs = { imm: k };
+        rewritten++;
         continue;
       }
       const sgn = domainOf(op, 'sext', 'shr_s');
