@@ -23,6 +23,7 @@
 // Missing pieces skip GREEN with a console.warn, docker-gate.ts style.
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
+import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -30,7 +31,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
 
 import { compileFromCommand } from '../../src/compile-command';
-import { loadDecompConfig } from '../../src/config';
+import { asmliftBlock } from '../../src/config';
 import { renderDeclarations } from '../../src/declare';
 import { type RankedCandidate, decompileRanked } from '../../src/rank';
 import { loadSymbolMap } from '../../src/symbols-provider';
@@ -104,8 +105,7 @@ describe.runIf(HAVE)('self-declared vs headers-wrapper A/B — klonoa dogfood (c
   const rows = new Map<string, Row>();
 
   beforeAll(async () => {
-    const cfg = loadDecompConfig(join(CHECKOUT, 'decomp.yaml'));
-    const tool = cfg?.config.tools?.asmlift;
+    const tool = asmliftBlock(loadDecompYaml(join(CHECKOUT, 'decomp.yaml')));
     if (!tool?.compiler || !tool.elf) {
       throw new Error('klonoa decomp.yaml lost its tools.asmlift compiler/elf keys');
     }
