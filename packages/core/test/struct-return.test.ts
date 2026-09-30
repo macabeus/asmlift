@@ -122,7 +122,7 @@ describe('a callee declared to return a struct or union by value', () => {
   test('a Thumb call to one declines where nothing says it comes back through memory', () => {
     const makeblob = { params: ['const void *'], returns: 'struct Blob64' };
     expect(() => decompile('p4', P4, ARMV4T_AGBCC, { prototypes: { makeblob } })).toThrow(
-      /`makeblob` is declared to return struct Blob64 by value, and nothing here says whether it comes back/,
+      /`makeblob` is declared to return struct Blob64 by value, and nothing here says whether it comes back.*`returnLayout`/,
     );
     // a typedef name states it through `returnLayout`
     const typedefd = { params: ['const void *'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };

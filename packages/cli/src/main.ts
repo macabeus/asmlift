@@ -173,7 +173,12 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
                    the callee declared in the candidate's own source.
                    "returnsVoid":true is the same fact as "returns":"void";
                    on the decompiled function's OWN entry either spells its
-                   void-ness
+                   void-ness. A callee returning a struct or union by value
+                   needs its members, which say whether the target hands it
+                   back through a hidden pointer in argument 0:
+                   "returns":"struct S","returnLayout":{"kind":"struct",
+                   "members":[{"name":"w","type":"u32","dims":[16]}]} (a
+                   --context that defines the struct states them too)
   --context        a preprocessed header (a decomp project's ctx.h): every
                    function it declares is a callee prototype, under --proto
                    and the symbol map, so a call is lifted at the arity the
