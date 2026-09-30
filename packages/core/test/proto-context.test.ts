@@ -311,13 +311,16 @@ describe('prototypes from a declaration context', () => {
 
   // `mode` hands the attributes after it a shared scalar type (c-common.c:563, 996-1000); compiled,
   // `struct O { int a; }` is 8 bytes and comes back through memory
-  test('an own-body typedef whose attributes start with mode leaves every layout unread', () => {
-    const p = prototypesFromContext(
-      `typedef struct R { int x; } A __attribute__((mode(SI), aligned(8))); struct O { int a; }; struct O mko(int);`,
-      'c',
-    );
-    expect(p.mko?.returnLayout).toEqual({ kind: 'struct' });
-  });
+  test.each(['__attribute__((mode(SI), aligned(8)))', '__attribute__ ( ( __mode__ ( __SI__ ) , aligned ( 8 ) ) )'])(
+    'an own-body typedef whose attributes start with mode leaves every layout unread: %s',
+    (attr) => {
+      const p = prototypesFromContext(
+        `typedef struct R { int x; } A ${attr}; struct O { int a; }; struct O mko(int);`,
+        'c',
+      );
+      expect(p.mko?.returnLayout).toEqual({ kind: 'struct' });
+    },
+  );
 
   // compiled, `struct G2 { G g; }` is 8 bytes and `struct S { s32 v; }` still 4 and in r0
   test('an aligned typedef of its own body leaves that body unread, and no other', () => {

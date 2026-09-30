@@ -340,7 +340,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     }
     const unsizedEnum = enumDef && (attributed || wide);
     const enumTag =
-      /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute(?:__)?\s*\(\(.*?\)\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
+      /^(?:typedef\s+)?(?:(?:const|volatile)\s+)*enum\b(?:\s*__attribute(?:__)?\s*\(\s*\(.*?\)\s*\))*\s*([A-Za-z_]\w*)\s*\{\}/.exec(
         s.text,
       );
     if (enumTag && unsizedEnum) {
@@ -485,7 +485,7 @@ export function prototypesFromContext(src: string, language: 'c' | 'c++'): Proto
     const t = s.text
       .replace(/\bextern\s*"C(?:\+\+)?"/g, ' ')
       .replace(SPECIFIERS, ' ')
-      .replace(/__attribute(?:__)?\s*\(\(.*?\)\)/g, ' ')
+      .replace(/__attribute(?:__)?\s*\(\s*\(.*?\)\s*\)/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
     // an `=` outside the parentheses is a variable's initializer; inside them, a default argument
@@ -554,7 +554,7 @@ function realigns(text: string): boolean {
   if (!/\btypedef\b/.test(text) || !ATTRIBUTE.test(text)) {
     return false;
   }
-  if (/\b__attribute(?:__)?\s*\(\([^;]*\b(?:__)?mode(?:__)?\s*\(/.test(text)) {
+  if (/\b(?:__)?mode(?:__)?\s*\(/.test(text)) {
     return true;
   }
   const plain = withoutAttributes(text).replace(/\s+/g, ' ').trim();
