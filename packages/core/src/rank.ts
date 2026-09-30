@@ -844,7 +844,7 @@ export function enumerateCandidates(
    *  `settingVariations` is both, as the candidate spells them — and, where a structure setting is
    *  named, the default one. Anywhere else the failure is a dropped variation, reported through
    *  `onEnumerationError` under the same names. The lift, the raise and the structuring all ask
-   *  this one predicate, so an axis a setting adds is an axis all three see. */
+   *  this one predicate, so a setting that names a new variation is seen by all three. */
   const abortsRow = (settingVariations: readonly Variation[], s?: StructureSetting): boolean =>
     settingVariations.length === 0 && (s === undefined || isDefaultSetting(s));
 
