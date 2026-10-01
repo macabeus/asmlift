@@ -403,6 +403,14 @@ green.
    answered and the longest a message waited. Do not report how many posts were read — nothing
    records reads, and a number nothing produced is the defect `docs/measurement-discipline.md` §1
    exists to forbid.
+4. **Clean up, and show it.** Remove every worktree `LANES.md` names, every scratch worktree this
+   run's agents and you created (the final measurement tree, a read-only checkout of `origin/main`),
+   and the local branch of every merged or closed PR. Then `git worktree prune`. Read the result,
+   do not assume it: `git worktree list` must name none of them, and the report quotes that
+   output. A worktree under `.claude/worktrees/` that this run did not create belongs to an earlier
+   run or another session: name it in the report with its branch and whether it is clean, and
+   remove it only when the user says to. The first run left about 20 of them, and nothing listed
+   them.
 
 A round that ended in a refuted brief, a measured null, or an unmatchable verdict backed by
 [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md) is a completed round. Report it as
@@ -410,8 +418,8 @@ one.
 
 **Stopping early.** The user may stop this at any point. When they do, or when you judge the merge
 tail is costing more than the remaining targets are worth: stop opening lanes, let running rounds
-finish, merge or close what is open, remove every worktree in `LANES.md`, promote the facts, and
-report. Never leave a worktree, a branch or a running bench behind without naming it.
+finish, merge or close what is open, promote the facts, and report, then clean up as step 4 says.
+Never leave a worktree, a branch or a running bench behind without naming it.
 
 ---
 
