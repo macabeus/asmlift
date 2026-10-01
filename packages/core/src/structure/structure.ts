@@ -44,7 +44,8 @@
 // into the `default:` — refuse in `chainArms`, which answers null.
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
-import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, isPinnedAccess, opSig } from '../ir/opcodes';
+import { effectful, placedAt, spelledWhenDead } from '../ir/discipline';
+import { CAST_WIDTHS, opSig } from '../ir/opcodes';
 import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
 import {
   BinOp,
@@ -2016,7 +2017,7 @@ function earlyReturnArm(
     } // re-enters the loop → not an exit
     if (entryOwned && dom.get(bb)!.has(to)) {
       owned.add(bb);
-    } else if (bb.ops.some((op) => EFFECTFUL_OPS.has(op.opcode))) {
+    } else if (bb.ops.some(effectful)) {
       return null;
     }
     const t = bb.ops[bb.ops.length - 1];
@@ -2534,7 +2535,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               P !== b &&
               pt?.opcode === 'br' &&
               P.params.length === 0 &&
-              P.ops.every((o) => !EFFECTFUL_OPS.has(o.opcode) && !materialize.has(o)) &&
+              P.ops.every((o) => !effectful(o) && !materialize.has(o)) &&
               // at least one def the LOOP BODY reads — the loop-invariant-motion shape this claim
               // exists for. A block that only computes the init args is the do-while path's
               // ordinary entry chain, and that path's sink machinery handles it better.
@@ -2608,7 +2609,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // whose result also feeds the body would be evaluated twice per iteration). A `load` is fine —
     // but NOT a materialized one: its temp assignment renders only via sideEffects(), which a
     // condition-only header never emits, so its uses would read an unassigned variable.
-    const headerPure = !h.ops.some((op) => EFFECTFUL_OPS.has(op.opcode) || materialize.has(op));
+    const headerPure = !h.ops.some((op) => effectful(op) || materialize.has(op));
 
     let exitFrom: Block,
       exit: Block,
@@ -2708,7 +2709,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
-        return owned !== null || (isRet(e.to) && !e.to.ops.some((op) => EFFECTFUL_OPS.has(op.opcode)));
+        return owned !== null || (isRet(e.to) && !e.to.ops.some(effectful));
       });
       if (fits) {
         return {
@@ -3737,7 +3738,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // did (frontend/frame-objects.ts), so its spelling carries the qualifier or the function declines:
   // a plain spelling is one agbcc may delete or hoist.
   const pinnedAccess = (op: Op, access: Expr): Expr => {
-    if (!isPinnedAccess(op)) {
+    if (placedAt(op) !== 'device') {
       return access;
     }
     const q = qualifiedMemoryAccess(access, ctype);
@@ -4769,7 +4770,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  `repeated-const-offset`, whose base local this refusal hands back). */
   const volatileQualifiable = (op: Op): boolean => {
     // A read the lift pinned is spelled through the qualifier whatever its address arm would say.
-    if (isPinnedAccess(op)) {
+    if (placedAt(op) === 'device') {
       return true;
     }
     if (op.opcode !== 'load') {
@@ -4805,11 +4806,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   /** Ops the `sideEffects` walk must SPELL even though nothing consumes their result — the
-   *  registry's own derived set (`SPELLED_WHEN_DEAD_OPS`), so the next op to acquire the property
-   *  needs no edit here, plus the address refusal above for the memory-read half.
+   *  question ir/discipline.ts asks of every op (`spelledWhenDead`), so the next op to acquire the
+   *  property needs no edit here, plus the address refusal above for the memory-read half.
    *
-   *  A memory READ is not in `EFFECTFUL_OPS`, deliberately: ir/opcodes.ts calls a load deletable
-   *  when dead, because nothing observes a read nobody reads. That is the C claim. The COMPILER
+   *  A memory READ is not `effectful`, deliberately: ir/discipline.ts calls a load deletable when
+   *  dead, because nothing observes a read nobody reads. That is the C claim. The COMPILER
    *  claim points the other way — an optimizing compiler deletes every dead read it is allowed to
    *  delete, so one still in the target is evidence the source's access was `volatile`, and
    *  dropping it deletes an instruction the machine executed.
@@ -4899,7 +4900,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const hasSpelledUse = (v: Value): boolean => (useSitesOf.get(v) ?? []).some((s) => isSpelled(s.op));
 
   const unreadResult = (op: Op): boolean =>
-    SPELLED_WHEN_DEAD_OPS.has(op.opcode) &&
+    spelledWhenDead(op) &&
     op.results.length > 0 &&
     // NO EXEMPTION FOR A MATERIALIZED DEF HERE, and it is not missing. Such a def already renders
     // at its own position, as `v = f(…)`, which spells the effect as surely as a bare statement
@@ -6147,7 +6148,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const ends = (n: Block): boolean =>
         inBody(n).length === 0 &&
         n.ops[n.ops.length - 1].opcode === 'br' &&
-        n.ops.every((op) => !EFFECTFUL_OPS.has(op.opcode) && !materialize.has(op)) &&
+        n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
         !(successorsOf(n)[0] === fl.header && new Set(preds.get(n)?.filter((q) => fl.body.has(q))).size > 1);
       ipdom = postDominators(fn, fl.body, (n) => inBody(n).filter((x) => !ends(x)));
       foreverJoins.set(fl.header, ipdom);
@@ -6585,9 +6586,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const bodyMap = latchMap ?? activeSub;
       const effectRoots = dw.latch.ops
         .slice(0, -1)
-        .filter(
-          (op) => op.results.length === 0 || materialize.has(op) || EFFECTFUL_OPS.has(op.opcode) || unreadResult(op),
-        )
+        .filter((op) => op.results.length === 0 || materialize.has(op) || effectful(op) || unreadResult(op))
         .flatMap((op) => op.operands);
       const updateRoots = successorTo(dw.latch, dw.header)!.args;
       const regionRoots = rootsOf(exitRegion(dw.exit, dw.body, stop));

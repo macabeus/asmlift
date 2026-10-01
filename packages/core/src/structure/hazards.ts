@@ -16,7 +16,7 @@
 // that is neither.
 //
 // The tree must give the same answer at the new point. Two ways it might not, and
-// `REEVAL_UNSAFE_OPS` is the registry view that names both. ORDER: a load re-evaluated after a
+// `reevalUnsafe` (ir/discipline.ts) is the question that names both. ORDER: a load re-evaluated after a
 // store the original preceded answers with what the store wrote, and an effect re-evaluated past
 // another is out of order. SPECULATION: a tree evaluated where the original never was — the def
 // dominates the latch, and the loop is single-latch at both call sites, but an early-`return` arm
@@ -49,7 +49,8 @@
 // the naming pipeline when the factory is created, and each hazard check reads whatever names
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value, successorsOf } from '../ir/core';
-import { EFFECTFUL_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { effectful, orderSensitive, reevalUnsafe } from '../ir/discipline';
+import { NEGATED_ICMP } from '../ir/opcodes';
 import { Expr, Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
@@ -621,7 +622,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // EFFECT the emitted loop runs it fewer times than the asm does.
   //
   // The effect flag is the whole test and no block position is consulted, because for an effectful
-  // op the two say the same thing: `HOIST_UNSAFE_OPS` (ir/opcodes.ts) IS `EFFECTFUL_OPS`, so
+  // op the two say the same thing: every effectful op is `speculationUnsafe` (ir/discipline.ts), so
   // raise/shortcircuit.ts never lifts one out of the arm it guards and a genuinely short-circuited
   // effect never reaches a connective here. A memory read is exempt there — C's own short circuit
   // re-guards it at the new point — and stays exempt here for the same reason, the reads for which
@@ -653,7 +654,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       if (d === undefined) {
         return;
       }
-      if (EFFECTFUL_OPS.has(d.opcode) && !(r.onTrue && r.onFalse)) {
+      if (effectful(d) && !(r.onTrue && r.onFalse)) {
         found = true;
         return;
       }
@@ -880,7 +881,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // (`preUpdateCopyHome`), so the ops that can tell are the ones STRICTLY BETWEEN the two, and one
     // ahead of `d` that renders after the home (below) — and only when both are the latch's, because
     // a def in any other block is separated from the copy by whole blocks this does not walk.
-    // `ORDER_SENSITIVE_OPS` is the between-set for all three ways `d` can care: a read wants no store
+    // `orderSensitive` is the between-set for all three ways `d` can care: a read wants no store
     // crossed, an effect no other effect or read, and a trap none of those performed ahead of the fault.
     //
     // NOT A RESTATEMENT OF WHAT `materialize` ALREADY BOUNDS, which is the reading to guard against.
@@ -925,17 +926,15 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     const movesPast = (d: Op, home: Op, tree: ReadonlySet<Op>): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
-      if (i < 0 || i > p || latch.ops.slice(i + 1, p).some((o) => ORDER_SENSITIVE_OPS.has(o.opcode))) {
+      if (i < 0 || i > p || latch.ops.slice(i + 1, p).some(orderSensitive)) {
         return true;
       }
       return latch.ops
         .slice(0, i)
-        .some(
-          (o) => ORDER_SENSITIVE_OPS.has(o.opcode) && !tree.has(o) && !(isRead(o) && isRead(d)) && rendersAfter(o, p),
-        );
+        .some((o) => orderSensitive(o) && !tree.has(o) && !(isRead(o) && isRead(d)) && rendersAfter(o, p));
     };
     // A memory read and nothing else: two of them commute, whichever runs first.
-    const isRead = (o: Op): boolean => ORDER_SENSITIVE_OPS.has(o.opcode) && !EFFECTFUL_OPS.has(o.opcode);
+    const isRead = (o: Op): boolean => orderSensitive(o) && !effectful(o);
     // Does latch op `o` RENDER after index `p`? Where it renders is `emitPos`: the terminator's
     // index stands for every copy it carries, and those land at or after the foot of the body; an
     // op with no one position, or none in the latch, counts as after.
@@ -1018,7 +1017,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
       // def is opaque — what it renders is a memory read this walk never sees — so it is refused at
       // every position rather than measured.
       for (const d of tree) {
-        if (respelledDefs.has(d) || (REEVAL_UNSAFE_OPS.has(d.opcode) && (home === null || movesPast(d, home, tree)))) {
+        if (respelledDefs.has(d) || (reevalUnsafe(d) && (home === null || movesPast(d, home, tree)))) {
           found.add('order-sensitive');
         }
       }

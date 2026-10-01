@@ -58,10 +58,10 @@ import {
   replaceAllUsesWith,
   successorsOf,
 } from '../ir/core';
-import { EFFECTFUL_OPS, HOIST_UNSAFE_OPS, NEGATED_ICMP, ORDER_SENSITIVE_OPS, isPinnedAccess } from '../ir/opcodes';
+import { effectful, forgetHelperPlacement, orderSensitive, speculationUnsafe } from '../ir/discipline';
+import { NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
-import { forgetHelperPlacement } from '../runtime-helpers';
 
 const BOOL_OPS = new Set([...Object.keys(NEGATED_ICMP), 'logic_and', 'logic_or']);
 
@@ -230,7 +230,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // just possibly non-matching. A read the lift pinned `volatile` is an access, not a value, and
         // stays in its arm the same way: re-guarded, it is the same access only if the fold said
         // where it was, and nothing records that (structure/analysis.ts, `volatileGuardedRead`).
-        if (bfeed.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode) || isPinnedAccess(op))) {
+        if (bfeed.ops.slice(0, -1).some(speculationUnsafe)) {
           continue;
         }
         // NEGATABLE only when the orientation actually inverts the head — asked here rather than up
@@ -248,7 +248,7 @@ export function recognizeShortCircuit(fn: Fn): boolean {
           continue;
         }
         // hoist B's pure body (defines Vb; harmless if a dead const). A helper op it moves no longer
-        // sits where the asm called it (runtime-helpers.ts `forgetHelperPlacement`).
+        // sits where the asm called it (ir/discipline.ts `forgetHelperPlacement`).
         bfeed.ops.slice(0, -1).forEach((op) => before(forgetHelperPlacement(op)));
         foldWriteOrder(fn.writeOrder, bfeed, h); // …and its writes now follow H's (ir/core.ts)
         let condSide = cond;
@@ -582,11 +582,11 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
           continue;
         }
         // ^g's body must be pure — see the REFUSALS note.
-        // HOIST_UNSAFE_OPS includes `opaque`: an instruction asmlift could not model, and moving it
+        // `speculationUnsafe` answers yes for `opaque`: an instruction asmlift could not model, and moving it
         // out of the arm that guards it is the reordering this refuses. Loud either way today — a
         // decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`.
         // A read the lift pinned `volatile` stays in its arm too, as in the value form above.
-        if (g.ops.slice(0, -1).some((op) => HOIST_UNSAFE_OPS.has(op.opcode) || isPinnedAccess(op))) {
+        if (g.ops.slice(0, -1).some(speculationUnsafe)) {
           continue;
         }
         // Which of ^g's edges rejoins ^h's other successor? That is the shared block. A DIRECT edge
@@ -944,7 +944,7 @@ const readsOf = (op: Op): Value[] => [...op.operands, ...op.successors.flatMap((
  *  gate in `opts.armReread` (default {@link ARM_REREAD_GATES}) refuses the site.
  *
  *  The copy is exact at the arm's head because nothing runs between: `g`'s body is pure (its
- *  caller refuses anything in HOIST_UNSAFE_OPS), so a load copied there reads what `g`'s own load
+ *  caller refuses anything `speculationUnsafe`), so a load copied there reads what `g`'s own load
  *  read, and `g` is the arm's ONLY predecessor, so the copy runs exactly when the original's
  *  value would have been live there. On verified IR that also places every escaping read under
  *  the arm: `g` dominates nothing else, because the shared block is reached from ^h directly.
@@ -1093,7 +1093,7 @@ function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, rea
  *      `emitPos` is null and analysis.ts materializes it whatever stands in the way
  *      (`p[2] = p[1] & 0x80; p[3] = p[1] & 0x80;` — one `and`, two stores);
  *    - it has MORE THAN ONE direct reader, and an effect precedes one of their render positions —
- *      the multi-render rule, `isWrite = EFFECTFUL_OPS`, which exempts nothing;
+ *      the multi-render rule, `isWrite = effectful`, which exempts nothing;
  *    - it has ONE, and an effect precedes its render position that analysis.ts's `isBarrier`
  *      counts: any `astore`/`opaque`, a `call` that is not rendered inside that same statement,
  *      and a `store` UNLESS it is to a provably disjoint slot of the read's own base
@@ -1102,7 +1102,7 @@ function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, rea
  *  A reader in any block other than the arm answers yes — the copy then outlives the arm's first
  *  block. What this does NOT mirror, and which way each gap errs, is ARM_REREAD_GATES' RESIDUE. */
 function readHeldAcrossEffect(c: ArmRereadSite): boolean {
-  const reads = [...c.copy].filter((op) => ORDER_SENSITIVE_OPS.has(op.opcode));
+  const reads = [...c.copy].filter(orderSensitive);
   if (reads.length === 0) {
     return false;
   }
@@ -1133,7 +1133,7 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
     if (cs.length === 1) {
       return at(cs[0]);
     }
-    return ORDER_SENSITIVE_OPS.has(op.opcode) ? posOf(op) : null;
+    return orderSensitive(op) ? posOf(op) : null;
   };
   for (const l of reads) {
     if (escapes(l.results)) {
@@ -1145,7 +1145,7 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
     }
     const multi = renders.length > 1;
     const bars = (x: Op, pos: number): boolean => {
-      if (!EFFECTFUL_OPS.has(x.opcode)) {
+      if (!effectful(x)) {
         return false;
       }
       if (multi) {
@@ -1286,7 +1286,7 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
     why: 'the target read it before the second test on both of its exits; moved, it runs on one',
     sound: false,
     guardedBy: 'branch-shortcircuit.test.ts: REFUSED: a READ only the arm consumes would move under the second test',
-    rejects: (c) => [...c.drop].some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)),
+    rejects: (c) => [...c.drop].some(orderSensitive),
   },
   {
     // THE BYTES HALF of the copy (see `armRereadCone`), and a claim about ONE compiler. The arm of
@@ -1329,7 +1329,7 @@ export const ARM_REREAD_GATES: readonly Gate<ArmRereadSite>[] = [
 
 /** Copy `copy` to the head of `arm`, point every read outside `g` at the copies, and delete `drop`.
  *  A dropped original is deleted rather than left for the hoist: the arm now performs it, and a
- *  dead READ left in ^h is one the structurer may still spell (SPELLED_WHEN_DEAD_OPS). */
+ *  dead READ left in ^h is one the structurer may still spell (ir/discipline.ts `spelledWhenDead`). */
 function rereadInArm(fn: Fn, g: Block, arm: Block, { copy, drop }: ArmReread): void {
   const copyOf = new Map<Value, Value>();
   const copies = g.ops

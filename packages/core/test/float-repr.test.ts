@@ -6,7 +6,7 @@ import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { MIPS_FP_REG } from '../src/frontend/splat';
 import { mkOp, mkValue } from '../src/ir/core';
-import { isDceSafe } from '../src/ir/opcodes';
+import { deletableWhenDead } from '../src/ir/discipline';
 import { parse } from '../src/ir/parse';
 import { type IrType, T, intWidth, parseType, typeEquals, typeToString } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
@@ -143,8 +143,8 @@ describe('the float opcodes compute on floats, and nothing else does', () => {
   });
 
   test('a dead float op is reaped like any pure op', () => {
-    for (const op of ['fadd', 'fsub', 'fmul', 'fdiv', 'fneg']) {
-      expect(isDceSafe(op)).toBe(true);
+    for (const opcode of ['fadd', 'fsub', 'fmul', 'fdiv', 'fneg'] as const) {
+      expect(deletableWhenDead(mkOp(opcode))).toBe(true);
     }
   });
 });

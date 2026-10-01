@@ -23,15 +23,8 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import {
-  EFFECTFUL_OPS,
-  MEM_BASE_OPS,
-  ORDER_SENSITIVE_OPS,
-  REEVAL_UNSAFE_OPS,
-  isPinnedAccess,
-  opSig,
-} from '../ir/opcodes';
-import { raisedHelper } from '../runtime-helpers';
+import { effectful, orderSensitive, placedAt, reevalUnsafe } from '../ir/discipline';
+import { MEM_BASE_OPS, opSig } from '../ir/opcodes';
 
 export interface UseSite {
   blk: Block;
@@ -386,8 +379,7 @@ export function hasDerivedReadHome(fn: Fn): boolean {
   }
   /** any op that writes memory strictly between two ops of one block — the rule's `memWriteBetween`
    *  over the straight line the same-block requirement already pins */
-  const writeBetween = (b: Block, lo: number, hi: number): boolean =>
-    b.ops.slice(lo + 1, hi).some((x) => EFFECTFUL_OPS.has(x.opcode));
+  const writeBetween = (b: Block, lo: number, hi: number): boolean => b.ops.slice(lo + 1, hi).some(effectful);
   const standsOnRead = (op0: Op): boolean => {
     const reads = readCone(op0, defOf);
     if (reads === null) {
@@ -523,11 +515,11 @@ function naturalLoops(
  *      re-derive the byte cast (`v0 = (u8 *)*a1 + 6;` then `v0 = (u8 *)v0 + 2;`). Address-shaped
  *      bases belong to the cast-aware machinery in l3/basecse.ts, scopebase.ts and nearbase.ts;
  *      this variation does not offer a second spelling of them.
- *    • an op whose answer depends on WHERE it runs, or that can TRAP — `REEVAL_UNSAFE_OPS`, read
+ *    • an op whose answer depends on WHERE it runs, or that can TRAP — `reevalUnsafe`, read
  *      from the registry rather than re-listed. Both halves carry: for a read WHERE it happens is
  *      the read rules' question, and a homed divide becomes an unconditional statement at a def
  *      block raise/shortcircuit.ts may have made, on paths C's own `&&` would have re-guarded —
- *      the KNOWN GAP `ir/opcodes.ts` books against `HOIST_UNSAFE_OPS`.
+ *      the gap ir/discipline.ts books against `speculationUnsafe`.
  *    • an `undef` — the variation's premise is a value the source COMPUTED once above the branch, and
  *      an uninitialised register was never computed at all: homed, it spells `v0 = uninit_r5;`,
  *      a copy of a value nothing wrote, which no asm can have.
@@ -631,7 +623,7 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
         continue;
       }
       const d = defOf.get(x);
-      if (d && !ORDER_SENSITIVE_OPS.has(d.opcode)) {
+      if (d && !orderSensitive(d)) {
         stack.push(...d.operands);
       }
     }
@@ -645,14 +637,14 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   const coneHoldsReevalUnsafe = (v: Value): boolean =>
     [...coneOf(v)].some((x) => {
       const d = defOf.get(x);
-      return d !== undefined && REEVAL_UNSAFE_OPS.has(d.opcode);
+      return d !== undefined && reevalUnsafe(d);
     });
   /** may this op's result be materialized at its def — and is this variation the one to do it? */
   const eligible = (op: Op): boolean => {
     const v = op.results[0];
     return (
       v !== undefined &&
-      !REEVAL_UNSAFE_OPS.has(op.opcode) &&
+      !reevalUnsafe(op) &&
       op.opcode !== 'undef' &&
       !(scGuarded.has(v) && coneHoldsReevalUnsafe(v)) &&
       !rendersAsAddress(op) &&
@@ -1358,7 +1350,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         hit(x, sites) ||
         sites.some(
           (u) =>
-            !EFFECTFUL_OPS.has(u.op.opcode) &&
+            !effectful(u.op) &&
             u.op.successors.length === 0 &&
             !materialize.has(u.op) &&
             u.op.results.length > 0 &&
@@ -1614,7 +1606,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       const crossesAt = (home: Op): boolean =>
         home !== op &&
         opBlock.get(home) === L.latch &&
-        between(L.latch.ops.indexOf(home)).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) || namedHelper(x));
+        between(L.latch.ops.indexOf(home)).some((x) => orderSensitive(x) || namedHelper(x));
       const exitArg = L.term.successors.some(
         (sc) =>
           !L.body.has(sc.block) &&
@@ -1761,7 +1753,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     const at = { blk, idx: opIndex.get(op0)! };
     const coneReads = new Set(reads);
     const bars = (x: Op): boolean =>
-      EFFECTFUL_OPS.has(x.opcode) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
+      effectful(x) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
     return (
       reads.length > 0 &&
       reads.every(
@@ -1779,15 +1771,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *
    *  raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body,
    *  memory reads included, into the block ABOVE the branch (its value form and its control-flow
-   *  form both splice that body into the head). ir/opcodes.ts states the safety argument as the
-   *  reason a read is deliberately absent from HOIST_UNSAFE_OPS: the structurer inlines it back
+   *  form both splice that body into the head). ir/discipline.ts states the safety argument as the
+   *  reason a plain read is not `speculationUnsafe`: the structurer inlines it back
    *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a READ
    *  the def block is a FOLD ARTIFACT rather than the block the asm read in, and the def-block
    *  placement rule stands down. Naming it also breaks the re-guard: `p != 0 && *p != 0` would
    *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches;
    *  `volatileGuardedRead` is the read it does not cover.
    *
-   *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
+   *  A CALL is `speculationUnsafe`, so no fold ever lifted one out of the arm it guards: a call
    *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
    *  materializes it there rather than letting C's short circuit skip it. The same holds of an op
    *  the asm reached by calling a runtime helper and the fold did not hoist — one it hoists loses
@@ -1820,7 +1812,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if ((op.opcode !== 'load' && op.opcode !== 'aload') || v === undefined || !shortCircuitGuarded.has(v)) {
           continue;
         }
-        if (isPinnedAccess(op)) {
+        if (placedAt(op) === 'device') {
           const at = defs ? constAddressOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0) : null;
           return at === null || op.opcode === 'aload' ? 'a device register' : `0x${at.toString(16)}`;
         }
@@ -1871,8 +1863,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
   /** the divides the pre-update exit rule below named (`rebuiltPast`) */
   const exitDivides = new Set<Op>();
-  /** an op the asm reached by CALLING a runtime helper (runtime-helpers.ts `raisedHelper`) */
-  const isHelper = (op: Op): boolean => raisedHelper(op) !== null;
+  /** an op the asm reached by CALLING a runtime helper */
+  const isHelper = (op: Op): boolean => placedAt(op) === 'helper';
   /** one the helper clause below named: a statement sequenced as a named call is */
   const namedHelper = (op: Op): boolean => materialize.has(op) && isHelper(op);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
@@ -1968,7 +1960,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               shortCircuitGuarded.has(pr) ||
               ridesEdge(op) ||
               at.some((p) => p.blk !== b) ||
-              at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedHelper(x)))
+              at.some((p) => memWriteBetween(op, p, (x) => effectful(x) || namedHelper(x)))
             ) {
               materialize.add(op);
               continue;
@@ -2082,7 +2074,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // Under the value-home variation: which named global cell this op reads, if any. A constant-
         // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
         // everything. Null ⇒ every write bars, exactly as before.
-        const pinned = isPinnedAccess(op);
+        const pinned = placedAt(op) === 'device';
         const cell =
           rereadGlobals && defs && op.opcode === 'load' && !pinned
             ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
@@ -2217,7 +2209,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // made, and a value read before it and used after it was read once and kept across it
         // (`v = gB; t = v / n; … q[1] = v;` is one `ldr` ahead of the `bl __divsi3`).
         if (poss.length > 1) {
-          const writes = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
+          const writes = barsThisRead ?? effectful;
           const isWrite = (x: Op): boolean => writes(x) || namedHelper(x);
           if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
             materialize.add(op);
@@ -2322,7 +2314,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           // Two pinned reads are two device accesses in an order. Rendered in one expression, the
           // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
           // pinned read spelled as a bare statement because nothing uses it is an access too.
-          if (pinned && (x.opcode === 'load' || x.opcode === 'aload') && isPinnedAccess(x)) {
+          if (pinned && (x.opcode === 'load' || x.opcode === 'aload') && placedAt(x) === 'device') {
             return true;
           }
           if (!isCall) {

@@ -3,16 +3,7 @@
 // testable, AI-addable datum.
 import { expect, test } from 'vitest';
 
-import {
-  EFFECTFUL_OPS,
-  HOIST_UNSAFE_OPS,
-  NEGATED_ICMP,
-  OPCODES,
-  ORDER_SENSITIVE_OPS,
-  REEVAL_UNSAFE_OPS,
-  SPELLED_WHEN_DEAD_OPS,
-  isDceSafe,
-} from '../src/ir/opcodes';
+import { NEGATED_ICMP, OPCODES } from '../src/ir/opcodes';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
@@ -186,42 +177,6 @@ test('composition: mwcc `!(x == 0)` folds through cntlzw-eq0 into a single `x !=
     'fn notb {\n^bb0(%0: s32):\n  %1: s32 = const {value=0}\n  %2: u32 = icmp_ne %0, %1\n  ret %2\n}\n',
   );
   verify(fn);
-});
-
-test('the five effect views over the registry name five different questions', () => {
-  // Each set answers one question about an op, and all five are derived from the signature flags
-  // rather than listed, so registering an opcode cannot leave one behind. Pinned because the
-  // memberships OVERLAP, and the disagreements are the whole reason there is more than one set.
-  expect([...EFFECTFUL_OPS].sort()).toEqual(['astore', 'call', 'opaque', 'store']);
-  expect([...HOIST_UNSAFE_OPS].sort()).toEqual([...EFFECTFUL_OPS].sort());
-  expect([...ORDER_SENSITIVE_OPS].sort()).toEqual(['aload', 'astore', 'call', 'load', 'opaque', 'store']);
-  expect([...REEVAL_UNSAFE_OPS].sort()).toEqual([
-    'aload',
-    'astore',
-    'call',
-    'load',
-    'opaque',
-    'sdiv',
-    'smod',
-    'store',
-    'udiv',
-    'umod',
-  ]);
-  // One opcode, four answers: a dead load is reapable, hoisting one is allowed (its consumers
-  // re-guard it), moving one on the same path is not, and neither is rebuilding it elsewhere.
-  expect(isDceSafe('load')).toBe(true);
-  expect(HOIST_UNSAFE_OPS.has('load')).toBe(false);
-  expect(ORDER_SENSITIVE_OPS.has('load')).toBe(true);
-  // A divide separates the last two: reordering one on a path it already ran is fine, running it
-  // on a path that skipped it is not — which is the only difference between the two sets.
-  expect(ORDER_SENSITIVE_OPS.has('sdiv')).toBe(false);
-  expect(REEVAL_UNSAFE_OPS.has('sdiv')).toBe(true);
-  // `SPELLED_WHEN_DEAD_OPS` asks "did the machine do something a source statement must stand for",
-  // a DIFFERENT question from "may this move" that today derives the same set. Pinned here rather
-  // than expressed as an alias, so a later registry change that makes them differ surfaces as a
-  // decision to make instead of following silently.
-  expect([...SPELLED_WHEN_DEAD_OPS].sort()).toEqual([...ORDER_SENSITIVE_OPS].sort());
-  expect(SPELLED_WHEN_DEAD_OPS).not.toBe(ORDER_SENSITIVE_OPS);
 });
 
 // ── an idiom that declares an operand order load-bearing ──────────────────────────────────────

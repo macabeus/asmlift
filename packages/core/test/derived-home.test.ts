@@ -204,7 +204,7 @@ test('a value inside a loop its read sits outside is not homed', () => {
 });
 
 // A call between the read and the value: it may write anything the read looked at, so moving the
-// read past it is the same refusal a store earns (`call` is in EFFECTFUL_OPS).
+// read past it is the same refusal a store earns (a `call` is `effectful`, ir/discipline.ts).
 const CALLBETWEEN = `fn callbetween {
 ^bb0(%0: u32):
   %1: u32 = const {value=134576844}

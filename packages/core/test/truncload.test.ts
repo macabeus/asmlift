@@ -408,10 +408,10 @@ describe('truncated-load recovery — the cover is picked from facts, not from e
 });
 
 describe('truncated-load recovery — a dead read keeps the width the machine used', () => {
-  // A DEAD LOAD is the project's own `volatile` witness (`ir/opcodes.ts` SPELLED_WHEN_DEAD_OPS): an
+  // A DEAD LOAD is the project's own `volatile` witness (`ir/discipline.ts` `spelledWhenDead`): an
   // optimizing compiler deletes every dead read it is allowed to delete, so one still in the target
   // is evidence the source qualified the access. The fold rewrites the narrow load into a `zext`,
-  // which is NOT in that set, and mints a fresh load, which is — so a widened dead read would carry
+  // which is not spelled when dead, and mints a fresh load, which is — so a widened dead read would carry
   // the witness at the wrong width.
   //
   // `fixed-cell` is what stops it, and by construction rather than by luck: `structure.ts`'s

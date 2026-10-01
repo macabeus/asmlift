@@ -37,7 +37,8 @@
 // arms meet, and that compare is the out-of-block reader that offers `/escape-home` on the
 // numerator, the spelling that wins.
 import type { Block, Op, Value } from '../ir/core';
-import { EFFECTFUL_OPS, opSig } from '../ir/opcodes';
+import { effectful } from '../ir/discipline';
+import { opSig } from '../ir/opcodes';
 import type { UseSite } from './analysis';
 import type { NaturalLoop } from './loops';
 
@@ -61,7 +62,7 @@ export function testRereadsOnly(branch: Op, at: Block, deps: RedundantTestDeps):
     if (op === undefined || cone.has(op)) {
       continue;
     }
-    if (EFFECTFUL_OPS.has(op.opcode)) {
+    if (effectful(op)) {
       return false;
     }
     cone.add(op);
