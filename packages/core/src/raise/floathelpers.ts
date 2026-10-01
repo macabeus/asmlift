@@ -156,12 +156,14 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // A DECLARED DOUBLE HAS NO FALLBACK. A helper the fold refuses stays a call for
   // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its two words handed
   // on as integers are the wrong number — so a double parameter nothing here can hand a double
-  // refuses the function.
+  // refuses the function. It names the argument as the source counts it, which a call returning a
+  // struct through memory (`sret`) does not count its operand 0 among, the hidden pointer.
   for (const [op, at] of consumers) {
     for (const i of at) {
       if (!source(op.operands[i], calls)) {
+        const arg = i + (op.attrs.sret === true ? 0 : 1);
         throw new RaiseUnsupportedError(
-          `cannot lift '${fn.name}': argument ${i + 1} of the call to '${String(op.attrs.target)}' ` +
+          `cannot lift '${fn.name}': argument ${arg} of the call to '${String(op.attrs.target)}' ` +
             'is a `double` its callee declares, and its two words are not a double this function was ' +
             'handed, a runtime helper returned or a finite literal staged, moved whole',
         );

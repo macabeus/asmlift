@@ -70,6 +70,13 @@ const PS2 =
   '\tmov\tr0, sp\n\tbl\tmkp\n\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
   '\t.long 0x3ff80000, 0x0\n';
 
+// `extern double gD; struct Blob64 mk3(s32 a, s32 b, double x); void si(s32 a, s32 b){ struct Blob64 t
+// = mk3(a, b, gD); }` — the double, loaded word by word, is r3 and [sp,#0]
+const SI =
+  'si:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x44\n\tadd\tr5, r0, #0\n\tadd\tr2, r1, #0\n\tldr\tr0, .L3\n' +
+  '\tldr\tr3, [r0]\n\tldr\tr4, [r0, #0x4]\n\tstr\tr4, [sp]\n\tadd\tr0, sp, #0x4\n\tadd\tr1, r5, #0\n\tbl\tmk3\n' +
+  '\tadd\tsp, sp, #0x44\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgD\n';
+
 const BLOB64 = { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] };
 const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
 const makeblob = { params: ['const void *'], returns: 'struct Blob64', returnLayout: BLOB64 };
@@ -122,6 +129,15 @@ describe('a callee declared to return a struct through memory', () => {
     const decls = renderDeclarations(c.symbolRefs ?? []);
     expect(decls).toContain('struct Blob64 { u32 w[16]; };');
     expect(decls).toContain('struct Blob64 mkd(double);');
+  });
+
+  // A double nothing here can hand the callee declines, and names the argument as the source counts
+  // it: the hidden pointer is no argument of the C call
+  test('a declared double it cannot hand on is named by its place in the C call', () => {
+    const mk3 = { params: ['s32', 's32', 'double'], returns: 'struct Blob64', returnLayout: BLOB64 };
+    expect(() => decompile('si', SI, ARMV4T_AGBCC, { prototypes: { mk3 } })).toThrow(
+      "argument 3 of the call to 'mk3' is a `double` its callee declares",
+    );
   });
 
   // A parameter the frontend sizes but the printer cannot spell leaves the struct's local with no
