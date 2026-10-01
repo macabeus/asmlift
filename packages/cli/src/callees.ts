@@ -60,9 +60,9 @@ export function calleeNames(asm: string, self?: string): string[] {
  *  convert into argument registers, and no signature in the project's own DWARF either.
  *
  *  `declaredCallArgs` IS THE READER, AND IT IS THE ONE THE FRONTEND ACTS ON, asked about the same
- *  target. Three declarations state nothing it can lay out — `params` omitted, `params` mistyped (`"2"`), and a typed list
- *  holding a spelling asmlift cannot size — and all three leave the frontend at its own
- *  arg-register scan. A reader that answered "declared" for the third would stay silent about the
+ *  target. Three declarations state nothing it can lay out — `params` omitted, `params` mistyped
+ *  (`"2"`), and a typed list holding a spelling asmlift cannot size — and all three leave the
+ *  frontend at its own arg-register scan. A reader that answered "declared" for the third would stay silent about the
  *  one case where the user HAS a header, believes it was read, and is looking at a guess.
  *
  *  The frontend's TIER decision asks a different question with a different reader

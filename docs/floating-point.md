@@ -319,7 +319,8 @@ typed memory access (a float element, a float struct member), and it owns an `lf
 constant, which is how a float LITERAL arrives on PowerPC. **It must first replace two rules this
 layer rests on**: the float RETURN is decided by scanning for a decoded write to `$f0`/`f1`
 (`frontend/fpu.ts` `writesFloatReturn`), and `ir/verify.ts` holds that a float reaches only a float
-op, `ret` or a call argument its callee declares `double`. Both are sound only while no float can reach memory, so a store that lands before them
+op, `ret` or a call argument its callee declares `double`. Both are sound only while no float can
+reach memory, so a store that lands before them
 lifts `int st3(float a, float b, float *p, float *q){ *p = a * b; *q = a + b; return 2; }` as a
 float return that drops the `2` — `fpu-lift.test.ts` pins that function. The return has to be read
 from the value that reaches each `ret`. After it: `frsp` and the int/float conversions, which

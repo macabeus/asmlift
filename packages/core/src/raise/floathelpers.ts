@@ -5,9 +5,9 @@
 // A parameter an ordinary callee declares `double` (the frontend's `doubles` on the call). And a
 // double literal, two constant words, where the target states their order
 // (`TargetDescription.doubleArgWords`) and its compiler reads a literal back
-// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all three apart from the integer helpers is the
-// value's KIND: the words are bits in integer registers, and the pass re-types them as floats,
-// which only data flow may justify — see the function below.
+// (`compilerBehaviors.roundTripsDoubleLiterals`). What sets all three apart from the integer
+// helpers is the value's KIND: the words are bits in integer registers, and the pass re-types them
+// as floats, which only data flow may justify — see the function below.
 import { Fn, Op, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
 import { doubleBits, doubleOf } from '../ir/float-bits';
 import { T } from '../ir/types';
@@ -156,8 +156,8 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // A DECLARED DOUBLE HAS NO FALLBACK. A helper the fold refuses stays a call for
   // `refuseUnmodelledHelpers` to gap, but an ordinary callee is no helper, and its two words handed
   // on as integers are the wrong number — so a double parameter nothing here can hand a double
-  // refuses the function. It names the argument as the source counts it, which a call returning a
-  // struct through memory (`sret`) does not count its operand 0 among, the hidden pointer.
+  // refuses the function. It counts arguments as the source does: an `sret` call's operand 0, the
+  // hidden pointer, is not one.
   for (const [op, at] of consumers) {
     for (const i of at) {
       if (!source(op.operands[i], calls)) {

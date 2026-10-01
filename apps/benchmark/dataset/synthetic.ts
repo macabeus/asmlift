@@ -3467,8 +3467,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // cannot referee the literal on this row, so `packages/core/test/double-args.test.ts` pins its
   // spelling, and the lift compiled against the ctx is the row's own object.
   //
-  // The refusal this row used to control, a declaration that does not account for every word
-  // staged, is pinned by `stack-args.test.ts` (the variadic hole) and `stackargs-fixpoint.test.ts`.
+  // The licence's refusal of a declaration that does not account for every word staged is pinned
+  // by `stack-args.test.ts` (the variadic hole) and `stackargs-fixpoint.test.ts`.
   //
   // m2c renders it with SIX arguments, the double split into the two words the ABI staged —
   // `fived(a, b, a + b, a - b, /* f64+0x0 */ 0x3FF80000, /* f64+0x4 */ 0)`, a nonmatch. So the

@@ -376,7 +376,7 @@ describe('declaredCallArgs on a double', () => {
 
   // An undeclared callee is handed a `float` promoted to a `double`, and the candidate declares no
   // floating parameter, so one word would be the wrong layout for the C that is compiled.
-  test('a float, a long double and a count state what they did before', () => {
+  test('a float and a long double state no layout, and a count is that many words', () => {
     expect(declaredCallArgs({ params: ['s32', 'float'] }, soft)).toBeUndefined();
     expect(declaredCallArgs({ params: ['long double'] }, soft)).toBeUndefined();
     expect(declaredCallArgs({ params: 5 }, soft)).toEqual({ widths: [32, 32, 32, 32, 32], doubles: new Set() });

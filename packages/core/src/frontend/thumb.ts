@@ -3679,9 +3679,9 @@ function liftOnce(
     // alignment: two registers, r3 and [sp,#0], or two words of the outgoing block. That is agbcc's
     // placement for a `long long` and a `double` alike — FUNCTION_ARG places by word offset
     // (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack (:636),
-    // FUNCTION_ARG_ADVANCE rounds to a word (:647) — and it is the one the register walk below has
-    // always assumed; `test/corpus/agbcc-double-args.s` compiles all three. The walk reads each word
-    // where it falls, so the block counts both of a pair's stack words.
+    // FUNCTION_ARG_ADVANCE rounds to a word (:647); `test/corpus/agbcc-double-args.s` compiles all
+    // three. The walk below reads each word where it falls, so the block counts both of a pair's
+    // stack words.
     const words = wordsOf(widths) - target.argRegs.length;
     // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
     // not claim to stage arguments inside the caller's own frame at all.

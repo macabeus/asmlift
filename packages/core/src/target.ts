@@ -174,16 +174,12 @@ export interface TargetDescription {
    *  (gcc/config/arm/thumb.h:335) on a little-endian target, so the pair is not a `long long`'s
    *  naming of the same bits; FUNCTION_ARG (:632) places by word offset, FUNCTION_ARG_PARTIAL_NREGS
    *  (:636) splits a pair across r3 and the stack, FUNCTION_ARG_ADVANCE (:647) rounds to a word and
-   *  PARM_BOUNDARY is 32 (:354). Compiled at the rows' flags: `f(a, b, 7, -2.75)` stages
-   *  r3 = 0xc0060000 and [sp] = 0, and a fifth-word double is at [sp,#4] and [sp,#8] behind a word
-   *  at [sp].
+   *  PARM_BOUNDARY is 32 (:354).
    *
-   *  o32 MIPS has an FPU and a double still takes two general words, high first, at an even word
-   *  as its `long long` does — compiled with IDO 7.1 `-mips2 -O2 -32`, `g(a, 1.5)` stages
-   *  `lui a2,0x3ff8; li a3,0` and `h(a, a, a, 2.5)` stores to 16(sp), and a leading double travels
-   *  in `$f12` with a0 and a1 still spoken for. The MIPS targets do not state it because no MIPS
-   *  frontend lays out a declared call. PowerPC EABI passes a double in a float register that takes
-   *  no general word (`fpu.slots: 'separate'`), so it has none to state. */
+   *  o32 MIPS has an FPU and a double after an integer argument still takes two general words,
+   *  high first, at an even word as its `long long` does (IDO 7.1). The MIPS targets do not state it
+   *  because no MIPS frontend lays out a declared call. PowerPC EABI passes a double in a float
+   *  register that takes no general word (`fpu.slots: 'separate'`), so it has none to state. */
   doubleArgWords?: 'high-first';
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
