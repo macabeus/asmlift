@@ -4,7 +4,7 @@
 // The project's own unit declares its callees (in a header, or earlier in the same file), so a
 // vendored TU that does not is not the unit the game was built from.
 import { spawnSync } from 'node:child_process';
-import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -27,11 +27,13 @@ const PROBE_TIMEOUT_MS = 120_000;
 export function undeclaredCallees(tu: string, probe: Probe = {}): string[] {
   const cc = probe.cc ?? CC;
   const timeout = probe.timeoutMs ?? PROBE_TIMEOUT_MS;
-  // The diagnostics go to a FILE, not a pipe. `spawnSync` returns once the child has exited AND
-  // every pipe it was handed is closed, and the clang driver forks a `-cc1` that can keep stderr
-  // open after the driver exits — so a piped probe waits on that process, not on the compiler,
-  // and holds the calling thread with it. A file has no reader to wait for.
+  // The unit and the diagnostics are FILES, not pipes. `spawnSync` returns once the child has
+  // exited AND every pipe it was handed is closed, and the clang driver forks a `-cc1` that can keep
+  // its descriptors open after the driver exits — so a piped probe waits on that process, not on
+  // the compiler, and holds the calling thread with it. A file has no other end to wait for.
   const dir = mkdtempSync(join(tmpdir(), 'asmlift-implicit-'));
+  const unitPath = join(dir, 'unit.i');
+  writeFileSync(unitPath, tu);
   const errPath = join(dir, 'stderr');
   const errFd = openSync(errPath, 'w');
   let r;
@@ -39,10 +41,9 @@ export function undeclaredCallees(tu: string, probe: Probe = {}): string[] {
   try {
     r = spawnSync(
       cc,
-      ['-fsyntax-only', '-std=gnu89', '-Wno-everything', '-Wimplicit-function-declaration', '-x', 'c', '-'],
+      ['-fsyntax-only', '-std=gnu89', '-Wno-everything', '-Wimplicit-function-declaration', '-x', 'c', unitPath],
       {
-        input: tu,
-        stdio: ['pipe', 'ignore', errFd],
+        stdio: ['ignore', 'ignore', errFd],
         env: { ...process.env, LC_ALL: 'C' },
         // BOUNDED, because a wedged compiler does not fail — it hangs, and the gate never reports.
         // The default SIGTERM, not SIGKILL: against a driver that traps SIGTERM to tear its child
