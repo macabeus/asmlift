@@ -7,9 +7,13 @@ import { cBackend } from '../src/backend/c';
 import { placedAt } from '../src/ir/discipline';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
+import { enumerateCandidates } from '../src/rank';
 import { type StructureOptions, structure } from '../src/structure/structure';
-import type { SymbolInfo } from '../src/symbols';
+import type { SymbolInfo, SymbolMap } from '../src/symbols';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { decompileTraced } from '../src/trace';
 
 const emit = (ir: string, opts: StructureOptions = {}): string => {
   const fn = parse(ir);
@@ -101,6 +105,41 @@ test('a read in a loop header, used only in the body, is named in the header', (
   expect(read, src).not.toBeNull();
   expect(src).toContain(`gOut = ${read![1]};`);
   expect(emit(HEADER_READ, { symbols: PLAIN, returnsVoid: true })).toContain('gOut = gVolReg;');
+});
+
+// `gVolReg;` and `return 3;`: agbcc keeps the `ldrh` only because the object is volatile, and the
+// raise-time dead-code pass runs long before structuring.
+describe('a read nothing uses', () => {
+  const DEAD = '\tldr\tr0, .L1\n\tldrh\tr0, [r0]\n\tmov\tr0, #0x3\n\tbx\tlr\n.L1:\n\t.word\t0x3001000\n';
+  const asm = `f:\n${DEAD}`;
+  const mapOf = (volatile: boolean): SymbolMap =>
+    new Map([[0x3001000, [{ name: 'gVolReg', kind: 'data', ...(volatile ? { volatile: true } : {}) }]]]);
+  const prototypes = { f: { params: 0 } };
+
+  test('of a declared object is spelled on every entry path', () => {
+    const symbols = mapOf(true);
+    expect(decompile('f', asm, ARMV4T_AGBCC, { symbols, prototypes }).source).toMatch(/\n\s*gVolReg;\n/);
+    const agbcc = targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+    expect(decompileTraced('f', asm, agbcc, { symbols, prototypes }).source).toMatch(/\n\s*gVolReg;\n/);
+    const [mapped] = enumerateCandidates('f', asm, ARMV4T_AGBCC, { symbols, prototypes });
+    expect(mapped.source).toMatch(/\n\s*gVolReg;\n/);
+  });
+
+  test('of a declared object reached by walking off another one is spelled', () => {
+    // `gPlain` is ordinary and twelve bytes past it is `gVolReg`; raise/offsetnames.ts names the walk.
+    const walk =
+      'f:\n\tldr\tr0, .L1\n\tadd\tr0, #12\n\tldrh\tr0, [r0]\n\tmov\tr0, #0x3\n\tbx\tlr\n.L1:\n\t.word\t0x3001000\n';
+    const symbols: SymbolMap = new Map([
+      [0x3001000, [{ name: 'gPlain', kind: 'data', shape: 'scalar', size: 2, signed: false }]],
+      [0x300100c, [{ name: 'gVolReg', kind: 'data', shape: 'scalar', size: 2, signed: false, volatile: true }]],
+    ]);
+    expect(decompile('f', walk, ARMV4T_AGBCC, { symbols, prototypes }).source).toMatch(/\n\s*gVolReg;\n/);
+  });
+
+  test('of an ordinary object is deleted', () => {
+    const src = decompile('f', asm, ARMV4T_AGBCC, { symbols: mapOf(false), prototypes }).source;
+    expect(src).not.toContain('gVolReg;');
+  });
 });
 
 describe('the stamp', () => {

@@ -395,7 +395,7 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
 `;
 
   test('a pinned narrow read through a runtime-indexed base keeps its width and its pin', () => {
-    expect(refusals(RUNTIME_CHANNEL)).toEqual(['pinned-access']);
+    expect(refusals(RUNTIME_CHANNEL)).toEqual(['qualified-access']);
     const fn = parse(RUNTIME_CHANNEL);
     verify(fn);
     expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
@@ -403,7 +403,23 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
     expect(narrow.attrs).toEqual({ off: 8, width: 2, signed: false, volatile: true });
     const ablated = parse(RUNTIME_CHANNEL);
     verify(ablated);
-    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'pinned-access'))).toBe(1);
+    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'qualified-access'))).toBe(1);
+  });
+
+  // The same channel walk through an object the map declares volatile (raise/declared-volatile.ts
+  // stamps it as the lift is made, before this pass runs).
+  const DECLARED_CHANNEL = RUNTIME_CHANNEL.replace(
+    '%1: unk32 = const {value=67109040}',
+    '%1: unk32 = gaddr {sym="gVolChannels"}',
+  ).replaceAll('volatile=true', 'declaredVolatile=true');
+
+  test('a narrow read of a declared volatile object through a runtime index keeps its width and its stamp', () => {
+    expect(refusals(DECLARED_CHANNEL)).toEqual(['qualified-access']);
+    const fn = parse(DECLARED_CHANNEL);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    const narrow = fn.blocks[0].ops.find((o) => o.opcode === 'load' && o.attrs.width === 2)!;
+    expect(narrow.attrs).toEqual({ off: 8, width: 2, signed: false, declaredVolatile: true });
   });
 });
 

@@ -194,8 +194,9 @@ describe('forgetHelperPlacement', () => {
 
 describe('carryDiscipline', () => {
   test('adds the placement of the op a rebuilt op stands for, and nothing else of it', () => {
-    const { pinnedLoad, helperSdiv, load, call } = kinds();
+    const { pinnedLoad, declaredLoad, helperSdiv, load, call } = kinds();
     expect(carryDiscipline(pinnedLoad, { elemSize: 2 })).toEqual({ elemSize: 2, volatile: true });
+    expect(carryDiscipline(declaredLoad, { elemSize: 2 })).toEqual({ elemSize: 2, declaredVolatile: true });
     expect(carryDiscipline(helperSdiv, { imm: 4 })).toEqual({ imm: 4, helper: '__divsi3' });
     expect(carryDiscipline(load, { elemSize: 2 })).toEqual({ elemSize: 2 });
     // a call's placement is its opcode, which the rebuilt op does not inherit

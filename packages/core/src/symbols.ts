@@ -657,8 +657,9 @@ function factsOf(info: SymbolInfo): string {
   );
 }
 
-/** NAME-keyed view over every symbol in the map — what the structurer consumes (it sees gaddr
- *  symbol names, not addresses). Aliases at one address each appear under their own name.
+/** NAME-keyed view over every symbol in the map, or over the names in `only` — what the structurer
+ *  consumes (it sees gaddr symbol names, not addresses). Aliases at one address each appear under
+ *  their own name.
  *
  *  One name can sit at SEVERAL addresses in a real project (file-static `sMenu` in two
  *  translation units, a `.symtab` full of same-named locals). Where those entries agree on their
@@ -671,11 +672,14 @@ function factsOf(info: SymbolInfo): string {
  *  spelling question into a compile failure); only the shape facts, which are what could be wrong,
  *  are withheld — the honest cast spellings take over. `kind` is kept: it never disagrees in the
  *  vendored maps, and it is settled address-side by `lookupSymbol` before a name is ever used. */
-export function symbolsByName(map: SymbolMap): Map<string, SymbolInfo> {
+export function symbolsByName(map: SymbolMap, only?: ReadonlySet<string>): Map<string, SymbolInfo> {
   const byName = new Map<string, SymbolInfo>();
   const conflicted = new Set<string>();
   for (const infos of map.values()) {
     for (const info of infos) {
+      if (only !== undefined && !only.has(info.name)) {
+        continue;
+      }
       const prev = byName.get(info.name);
       if (prev === undefined) {
         byName.set(info.name, info);

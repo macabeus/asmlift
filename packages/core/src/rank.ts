@@ -28,7 +28,6 @@ import {
   assertResolved,
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
-import { frontendFor } from './frontend/registry';
 import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
 import { Fn, Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
@@ -59,7 +58,7 @@ import { volatileValueLocals } from './l3/volatileval';
 import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
-import { applyIdiomPatterns, raiseRecovered, structureChecked } from './pipeline';
+import { applyIdiomPatterns, liftStamped, raiseRecovered, structureChecked } from './pipeline';
 import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
@@ -447,7 +446,6 @@ export function enumerateCandidates(
   // Same merge as `decompile`: the project's DWARF signatures fill in what the caller did not
   // state, so both the annotate pass and the ranked candidates reason about one prototype table.
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
-  const frontend = frontendFor(target);
   const baseOpts = {
     ...structureOptionsFor(target, declaresVoidReturn(prototypes[name]), prototypes),
     // See the same line in pipeline.ts: a backend that cannot print switch fall-through must not
@@ -580,8 +578,7 @@ export function enumerateCandidates(
   // pointers/aggregates so they are excluded from the signedness variation (see NO_PIN_KINDS). One
   // extra lift+recover, no compile. (The shared lift deliberately stops after recoverTypes — it only reads the param KINDS, so
   // the totality contract / return-sinking of the full spine are not run on it.)
-  const sharedLift = frontend.lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
-  verify(sharedLift);
+  const sharedLift = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols);
   // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
   // half. Read off the shared lift's LIFTED form — before the fold below and the tower rewrite it —
   // because the base-materialization order the derivation's licence reads does not survive them.
@@ -624,8 +621,7 @@ export function enumerateCandidates(
     if (symbols === opts.symbols) {
       return sharedLiftTreeOwned;
     }
-    const p = frontend.lift(name, asm, target, prototypes, opts.asmData, symbols);
-    verify(p);
+    const p = liftStamped(name, asm, target, prototypes, opts.asmData, symbols);
     applyIdiomPatterns(p, target, opts.patterns);
     let seen = false;
     runPreRecovery(p, target, () => verify(p), prototypes[name], {
@@ -887,7 +883,7 @@ export function enumerateCandidates(
   // every OTHER name in the function, so supplying more information made the tool strictly
   // worse. A union cannot — each name is declared by whichever half knows more about it.
   // SCOPE: `declSymbols` is used ONLY here. It must never reach `opts.symbols`/`baseOpts.symbols`
-  // or `frontend.lift` — feeding it to the lift would turn on pool promotion, interior
+  // or `liftStamped` — feeding it to the lift would turn on pool promotion, interior
   // attribution and the `/raw-globals` variation, which is a different (and source-moving) change.
   // THREE halves now, in increasing authority: the name-only pool/reloc symbols, the array shapes
   // the asm evidences for them (raise/globalshape.ts — an `extern u16 gTbl[];` where the bare
@@ -1811,7 +1807,7 @@ export function enumerateCandidates(
       if (cand.signed && !pinnable) {
         break;
       }
-      const base = frontend.lift(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
+      const base = liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
       // narrowToSetupArgs carries the argument for why the differ is what settles it.
@@ -1890,7 +1886,7 @@ export function enumerateCandidates(
           fn =
             liftSetting.variations.length === 0
               ? base
-              : frontend.lift(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
+              : liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the default lift's own candidates already cover it
           }

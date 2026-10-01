@@ -1783,7 +1783,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  is the fold's to do, so this reports and the caller declines — which costs no row: the shape is
    *  0 of the corpus's 1,203, swept under both map modes.
    *
-   *  The read is the one the `declared` stamp marks (structure/declared-volatile.ts), and reported
+   *  The read is the one the `declared` stamp marks (raise/declared-volatile.ts), and reported
    *  by the object its base reaches. A read the lift pinned (`device`) is the same observable access
    *  with no name to report but its address. */
   const volatileGuardedRead = ((): string | null => {

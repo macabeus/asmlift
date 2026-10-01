@@ -70,6 +70,7 @@ import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
 import { qualifiedMemoryAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
+import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -88,7 +89,6 @@ import {
 } from '../symbols';
 import { analyze } from './analysis';
 import { makeBitfieldSpelling } from './bitfields';
-import { stampDeclaredVolatile } from './declared-volatile';
 import {
   addOffset,
   addrIn,

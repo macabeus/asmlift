@@ -890,8 +890,9 @@ the one pass that knew it: `call` is its own opcode; `helper` is the stamp
 computed by calling a runtime routine; `device` is the `volatile` the frontend's device pin
 ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
 access; `declared` is the stamp
-[`structure/declared-volatile.ts`](../packages/core/src/structure/declared-volatile.ts) puts on a
-read of a map-declared volatile object when structuring starts, from the map it is handed. Every
+[`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on a read of a
+map-declared volatile object as the lift is made, from the map the function is lifted and
+structured under, before any pass asks whether the read may be deleted. Every
 pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,
 `spelledWhenDead`, `speculationUnsafe`, `orderSensitive`, `reevalUnsafe`, `counted` — rather than
 testing an opcode set, an L2 rebuilder carries the stamps through `carryDiscipline`, the contract

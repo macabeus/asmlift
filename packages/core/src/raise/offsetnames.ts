@@ -105,6 +105,7 @@ import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
 import { dce } from '../pattern/engine';
 import { type SymbolInfo, type SymbolMap, accessSignedness, lookupSymbol } from '../symbols';
+import { stampDeclaredVolatileUnder } from './declared-volatile';
 
 /** One `add`/`sub` whose address the gates judge. Built only for an op that already resolves to a
  *  named base plus a NON-ZERO constant — a zero offset names the base itself, which the pool path
@@ -462,6 +463,9 @@ export function nameOffsetAddresses(
     s.op.attrs = { sym: s.addr.target!.name };
   }
   if (admitted.length > 0) {
+    // An access now names another object, so whether it reads one the map declares volatile is
+    // asked again before anything is deleted.
+    stampDeclaredVolatileUnder(fn, symbols);
     dce(fn); // the constants and the walked-off base the rewrite just orphaned
     verify(fn);
   }

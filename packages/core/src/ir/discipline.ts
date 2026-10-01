@@ -6,11 +6,10 @@
 // that knew it: `call` is its own opcode; `helper` is the stamp `runtime-helpers.ts` `helperOp` puts
 // on a value op the asm computed by calling a runtime routine; `device` is the `volatile` the
 // frontend's device-pin pass (frontend/device-pins.ts) puts on a memory access; `declared` is the
-// stamp structure/declared-volatile.ts puts on a read of an object the symbol map declares
-// volatile. That last one is put when structuring starts, from the map it is handed, so the raise
-// passes before it never see it. Every question below takes the op, so a pass asks one question
-// instead of re-deriving the combination, and `PLACEMENT_ANSWERS` is the one place a placement's
-// answers are written.
+// stamp raise/declared-volatile.ts puts on a read of an object the symbol map declares volatile, as
+// the lift is made and again when structuring starts. Every question below takes the op, so a pass
+// asks one question instead of re-deriving the combination, and `PLACEMENT_ANSWERS` is the one
+// place a placement's answers are written.
 //
 // NAMED RESIDUE. The sites below ask a registry question where a placement could change the answer,
 // and keep the registry's answer. DELIBERATE: the placement does not bear on what the site asks.
@@ -43,14 +42,14 @@
 //     a device store a pinned read of the same cell re-reads in a loop, under the per-object policy
 //       (frontend/device-pins.ts's header argues it);
 //     a read of a map-declared volatile object through a base that reaches no name, such as a
-//       pointer walked along the object in a loop (structure/declared-volatile.ts).
+//       pointer walked along the object in a loop (raise/declared-volatile.ts).
 import type { Op } from './core';
 import { MEM_BASE_OPS, type OpSig, opSig } from './opcodes';
 
 /** Why an op must run where the asm ran it. */
 export type Placement = 'call' | 'helper' | 'device' | 'declared';
 
-/** The attr structure/declared-volatile.ts stamps a `declared` read with. */
+/** The attr raise/declared-volatile.ts stamps a `declared` read with. */
 export const DECLARED_VOLATILE = 'declaredVolatile';
 
 interface PlacementAnswers {
@@ -145,10 +144,8 @@ export function spelledWhenDead(op: Op): boolean {
  *  raise/shortcircuit.ts, which hoists an arm's body into the block above, and the structurer
  *  inlines an unnamed value back into the `&&`/`||` right-hand side, where C's own short circuit
  *  re-guards it. Answering yes for plain reads refuses every connective whose arm reads memory,
- *  which branch-shortcircuit.test.ts's `refusals` pin. A read of an object the map declares
- *  volatile is the read the re-guard argument does not cover — it moves an access, not a value —
- *  and its `declared` stamp is put after the hoist has run, so the structurer declines the function
- *  on one instead (structure/analysis.ts, `volatileGuardedRead`).
+ *  which branch-shortcircuit.test.ts's `refusals` pin. A qualified read is the read the re-guard
+ *  argument does not cover — it moves an access, not a value — so its placement answers yes.
  *
  *  The trapping divides answer no as well, and there the re-guard argument does NOT carry: a hoisted
  *  `sdiv` the structurer NAMES becomes an unconditional statement. `reevalUnsafe` answers yes for
@@ -195,12 +192,15 @@ export function forgetHelperPlacement(op: Op): Op {
 }
 
 /** `attrs`, plus the placement of `from`, for an op a pass builds to stand for `from`: a memory
- *  access keeps its `volatile`, a value op its `helper`. Every op rebuilder carries the stamps
- *  through here, so a placement decided once is not lost to a rebuild that forgot to copy it. */
+ *  access keeps its `volatile` or its `declared` stamp, a value op its `helper`. Every op rebuilder
+ *  carries the stamps through here, so a placement decided once is not lost to a rebuild that
+ *  forgot to copy it. */
 export function carryDiscipline(from: Op, attrs: Op['attrs']): Op['attrs'] {
   switch (placedAt(from)) {
     case 'device':
       return { ...attrs, volatile: true };
+    case 'declared':
+      return { ...attrs, [DECLARED_VOLATILE]: true };
     case 'helper':
       return { ...attrs, helper: from.attrs.helper };
     default:

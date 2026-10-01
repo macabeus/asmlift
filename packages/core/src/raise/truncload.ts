@@ -83,9 +83,10 @@
 // loops. `fixed-cell` does not fire there, because no constant address exists to read, and nothing
 // else can: the IR for that loop and the IR for an element of an ordinary global array are the
 // SAME IR, so refusing it would refuse every indexed access into a named object — including the
-// map-less spelling of the row this pass was written for. Where the lift pinned the access as a
-// device register's, `pinned-access` refuses it; an unpinned one is a residue, it is unpriced, and
-// the place it would be settled is the symbol map, not this pass.
+// map-less spelling of the row this pass was written for. Where the access is qualified — the lift
+// pinned it as a device register's, or the map declares its object volatile — `qualified-access`
+// refuses it; any other one is a residue, it is unpriced, and the place it would be settled is the
+// symbol map, not this pass.
 //
 // A NARROW STORE IS NOT A CANDIDATE AT ALL — the refusal is in the candidate builder below rather
 // than in the gate table, and this is the table's named residue. Widening a write clobbers the
@@ -137,8 +138,9 @@ function baseResolves(defs: Map<Value, Op>, entryParams: ReadonlySet<Value>, v: 
 export interface TruncatedLoad {
   /** the narrow load reads a cell at a COMPILE-TIME CONSTANT address */
   fixedCell: boolean;
-  /** the narrow load or its cover is a device access the lift pinned */
-  pinned: boolean;
+  /** the narrow load or its cover is a qualified access: pinned by the lift, or of an object the
+   *  map declares volatile */
+  qualified: boolean;
   /** the base's origin resolves — it is not a join the walk could not finish */
   resolvedBase: boolean;
   /** the covering access is a LOAD, so its signedness is read rather than invented */
@@ -184,16 +186,17 @@ export const TRUNC_LOAD_GATES: readonly Gate<TruncatedLoad>[] = [
     rejects: (c) => !c.resolvedBase,
   },
   {
-    // SOUND, and `fixed-cell`'s question answered by the pass that knew it: the device pin
+    // SOUND, and `fixed-cell`'s question answered by the passes that knew it: the device pin
     // (frontend/device-pins.ts) marks a register's access whatever its address is, including the
-    // runtime-indexed channel `(vu32 *)(0x40000B0 + ch * 12)` no constant address reaches. Widened,
-    // the narrow access becomes a cast of a fresh load that carries no pin, at a width the machine
-    // never used on the register.
-    id: 'pinned-access',
-    why: 'a device access the lift pinned is made at its own width, and the fold would also drop the pin',
+    // runtime-indexed channel `(vu32 *)(0x40000B0 + ch * 12)` no constant address reaches, and the
+    // `declared` stamp (raise/declared-volatile.ts) marks a read of a volatile object through a
+    // runtime index into it. Widened, the narrow access becomes a cast of a fresh load that carries
+    // no placement, at a width the machine never used on the object.
+    id: 'qualified-access',
+    why: 'a qualified access is made at its own width, and the fold would also drop its placement',
     sound: true,
     guardedBy: 'truncload.test.ts: a pinned narrow read through a runtime-indexed base keeps its width and its pin',
-    rejects: (c) => c.pinned,
+    rejects: (c) => c.qualified,
   },
   {
     // The sibling narrowing passes' rule, under the sibling name (raise/paramwidth.ts,
@@ -305,7 +308,7 @@ export function truncatedLoadCandidates(fn: Fn, littleEndian: boolean): TruncLoa
         covering,
         c: {
           fixedCell: constAddressOf(defs, base, narrow.off) !== null || globalCellOf(defs, base, narrow.off) !== null,
-          pinned: placedAt(op) === 'device' || placedAt(covering.op) === 'device',
+          qualified: [op, covering.op].some((o) => placedAt(o) === 'device' || placedAt(o) === 'declared'),
           resolvedBase: baseResolves(defs, entryParams, base),
           coveringLoad: covering.isLoad,
           lowOrderEnd: isLowOrderEnd(narrow, covering),

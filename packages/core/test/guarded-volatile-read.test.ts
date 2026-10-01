@@ -12,9 +12,11 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
 import { StructureError, structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const emitWith = (ir: string, symbols?: Map<string, SymbolInfo>): string => {
   const fn = parse(ir);
@@ -175,4 +177,19 @@ test('a plain member of a partly-volatile struct keeps the connective', () => {
 
 test('the volatile member of that same struct declines', () => {
   expect(() => emitWith(GUARDED_MEMBER(4), MIXED_STRUCT)).toThrow(/guard a read of the volatile object 'gIo'/);
+});
+
+// agbcc -O2 of `extern volatile int gVolReg; void v(int a) { if (a > 0 && gVolReg != 0) g(a); }`: the
+// `ldr` runs only past the `ble`. The read is stamped as the lift is made, so the short-circuit fold
+// leaves it in the arm it guards, and the structurer spells it there.
+const BELOW_THE_GUARD =
+  'v:\n\tpush\t{lr}\n\tadd\tr1, r0, #0\n\tcmp\tr1, #0\n\tble\t.L3\n\tldr\tr0, .L4\n\tldr\tr0, [r0]\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.L3\n\tadd\tr0, r1, #0\n\tbl\tg\n.L3:\n\tpop\t{r0}\n\tbx\tr0\n' +
+  '.L4:\n\t.word\tgVolReg\n';
+
+test('a volatile read the asm makes only past the guard is spelled under it', () => {
+  const symbols = new Map([[0x3000000, [{ name: 'gVolReg', kind: 'data' as const, volatile: true }]]]);
+  const prototypes = { v: { params: 1, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
+  const src = decompile('v', BELOW_THE_GUARD, ARMV4T_AGBCC, { symbols, prototypes }).source;
+  expect(src).toMatch(/if \(a0 > 0\) \{\s*if \(gVolReg != 0\) g\(a0\);\s*\}/);
 });
