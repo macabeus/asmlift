@@ -377,6 +377,34 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
     expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(1);
     verify(fn);
   });
+  // A DEVICE ACCESS THE LIFT PINNED keeps the width it was made at, wherever its address points.
+  // `fixed-cell` cannot see this one: a DMA channel chosen at run time, `0x40000B0 + ch * 12`, has
+  // no constant address, while the pin (frontend/device-pins.ts) already says it is a register.
+  const RUNTIME_CHANNEL = `fn t {
+^bb0(%0: unk32):
+  %1: unk32 = const {value=67109040}
+  %2: unk32 = const {value=12}
+  %3: unk32 = mul %0, %2
+  %4: unk32 = add %1, %3
+  %5: unk32 = load %4 {off=8, width=4, signed=true, volatile=true}
+  %6: unk32 = load %4 {off=8, width=2, signed=false, volatile=true}
+  %7: unk32 = add %5, %6
+  store %4, %7 {off=0, width=4, volatile=true}
+  ret
+}
+`;
+
+  test('a pinned narrow read through a runtime-indexed base keeps its width and its pin', () => {
+    expect(refusals(RUNTIME_CHANNEL)).toEqual(['pinned-access']);
+    const fn = parse(RUNTIME_CHANNEL);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    const narrow = fn.blocks[0].ops.find((o) => o.opcode === 'load' && o.attrs.width === 2)!;
+    expect(narrow.attrs).toEqual({ off: 8, width: 2, signed: false, volatile: true });
+    const ablated = parse(RUNTIME_CHANNEL);
+    verify(ablated);
+    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'pinned-access'))).toBe(1);
+  });
 });
 
 describe('truncated-load recovery — the cover is picked from facts, not from emission order', () => {
