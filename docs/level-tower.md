@@ -747,16 +747,18 @@ libgcc call (`__adddf3`, `__negdf2` …) over the register pairs a long long tra
 the IR the way a 64-bit integer does — a `concat` of two argument registers into the call, the
 result split back into r0:r1 — and `raise/floathelpers.ts` folds the call to the float op over
 `f64`s, in its own pass just ahead of the one that folds `__muldi3`. A call to an ordinary callee a
-prototype declares to take a `double` enters the same way: the frontend lays that parameter out as
-the next two argument words wherever they fall (`TargetDescription.doubleArgWords` — two registers,
-r3 and [sp,#0], or two outgoing stack words), lists it in the call's `doubles`, and the same pass
-hands it a double. That pass is the only producer of an `f64` from integer words, and it is not an
-op: verify holds that a `concat` builds an integer, so a double may come only from a pair of this
-function's argument slots, fused into one parameter however many calls it is handed to, from
-another such helper's result, or from two constant words — a literal, which becomes an `fconst`
-the C backend spells as the shortest decimal agbcc reads back as the same double. agbcc stores a
-double high word first (`FLOAT_WORDS_BIG_ENDIAN`), the opposite of a long long, which is why only a
-pair moved whole, or two constants read high word first, may be read as a double.
+prototype declares to take a `double` enters the same way, on a target whose double takes two
+general words (`TargetDescription.doubleArgWords`, which states that and their order): the frontend
+lays that parameter out where it lays out any 64-bit argument, the next two argument words wherever
+they fall (`frontend/thumb.ts` `declaredCall` — two registers, r3 and [sp,#0], or two outgoing stack
+words), lists it in the call's `doubles`, and the same pass hands it a double. That pass is the only
+producer of an `f64` from integer words, and it is not an op: verify holds that a `concat` builds an
+integer, so a double may come only from a pair of this function's argument slots, fused into one
+parameter however many calls it is handed to, from another such helper's result, or from two
+constant words — a literal, which becomes an `fconst` the C backend spells as the shortest decimal
+agbcc reads back as the same double. agbcc stores a double high word first
+(`FLOAT_WORDS_BIG_ENDIAN`), the opposite of a long long, which is why only a pair moved whole, or
+two constants read high word first, may be read as a double.
 
 **What refuses, and why each refusal is where it is.**
 
