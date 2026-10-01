@@ -49,7 +49,8 @@
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `roundTripsDoubleLiterals`
-//     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts). The
+//     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
+//     raise/declared-volatile.ts through liftStamped and the offset-name pass). The
 //     field names are a SUPERSET of
 //     StructureOptions' — see `structureOptionsFor`.
 //
@@ -61,6 +62,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, dialectOf, parseFlags } from './codegen-flags';
+import type { Op } from './ir/core';
 import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StaticLayout } from './structure/local-statics';
@@ -92,6 +94,19 @@ export function sourceReach(read: SourceRead, off: number): { lo: number; hi: nu
     lo: read.walk === 'decrement' ? -Infinity : 0 - (off % read.unit),
     hi: read.walk === 'increment' ? (read.bytes ?? Infinity) : read.unit,
   };
+}
+
+/** Could the source have made this read through a `volatile` lvalue, on a compiler that behaves as
+ *  `behaviors` says? Not a sign-extending narrow load where the compiler extends a qualified narrow
+ *  read in a register (`volatileReadsExtendInRegister`): the qualified read is another instruction
+ *  sequence. The device pin (frontend/device-pins.ts) and the `declared` stamp
+ *  (raise/declared-volatile.ts) both ask it, so the two placements read one load the same way. */
+export function readCouldBeVolatile(
+  behaviors: Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'>,
+  op: Op,
+): boolean {
+  const width = (op.opcode === 'aload' ? op.attrs.elemSize : op.attrs.width) as number;
+  return !(behaviors.volatileReadsExtendInRegister === true && op.attrs.signed === true && width < 4);
 }
 
 /** A device channel's source control, read off the halfword at `sink + offset` of a
@@ -740,10 +755,11 @@ export interface TargetDescription {
     // sign-extend expander refuses a volatile MEM while expanding (`general_operand`, recog.c:918,
     // under `init_recog_no_volatile`, function.c:5564) and thumb.md:393-409 then extends in a
     // register; compiled at the canonical flags. So a lifted sign-extending narrow load is evidence
-    // the source read was plain, and the device pin (frontend/device-pins.ts) leaves it plain.
+    // the source read was plain (`readCouldBeVolatile`): the device pin (frontend/device-pins.ts)
+    // leaves it plain, and the `declared` stamp (raise/declared-volatile.ts) leaves it unplaced.
     //
     // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
-    // pinned whatever its extension.
+    // pinned, and a read of a declared object placed, whatever its extension.
     volatileReadsExtendInRegister?: boolean;
   };
 }

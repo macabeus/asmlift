@@ -47,13 +47,13 @@
  *  different addresses, which are two cells to that pass, and those are the ones a pin here would
  *  refuse.
  *
- *  Under either policy, a read the compiler could not have made of a `volatile` stays plain: on a
- *  compiler that sign-extends a qualified narrow read in a register (`volatileReadsExtendInRegister`),
- *  a sign-extending load is a plain read in the source, and qualified it recompiles to another
- *  instruction sequence. */
+ *  Under either policy, a read the compiler could not have made of a `volatile` stays plain
+ *  (target.ts `readCouldBeVolatile`): on a compiler that sign-extends a qualified narrow read in a
+ *  register, a sign-extending load is a plain read in the source, and qualified it recompiles to
+ *  another instruction sequence. */
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
-import type { TargetDescription } from '../target';
+import { type TargetDescription, readCouldBeVolatile } from '../target';
 
 /** The literal addresses a function's values denote, over its IR as it stands when asked. */
 export interface LiteralAddresses {
@@ -253,12 +253,10 @@ export function pinDeviceAccesses(
     return each.find((a) => typeof a === 'number') ?? 'cycle';
   };
   // A read the compiler could not have made of a `volatile` was plain in the source.
-  const extendedInLoad = (op: Op): boolean =>
-    target.compilerBehaviors.volatileReadsExtendInRegister === true &&
-    op.attrs.signed === true &&
-    (op.attrs.width as number) < 4;
   const pins = (op: Op, blk: Block, at: number): boolean =>
-    op.opcode === 'load' ? !extendedInLoad(op) : stores === 'every' || overwritten(op, blk, at, addresses);
+    op.opcode === 'load'
+      ? readCouldBeVolatile(target.compilerBehaviors, op)
+      : stores === 'every' || overwritten(op, blk, at, addresses);
   for (const blk of irBlocks) {
     blk.ops.forEach((op, at) => {
       if (op.opcode !== 'store' && op.opcode !== 'load') {

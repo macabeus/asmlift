@@ -1,9 +1,10 @@
 // asmlift — the decider for ir/discipline.ts's `declared` placement: a memory read of an object the
 // project's symbol map declares volatile.
 //
-// The stamp is a function of the IR and the map the function is lifted and structured under, and
-// nothing else: a read whose base reaches a global the map qualifies, at the byte the access names
-// (`declaresVolatile`). It is put as the lift is made (pipeline.ts `liftStamped`), before the first
+// The stamp is a function of the IR, the map the function is lifted and structured under, and the
+// compiler, and nothing else: a read whose base reaches a global the map qualifies, at the byte the
+// access names (`declaresVolatile`), that the compiler could have made of a `volatile` (target.ts
+// `readCouldBeVolatile` — the device pin asks it too). It is put as the lift is made (pipeline.ts `liftStamped`), before the first
 // pass that asks whether a read may be deleted, folded or moved, and re-derived by every pass that
 // changes which object an access names and by structuring. Structuring the same function under
 // another map — the `/raw-globals` setting has none — re-runs it, and an op the new map does not
@@ -14,14 +15,23 @@ import { globalBaseOf, globalCellOf } from '../ir/alias';
 import { type Fn, defOpMap } from '../ir/core';
 import { DECLARED_VOLATILE } from '../ir/discipline';
 import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
+import { type TargetDescription, readCouldBeVolatile } from '../target';
 
-/** Stamp every `load`/`aload` of `fn` that reads an object `symbols` declares volatile, and clear
- *  the stamp from every other op. */
-export function stampDeclaredVolatile(fn: Fn, symbols: ReadonlyMap<string, SymbolInfo> | undefined): void {
+/** The compiler fact the stamp reads. */
+export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'>;
+
+/** Stamp every `load`/`aload` of `fn` that reads an object `symbols` declares volatile, and that a
+ *  compiler behaving as `behaviors` says could have made of one, and clear the stamp from every
+ *  other op. */
+export function stampDeclaredVolatile(
+  fn: Fn,
+  symbols: ReadonlyMap<string, SymbolInfo> | undefined,
+  behaviors: StampBehaviors,
+): void {
   const defs = symbols ? defOpMap(fn) : undefined;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      const read = op.opcode === 'load' || op.opcode === 'aload';
+      const read = (op.opcode === 'load' || op.opcode === 'aload') && readCouldBeVolatile(behaviors, op);
       const base = defs && read ? globalBaseOf(defs, op.operands[0]) : null;
       // A subscript reaches the object while naming no cell, so only a `load` asks by byte.
       const cell =
@@ -41,9 +51,9 @@ export function stampDeclaredVolatile(fn: Fn, symbols: ReadonlyMap<string, Symbo
 /** {@link stampDeclaredVolatile} under an address-keyed project map, through the name-keyed view
  *  structuring is handed for the same map (symbols.ts `symbolsByName`), narrowed to the names the
  *  function's own `gaddr`s carry. */
-export function stampDeclaredVolatileUnder(fn: Fn, map: SymbolMap | undefined): void {
+export function stampDeclaredVolatileUnder(fn: Fn, map: SymbolMap | undefined, behaviors: StampBehaviors): void {
   if (map === undefined) {
-    stampDeclaredVolatile(fn, undefined);
+    stampDeclaredVolatile(fn, undefined, behaviors);
     return;
   }
   const names = new Set<string>();
@@ -54,5 +64,5 @@ export function stampDeclaredVolatileUnder(fn: Fn, map: SymbolMap | undefined): 
       }
     }
   }
-  stampDeclaredVolatile(fn, symbolsByName(map, names));
+  stampDeclaredVolatile(fn, symbolsByName(map, names), behaviors);
 }

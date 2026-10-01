@@ -1641,6 +1641,10 @@ export interface StructureOptions {
   // `deviceMemoryWriters`, which no structurer rule reads). Used as a REFUSAL: absent, a dead read
   // at a literal address is dropped.
   deviceRegisters?: readonly [number, number];
+  // Does the compiler extend a `volatile` narrow signed read in a register, never in the load? The
+  // `declared` stamp structuring re-derives reads it (TargetDescription.compilerBehaviors'
+  // `volatileReadsExtendInRegister`), so it leaves unplaced the read the lift's stamp did.
+  volatileReadsExtendInRegister?: boolean;
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` variation, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
@@ -2088,7 +2092,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     inferredSymbols,
     orderLicensedGlobals,
   } = opts;
-  stampDeclaredVolatile(fn, mapSymbols);
+  stampDeclaredVolatile(fn, mapSymbols, opts);
   // THE shape dictionary the rendering context asks, map-first. Built as a lookup rather than a
   // merged Map because the map is the PROJECT's and is asked by name for a whole project's worth
   // of symbols — copying it per structuring is work proportional to the project, and a ranked run

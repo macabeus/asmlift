@@ -231,6 +231,21 @@ describe('the stamp', () => {
     expect(placedAt(load)).toBeNull();
   });
 
+  test('leaves a read the compiler could not have made of a `volatile` unplaced', () => {
+    const signed = SQUARE.replace(
+      '%1: u16 = load %0 {off=0, signed=false, width=2}',
+      '%1: s16 = load %0 {off=0, signed=true, width=2}',
+    );
+    const fn = parse(signed);
+    verify(fn);
+    recoverTypes(fn);
+    const load = fn.blocks[0].ops.find((o) => o.opcode === 'load')!;
+    structure(fn, { symbols: VOLATILE, volatileReadsExtendInRegister: true });
+    expect(placedAt(load)).toBeNull();
+    structure(fn, { symbols: VOLATILE });
+    expect(placedAt(load)).toBe('declared');
+  });
+
   test('keys a member the map qualifies by the bytes it spans', () => {
     const MEMBER = `fn m {
 ^bb0():
@@ -260,5 +275,44 @@ describe('the stamp', () => {
     // and a read of that member nothing uses is spelled, qualified
     const dead = MEMBER.replace('%3: s32 = add %1, %2\n  ret %3', 'ret %2');
     expect(emit(dead, { symbols: map })).toContain('\n    ((volatile u16 *)&gMain)[2];\n');
+  });
+});
+
+// agbcc -O2 over `extern volatile struct S gVolS;` (`s16 a; s16 pad; s32 b;`): `return ((s16
+// *)&gVolS)[3];` is `ldrsh` of `gVolS+6`, and `return *(volatile s16 *)((u32)&gVolS + 6);` is `ldrh;
+// lsl #16; asr #16` — agbcc sign-extends a qualified narrow read in a register, never in the load.
+describe('a sign-extending read of a declared object', () => {
+  const symbols: SymbolMap = new Map([
+    [
+      0x3001000,
+      [
+        {
+          name: 'gVolS',
+          kind: 'data',
+          volatile: true,
+          shape: 'struct',
+          size: 8,
+          layout: [
+            { name: 'a', offset: 0, size: 2, signed: true },
+            { name: 'pad', offset: 2, size: 2, signed: true },
+            { name: 'b', offset: 4, size: 4, signed: true },
+          ],
+        },
+      ],
+    ],
+  ]);
+  const prototypes = { f: { params: 0 } };
+  const read = (load: string): string =>
+    `f:\n\tldr\tr0, .L3\n\tmov\tr1, #0\n\t${load}\tr0, [r0, r1]\n\tbx\tlr\n.L3:\n\t.word\t0x3001006\n`;
+
+  test('was a plain read in the source, and stays plain', () => {
+    const src = decompile('f', read('ldrsh'), ARMV4T_AGBCC, { symbols, prototypes }).source;
+    expect(src).not.toContain('volatile');
+    expect(src).toMatch(/\(s16 \*\)/);
+  });
+
+  test('…where a zero-extending one stays qualified', () => {
+    const src = decompile('f', read('ldrh'), ARMV4T_AGBCC, { symbols, prototypes }).source;
+    expect(src).toMatch(/\(volatile u16 \*\)/);
   });
 });

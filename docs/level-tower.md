@@ -893,8 +893,10 @@ computed by calling a runtime routine; `device` is the `volatile` the frontend's
 ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
 access; `declared` is the stamp
 [`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on a read of a
-map-declared volatile object as the lift is made, from the map the function is lifted and
-structured under, before any pass asks whether the read may be deleted. Every
+map-declared volatile object as the lift is made, from the map and the compiler the function is
+lifted and structured under, before any pass asks whether the read may be deleted. A read the
+compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
+by this stamp and by the device pin alike, through the one predicate both ask. Every
 pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,
 `spelledWhenDead`, `speculationUnsafe`, `orderSensitive`, `reevalUnsafe`, `counted` — rather than
 testing an opcode set, an L2 rebuilder carries the stamps through `carryDiscipline`, the contract

@@ -105,7 +105,7 @@ import { verify } from '../ir/verify';
 import { type Gate, firstRejection } from '../l3/gates';
 import { dce } from '../pattern/engine';
 import { type SymbolInfo, type SymbolMap, accessSignedness, lookupSymbol } from '../symbols';
-import { stampDeclaredVolatileUnder } from './declared-volatile';
+import { type StampBehaviors, stampDeclaredVolatileUnder } from './declared-volatile';
 
 /** One `add`/`sub` whose address the gates judge. Built only for an op that already resolves to a
  *  named base plus a NON-ZERO constant — a zero offset names the base itself, which the pool path
@@ -452,6 +452,7 @@ function offsetSites(fn: Fn, symbols: SymbolMap): { op: Op; sym: string; addr: O
 export function nameOffsetAddresses(
   fn: Fn,
   symbols: SymbolMap,
+  behaviors: StampBehaviors,
   gates: readonly Gate<OffsetAddress>[] = OFFSET_NAME_GATES,
 ): string[] {
   // Every site is judged against the PRE-REWRITE defs, so a chain's later links resolve through
@@ -465,7 +466,7 @@ export function nameOffsetAddresses(
   if (admitted.length > 0) {
     // An access now names another object, so whether it reads one the map declares volatile is
     // asked again before anything is deleted.
-    stampDeclaredVolatileUnder(fn, symbols);
+    stampDeclaredVolatileUnder(fn, symbols, behaviors);
     dce(fn); // the constants and the walked-off base the rewrite just orphaned
     verify(fn);
   }
@@ -502,6 +503,8 @@ export function offsetNameRefusals(
  *  this pass having one seat. What a list also carries is the invariant that every driver picks a
  *  pass up, which three hand-written calls do not — so `offset-names.test.ts` supplies it by
  *  wrapping this record and asserting all three reach it. */
-export const OFFSET_NAME_PASS: { run: (fn: Fn, symbols: SymbolMap) => string[] } = {
-  run: (fn, symbols) => nameOffsetAddresses(fn, symbols),
+export const OFFSET_NAME_PASS: {
+  run: (fn: Fn, symbols: SymbolMap, behaviors: StampBehaviors) => string[];
+} = {
+  run: (fn, symbols, behaviors) => nameOffsetAddresses(fn, symbols, behaviors),
 };

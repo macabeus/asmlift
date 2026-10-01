@@ -1923,7 +1923,7 @@ export function enumerateCandidates(
           // `/raw-globals` sibling has no map and so no name to reach. AFTER the two readings, and
           // the staleness that leaves them is priced in pipeline.ts's copy of this note.
           if (symbolSetting.symbols) {
-            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols);
+            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols, target.compilerBehaviors);
           }
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {

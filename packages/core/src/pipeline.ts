@@ -178,7 +178,7 @@ function runTower(
   // `inferredSymbols`, and the ORDER licence only enables a cast spelling that is byte-correct
   // under any declaration. Measured: with this call moved ABOVE both readings, the three corpus
   // rows the pass fires on keep their fan size, their winner and their score exactly.
-  const walkedNames = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : [];
+  const walkedNames = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols, target.compilerBehaviors) : [];
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -236,7 +236,7 @@ export function liftStamped(
 ): Fn {
   const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols);
   verify(fn);
-  stampDeclaredVolatileUnder(fn, symbols);
+  stampDeclaredVolatileUnder(fn, symbols, target.compilerBehaviors);
   return fn;
 }
 
