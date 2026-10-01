@@ -139,41 +139,45 @@ describe.skipIf(!agbccAvailable())('closure over the names the enumerated synthe
   const names = new Set<string>();
   let fans = 0;
   // One test per toolchain: the tier's enumeration is minutes of work on a loaded machine, and a
-  // test's timeout bounds one test, not the file.
-  const toolchains = [...new Set(syntheticCases().map((c) => c.toolchain.id))];
+  // test's timeout bounds one test, not the file. A toolchain this machine lacks is skipped.
+  const toolchains = new Map(syntheticCases().map((c) => [c.toolchain.id, c.toolchain]));
+  const present = [...toolchains.values()].filter((tc) => tc.available()).map((tc) => tc.id);
+  const enumerated = new Set<string>();
 
-  test.each(toolchains)(
-    'the %s rows enumerate',
-    async (id) => {
-      for (const c of syntheticCases().filter((x) => x.toolchain.id === id)) {
-        // vitest's worker answers its runner over an RPC with a fixed 60 s timeout that the poll
-        // phase cannot serve while this loop holds the thread. Yielding once per row lets the reply
-        // be read (`setImmediate` runs after poll).
-        await new Promise<void>((resolve) => setImmediate(resolve));
-        if (!c.toolchain.available()) {
-          continue;
-        }
-        const built = c.build();
-        const asm = scrubObjectHeader(built.asm);
-        for (const symbols of c.symbols === undefined ? [undefined] : [undefined, c.symbols]) {
-          const opts = rankOptionsFor(c.toolchain, c.codegen, built.obj, c.sym, c.proto, c.compile, symbols);
-          let cands: { variations: readonly string[] }[];
-          try {
-            cands = enumerateRanked(c.sym, asm, c.codegen.target, { ...opts, onEnumerationError: () => {} });
-          } catch {
-            continue; // a row that declines mints nothing to check
+  for (const id of toolchains.keys()) {
+    test.skipIf(!present.includes(id))(
+      `the ${id} rows enumerate`,
+      async () => {
+        for (const c of syntheticCases({ toolchain: id })) {
+          // vitest's worker answers its runner over an RPC with a fixed 60 s timeout that the poll
+          // phase cannot serve while this loop holds the thread. Yielding once per row lets the reply
+          // be read (`setImmediate` runs after poll).
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          const built = c.build();
+          const asm = scrubObjectHeader(built.asm);
+          for (const symbols of c.symbols === undefined ? [undefined] : [undefined, c.symbols]) {
+            const opts = rankOptionsFor(c.toolchain, c.codegen, built.obj, c.sym, c.proto, c.compile, symbols);
+            let cands: { variations: readonly string[] }[];
+            try {
+              cands = enumerateRanked(c.sym, asm, c.codegen.target, { ...opts, onEnumerationError: () => {} });
+            } catch {
+              continue; // a row that declines mints nothing to check
+            }
+            fans++;
+            for (const x of cands) {
+              names.add(joinVariations(x.variations));
+            }
           }
-          fans++;
-          for (const x of cands) {
-            names.add(joinVariations(x.variations));
-          }
         }
-      }
-    },
-    600_000,
-  );
+        enumerated.add(id);
+      },
+      600_000,
+    );
+  }
 
   test('every enumerated name parses into registered variations, signedness first, in kind order', () => {
+    // the names are the toolchain tests' output: a filter that selects this test alone reads none
+    expect([...enumerated].sort(), 'the toolchain tests did not run; filter on the describe').toEqual(present.sort());
     // At b1be5321: 707 fans and 3,037 distinct names with every synthetic toolchain present, 334 and
     // 2,915 of them agbcc's. The floor sits under the agbcc-only figures, so a shell with agbcc and
     // nothing else still passes, and a selection that silently shrank to a handful of rows does not.
