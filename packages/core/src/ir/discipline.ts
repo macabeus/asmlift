@@ -17,7 +17,7 @@
 //
 //   `speculationUnsafe` answers no for a plain read — DELIBERATE, argued at the function — and for
 //   a trapping divide — GAP: raise/shortcircuit.ts hoists one the structurer may name above its guard.
-//   A QUALIFIED read is a `device` or `declared` one.
+//   A QUALIFIED read is one `qualified` answers yes for.
 //   Two qualified reads commuting (`orderSensitive` without `effectful` on either side):
 //     pattern/engine.ts `reordersUnsequenced` — DELIBERATE: the structurer's barrier scan names the
 //       first of two qualified reads the fold would join in one expression.
@@ -49,6 +49,10 @@ import { MEM_BASE_OPS, type OpSig, opSig } from './opcodes';
 /** Why an op must run where the asm ran it. */
 export type Placement = 'call' | 'helper' | 'device' | 'declared';
 
+/** Where a qualified access's spelling carries its `volatile`: on a cast of its own address, or
+ *  through the declaration of the object it names. */
+export type Qualifier = 'cast' | 'declaration';
+
 /** The attr raise/declared-volatile.ts stamps a `declared` read with. */
 export const DECLARED_VOLATILE = 'declaredVolatile';
 
@@ -59,19 +63,20 @@ interface PlacementAnswers {
   speculationUnsafe: boolean;
   /** each render is one more execution, so it renders once on every path the asm ran it on */
   counted: boolean;
+  /** an access whose spelling must carry `volatile`, and where it carries it */
+  qualifiedBy: Qualifier | null;
 }
 
 const PLACEMENT_ANSWERS: Readonly<Record<Placement, PlacementAnswers>> = {
   // The registry's `effects` flag gives a call the first two answers on its own.
-  call: { keptWhenDead: true, speculationUnsafe: true, counted: true },
+  call: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: null },
   // The value the helper computes is pure: nothing observes a divide nobody reads, a fold that
   // moves one under a guard drops the stamp (`forgetHelperPlacement`), and agbcc computes one
   // spelled twice once (`a / n + a / n` is one `bl __divsi3`).
-  helper: { keptWhenDead: false, speculationUnsafe: false, counted: false },
-  // The access is what is observable, not the value it yields: its spelling is qualified, through
-  // a cast for `device` and through the object's declaration for `declared`.
-  device: { keptWhenDead: true, speculationUnsafe: true, counted: true },
-  declared: { keptWhenDead: true, speculationUnsafe: true, counted: true },
+  helper: { keptWhenDead: false, speculationUnsafe: false, counted: false, qualifiedBy: null },
+  // The access is what is observable, not the value it yields, so its spelling is qualified.
+  device: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: 'cast' },
+  declared: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: 'declaration' },
 };
 
 /** The placement an op carries, or null for an op that may render wherever its value is used. */
@@ -93,10 +98,24 @@ export function placedAt(op: Op): Placement | null {
   return null;
 }
 
-const answered = (op: Op, q: keyof PlacementAnswers): boolean => {
+const answered = (op: Op, q: 'keptWhenDead' | 'speculationUnsafe' | 'counted'): boolean => {
   const p = placedAt(op);
   return p !== null && PLACEMENT_ANSWERS[p][q];
 };
+
+/** Where this access's spelling carries the `volatile` the recompile needs to make it where, and as
+ *  often as, the asm did — or null for an op whose spelling needs none. A spelling through the
+ *  declaration needs a cast's qualifier too wherever it reaches the object through a cast, since a
+ *  cast's pointee drops the declaration's qualifiers (l3/volstore.ts `castOffDeclaration`). */
+export function qualifiedBy(op: Op): Qualifier | null {
+  const p = placedAt(op);
+  return p === null ? null : PLACEMENT_ANSWERS[p].qualifiedBy;
+}
+
+/** Must this access's spelling carry `volatile`? */
+export function qualified(op: Op): boolean {
+  return qualifiedBy(op) !== null;
+}
 
 const sigOf = (op: Op): OpSig | undefined => opSig(op.opcode);
 

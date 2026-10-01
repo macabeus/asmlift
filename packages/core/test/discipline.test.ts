@@ -13,6 +13,8 @@ import {
   forgetHelperPlacement,
   orderSensitive,
   placedAt,
+  qualified,
+  qualifiedBy,
   reevalUnsafe,
   speculationUnsafe,
   spelledWhenDead,
@@ -172,6 +174,25 @@ describe('the questions', () => {
       'pinnedLoad',
       'pinnedStore',
     ]);
+  });
+});
+
+describe('qualifiedBy', () => {
+  test('a device access carries its qualifier on a cast, a declared read through its declaration', () => {
+    const ops = kinds();
+    const by = Object.fromEntries(
+      Object.entries(ops)
+        .filter(([, op]) => qualifiedBy(op) !== null)
+        .map(([name, op]) => [name, qualifiedBy(op)]),
+    );
+    expect(by).toEqual({
+      pinnedLoad: 'cast',
+      pinnedAload: 'cast',
+      pinnedStore: 'cast',
+      declaredLoad: 'declaration',
+      declaredAload: 'declaration',
+    });
+    expect(yesFor(qualified)).toEqual(Object.keys(by).sort());
   });
 });
 

@@ -101,7 +101,7 @@
 // the sound and the unsound spelling the same, so nothing downstream would ever refuse it.
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { type Block, type Fn, type Op, type Value, defOpMap, dominators, mkOp, mkValue } from '../ir/core';
-import { placedAt } from '../ir/discipline';
+import { qualified } from '../ir/discipline';
 import { CAST_WIDTHS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -161,9 +161,9 @@ export const TRUNC_LOAD_GATES: readonly Gate<TruncatedLoad>[] = [
     // spellings a source has for one land here: the bare cast of a number (`*(vu16 *)0x4000004`)
     // through `constAddressOf`, and the named register (`REG_DISPSTAT`) through `globalCellOf`,
     // whose `volatile` is a declaration in the project's headers that no raise pass can read.
-    // The two helpers are ir/alias.ts's, and they are the SAME pair structure.ts's
-    // `volatileQualifiable` asks — so a load this rule admits is one that predicate answers no to,
-    // by construction rather than by measurement.
+    // The two helpers are ir/alias.ts's, and `constAddressOf` is the address structure.ts's
+    // `volatileQualifiable` asks about — so a load this rule and `qualified-access` admit is one that
+    // predicate answers no to, by construction rather than by measurement.
     //
     // NOT `capabilities.deviceRegisters`. That window is documented as a question about SPELLING
     // and may be approximate (target.ts), so a soundness rule may not rest on it; asking whether
@@ -308,7 +308,7 @@ export function truncatedLoadCandidates(fn: Fn, littleEndian: boolean): TruncLoa
         covering,
         c: {
           fixedCell: constAddressOf(defs, base, narrow.off) !== null || globalCellOf(defs, base, narrow.off) !== null,
-          qualified: [op, covering.op].some((o) => placedAt(o) === 'device' || placedAt(o) === 'declared'),
+          qualified: [op, covering.op].some(qualified),
           resolvedBase: baseResolves(defs, entryParams, base),
           coveringLoad: covering.isLoad,
           lowOrderEnd: isLowOrderEnd(narrow, covering),
