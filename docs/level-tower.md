@@ -869,19 +869,20 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
 - **`assertPostIncrUnshared`** (also after structuring): no expression names a `postincr`'s
   variable twice. C89 leaves undefined which value the second read sees, so a pass that brings one
   in has to fail here rather than compile into whichever answer the compiler picked.
-- **`assertEffectsPreserved`** (also after structuring): every execution the asm makes is
-  emitted, and none is emitted more times than the asm makes it on any one path. It counts by key:
-  `call:<target>` for a call; `device:0x<address>` for a memory access the lift pinned `volatile`,
-  or `device:?` where a side cannot read the address off it, a `?` on either side standing for any
-  address; and `declared:<object>` for a read of an object the symbol map declares volatile. A
-  pinned access through a named global and a declared read are counted for re-runs only, because
-  their qualifier may be the declaration, which leaves nothing in the tree to find; a declared read
-  that reaches its object through a cast with no `volatile` is refused, since the cast's pointee
-  drops the declaration's qualifier. The `opaque` ops standing in for unmodelled instructions are
-  checked as never dropped. It is the odd one out and worth the attention: the other four check L3
-  against _itself_, so they catch a tree that is ill-formed. This one checks L3 against the L2 graph it came from, which is the only way to catch
-  a pass that **loses** something well-formedly — a dropped call, a hardware read rendered twice,
-  or an unmodelled instruction quietly vanishing because its destination register was dead.
+- **`assertEffectsPreserved`** (also after structuring): every execution the asm makes is emitted,
+  and none is emitted more times than the asm makes it on any one path. It counts by key:
+  `call:<target>` for a call; `device:r:0x<address>` and `device:w:0x<address>` for a read and a
+  write the lift pinned `volatile`, with `?` for the address where a side cannot read one off, a `?`
+  on either side standing for any address and each render for one access; and `declared:<object>`
+  for a read of an object the symbol map declares volatile. A pinned access through a named global
+  and a declared read are counted for re-runs only, because their qualifier may be the declaration,
+  which leaves nothing in the tree to find; a declared read that reaches its object through a cast
+  with no `volatile` is refused, since the cast's pointee drops the declaration's qualifier. The
+  `opaque` ops standing in for unmodelled instructions are checked as never dropped. It is the odd
+  one out and worth the attention: the other four check L3 against _itself_, so they catch a tree
+  that is ill-formed. This one checks L3 against the L2 graph it came from, which is the only way to
+  catch a pass that **loses** something well-formedly — a dropped call, a hardware read rendered
+  twice, or an unmodelled instruction quietly vanishing because its destination register was dead.
 
 **What the effect contract counts is decided once, below it.** Whether an op must run where, and
 as often as, the asm ran it is a fact about the OP, and

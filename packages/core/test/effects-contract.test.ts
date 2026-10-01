@@ -244,10 +244,11 @@ test('a lift carrying a region no path reaches declines through the pipeline', (
 describe('assertEffectsPreserved — a pinned device access', () => {
   const REG = 0x4000006;
   /** an IR fn whose entry block makes one pinned `load` of each address in `reads` (null: through a
-   *  runtime-indexed base), and one plain load of each in `plain` */
-  const irReading = (reads: (number | null)[], plain: number[] = []): Fn => {
+   *  runtime-indexed base), one plain load of each in `plain`, and one pinned `store` of each in
+   *  `writes` */
+  const irReading = (reads: (number | null)[], plain: number[] = [], writes: (number | null)[] = []): Fn => {
     const ops = [];
-    const load = (addr: number | null, volatile: boolean) => {
+    const access = (addr: number | null, volatile: boolean, write: boolean) => {
       const base = mkValue(T.ptr(T.u(16)));
       if (addr === null) {
         const idx = mkValue(T.s(32));
@@ -255,16 +256,16 @@ describe('assertEffectsPreserved — a pinned device access', () => {
       } else {
         ops.push(mkOp('const', { results: [base], attrs: { value: addr } }));
       }
+      const attrs = { off: 0, width: 2, ...(volatile ? { volatile: true } : {}) };
       ops.push(
-        mkOp('load', {
-          operands: [base],
-          results: [mkValue(T.u(16))],
-          attrs: { off: 0, width: 2, signed: false, ...(volatile ? { volatile: true } : {}) },
-        }),
+        write
+          ? mkOp('store', { operands: [base, mkValue(T.u(16))], attrs })
+          : mkOp('load', { operands: [base], results: [mkValue(T.u(16))], attrs: { ...attrs, signed: false } }),
       );
     };
-    reads.forEach((a) => load(a, true));
-    plain.forEach((a) => load(a, false));
+    reads.forEach((a) => access(a, true, false));
+    plain.forEach((a) => access(a, false, false));
+    writes.forEach((a) => access(a, true, true));
     ops.push(mkOp('ret', {}));
     return {
       name: 'F',
@@ -287,11 +288,16 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     value: at({ k: 'const', value: addr }, volatile),
   });
   const readThrough = (base: string): Stmt => ({ k: 'exprstmt', value: at({ k: 'var', name: base }, true) });
+  const write = (addr: number): Stmt => ({
+    k: 'store',
+    lval: at({ k: 'const', value: addr }, true),
+    value: { k: 'const', value: 1 },
+  });
   const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
 
   test('one pinned read rendered twice in sequence fails', () => {
     expect(() => checkReads(irReading([REG]), [read(REG), read(REG)])).toThrow(
-      /emitted 2 accesses to the device register at 0x4000006 on one path/,
+      /emitted 2 reads of the device register at 0x4000006 on one path/,
     );
   });
 
@@ -306,7 +312,7 @@ describe('assertEffectsPreserved — a pinned device access', () => {
 
   test('a pinned read with no qualified render fails as dropped', () => {
     expect(() => checkReads(irReading([REG]), [read(REG, false)])).toThrow(
-      /dropped the access to the device register at 0x4000006/,
+      /dropped the read of the device register at 0x4000006/,
     );
   });
 
@@ -318,10 +324,68 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([REG]), [readThrough('p')])).not.toThrow();
   });
 
+  test('one render the contract cannot place stands for one read, not for every one', () => {
+    expect(() => checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p')])).toThrow(
+      /dropped reads of the device registers at 0x4000006, 0x4000008, 0x400000a in 'F'/,
+    );
+    expect(() =>
+      checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p'), readThrough('q'), readThrough('r')]),
+    ).not.toThrow();
+  });
+
+  test('a read at no constant address needs a render no placed access already needs', () => {
+    expect(() => checkReads(irReading([null], [], [REG]), [write(REG)])).toThrow(
+      /dropped a read of a device register in 'F'/,
+    );
+    expect(() => checkReads(irReading([null], [], [REG]), [write(REG), readThrough('p')])).not.toThrow();
+  });
+
+  test('a read does not stand for a write, nor a write for a read', () => {
+    expect(() => checkReads(irReading([REG], [], [REG]), [read(REG), read(REG)])).toThrow(
+      /dropped the write to the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG], [], [REG]), [write(REG), write(REG)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG], [], [REG]), [write(REG), read(REG)])).not.toThrow();
+  });
+
+  test('a member of a qualified element is one write, where it is a store’s target', () => {
+    // `astore` through `0x40000B0 + ch * 12`, rendered `((volatile struct S *)0x40000B0)[ch].f = 1;`
+    const base = mkValue(T.ptr(T.u(32)));
+    const fn = irReading([]);
+    fn.blocks[0].ops.unshift(
+      mkOp('const', { results: [base], attrs: { value: 0x40000b0 } }),
+      mkOp('astore', {
+        operands: [base, mkValue(T.s(32)), mkValue(T.u(32))],
+        attrs: { elemSize: 12, fieldOff: 0, volatile: true },
+      }),
+    );
+    const element: Expr = {
+      k: 'index',
+      base: {
+        k: 'cast',
+        to: T.ptr({ kind: 'struct', name: 'S', size: 12, fields: [] }),
+        volatile: true,
+        e: { k: 'const', value: 0x40000b0 },
+      },
+      idx: { k: 'var', name: 'ch' },
+      width: 12,
+      signed: false,
+    };
+    const member: Stmt = {
+      k: 'store',
+      lval: { k: 'field', base: element, name: 'f' },
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(fn, [member])).not.toThrow();
+    expect(() => checkReads(fn, [])).toThrow(/dropped a write to a device register in 'F'/);
+  });
+
   test('a read at no constant address licenses one render on a path, wherever it lands', () => {
     expect(() => checkReads(irReading([null]), [readThrough('p')])).not.toThrow();
     expect(() => checkReads(irReading([null]), [readThrough('p'), readThrough('p')])).toThrow(
-      /emitted 2 accesses to device registers on one path in 'F', where the asm makes 1/,
+      /emitted 2 reads of device registers on one path in 'F', where the asm makes 1/,
     );
   });
 });

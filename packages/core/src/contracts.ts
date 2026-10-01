@@ -122,12 +122,15 @@ export function assertResolved(sfn: SFn): void {
 //     ran, and a region duplicated there would pass the count unseen.
 //   • Names the IR does not have are ignored, and only calls carrying a target symbol are counted
 //     (every frontend that emits `call` today stamps one).
-//   • A pinned access is keyed by the constant address both sides can read off it — the IR's base
-//     and offset, the tree's `cellAddress` — and `?` where a side cannot. A `?` render may stand
-//     for any pinned access and a `?` access may render at any address, so the per-path rule is
-//     Hall's condition over that compatibility, and the dropped rule asks only for a render that
-//     could be the access. An access through a named global is counted for re-runs and never as
-//     dropped: its qualifier may be the global's declaration, which leaves nothing in the tree.
+//   • A pinned access is keyed by whether it reads or writes, and by the constant address both sides
+//     can read off it — the IR's base and offset, the tree's `cellAddress` — or `?` where a side
+//     cannot. A read never stands for a write. A `?` render may stand for any pinned access and a
+//     `?` access may render at any address, and each render is one execution, so both rules are
+//     Hall's condition over that compatibility: the renders on a path at any set of addresses are
+//     at most those addresses' accesses plus the `?` accesses, and the accesses at any set of
+//     addresses have at least as many renders there plus the `?` renders. An access through a named
+//     global is counted for re-runs and never as dropped: its qualifier may be the global's
+//     declaration, which leaves nothing in the tree.
 //   • A declared read is keyed by the object it reads, and counted for re-runs only. The tree side
 //     counts each access whose address is that object's name plus arithmetic, once, however it is
 //     spelled — `gSym`, `gSym[i]`, `gSym.f`, `gPtr->f`, a `volatile` cast through `&gSym` — and
@@ -138,8 +141,9 @@ export function assertResolved(sfn: SFn): void {
 //     delete, and is refused. Objects the asm also reads unstamped are skipped, since nothing tells
 //     their renders apart. A pinned access through the object's name may render as one of its
 //     reads.
-/** Executions per key: `call:<target>`, `device:<0xaddress>`, `device:?` for a pinned access at no
- *  address the counting side can read, or `declared:<object>`. */
+/** Executions per key: `call:<target>`; `device:r:<0xaddress>` for a pinned read and
+ *  `device:w:<0xaddress>` for a pinned write, with `?` for the address where the counting side cannot
+ *  read one; or `declared:<object>`. */
 type EffectCounts = Map<string, number>;
 
 /** per-key combine of two count maps (`sum` for sequence, `max` for exclusive alternatives) */
@@ -151,10 +155,11 @@ function combine(a: EffectCounts, b: EffectCounts, f: (x: number, y: number) => 
   return out;
 }
 
-const DEVICE_UNPLACED = 'device:?';
 const DECLARED = 'declared:';
 const STRIPPED = 'stripped:';
-const deviceKey = (addr: number | null): string => (addr === null ? DEVICE_UNPLACED : `device:0x${addr.toString(16)}`);
+type Direction = 'r' | 'w';
+const deviceKey = (dir: Direction, addr: number | null): string =>
+  `device:${dir}:${addr === null ? '?' : `0x${addr.toString(16)}`}`;
 
 /** Is this access spelled through a `volatile` pointee? A dot member qualifies through the element
  *  or member it selects from, any other access through its own base's cast chain. */
@@ -163,7 +168,7 @@ function qualifiedAccessChain(e: Expr): boolean {
     return qualifiedBase(e.base);
   }
   if (e.k === 'field') {
-    return e.dot === true
+    return fieldSpellsDot(e)
       ? (e.base.k === 'index' || e.base.k === 'field') && qualifiedAccessChain(e.base)
       : qualifiedBase(e.base);
   }
@@ -216,7 +221,7 @@ function effectsInExpr(
   if (e.k === 'call') {
     bump(`call:${e.fn}`);
   } else if (!selected && qualifiedAccessChain(e)) {
-    bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(cellAddress(e)));
+    bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(target ? 'w' : 'r', cellAddress(e)));
   } else if (!selected && !target && access) {
     if (object !== null) {
       bump(`${ofDeclared && castOffDeclaration(e, ctx.typeOf) ? STRIPPED : DECLARED}${object}`);
@@ -224,7 +229,7 @@ function effectsInExpr(
   } else if (!named && !target && e.k === 'var') {
     bump(`${DECLARED}${e.name}`);
   }
-  const partOfThis = e.k === 'field' && e.dot === true;
+  const partOfThis = e.k === 'field' && fieldSpellsDot(e);
   exprChildren(e).forEach((c) =>
     effectsInExpr(c, into, ctx, partOfThis && c === e.base, access && c === e.base ? true : named && !access, false),
   );
@@ -233,7 +238,7 @@ function effectsInExpr(
 /** A dot member's own base chain, past the element or member it selects from: the address of the
  *  one access the member spells. */
 function dotSelected(e: Extract<Expr, { k: 'index' } | { k: 'field' }>): Expr {
-  if (e.k === 'field' && e.dot === true && (e.base.k === 'index' || e.base.k === 'field')) {
+  if (e.k === 'field' && fieldSpellsDot(e) && (e.base.k === 'index' || e.base.k === 'field')) {
     return dotSelected(e.base);
   }
   return e.base;
@@ -354,8 +359,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   const irDevices: EffectCounts = new Map();
   // Pinned accesses through a named global: in `irDevices` too, and exempt from the dropped rule.
   const namedDevices = new Map<string, number>();
-  // …and the same accesses by the object they name, whose renders may be counted as its reads.
-  const devicesOf: EffectCounts = new Map();
+  // …and the reads among them by the object they name, whose renders may be counted as its reads.
+  const pinnedReadsOf: EffectCounts = new Map();
   const irDeclared: EffectCounts = new Map();
   // Objects some unplaced read reads too, whose renders the tree side cannot tell from a declared one.
   const plainlyRead = new Set<string>();
@@ -377,12 +382,15 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         irOpaques.add(gapReasonFor(op.attrs));
       } else if (placedAt(op) === 'device') {
         const plain = op.opcode === 'load' || op.opcode === 'store';
-        const key = deviceKey(plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
+        const dir = op.opcode === 'load' || op.opcode === 'aload' ? 'r' : 'w';
+        const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
         bump(irDevices, key);
         const object = globalBaseOf(defs, op.operands[0]);
         if (object !== null) {
           bump(namedDevices, key);
-          bump(devicesOf, `${DECLARED}${object}`);
+          if (dir === 'r') {
+            bump(pinnedReadsOf, `${DECLARED}${object}`);
+          }
         }
       } else if (op.opcode === 'load' || op.opcode === 'aload') {
         const object = globalBaseOf(defs, op.operands[0]);
@@ -458,7 +466,7 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
       );
     }
     const p = path.get(key) ?? 0;
-    const made = n + (devicesOf.get(key) ?? 0);
+    const made = n + (pinnedReadsOf.get(key) ?? 0);
     if (p > made) {
       throw new ContractError(
         `structuring emitted ${p} reads of the volatile object '${object}' on one path in '${sfn.name}', ` +
@@ -468,7 +476,32 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   }
 }
 
-/** The pinned-access half of {@link assertEffectsPreserved}, over the counts keyed by `deviceKey`. */
+/** One direction of a device count map: the count at each address it reads off, and at `?`. */
+function oneDirection(m: EffectCounts, dir: Direction): { at: Map<string, number>; unplaced: number; all: number } {
+  const prefix = `device:${dir}:`;
+  const at = new Map<string, number>();
+  let unplaced = 0;
+  let all = 0;
+  for (const [k, v] of m) {
+    if (k.startsWith(prefix)) {
+      all += v;
+      if (k === `${prefix}?`) {
+        unplaced = v;
+      } else {
+        at.set(k.slice(prefix.length), v);
+      }
+    }
+  }
+  return { at, unplaced, all };
+}
+
+const NOUNS: Readonly<Record<Direction, { one: string; many: string }>> = {
+  r: { one: 'read of', many: 'reads of' },
+  w: { one: 'write to', many: 'writes to' },
+};
+
+/** The pinned-access half of {@link assertEffectsPreserved}, over the counts keyed by `deviceKey`:
+ *  first that no access is dropped, then that none is re-run, each direction on its own. */
 function devicesPreserved(
   name: string,
   ir: EffectCounts,
@@ -476,42 +509,52 @@ function devicesPreserved(
   total: EffectCounts,
   path: EffectCounts,
 ): void {
-  const placed = (m: EffectCounts) => [...m].filter(([k]) => k.startsWith('device:0x'));
-  const sumOf = (m: EffectCounts) => [...m].reduce((n, [k, v]) => (k.startsWith('device:') ? n + v : n), 0);
-  const unplacedIr = ir.get(DEVICE_UNPLACED) ?? 0;
-  const anyRender = sumOf(total) > 0;
-  for (const [k, n] of placed(ir)) {
-    if (n > (named.get(k) ?? 0) && !(total.get(k) ?? 0) && !(total.get(DEVICE_UNPLACED) ?? 0)) {
+  const directions = ['r', 'w'] as const;
+  for (const dir of directions) {
+    const made = oneDirection(ir, dir);
+    const exempt = oneDirection(named, dir);
+    const renders = oneDirection(total, dir);
+    // An access through a named global needs no render of its own.
+    const owed = (a: string) => Math.max(0, (made.at.get(a) ?? 0) - (exempt.at.get(a) ?? 0));
+    const short = [...made.at.keys()].filter((a) => owed(a) > (renders.at.get(a) ?? 0));
+    const deficit = short.reduce((n, a) => n + owed(a) - (renders.at.get(a) ?? 0), 0);
+    if (deficit > renders.unplaced) {
       throw new ContractError(
-        `structuring dropped the access to the device register at ${k.slice('device:'.length)} in '${name}' — ` +
-          'the machine made it and the source does not',
+        short.length === 1
+          ? `structuring dropped the ${NOUNS[dir].one} the device register at ${short[0]} in '${name}' — ` +
+              'the machine made it and the source does not'
+          : `structuring dropped ${NOUNS[dir].many} the device registers at ${short.join(', ')} in '${name}' — ` +
+              'the machine made them and the source does not',
+      );
+    }
+    const owedAll = [...made.at.keys()].reduce((n, a) => n + owed(a), 0) + Math.max(0, made.unplaced - exempt.unplaced);
+    if (owedAll > renders.all) {
+      throw new ContractError(
+        `structuring dropped a ${NOUNS[dir].one} a device register in '${name}' — the machine made it and the ` +
+          'source does not',
       );
     }
   }
-  if (unplacedIr > (named.get(DEVICE_UNPLACED) ?? 0) && !anyRender) {
-    throw new ContractError(
-      `structuring dropped an access to a device register in '${name}' — the machine made it and the source does not`,
-    );
-  }
-  // Hall's condition: the renders at the addresses in any set K need |K's accesses| + the `?`
-  // accesses, so it is enough to check the worst K — every address rendered beyond its own count.
-  let excess = 0;
-  for (const [k, p] of placed(path)) {
-    const n = ir.get(k) ?? 0;
-    if (p > n + unplacedIr) {
+  for (const dir of directions) {
+    const made = oneDirection(ir, dir);
+    const onPath = oneDirection(path, dir);
+    let excess = 0;
+    for (const [a, p] of onPath.at) {
+      const n = made.at.get(a) ?? 0;
+      if (p > n + made.unplaced) {
+        throw new ContractError(
+          `structuring emitted ${p} ${NOUNS[dir].many} the device register at ${a} on one path in '${name}', ` +
+            `where the asm makes ${n + made.unplaced}`,
+        );
+      }
+      excess += Math.max(0, p - n);
+    }
+    if (excess > made.unplaced || onPath.all > made.all) {
       throw new ContractError(
-        `structuring emitted ${p} accesses to the device register at ${k.slice('device:'.length)} on one path ` +
-          `in '${name}', where the asm makes ${n + unplacedIr}`,
+        `structuring emitted ${onPath.all} ${NOUNS[dir].many} device registers on one path in '${name}', where the ` +
+          `asm makes ${made.all}`,
       );
     }
-    excess += Math.max(0, p - n);
-  }
-  const rendered = sumOf(path);
-  const made = sumOf(ir);
-  if (excess > unplacedIr || rendered > made) {
-    throw new ContractError(
-      `structuring emitted ${rendered} accesses to device registers on one path in '${name}', where the asm makes ${made}`,
-    );
   }
 }
 
