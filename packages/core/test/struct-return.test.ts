@@ -152,6 +152,13 @@ describe('a callee declared to return a struct through memory', () => {
     }
   });
 
+  // a bare count sizes every argument and states no type the printer could declare the callee with
+  test('a callee declared by a parameter count declines, and the message says so', () => {
+    expect(() => decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: { ...makeblob, params: 1 } } })).toThrow(
+      /`makeblob` returns struct Blob64 through a hidden pointer in r0, and its declaration states only a count of parameters, no type the lifted source can declare it with/,
+    );
+  });
+
   // `struct Blob64 mke(enum E e);` — an enum parameter sizes to nothing, and a guessed arity would
   // read the hidden pointer in r0 as the first argument
   test('with parameters nothing sizes, it declines', () => {
