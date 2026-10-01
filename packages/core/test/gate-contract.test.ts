@@ -21,7 +21,7 @@ import {
   UNFOLDED_GATES,
 } from '../src/l3/basecse';
 import { ARM_DISJOINT_GATES, COALESCE_GATES } from '../src/l3/coalesce';
-import { type Gate, ablateHeuristic, gateTableDefects } from '../src/l3/gates';
+import { type Gate, ablateHeuristic, gateTableDefects, guardsOf } from '../src/l3/gates';
 import { HOMESPLIT_FAN_GATES, HOMESPLIT_GATES, withholdingKey } from '../src/l3/homesplit';
 import { INLINEBASE_GATES } from '../src/l3/inlinebase';
 import { OFFMEMBER_GATES } from '../src/l3/offmember';
@@ -153,13 +153,15 @@ describe.each(Object.entries(TABLES))('%s', (_name, gates) => {
   test('every named guard is a test that still exists', () => {
     // `guardedBy` is prose until something reads it: `<file>.test.ts: <title>`. Matching the title
     // against the text of the FILE it names is what stops it from decaying into a comment that names
-    // a test deleted two refactors ago, or a file that was since renamed.
+    // a test deleted two refactors ago, or a file that was since renamed. A rule with two halves
+    // names one guard per half, and each is looked up.
     const missing = gates
-      .filter((g) => g.guardedBy)
-      .map((g) => {
-        const parts = g.guardedBy!.split(':');
-        return { id: g.id, file: parts[0].trim(), guard: parts[parts.length - 1].trim() };
-      })
+      .flatMap((g) =>
+        guardsOf(g).map((one) => {
+          const parts = one.split(':');
+          return { id: g.id, file: parts[0].trim(), guard: parts[parts.length - 1].trim() };
+        }),
+      )
       .filter((g) => !testFiles.get(g.file)?.includes(g.guard));
     expect(missing).toEqual([]);
   });

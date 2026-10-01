@@ -839,6 +839,14 @@ export function enumerateCandidates(
     s.ptrElems &&
     s.declRank &&
     STRUCTURE_VARIATIONS.every((variation) => !s[variation.flag]);
+  /** Does a failure ABORT THE ROW, rather than drop the setting that threw? Only on the default
+   *  candidate's own path: no variation named by the symbol-map setting or the lift setting —
+   *  `settingVariations` is both, as the candidate spells them — and, where a structure setting is
+   *  named, the default one. Anywhere else the failure is a dropped variation, reported through
+   *  `onEnumerationError` under the same names. The lift, the raise and the structuring all ask
+   *  this one predicate, so a setting that names a new variation is seen by all three. */
+  const abortsRow = (settingVariations: readonly Variation[], s?: StructureSetting): boolean =>
+    settingVariations.length === 0 && (s === undefined || isDefaultSetting(s));
 
   const seen = new Map<string, Candidate>();
   const seenTrees = new Set<string>();
@@ -1772,7 +1780,21 @@ export function enumerateCandidates(
     const usableStructureSettings = symbolSetting.symbols
       ? structureSettings
       : structureSettings.filter((s) => s.bitfields && s.ptrElems && (s.declRank || rawDerivesRank));
-    const treeOwnedFold = treeOwnedIn(symbolSetting.symbols);
+    // THE `/raw-globals` SETTING IS A VARIATION, so a lift that declines without the map drops it
+    // and keeps the map's candidates (`abortsRow`). The two lifts can disagree on whether a
+    // function lifts at all: a name only the map places is, without it, a pointer the frame-object
+    // audit cannot bound. This is the setting's first lift, and every later one is the same lift
+    // again.
+    let treeOwnedFold: boolean;
+    try {
+      treeOwnedFold = treeOwnedIn(symbolSetting.symbols);
+    } catch (e) {
+      if (abortsRow(symbolSetting.variations)) {
+        throw e;
+      }
+      reportThrow(symbolSetting.variations, e);
+      continue;
+    }
     // The signedness variation DECLINES where the pin has nothing to pin. `pinScalarParams` writes only
     // over an entry param still `unknown`/`int` that is not one of the recovered pointers/
     // aggregates `ptrIdx` excludes; where no param is left, the second pass re-lifts, re-raises and
@@ -1930,14 +1952,15 @@ export function enumerateCandidates(
           );
         } catch (e) {
           // THE DEFAULT CARRIES NO VARIATION, by construction: every lift variation appends one, so
-          // `variations.length === 0` is the only spelling of "no lift variation is on" that stays correct
+          // an empty list is the only spelling of "no lift variation is on" that stays correct
           // when a fourth is added — the same reason the structure half below reads its table
           // instead of naming its flags.
-          if (liftSetting.variations.length === 0) {
+          const settingVariations = [...liftSetting.variations, ...symbolSetting.variations];
+          if (abortsRow(settingVariations)) {
             throw e; // the default lift keeps its behavior: a raising failure aborts the row
           }
           // A dropped variation, never an aborted enumeration — the same posture as `respell`.
-          reportThrow(liftSetting.variations, e);
+          reportThrow(settingVariations, e);
           continue;
         }
         // THE SHARED-TAIL VARIATIONS: the same raised fn, structured again with `followEarlyReturns`,
@@ -1993,7 +2016,7 @@ export function enumerateCandidates(
                 verify(fn);
               }
             } catch (e) {
-              reportThrow([...liftSetting.variations, 'shared-tail'], e);
+              reportThrow([...liftSetting.variations, 'shared-tail', ...symbolSetting.variations], e);
               break;
             }
             // Unsunk, this fn is the `/shared-ret` pass's again.
@@ -2070,7 +2093,7 @@ export function enumerateCandidates(
                 ...(alternative ? { followEarlyReturns: true } : {}),
               });
             } catch (e) {
-              if (liftVariations.length === 0 && isDefaultSetting(s)) {
+              if (abortsRow([...liftVariations, ...symbolSetting.variations], s)) {
                 throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
               }
               // Recorded for EVERY dropped setting: a candidate with more variations on looks its siblings
@@ -2078,7 +2101,7 @@ export function enumerateCandidates(
               dropped.add(key);
               // an anchored setting that fails structuring or its contracts is a dropped variation, never
               // an aborted enumeration — same rule as respell below
-              reportThrow([...liftVariations, ...s.variations], e);
+              reportThrow([...liftVariations, ...s.variations, ...symbolSetting.variations], e);
               continue;
             }
             // A TREE another structure setting already produced. `respellTree` reads the tree and this

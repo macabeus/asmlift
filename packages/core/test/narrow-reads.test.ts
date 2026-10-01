@@ -4,11 +4,12 @@
 // spelling reaches the loop variable's PRE-update value, which the structurer refuses; re-rooted on
 // the back-edge argument it is the `(s16)i` the source wrote.
 //
-// Both spellings are covered — the folded `zext`/`sext` pair, and the raw `shr_u`/`shr_s` pair the
-// cast idiom cannot fold because the value under the shifts is not a bare `shl` — and so is the one
-// pairing that must NOT happen. The two spellings name different bits (the low half vs the high
-// half), so a fixture written in one spelling can never catch a key that fuses them; the two
-// cross-domain tests at the end are the only ones that can, and they are the file's soundness
+// All three spellings are covered — the folded `zext`/`sext` pair, the raw `shr_u`/`shr_s` pair the
+// cast idiom cannot fold because the value under the shifts is not a bare `shl`, and a variable
+// carried as a `shl` whose test the cast idiom folded to a `sext` of the value under the shift —
+// and so are the pairings that must NOT happen. A key that fuses two spellings, or two widths of
+// one, pairs different bits, and a fixture written in one spelling at one width can never catch
+// that; the tests that mix them are the only ones that can, and they are the file's soundness
 // tests. Every other refusal is a one-fact edit with the accepted fixture as a positive control.
 import { expect, test } from 'vitest';
 
@@ -16,9 +17,11 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
+import { decompile } from '../src/pipeline';
 import { rerootNarrowReads } from '../src/raise/narrow';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
+import { ARMV4T_AGBCC } from '../src/target';
 
 const run = (ir: string) => {
   const fn = parse(ir);
@@ -82,6 +85,26 @@ const SHIFT_PAIR = `fn narrowshift {
 }
 `;
 
+// `s8 i = gStart[0]; while (i != -1) { gOut[i] = n++; i = gBuf[i].next; }` as agbcc leaves the
+// walk's body: the variable is carried as `next << 24` (%5), and the test's `asr #24` of it was
+// folded by the cast idiom to a `sext` of the load (%6).
+const SHL_CARRIED = `fn walk {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = shr_s %1 {imm=24}
+  %3: s32* = gaddr {sym="gBuf"}
+  %4: s32 = aload %3, %2 {elemSize=8, signed=false, width=1}
+  %5: s32 = shl %4 {imm=24}
+  %6: s32 = sext %4 {width=8}
+  %7: s32 = const {value=-1}
+  %8: u32 = icmp_ne %6, %7
+  cond_br %8, ^bb1(%5), ^bb2()
+^bb2():
+  ret
+}
+`;
+
 test('the folded pair: the loop test re-roots on the back-edge argument', () => {
   const { n, ir } = run(ZEXT_PAIR);
   expect(n).toBe(1);
@@ -100,6 +123,28 @@ test('the loop the re-root unblocks structures, and the test reads the loop vari
   // structurer declines rather than render it one iteration off.
   expect(() => emit(ZEXT_PAIR)).not.toThrow();
   expect(emit(ZEXT_PAIR)).toContain('} while ((s16)v0 <= 5);');
+});
+
+test('the carried shift: the sign extension becomes the shift back down of the carried value', () => {
+  const { n, ir } = run(SHL_CARRIED);
+  expect(n).toBe(1);
+  expect(ir).toMatch(/%(\d+): \S+ = shl %\d+ \{imm=24\}\n\s+%\d+: \S+ = shr_s %\1 \{imm=24\}/);
+  expect(ir).not.toContain('sext');
+});
+
+// agbcc's own output for the walk above, whole: without the re-root the test reads the load that
+// fed the update, which renders as the entry AFTER next, and the structurer refuses it.
+const WALK =
+  'walk:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr4, #0x0\n\tldr\tr0, .L7\n\tldrb\tr0, [r0]\n\tlsl\tr1, r0, #0x18\n' +
+  '\tasr\tr0, r1, #0x18\n\tmov\tr2, #0x1\n\tneg\tr2, r2\n\tcmp\tr0, r2\n\tbeq\t.L4\n\tldr\tr7, .L7+0x4\n' +
+  '\tldr\tr6, .L7+0x8\n\tadd\tr5, r2, #0\n.L5:\n\tasr\tr1, r1, #0x18\n\tadd\tr3, r1, r7\n\tadd\tr2, r4, #0\n' +
+  '\tadd\tr0, r2, #0x1\n\tlsl\tr0, r0, #0x18\n\tlsr\tr4, r0, #0x18\n\tstrb\tr2, [r3]\n\tlsl\tr1, r1, #0x3\n' +
+  '\tadd\tr1, r1, r6\n\tldrb\tr0, [r1, #0x6]\n\tlsl\tr1, r0, #0x18\n\tasr\tr0, r1, #0x18\n\tcmp\tr0, r5\n' +
+  '\tbne\t.L5\n.L4:\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.align\t2, 0\n.L7:\n' +
+  '\t.word\tgStart\n\t.word\tgOut\n\t.word\tgBuf\n';
+
+test('a list walk carried shifted structures, and its test reads the carried variable', () => {
+  expect(decompile('walk', WALK, ARMV4T_AGBCC).source).toContain('} while (v1 >> 24 != -1);');
 });
 
 // REFUSALS — each a one-fact edit of an accepted fixture, with that fixture run first as a control.
@@ -165,5 +210,31 @@ test('an unsigned SHIFT is not paired with a sign extension of the same operand'
   const mixed = SHIFT_PAIR.replace('%6: s32 = shr_s %10 {imm=16}', '%6: s32 = sext %10 {width=16}');
   expect(mixed).not.toBe(SHIFT_PAIR);
   expect(run(SHIFT_PAIR).n).toBe(1);
+  expect(run(mixed).n).toBe(0);
+});
+
+test('a left shift that is not an edge argument is left alone', () => {
+  expect(run(SHL_CARRIED).n).toBe(1);
+  const notCarried = SHL_CARRIED.replace('cond_br %8, ^bb1(%5), ^bb2()', 'cond_br %8, ^bb1(%4), ^bb2()');
+  expect(notCarried).not.toBe(SHL_CARRIED);
+  expect(run(notCarried).n).toBe(0);
+});
+
+test('a left shift that comes AFTER the sign extension is left alone', () => {
+  expect(run(SHL_CARRIED).n).toBe(1);
+  const reordered = SHL_CARRIED.replace(
+    '  %5: s32 = shl %4 {imm=24}\n  %6: s32 = sext %4 {width=8}\n',
+    '  %6: s32 = sext %4 {width=8}\n  %5: s32 = shl %4 {imm=24}\n',
+  );
+  expect(reordered).not.toBe(SHL_CARRIED);
+  expect(run(reordered).n).toBe(0);
+});
+
+// The same soundness rule as the cross-domain pair above: `shl {24}` holds the LOW byte, so only a
+// `sext {8}` is its shift back down — `sext {16}` of the same value is other bits.
+test('a sign extension is paired only with the shift that keeps its bits', () => {
+  expect(run(SHL_CARRIED).n).toBe(1);
+  const mixed = SHL_CARRIED.replace('%6: s32 = sext %4 {width=8}', '%6: s32 = sext %4 {width=16}');
+  expect(mixed).not.toBe(SHL_CARRIED);
   expect(run(mixed).n).toBe(0);
 });

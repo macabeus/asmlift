@@ -2375,6 +2375,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
+        // A frame object declared as an aggregate (`laddrType`) is one whatever its accesses agree
+        // on — the frame-side twin of the symbol map's declaration-shape override. Spelled
+        // scalar, a store assigns to the array and a load reads its address.
+        if (op.opcode === 'laddr' && laddrType(op).kind !== 'int') {
+          bumpAgg(laddrName.get(op)!);
+        }
         const gaddrSym = (v: Value) => {
           const dv = defs.get(v);
           // laddr participates identically: `sp0` is scalar-spelled at off 0 and cast-spelled

@@ -17,7 +17,7 @@ import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
-import type { TargetDescription } from '../target';
+import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
 import { FrontendUnsupportedError } from './errors';
 import { type LiveInModel, slotKeyOffset } from './ssa';
 
@@ -69,15 +69,16 @@ export interface FrameEscape {
   readonly how: string;
   readonly objectReached: number | undefined;
   readonly slotReached: { readonly slot: number; readonly above: boolean } | undefined;
-  /** the function holds an `undef` of a frame slot */
-  readonly frameUndef: boolean;
-  /** the lowest owned word no object and no slot accounts for */
+  /** the lowest frame slot inside that reach the function holds an `undef` of */
+  readonly undefReached: number | undefined;
+  /** the lowest owned word inside that reach that no object and no slot accounts for */
   readonly unaccountedWord: number | undefined;
 }
 
 // WHAT AN ESCAPE COSTS. The audit bounds what WE access through an object, never what a callee
 // does with the address it was handed — and a callee may write any offset from it. So an escape
-// retracts four claims, each function-wide because one address reaches the whole frame. They are
+// retracts four claims, each over the bytes it may reach (`readWindow`): the whole frame for a
+// writer nothing bounds. They are
 // a table (`l3/gates.ts`), taken as `FrameObjectAudit.gates` so a census or an ablation can reach
 // them; the rest of the audit — the split, the use classification, the
 // premise re-check, the shape and overlap checks — decides what the objects ARE, and stays inline.
@@ -112,12 +113,17 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // FRAME undefs only. A register-keyed one says a local lives in a register the ABI does not
   // pass arguments in, and no address reaches a register — the escape this retraction is about
   // cannot touch it, and counting it would refuse the whole function for an unrelated escape.
+  //
+  // …and only the frame slots inside the writer's reach. A callee handed only its own return
+  // storage writes the struct it returns and nothing else, so a slot outside that struct has no
+  // writer but this function: `if (a) x = gF(h); r = mk8(b); g4(i, j, x, a);` spills `x` beside
+  // `r`'s temp, unstored on one path, and that slot is still uninitialised there.
   {
     id: 'writer-over-undef',
     why: 'an unstored frame slot is uninitialised only while this function is its sole writer',
     sound: true,
     guardedBy: 'thumb-frontend.test.ts: an ESCAPED frame address retracts the undef argument',
-    rejects: (e) => e.writes && e.frameUndef,
+    rejects: (e) => e.writes && e.undefReached !== undefined,
   },
   // …and the SLOT MODEL is the third claim an escape retracts — the undef rule's argument
   // taken one step further. The audit's extents are inferred from OUR accesses, so an object
@@ -181,24 +187,30 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // three rules above all pass it: one object, no `undef` op, no slot above it.
   //
   // What licenses an answer is the frame being ACCOUNTED FOR, word by word. Every word of the
-  // reserved local area has to be an object this audit modelled or a slot the slot model keys;
-  // a word that is neither is storage nothing here describes, so the emitted C reserves less
-  // than the machine did and the writer reaches past what it allocated. Whole local area and
-  // not only the words above the object: a word below it is still frame the declaration has to
-  // account for. Word granularity, not byte — the stack is word-aligned, so a halfword object
-  // owns its word and the padding beside it is not a second local.
+  // reserved local area the escape reaches has to be an object this audit modelled or a slot the
+  // slot model keys; a word that is neither is storage nothing here describes, so the emitted C
+  // reserves less than the machine did and the writer reaches past what it allocated. A writer
+  // that may write anywhere through the address reaches the whole local area, below the object as
+  // well as above it; a callee handed only its own return storage writes the struct it returns
+  // and nothing else (`readWindow`), so a word outside that struct is one it never reaches. Word
+  // granularity, not byte — the stack is word-aligned, so a halfword object owns its word and the
+  // padding beside it is not a second local.
   //
-  // On a WRITER, as the undef rule is: a device SOURCE register reads through the address and
-  // cannot write the frame back, and an unwritten word it reads holds nothing.
+  // …and on a READER as far as it reads, since a read past the object copies frame bytes the
+  // source reserved and the recompile does not. `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`
+  // reads the sixteen bytes its control word names, and a DMA copy incrementing from `buf` reads
+  // every word above it; lifted as `u16 sp0`, the recompile's frame is four bytes wide and the
+  // transfer copies the saved `lr` and the caller's frame out with it. A read unbounded both ways
+  // meets this rule only beside a writer, which reaches the same word: alone, the audit keeps the
+  // local area as one object instead (`oneObjectOnOffer`).
   //
-  // WHAT IT LEAVES, since this is the extent question the gate comment above is about: a
-  // `mayWrite` escape is accepted only where the modelled objects and the keyed slots tile the
-  // reserved area between them — a word above the object is a slot (refused above), a second
-  // object (refused above), or unaccounted (refused here). That is not a wider extent model; it
-  // is the same one-scalar `extent`, made to say when it does not fit. An object of two words
-  // cannot be built here at all — the second access that would reach it is a `[+4]` the
-  // `scalar()` guard refuses — so no widening of the frame licence admits a shape this rule
-  // would then have to judge.
+  // WHAT IT LEAVES, since this is the extent question the gate comment above is about: an escape
+  // is accepted only where the modelled objects and the keyed slots tile the reserved area it
+  // reaches — a word above the object is a slot (refused above), a second object (refused above),
+  // or unaccounted (refused here). That is not a wider extent model; it is the same one-scalar
+  // `extent`, made to say when it does not fit. An object of two words cannot be built here at
+  // all — the second access that would reach it is a `[+4]` the `scalar()` guard refuses — so no
+  // widening of the frame licence admits a shape this rule would then have to judge.
   //
   // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
   // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
@@ -206,11 +218,14 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
   // that reaches memory rather than a callee, and the callee's declared return.
   {
-    id: 'writer-over-unaccounted-word',
-    why: 'a writer reaching a frame word no declaration covers writes past what the recompile allocates',
+    id: 'reaches-an-unaccounted-word',
+    why: 'an escape reaching a frame word no declaration covers reaches past what the recompile allocates',
     sound: true,
-    guardedBy: 'thumb-frontend.test.ts: an array whose top nothing bounds declines rather than shrinking the frame',
-    rejects: (e) => e.writes && e.unaccountedWord !== undefined,
+    guardedBy: [
+      'thumb-frontend.test.ts: an array whose top nothing bounds declines rather than shrinking the frame',
+      'thumb-frontend.test.ts: a copy that reads past its object into a word nothing accounts for declines',
+    ],
+    rejects: (e) => e.unaccountedWord !== undefined,
   },
 ];
 
@@ -620,6 +635,27 @@ export function auditFrameObjects({
     // …and for the others, the stores that handed the address to a source register, which is
     // where `readWindow` below reads how far the device reads
     const sourceStores = new Map<number, { op: Op; sink: number }[]>();
+    // …and a CALL that only reads is the same answer: the address handed to a block transfer
+    // (`blockTransferCalls`) as its source, with a literal control word, is read `[lo, hi)` from
+    // the object and written by nobody. `CPU_FILL`'s `vu32 tmp = v; CpuSet(&tmp, dest, …)` is the
+    // shape. A control word this cannot read, or any other argument position, is a callee that
+    // may write.
+    const calleeReads = new Map<number, { lo: number; hi: number }>();
+    // …and of those, the objects a transfer FILLS from — a fixed source, the `tmp` of every fill
+    // macro — which the `volatile` stamp below keys on beside `published`
+    const filledFrom = new Set<number>();
+    const transferRead = (op: Op, idx: number, off: number): { lo: number; hi: number; fill: boolean } | undefined => {
+      const callee = op.attrs.target;
+      const calls = target.capabilities.blockTransferCalls;
+      const call = typeof callee === 'string' && calls && Object.hasOwn(calls, callee) ? calls[callee] : undefined;
+      const control = call === undefined || idx !== call.source ? undefined : op.operands[call.control];
+      const word = control === undefined ? undefined : constOfValue(control);
+      if (call === undefined || word === undefined) {
+        return undefined;
+      }
+      const read = blockTransferRead(call, word);
+      return { ...sourceReach(read, off), fill: read.walk === 'fixed' };
+    };
     // …and the two escapes SPLIT, because each decides something the other does not.
     // `passedToCallee` is the address handed to a callee as an argument — the one escape whose
     // writer this frontend can name, which is what the struct-return premise re-check below rests
@@ -722,7 +758,14 @@ export function auditFrameObjects({
           if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
             escaped.add(off); // the address ESCAPES as a value — the point of the capability
             const sink = op.opcode === 'store' ? readsThrough(op) : undefined;
-            if (sink === undefined) {
+            const read = op.opcode === 'call' ? transferRead(op, idx, off) : undefined;
+            if (read !== undefined) {
+              const had = calleeReads.get(off) ?? read;
+              calleeReads.set(off, { lo: Math.min(had.lo, read.lo), hi: Math.max(had.hi, read.hi) });
+              if (read.fill) {
+                filledFrom.add(off);
+              }
+            } else if (sink === undefined) {
               mayWrite.add(off);
             } else {
               (sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!).push({ op, sink });
@@ -782,15 +825,17 @@ export function auditFrameObjects({
     }
 
     // THE BYTES AN ESCAPE MAY REACH, as `[lo, hi)` relative to the object's own offset. Anything
-    // that may write, and anything this cannot bound, reaches the whole frame. A device that only
-    // reads is bounded by its channel's control halfword (`readSourceControl`), per TRANSFER: the
-    // device reads the object on every arm of the channel from the store that handed it the
-    // address until a later word store to the same source register replaces it, so the control
-    // stores that bound it are the ones reachable in between. Each has to be a literal the target
-    // decodes. A store through a pointer this cannot resolve — one that is this frame's on only
-    // some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves the
-    // read unbounded — as does a transfer never armed here at all. An unbounded device read says
-    // which of those it met (`why`): each is a different capability to build.
+    // that may write, and anything this cannot bound, reaches the whole frame — save a callee
+    // handed only its own return storage, which writes the struct it returns (`returnTemps`). A
+    // device that only reads is bounded by its channel's control halfword (`readSourceControl`),
+    // per TRANSFER: the device reads the object on every arm of the channel from the store that
+    // handed it the address until a later word store to the same source register replaces it, so
+    // the control stores that bound it are the ones reachable in between. Each has to be a literal
+    // the target decodes. A store through a pointer this cannot resolve — one that is this frame's
+    // on only some paths included (`frameOnEveryPath`) — may BE the control halfword, so it leaves
+    // the read unbounded — as does a transfer never armed here at all. An unbounded device read
+    // says which of those it met (`why`): each is a different capability to build. A block transfer
+    // that took the address as its source adds the bytes its control word reads (`calleeReads`).
     //
     // A NAMED SYMBOL PLUS A CONSTANT IS RESOLVED WHERE THE SYMBOL MAP PLACES THE NAME, and then
     // exactly, by the overlap test below. agbcc's alias model never lets a C identifier plus a
@@ -816,6 +861,10 @@ export function auditFrameObjects({
       }
       const control = target.capabilities.readSourceControl;
       const stores = sourceStores.get(off);
+      const called = calleeReads.get(off);
+      if (!mayWrite.has(off) && stores === undefined && called !== undefined) {
+        return { lo: called.lo, hi: called.hi, why: 'that reads through it' };
+      }
       if (mayWrite.has(off) || stores === undefined || control === undefined) {
         return unbounded('that reads through it');
       }
@@ -867,18 +916,15 @@ export function auditFrameObjects({
           return unbounded('this function never arms');
         }
       }
-      let [lo, hi] = [0, 0];
+      let { lo, hi } = called ?? { lo: 0, hi: 0 };
       for (const h of halves) {
-        const unit = control.units[(h & control.wideBit) !== 0 ? 1 : 0];
-        const mode = control.modes[(h >> control.modeShift) & (control.modes.length - 1)];
-        if (mode === null || mode === undefined) {
+        const read = sourceControlRead(control, h);
+        if (read === null) {
           return unbounded('whose control word bounds nothing');
         }
-        // A device may force the address down to a unit boundary — the GBA's does — so a 32-bit
-        // read of the halfword at [sp,#2] reads from [sp,#0], and the object below shares its
-        // unit. The frame base is at least unit-aligned, so the offset says how far down.
-        lo = Math.min(lo, mode === 'decrement' ? -Infinity : -(off % unit));
-        hi = Math.max(hi, mode === 'increment' ? Infinity : unit);
+        const reach = sourceReach(read, off);
+        lo = Math.min(lo, reach.lo);
+        hi = Math.max(hi, reach.hi);
       }
       return { lo, hi, why: 'that reads through it' };
     };
@@ -1232,7 +1278,10 @@ export function auditFrameObjects({
       }
       // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
       // at `k - from` off the object, and a member address used any other way becomes the object's
-      // address moved by that constant.
+      // address moved by that constant. `volatile` keys on `published` alone, and a block
+      // transfer's fill source (`filledFrom`) needs no second key here: this answer is asked for
+      // only where a read is unbounded, a call's read is always bounded, so the unbounded one is
+      // a device's, handed the address by a store — which publishes it.
       const object = mkOp('laddr', {
         results: [mkValue(T.unk(32))],
         attrs: {
@@ -1497,9 +1546,11 @@ export function auditFrameObjects({
     // …computed ONCE, with whether the escape may write and how it left, and read by every rule an
     // escape retracts (`FRAME_ESCAPE_GATES`), so a new bound — a callee's declared extent — has one
     // place to go.
-    const frameUndef = irBlocks.some((blk) =>
-      blk.ops.some((op) => op.opcode === 'undef' && slotKeyOffset(op.attrs.key as string) !== null),
-    );
+    const undefSlots = irBlocks
+      .flatMap((blk) => blk.ops.filter((op) => op.opcode === 'undef'))
+      .map((op) => slotKeyOffset(op.attrs.key as string))
+      .filter((slot) => slot !== null)
+      .sort((x, y) => x - y);
     const accountedWords = new Set<number>();
     for (const [off, obj] of extent) {
       for (let w = off - (off % 4); w < off + span(obj); w += 4) {
@@ -1509,10 +1560,14 @@ export function auditFrameObjects({
     for (const slot of usedSlotOffsets) {
       accountedWords.add(slot - (slot % 4));
     }
-    let unaccountedWord: number | undefined;
-    for (let w = owned.from; w < owned.to && unaccountedWord === undefined; w += 4) {
-      unaccountedWord = accountedWords.has(w) ? undefined : w;
-    }
+    const unaccountedIn = (lo: number, hi: number): number | undefined => {
+      for (let w = owned.from; w < owned.to; w += 4) {
+        if (!accountedWords.has(w) && w < hi && w + 4 > lo) {
+          return w;
+        }
+      }
+      return undefined;
+    };
     const escapes: FrameEscape[] = [...escaped].map((off) => {
       const { lo, hi, why } = windowOf.get(off)!;
       const writes = mayWrite.has(off);
@@ -1540,8 +1595,8 @@ export function auditFrameObjects({
             : `is handed to a device ${why}`,
         objectReached: objectReached?.[0],
         slotReached,
-        frameUndef,
-        unaccountedWord,
+        undefReached: undefSlots.find((slot) => slot < off + hi && slot + 4 > off + lo),
+        unaccountedWord: unaccountedIn(off + lo, off + hi),
       };
     });
     const escapeRefusal = (id: string, e: FrameEscape): string => {
@@ -1552,7 +1607,9 @@ export function auditFrameObjects({
             ? 'the captured address escapes, so something outside this function reaches the whole frame — including another object'
             : `${at}, which may read the object at [sp,#${e.objectReached})`;
         case 'writer-over-undef':
-          return 'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised';
+          return e.lo === -Infinity && e.hi === Infinity
+            ? 'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised'
+            : `${at}, which may write the slot at [sp,#${e.undefReached}] — an unstored slot it reaches is not provably uninitialised`;
         case 'reaches-a-slot':
           return !e.slotReached!.above
             ? `${at}, and it may point INTO an object that starts lower — the slot at [sp,#${e.slotReached!.slot}] below it is kept in a register, not the frame`
@@ -1562,25 +1619,28 @@ export function auditFrameObjects({
         default:
           return (
             `the word at [sp,#${e.unaccountedWord}] is neither an object this lift models nor a slot it keys, ` +
-            'and the captured address reaches something that may write it — nothing accounts for the ' +
+            `and the captured address reaches something that may ${e.writes ? 'write' : 'read'} it — nothing accounts for the ` +
             "rest of the frame, so nothing bounds the captured object's extent"
           );
       }
     };
     // …unless the one-object answer is on offer (every escape only READS and one of them reads
     // without bound) and the per-object model does not describe the frame: it refused a shape, an
-    // object sits over a slot, or the unbounded read reaches another object or a slot. Then what
-    // the device may read is kept rather than refused: lift again with the local area as one object
-    // in memory (`oneObject` above). Below the local area are the outgoing arguments and above it
-    // the saved registers, neither of them an object. Where the per-object model does describe the
-    // frame — one object and nothing else in reach — it stands, and the object keeps its own type.
+    // object sits over a slot, or the unbounded read reaches another object, a slot or a word
+    // nothing accounts for. Then what the device may read is kept rather than refused: lift again
+    // with the local area as one object in memory (`oneObject` above). Below the local area are the
+    // outgoing arguments and above it the saved registers, neither of them an object. Where the
+    // per-object model does describe the frame — one object and nothing else in reach — it stands,
+    // and the object keeps its own type.
     if (
       oneObjectOnOffer &&
       (perObjectRefused ||
         overSlot.length > 0 ||
         escapes.some(
           (e) =>
-            e.lo === -Infinity && e.hi === Infinity && (e.objectReached !== undefined || e.slotReached !== undefined),
+            e.lo === -Infinity &&
+            e.hi === Infinity &&
+            (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined),
         ))
     ) {
       return { oneObject: { from: declared.from, to: declared.to } };
@@ -1606,6 +1666,12 @@ export function auditFrameObjects({
     // spelling there: klonoa's `DMA_FILL` writes `vu##bit tmp` outright, sa3's does under
     // `PLATFORM_GBA`, pokeemerald's inside `DMA_FILL_UNCHECKED`, and the address goes to a device
     // register through a store. Reproducing that source means reproducing the qualifier.
+    //
+    // …and iff it is the FIXED source of a block transfer (`filledFrom`), the same idiom through a
+    // BIOS call: every fill macro writes `vu##bit tmp = value; CpuSet((void *)&tmp, …)` (sa3's
+    // cpuset_macros.h, pokeemerald's macro.h). Compiled, the plain spelling is not the same
+    // program: a `u16` parameter stored to a plain `u16 tmp` loses its `lsl`/`lsr` pair, and the
+    // pool loads around the call reorder.
     //
     // NOT on an ordinary `&local` ARGUMENT, where no source in the corpus writes one and the
     // qualifier is not free. `void f(u32 i){ s32 w; w = gEnts[i].h; use(&w); four(w,w,w,w); }`
@@ -1638,12 +1704,13 @@ export function auditFrameObjects({
       const signed = accesses.get(off)!.some((a) => a.signed);
       const aggregate = aggregateAt.get(off);
       for (const op of ops) {
+        const qualified = published.has(off) || filledFrom.has(off);
         op.attrs = {
           ...op.attrs,
           width,
           signed,
           count,
-          ...(published.has(off) ? { volatile: true } : {}),
+          ...(qualified ? { volatile: true } : {}),
           ...(aggregate !== undefined ? { aggregate: true } : {}),
         };
         // a return temp's address points at the struct the call returns

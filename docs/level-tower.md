@@ -898,7 +898,7 @@ interface Gate<Ctx> {
   readonly id: string; // stable, kebab-case
   readonly why: string; // one line: the reason the rule exists, readable without the code
   readonly sound: boolean; // remove it and some candidate is WRONG, not merely worse
-  readonly guardedBy?: string; // required when `sound` — the test that fails without it
+  readonly guardedBy?: string | readonly string[]; // required when `sound` — the test that fails without it, one per half
   readonly rejects: (c: Ctx) => boolean; // true ⇒ REJECT
 }
 ```

@@ -1072,6 +1072,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
+    // …and where the one object's only member is one access at its base, it is still the array the
+    // declaration says. The read reaches words nothing accounts for, so the frame stays whole; a
+    // scalar spelling of the member would assign to the array, or read its address. Verbatim agbcc,
+    // `u16 buf[4]; buf[0] = x; REG_DMA3SAD = (u32)buf; REG_DMA3DAD = (u32)gDst; return buf[0];` —
+    // the channel is never armed here, so nothing bounds the read.
+    test('a lone member at the base of one object is spelled through the array', () => {
+      const lone =
+        'm6:\n\tadd\tsp, sp, #-0x8\n\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr0, .L12\n\tstr\tr1, [r0]\n' +
+        '\tldr\tr1, .L12+0x4\n\tldr\tr0, .L12+0x8\n\tstr\tr0, [r1]\n\tmov\tr0, sp\n\tldrh\tr0, [r0]\n' +
+        '\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n' +
+        '\t.word\tgDst\n';
+      const src = decompile('m6', lone, ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('*(u16 *)sp0 = a0;');
+      expect(src).toContain('return *(u16 *)sp0;');
+      // …and a read alone: the machine loads the word at [sp], it does not return the frame address
+      const readOnly =
+        'j:\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tldr\tr0, .L3\n\tstr\tr1, [r0]\n\tldr\tr0, [r1]\n' +
+        '\tadd\tsp, sp, #0x10\n\tbx\tlr\n.L3:\n\t.word\t0x40000d4\n';
+      const read = decompile('j', readOnly, ARMV4T_AGBCC).source;
+      expect(read).toContain('volatile u8 sp0[16];');
+      expect(read).toContain('return *(s32 *)sp0;');
+    });
+
     // …a member at [+1] through the captured address. Verbatim agbcc, `union U { u16 h; u8 b[2]; }
     // u; u.h = x; REG_DMA3SAD = (u32)&u; …; *gCnt = 5; return u.b[1];`.
     test('a member through the captured address is one object when the read is unbounded', () => {
@@ -1198,6 +1222,90 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     test('an incrementing fill reads the object above its own', () => {
       expect(() => decompile('f', twoFills('0x80000010'), ARMV4T_AGBCC)).toThrow(
         /the captured address at \[sp,#0\) is handed to a device that reads through it, which may read the object at \[sp,#4\)/,
+      );
+    });
+
+    // …and a BIOS block transfer is the same bound through a call (`blockTransferCalls`): CpuSet
+    // reads its source as far as a literal control word says and never writes through it. agbcc's
+    // output for `vu16 a; vu32 b; a = x; CpuSet((void *)&a, gA, 0x01000010); b = y;
+    // CpuSet((void *)&b, gB, 0x05000008);` — sa3's `CpuFill16` then `CpuFill32`.
+    const cpuFills = (callee: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r1, #0\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+      '\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr1, .L3\n\tldr\tr2, .L3+0x4\n\tmov\tr0, sp\n\tbl\tCpuSet\n' +
+      `\tstr\tr4, [sp, #0x4]\n\tadd\tr0, sp, #0x4\n\tldr\tr1, .L3+0x8\n\tldr\tr2, .L3+0xc\n\tbl\t${callee}\n` +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgA\n' +
+      '\t.word\t0x1000010\n\t.word\tgB\n\t.word\t0x5000008\n';
+
+    test('two CpuSet fills each read their own object, spelled as the fill macro spells it', () => {
+      const src = decompile('f', cpuFills('CpuSet'), ARMV4T_AGBCC).source;
+      expect(src).toContain('volatile u16 sp0;');
+      expect(src).toContain('volatile u32 sp4;');
+      expect(src).toContain('CpuSet(&sp4, &gB, 83886088);');
+      // CONTROL: a callee the target names no extent for may write anything from the address
+      expect(() => decompile('f', cpuFills('CpuSet2'), ARMV4T_AGBCC)).toThrow(
+        /something outside this function reaches the whole frame/,
+      );
+    });
+
+    test('a control word built at run time bounds nothing', () => {
+      // `CpuSet((void *)&b, gB, 0x05000000 | y)`
+      const runtime = cpuFills('CpuSet').replace(
+        '\tldr\tr2, .L3+0xc\n',
+        '\tmov\tr2, #0xa0\n\tlsl\tr2, r2, #0x13\n\torr\tr2, r2, r4\n',
+      );
+      expect(() => decompile('f', runtime, ARMV4T_AGBCC)).toThrow(
+        /something outside this function reaches the whole frame/,
+      );
+    });
+
+    test('a copy reads every unit it copies, past its own object', () => {
+      // `CpuSet((void *)&a, gA, 4)`: four halfwords from [sp,#0], and `b` at [sp,#4] is two of them
+      const copy = cpuFills('CpuSet').replace('\t.word\t0x1000010\n', '\t.word\t0x4\n');
+      expect(() => decompile('f', copy, ARMV4T_AGBCC)).toThrow(
+        /the captured address at \[sp,#0\) is passed to a callee, which may read the object at \[sp,#4\)/,
+      );
+      // CpuFastSet rounds a count of one word up to eight, so it reads the slot above
+      const fast =
+        'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tmov\tr2, sp\n' +
+        '\tstrh\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n\tldr\tr1, .L18\n\tmov\tr0, sp\n\tmov\tr2, #0x1\n\tbl\tCpuFastSet\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n.L19:\n\t.align\t2, 0\n.L18:\n\t.word\tgA\n';
+      expect(() => decompile('f', fast, ARMV4T_AGBCC)).toThrow(/which may read the slot at \[sp,#4\]/);
+    });
+
+    test('a copy that reads past its object into a word nothing accounts for declines', () => {
+      // `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`: sixteen bytes read, two of them declared
+      const wide = (count: string) =>
+        'r1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr1, .L3\n\tmov\tr0, sp\n' +
+        `\tmov\tr2, #${count}\n\tbl\tCpuSet\n\tadd\tsp, sp, #0x10\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n` +
+        '\t.word\tgDst\n';
+      expect(() => decompile('r1', wide('0x8'), ARMV4T_AGBCC)).toThrow(
+        /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys, and the captured address reaches something that may read it/,
+      );
+      // CONTROL: two halfwords stay inside the object's own word, and the frame's other words are
+      // read by nothing
+      expect(decompile('r1', wide('0x2'), ARMV4T_AGBCC).source).toContain('CpuSet(&sp0, &gDst, 2);');
+      // …and a DMA copy that increments from `buf` reads every word above it: `REG_DMA3SAD =
+      // (u32)buf; REG_DMA3DAD = (u32)gDst; REG_DMA3CNT = 0x80000008;`
+      const dma =
+        'd1:\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tstrh\tr0, [r1]\n\tldr\tr0, .L15\n\tstr\tr1, [r0]\n' +
+        '\tldr\tr1, .L15+0x4\n\tldr\tr0, .L15+0x8\n\tstr\tr0, [r1]\n\tadd\tr1, r1, #0x4\n\tldr\tr0, .L15+0xc\n' +
+        '\tstr\tr0, [r1]\n\tadd\tsp, sp, #0x10\n\tbx\tlr\n.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t0x40000d4\n' +
+        '\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7ffffff8\n';
+      expect(() => decompile('d1', dma, ARMV4T_AGBCC)).toThrow(
+        /the word at \[sp,#4\] is neither an object this lift models nor a slot it keys, and the captured address reaches something that may read it/,
+      );
+    });
+
+    test('a frame address the transfer writes through is a writer, as any callee is', () => {
+      // `CpuSet((void *)&a, (void *)&b, 0x01000002); CpuSet((void *)&b, gB, 0x05000008);`
+      const asDest =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tmov\tr2, sp\n' +
+        '\tstrh\tr0, [r2]\n\tstr\tr1, [sp, #0x4]\n\tadd\tr4, sp, #0x4\n\tldr\tr2, .L21\n\tmov\tr0, sp\n' +
+        '\tadd\tr1, r4, #0\n\tbl\tCpuSet\n\tldr\tr1, .L21+0x4\n\tldr\tr2, .L21+0x8\n\tadd\tr0, r4, #0\n\tbl\tCpuSet\n' +
+        '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L22:\n\t.align\t2, 0\n.L21:\n\t.word\t0x1000002\n' +
+        '\t.word\tgB\n\t.word\t0x5000008\n';
+      expect(() => decompile('f', asDest, ARMV4T_AGBCC)).toThrow(
+        /something outside this function reaches the whole frame/,
       );
     });
   });

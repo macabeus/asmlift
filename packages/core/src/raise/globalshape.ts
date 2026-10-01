@@ -505,11 +505,12 @@ export const SHAPE_GATES: readonly Gate<ShapeEvidence>[] = [
     id: 'index-materialized-first',
     why: 'a scaling of the index precedes the pool load IN ITS OWN BLOCK — the pointer path, which is the cast spelling',
     sound: true,
-    // Its SECOND reaching fixture is the compiler-shaped one: `…and the same function cast-spelled
-    // still refuses, on the access that CAN be compared` runs the real agbcc output for a function
-    // that subscripts the name once outside a loop and once inside it. It is not named in
-    // `guardedBy` because that field is matched against a single test title (gate-contract.ts).
-    guardedBy: 'global-array-shape.test.ts: one index-first access refuses a symbol the others license',
+    // Its SECOND reaching fixture is the compiler-shaped one: the real agbcc output for a function
+    // that subscripts the name once outside a loop and once inside it.
+    guardedBy: [
+      'global-array-shape.test.ts: one index-first access refuses a symbol the others license',
+      'global-array-shape.test.ts: …and the same function cast-spelled still refuses, on the access that CAN be compared',
+    ],
     rejects: anIndexFirstAccess,
   },
   {

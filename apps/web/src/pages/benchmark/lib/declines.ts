@@ -123,8 +123,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
-    // disjunction is 17 of the 18 rows, so a pattern requiring the word only Thumb writes claims
-    // 1 of them and leaves the rest to a class whose label reads "other sp uses".
+    // disjunction is 17 of the 17 rows, so a pattern requiring the word only Thumb writes claims
+    // 0 of them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
     // `apps/web/test/declines.test.ts` ("the disjunction share this paragraph names is the share
