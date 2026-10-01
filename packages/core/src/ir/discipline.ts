@@ -18,7 +18,8 @@
 //   Two pinned reads commuting (`orderSensitive` without `effectful` on either side):
 //     pattern/engine.ts `reordersUnsequenced` — DELIBERATE: the structurer's barrier scan names the
 //       first of two pinned reads the fold would join in one expression.
-//     structure/hazards.ts `movesPast` — GAP: a pinned read rebuilt past another pinned read.
+//     structure/hazards.ts `movesPast` — DELIBERATE: the analysis names a pinned read another pinned
+//       read stands between it and its render, so the scan never weighs two.
 //   `effectful` as the barrier a read may not cross, without `isBarrier`'s helper and pin clauses
 //   (structure/analysis.ts):
 //     structure/analysis.ts `writeBetween`, `standsOnMovableRead`, the multi-render rule — DELIBERATE:

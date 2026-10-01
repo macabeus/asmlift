@@ -919,10 +919,11 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // two exit args becomes two reads in the emitted C. For a READ that is legal by this same scan:
     // either nothing order-sensitive lies between the two homes, or the second slot is refused and
     // the edge stands down whole. It costs a spelling; only a `volatile` qualifier would make the
-    // extra access observable, and that qualifier is minted by a variation the differ referees
-    // (l3/volatileptr.ts), never by the default candidate. For a CALL it would be a second
-    // execution; the analysis names a call that rides an edge copy, and `assertEffectsPreserved`
-    // (contracts.ts) counts on the path whatever reaches here anyway.
+    // extra access observable. A variation mints one the differ referees (l3/volatileptr.ts), and
+    // the device pin (frontend/device-pins.ts) puts one on the default candidate — but the analysis
+    // places a pinned read as it places a call, naming one with two uses or one that rides an edge
+    // copy, so neither reaches this scan twice, and `assertEffectsPreserved` (contracts.ts) counts
+    // both on the path whatever reaches here anyway.
     const movesPast = (d: Op, home: Op, tree: ReadonlySet<Op>): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
@@ -933,7 +934,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         .slice(0, i)
         .some((o) => orderSensitive(o) && !tree.has(o) && !(isRead(o) && isRead(d)) && rendersAfter(o, p));
     };
-    // A memory read and nothing else: two of them commute, whichever runs first.
+    // A memory read and nothing else: two of them commute, whichever runs first. Two pinned reads
+    // would not, and never meet in the AHEAD arm: the analysis names a pinned read that another
+    // pinned read stands between it and its render (`isBarrier`), so a pinned op ahead of `d`
+    // renders at its own index.
     const isRead = (o: Op): boolean => orderSensitive(o) && !effectful(o);
     // Does latch op `o` RENDER after index `p`? Where it renders is `emitPos`: the terminator's
     // index stands for every copy it carries, and those land at or after the foot of the body; an
