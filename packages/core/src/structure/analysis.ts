@@ -2327,9 +2327,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           return false;
         };
-        // A CROSS-BLOCK call's execution would become path-dependent — always materialize. Within
-        // its own block a call is judged like everything else, by the barrier scan below.
-        if (isCall && pos.blk !== b) {
+        // A CROSS-BLOCK call or pinned read would run on the render block's paths instead of its
+        // own — always materialize. Within its own block it is judged like everything else, by the
+        // barrier scan below.
+        if (once && pos.blk !== b) {
           materialize.add(op);
           continue;
         }

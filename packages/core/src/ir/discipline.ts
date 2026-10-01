@@ -25,8 +25,6 @@
 //     structure/analysis.ts `writeBetween`, `standsOnMovableRead`, the multi-render rule — DELIBERATE:
 //       each asks about a memory write, and a pinned read writes nothing.
 //   The `call` placement alone, in structure/analysis.ts:
-//     the cross-block rule (`isCall && pos.blk !== b`) — GAP: a pinned read rendered in another
-//       block runs on that block's paths.
 //     the `&&`/`||` rule — DELIBERATE: a pinned read in that cone declines (`volatileGuardedRead`),
 //       and a helper op has its own clause.
 //     `callPos` — DELIBERATE: it asks which values live across the registers a call clobbers.
