@@ -343,17 +343,76 @@ export function auditFrameObjects({
   if (laddrs.length > 0 || capturedObjectIsTheWholeFrame) {
     const readOnlySinks = new Set(target.capabilities.readOnlyAddressSinks ?? []);
     const { defOf, constOf: constOfValue, literalAddrOf } = literalAddresses(irBlocks, symbols);
-    // The register this store hands the WHOLE address to, when it is one a device only reads
-    // through, else undefined. Word stores only: a `strh` to a source register hands over half an
-    // address, so the device's source is not this object. A base this cannot resolve — computed,
-    // register-offset, merged by a phi — is the conservative answer.
-    const readsThrough = (op: Op): number | undefined => {
-      if (readOnlySinks.size === 0 || (op.attrs.width as number) !== 4) {
-        return undefined;
+    // `v` as a sum of runtime values times constants, plus a constant (the `1` key): agbcc's `ch *
+    // 12` is `((ch << 1) + ch) << 2`, which is 12 times `ch` only once the two `ch` terms are added.
+    // Undefined past what this can read.
+    const linearOf = (v: Value, depth = 0): Map<Value | 1, number> | undefined => {
+      const c = constOfValue(v);
+      if (c !== undefined) {
+        return new Map([[1, c]]);
       }
+      const d = defOf.get(v);
+      if (d === undefined || depth > 8) {
+        return new Map([[v, 1]]);
+      }
+      const scaled = (x: Value, by: number) => {
+        const l = linearOf(x, depth + 1);
+        return l && new Map([...l].map(([t, k]) => [t, k * by] as const));
+      };
+      const k = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : constOfValue(d.operands[1]);
+      if (d.opcode === 'shl' && k !== undefined && k >= 0 && k < 31) {
+        return scaled(d.operands[0], 2 ** k);
+      }
+      if (d.opcode === 'mul' && d.operands.length === 2 && k !== undefined) {
+        return scaled(d.operands[0], k);
+      }
+      if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
+        const x = linearOf(d.operands[0], depth + 1);
+        const y = scaled(d.operands[1], d.opcode === 'add' ? 1 : -1);
+        if (x === undefined || y === undefined) {
+          return undefined;
+        }
+        y.forEach((n, t) => x.set(t, (x.get(t) ?? 0) + n));
+        return x;
+      }
+      return new Map([[v, 1]]);
+    };
+    // A number every value of `v` is a multiple of, or 0 when this cannot name one.
+    const factorOf = (v: Value): number => {
+      const l = linearOf(v);
+      return l === undefined ? 0 : [...l.values()].reduce(gcd, 0);
+    };
+    // The spacing of the read-only registers: a runtime index that is a multiple of it, from one
+    // of them, names one of them and never a register between — the channel stride.
+    const sinkSpacing = [...readOnlySinks].reduce((g, s, _, all) => gcd(g, s - all[0]), 0);
+    // The registers this store hands the WHOLE address to, when each is one a device only reads
+    // through, else none. Word stores only: a `strh` to a source register hands over half an
+    // address, so the device's source is not this object. A literal base names one register; a
+    // literal plus a runtime index — `(vu32 *)(0x40000B0 + ch * 12)`, a channel chosen at run time
+    // — names every read-only register its stride reaches, and only when that stride is a multiple
+    // of their spacing, so no index lands between them. A base this cannot resolve — computed,
+    // register-offset, merged by a phi — is the conservative answer.
+    const readsThrough = (op: Op): readonly number[] => {
+      if (readOnlySinks.size === 0 || (op.attrs.width as number) !== 4) {
+        return [];
+      }
+      const off = op.attrs.off as number;
       const base = literalAddrOf(op.operands[0]);
-      const at = base === undefined ? undefined : base + (op.attrs.off as number);
-      return at !== undefined && readOnlySinks.has(at) ? at : undefined;
+      if (base !== undefined) {
+        return readOnlySinks.has(base + off) ? [base + off] : [];
+      }
+      const d = defOf.get(op.operands[0]);
+      if (d?.opcode !== 'add' || d.operands.length !== 2 || sinkSpacing === 0) {
+        return [];
+      }
+      for (const [lit, index] of [d.operands, [...d.operands].reverse()]) {
+        const from = literalAddrOf(lit);
+        const stride = from === undefined ? 0 : factorOf(index);
+        if (from !== undefined && readOnlySinks.has(from + off) && stride > 0 && stride % sinkSpacing === 0) {
+          return [...readOnlySinks].filter((s) => (s - (from + off)) % stride === 0);
+        }
+      }
+      return [];
     };
     const fail = (why: string): never => {
       throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
@@ -704,7 +763,7 @@ export function auditFrameObjects({
           }
           if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
             escaped.add(off); // the address ESCAPES as a value — the point of the capability
-            const sink = op.opcode === 'store' ? readsThrough(op) : undefined;
+            const handedTo = op.opcode === 'store' ? readsThrough(op) : [];
             const read = op.opcode === 'call' ? transferRead(op, idx, off) : undefined;
             if (read !== undefined) {
               const had = calleeReads.get(off) ?? read;
@@ -712,10 +771,11 @@ export function auditFrameObjects({
               if (read.fill) {
                 filledFrom.add(off);
               }
-            } else if (sink === undefined) {
+            } else if (handedTo.length === 0) {
               mayWrite.add(off);
             } else {
-              (sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!).push({ op, sink });
+              const stores = sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!;
+              handedTo.forEach((sink) => stores.push({ op, sink }));
             }
             if (op.opcode === 'call') {
               passedToCallee.add(off);
@@ -1547,6 +1607,10 @@ export function auditFrameObjects({
     return { policy: 'per-object', sinks };
   }
   return undefined;
+}
+
+function gcd(a: number, b: number): number {
+  return b === 0 ? Math.abs(a) : gcd(b, a % b);
 }
 
 /** The size of the struct a call stamped `sret` returns through its argument 0 (frontend/thumb.ts

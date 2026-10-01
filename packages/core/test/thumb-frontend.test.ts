@@ -3315,6 +3315,40 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src.match(/\(volatile struct Elem0 \*\)67109040\)\[a2\]/g)).toHaveLength(6);
   });
 
+  // …and a frame address handed to a channel chosen at run time reaches that channel's SOURCE
+  // register, so the device only reads it and the function is pinned. Verbatim agbcc, `vu32 *d =
+  // (vu32 *)(0x40000B0 + ch * 12); tmp = 0; d[0] = &tmp; d[1] = dst; d[2] = 0x81000000 | n; d[2];`:
+  // the index is a multiple of the channels' 12-byte stride, so every register it names is a
+  // source. Plain, the closing read is used by nothing and not lifted at all.
+  test('a frame address handed to a runtime channel is read by the device, and pinned', () => {
+    const runtimeFill =
+      'fillChN:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr3, r0, #0x1\n' +
+      '\tadd\tr3, r3, r0\n\tlsl\tr3, r3, #0x2\n\tldr\tr0, .L6\n\tadd\tr3, r3, r0\n' +
+      '\tmov\tr4, sp\n\tmov\tr0, #0x0\n\tstrh\tr0, [r4]\n\tstr\tr4, [r3]\n' +
+      '\tstr\tr1, [r3, #0x4]\n\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n\torr\tr0, r0, r2\n' +
+      '\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x40000b0\n';
+    const src = decompile('fillChN', runtimeFill, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).toContain('    ((volatile struct Elem0 *)67109040)[a0].field_8;\n}');
+  });
+
+  // …but an index of another stride may name a DESTINATION register, which writes the frame: `((vu32
+  // *)0x40000B0)[i] = &tmp` is DMA0SAD at i = 0 and DMA0DAD at i = 1. Verbatim agbcc; the address
+  // stays an escape that may write, so nothing is pinned.
+  test('a frame address handed through an index of another stride may be written', () => {
+    const wordIndexed =
+      'fillWord:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tlsl\tr0, r0, #0x2\n\tldr\tr4, .L3\n\tadd\tr3, r0, r4\n' +
+      '\tmov\tr4, sp\n\tstr\tr4, [r3]\n\tldr\tr4, .L3+0x4\n\tadd\tr3, r0, r4\n\tstr\tr1, [r3]\n' +
+      '\tldr\tr1, .L3+0x8\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x81\n\tlsl\tr1, r1, #0x18\n' +
+      '\torr\tr1, r1, r2\n\tstr\tr1, [r0]\n\tldr\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000b0\n' +
+      '\t.word\t0x40000b4\n\t.word\t0x40000b8\n';
+    const src = decompile('fillWord', wordIndexed, ARMV4T_AGBCC).source;
+    expect(src).not.toContain('(volatile s32 *)');
+  });
+
   // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
   // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here).
   test('a phi of device registers is a device store too', () => {
