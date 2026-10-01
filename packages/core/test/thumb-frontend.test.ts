@@ -3578,6 +3578,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('    do {\n        v0 = *(volatile u16 *)67108870;\n    } while (v0 != 160);\n');
   });
 
+  // …save a read agbcc could not have made of a `volatile`: it never sign-extends a qualified read
+  // in the load (the expander refuses a volatile MEM, recog.c:918 under function.c:5564, and
+  // thumb.md:393-409 then loads it zero-extended and shifts), so an `ldrsh` is a plain read in the
+  // source and qualified it recompiles to `ldrh; lsl; asr`. Verbatim agbcc but for one pool label, a
+  // fill from a frame temporary and then `return *(s16 *)0x4000020;`, and the same with `volatile
+  // s16`.
+  test('a device read agbcc sign-extended in the load is not pinned', () => {
+    const preamble = (name: string) =>
+      `${name}:\n\tadd\tsp, sp, #-0x4\n\tmov\tr2, sp\n\tmov\tr1, #0x0\n\tstrh\tr1, [r2]\n` +
+      '\tldr\tr1, .L3\n\tstr\tr2, [r1]\n\tadd\tr1, r1, #0x4\n\tstr\tr0, [r1]\n' +
+      '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L3+0x4\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n\tldr\tr0, .L3+0x8\n';
+    const pool =
+      '\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n' +
+      '\t.word\t-0x7efffff0\n\t.word\t0x4000020\n';
+    const signedLoad = preamble('rdPlain') + '\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n' + pool;
+    const extendedAfter = preamble('rdVol') + '\tldrh\tr0, [r0]\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n' + pool;
+    expect(decompile('rdPlain', signedLoad, ARMV4T_AGBCC).source).toContain('    return *(s16 *)67108896;\n');
+    expect(decompile('rdVol', extendedAfter, ARMV4T_AGBCC).source).toContain(
+      '    return (s16)*(volatile u16 *)67108896;\n',
+    );
+  });
+
   // A device address agbcc builds without a pool word is placed too: 0x04000000 is `mov #0x80;
   // lsl #0x13`. Verbatim agbcc, two fills whose control nothing bounds, then `REG_DISPCNT = 0x80;
   // gY = 5; REG_DISPCNT = d;`: spelled plain, the recompile drops the first DISPCNT store (11 -> 10).

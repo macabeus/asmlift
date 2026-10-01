@@ -46,8 +46,9 @@
 //     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
-//     (frontend/thumb.ts, which reads the epilogue) and `roundTripsDoubleLiterals`
-//     (raise/floathelpers.ts). The field names are a SUPERSET of
+//     (frontend/thumb.ts, which reads the epilogue), `roundTripsDoubleLiterals`
+//     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts). The
+//     field names are a SUPERSET of
 //     StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization decisions) are
@@ -731,6 +732,17 @@ export interface TargetDescription {
     // ABSENT ⇒ unmeasured, and a function that defines a static declines: a wrong floor mislays
     // every static after the first, which no score sees.
     staticLayout?: StaticLayout;
+    // Does this compiler load a `volatile` narrow signed read zero-extended and sign-extend it in a
+    // register, never in the load itself? agbcc: yes — `*(volatile s16 *)a` is `ldrh; lsl #16; asr
+    // #16` and `volatile s8` is `ldrb; lsl; asr`, where the plain `s16` read is `ldrsh`: the
+    // sign-extend expander refuses a volatile MEM while expanding (`general_operand`, recog.c:918,
+    // under `init_recog_no_volatile`, function.c:5564) and thumb.md:393-409 then extends in a
+    // register; compiled at the canonical flags. So a lifted sign-extending narrow load is evidence
+    // the source read was plain, and the device pin (frontend/device-pins.ts) leaves it plain.
+    //
+    // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
+    // pinned whatever its extension.
+    volatileReadsExtendInRegister?: boolean;
   };
 }
 
@@ -828,6 +840,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     nearBaseSpan: 255,
+    volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
     foldsPointerAdvance: true,
     readsStayWhereWritten: true,

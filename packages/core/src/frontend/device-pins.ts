@@ -37,7 +37,12 @@
  *  variation, and the ones that home the base or un-reduce a loop refuse a qualified base, which
  *  costs `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches. That is also why the two
  *  policies stay two rows: the one-object row's every-store pin is what keeps `threeFills`' nine
- *  qualified stores (thumb-frontend.test.ts), and on the per-object row it costs those two matches. */
+ *  qualified stores (thumb-frontend.test.ts), and on the per-object row it costs those two matches.
+ *
+ *  Under either policy, a read the compiler could not have made of a `volatile` stays plain: on a
+ *  compiler that sign-extends a qualified narrow read in a register (`volatileReadsExtendInRegister`),
+ *  a sign-extending load is a plain read in the source, and qualified it recompiles to another
+ *  instruction sequence. */
 import type { Block, Op, Value } from '../ir/core';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -239,8 +244,13 @@ export function pinDeviceAccesses(
     }
     return each.find((a) => typeof a === 'number') ?? 'cycle';
   };
+  // A read the compiler could not have made of a `volatile` was plain in the source.
+  const extendedInLoad = (op: Op): boolean =>
+    target.compilerBehaviors.volatileReadsExtendInRegister === true &&
+    op.attrs.signed === true &&
+    (op.attrs.width as number) < 4;
   const pins = (op: Op, blk: Block, at: number): boolean =>
-    op.opcode === 'load' || stores === 'every' || overwritten(op, blk, at, addresses);
+    op.opcode === 'load' ? !extendedInLoad(op) : stores === 'every' || overwritten(op, blk, at, addresses);
   for (const blk of irBlocks) {
     blk.ops.forEach((op, at) => {
       if (op.opcode !== 'store' && op.opcode !== 'load') {
