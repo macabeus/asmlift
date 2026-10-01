@@ -3,6 +3,22 @@ description: Bump the pinned m2c baseline, rerun the benchmark, attribute every 
 argument-hint: [target-m2c-commit] (default: upstream master HEAD)
 ---
 
+**Before anything else, check that this copy is current.** A slash command is loaded from the checkout
+the session started in, which is routinely behind `origin/main`, so the text you are reading may be a
+stale version of this command. In that checkout, run:
+
+```
+git fetch -q origin && git diff --quiet origin/main -- .claude/commands/update-m2c.md
+```
+
+- **Exit 0:** this copy is `origin/main`'s. Go on.
+- **Exit 1, and `git diff --quiet HEAD -- .claude/commands/update-m2c.md` exits 1 too:** the checkout carries
+  its own edits to this file. Ask the user which copy to follow.
+- **Exit 1 otherwise:** the checkout is behind. Stop reading this copy and follow
+  `git show origin/main:.claude/commands/update-m2c.md` instead.
+- **Any other exit:** the check did not run (no remote, not a repository). Tell the user before going
+  on.
+
 Update the benchmark's pinned m2c to **$1** (if empty: latest upstream master). This is a
 *measurement + intelligence* task, not just a version bump: every row that moves must be attributed
 to a specific upstream commit, and the commit range must be mined for ideas asmlift can port.

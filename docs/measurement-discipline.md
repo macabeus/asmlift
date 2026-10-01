@@ -28,6 +28,9 @@ So, mechanically:
 - **Brief author:** give the path as `<the worktree you just created>/.claude/commands/…`, or as a
   `git show origin/main:…`. Do not paste an excerpt of the file into the brief — a copy is a
   fourth version to go stale, and this file exists because that already happened.
+- **A slash command's text** is neither: it is loaded from the checkout the session started in,
+  which is the user's, so it can be stale with no path involved. Every command file opens with a
+  check that compares itself with `origin/main` and says which copy to follow; run it first.
 - **Either:** the cheapest check that you are on the current copy is `git -C <dir> log --oneline -1
 origin/main -- .claude/commands`.
 

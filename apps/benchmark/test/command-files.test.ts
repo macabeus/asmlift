@@ -93,6 +93,29 @@ const docFiles = () =>
     .filter((f) => f.endsWith('.md'))
     .map((f) => join(DOCS_DIR, f));
 const read = (f: string) => readFileSync(join(COMMANDS_DIR, f), 'utf8').split('\n');
+
+const FRESHNESS_OPENS = '**Before anything else, check that this copy is current.**';
+/** Where a command file's freshness check sits: from its opening line to the end of its last
+ *  bullet. Every command carries the same check inline, because a stale copy can only run a check
+ *  it already holds; the test below holds the copies to one text. */
+function freshnessCheck(lines: readonly string[]): { from: number; to: number } | undefined {
+  const from = lines.findIndex((l) => l.startsWith(FRESHNESS_OPENS));
+  const last = lines.findIndex((l, i) => i > from && l.startsWith('- **Any other exit:**'));
+  if (from < 0 || last < 0) {
+    return undefined;
+  }
+  let to = last + 1;
+  while (to < lines.length && lines[to].startsWith('  ')) {
+    to++;
+  }
+  return { from, to };
+}
+/** A command file without its freshness check, for the comparisons that must not count it. */
+const readBelowFreshness = (f: string) => {
+  const lines = read(f);
+  const at = freshnessCheck(lines);
+  return at === undefined ? lines : [...lines.slice(0, at.from), ...lines.slice(at.to)];
+};
 /** One cell of a markdown table row. `row.split('|')` puts the leading `|` before index 1, so cell
  *  1 is the command, 2 the cost and 3 the provenance. */
 const cellOf = (row: string, n: number) => row.split('|')[n] ?? '';
@@ -123,7 +146,7 @@ function longestSharedRun(a: string[], b: string[], minSubstantive = 2) {
 
 describe('the two round prompts do not duplicate an instruction', () => {
   it('shares no run of 3+ consecutive lines below the preamble', () => {
-    const [a, b] = PAIR.map((f) => read(f).slice(PREAMBLE_LINES));
+    const [a, b] = PAIR.map((f) => readBelowFreshness(f).slice(PREAMBLE_LINES));
     const run = longestSharedRun(a, b);
     expect(
       run.length < 3,
@@ -152,6 +175,29 @@ describe('the two round prompts do not duplicate an instruction', () => {
       for (const doc of ['docs/bench-cost.md', 'docs/measurement-discipline.md']) {
         expect(text, `${f} does not link ${doc} — the laws and the costs are shared by every round`).toContain(doc);
       }
+    }
+  });
+});
+
+describe('every command checks that it is the current copy before anything else', () => {
+  it('opens with the freshness check, the same text in every file, naming its own file', () => {
+    const files = commandFiles();
+    expect(
+      files.length,
+      'no command files found — the directory moved and this suite went blind',
+    ).toBeGreaterThanOrEqual(4);
+    const texts = files.map((f) => {
+      const lines = read(f);
+      const at = freshnessCheck(lines);
+      expect(at, `${f} carries no freshness check`).toBeDefined();
+      const frontmatterEnd = lines.indexOf('---', 1);
+      expect(at!.from, `${f}'s freshness check is not the first thing after its frontmatter`).toBe(frontmatterEnd + 2);
+      const block = lines.slice(at!.from, at!.to).join('\n');
+      expect(block.split(`.claude/commands/${f}`).length - 1, `${f}'s check does not name its own file`).toBe(3);
+      return block.replaceAll(`.claude/commands/${f}`, '.claude/commands/<file>');
+    });
+    for (const [i, t] of texts.entries()) {
+      expect(t, `${files[i]}'s freshness check differs from ${files[0]}'s`).toBe(texts[0]);
     }
   });
 });
