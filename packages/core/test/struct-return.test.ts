@@ -40,6 +40,23 @@ const S6 =
   '\tbl\tmk8\n\tldr\tr1, .L3\n\tldr\tr0, [sp]\n\tstr\tr0, [r1]\n\tadd\tsp, sp, #0x14\n\tpop\t{r0}\n\tbx\tr0\n' +
   '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgV\n';
 
+// `u32 u3(u32 a, u32 b, u32 c, u32 d){ u32 x, e, f, g, h, i, j; struct B8 r; e = gF(a); f = gF(b);
+//  g = gF(c); h = gF(d); i = gF(e); j = gF(f); if (a) x = gF(h); r = mk8(b); g4(e, f, g, h);
+//  g4(i, j, x, a); return x; }` — `r`'s temp is [sp,#0..8) and `x` spills to [sp,#8], unstored when
+//  `a` is 0
+const U3_UNDEF =
+  'u3:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, sl\n\tmov\tr6, r9\n\tmov\tr5, r8\n' +
+  '\tpush\t{r5, r6, r7}\n\tadd\tsp, sp, #-0x10\n\tadd\tr6, r0, #0\n\tmov\tsl, r1\n' +
+  '\tadd\tr4, r2, #0\n\tadd\tr5, r3, #0\n\tbl\tgF\n\tmov\tr8, r0\n\tmov\tr0, sl\n\tbl\tgF\n' +
+  '\tadd\tr7, r0, #0\n\tadd\tr0, r4, #0\n\tbl\tgF\n\tstr\tr0, [sp, #0xc]\n\tadd\tr0, r5, #0\n' +
+  '\tbl\tgF\n\tadd\tr4, r0, #0\n\tmov\tr0, r8\n\tbl\tgF\n\tmov\tr9, r0\n\tadd\tr0, r7, #0\n' +
+  '\tbl\tgF\n\tadd\tr5, r0, #0\n\tcmp\tr6, #0\n\tbeq\t.L3\n\tadd\tr0, r4, #0\n\tbl\tgF\n' +
+  '\tstr\tr0, [sp, #0x8]\n.L3:\n\tmov\tr0, sp\n\tmov\tr1, sl\n\tbl\tmk8\n\tmov\tr0, r8\n' +
+  '\tadd\tr1, r7, #0\n\tldr\tr2, [sp, #0xc]\n\tadd\tr3, r4, #0\n\tbl\tg4\n\tmov\tr0, r9\n' +
+  '\tadd\tr1, r5, #0\n\tldr\tr2, [sp, #0x8]\n\tadd\tr3, r6, #0\n\tbl\tg4\n' +
+  '\tldr\tr0, [sp, #0x8]\n\tadd\tsp, sp, #0x10\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n' +
+  '\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n';
+
 const BLOB64 = { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] };
 const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
 const makeblob = { params: ['const void *'], returns: 'struct Blob64', returnLayout: BLOB64 };
@@ -167,6 +184,16 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('struct B8 sp12;');
     expect(source).toContain('sp12 = mk8(a0);');
     expect(source).toContain('gV = a0;');
+  });
+
+  // …and the slot beside it has no writer but this function, so where no store reaches it the
+  // value is still uninitialised
+  test('an unstored slot outside the returned struct is one the call does not write', () => {
+    const { source } = decompile('u3', U3_UNDEF, ARMV4T_AGBCC, { prototypes: { mk8 } });
+    expect(source).toContain('struct B8 sp0;');
+    expect(source).toContain('if (a0 != 0) v6 = gF(v3);');
+    expect(source).toContain('sp0 = mk8(a1);');
+    expect(source).toContain('g4(v4, v5, v6, a0);');
   });
 
   test('without a declared return it is the frame the out-parameter refusal names', () => {

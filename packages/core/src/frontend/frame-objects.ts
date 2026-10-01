@@ -69,15 +69,16 @@ export interface FrameEscape {
   readonly how: string;
   readonly objectReached: number | undefined;
   readonly slotReached: { readonly slot: number; readonly above: boolean } | undefined;
-  /** the function holds an `undef` of a frame slot */
-  readonly frameUndef: boolean;
+  /** the lowest frame slot inside that reach the function holds an `undef` of */
+  readonly undefReached: number | undefined;
   /** the lowest owned word inside that reach that no object and no slot accounts for */
   readonly unaccountedWord: number | undefined;
 }
 
 // WHAT AN ESCAPE COSTS. The audit bounds what WE access through an object, never what a callee
 // does with the address it was handed — and a callee may write any offset from it. So an escape
-// retracts four claims, each function-wide because one address reaches the whole frame. They are
+// retracts four claims, each over the bytes it may reach (`readWindow`): the whole frame for a
+// writer nothing bounds. They are
 // a table (`l3/gates.ts`), taken as `FrameObjectAudit.gates` so a census or an ablation can reach
 // them; the rest of the audit — the split, the use classification, the
 // premise re-check, the shape and overlap checks — decides what the objects ARE, and stays inline.
@@ -112,12 +113,17 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // FRAME undefs only. A register-keyed one says a local lives in a register the ABI does not
   // pass arguments in, and no address reaches a register — the escape this retraction is about
   // cannot touch it, and counting it would refuse the whole function for an unrelated escape.
+  //
+  // …and only the frame slots inside the writer's reach. A callee handed only its own return
+  // storage writes the struct it returns and nothing else, so a slot outside that struct has no
+  // writer but this function: `if (a) x = gF(h); r = mk8(b); g4(i, j, x, a);` spills `x` beside
+  // `r`'s temp, unstored on one path, and that slot is still uninitialised there.
   {
     id: 'writer-over-undef',
     why: 'an unstored frame slot is uninitialised only while this function is its sole writer',
     sound: true,
     guardedBy: 'thumb-frontend.test.ts: an ESCAPED frame address retracts the undef argument',
-    rejects: (e) => e.writes && e.frameUndef,
+    rejects: (e) => e.writes && e.undefReached !== undefined,
   },
   // …and the SLOT MODEL is the third claim an escape retracts — the undef rule's argument
   // taken one step further. The audit's extents are inferred from OUR accesses, so an object
@@ -1540,9 +1546,11 @@ export function auditFrameObjects({
     // …computed ONCE, with whether the escape may write and how it left, and read by every rule an
     // escape retracts (`FRAME_ESCAPE_GATES`), so a new bound — a callee's declared extent — has one
     // place to go.
-    const frameUndef = irBlocks.some((blk) =>
-      blk.ops.some((op) => op.opcode === 'undef' && slotKeyOffset(op.attrs.key as string) !== null),
-    );
+    const undefSlots = irBlocks
+      .flatMap((blk) => blk.ops.filter((op) => op.opcode === 'undef'))
+      .map((op) => slotKeyOffset(op.attrs.key as string))
+      .filter((slot) => slot !== null)
+      .sort((x, y) => x - y);
     const accountedWords = new Set<number>();
     for (const [off, obj] of extent) {
       for (let w = off - (off % 4); w < off + span(obj); w += 4) {
@@ -1587,7 +1595,7 @@ export function auditFrameObjects({
             : `is handed to a device ${why}`,
         objectReached: objectReached?.[0],
         slotReached,
-        frameUndef,
+        undefReached: undefSlots.find((slot) => slot < off + hi && slot + 4 > off + lo),
         unaccountedWord: unaccountedIn(off + lo, off + hi),
       };
     });
@@ -1599,7 +1607,9 @@ export function auditFrameObjects({
             ? 'the captured address escapes, so something outside this function reaches the whole frame — including another object'
             : `${at}, which may read the object at [sp,#${e.objectReached})`;
         case 'writer-over-undef':
-          return 'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised';
+          return e.lo === -Infinity && e.hi === Infinity
+            ? 'the captured address escapes, so a callee may write any frame offset and an unstored slot is not provably uninitialised'
+            : `${at}, which may write the slot at [sp,#${e.undefReached}] — an unstored slot it reaches is not provably uninitialised`;
         case 'reaches-a-slot':
           return !e.slotReached!.above
             ? `${at}, and it may point INTO an object that starts lower — the slot at [sp,#${e.slotReached!.slot}] below it is kept in a register, not the frame`
