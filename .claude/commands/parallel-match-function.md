@@ -146,7 +146,9 @@ exists. The first pick has no running round to compare file surface against, so 
 list alone and say so.
 
 `LANES.md` is the registry, one row per lane: `handle | worktree path | branch | started (UTC) | state`.
-`state` is `running`, `returned`, or `dead`. **Nothing is ever launched into a worktree named in
+`state` is `running`, `returned`, `dead`, `held`, or `scratch`. A scratch worktree (a trial merge's,
+the final measurement tree, a read-only checkout of `origin/main`) gets a `scratch` row from
+whoever creates it, you or a merge agent, so Phase 4 has a record of it. **Nothing is ever launched into a worktree named in
 `LANES.md`** — the duplicate-agent-into-a-live-worktree failure is on record, and this row is the
 only thing that prevents it. You create the lane before launching the round, in one command, and
 remove the worktree (`git worktree remove`) after that round's PR has merged or been closed —
@@ -247,9 +249,10 @@ three are files, including the escalation:
 decision, and list the options as the round stated them. A premise you think belongs in an option
 (a scope limit, an exception, a "still declines") is not written into it: the user picks an option
 whole, and a clause you added binds the next round as if the user had chosen it. Either the premise
-is the round's, or you check it first (a source study, a compiled probe,
+is the round's, or you drop it, or you check it first (a source study, a compiled probe,
 [`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) §2) and put it to the user
-as its own sentence, with its evidence. In the 2026-09-28 run one added clause ("in-function
+as its own sentence, with its evidence. Checking it is delegated like any read, so its evidence and
+not its transcript reaches this pass. In the 2026-09-28 run one added clause ("in-function
 unresolved stores still decline") sent two rounds to build nothing.
 
 "Still thinking about it" is not a fourth option. A message that cannot be decided this pass is
@@ -359,14 +362,18 @@ The merge, in order:
      worktree: it prints the merged tree and every conflicting path, and exits 1 on a conflict.
      It is the only one of the five that produces an exit status, so run it last and read it.
      - **Clean:** gate the composed tree. `git commit-tree <tree> -p <post-merge> -p <other> -m
-       trial` gives a commit no ref points at; add a detached scratch worktree at it, run the
-       round's own gate list there, then remove the worktree.
+       trial` gives a commit no ref points at. Set a scratch lane up at it with
+       `sh scripts/lane-setup.sh <scratch> trial/<pr> --base <trial-commit> --env <board>/env.sh`,
+       since a bare `git worktree add` has no dependencies, environment or toolchains to gate with.
+       Run the round's own gate list there, then remove both the worktree and the `trial/<pr>`
+       branch.
      - **A conflict:** do not resolve it in a scratch worktree. A merge agent's edits there have
        been refused, and a resolution nobody reviews is the hazard step 1's breaker exists for.
        Return the conflicting hunks and the resolution you would apply. The coordinator posts it
        to `board/traps/` for the other branch, and adds to that branch's `MERGE-QUEUE.md` row that
        its own merge applies it, runs a breaker on it, and runs the full gate list on the composed
        tree. That rebase is where the composed tree is first verified, and the queue row says so.
+       The conflict does not block this merge.
 
    **A defect found here is fixed before the merge, not logged after it.**
 4. **Squash-merge**, then **re-gate `main` itself.** Run the gate list [`/match-function`](./match-function.md)
@@ -400,19 +407,20 @@ green.
 2. **Measure the corpus once, on merged `main`.** Not by summing per-branch deltas taken against
    different bases — `docs/measurement-discipline.md` §5 and §6 are why. This bench has an owner:
    you, after the last merge.
-3. **Report**: every target and its outcome, including held and dead lanes; the corpus movement
+3. **Clean up, and show it.** Remove every worktree `LANES.md` names, `scratch` rows included,
+   and the local branch of every merged or closed PR: `git branch -D`, since a squash-merged branch
+   is never an ancestor of `main` and `-d` refuses it. A worktree with uncommitted changes is not
+   removed with `--force` unless its row says it holds nothing; otherwise name it and leave it.
+   Then `git worktree prune`. Read the result, do not assume it: `git worktree list` must name
+   none of them, and the report quotes that output. A worktree under `.claude/worktrees/` that
+   `LANES.md` does not name belongs to an earlier run or another session: name it in the report
+   with its branch and whether it is clean, and remove it only when the user says to. The first
+   run left about 20 of them, and nothing listed them.
+4. **Report**: every target and its outcome, including held and dead lanes; the corpus movement
    from (2); what is still open; and from `bin/pass-check.sh --stats`, messages filed versus
    answered and the longest a message waited. Do not report how many posts were read — nothing
    records reads, and a number nothing produced is the defect `docs/measurement-discipline.md` §1
    exists to forbid.
-4. **Clean up, and show it.** Remove every worktree `LANES.md` names, every scratch worktree this
-   run's agents and you created (the final measurement tree, a read-only checkout of `origin/main`),
-   and the local branch of every merged or closed PR. Then `git worktree prune`. Read the result,
-   do not assume it: `git worktree list` must name none of them, and the report quotes that
-   output. A worktree under `.claude/worktrees/` that this run did not create belongs to an earlier
-   run or another session: name it in the report with its branch and whether it is clean, and
-   remove it only when the user says to. The first run left about 20 of them, and nothing listed
-   them.
 
 A round that ended in a refuted brief, a measured null, or an unmatchable verdict backed by
 [`docs/unmatchable-quirks.md`](../../docs/unmatchable-quirks.md) is a completed round. Report it as
@@ -420,7 +428,7 @@ one.
 
 **Stopping early.** The user may stop this at any point. When they do, or when you judge the merge
 tail is costing more than the remaining targets are worth: stop opening lanes, let running rounds
-finish, merge or close what is open, promote the facts, and report, then clean up as step 4 says.
+finish, merge or close what is open, promote the facts, clean up as step 3 says, and report.
 Never leave a worktree, a branch or a running bench behind without naming it.
 
 ---
