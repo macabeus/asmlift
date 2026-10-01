@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { Op } from '../src/ir/core';
 import {
+  carryDiscipline,
   deletableWhenDead,
   effectful,
   forgetHelperPlacement,
@@ -163,5 +164,16 @@ describe('forgetHelperPlacement', () => {
     forgetHelperPlacement(pinnedLoad);
     expect(opaque.attrs.helper).toBe('__unmodelled');
     expect(placedAt(pinnedLoad)).toBe('device');
+  });
+});
+
+describe('carryDiscipline', () => {
+  test('adds the placement of the op a rebuilt op stands for, and nothing else of it', () => {
+    const { pinnedLoad, helperSdiv, load, call } = kinds();
+    expect(carryDiscipline(pinnedLoad, { elemSize: 2 })).toEqual({ elemSize: 2, volatile: true });
+    expect(carryDiscipline(helperSdiv, { imm: 4 })).toEqual({ imm: 4, helper: '__divsi3' });
+    expect(carryDiscipline(load, { elemSize: 2 })).toEqual({ elemSize: 2 });
+    // a call's placement is its opcode, which the rebuilt op does not inherit
+    expect(carryDiscipline(call, {})).toEqual({});
   });
 });

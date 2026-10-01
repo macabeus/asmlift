@@ -18,6 +18,7 @@
 // UNAMBIGUOUS here (the scaled operand is the index, read from the machine code) — the unscaled
 // `add(x, y)` byte form stays out of scope (genuinely ambiguous without types).
 import { Fn, Op, Value, defOpMap, mkOp } from '../ir/core';
+import { carryDiscipline } from '../ir/discipline';
 import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
 import { collectStructs } from './structs';
@@ -254,23 +255,17 @@ export function recognizeStructArrays(fn: Fn): number {
             operands: [base, index],
             results: [op.results[0]],
             // listOrder rides along: an ldmia-expanded load keeps its stream-order caveat as an aload
-            attrs: {
+            attrs: carryDiscipline(op, {
               elemSize: stride,
               signed: op.attrs.signed as boolean,
               fieldOff: op.attrs.off as number,
               ...(op.attrs.listOrder === true && { listOrder: true }),
-              ...(op.attrs.volatile === true && { volatile: true }),
-            },
+            }),
           });
         } else if (op.opcode === 'store') {
-          // `volatile` rides along too: the lift marked an access the recompile must make
           bb.ops[i] = mkOp('astore', {
             operands: [base, index, op.operands[1]],
-            attrs: {
-              elemSize: stride,
-              fieldOff: op.attrs.off as number,
-              ...(op.attrs.volatile === true && { volatile: true }),
-            },
+            attrs: carryDiscipline(op, { elemSize: stride, fieldOff: op.attrs.off as number }),
           });
         }
       }

@@ -171,3 +171,17 @@ export function forgetHelperPlacement(op: Op): Op {
   }
   return op;
 }
+
+/** `attrs`, plus the placement of `from`, for an op a pass builds to stand for `from`: a memory
+ *  access keeps its `volatile`, a value op its `helper`. Every op rebuilder carries the stamps
+ *  through here, so a placement decided once is not lost to a rebuild that forgot to copy it. */
+export function carryDiscipline(from: Op, attrs: Op['attrs']): Op['attrs'] {
+  switch (placedAt(from)) {
+    case 'device':
+      return { ...attrs, volatile: true };
+    case 'helper':
+      return { ...attrs, helper: from.attrs.helper };
+    default:
+      return attrs;
+  }
+}
