@@ -241,6 +241,15 @@ three are files, including the escalation:
   and the reply file records that it was escalated and what you asked. An escalation with no reply
   file is re-read as unhandled on the next pass and re-escalated forever.
 
+**An escalation asks in the round's words and adds nothing.** Quote the finding that forces the
+decision, and list the options as the round stated them. A premise you think belongs in an option
+(a scope limit, an exception, a "still declines") is not written into it: the user picks an option
+whole, and a clause you added binds the next round as if the user had chosen it. Either the premise
+is the round's, or you check it first (a source study, a compiled probe,
+[`docs/measurement-discipline.md`](../../docs/measurement-discipline.md) §2) and put it to the user
+as its own sentence, with its evidence. In the 2026-09-28 run one added clause ("in-function
+unresolved stores still decline") sent two rounds to build nothing.
+
 "Still thinking about it" is not a fourth option. A message that cannot be decided this pass is
 refused with the reason, or escalated. **A pass that ends with `bin/pass-check.sh` non-zero is a
 failed pass**; re-run the pass immediately rather than noting it.
