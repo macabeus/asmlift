@@ -876,8 +876,8 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   on either side standing for any address and each render for one access; and `declared:<object>`
   for a read of an object the symbol map declares volatile. A pinned access through a named global
   and a declared read are counted for re-runs only, because their qualifier may be the declaration,
-  which leaves nothing in the tree to find; a declared read that reaches its object through a cast
-  with no `volatile` is refused, since the cast's pointee drops the declaration's qualifier. The
+  which leaves nothing in the tree to find; a declared read or store that reaches its object through
+  a cast with no `volatile` is refused, since the cast's pointee drops the declaration's qualifier. The
   `opaque` ops standing in for unmodelled instructions are checked as never dropped. It is the odd
   one out and worth the attention: the other four check L3 against _itself_, so they catch a tree
   that is ill-formed. This one checks L3 against the L2 graph it came from, which is the only way to
@@ -892,9 +892,9 @@ the one pass that knew it: `call` is its own opcode; `helper` is the stamp
 computed by calling a runtime routine; `device` is the `volatile` the frontend's device pin
 ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
 access; `declared` is the stamp
-[`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on a read of a
-map-declared volatile object as the lift is made, from the map and the compiler the function is
-lifted and structured under, before any pass asks whether the read may be deleted. A read the
+[`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
+a map-declared volatile object as the lift is made, from the map and the compiler the function is
+lifted and structured under, before any pass asks whether a read may be deleted. A read the
 compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
 by this stamp and by the device pin alike, through the one predicate both ask. Every
 pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,

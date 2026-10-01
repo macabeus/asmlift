@@ -189,10 +189,10 @@ test('the SAME global without the map’s `volatile` refuses — the map owns th
   expect(lift(NAMED, true, new Map([[0x03000100, [gInfo(false)]]]))).not.toMatch(/^\s*gStatus;$/m);
 });
 
-test('a map-declared VOLATILE register reached through a CAST is read through a `volatile` cast', () => {
+test('a map-declared VOLATILE register reached through a CAST is written and read through a `volatile` cast', () => {
   // The target row's own map-fed default: REG_DMA3SAD declared `volatile`, three stores and the
-  // wait read, and the read reaches the register as `((s32 *)&REG_DMA3SAD)[2]` — a cast to a PLAIN
-  // `s32 *`, which is not a volatile lvalue whatever the declaration says. So the read carries the
+  // wait read, each reaching the register as `((s32 *)&REG_DMA3SAD)[k]` — a cast to a PLAIN `s32 *`,
+  // which is not a volatile lvalue whatever the declaration says. So each access carries the
   // qualifier on its own cast (structure.ts `pinnedAccess`).
   const asm =
     'f:\n\tldr\tr3, _pool\t@ =0x040000D4\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
@@ -208,19 +208,17 @@ test('a map-declared VOLATILE register reached through a CAST is read through a 
     volatile: true,
   };
   expect(body(lift(asm, true, new Map([[0x040000d4, [reg]]])))).toEqual([
-    's32 *p0;',
-    'p0 = (s32 *)&REG_DMA3SAD;',
-    '*p0 = 1;',
-    'p0[1] = 1;',
-    'p0[2] = 1;',
+    '*(volatile s32 *)&REG_DMA3SAD = 1;',
+    '((volatile s32 *)&REG_DMA3SAD)[1] = 1;',
+    '((volatile s32 *)&REG_DMA3SAD)[2] = 1;',
     '((volatile s32 *)&REG_DMA3SAD)[2];',
   ]);
 });
 
-test('a volatile CONTAINER admits its named member; a `vu16` MEMBER is read through a `volatile` cast', () => {
+test('a volatile CONTAINER admits its named member; a `vu16` MEMBER is accessed through a `volatile` cast', () => {
   // `memberQualsAllow` refuses to spell a volatile member by name at all (the name would
   // reintroduce a qualifier the cast form it replaces never carried), so a `vu16` member is reached
-  // as `((s32 *)&gState)[2]`, and its read carries the qualifier on that cast.
+  // as `((s32 *)&gState)[2]`, and its store and read carry the qualifier on that cast.
   // `volatile struct State gState;` qualifies every member, and `gState.ctl;` really is observable.
   const asm =
     'f:\n\tldr\tr3, _pool\t@ =0x03000100\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x8]\n' +
@@ -249,7 +247,10 @@ test('a volatile CONTAINER admits its named member; a `vu16` MEMBER is read thro
       ],
     ]);
   expect(body(lift(asm, true, st(false, true)))).toEqual(['gState.ctl = 1;', 'gState.ctl;']);
-  expect(body(lift(asm, true, st(true, false)))).toEqual(['((s32 *)&gState)[2] = 1;', '((volatile s32 *)&gState)[2];']);
+  expect(body(lift(asm, true, st(true, false)))).toEqual([
+    '((volatile s32 *)&gState)[2] = 1;',
+    '((volatile s32 *)&gState)[2];',
+  ]);
   expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;']);
 });
 

@@ -489,3 +489,58 @@ describe('assertEffectsPreserved — a read of a declared volatile object', () =
     expect(() => checkReads(irReading([true]), [])).not.toThrow();
   });
 });
+
+describe('assertEffectsPreserved — a write to a declared volatile object', () => {
+  /** an IR fn whose entry block stores to `gVolReg` once per entry of `writes`, stamped declared
+   *  where the entry is true */
+  const irWriting = (writes: boolean[]): Fn => {
+    const base = mkValue(T.ptr(T.u(16)));
+    const value = mkValue(T.u(16));
+    const ops = [
+      mkOp('gaddr', { results: [base], attrs: { sym: 'gVolReg' } }),
+      mkOp('const', { results: [value], attrs: { value: 1 } }),
+      ...writes.map((declared) =>
+        mkOp('store', {
+          operands: [base, value],
+          attrs: { off: 2, width: 2, ...(declared ? { declaredVolatile: true } : {}) },
+        }),
+      ),
+      mkOp('ret', {}),
+    ];
+    return {
+      name: 'F',
+      blocks: [{ params: [], ops }],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+      localObjects: undefined,
+    };
+  };
+  // `((volatile u16 *)&gVolReg)[1] = 1;`, or the same through `(u16 *)`
+  const write = (volatile: boolean): Stmt => ({
+    k: 'store',
+    lval: {
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'gVolReg' }, ...(volatile ? { volatile } : {}) },
+      idx: { k: 'const', value: 1 },
+      width: 2,
+      signed: false,
+    },
+    value: { k: 'const', value: 1 },
+  });
+  const check = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+
+  test('a write spelled through a cast that drops the qualifier fails', () => {
+    expect(() => check(irWriting([true, true]), [write(false), write(false)])).toThrow(
+      /write to the volatile object 'gVolReg' in 'F' through a cast that drops its qualifier/,
+    );
+  });
+
+  test('a write whose cast carries the qualifier passes', () => {
+    expect(() => check(irWriting([true, true]), [write(true), write(true)])).not.toThrow();
+  });
+
+  test('an object the asm also writes unstamped is not checked', () => {
+    expect(() => check(irWriting([true, false]), [write(false), write(false)])).not.toThrow();
+  });
+});

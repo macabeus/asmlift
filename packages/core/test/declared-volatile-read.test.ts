@@ -348,3 +348,37 @@ describe('a read the stamp cannot place by byte', () => {
     expect(src).toContain('volatile');
   });
 });
+
+// agbcc -O2 over `extern volatile u32 gVolW;`: two halfword stores to its upper half, and one in a
+// `for (i = n - 1; i != -1; i--)` loop. Spelled through a plain cast, agbcc deletes the first store and sinks the loop's out
+// of the loop.
+describe('a store to a declared object', () => {
+  const mapOf = (volatile: boolean): SymbolMap =>
+    new Map([
+      [
+        0x3001000,
+        [{ name: 'gVolW', kind: 'data', shape: 'scalar', size: 4, signed: false, ...(volatile ? { volatile } : {}) }],
+      ],
+    ]);
+  const ST2 =
+    'st2v:\n\tldr\tr0, .L3\n\tmov\tr1, #1\n\tstrh\tr1, [r0]\n\tmov\tr1, #2\n\tstrh\tr1, [r0]\n\tbx\tlr\n' +
+    '.L3:\n\t.word\t0x3001002\n';
+  const LOOP =
+    'stloopv:\n\tpush\t{lr}\n\tsub\tr0, r0, #1\n\tmov\tr1, #1\n\tneg\tr1, r1\n\tcmp\tr0, r1\n\tbeq\t.L4\n' +
+    '\tldr\tr2, .L8\n.L6:\n\tstrh\tr0, [r2]\n\tsub\tr0, r0, #1\n\tcmp\tr0, r1\n\tbne\t.L6\n' +
+    '.L4:\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\t0x3001002\n';
+  const prototypes = { st2v: { params: 0, returnsVoid: true }, stloopv: { params: 1, returnsVoid: true } };
+  const qualifiedStores = (src: string): number => src.match(/\(volatile u16 \*\)&gVolW\)\[1\] = /g)?.length ?? 0;
+
+  test('through a cast puts the qualifier the cast drops on each store', () => {
+    const src = decompile('st2v', ST2, ARMV4T_AGBCC, { symbols: mapOf(true), prototypes }).source;
+    expect(qualifiedStores(src), src).toBe(2);
+    const loop = decompile('stloopv', LOOP, ARMV4T_AGBCC, { symbols: mapOf(true), prototypes }).source;
+    expect(qualifiedStores(loop), loop).toBe(1);
+  });
+
+  test('of an ordinary object stays plain', () => {
+    const src = decompile('st2v', ST2, ARMV4T_AGBCC, { symbols: mapOf(false), prototypes }).source;
+    expect(src).not.toContain('volatile');
+  });
+});

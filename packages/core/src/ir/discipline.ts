@@ -6,8 +6,9 @@
 // that knew it: `call` is its own opcode; `helper` is the stamp `runtime-helpers.ts` `helperOp` puts
 // on a value op the asm computed by calling a runtime routine; `device` is the `volatile` the
 // frontend's device-pin pass (frontend/device-pins.ts) puts on a memory access; `declared` is the
-// stamp raise/declared-volatile.ts puts on a read of an object the symbol map declares volatile, that
-// the compiler could have made of a `volatile`, as the lift is made and again when structuring starts. Every question below takes the op, so a pass
+// stamp raise/declared-volatile.ts puts on an access of an object the symbol map declares volatile —
+// a read only where the compiler could have made it of a `volatile` — as the lift is made and again
+// when structuring starts. Every question below takes the op, so a pass
 // asks one question instead of re-deriving the combination, and `PLACEMENT_ANSWERS` is the one
 // place a placement's answers are written.
 //
@@ -54,7 +55,7 @@ export type Placement = 'call' | 'helper' | 'device' | 'declared';
  *  through the declaration of the object it names. */
 export type Qualifier = 'cast' | 'declaration';
 
-/** The attr raise/declared-volatile.ts stamps a `declared` read with. */
+/** The attr raise/declared-volatile.ts stamps a `declared` access with. */
 export const DECLARED_VOLATILE = 'declaredVolatile';
 
 interface PlacementAnswers {
@@ -88,7 +89,7 @@ export function placedAt(op: Op): Placement | null {
   if (MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true) {
     return 'device';
   }
-  if ((op.opcode === 'load' || op.opcode === 'aload') && op.attrs[DECLARED_VOLATILE] === true) {
+  if (MEM_BASE_OPS.has(op.opcode) && op.attrs[DECLARED_VOLATILE] === true) {
     return 'declared';
   }
   // An `opaque` carries `helper` too, naming the call nothing could fold (`refuseUnmodelledHelpers`);

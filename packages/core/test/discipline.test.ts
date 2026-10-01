@@ -32,6 +32,7 @@ const IR = `fn kinds {
   %14: s32 = aload %0, %1 {elemSize=4, signed=true, declaredVolatile=true}
   store %0, %1 {off=8, width=4}
   store %0, %1 {off=12, width=4, volatile=true}
+  store %0, %1 {off=16, width=4, declaredVolatile=true}
   astore %0, %1, %2 {elemSize=4}
   %7: s32 = sdiv %1, %2
   %8: s32 = sdiv %1, %2 {helper="__divsi3"}
@@ -56,6 +57,7 @@ function kinds(): Record<string, Op> {
     declaredAload,
     store,
     pinnedStore,
+    declaredStore,
     astore,
     sdiv,
     helperSdiv,
@@ -74,6 +76,7 @@ function kinds(): Record<string, Op> {
     declaredAload,
     store,
     pinnedStore,
+    declaredStore,
     astore,
     sdiv,
     helperSdiv,
@@ -93,7 +96,7 @@ const yesFor = (q: (op: Op) => boolean): string[] =>
     .sort();
 
 describe('placedAt', () => {
-  test('names a call, a helper-stamped value op, a volatile memory access and a declared read, and nothing else', () => {
+  test('names a call, a helper-stamped value op, a volatile memory access and a declared one, and nothing else', () => {
     const ops = kinds();
     expect(Object.fromEntries(Object.entries(ops).map(([name, op]) => [name, placedAt(op)]))).toEqual({
       load: null,
@@ -104,6 +107,7 @@ describe('placedAt', () => {
       declaredAload: 'declared',
       store: null,
       pinnedStore: 'device',
+      declaredStore: 'declared',
       astore: null,
       sdiv: null,
       helperSdiv: 'helper',
@@ -120,7 +124,7 @@ describe('placedAt', () => {
 
 describe('the questions', () => {
   test('effectful: a write, a call, an unmodelled instruction — a placement adds nothing', () => {
-    expect(yesFor(effectful)).toEqual(['astore', 'call', 'opaque', 'pinnedStore', 'store']);
+    expect(yesFor(effectful)).toEqual(['astore', 'call', 'declaredStore', 'opaque', 'pinnedStore', 'store']);
   });
 
   test('deletableWhenDead: every pure value and plain read, but not a qualified read', () => {
@@ -134,6 +138,7 @@ describe('the questions', () => {
       'call',
       'declaredAload',
       'declaredLoad',
+      'declaredStore',
       'load',
       'opaque',
       'pinnedAload',
@@ -149,6 +154,7 @@ describe('the questions', () => {
       'call',
       'declaredAload',
       'declaredLoad',
+      'declaredStore',
       'opaque',
       'pinnedAload',
       'pinnedLoad',
@@ -170,6 +176,7 @@ describe('the questions', () => {
       'call',
       'declaredAload',
       'declaredLoad',
+      'declaredStore',
       'pinnedAload',
       'pinnedLoad',
       'pinnedStore',
@@ -178,7 +185,7 @@ describe('the questions', () => {
 });
 
 describe('qualifiedBy', () => {
-  test('a device access carries its qualifier on a cast, a declared read through its declaration', () => {
+  test('a device access carries its qualifier on a cast, a declared one through its declaration', () => {
     const ops = kinds();
     const by = Object.fromEntries(
       Object.entries(ops)
@@ -191,6 +198,7 @@ describe('qualifiedBy', () => {
       pinnedStore: 'cast',
       declaredLoad: 'declaration',
       declaredAload: 'declaration',
+      declaredStore: 'declaration',
     });
     expect(yesFor(qualified)).toEqual(Object.keys(by).sort());
   });

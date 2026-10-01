@@ -106,8 +106,8 @@ export function assertResolved(sfn: SFn): void {
 // What is counted is what each render executes (ir/discipline.ts `counted`): a call, a memory access
 // the lift pinned (the `device` placement), whose qualified spelling the recompile performs once per
 // render, and a read of an object the symbol map declares volatile (`declared`), which the tree
-// spells by the object's name. Deliberately narrow beyond that, so it never declines a function that
-// is fine:
+// spells by the object's name. A store to such an object is checked for its spelling only.
+// Deliberately narrow beyond that, so it never declines a function that is fine:
 //
 //   • CALLS AND QUALIFIED ACCESSES only. A plain load legitimately re-renders (that is the whole point
 //     of the inline-at-use model, and the alias gate governs it); a plain store is checked by
@@ -141,6 +141,9 @@ export function assertResolved(sfn: SFn): void {
 //     delete, and is refused. Objects the asm also reads unstamped are skipped, since nothing tells
 //     their renders apart. A pinned access through the object's name may render as one of its
 //     reads.
+//   • A declared store is not counted: it renders at its own position, once. One spelled through a
+//     cast with no `volatile` is a plain store the compiler may delete or sink, and is refused, as
+//     the read is. Objects the asm also writes unstamped are skipped, as for reads.
 /** Executions per key: `call:<target>`; `device:r:<0xaddress>` for a pinned read and
  *  `device:w:<0xaddress>` for a pinned write, with `?` for the address where the counting side cannot
  *  read one; or `declared:<object>`. */
@@ -157,6 +160,7 @@ function combine(a: EffectCounts, b: EffectCounts, f: (x: number, y: number) => 
 
 const DECLARED = 'declared:';
 const STRIPPED = 'stripped:';
+const STRIPPED_WRITE = 'stripped-write:';
 type Direction = 'r' | 'w';
 const deviceKey = (dir: Direction, addr: number | null): string =>
   `device:${dir}:${addr === null ? '?' : `0x${addr.toString(16)}`}`;
@@ -193,16 +197,19 @@ function accessedObject(base: Expr): string | null {
 }
 
 /** What the tree side reads a render against: the objects whose every read the asm makes is
- *  declared, and the rendered C type of an expression, which decides where the printer casts. */
+ *  declared, those whose every write is, and the rendered C type of an expression, which decides
+ *  where the printer casts. */
 interface TreeContext {
   declared: ReadonlySet<string>;
+  written: ReadonlySet<string>;
   typeOf: (e: Expr) => IrType | undefined;
 }
 
 /** every call under `e`, counted by target name; every qualified memory access, by the address it
- *  denotes, or by its object where that object's reads are declared; and every other access and
- *  bare global read, by the object it names — under `stripped:` where the access reaches a declared
- *  object through a cast that drops its qualifier. `selected` marks an element or member a dot
+ *  denotes, or by its object where that object's reads are declared, and not at all where it is a
+ *  write the object's declaration places; and every other access and bare global read, by the
+ *  object it names — under `stripped:` (`stripped-write:` for a store target) where the access
+ *  reaches a declared object through a cast that drops its qualifier. `selected` marks an element or member a dot
  *  member selects from: that is a part of the one access the member spells, not an access of its
  *  own. `named` marks the base of an access: a `gSym` there is the access's address, counted with
  *  it. `target` marks a store's target, which is a write. */
@@ -218,11 +225,18 @@ function effectsInExpr(
   const access = e.k === 'index' || e.k === 'field';
   const object = access && !selected ? accessedObject(dotSelected(e)) : null;
   const ofDeclared = object !== null && !target && ctx.declared.has(object);
+  const writesDeclared = object !== null && target && ctx.written.has(object);
   if (e.k === 'call') {
     bump(`call:${e.fn}`);
   } else if (!selected && qualifiedAccessChain(e)) {
-    bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(target ? 'w' : 'r', cellAddress(e)));
-  } else if (!selected && !target && access) {
+    if (!writesDeclared) {
+      bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(target ? 'w' : 'r', cellAddress(e)));
+    }
+  } else if (!selected && target && access) {
+    if (writesDeclared && castOffDeclaration(e, ctx.typeOf)) {
+      bump(`${STRIPPED_WRITE}${object}`);
+    }
+  } else if (!selected && access) {
     if (object !== null) {
       bump(`${ofDeclared && castOffDeclaration(e, ctx.typeOf) ? STRIPPED : DECLARED}${object}`);
     }
@@ -364,6 +378,9 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   const irDeclared: EffectCounts = new Map();
   // Objects some unplaced read reads too, whose renders the tree side cannot tell from a declared one.
   const plainlyRead = new Set<string>();
+  // Objects a declared store writes, and those some unplaced store writes too.
+  const declaredWritten = new Set<string>();
+  const plainlyWritten = new Set<string>();
   // Unmodelled instructions, by the mnemonic the frontend stamped. Same "never dropped" property as
   // a call, and it needs its own tally because an `opaque` carries no `target`.
   const irOpaques = new Set<string>();
@@ -399,11 +416,19 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         } else if (object !== null) {
           plainlyRead.add(object);
         }
+      } else if (op.opcode === 'store' || op.opcode === 'astore') {
+        const object = globalBaseOf(defs, op.operands[0]);
+        if (object !== null) {
+          (placedAt(op) === 'declared' ? declaredWritten : plainlyWritten).add(object);
+        }
       }
     }
   }
   for (const object of plainlyRead) {
     irDeclared.delete(`${DECLARED}${object}`);
+  }
+  for (const object of plainlyWritten) {
+    declaredWritten.delete(object);
   }
   // DROPPED only, not the RE-RUN half: a gap rendered twice is a diagnostic printed twice, which
   // costs nothing because nothing recompiles it, and structuring legitimately duplicates a shared
@@ -427,13 +452,14 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
       }
     }
   }
-  if (!irCalls.size && !irDevices.size && !irDeclared.size) {
+  if (!irCalls.size && !irDevices.size && !irDeclared.size && !declaredWritten.size) {
     return;
   }
   const unreached: Stmt[] = [];
   const vt = declaredTypes(sfn);
   const ctx: TreeContext = {
     declared: new Set([...irDeclared.keys()].map((k) => k.slice(DECLARED.length))),
+    written: declaredWritten,
     typeOf: (e) => exprCType(e, vt),
   };
   const { total, paths } = countEffects(sfn.body, ctx, unreached);
@@ -456,6 +482,14 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   }
   if (irDevices.size) {
     devicesPreserved(sfn.name, irDevices, namedDevices, total, path);
+  }
+  for (const object of declaredWritten) {
+    if (total.has(`${STRIPPED_WRITE}${object}`)) {
+      throw new ContractError(
+        `structuring spelled a write to the volatile object '${object}' in '${sfn.name}' through a cast that ` +
+          'drops its qualifier',
+      );
+    }
   }
   for (const [key, n] of irDeclared) {
     const object = key.slice(DECLARED.length);

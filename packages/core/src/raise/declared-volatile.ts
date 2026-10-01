@@ -1,27 +1,35 @@
-// asmlift — the decider for ir/discipline.ts's `declared` placement: a memory read of an object the
-// project's symbol map declares volatile.
+// asmlift — the decider for ir/discipline.ts's `declared` placement: a memory access of an object
+// the project's symbol map declares volatile.
 //
 // The stamp is a function of the IR, the map the function is lifted and structured under, and the
-// compiler, and nothing else: a read whose base reaches a global the map qualifies, at the byte the
-// access names (`declaresVolatile`), that the compiler could have made of a `volatile` (target.ts
-// `readCouldBeVolatile` — the device pin asks it too). It is put as the lift is made (pipeline.ts `liftStamped`), before the first
-// pass that asks whether a read may be deleted, folded or moved, and re-derived by every pass that
-// changes which object an access names and by structuring. Structuring the same function under
-// another map — the `/raw-globals` setting has none — re-runs it, and an op the new map does not
-// qualify loses the stamp, so a structuring never answers for a map it was not given. A base that
-// reaches no name is a pointer parameter or a raw address: no declaration is in evidence, and the
-// read stays unplaced unless the lift pinned it (`device`).
+// compiler, and nothing else: an access whose base reaches a global the map qualifies, at the byte
+// the access names (`declaresVolatile`) — and, for a read, one the compiler could have made of a
+// `volatile` (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
+// lift is made (pipeline.ts `liftStamped`), before the first pass that asks whether a read may be
+// deleted, folded or moved, and re-derived by every pass that changes which object an access names
+// and by structuring. Structuring the same function under another map — the `/raw-globals` setting
+// has none — re-runs it, and an op the new map does not qualify loses the stamp, so a structuring
+// never answers for a map it was not given. A base that reaches no name is a pointer parameter or a
+// raw address: no declaration is in evidence, and the access stays unplaced unless the lift pinned
+// it (`device`).
 import { globalBaseOf, globalCellOf } from '../ir/alias';
-import { type Fn, defOpMap } from '../ir/core';
+import { type Fn, type Op, defOpMap } from '../ir/core';
 import { DECLARED_VOLATILE } from '../ir/discipline';
+import { MEM_BASE_OPS } from '../ir/opcodes';
 import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
 
 /** The compiler fact the stamp reads. */
 export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'>;
 
-/** Stamp every `load`/`aload` of `fn` that reads an object `symbols` declares volatile, and that a
- *  compiler behaving as `behaviors` says could have made of one, and clear the stamp from every
+/** May this memory access be stamped: a store, or a read the compiler could have made of a
+ *  `volatile`? */
+const stampable = (op: Op, behaviors: StampBehaviors): boolean =>
+  MEM_BASE_OPS.has(op.opcode) &&
+  (op.opcode === 'store' || op.opcode === 'astore' || readCouldBeVolatile(behaviors, op));
+
+/** Stamp every memory access of `fn` to an object `symbols` declares volatile — a read only where a
+ *  compiler behaving as `behaviors` says could have made it of one — and clear the stamp from every
  *  other op. */
 export function stampDeclaredVolatile(
   fn: Fn,
@@ -31,12 +39,13 @@ export function stampDeclaredVolatile(
   const defs = symbols ? defOpMap(fn) : undefined;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
-      const read = (op.opcode === 'load' || op.opcode === 'aload') && readCouldBeVolatile(behaviors, op);
-      const base = defs && read ? globalBaseOf(defs, op.operands[0]) : null;
-      // A subscript reaches the object while naming no cell, so only a `load` asks by byte, and a
-      // read that names no byte is placed only where every byte it could reach is qualified.
+      const base = defs && stampable(op, behaviors) ? globalBaseOf(defs, op.operands[0]) : null;
+      // A subscript reaches the object while naming no cell, so only a `load`/`store` asks by byte,
+      // and an access that names no byte is placed only where every byte it could reach is qualified.
       const cell =
-        base !== null && op.opcode === 'load' ? globalCellOf(defs!, op.operands[0], op.attrs.off as number) : null;
+        base !== null && (op.opcode === 'load' || op.opcode === 'store')
+          ? globalCellOf(defs!, op.operands[0], op.attrs.off as number)
+          : null;
       const declared = base !== null && declaresVolatile(symbols!.get(base), cell === null ? null : cell.byte);
       // A fresh record either way: a rebuilder may hand two ops one `attrs` object.
       if (declared && op.attrs[DECLARED_VOLATILE] !== true) {
