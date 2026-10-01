@@ -23,7 +23,7 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import { effectful, orderSensitive, placedAt, reevalUnsafe } from '../ir/discipline';
+import { counted, effectful, orderSensitive, placedAt, reevalUnsafe } from '../ir/discipline';
 import { MEM_BASE_OPS, opSig } from '../ir/opcodes';
 
 export interface UseSite {
@@ -777,20 +777,6 @@ export interface AnalyzeOptions {
    *  materializes first). That is a pre-emption, not a conflict: a per-arm source read compiles to
    *  a per-arm load on that compiler, so the sunk spelling is one it did not emit from this asm. */
   rereadGlobals?: boolean;
-  /** "does the project declare this CELL volatile?" — a read of a volatile object may NOT be
-   *  duplicated or moved, so the variation above refuses on one. Answers false for a symbol the map
-   *  does not carry (and for no map at all), which is the same posture the multi-render rule has
-   *  always had: without a declaration nothing here can know, and the differ referees the extra
-   *  load. Where the map DOES know, the variation is silent about it rather than wrong.
-   *
-   *  The BYTE is what makes it a cell question: the `vu16 field;` idiom qualifies one member of a
-   *  plainly-declared struct (pokeemerald's `gMain` declares 23 members and qualifies one), so the
-   *  object's own name cannot answer for the member an access names. `null` is an access whose
-   *  offset is not pinned — a runtime index reaches every member — and any volatile one answers it.
-   *
-   *  The second consumer is not silent: `volatileGuardedRead` declines the whole function on a
-   *  read this answers true for, so a declaration a project adds can cost it that function. */
-  volatileGlobal?: (name: string, byte: number | null) => boolean;
   /** The in-place-join variation (rank.ts `/inplace`). A load whose result is a `cond_br` successor
    *  ARG feeds a merge: rendered inline it has no name, so the merge param mints a fresh variable
    *  and BOTH arms must assign it. Materialized, the naming walk can home the merge in the load's
@@ -1189,7 +1175,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     defs,
     dom,
     rereadGlobals = false,
-    volatileGlobal,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
@@ -1733,7 +1718,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  And each read's value must go NOWHERE BUT the cone: exactly one use site. Homing resolves a
    *  render position for a read that had none, so a SECOND use resolves a second one, and the
    *  multi-render load rule then inlines the read at BOTH — two accesses where the asm has one
-   *  `ldrh`, which for a volatile cell is precisely the duplication `volatileGlobal` refuses. Two
+   *  `ldrh`, which for a volatile cell is precisely the duplication the `declared` placement refuses. Two
    *  homed values over one read is the same shape from the other side (each is the other's second
    *  use), so one test covers both. This is what makes "renders once, inside the home" a property
    *  rather than an aspiration: without it the variation silently doubles a hardware read.
@@ -1798,13 +1783,9 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  is the fold's to do, so this reports and the caller declines — which costs no row: the shape is
    *  0 of the corpus's 1,203, swept under both map modes.
    *
-   *  Keyed on the OBJECT the base reaches rather than the cell, because volatility is declared of
-   *  the object and a subscript reaches it while naming no cell — an `aload`, or a `load` through
-   *  walked arithmetic where the map carries no array shape. Where the offset IS pinned the question
-   *  is asked of that byte, so a plain member beside a `vu16` one keeps its connective. A base that
-   *  reaches no name — a pointer parameter, a raw MMIO address — is unknown and does not refuse, the
-   *  posture no map at all has, unless the lift marked the read `volatile` (a device register the
-   *  frame audit pinned), which is the same observable access with no name to report but its address. */
+   *  The read is the one the `declared` stamp marks (structure/declared-volatile.ts), and reported
+   *  by the object its base reaches. A read the lift pinned (`device`) is the same observable access
+   *  with no name to report but its address. */
   const volatileGuardedRead = ((): string | null => {
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -1812,17 +1793,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if ((op.opcode !== 'load' && op.opcode !== 'aload') || v === undefined || !shortCircuitGuarded.has(v)) {
           continue;
         }
-        if (placedAt(op) === 'device') {
+        const placed = placedAt(op);
+        if (placed === 'device') {
           const at = defs ? constAddressOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0) : null;
           return at === null || op.opcode === 'aload' ? 'a device register' : `0x${at.toString(16)}`;
         }
-        if (!defs || !volatileGlobal) {
-          continue;
-        }
-        const base = globalBaseOf(defs, op.operands[0]);
-        const cell = op.opcode === 'load' ? globalCellOf(defs, op.operands[0], op.attrs.off as number) : null;
-        if (base !== null && volatileGlobal(base, cell === null ? null : cell.byte)) {
-          return base;
+        if (placed === 'declared') {
+          return globalBaseOf(defOf, op.operands[0]) ?? 'a volatile object';
         }
       }
     }
@@ -2071,16 +2048,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if (!r || !useSitesOf.has(r)) {
           continue;
         } // dead call → exprstmt (unchanged)
+        // A call, or a read whose spelling is qualified (a device read the lift pinned, a read of an
+        // object the map declares volatile), EXECUTES at each render, where a plain duplicate read is
+        // one agbcc CSEs away. It takes the two-site, edge and one-position rules below; in a
+        // `&&`/`||` cone `volatileGuardedRead` declines a qualified read instead. And it stays in
+        // order against every other qualified access, which `isBarrier` says.
+        const once = counted(op);
         // Under the value-home variation: which named global cell this op reads, if any. A constant-
         // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
-        // everything. Null ⇒ every write bars, exactly as before.
-        const pinned = placedAt(op) === 'device';
+        // everything. Null ⇒ every write bars.
         const cell =
-          rereadGlobals && defs && op.opcode === 'load' && !pinned
+          rereadGlobals && defs && op.opcode === 'load' && !once
             ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
             : null;
-        const barsThisRead =
-          cell && defs && !volatileGlobal?.(cell.name, cell.byte) ? mayWriteGlobal(defs, cell.name) : null;
+        const barsThisRead = cell && defs ? mayWriteGlobal(defs, cell.name) : null;
         if (materializeJoinFeeds && op.opcode === 'load' && condBrArgFed.has(r)) {
           materialize.add(op);
           continue;
@@ -2088,12 +2069,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const sites = useSitesOf.get(r)!;
         const consumers = [...new Set(sites.map((s) => s.op))];
         const isCall = op.opcode === 'call';
-        // A device read the lift marked `volatile` executes once too: each spelling of it is a read
-        // the recompile makes, where a plain duplicate is one agbcc CSEs away. It takes the call's
-        // two-site, edge and one-position rules below; in a `&&`/`||` cone `volatileGuardedRead`
-        // declines it instead. And it stays in order against every other device access, which
-        // `isBarrier` says.
-        const once = isCall || pinned;
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (once && sites.length > 1) {
           materialize.add(op);
@@ -2292,7 +2267,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           if (x.opcode === 'store') {
             // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load
             // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars — and so does every
-            // store to a pinned read: a device register answers by when it is read, not only by
+            // store to a qualified read: a device register answers by when it is read, not only by
             // which bytes were last written (REG_IF read after the REG_IE write it preceded).
             if (!once && op.opcode === 'load' && disjointConstSlots(op, x)) {
               return false;
@@ -2311,10 +2286,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               !onlyFeedsCall(x)
             );
           }
-          // Two pinned reads are two device accesses in an order. Rendered in one expression, the
+          // Two qualified reads are two accesses in an order. Rendered in one expression, the
           // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
-          // pinned read spelled as a bare statement because nothing uses it is an access too.
-          if (pinned && (x.opcode === 'load' || x.opcode === 'aload') && placedAt(x) === 'device') {
+          // qualified read spelled as a bare statement because nothing uses it is an access too.
+          if (once && !isCall && (x.opcode === 'load' || x.opcode === 'aload') && counted(x)) {
             return true;
           }
           if (!isCall) {
@@ -2327,8 +2302,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           return false;
         };
-        // A CROSS-BLOCK call or pinned read would run on the render block's paths instead of its
-        // own — always materialize. Within its own block it is judged like everything else, by the
+        // A CROSS-BLOCK call or qualified read would run on the render block's paths instead of
+        // its own — always materialize. Within its own block it is judged like everything else, by the
         // barrier scan below.
         if (once && pos.blk !== b) {
           materialize.add(op);

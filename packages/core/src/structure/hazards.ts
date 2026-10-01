@@ -920,10 +920,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     // either nothing order-sensitive lies between the two homes, or the second slot is refused and
     // the edge stands down whole. It costs a spelling; only a `volatile` qualifier would make the
     // extra access observable. A variation mints one the differ referees (l3/volatileptr.ts), and
-    // the device pin (frontend/device-pins.ts) puts one on the default candidate — but the analysis
-    // places a pinned read as it places a call, naming one with two uses or one that rides an edge
-    // copy, so neither reaches this scan twice, and `assertEffectsPreserved` (contracts.ts) counts
-    // both on the path whatever reaches here anyway.
+    // the default candidate carries one on a read the device pin or the symbol map qualifies — but
+    // the analysis places such a read as it places a call (ir/discipline.ts `counted`), naming one
+    // with two uses or one that rides an edge copy, so neither reaches this scan twice, and
+    // `assertEffectsPreserved` (contracts.ts) counts both on the path whatever reaches here anyway.
     const movesPast = (d: Op, home: Op, tree: ReadonlySet<Op>): boolean => {
       const i = latch.ops.indexOf(d);
       const p = latch.ops.indexOf(home);
@@ -934,10 +934,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
         .slice(0, i)
         .some((o) => orderSensitive(o) && !tree.has(o) && !(isRead(o) && isRead(d)) && rendersAfter(o, p));
     };
-    // A memory read and nothing else: two of them commute, whichever runs first. Two pinned reads
-    // would not, and never meet in the AHEAD arm: the analysis names a pinned read that another
-    // pinned read stands between it and its render (`isBarrier`), so a pinned op ahead of `d`
-    // renders at its own index.
+    // A memory read and nothing else: two of them commute, whichever runs first. Two qualified
+    // reads would not, and never meet in the AHEAD arm: the analysis names a qualified read that
+    // another qualified read stands between it and its render (`isBarrier`), so a qualified op ahead
+    // of `d` renders at its own index.
     const isRead = (o: Op): boolean => orderSensitive(o) && !effectful(o);
     // Does latch op `o` RENDER after index `p`? Where it renders is `emitPos`: the terminator's
     // index stands for every copy it carries, and those land at or after the foot of the body; an

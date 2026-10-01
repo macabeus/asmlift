@@ -1,11 +1,13 @@
 // ir/discipline.ts — the questions every pass asks of an op about where, and how often, it runs.
 // Each question is pinned as a table over one op of every kind that answers differently, built
-// from IR text, so a placement stamp (`volatile`, `helper`) is asked about exactly as a pass sees it.
+// from IR text, so a placement stamp (`volatile`, `helper`, `declaredVolatile`) is asked about exactly
+// as a pass sees it.
 import { describe, expect, test } from 'vitest';
 
 import type { Op } from '../src/ir/core';
 import {
   carryDiscipline,
+  counted,
   deletableWhenDead,
   effectful,
   forgetHelperPlacement,
@@ -24,6 +26,8 @@ const IR = `fn kinds {
   %4: s32 = load %0 {off=4, signed=false, width=2, volatile=true}
   %5: s32 = aload %0, %1 {elemSize=4, signed=true}
   %6: s32 = aload %0, %1 {elemSize=4, signed=true, volatile=true}
+  %13: s32 = load %0 {off=6, signed=false, width=2, declaredVolatile=true}
+  %14: s32 = aload %0, %1 {elemSize=4, signed=true, declaredVolatile=true}
   store %0, %1 {off=8, width=4}
   store %0, %1 {off=12, width=4, volatile=true}
   astore %0, %1, %2 {elemSize=4}
@@ -46,6 +50,8 @@ function kinds(): Record<string, Op> {
     pinnedLoad,
     aload,
     pinnedAload,
+    declaredLoad,
+    declaredAload,
     store,
     pinnedStore,
     astore,
@@ -62,6 +68,8 @@ function kinds(): Record<string, Op> {
     pinnedLoad,
     aload,
     pinnedAload,
+    declaredLoad,
+    declaredAload,
     store,
     pinnedStore,
     astore,
@@ -83,13 +91,15 @@ const yesFor = (q: (op: Op) => boolean): string[] =>
     .sort();
 
 describe('placedAt', () => {
-  test('names a call, a helper-stamped value op and a volatile memory access, and nothing else', () => {
+  test('names a call, a helper-stamped value op, a volatile memory access and a declared read, and nothing else', () => {
     const ops = kinds();
     expect(Object.fromEntries(Object.entries(ops).map(([name, op]) => [name, placedAt(op)]))).toEqual({
       load: null,
       pinnedLoad: 'device',
       aload: null,
       pinnedAload: 'device',
+      declaredLoad: 'declared',
+      declaredAload: 'declared',
       store: null,
       pinnedStore: 'device',
       astore: null,
@@ -111,15 +121,17 @@ describe('the questions', () => {
     expect(yesFor(effectful)).toEqual(['astore', 'call', 'opaque', 'pinnedStore', 'store']);
   });
 
-  test('deletableWhenDead: every pure value and plain read, but not a pinned read', () => {
+  test('deletableWhenDead: every pure value and plain read, but not a qualified read', () => {
     expect(yesFor(deletableWhenDead)).toEqual(['add', 'aload', 'helperSdiv', 'laddr', 'load', 'sdiv']);
   });
 
-  test('spelledWhenDead: every effect and every read, pinned or not', () => {
+  test('spelledWhenDead: every effect and every read, qualified or not', () => {
     expect(yesFor(spelledWhenDead)).toEqual([
       'aload',
       'astore',
       'call',
+      'declaredAload',
+      'declaredLoad',
       'load',
       'opaque',
       'pinnedAload',
@@ -129,10 +141,12 @@ describe('the questions', () => {
     ]);
   });
 
-  test('speculationUnsafe: every effect and a pinned read, but not a plain read or a helper value', () => {
+  test('speculationUnsafe: every effect and a qualified read, but not a plain read or a helper value', () => {
     expect(yesFor(speculationUnsafe)).toEqual([
       'astore',
       'call',
+      'declaredAload',
+      'declaredLoad',
       'opaque',
       'pinnedAload',
       'pinnedLoad',
@@ -147,6 +161,17 @@ describe('the questions', () => {
 
   test('reevalUnsafe: orderSensitive plus the trapping divides, stamped or not', () => {
     expect(yesFor(reevalUnsafe)).toEqual([...yesFor(orderSensitive), 'helperSdiv', 'sdiv'].sort());
+  });
+
+  test('counted: a call and every qualified access, but not a helper value', () => {
+    expect(yesFor(counted)).toEqual([
+      'call',
+      'declaredAload',
+      'declaredLoad',
+      'pinnedAload',
+      'pinnedLoad',
+      'pinnedStore',
+    ]);
   });
 });
 

@@ -1969,7 +1969,8 @@ export function enumerateCandidates(
         //   - `/shared-ret` is the follow ALONE, on the fn as raised. Some divergent `if` shares a
         //     `ret` the compiler left in place (`synthetic:gcseinner`).
         //   - `/shared-tail` is the follow after `sinkStoreTails` has rewritten the fn in place, which
-        //     is safe because `structure()` never mutates `fn`, so the earlier passes are done with it.
+        //     is safe because `structure()` writes nothing on `fn` but the `declared` stamps, which it
+        //     re-derives from its map on every call, so the earlier passes are done with it.
         //     It is enumerated only where the sink changed something AND some divergent `if` of the
         //     SUNK fn shares a `ret`. That is the sink's price gate: without it, a tail copied into
         //     arms no `if` shares adds a candidate spelling it in each — 204 synthetic candidates on 8
@@ -2071,8 +2072,9 @@ export function enumerateCandidates(
               dropped.add(key);
               continue;
             }
-            // structure() reads `fn` and produces a fresh SFn (it does not mutate `fn`), so both branch
-            // senses structure the same recovered function without re-lifting.
+            // structure() produces a fresh SFn and writes nothing on `fn` but the `declared` stamps,
+            // which it re-derives from its map on every call, so both branch senses structure the same
+            // recovered function without re-lifting.
             let sfn: SFn;
             try {
               sfn = structureChecked(fn, {

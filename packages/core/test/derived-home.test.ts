@@ -276,8 +276,8 @@ test('a read consumed outside the homed value is not homed — it would render t
 });
 
 // TWO values over ONE read of a global the map declares volatile. Each is the other's second
-// consumer, so the same rule refuses both — and `volatileGlobal`'s contract (a volatile read is
-// neither duplicated nor moved), which `/reread-globals` honours in this same shape, holds here too.
+// consumer, so the same rule refuses both — and the `declared` placement's contract (a volatile read
+// is neither duplicated nor moved), which `/reread-globals` honours in this same shape, holds here too.
 const TWOHOMES = `fn twohomes {
 ^bb0():
   %0: s32* = gaddr {sym="gVolReg"}
