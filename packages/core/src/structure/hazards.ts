@@ -625,9 +625,10 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // op the two say the same thing: every effectful op is `speculationUnsafe` (ir/discipline.ts), so
   // raise/shortcircuit.ts never lifts one out of the arm it guards and a genuinely short-circuited
   // effect never reaches a connective here. A memory read is exempt there — C's own short circuit
-  // re-guards it at the new point — and stays exempt here for the same reason, the reads for which
-  // re-guarding is not merely a spelling — the qualified ones (ir/discipline.ts `counted`) — having
-  // declined before any loop is looked at (structure.ts, `volatileGuardedRead`).
+  // re-guards it at the new point — and stays exempt here for the same reason. The reads for which
+  // re-guarding is not merely a spelling — the qualified ones (ir/discipline.ts `counted`) — are
+  // `speculationUnsafe` too, so one in the connective ran above it, and structure/analysis.ts names
+  // it there.
   //
   // NO SPINE CONDITION, unlike the gates that read the same `Reach`: those ask which LOOP EDGE a
   // position is evaluated on, which an op between the connectives inverts. This asks only whether

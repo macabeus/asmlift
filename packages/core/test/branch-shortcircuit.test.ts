@@ -406,6 +406,33 @@ describe('refusals', () => {
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
   });
 
+  // THE INVARIANT structure/analysis.ts's guarded-operand rule rests on: it names a counted read of
+  // a connective's cone at its def, above the branch, because no fold put one there.
+  test.each([
+    ['a device read', { volatile: true }],
+    ['a declared read', { declaredVolatile: true }],
+    ['a plain read', {}],
+  ])('%s in the second condition stays in its arm unless it is plain', (label, stamp) => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const v = mkValue(T.u(16));
+        return [
+          mkOp('load', {
+            operands: [mkValue(T.ptr(T.u(16)))],
+            results: [v],
+            attrs: { off: 0, signed: false, width: 2, ...stamp },
+          }),
+          mkOp('icmp_ne', { operands: [v, mkValue(T.unk(32))], results: [out] }),
+        ];
+      },
+    });
+    const plain = label === 'a plain read';
+    expect(recognizeBranchShortCircuit(fn)).toBe(plain);
+    expect(connective(fn)).toBe(plain ? 'logic_or' : null);
+  });
+
   test('a value the ARM re-reads is re-derived there, and the condition folds', () => {
     // `if (a || (p->f & 0x7F) == 0x7F) … else { p->f = … }`: agbcc reads `p->f` once in the second
     // test and carries the register into the arm. Refusing this splits the connective into a nest

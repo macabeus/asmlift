@@ -3444,7 +3444,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // …and it stays in the arm it was read in: `if (k && (v = REG_VCOUNT) > 5) h(v);` is not folded
-  // into a `&&`, which would re-guard a read whose place the fold does not record.
+  // into a `&&`, whose fold would hoist the read above the branch, onto the path that skips it.
   test('a volatile device read a branch guards stays in its arm', () => {
     const guarded =
       'sc1:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +

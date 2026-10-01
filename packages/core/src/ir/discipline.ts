@@ -28,8 +28,6 @@
 //     structure/analysis.ts `writeBetween`, `standsOnMovableRead`, the multi-render rule — DELIBERATE:
 //       each asks about a memory write, and a qualified read writes nothing.
 //   The `call` placement alone, in structure/analysis.ts:
-//     the `&&`/`||` rule — DELIBERATE: a qualified read in that cone declines (`volatileGuardedRead`),
-//       and a helper op has its own clause.
 //     `callPos` — DELIBERATE: it asks which values live across the registers a call clobbers.
 //     `readCone`, `isHomeableDef`, `copyInterdependentValues` — DELIBERATE: a qualified read is a
 //       `load` there, which each already stops at.

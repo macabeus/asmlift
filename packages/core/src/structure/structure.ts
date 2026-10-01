@@ -2169,51 +2169,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
-  const {
-    useSitesOf,
-    opIndex,
-    opBlock,
-    liveIn,
-    materialize,
-    preUpdateHomes,
-    reachFrom,
-    emitPos,
-    memWriteBetween,
-    volatileGuardedRead,
-  } = analyze(fn, returnsVoid, {
-    defs,
-    dom,
-    rereadGlobals,
-    materializeJoinFeeds,
-    homeSharedAddresses,
-    homeLoopExprs,
-    homeDerivedReads,
-    homeMergeFeeds,
-    homeEscapingExtensions,
-    readsStayWhereWritten,
-    contractsFloatProducts,
-  });
-
-  // A VOLATILE READ THE RENDERED `&&`/`||` DECIDES THE EXISTENCE OF. The connective evaluates its
-  // guarded operand conditionally and the machine's branch did not, for anything the fold brought
-  // into it; a read is exempt from that hazard because C's own short circuit re-guards it at the new
-  // point — but only where re-guarding it is a spelling choice. For a cell the map declares volatile
-  // the two placements are a missing hardware access and a duplicated one, and which one the asm had
-  // is what the fold erased (see `volatileGuardedRead`). Nothing here can re-place it, so decline
-  // LOUD — the answer `testSkipsAnEffect` gives for an effect in the same position.
-  //
-  // WHAT IT STANDS IN FOR is a roster: both placements minted, each published only at a byte-exact
-  // score — `Candidate.matchOnly`, the licence l3/unreduce.ts takes for a spelling whose semantics
-  // no gate over the C can settle. That licence is a VARIATION's, and it is spent standing beside a
-  // default whose semantics the pass did establish; here the fold erased the fact both spellings
-  // rest on, so neither is that default. And the callers with no target object — the playground, a
-  // run without `--score-against` — have no differ to referee a pair with at all.
-  if (volatileGuardedRead !== null) {
-    throw new StructureError(
-      `cannot structure '${fn.name}': a '&&'/'||' would guard a read of the volatile object ` +
-        `'${volatileGuardedRead}', and which side of the branch the asm read it on is not recoverable`,
-    );
-  }
+  const { useSitesOf, opIndex, opBlock, liveIn, materialize, preUpdateHomes, reachFrom, emitPos, memWriteBetween } =
+    analyze(fn, returnsVoid, {
+      defs,
+      dom,
+      rereadGlobals,
+      materializeJoinFeeds,
+      homeSharedAddresses,
+      homeLoopExprs,
+      homeDerivedReads,
+      homeMergeFeeds,
+      homeEscapingExtensions,
+      readsStayWhereWritten,
+      contractsFloatProducts,
+    });
 
   // THE FOLLOW OF A DIVERGENT `if`, over the paths that do not return early. Post-dominance gives
   // such an `if` no join — its arms reach two different `ret`s, and EXIT is the only block on every

@@ -1,12 +1,10 @@
-// A READ OF A VOLATILE OBJECT IN A `&&`/`||`'s GUARDED OPERAND, which asmlift cannot place.
+// A READ OF A VOLATILE OBJECT IN A `&&`/`||`'s GUARDED OPERAND.
 //
-// `raise/shortcircuit.ts` may hoist a read out of the arm it guards, on the contract that the
-// structurer inlines it back under C's own short circuit — so a read in the cone reached that
-// position two ways and the emitted C is right for only one of them. For an ordinary cell both
-// spellings read the same value and the choice is a matching question; for a cell the map declares
-// volatile they are a missing hardware access and a duplicated one. The fold erased which the asm
-// had, so the answer is a loud decline, the one `testSkipsAnEffect` gives an effect in the same
-// position. Toolchain-free; `guarded-arm-call.test.ts` is the sibling for the op that can be placed.
+// `raise/shortcircuit.ts` may hoist a plain read out of the arm it guards, on the contract that the
+// structurer inlines it back under C's own short circuit. It never hoists a qualified one (ir/
+// discipline.ts `speculationUnsafe`), so a qualified read a connective reads ran above the branch,
+// on every path, and the structurer names it there, as it names a call
+// (`guarded-arm-call.test.ts`). For an ordinary cell the read stays in the connective.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -14,7 +12,8 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { StructureError, structure } from '../src/structure/structure';
+import { enumerateCandidates } from '../src/rank';
+import { structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -28,9 +27,8 @@ const emitWith = (ir: string, symbols?: Map<string, SymbolInfo>): string => {
 const VOLATILE_MAP = new Map<string, SymbolInfo>([['gVolReg', { name: 'gVolReg', kind: 'data', volatile: true }]]);
 const PLAIN_MAP = new Map<string, SymbolInfo>([['gVolReg', { name: 'gVolReg', kind: 'data' }]]);
 
-// `if (a0 > 0 && gVolReg != 0) g(a0);` — the read is the connective's SECOND operand. Lifted from
-// two real agbcc objects: compiled from `int t = gVolReg; if (a > 0 && t != 0)` the `ldr` sits above
-// the `cmp`, and from `if (a > 0 && gVolReg != 0)` below the `ble`. Both lift to this IR.
+// `int t = gVolReg; if (a0 > 0 && t != 0) g(a0);` — the read is the connective's SECOND operand,
+// defined above the branch.
 const GUARDED_READ = `fn v {
 ^bb0(%0: s32):
   %1: s32* = gaddr {sym="gVolReg"}
@@ -48,9 +46,12 @@ const GUARDED_READ = `fn v {
 }
 `;
 
-test('a volatile read in an `&&`’s guarded operand declines, and names the cell', () => {
-  expect(() => emitWith(GUARDED_READ, VOLATILE_MAP)).toThrow(StructureError);
-  expect(() => emitWith(GUARDED_READ, VOLATILE_MAP)).toThrow(/guard a read of the volatile object 'gVolReg'/);
+/** `name` read into a local above the connective, and the local in its guarded operand. */
+const namedAbove = (read: string): RegExp =>
+  new RegExp(`(v\\d+) = ${read.replace(/[[\]().*]/g, '\\$&')};\\s*\\n\\s*if \\(a0 > 0 && \\1 != 0\\)`);
+
+test('a volatile read in an `&&`’s guarded operand is named above the connective', () => {
+  expect(emitWith(GUARDED_READ, VOLATILE_MAP)).toMatch(namedAbove('gVolReg'));
 });
 
 test('the declaration is what decides it — an ordinary cell keeps the connective', () => {
@@ -129,8 +130,8 @@ test.each([
   ['a subscript', GUARDED_ELEMENT],
   ['walked arithmetic', GUARDED_WALKED],
   ['a walk that counts down', GUARDED_WALKED.replace('add %2, %4', 'sub %2, %4')],
-])('%s reaches the same volatile object, so it declines too', (_label, ir) => {
-  expect(() => emitWith(ir, VOLATILE_ARRAY)).toThrow(/guard a read of the volatile object 'gVolArr'/);
+])('%s reaches the same volatile object, so it is named too', (_label, ir) => {
+  expect(emitWith(ir, VOLATILE_ARRAY)).toMatch(/(v\d+) = .*gVolArr.*;\s*\n\s*if \(a0 > 0 && \1 != 0\)/);
 });
 
 // A MIXED-VOLATILITY STRUCT, which is what the `vu16 field;` idiom produces: pokeemerald's `gMain`
@@ -175,8 +176,8 @@ test('a plain member of a partly-volatile struct keeps the connective', () => {
   expect(emitWith(GUARDED_MEMBER(0), MIXED_STRUCT)).toContain('a0 > 0 && gIo.a != 0');
 });
 
-test('the volatile member of that same struct declines', () => {
-  expect(() => emitWith(GUARDED_MEMBER(4), MIXED_STRUCT)).toThrow(/guard a read of the volatile object 'gIo'/);
+test('the volatile member of that same struct is named, through a qualified cast', () => {
+  expect(emitWith(GUARDED_MEMBER(4), MIXED_STRUCT)).toMatch(namedAbove('((volatile s32 *)&gIo)[1]'));
 });
 
 // agbcc -O2 of `extern volatile int gVolReg; void v(int a) { if (a > 0 && gVolReg != 0) g(a); }`: the
@@ -192,4 +193,20 @@ test('a volatile read the asm makes only past the guard is spelled under it', ()
   const prototypes = { v: { params: 1, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
   const src = decompile('v', BELOW_THE_GUARD, ARMV4T_AGBCC, { symbols, prototypes }).source;
   expect(src).toMatch(/if \(a0 > 0\) \{\s*if \(gVolReg != 0\) g\(a0\);\s*\}/);
+});
+
+// agbcc -O2 of `extern volatile unsigned short gVolReg; void f(int a) { int t = gVolReg; if (a > 0 &&
+// t != 0) g(a); }`: the `ldrh` runs above the first compare, on every path.
+const ABOVE_THE_GUARD =
+  'f:\n\tpush\t{lr}\n\tadd\tr1, r0, #0\n\tldr\tr0, .L4\n\tldrh\tr0, [r0]\n\tcmp\tr1, #0\n\tble\t.L3\n' +
+  '\tcmp\tr0, #0\n\tbeq\t.L3\n\tadd\tr0, r1, #0\n\tbl\tg\n.L3:\n\tpop\t{r0}\n\tbx\tr0\n' +
+  '.L4:\n\t.word\tgVolReg\n';
+
+test('a volatile read the asm makes above the guard is named there, on every entry path', () => {
+  const symbols = new Map([[0x3000000, [{ name: 'gVolReg', kind: 'data' as const, volatile: true }]]]);
+  const prototypes = { f: { params: 1, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
+  const above = /(v\d+) = gVolReg;\s*\n\s*if \((?:\(s32\))?a0 > 0 && \1 != 0\) g\(a0\);/;
+  expect(decompile('f', ABOVE_THE_GUARD, ARMV4T_AGBCC, { symbols, prototypes }).source).toMatch(above);
+  const [first] = enumerateCandidates('f', ABOVE_THE_GUARD, ARMV4T_AGBCC, { symbols, prototypes });
+  expect(first.source).toMatch(above);
 });

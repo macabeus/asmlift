@@ -10,7 +10,7 @@
 //     "does this function hold a value the variation would home at all" so rank.ts can skip a
 //     variation whose candidate would only duplicate the default. Each mirrors its variation's scope inside `analyze`
 //     and states where it DIVERGES from it, in which direction, and what that costs.
-import { constAddressOf, disjointConstSlots, globalBaseOf, globalCellOf, mayWriteGlobal } from '../ir/alias';
+import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
   Block,
   Fn,
@@ -49,9 +49,8 @@ function rendersAsAddress(op: Op): boolean {
  *  def block of anything in it is a FOLD ARTIFACT — a rule that names one of these values there
  *  emits it above the guard the source wrote (`p != 0 && *p != 0` becoming `v0 = *p;` above its own
  *  null check). Asked by the def-block placement rule and by the merge-feed-home scope; the
- *  guarded-call rule asks the same set for the opposite answer, since `call` is hoist-unsafe and so
- *  was never folded into the cone in the first place, and `volatileGuardedRead` asks it for the read
- *  whose two placements are not a spelling choice. */
+ *  guarded-call rule asks the same set for the opposite answer, since a counted op is
+ *  `speculationUnsafe` and so was never folded into the cone in the first place. */
 function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
   const guarded = new Set<Value>();
   const work: Value[] = [];
@@ -739,10 +738,6 @@ export interface StructureAnalysis {
   /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
    *  def-avoiding path — the fold-ordering gate (see `makeMemWriteBetween`) */
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
-  /** the name (or, for a device read the lift pinned, the address) of a VOLATILE object read inside
-   *  a `&&`/`||`'s guarded operand cone, if any — a value in that cone no placement here can answer
-   *  for, reported for the caller to decline on */
-  volatileGuardedRead: string | null;
 }
 
 export interface AnalyzeOptions {
@@ -1761,12 +1756,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a READ
    *  the def block is a FOLD ARTIFACT rather than the block the asm read in, and the def-block
    *  placement rule stands down. Naming it also breaks the re-guard: `p != 0 && *p != 0` would
-   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches;
-   *  `volatileGuardedRead` is the read it does not cover.
+   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches, and
+   *  a plain read is the only one it covers.
    *
-   *  A CALL is `speculationUnsafe`, so no fold ever lifted one out of the arm it guards: a call
-   *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
-   *  materializes it there rather than letting C's short circuit skip it. The same holds of an op
+   *  A COUNTED op — a call, a qualified read — is `speculationUnsafe`, so no fold ever lifted one
+   *  out of the arm it guards: one that reached this cone ran ABOVE the branch, unconditionally, and
+   *  the guarded-call rule materializes it there rather than letting C's short circuit skip it.
+   *  agbcc emits `int t = gVolReg; if (a > 0 && t != 0)` with the `ldrh` above the `cmp`, and
+   *  `if (a > 0 && gVolReg != 0)` with it past the `ble`, where the fold leaves it in its arm and
+   *  no connective is built. The same holds of an op
    *  the asm reached by calling a runtime helper and the fold did not hoist — one it hoists loses
    *  the stamp — and the helper clause names it by the same argument.
    *
@@ -1774,37 +1772,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
    *  is reached through the outer's cone, operand[0] included, which is what C does with it. */
   const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
-  /** A read of an object the map declares VOLATILE, inside that guarded cone. The fold erased which
-   *  placement the asm had, and here both are observable: a read it LIFTED belongs under the `&&`,
-   *  one already above the branch belongs ahead of the test. agbcc emits the two as two objects
-   *  (`int t = gVolReg; if (a > 0 && t != 0)` puts the `ldr` above the `cmp`; `if (a > 0 && gVolReg
-   *  != 0)` puts it below the `ble`), so for an ordinary cell the choice is a matching question and
-   *  for this one it is a missing hardware access against a duplicated one. Recording its own motion
-   *  is the fold's to do, so this reports and the caller declines — which costs no row: the shape is
-   *  0 of the corpus's 1,203, swept under both map modes.
-   *
-   *  The read is the one the `declared` stamp marks (raise/declared-volatile.ts), and reported
-   *  by the object its base reaches. A read the lift pinned (`device`) is the same observable access
-   *  with no name to report but its address. */
-  const volatileGuardedRead = ((): string | null => {
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        const v = op.results[0];
-        if ((op.opcode !== 'load' && op.opcode !== 'aload') || v === undefined || !shortCircuitGuarded.has(v)) {
-          continue;
-        }
-        const placed = placedAt(op);
-        if (placed === 'device') {
-          const at = defs ? constAddressOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0) : null;
-          return at === null || op.opcode === 'aload' ? 'a device register' : `0x${at.toString(16)}`;
-        }
-        if (placed === 'declared') {
-          return globalBaseOf(defOf, op.operands[0]) ?? 'a volatile object';
-        }
-      }
-    }
-    return null;
-  })();
   /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
    *  i.e. is the value nothing but a block parameter's incoming copy?
    *
@@ -2050,9 +2017,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         } // dead call → exprstmt (unchanged)
         // A call, or a read whose spelling is qualified (a device read the lift pinned, a read of an
         // object the map declares volatile), EXECUTES at each render, where a plain duplicate read is
-        // one agbcc CSEs away. It takes the two-site, edge and one-position rules below; in a
-        // `&&`/`||` cone `volatileGuardedRead` declines a qualified read instead. And it stays in
-        // order against every other qualified access, which `isBarrier` says.
+        // one agbcc CSEs away. It takes the two-site, edge, guarded-operand and one-position rules
+        // below. And it stays in order against every other qualified access, which `isBarrier` says.
         const once = counted(op);
         // Under the value-home variation: which named global cell this op reads, if any. A constant-
         // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
@@ -2094,15 +2060,15 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         }
         // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
         // give it away. Two independent facts. A def DOMINATES its uses (ir/verify.ts), so a call
-        // the connective reads ran on every path that evaluates it, while the inlined C runs it on
-        // fewer and takes whatever the callee wrote with it — agbcc compiles `do { r = cb(p); }
-        // while (i++ <= n && r != 0);` to a `bl cb` ahead of both compares. And the DEF is where to
-        // put it back because `call` is hoist-unsafe, so no fold lifted one into this cone.
-        // `opaque`, the other hoist-unsafe op with a result, needs no placement — neither position
-        // spells compilable C — and a bottom test holding one still declines in `testSkipsAnEffect`,
-        // which is that guard's remaining population. What this clause reaches is the row that pins
-        // it, 1 of the corpus's 1,203, swept in both map modes.
-        if (isCall && shortCircuitGuarded.has(r)) {
+        // or a qualified read the connective reads ran on every path that evaluates it, while the
+        // inlined C runs it on fewer — agbcc compiles `do { r = cb(p); } while (i++ <= n && r !=
+        // 0);` to a `bl cb` ahead of both compares. And the DEF is where to put it back because a
+        // counted op is `speculationUnsafe`, so no fold lifted one into this cone
+        // (raise/shortcircuit.ts refuses an arm that holds one). `opaque`, the other hoist-unsafe
+        // op with a result, needs no placement — neither position spells compilable C — and a
+        // bottom test holding one still declines in `testSkipsAnEffect`, which is that guard's
+        // remaining population.
+        if (once && shortCircuitGuarded.has(r)) {
           materialize.add(op);
           continue;
         }
@@ -2348,6 +2314,5 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     reachFrom,
     emitPos,
     memWriteBetween,
-    volatileGuardedRead,
   };
 }

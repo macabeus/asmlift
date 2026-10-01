@@ -227,9 +227,10 @@ export function recognizeShortCircuit(fn: Fn): boolean {
         // value ops (arith, loads, icmp) are safe: the structurer inlines them back into the `&&`/`||` RHS
         // expression, where C's own short-circuit re-guards them. Any side effect ⇒ DECLINE the fold — the
         // merge-variable spelling the fall-through leaves is correct (the side effect stays in B's block),
-        // just possibly non-matching. A read the lift pinned `volatile` is an access, not a value, and
-        // stays in its arm the same way: re-guarded, it is the same access only if the fold said
-        // where it was, and nothing records that (structure/analysis.ts, `volatileGuardedRead`).
+        // just possibly non-matching. A qualified read is an access, not a value, and stays in its
+        // arm the same way. structure/analysis.ts rests on this refusal: it names a counted op it
+        // finds in a connective's guarded operand at its def, above the branch, because no fold
+        // put one there.
         if (bfeed.ops.slice(0, -1).some(speculationUnsafe)) {
           continue;
         }
@@ -585,7 +586,7 @@ export function recognizeBranchShortCircuit(fn: Fn, opts: BranchShortCircuitOpti
         // `speculationUnsafe` answers yes for `opaque`: an instruction asmlift could not model, and moving it
         // out of the arm that guards it is the reordering this refuses. Loud either way today — a
         // decline under `onGap: 'strict'`, an ASMLIFT_ERROR marker under `annotate`.
-        // A read the lift pinned `volatile` stays in its arm too, as in the value form above.
+        // A qualified read stays in its arm too, as in the value form above, and for the same reader.
         if (g.ops.slice(0, -1).some(speculationUnsafe)) {
           continue;
         }
