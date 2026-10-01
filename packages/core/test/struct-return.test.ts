@@ -63,6 +63,13 @@ const PS1 =
   'ps1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tldr\tr2, .L3+0x4\n\tldr\tr1, .L3\n\tmov\tr0, sp\n' +
   '\tbl\tmkd\n\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.long 0x3ff80000, 0x0\n';
 
+// `struct Blob64 mkp(double *p, double x); void ps2(double *q){ struct Blob64 b = mkp(q, 1.5); }` —
+// the pointer in r1, the double r2:r3
+const PS2 =
+  'ps2:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tadd\tr1, r0, #0\n\tldr\tr3, .L3+0x4\n\tldr\tr2, .L3\n' +
+  '\tmov\tr0, sp\n\tbl\tmkp\n\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+  '\t.long 0x3ff80000, 0x0\n';
+
 const BLOB64 = { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] };
 const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
 const makeblob = { params: ['const void *'], returns: 'struct Blob64', returnLayout: BLOB64 };
@@ -115,6 +122,18 @@ describe('a callee declared to return a struct through memory', () => {
     const decls = renderDeclarations(c.symbolRefs ?? []);
     expect(decls).toContain('struct Blob64 { u32 w[16]; };');
     expect(decls).toContain('struct Blob64 mkd(double);');
+  });
+
+  // A parameter the frontend sizes but the printer cannot spell leaves the struct's local with no
+  // definition in the candidate's own unit, so the call declines rather than lift to a source that
+  // cannot compile
+  test('a callee the lifted source cannot declare declines', () => {
+    for (const params of [['double *', 'double'], ['size_t', 'double'], ['double *']]) {
+      const mkp = { params, returns: 'struct Blob64', returnLayout: BLOB64 };
+      expect(() => decompile('ps2', PS2, ARMV4T_AGBCC, { prototypes: { mkp } })).toThrow(
+        /`mkp` returns struct Blob64 through a hidden pointer in r0, and a parameter type of its declaration has no spelling/,
+      );
+    }
   });
 
   // `struct Blob64 mke(enum E e);` — an enum parameter sizes to nothing, and a guessed arity would

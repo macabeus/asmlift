@@ -30,6 +30,7 @@ import {
   declaredReturnWidth,
   declaresAggregateReturn,
   declaresParams,
+  spellableProto,
   wordsOf,
 } from '../proto';
 import { type RuntimeHelper, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
@@ -3659,6 +3660,17 @@ function liftOnce(
     }
     if (params === undefined) {
       return null;
+    }
+    // THE STRUCT'S LOCAL NEEDS THE CALLEE PRINTED. A self-declared candidate defines the struct only
+    // beside the callee's printed prototype (`declare.ts`), so a declaration the printer cannot spell
+    // (`double *`, `size_t`) lifts to a candidate that does not compile. Asked of the printer's own
+    // predicate, so the two cannot disagree; a headers world, which would declare the callee itself,
+    // loses the lift with it.
+    if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden ` +
+          'pointer in r0, and a parameter type of its declaration has no spelling the lifted source can declare it with',
+      );
     }
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const widths = hidden === 0 ? params : [32, ...params];
