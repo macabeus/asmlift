@@ -3,8 +3,7 @@
 // so the worker's event loop does not poll between two synchronous tests: a file of short blocking
 // tests (a compile each) holds the thread for all of them together, and the reply that arrives
 // meanwhile is read only after its deadline has fired (`Timeout calling "onTaskUpdate"`). One
-// macrotask after each test lets it be read in time. What can still exceed the deadline is a
-// single test's own synchronous span.
+// macrotask after each test lets it be read in time.
 import { afterEach } from 'vitest';
 
 afterEach(() => new Promise<void>((resolve) => setImmediate(resolve)));
