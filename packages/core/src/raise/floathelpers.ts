@@ -102,6 +102,20 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     const d = def.get(v);
     return d !== undefined && calls.has(d);
   };
+  // A CONSTANT WORD, as a compiler may build one in two instructions: agbcc moves a word that is a
+  // shifted byte as `mov`+`lsl` (thumb.md:66, `thumb_shiftable_const` at thumb.c:61) and one in
+  // -255..-1 as `mov`+`neg` (thumb.md:88), so the high word of 2.0 reaches r3 as `0x80 << 23`. Its
+  // value, or undefined where `v` is no constant.
+  const wordOf = (v: Value): number | undefined => {
+    const d = def.get(v);
+    if (d?.opcode === 'const') {
+      return Number(d.attrs.value);
+    }
+    const shift = d?.opcode === 'shl' ? d.attrs.imm : undefined;
+    const w =
+      d?.operands.length === 1 && (d.opcode === 'neg' || typeof shift === 'number') ? wordOf(d.operands[0]) : undefined;
+    return w === undefined ? undefined : d!.opcode === 'neg' ? -w | 0 : (w << (shift as number)) | 0;
+  };
   // A LITERAL IS TWO CONSTANT WORDS, HIGH WORD FIRST on a target whose double crosses a call in
   // general words (`TargetDescription.doubleArgWords`) — the order that makes the long long naming
   // of the same pair another number. Its bits, or undefined where the pair is no literal, the target
@@ -110,16 +124,16 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   // spells.
   const literalBits = (v: Value): string | undefined => {
     const d = def.get(v);
-    const [first, second] = (d?.opcode === 'concat' ? d.operands : []).map((o) => def.get(o));
+    const [first, second] = (d?.opcode === 'concat' ? d.operands : []).map(wordOf);
     if (
       target.doubleArgWords === undefined ||
       target.compilerBehaviors.roundTripsDoubleLiterals !== true ||
-      first?.opcode !== 'const' ||
-      second?.opcode !== 'const'
+      first === undefined ||
+      second === undefined
     ) {
       return undefined;
     }
-    const bits = doubleBits(Number(first.attrs.value), Number(second.attrs.value));
+    const bits = doubleBits(first, second);
     return Number.isFinite(doubleOf(bits)) ? bits : undefined;
   };
   const literal = (v: Value, calls: ReadonlySet<Op>) => literalBits(v) !== undefined && floatsOnly(v, calls);
@@ -159,9 +173,16 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   }
   const floatOf = new Map<Value, Value>();
   const float = (bits: number) => mkValue(bits > 32 ? T.f64() : T.f32());
-  // the `fconst` each literal's `concat` becomes, and the constant words only it read
+  // the `fconst` each literal's `concat` becomes, and the ops computing the constant words only it read
   const literals = new Map<Op, Op>();
   const spent = new Set<Op>();
+  const spend = (w: Value, by: Op) => {
+    const d = def.get(w)!;
+    if (users.get(w)!.every((u) => u === by)) {
+      spent.add(d);
+      d.operands.forEach((o) => spend(o, d));
+    }
+  };
   // One parameter in its first slot's place, which is where the ABI put the value.
   const retype = (o: Value, bits: number) => {
     if (floatOf.has(o) || fromCall(o, calls)) {
@@ -172,7 +193,7 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
     if (pattern !== undefined) {
       const whole = float(64);
       literals.set(d!, mkOp('fconst', { results: [whole], attrs: { bits: pattern } }));
-      d!.operands.forEach((w) => users.get(w)!.every((u) => u === d) && spent.add(def.get(w)!));
+      d!.operands.forEach((w) => spend(w, d!));
       floatOf.set(o, whole);
       return;
     }

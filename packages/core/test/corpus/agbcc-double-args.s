@@ -442,3 +442,39 @@ dstore:
 	.word	gD
 .Lfe23:
 	.size	 dstore,.Lfe23-dstore
+	.align	2, 0
+	.globl	dshift
+	.type	 dshift,function
+	.thumb_func
+dshift:
+	push	{lr}
+	add	sp, sp, #-0x4
+	mov	r2, #0x0
+	str	r2, [sp]
+	mov	r3, #0x80
+	lsl	r3, r3, #0x17
+	mov	r2, #0x7
+	bl	f4
+	add	sp, sp, #0x4
+	pop	{r0}
+	bx	r0
+.Lfe24:
+	.size	 dshift,.Lfe24-dshift
+	.align	2, 0
+	.globl	dnegword
+	.type	 dnegword,function
+	.thumb_func
+dnegword:
+	push	{lr}
+	add	sp, sp, #-0x4
+	mov	r2, #0x1
+	neg	r2, r2
+	str	r2, [sp]
+	mov	r3, #0x0
+	mov	r2, #0x7
+	bl	f4
+	add	sp, sp, #0x4
+	pop	{r0}
+	bx	r0
+.Lfe25:
+	.size	 dnegword,.Lfe25-dnegword

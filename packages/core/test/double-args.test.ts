@@ -86,6 +86,16 @@ describe('a declared double argument', () => {
     expect(source).not.toMatch(/1073217536|\(s64\)|\(u32\)/);
   });
 
+  // agbcc moves each half of a split literal as a word, and a word that is a shifted byte or in
+  // -255..-1 as two instructions (thumb.md:66, :88): 2.0's high word is `mov r3, #0x80; lsl r3, r3,
+  // #0x17`, and the low word of the double whose bits are 0x00000000ffffffff is `mov; neg`.
+  test.each([
+    ['dshift', 'f4(a0, a1, 7, 2.0);'],
+    ['dnegword', 'f4(a0, a1, 7, 2.1219957905e-314);'],
+  ])("%s: a word the compiler built in two instructions is still the literal's", (name, call) => {
+    expect(lift(name, own(F4, name))).toBe(`void ${name}(s32 a0, s32 a1) {\n    ${call}\n}\n`);
+  });
+
   // A NaN or an infinity has no C literal, so the pair is no literal.
   test('a pair that is not a finite double declines', () => {
     const nan =

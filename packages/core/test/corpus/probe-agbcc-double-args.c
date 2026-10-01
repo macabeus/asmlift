@@ -29,3 +29,5 @@ void dtwice(double x) { g(x); g(x); }
 void dboth(int a, double x) { f4(a, a, a, x); g(x); }
 extern double gD;
 void dstore(double x) { gD = x; g(x); }
+void dshift(int a, int b) { f4(a, b, 7, 2.0); }
+void dnegword(int a, int b) { f4(a, b, 7, 2.1219957905e-314); }
