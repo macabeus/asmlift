@@ -912,11 +912,15 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
   // row's own context declares, and that declaration now reaches the lift. A call no declaration
   // covers still declines there.
+  //
+  // `outgoing-stack-args` joins because its one row, `stkwide`, declares the `double` its staged
+  // words hold, and lifts. The licence's refusals stand, pinned by `stack-args.test.ts`.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'no-prototype-args',
+    'outgoing-stack-args',
     'pool-word-shape',
     'store-class',
     'structs',
@@ -990,7 +994,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 4],
-    ['outgoing-stack-args > stack-frames', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
