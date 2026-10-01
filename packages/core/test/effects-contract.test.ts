@@ -325,3 +325,85 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     );
   });
 });
+
+// A read of an object the symbol map declares volatile (`declaredVolatile`, the `declared` placement)
+// is an execution too: the tree spells it by the object's name, whose declaration qualifies it, so
+// each render is a read the recompile makes. Counted for re-runs only, by the object it reads.
+describe('assertEffectsPreserved — a read of a declared volatile object', () => {
+  /** an IR fn whose entry block reads `gVolReg` once per entry of `reads`, stamped declared where
+   *  the entry is true */
+  const irReading = (reads: boolean[]): Fn => {
+    const ops = [];
+    const base = mkValue(T.ptr(T.u(16)));
+    ops.push(mkOp('gaddr', { results: [base], attrs: { sym: 'gVolReg' } }));
+    for (const declared of reads) {
+      ops.push(
+        mkOp('load', {
+          operands: [base],
+          results: [mkValue(T.u(16))],
+          attrs: { off: 0, width: 2, signed: false, ...(declared ? { declaredVolatile: true } : {}) },
+        }),
+      );
+    }
+    ops.push(mkOp('ret', {}));
+    return {
+      name: 'F',
+      blocks: [{ params: [], ops }],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+      localObjects: undefined,
+    };
+  };
+  const scalar: Expr = { k: 'var', name: 'gVolReg' };
+  const element = (i: number): Expr => ({
+    k: 'index',
+    base: { k: 'addr', name: 'gVolReg' },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const use = (e: Expr): Stmt => ({ k: 'store', lval: { k: 'var', name: 'gOut' }, value: e });
+  const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+
+  test('one read rendered twice in sequence fails', () => {
+    expect(() => checkReads(irReading([true]), [use(scalar), use(scalar)])).toThrow(
+      /emitted 2 reads of the volatile object 'gVolReg' on one path in 'F', where the asm makes 1/,
+    );
+  });
+
+  test('one read spelled twice in one expression fails', () => {
+    expect(() => checkReads(irReading([true]), [use({ k: 'bin', op: '*', l: scalar, r: scalar })])).toThrow(
+      /emitted 2 reads of the volatile object 'gVolReg'/,
+    );
+  });
+
+  test('one read rendered once in each of two exclusive arms passes', () => {
+    const arms: Stmt = { k: 'if', cond: { k: 'var', name: 'c' }, then: [use(scalar)], else: [use(scalar)] };
+    expect(() => checkReads(irReading([true]), [arms])).not.toThrow();
+  });
+
+  test('two reads license two renders, through any spelling of the object', () => {
+    expect(() => checkReads(irReading([true, true]), [use(scalar), use(element(0))])).not.toThrow();
+    expect(() => checkReads(irReading([true, true]), [use(element(0)), use(element(0)), use(scalar)])).toThrow(
+      /emitted 3 reads of the volatile object 'gVolReg'/,
+    );
+  });
+
+  test('a write to the object is not a read', () => {
+    const write: Stmt = { k: 'store', lval: scalar, value: { k: 'const', value: 1 } };
+    expect(() => checkReads(irReading([true]), [write, use(scalar)])).not.toThrow();
+  });
+
+  test('an unstamped read is not counted, rendered however often', () => {
+    expect(() => checkReads(irReading([false]), [use(scalar), use(scalar)])).not.toThrow();
+  });
+
+  test('an object the asm also reads unstamped is not counted: its renders cannot be told apart', () => {
+    expect(() => checkReads(irReading([true, false]), [use(scalar), use(scalar), use(scalar)])).not.toThrow();
+  });
+
+  test('a read never rendered is not refused', () => {
+    expect(() => checkReads(irReading([true]), [])).not.toThrow();
+  });
+});
