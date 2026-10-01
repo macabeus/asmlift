@@ -353,9 +353,18 @@ The merge, in order:
      written and is false where the code now is;
    - **duplicated mechanism** — two branches that independently built the same thing. Nothing is
      broken and no gate fires; the tree is simply worse, which is why the other checks miss it;
-   - **the trial merge** — `git merge --no-commit --no-ff` of the other branch onto the post-merge
-     tree, then the round's own gate list, then `git merge --abort`. It is the only one of the five
-     that produces an exit status, so run it last and read it.
+   - **the trial merge** — `git merge-tree --write-tree <post-merge> <other>`, which needs no
+     worktree: it prints the merged tree and every conflicting path, and exits 1 on a conflict.
+     It is the only one of the five that produces an exit status, so run it last and read it.
+     - **Clean:** gate the composed tree. `git commit-tree <tree> -p <post-merge> -p <other> -m
+       trial` gives a commit no ref points at; add a detached scratch worktree at it, run the
+       round's own gate list there, then remove the worktree.
+     - **A conflict:** do not resolve it in a scratch worktree. A merge agent's edits there have
+       been refused, and a resolution nobody reviews is the hazard step 1's breaker exists for.
+       Return the conflicting hunks and the resolution you would apply. The coordinator posts it
+       to `board/traps/` for the other branch, and adds to that branch's `MERGE-QUEUE.md` row that
+       its own merge applies it, runs a breaker on it, and runs the full gate list on the composed
+       tree. That rebase is where the composed tree is first verified, and the queue row says so.
 
    **A defect found here is fixed before the merge, not logged after it.**
 4. **Squash-merge**, then **re-gate `main` itself.** Run the gate list [`/match-function`](./match-function.md)
