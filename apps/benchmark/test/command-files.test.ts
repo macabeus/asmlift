@@ -76,7 +76,7 @@ const ARTIFACT = join(ROOT, 'apps', 'benchmark', 'results', 'results.json');
  *  in the link check below — sharing the LAWS is not sharing a phase structure. */
 const PAIR = ['match-function.md', 'attribute-function.md'];
 
-/** Lines 1-8 of the PAIR: the frontmatter, the `Target function: **$1**` line and the "if it is
+/** Lines 1-8 of the PAIR once the freshness check is taken out: the frontmatter, the `Target function: **$1**` line and the "if it is
  *  empty, ask" instruction — the one place sharing text is the point rather than a drift hazard.
  *  Shared by this pair only; of the six command-file pairs the other five share no run at all.
  *  The identical run ends at line 8 (line 9 is blank in both), so 8 is its exact end: 6 already
@@ -95,8 +95,8 @@ const docFiles = () =>
 const read = (f: string) => readFileSync(join(COMMANDS_DIR, f), 'utf8').split('\n');
 
 const FRESHNESS_OPENS = '**Before anything else, check that this copy is current.**';
-/** Where a command file's freshness check sits: from its opening line to the end of its last
- *  bullet. Every command carries the same check inline, because a stale copy can only run a check
+/** Where a command file's freshness check sits: from its opening line through the blank line after
+ *  its last bullet. Every command carries the same check inline, because a stale copy can only run a check
  *  it already holds; the test below holds the copies to one text. */
 function freshnessCheck(lines: readonly string[]): { from: number; to: number } | undefined {
   const from = lines.findIndex((l) => l.startsWith(FRESHNESS_OPENS));
@@ -108,13 +108,16 @@ function freshnessCheck(lines: readonly string[]): { from: number; to: number } 
   while (to < lines.length && lines[to].startsWith('  ')) {
     to++;
   }
-  return { from, to };
+  return { from, to: lines[to] === '' ? to + 1 : to };
 }
-/** A command file without its freshness check, for the comparisons that must not count it. */
+/** A command file without its freshness check, for the comparisons that must not count it, and
+ *  the file's own 1-based line number for an index into what is left. */
 const readBelowFreshness = (f: string) => {
   const lines = read(f);
   const at = freshnessCheck(lines);
-  return at === undefined ? lines : [...lines.slice(0, at.from), ...lines.slice(at.to)];
+  const kept = at === undefined ? lines : [...lines.slice(0, at.from), ...lines.slice(at.to)];
+  const fileLine = (i: number) => (at !== undefined && i >= at.from ? i + (at.to - at.from) : i) + 1;
+  return { lines: kept, fileLine };
 };
 /** One cell of a markdown table row. `row.split('|')` puts the leading `|` before index 1, so cell
  *  1 is the command, 2 the cost and 3 the provenance. */
@@ -146,11 +149,12 @@ function longestSharedRun(a: string[], b: string[], minSubstantive = 2) {
 
 describe('the two round prompts do not duplicate an instruction', () => {
   it('shares no run of 3+ consecutive lines below the preamble', () => {
-    const [a, b] = PAIR.map((f) => readBelowFreshness(f).slice(PREAMBLE_LINES));
-    const run = longestSharedRun(a, b);
+    const [a, b] = PAIR.map(readBelowFreshness);
+    const run = longestSharedRun(a.lines.slice(PREAMBLE_LINES), b.lines.slice(PREAMBLE_LINES));
     expect(
       run.length < 3,
-      `${PAIR[0]}:${run.aLine + PREAMBLE_LINES} and ${PAIR[1]}:${run.bLine + PREAMBLE_LINES} share ` +
+      `${PAIR[0]}:${a.fileLine(run.aLine - 1 + PREAMBLE_LINES)} and ` +
+        `${PAIR[1]}:${b.fileLine(run.bLine - 1 + PREAMBLE_LINES)} share ` +
         `${run.length} identical lines starting "${run.text.trim().slice(0, 70)}". ` +
         `Move the shared instruction into a doc under docs/ and link it from both.`,
     ).toBe(true);
@@ -194,6 +198,10 @@ describe('every command checks that it is the current copy before anything else'
       expect(at!.from, `${f}'s freshness check is not the first thing after its frontmatter`).toBe(frontmatterEnd + 2);
       const block = lines.slice(at!.from, at!.to).join('\n');
       expect(block.split(`.claude/commands/${f}`).length - 1, `${f}'s check does not name its own file`).toBe(3);
+      // a bullet after the block is one more verdict the comparison below never reads
+      expect(lines[at!.to - 1], `${f}'s freshness check is not followed by a blank line`).toBe('');
+      const next = lines.slice(at!.to).find((l) => l.trim() !== '') ?? '';
+      expect(next, `${f} continues the freshness check's list past its last bullet`).not.toMatch(/^\s*[-*+] /);
       return block.replaceAll(`.claude/commands/${f}`, '.claude/commands/<file>');
     });
     for (const [i, t] of texts.entries()) {
