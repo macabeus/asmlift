@@ -39,6 +39,14 @@
  *  policies stay two rows: the one-object row's every-store pin is what keeps `threeFills`' nine
  *  qualified stores (thumb-frontend.test.ts), and on the per-object row it costs those two matches.
  *
+ *  One store left plain this way is a GAP: a device store a pinned read of the same cell re-reads
+ *  in a loop where nothing else may alias the cell. agbcc's loop pass takes the first access of a
+ *  cell it meets as the cell's and compares no qualifier (loop.c:8767, rtx_equal_p at
+ *  rtlanal.c:1066), so plain, the store moves the cell into a register and the read is served the
+ *  stored value. The variations that home the channel's base name the store and the read through
+ *  different addresses, which are two cells to that pass, and those are the ones a pin here would
+ *  refuse.
+ *
  *  Under either policy, a read the compiler could not have made of a `volatile` stays plain: on a
  *  compiler that sign-extends a qualified narrow read in a register (`volatileReadsExtendInRegister`),
  *  a sign-extending load is a plain read in the source, and qualified it recompiles to another
