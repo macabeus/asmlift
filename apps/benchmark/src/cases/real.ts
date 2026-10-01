@@ -68,7 +68,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
         ctx: m2cI === null ? f.ctx : appendCtxProto(m2cI, ctxProto),
         ctxRef: f.m2cCtx ? man.ctxPath(f.sym) : undefined,
         ctxProto: ctxProto ?? undefined,
-        proto: rowPrototypes(f.proto, vendored, language, f.sym, symbols),
+        proto: rowPrototypes(f.proto, vendored, language, f.sym, symbols, codegen.target),
         // LEAKAGE-FREE by construction: every row here is a function someone already decompiled,
         // so the project ELF knows things about it that a user mid-decomp cannot. Score against
         // the map as it would look with this function still `INCLUDE_ASM` (core's

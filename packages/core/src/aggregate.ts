@@ -214,7 +214,7 @@ export function returnsInMemory(layout: AggregateLayout, target: TargetDescripti
  *  ENTRY is read through `?.` for the other half of the same fact: `decompile` is a published
  *  entry point that runs no `validatePrototypes`, so a `null` entry out of parsed JSON reaches
  *  here, and a raw TypeError would leave through neither the decline channel nor anything a
- *  caller can act on. Every other reader of this table — `declaredArgWidths`, and `declaredCall`
+ *  caller can act on. Every other reader of this table — `declaredCallArgs`, and `declaredCall`
  *  through it — answers "nothing is declared" for such an entry, and so does this. */
 export function returnsWithoutHiddenPointer(
   callee: string,

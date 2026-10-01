@@ -217,33 +217,29 @@ describe('what refuses', () => {
     );
   });
 
-  // A PAIR SPLIT ACROSS THE REGISTER/STACK BOUNDARY is a placement this frontend does not build:
-  // agbcc puts the low half in r3 and the high half at [sp,#0]. The declaration is readable and
-  // the block is the right size, so nothing else would stop it — the walk would read `r4`, which
-  // is an argument register on no target here.
+  // A PAIR PAST THE ARGUMENT REGISTERS takes its words where agbcc puts them — r3 and [sp,#0], or
+  // two words of the outgoing block (`double-args.test.ts` lifts both) — so a call that stages
+  // neither is a declaration the code does not agree with, and the licence names the words.
   //
-  // THE ORDINAL IS THE PARAMETER'S AND THE POSITION IS THE WORD'S, and the message has to keep
-  // them apart: with an EARLIER wide parameter they are different numbers, and printing the word
-  // index as a parameter number sends a reader to the wrong entry of their own header.
-  test('a declared pair that does not fit in the argument registers refuses, naming the parameter', () => {
+  // THE WORDS ARE COUNTED, NOT THE PARAMETERS: `long long, s32, long long` is five words.
+  test('a declared pair past the argument registers that nothing staged declines, naming the words', () => {
     const declared = (params: string[]) =>
       decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC, {
         prototypes: { sink: { params, returnsVoid: true } },
       });
-    expect(() => declared(['s32', 's32', 's32', 'long long'])).toThrow(
-      /one half of a 64-bit value would be handed to `sink` outside the argument registers — its parameter 4 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argument register\(s\), so the low half is in r3 and the upper half in this frame's outgoing stack block/,
-    );
-    // PARAMETER 3, WORD 4 — the ordinal and the position part company at the first wide parameter,
-    // and an earlier version of this message printed `at + 1` for both.
-    expect(() => declared(['long long', 's32', 'long long'])).toThrow(
-      /handed to `sink` outside the argument registers — its parameter 3 is 64 bits wide/,
-    );
-    // WHOLLY IN THE FRAME is the other shape the comment above names and the message did not: at
-    // word 5 of 4 registers NOTHING is in a register, so "one half lands in the frame and the
-    // other in a register" was false about its own input, and it cited an argument register that
-    // does not exist.
+    for (const [params, n] of [
+      [['s32', 's32', 's32', 'long long'], 4],
+      [['long long', 's32', 'long long'], 3],
+    ] as const) {
+      expect(() => declared([...params])).toThrow(
+        new RegExp(
+          `\`sink\` is declared with ${n} arguments in 5 argument words, so its outgoing stack-argument block is ` +
+            '\\[sp,#0\\] — but \\[sp,#0\\] is not stored',
+        ),
+      );
+    }
     expect(() => declared(['s32', 's32', 's32', 's32', 'long long'])).toThrow(
-      /its parameter 5 is 64 bits wide and takes argument words 5 and 6 .* so both halves are in this frame's outgoing stack block/,
+      /declared with 5 arguments in 6 argument words, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\]/,
     );
   });
 });

@@ -3,8 +3,9 @@
 // project's own headers, where a different type is a conflicting declaration.
 import { describe, expect, test } from 'vitest';
 
-import { declaredArgWidths, declaredWidth } from '../src/proto';
+import { declaredCallArgs, declaredWidth } from '../src/proto';
 import { prototypesFromContext, withContextPrototypes } from '../src/proto-context';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 // the shape of the CARD block in Pikmin's context: its typedefs and an `extern "C"` block
 const PIKMIN_CARD = `
@@ -35,7 +36,7 @@ describe('prototypes from a declaration context', () => {
     expect(p.CARDCheckAsync).toEqual({ returns: 's32', params: ['s32', 'void (*)(s32 channel, s32 result)'] });
     // a struct keeps its name: it sizes only as the pointee of a pointer
     expect((p.CARDMountAsync?.params as string[])[1]).toBe('CARDMemoryCard *');
-    expect(declaredArgWidths(p.CARDMountAsync)).toEqual([32, 32, 32, 32]);
+    expect(declaredCallArgs(p.CARDMountAsync, PPC_MWCC)?.widths).toEqual([32, 32, 32, 32]);
     // `()` is an empty list in C++
     expect(p.CARDInit).toEqual({ returnsVoid: true, params: [] });
   });
@@ -54,7 +55,7 @@ describe('prototypes from a declaration context', () => {
     );
     expect(p.memcpy).toEqual({ returns: 'void *', params: ['void *', 'const void *', 'size_t'] });
     expect(p.sum?.params).toEqual(['int *', 'int (*)(int, int)']);
-    expect(declaredArgWidths(p.sum)).toEqual([32, 32]);
+    expect(declaredCallArgs(p.sum, PPC_MWCC)?.widths).toEqual([32, 32]);
   });
 
   test('a list holding a spelling that cannot be sized is kept, and the frontend abstains on it', () => {
@@ -63,8 +64,8 @@ describe('prototypes from a declaration context', () => {
       'c',
     );
     expect(p.len?.params).toEqual(['Vec']);
-    expect(declaredArgWidths(p.len)).toBeUndefined();
-    expect(declaredArgWidths(p.sq)).toBeUndefined();
+    expect(declaredCallArgs(p.len, PPC_MWCC)?.widths).toBeUndefined();
+    expect(declaredCallArgs(p.sq, PPC_MWCC)?.widths).toBeUndefined();
   });
 
   test('skips members, namespaces, templates, operators and variadics; drops an overloaded name', () => {
@@ -439,12 +440,18 @@ describe('a context struct return under a stated or mapped signature', () => {
   const blob = { returns: 'struct Blob64', returnLayout: ctx.makeblob!.returnLayout };
 
   test('a stated entry that states only the arity keeps it', () => {
-    const p = withContextPrototypes({ makeblob: { params: ['const void *'] } }, ctx, 'f', undefined);
+    const p = withContextPrototypes({ makeblob: { params: ['const void *'] } }, ctx, 'f', undefined, ARMV4T_AGBCC);
     expect(p.makeblob).toEqual({ params: ['const void *'], ...blob });
     // …and one that states a return of its own is taken whole
-    const own = withContextPrototypes({ makeblob: { params: 1, returns: 's32' } }, ctx, 'f', undefined);
+    const own = withContextPrototypes({ makeblob: { params: 1, returns: 's32' } }, ctx, 'f', undefined, ARMV4T_AGBCC);
     expect(own.makeblob).toEqual({ params: 1, returns: 's32' });
-    const none = withContextPrototypes({ makeblob: { params: 1, returnsVoid: true } }, ctx, 'f', undefined);
+    const none = withContextPrototypes(
+      { makeblob: { params: 1, returnsVoid: true } },
+      ctx,
+      'f',
+      undefined,
+      ARMV4T_AGBCC,
+    );
     expect(none.makeblob).toEqual({ params: 1, returnsVoid: true });
   });
 
@@ -456,6 +463,7 @@ describe('a context struct return under a stated or mapped signature', () => {
       ctx,
       'f',
       undefined,
+      ARMV4T_AGBCC,
     );
     expect(p.makeblob).toEqual({ params: ['const void *'], returnsVoid: false, ...blob });
   });
@@ -473,7 +481,7 @@ describe('a context struct return under a stated or mapped signature', () => {
         ],
       ],
     ]);
-    expect(withContextPrototypes(undefined, ctx, 'f', symbols).mke).toEqual({ params: ['s32'], ...blob });
+    expect(withContextPrototypes(undefined, ctx, 'f', symbols, ARMV4T_AGBCC).mke).toEqual({ params: ['s32'], ...blob });
   });
 });
 

@@ -41,7 +41,7 @@ import { returnedAggregate, returnsInMemory } from '../aggregate';
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredArgWidths, declaredReturnWidth, declaresAggregateReturn } from '../proto';
+import { type Prototypes, declaredCallArgs, declaredReturnWidth, declaresAggregateReturn } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import {
@@ -643,7 +643,7 @@ export function lift(
   // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
   // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
   // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`declaredArgWidths` is asked
+  // and names the gap rather than guessing. A prototype answers it (`declaredCallArgs` is asked
   // first), and this scan is never weighed against one: it is a guess, and a guess that cannot
   // fail cannot witness a width a declaration left open.
   const fallbackArgc = (bi: number, at: number): number => {
@@ -1056,11 +1056,11 @@ export function lift(
           const sym = ins.reloc?.sym ?? 'func';
           // ONE QUESTION, ONE ANSWER, AND THE OTHER FRONTEND ASKS IT THE SAME WAY. A declaration
           // states C PARAMETERS and a call site walks argument REGISTERS; `proto.ts`
-          // `declaredArgWidths` converts between them and `frontend/thumb.ts` reads the same
+          // `declaredCallArgs` converts between them and `frontend/thumb.ts` reads the same
           // answer out of the same function. A user-supplied fact that two frontends convert
           // differently is a bug wherever it is read second.
           //
-          // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `declaredArgWidths` abstains for the
+          // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `declaredCallArgs` abstains for the
           // whole list and this falls to `fallbackArgc` — the guess a callee with no prototype gets,
           // which reads each argument register through `readGuessedArg` so `finish()` can retract
           // the ones a call destroyed. A declaration is not an excuse to ASSERT registers whose
@@ -1087,7 +1087,7 @@ export function lift(
                 'a struct returned through a hidden pointer, or one nothing here can size, is not modelled',
             );
           }
-          const widths = declaredArgWidths(own);
+          const widths = declaredCallArgs(own, target)?.widths;
           let declared: number | undefined;
           if (widths !== undefined) {
             const wideAt = widths.findIndex((w) => w > 32);
@@ -1121,7 +1121,7 @@ export function lift(
           //
           // The other half of the pair already refuses (`r4 is read on a path where a call has
           // destroyed it`), so this is the arm that was left, not a second reading of one gap.
-          const returned = declaredReturnWidth(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined);
+          const returned = declaredReturnWidth(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined, target);
           if (returned !== undefined && returned > 32) {
             throw new PpcUnsupportedError(
               `cannot lift '${name}': '${sym}' would hand back one half of a 64-bit value — its return is ` +

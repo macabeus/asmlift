@@ -57,6 +57,26 @@ const U3_UNDEF =
   '\tldr\tr0, [sp, #0x8]\n\tadd\tsp, sp, #0x10\n\tpop\t{r3, r4, r5}\n\tmov\tr8, r3\n' +
   '\tmov\tr9, r4\n\tmov\tsl, r5\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n';
 
+// `struct Blob64 mkd(double); void ps1(void){ struct Blob64 b = mkd(1.5); }` — the double is r1:r2,
+// high word first, one register up from where it would be without the hidden pointer
+const PS1 =
+  'ps1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tldr\tr2, .L3+0x4\n\tldr\tr1, .L3\n\tmov\tr0, sp\n' +
+  '\tbl\tmkd\n\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.long 0x3ff80000, 0x0\n';
+
+// `struct Blob64 mkp(double *p, double x); void ps2(double *q){ struct Blob64 b = mkp(q, 1.5); }` —
+// the pointer in r1, the double r2:r3
+const PS2 =
+  'ps2:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x40\n\tadd\tr1, r0, #0\n\tldr\tr3, .L3+0x4\n\tldr\tr2, .L3\n' +
+  '\tmov\tr0, sp\n\tbl\tmkp\n\tadd\tsp, sp, #0x40\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+  '\t.long 0x3ff80000, 0x0\n';
+
+// `extern double gD; struct Blob64 mk3(s32 a, s32 b, double x); void si(s32 a, s32 b){ struct Blob64 t
+// = mk3(a, b, gD); }` — the double, loaded word by word, is r3 and [sp,#0]
+const SI =
+  'si:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x44\n\tadd\tr5, r0, #0\n\tadd\tr2, r1, #0\n\tldr\tr0, .L3\n' +
+  '\tldr\tr3, [r0]\n\tldr\tr4, [r0, #0x4]\n\tstr\tr4, [sp]\n\tadd\tr0, sp, #0x4\n\tadd\tr1, r5, #0\n\tbl\tmk3\n' +
+  '\tadd\tsp, sp, #0x44\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgD\n';
+
 const BLOB64 = { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', dims: [16] }] };
 const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
 const makeblob = { params: ['const void *'], returns: 'struct Blob64', returnLayout: BLOB64 };
@@ -98,6 +118,45 @@ describe('a callee declared to return a struct through memory', () => {
         expect(decls).toContain(line);
       }
     }
+  });
+
+  // The frontend lays a declared `double` out, so the printed prototype carries it, and with it the
+  // struct the call returns: without either the candidate's own unit cannot compile the lift.
+  test('a callee that takes a double is declared with it', () => {
+    const mkd = { params: ['double'], returns: 'struct Blob64', returnLayout: BLOB64 };
+    const [c] = enumerateCandidates('ps1', PS1, ARMV4T_AGBCC, { prototypes: { mkd } });
+    expect(c.source).toContain('sp0 = mkd(1.5);');
+    const decls = renderDeclarations(c.symbolRefs ?? []);
+    expect(decls).toContain('struct Blob64 { u32 w[16]; };');
+    expect(decls).toContain('struct Blob64 mkd(double);');
+  });
+
+  // A double nothing here can hand the callee declines, and names the argument as the source counts
+  // it: the hidden pointer is no argument of the C call
+  test('a declared double it cannot hand on is named by its place in the C call', () => {
+    const mk3 = { params: ['s32', 's32', 'double'], returns: 'struct Blob64', returnLayout: BLOB64 };
+    expect(() => decompile('si', SI, ARMV4T_AGBCC, { prototypes: { mk3 } })).toThrow(
+      "argument 3 of the call to 'mk3' is a `double` its callee declares",
+    );
+  });
+
+  // A parameter the frontend sizes but the printer cannot spell leaves the struct's local with no
+  // definition in the candidate's own unit, so the call declines rather than lift to a source that
+  // cannot compile
+  test('a callee the lifted source cannot declare declines', () => {
+    for (const params of [['double *', 'double'], ['size_t', 'double'], ['double *']]) {
+      const mkp = { params, returns: 'struct Blob64', returnLayout: BLOB64 };
+      expect(() => decompile('ps2', PS2, ARMV4T_AGBCC, { prototypes: { mkp } })).toThrow(
+        /`mkp` returns struct Blob64 through a hidden pointer in r0, and a parameter type of its declaration has no spelling/,
+      );
+    }
+  });
+
+  // a bare count sizes every argument and states no type the printer could declare the callee with
+  test('a callee declared by a parameter count declines, and the message says so', () => {
+    expect(() => decompile('p1', P1, ARMV4T_AGBCC, { prototypes: { makeblob: { ...makeblob, params: 1 } } })).toThrow(
+      /`makeblob` returns struct Blob64 through a hidden pointer in r0, and its declaration states only a count of parameters, no type the lifted source can declare it with/,
+    );
   });
 
   // `struct Blob64 mke(enum E e);` — an enum parameter sizes to nothing, and a guessed arity would

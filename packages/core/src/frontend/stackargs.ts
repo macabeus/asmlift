@@ -35,6 +35,9 @@ export interface StackArgsCall<C> {
   /** The callee's name, for the refusal messages. `?` where the frontend has none. */
   readonly callee: string;
   readonly declared: readonly number[] | null;
+  /** The parameters the declaration lists, for the refusal messages — fewer than its words when a
+   *  64-bit parameter takes two or a hidden struct-return pointer takes one. Absent, one per word. */
+  readonly params?: number;
 }
 
 /** One basic block's events. Where control goes afterwards is read out of `preds`, so a block is
@@ -227,7 +230,12 @@ export function analyzeOutgoingArgs<C>({
     return { blocker: null, blocks: new Map(), area: 0 };
   }
   const say = (offs: readonly number[]) => offs.map((o) => `[sp,#${o}]`).join(', ');
-  const arityOf = (offs: readonly number[]) => argRegs + offs.length;
+  const declaredAs = (ev: StackArgsCall<C>, offs: readonly number[]) => {
+    const words = argRegs + offs.length;
+    return ev.params === undefined || ev.params === words
+      ? `${words} arguments`
+      : `${ev.params} arguments in ${words} argument words`;
+  };
 
   // THE ONE-WORD CAPTURED FRAME. `capturedWholeFrame` says the whole frame is an object whose
   // address has ESCAPED this function — handed to a callee, or published to memory; the frontend
@@ -239,7 +247,7 @@ export function analyzeOutgoingArgs<C>({
       const offs = ev.declared;
       if (offs !== null) {
         return refuse(
-          `callee \`${ev.callee}\` is declared with ${arityOf(offs)} arguments, so [sp,#0] is its outgoing stack argument — ` +
+          `callee \`${ev.callee}\` is declared with ${declaredAs(ev, offs)}, so [sp,#0] is its outgoing stack argument — ` +
             'but this one-word frame is an object whose address escapes the function, and the two name the same word',
         );
       }
@@ -376,7 +384,7 @@ export function analyzeOutgoingArgs<C>({
     const extra = asc(may).filter((o) => !offs.includes(o));
     if (missing.length > 0 || extra.length > 0) {
       return refuse(
-        `callee \`${ev.callee}\` is declared with ${arityOf(offs)} arguments, so its outgoing stack-argument block is ${say(offs)} — but ` +
+        `callee \`${ev.callee}\` is declared with ${declaredAs(ev, offs)}, so its outgoing stack-argument block is ${say(offs)} — but ` +
           (missing.length > 0
             ? `${say(missing)} is not stored on every path to the call`
             : `${say(extra)} also reaches the call unread, so the declaration does not account for every word staged here`),

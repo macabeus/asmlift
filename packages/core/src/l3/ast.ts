@@ -6,6 +6,9 @@ import { type IrType, typeEquals } from '../ir/types';
 export type Expr =
   | { k: 'var'; name: string }
   | { k: 'const'; value: number }
+  // A `double` literal, carried as its IEEE bit pattern (ir/float-bits.ts) — a kind apart from the
+  // integer `const`, so no integer fold, range test or signedness reading ever takes it for one.
+  | { k: 'fconst'; bits: string }
   | { k: 'bin'; op: BinOp; l: Expr; r: Expr }
   | { k: 'un'; op: '-' | '~' | '!' | 'f-'; e: Expr }
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
@@ -504,6 +507,8 @@ export function exprEquals(a: Expr, b: Expr): boolean {
       return a.name === (b as typeof a).name;
     case 'const':
       return a.value === (b as typeof a).value;
+    case 'fconst':
+      return a.bits === (b as typeof a).bits;
     case 'bin': {
       const bb = b as typeof a;
       return a.op === bb.op && exprEquals(a.l, bb.l) && exprEquals(a.r, bb.r);
@@ -649,6 +654,7 @@ export function exprChildren(e: Expr): Expr[] {
   switch (e.k) {
     case 'var':
     case 'const':
+    case 'fconst':
     case 'addr':
     case 'postincr':
       return [];
@@ -673,6 +679,7 @@ export function mapExprChildren(e: Expr, f: (c: Expr) => Expr): Expr {
   switch (e.k) {
     case 'var':
     case 'const':
+    case 'fconst':
     case 'addr':
     case 'postincr':
       return e;

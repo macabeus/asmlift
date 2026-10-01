@@ -11,6 +11,7 @@ import {
 } from '@asmlift/core/proto';
 import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
+import type { TargetDescription } from '@asmlift/core/target';
 
 /** parsed contexts, keyed by dialect and vendored file: the rows of one unit share a context */
 const parsed = new Map<string, Prototypes>();
@@ -23,6 +24,7 @@ export function rowPrototypes(
   language: 'c' | 'c++',
   sym: string,
   symbols: SymbolMap | undefined,
+  target: Pick<TargetDescription, 'doubleArgWords'>,
 ): Prototypes | undefined {
   if (ctxI === '') {
     return manifest;
@@ -33,7 +35,7 @@ export function rowPrototypes(
     derived = prototypesFromContext(ctxI, language);
     parsed.set(key, derived);
   }
-  const merged = withContextPrototypes(manifest, derived, sym, symbols);
+  const merged = withContextPrototypes(manifest, derived, sym, symbols, target);
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 

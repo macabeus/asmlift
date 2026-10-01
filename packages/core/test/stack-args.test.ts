@@ -150,7 +150,7 @@ describe('an argument slot is owned storage that this function does not DECLARE'
 });
 
 describe('the declaration must say how many WORDS, and a parameter list is parameters', () => {
-  // The block is words, `declaredArgWidths` is words, and the lowering maps word k to slot
+  // The block is words, `declaredCallArgs` is words, and the lowering maps word k to slot
   // k - |argRegs|. A C PARAMETER COUNT is a fourth number and is the same as the other three only
   // while every parameter occupies one word — a `long long` or a by-value struct breaks it. A
   // `long long` is READ as two words; a by-value struct, a project typedef and a floating type
@@ -158,24 +158,22 @@ describe('the declaration must say how many WORDS, and a parameter list is param
   // and a list holding one states no layout, so the block is laid out from the machine instead.
   const TWO = HEAD + '\tadd\tsp, sp, #-0x8\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tbl\tfd\n' + TAIL('0x8');
 
-  test('a declared pair the block would split refuses, naming the parameter', () => {
+  test('a declared pair is two words of the block, and the words must agree', () => {
     // The dangerous case, because the two witnesses agree by coincidence: read for its LENGTH
     // alone, six declared parameters size a two-word block and the code stages two words, so the
     // equality holds — and consuming it hands `fd` six arguments where the fifth `long long` spans
-    // both staged words (`fd(a0, a1, a0, a1, a2, a3)`). The fifth parameter's halves are both in
-    // the block and the refusal names it.
-    for (const params of [
-      ['s32', 's32', 's32', 's32', 'long long', 's32'],
-      // Same assembly, the declaration `void fd(s32, s32, s32, s32, long long)` that really
-      // produced it. The word counts disagree here, so the may-set check would refuse anyway — but
-      // on `[sp,#4] also reaches the call unread`, which sends a reader hunting for a store when
-      // the fact to know is the parameter.
-      ['s32', 's32', 's32', 's32', 'long long'],
-    ]) {
-      expect(() => src(TWO, { fd: { params } })).toThrow(
-        /handed to `fd` outside the argument registers — its parameter 5 is 64 bits wide .* both halves are in this frame's outgoing stack block/,
-      );
-    }
+    // both staged words (`fd(a0, a1, a0, a1, a2, a3)`). Read as words it is SEVEN, and the third
+    // block word is never stored. The refusal names both counts, since each is a number a reader
+    // checks against a different thing — the header, and the frame.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'long long', 's32'] } })).toThrow(
+      /declared with 6 arguments in 7 argument words, so its outgoing stack-argument block is \[sp,#0\], \[sp,#4\], \[sp,#8\] — but \[sp,#8\] is not stored/,
+    );
+    // The declaration that really produced it agrees word for word, so the two staged words are
+    // the pair: `concat(a0, a1)`, whose halves are also passed alone and so fuse into no parameter,
+    // is a 64-bit value with no spelling, and says so.
+    expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'long long'] } })).toThrow(
+      /no lowering for op 'concat'/,
+    );
   });
 
   // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so it licenses no block and the verdict is
@@ -190,9 +188,11 @@ describe('the declaration must say how many WORDS, and a parameter list is param
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'TaskFunc', 's32'] } })).toThrow(
       /stack pointer used as data/,
     );
-    // The `stkwide` row's own declaration: a `double` has no width, so it licenses no block either.
+    // …where a `double` is two words on agbcc (`TargetDescription.doubleArgWords`), so it lays the
+    // block out, and the verdict is about the double: its words are `a0` and `a1`, which are also
+    // passed as words, so it is no double moved whole.
     expect(() => src(TWO, { fd: { params: ['s32', 's32', 's32', 's32', 'double'] } })).toThrow(
-      /stack pointer used as data — the store to \[sp,#0\] is never reloaded/,
+      /argument 5 of the call to 'fd' is a `double` its callee declares/,
     );
     // …and a COUNT, which states argument registers directly, is what gets past it.
     expect(src(TWO, { fd: { params: 6 } })).toContain('fd(a0, a1, a2, a3, a0, a1)');

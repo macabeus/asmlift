@@ -19,6 +19,7 @@
 import type { IrType } from '../ir/types';
 import { type AggregateLayout, type ParamType, type Prototypes, spellableProto } from '../proto';
 import type { SymbolInfo } from '../symbols';
+import type { TargetDescription } from '../target';
 import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
 
 /** One recorded VALUE reference — a name the tree references plus the facts to declare it. */
@@ -91,6 +92,8 @@ export function collectSymbolRefs(
    *  declaration. REQUIRED, not optional: a caller that forgot it would silently get the old
    *  blanket refusal back, which is the shape of an optional refusal a second caller switches off. */
   prototypes: Prototypes,
+  /** which declared types the frontend lays out, so which a printed prototype may carry */
+  target: Pick<TargetDescription, 'doubleArgWords'>,
   onRefused?: (name: string, reason: 'call-target' | 'self-name') => void,
 ): SymbolRef[] {
   const called = new Set<string>();
@@ -129,7 +132,7 @@ export function collectSymbolRefs(
     // function, and `proto.ts` `prototypesFromSymbols` has already taken the `returns` off such an
     // entry, so what arrives here states no printable prototype and the frontend read the call the
     // same way. Testing it a second time at this reader is what let the two answer differently.
-    const p = Object.hasOwn(prototypes, n) ? spellableProto(prototypes[n], returned.get(n)) : undefined;
+    const p = Object.hasOwn(prototypes, n) ? spellableProto(prototypes[n], target, returned.get(n)) : undefined;
     if (p !== undefined) {
       proto.set(n, p);
     }

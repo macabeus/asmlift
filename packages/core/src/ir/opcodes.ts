@@ -148,6 +148,10 @@ export const OPCODES = {
   fmul: { operands: 2, results: 1 },
   fdiv: { operands: 2, results: 1 },
   fneg: { operands: 1, results: 1 },
+  // A double LITERAL: `bits` is its IEEE pattern as sixteen hex digits (ir/float-bits.ts). Its own
+  // opcode rather than a `const` over a float type for the reason the arithmetic above has its own:
+  // every pass that matches `const` is an integer fold.
+  fconst: { operands: 0, results: 1, requiredAttrs: ['bits'] },
   // --- memory ---
   load: { operands: 1, results: 1, requiredAttrs: ['off', 'width', 'signed'], reads: true },
   store: { operands: 2, results: 0, requiredAttrs: ['off', 'width'], effects: true },
@@ -265,7 +269,7 @@ export const CAST_WIDTHS: ReadonlySet<number> = new Set([8, 16]);
 /** The float opcodes: the only ops a `{kind:'float'}` value may be an operand or a result of,
  *  besides `ret` (ir/verify.ts). Authored beside the registry because no signature field says what
  *  an op computes ON. */
-export const FLOAT_OPS: ReadonlySet<string> = new Set(['fadd', 'fsub', 'fmul', 'fdiv', 'fneg']);
+export const FLOAT_OPS: ReadonlySet<string> = new Set(['fadd', 'fsub', 'fmul', 'fdiv', 'fneg', 'fconst']);
 
 /** Signature lookup by RUNTIME opcode string (Op.opcode is a plain string — IR consumers switch
  *  on it); undefined for an unregistered opcode. */

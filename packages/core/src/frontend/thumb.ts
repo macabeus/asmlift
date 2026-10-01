@@ -26,10 +26,11 @@ import {
   type FnProto,
   type Prototypes,
   STANDARD_SIGNATURES,
-  declaredArgWidths,
+  declaredCallArgs,
   declaredReturnWidth,
   declaresAggregateReturn,
   declaresParams,
+  spellableProto,
   wordsOf,
 } from '../proto';
 import { type RuntimeHelper, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
@@ -2825,19 +2826,7 @@ function liftOnce(
     if (declaresParams(prototypes[callee])) {
       return null;
     }
-    // A 64-bit argument that straddles the register/stack boundary is a placement this frontend
-    // cannot lay out — agbcc splits it, low half in r3 and high half at [sp,#0] — so the pair is
-    // not read here. This is NOT the refusal: the call falls back to the declared-arity path,
-    // which reads the helper's WORD arity out of `helperProtos` and stops on whichever loud gate
-    // that path meets, the outgoing-stack-argument refusal or `raise/widehelpers.ts` declining to
-    // fold a call it did not build the pair for. What this bounds is the register read: without
-    // it the loop above walks `r${k}` past `argRegs`, so a fifth word is read out of r4, which is
-    // not an argument register on any target here.
-    //
-    // NOTHING REACHES IT. The widest entry in either shipped table is `[64, 64]`, four words,
-    // against four argument registers on Thumb and eight on PPC — so the bound is the table's, and
-    // this is the generalisation that keeps a future entry from being laid out by accident.
-    return wordsOf(h.params) <= target.argRegs.length ? h : null;
+    return h;
   };
   /** Whether the target's own runtime table claims this name — asked of the TABLE, not of what
    *  `wideHelper` made of it.
@@ -3567,8 +3556,9 @@ function liftOnce(
   //
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
   // spell — including `long long`, which is why a pair no longer needs guessing at — and
-  // `undefined` for a project typedef, a by-value struct or a floating type. One such spelling and
-  // `declaredArgWidths` states no layout at all, because the question here is not how wide that
+  // `undefined` for a project typedef, a by-value struct or a floating type. `declaredCallArgs`
+  // sizes a `double` from the target (`TargetDescription.doubleArgWords`); one other such spelling
+  // and it states no layout at all, because the question here is not how wide that
   // parameter is but whether it occupies one argument register or two, and the choice moves every
   // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
   // the call is lifted at the arg-register guess, exactly as a callee the project never declared
@@ -3637,7 +3627,13 @@ function liftOnce(
   };
   const declaredCall = (
     callee: string,
-  ): { widths: readonly number[]; block: readonly number[] | null; returned?: StructReturn | 'register' } | null => {
+  ): {
+    widths: readonly number[];
+    doubles: ReadonlySet<number>;
+    block: readonly number[] | null;
+    params: number;
+    returned?: StructReturn | 'register';
+  } | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
     // last two wins — it may be building against its own re-declaration.
@@ -3653,7 +3649,8 @@ function liftOnce(
     const own = known(prototypes);
     const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
     const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const params = declaredArgWidths(proto);
+    const declared = declaredCallArgs(proto, target);
+    const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from r0, which holds the hidden pointer
       throw new FrontendUnsupportedError(
@@ -3664,47 +3661,41 @@ function liftOnce(
     if (params === undefined) {
       return null;
     }
-    const widths = returned === undefined || returned === 'register' ? params : [32, ...params];
-    // A PAIR THAT IS NOT WHOLLY IN ARGUMENT REGISTERS is a placement this frontend does not build.
-    // agbcc SPLITS one — low half in r3, high half at [sp,#0] — and a pair assembled from one
-    // register and one frame slot, or from two frame slots, is a shape nothing here assembles. The
-    // refusal is what keeps the walk below from reading `r4`, which is an argument register on no
-    // target here. (`wideHelper` bounds the same placement for the helper table, where it can fall
-    // back to the declared path instead; a declaration has nothing to fall back to.)
-    //
-    // THE UPPER HALF IS NOT SPELT "high half" ON PURPOSE. `DECLINE_CLASSES` is an ordered list and
-    // the first pattern that matches wins, so `reloc-halves` — whose subject is a `%hi`/`@ha`
-    // relocation and whose pattern holds `/high half/` — claims this sentence on any ordering that
-    // puts it first, and a 64-bit argument gap is then published as a relocation gap on the
-    // blocker Pareto. A classification that rests on the order of a list is a classification
-    // nothing states.
-    //
-    // THE ORDINAL IS THE PARAMETER'S AND THE POSITION IS THE WORD'S, and they are different
-    // numbers the moment an earlier parameter is wide — which is the only way to get here past the
-    // first parameter, so printing one for the other would be wrong in exactly the population this
-    // message has.
-    let at = 0;
-    for (const [i, w] of widths.entries()) {
-      if (w > 32 && at + 2 > target.argRegs.length) {
+    // THE STRUCT'S LOCAL NEEDS THE CALLEE PRINTED. A self-declared candidate defines the struct only
+    // beside the callee's printed prototype (`declare.ts`), so a declaration the printer cannot spell
+    // (`double *`, `size_t`, or a bare parameter count, which states no type) lifts to a candidate
+    // that does not compile. Asked of the printer's own predicate, so the two cannot disagree; a
+    // headers world, which would declare the callee itself, loses the lift with it.
+    if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
+      const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in r0`;
+      if (typeof own!.params === 'number') {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': one half of a 64-bit value would be handed to \`${callee}\` outside ` +
-            `the argument registers — its parameter ${i + 1} is 64 bits wide and takes argument words ` +
-            `${at + 1} and ${at + 2} of a call with ${target.argRegs.length} argument register(s), so ` +
-            (at < target.argRegs.length
-              ? `the low half is in ${target.argRegs[at]} and the upper half in this frame's outgoing ` + 'stack block'
-              : "both halves are in this frame's outgoing stack block") +
-            ' — this frontend assembles a pair out of two argument registers and out of nothing else',
+          `cannot lift '${name}': ${via}, and its declaration states only a count of parameters, no type the lifted source can declare it with`,
         );
       }
-      at += w > 32 ? 2 : 1;
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${via}, and a parameter type of its declaration has no spelling the lifted source can declare it with`,
+      );
     }
-    const words = at - target.argRegs.length;
+    const hidden = returned === undefined || returned === 'register' ? 0 : 1;
+    const widths = hidden === 0 ? params : [32, ...params];
+    const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
+    // A 64-BIT PARAMETER TAKES THE NEXT TWO ARGUMENT WORDS WHEREVER THEY FALL, with no even
+    // alignment: two registers, r3 and [sp,#0], or two words of the outgoing block. That is agbcc's
+    // placement for a `long long` and a `double` alike — FUNCTION_ARG places by word offset
+    // (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack (:636),
+    // FUNCTION_ARG_ADVANCE rounds to a word (:647); `test/corpus/agbcc-double-args.s` compiles all
+    // three. The walk below reads each word where it falls, so the block counts both of a pair's
+    // stack words.
+    const words = wordsOf(widths) - target.argRegs.length;
     // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
     // not claim to stage arguments inside the caller's own frame at all.
     const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
     return {
       widths,
+      doubles,
       block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
+      params: params.length,
       ...(returned === undefined ? {} : { returned }),
     };
   };
@@ -3717,7 +3708,8 @@ function liftOnce(
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
-          return [{ kind: 'call', call: ins, callee, declared: declaredCall(callee)?.block ?? null }];
+          const declared = declaredCall(callee);
+          return [{ kind: 'call', call: ins, callee, declared: declared?.block ?? null, params: declared?.params }];
         }
         return [];
       }),
@@ -4644,7 +4636,7 @@ function liftOnce(
           // for the pairing rule and the arity rule to disagree.
           //
           // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
-          // `declaredArgWidths`), so `declared` is null for it and this falls to the guess below —
+          // `declaredCallArgs`), so `declared` is null for it and this falls to the guess below —
           // the same answer the callee would get with no prototype at all.
           const widths = wide?.params ?? declared?.widths ?? null;
           const argc = widths === null ? fallbackArgcHere(bi) : wordsOf(widths);
@@ -4664,7 +4656,7 @@ function liftOnce(
               ? wide.returns
               : isRuntimeHelperName(targetSym)
                 ? undefined
-                : declaredReturnWidth(prototypes[targetSym])) === 64;
+                : declaredReturnWidth(prototypes[targetSym], target)) === 64;
           const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
           // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
@@ -4672,30 +4664,33 @@ function liftOnce(
           // they exist, so a destroyed register read for it is a wrong value nothing retracts. A
           // guess is a list of single words by construction — `fallbackArgcHere` counts registers.
           const readArg = widths === null ? ssa.readGuessedArg : readVar;
+          // ARGUMENT WORD `j`: a register, or past the registers a word of this frame's outgoing
+          // area, at [sp,#0] upward — the block `analyzeOutgoingArgs` licensed for THIS call, and
+          // only that block. `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed
+          // stack word can only come from a stated width; reaching one with no block means the slot
+          // model is off for another reason, and the decline names it rather than reading `r4` as if
+          // it were argument 5.
+          const word = (j: number): Value => {
+            if (j < target.argRegs.length) {
+              return readVar(`r${j}`, bi);
+            }
+            const off = stackArgs?.[j - target.argRegs.length];
+            if (off === undefined) {
+              throw spAsDataError();
+            }
+            usedSlotOffsets.add(off);
+            return readVar(slotKey(off), bi);
+          };
           let k = 0;
           for (const w of widths ?? Array.from({ length: argc }, () => 32)) {
-            if (k >= target.argRegs.length) {
-              // ARGUMENTS BEYOND THE REGISTERS come out of this frame's outgoing area, at [sp,#0]
-              // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that
-              // block. `fallbackArgcHere` never exceeds `argRegs.length`, so an unlicensed stack
-              // argument can only come from a stated width, and `declaredCall` has already refused
-              // the one stated width that could put a PAIR here; reaching this with no block means
-              // the slot model is off for another reason, and the decline names it rather than
-              // reading `r4` as if it were argument 5.
-              const off = stackArgs?.[k - target.argRegs.length];
-              if (off === undefined) {
-                throw spAsDataError();
-              }
-              usedSlotOffsets.add(off);
-              args.push(readVar(slotKey(off), bi));
-            } else if (w > 32) {
-              // A 64-BIT PARAMETER IS TWO ARGUMENT REGISTERS AND ONE VALUE, so the pair is built
-              // here rather than recovered from two 32-bit arguments later — `contracts.ts` would
-              // fire on the second reading anyway, since the structurer materialises an effectful
-              // call once per result.
-              args.push(fuseHalves(irb, readVar(`r${k}`, bi), readVar(`r${k + 1}`, bi)));
+            if (w > 32) {
+              // A 64-BIT PARAMETER IS TWO ARGUMENT WORDS AND ONE VALUE, so the pair is built here
+              // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
+              // the second reading anyway, since the structurer materialises an effectful call once
+              // per result. Its words are wherever `declaredCall` placed them.
+              args.push(fuseHalves(irb, word(k), word(k + 1)));
             } else {
-              args.push(readArg(`r${k}`, bi));
+              args.push(k < target.argRegs.length ? readArg(`r${k}`, bi) : word(k));
             }
             k += w > 32 ? 2 : 1;
           }
@@ -4715,17 +4710,16 @@ function liftOnce(
           //
           // SO THE MESSAGE IS ABOUT THE WIDTH AND NOT ABOUT A PROTOTYPE, because a supplied one
           // reaches here too: a typed list holding a spelling `declaredWidth` cannot size states
-          // no layout at all (`proto.ts` `declaredArgWidths`), and a bare COUNT states argument
+          // no layout at all (`proto.ts` `declaredCallArgs`), and a bare COUNT states argument
           // registers rather than widths. Both leave `widths` null with a `--proto` on the command
           // line, and blaming an absent prototype would be false about its own input.
           if (widths === null) {
             for (const [j, v] of args.entries()) {
               const half = halfOf.get(v);
               // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
-              // reader to a declaration that cannot help: a double leaves a soft-float helper only
-              // into another one or the return (`raise/floathelpers.ts`), and a pair built here for a
-              // callee declared to take one is refused there. What a declaration still settles is a
-              // guessed arity that read the pair and never took it.
+              // reader to the wrong declaration: a double leaves a soft-float helper only into
+              // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
+              // and a pair built here for a callee declared to take a `long long` is refused there.
               const producer = half && pairCallee.get(half.whole);
               const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
               if (half && helper && isFloatHelper(helper)) {
@@ -4733,10 +4727,10 @@ function liftOnce(
                   `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
                     `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
                     `returned, and nothing states how wide '${targetSym}'s parameters are. A double is ` +
-                    "modelled only into the runtime's arithmetic helpers and the return, so a callee that " +
-                    'takes one declines whatever its prototype says (a compare, a conversion, any other ' +
-                    'call); a callee that takes fewer arguments than its registers suggest lifts once a ' +
-                    `prototype states them (\`{"${targetSym}": {"params": [...]}}\`)`,
+                    "modelled into the runtime's arithmetic helpers, the return and a parameter a prototype " +
+                    'declares `double`, so a runtime compare or conversion declines; a callee that takes a ' +
+                    'double, or fewer arguments than its registers suggest, lifts once a prototype states ' +
+                    `them (\`{"${targetSym}": {"params": [...]}}\`)`,
                 );
               }
               if (half) {
@@ -4757,10 +4751,19 @@ function liftOnce(
             declared?.returned ?? (declared === null && !wide ? registerStructReturn(targetSym) : undefined);
           const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
           const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
+          // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
+          // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
+          // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
+          // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
+          const doubles = declared?.doubles.size ? [...declared.doubles] : undefined;
           const callOp = mkOp('call', {
             operands: args,
             results: [res],
-            attrs: { target: targetSym, ...(sret === undefined ? {} : { sret: true }) },
+            attrs: {
+              target: targetSym,
+              ...(sret === undefined ? {} : { sret: true }),
+              ...(doubles === undefined ? {} : { doubles }),
+            },
           });
           irb.ops.push(callOp);
           // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it

@@ -789,7 +789,9 @@ describe('the classes with no corpus row are alive, not dead entries', () => {
   // caps a marker at 200 characters, so a phrase further in than that is one the artifact does not
   // carry. All three reach their class inside the first 80.
   test.each([
-    "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to `llsink` outside the argument registers — its parameter 1 is 64 bits wide and takes argument words 4 and 5 of a call with 4 argu",
+    // A soft double's two words handed to a callee declaring `double`: no FPU is involved, so the
+    // gap is the pair's and not `float`'s.
+    "raise: cannot lift 'dmem': argument 1 of the call to 'g' is a `double` its callee declares, and its two words are not a double this function was handed, a runtime helper returned or a finite literal",
     "lift: cannot lift 'llpass': one half of a 64-bit value would be handed to 'llsink' — its parameter 1 is declared wider than a register, and this frontend passes each argument register as its own value r",
     "lift: cannot lift 'llpass': argument 1 of the call to 'llsink' is the low half of a 64-bit value, and nothing states how wide 'llsink's parameters are, so a pair cannot be told from two ordinary argument",
     "structure: 1 unresolvable value(s) in 'llpass' — no lowering for op 'concat'",
@@ -912,11 +914,15 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
   // row's own context declares, and that declaration now reaches the lift. A call no declaration
   // covers still declines there.
+  //
+  // `outgoing-stack-args` joins because its one row, `stkwide`, declares the `double` its staged
+  // words hold, and lifts. The licence's refusals stand, pinned by `stack-args.test.ts`.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'no-prototype-args',
+    'outgoing-stack-args',
     'pool-word-shape',
     'store-class',
     'structs',
@@ -990,7 +996,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['ctr-transfer > branch-form', 4],
-    ['outgoing-stack-args > stack-frames', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
@@ -1083,6 +1088,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
+    ['wide-call-arg', 'is a `double` its callee declares', 'packages/core/src/raise/floathelpers.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
     ['loop-shapes', 'unrecovered back-edge', 'packages/core/src/structure/structure.ts'],
@@ -1170,7 +1176,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 31],
+    ['frontend/thumb.ts', 33],
     ['structure/structure.ts', 20],
     ['frontend/mips.ts', 9],
     ['frontend/ppc.ts', 8],
@@ -1180,7 +1186,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 87;
+  const RESIDUE_TOTAL = 89;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

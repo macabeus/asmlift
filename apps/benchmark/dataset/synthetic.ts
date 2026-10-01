@@ -3374,9 +3374,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // INTEGER-LIKE (`{char a,b,c,d;}`, `{short a,b;}`), which agbcc returns in memory through a
   // one-word temp: instruction for instruction an out-parameter call. What rules that out is that
   // the temp is storage the CALLEE owns — written only by the callee, and its pointer is argument
-  // 0, always. `stkwide` is the refusing control that keeps this honest; `stkarg` is a MATCH and
-  // refuses nothing, because a call whose callee's declaration and whose staging stores agree word
-  // for word is now consumed, and every disagreement declines naming what it saw.
+  // 0, always. `stkarg` is a MATCH and refuses nothing, because a call whose callee's declaration
+  // and whose staging stores agree word for word is consumed, and every disagreement declines
+  // naming what it saw (`stack-args.test.ts`).
   //
   // STILL MISSING, and what these rows will pin next: a frame word that is neither an object, a
   // keyed slot, nor a licensed outgoing argument. The object's real extent is inferred from the
@@ -3456,26 +3456,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // declares it, on the identical `ctx` asmlift receives. It declines `stkarg` outright
   // (`Unable to find stack arg 0x0`), which is the same blocker asmlift names there.
   //
-  // `stkwide` is the DECLINING row for the other side of that licence — a declaration that does
-  // not account for every word staged. `void fived(s32, s32, s32, s32, double)` has five
-  // parameters and agbcc stages TWO words for the fifth: `ldr r4, .L3` /
-  // `ldr r5, .L3+0x4` / `str r4, [sp]` / `str r5, [sp, #0x4]`, the literal sitting in the pool as
-  // `.long 0x3ff80000, 0x0`. The row's proto is the COUNT `params: 5`, which `FnProto` reads as
-  // five argument WORDS. One declared stack word against two staged ones is the may-set
-  // disagreement, and asmlift declines: `stack pointer used as data — callee \`fived\` is declared
-  // with 5 arguments, so its outgoing stack-argument block is [sp,#0] — but [sp,#4] also reaches
-  // the call unread, so the declaration does not account for every word staged here`. `stkarg` is
-  // the ACCEPTING control for that licence and this row is the REFUSING one: without it nothing
-  // in the corpus notices an acceptance widened back to "a declared arity is enough", which is
-  // the shape that used to delete a variadic call's uncovered arguments.
+  // `stkwide` is that licence at a parameter two words wide. `void fived(s32, s32, s32, s32,
+  // double)` stages the fifth as two words — `ldr r4, .L3` / `ldr r5, .L3+0x4` / `str r4, [sp]` /
+  // `str r5, [sp, #0x4]`, the literal in the pool as `.long 0x3ff80000, 0x0`, HIGH word first
+  // (agbcc thumb.h:335 FLOAT_WORDS_BIG_ENDIAN). The proto states the `double` the row's ctx gives
+  // m2c, so the block is two words and the pair is read as the literal its words spell, `1.5`
+  // (`TargetDescription.doubleArgWords`). Read as a `long long`, the same words are `1073217536`,
+  // and that C scores a MATCH too: the callee is `void`, so the candidate never declares it, and an
+  // unprototyped call stages a long long exactly as it stages a high-word-first double. The score
+  // cannot referee the literal on this row, so `packages/core/test/double-args.test.ts` pins its
+  // spelling, and the lift compiled against the ctx is the row's own object.
   //
-  // A TYPED proto keeps it declining. `double` has no width in `FnProto` (how many general
-  // registers it takes is a target fact), so that list states no layout and the store refuses on
-  // the code alone. Spelled `long long`, both halves of the fifth parameter are in the stack block,
-  // and the Thumb frontend assembles a pair only from argument registers. Only `params: 6` lifts,
-  // and it lifts the word split m2c prints below. The asm cannot choose between the two types:
-  // agbcc stages a double's HIGH word first, so `1.5` and a `long long` `0x3ff80000` in this
-  // argument compile to byte-identical objects.
+  // The licence's refusal of a declaration that does not account for every word staged is pinned
+  // by `stack-args.test.ts` (the variadic hole) and `stackargs-fixpoint.test.ts`.
   //
   // m2c renders it with SIX arguments, the double split into the two words the ABI staged —
   // `fived(a, b, a + b, a - b, /* f64+0x0 */ 0x3FF80000, /* f64+0x4 */ 0)`, a nonmatch. So the
@@ -3489,7 +3482,31 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['multi-arg', 'double'],
     toolchains: ['agbcc'],
     ctx: 'void fived(s32 a, s32 b, s32 c, s32 d, double e); void stkwide(s32 a, s32 b);',
-    proto: { fived: { params: 5, returnsVoid: true }, stkwide: { returnsVoid: true } },
+    proto: {
+      fived: { params: ['s32', 's32', 's32', 's32', 'double'], returnsVoid: true },
+      stkwide: { returnsVoid: true },
+    },
+  },
+  // `stkwide`'s literal in the other two places agbcc puts a double argument (thumb.h:632/636): both
+  // words in r0:r1 (`dreg`), and split, the HIGH word in r3 and the low at [sp,#0] (`dsplit`). Each
+  // is its own branch of the call lowering (`frontend/thumb.ts`), and `stkwide` reaches only the
+  // outgoing-block one. The same caveat holds: the callee is `void` and undeclared in the candidate,
+  // so the score cannot tell `1.5` from the integer its words spell as a `long long`.
+  {
+    sym: 'dreg',
+    src: 'void g(double x);\nvoid dreg(void){ g(1.5); }',
+    features: ['double'],
+    toolchains: ['agbcc'],
+    ctx: 'void g(double x); void dreg(void);',
+    proto: { g: { params: ['double'], returnsVoid: true }, dreg: { returnsVoid: true } },
+  },
+  {
+    sym: 'dsplit',
+    src: 'void f4(s32 a, s32 b, s32 c, double d);\nvoid dsplit(s32 a, s32 b){ f4(a, b, 7, 1.5); }',
+    features: ['multi-arg', 'double'],
+    toolchains: ['agbcc'],
+    ctx: 'void f4(s32 a, s32 b, s32 c, double d); void dsplit(s32 a, s32 b);',
+    proto: { f4: { params: ['s32', 's32', 's32', 'double'], returnsVoid: true }, dsplit: { returnsVoid: true } },
   },
   {
     sym: 'stkaddr',

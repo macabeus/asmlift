@@ -39,6 +39,11 @@ describe('the double arithmetic helpers are the float ops', () => {
     expect(lift('dchain')).toBe('double dchain(double a0, double a1, double a2) {\n    return (a0 + a1) * a2;\n}\n');
   });
 
+  // Each argument register is read by two pairs of the same two slots, which are one parameter.
+  test('an argument passed twice', () => {
+    expect(lift('dsq')).toBe('double dsq(double a0) {\n    return a0 * a0;\n}\n');
+  });
+
   // Without `g`'s declaration its guessed arity reads the pair the helper left in r0:r1, and the
   // refusal says that a declaration is what settles it.
   test('a guessed arity that reads a double names the declaration that settles it', () => {
@@ -54,23 +59,24 @@ describe('the double arithmetic helpers are the float ops', () => {
   });
 });
 
+// `a + 1.5` stages r2=0x3ff80000, r3=0: two constant words, read high word first as the double
+// they spell — a long long's naming of that pair is a different number.
+test('a literal operand is the double its words spell', () => {
+  expect(lift('dconst')).toBe('double dconst(double a0) {\n    return a0 + 1.5;\n}\n');
+});
+
 // The fold is its own pass and its own trace stage, ahead of the 64-bit integer helpers: the stage
 // that first shows the doubles is the float one, and the 64-bit one changes nothing after it.
 test('the double parameters appear at the soft-float stage', () => {
   const { report } = decompileTraced('dadd', asm, targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
   const first = report.trace.find((s) => s.irDump?.includes('%0: f64'));
   expect(first?.id).toBe('stage:floathelpers');
-  expect(first?.title).toBe('Soft-float helper lower (bl __adddf3 → float op)');
+  expect(first?.title).toBe('Soft-float lower (bl __adddf3 → float op, a declared double, a literal)');
   const at = (id: string) => report.trace.find((s) => s.id === id)?.irDump;
   expect(at('stage:widehelpers') ?? at('stage:floathelpers')).toBe(at('stage:floathelpers'));
 });
 
 describe('what refuses', () => {
-  // `a + 1.5` stages r2=0x3ff80000, r3=0: a long long's naming of that pair is a different number.
-  test('a literal operand', () => {
-    expect(() => lift('dconst')).toThrow(/no model for the runtime helper '__adddf3'/);
-  });
-
   test('an operand loaded from memory', () => {
     expect(() => lift('dld')).toThrow(/no model for the runtime helper '__adddf3'/);
   });
@@ -84,20 +90,18 @@ describe('what refuses', () => {
     expect(() => lift('dst1')).toThrow(/no model for the runtime helper '__negdf2'/);
   });
 
-  // A declaration that the callee takes a long long builds the pair, and it is still not a double.
-  test('a result passed to an ordinary callee', () => {
+  // A declaration that the callee takes a long long builds the pair, and it is still not a double;
+  // one that it takes a double hands it the double (`double-args.test.ts`).
+  test('a result passed to an ordinary callee declared to take a long long', () => {
     expect(() => lift('dpass', { use: { params: ['s64'] } })).toThrow(/no model for the runtime helper '__adddf3'/);
-  });
-
-  // Each argument register is read by two pairs, so neither pair is the argument alone. The 64-bit
-  // integer fusion refuses the same shape (`s64 sq(s64 a){ return a * a; }`).
-  test('an argument passed twice', () => {
-    expect(() => lift('dsq')).toThrow(/no model for the runtime helper '__muldf3'/);
+    expect(lift('dpass', { use: { params: ['double'], returnsVoid: true } })).toBe(
+      'void dpass(double a0, double a1) {\n    use(a0 + a1);\n}\n',
+    );
   });
 
   // A double into a compare, a conversion or an ordinary callee is no long long, and the refusal
   // says so rather than asking for a prototype that states one: with one, the pair is built and the
-  // fold refuses it (`a result passed to an ordinary callee` above).
+  // fold refuses it (`a result passed to an ordinary callee declared to take a long long` above).
   test.each([
     ['d2i', '__fixdfsi', '__muldf3'],
     ['dgt', '__gtdf2', '__adddf3'],

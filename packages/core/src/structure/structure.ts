@@ -3757,6 +3757,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (d.opcode === 'const') {
       return { k: 'const', value: d.attrs.value as number };
     }
+    if (d.opcode === 'fconst') {
+      return { k: 'fconst', bits: d.attrs.bits as string };
+    }
     // a bitfield extract recognized over the ops (see the precompute above): the member read,
     // not the shift pair
     const bf = bitfieldSpelling.get(d);

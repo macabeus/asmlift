@@ -26,22 +26,24 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 164 distinct decline messages (the texts reached by
+// `packages/core/src` throws 166 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 87 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 89 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts       33  ARM-mode function, raw data in the code stream, a base alignment the
 //                               input does not determine, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
 //                               `bl` whose target this asm defines as a data label, a call to a
 //                               function declared to return a struct it cannot lower (its
 //                               interpolated reason), one returning it into anything but a
-//                               local, one whose parameters nothing sizes, and
+//                               local, one whose parameters nothing sizes, one whose declaration
+//                               the lifted source cannot print (a type it has no spelling for, or a
+//                               bare parameter count that states none), and
 //                               the reaching-compare throw whose reason is interpolated
 //                               (`cross-block-flags` keys on one of its reasons, so the template
 //                               with a placeholder in it matches nothing)
@@ -345,14 +347,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     //   the CALL BOUNDARY — a pair reaching a callee whose parameter widths nothing states, where
     //   both answers (the low half alone, or the two halves as two arguments) recompile to the
-    //   `bl` being lifted, so nothing downstream can referee either; and a pair the ABI splits
-    //   across the register/stack boundary, which this frontend does not assemble. The PowerPC
-    //   arm is the same gap seen from a frontend with no pair at all, and it is the class's one
-    //   inhabitant today (`synthetic:llpass:mwcc_242_81`).
-    //
-    // THE SPLIT-PAIR ARM SAYS "upper half" AND NOT "high half", and thumb.ts says why at the
-    // throw: `reloc-halves` holds `/high half/`, this list is ordered, and a classification that
-    // depends on which entry comes first is a classification nothing states.
+    //   `bl` being lifted, so nothing downstream can referee either; and the two words of a
+    //   parameter a callee declares `double` on a target with no FPU (`raise/floathelpers.ts`),
+    //   which are no double moved whole. That arm names no floating-point register and must not
+    //   read as `float`, whose subject is the FPU. The PowerPC arm is the same gap seen from a
+    //   frontend with no pair at all, and it is the class's one inhabitant today
+    //   (`synthetic:llpass:mwcc_242_81`).
     //
     //   the RETURN — a pair another block built reaching the return, and an epilogue that says the
     //   return type is 5 to 8 bytes over an r0:r1 that is no pair this lift built (both
@@ -374,7 +374,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'wide-call-arg',
     label: 'A 64-bit value the lift could not carry as one',
     pattern:
-      /(?:half|halves) of a 64-bit (?:value|pair)|return type is 5 to 8 bytes|no lowering for op 'concat'|no upper half to shift out/,
+      /(?:half|halves) of a 64-bit (?:value|pair)|is a `double` its callee declares|return type is 5 to 8 bytes|no lowering for op 'concat'|no upper half to shift out/,
   },
   {
     // THE SIBLING GAP OF `opaque-ops`, and a different capability: not an instruction nobody

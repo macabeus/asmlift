@@ -10,6 +10,7 @@
 // below the signature is this file's: declarations, statements, expressions, precedence, the
 // legalizing casts, and the recovered-struct declaration spelling (which is why that lives here
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
+import { doubleLiteral } from '../ir/float-bits';
 import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -305,6 +306,11 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return e.name;
     case 'const':
       return String(e.value);
+    // a negative literal is a prefix `-`, and parenthesizes where one would (`un` below)
+    case 'fconst': {
+      const s = doubleLiteral(e.bits);
+      return parentPrec < 2 && s.startsWith('-') ? `(${s})` : s;
+    }
     case 'addr': {
       // `&gSym` — the address of a named global or of a frame-local object. A prefix operator;
       // parenthesizes under a POSTFIX parent like the other prefix forms.

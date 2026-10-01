@@ -1,7 +1,7 @@
 // The declared call shape: a callee `params` given as a bare COUNT or as the typed parameter list
 // a header extraction produces (`["u8"]`) must BOTH drive call-argument recovery, and they are two
 // different vocabularies — the count already speaks argument REGISTERS, the typed list speaks C
-// PARAMETERS and has to be converted. `declaredArgWidths` is that conversion, and it produces the
+// PARAMETERS and has to be converted. `declaredCallArgs` is that conversion, and it produces the
 // number every frontend walks its argument registers by.
 import { describe, expect, test } from 'vitest';
 
@@ -11,7 +11,7 @@ import { decompile } from '../src/pipeline';
 import type { FnProto } from '../src/proto';
 import {
   PRELUDE_TYPEDEFS,
-  declaredArgWidths,
+  declaredCallArgs,
   declaredReturnWidth,
   declaredWidth,
   prototypesFromSymbols,
@@ -20,15 +20,18 @@ import {
   wordsOf,
 } from '../src/proto';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC, C_TYPEDEFS } from '../src/target';
+import { ARMV4T_AGBCC, C_TYPEDEFS, PPC_MWCC } from '../src/target';
 
 /** the argument registers a declaration occupies, or `undefined` for "this states no layout" — the
  *  two answers a frontend acts on differently, collapsed into one expression so a test can name
  *  which one it means. */
-const argRegs = (p: Parameters<typeof declaredArgWidths>[0]): number | undefined => {
-  const widths = declaredArgWidths(p);
+const argRegs = (p: FnProto | undefined): number | undefined => {
+  const widths = layout(p);
   return widths === undefined ? undefined : wordsOf(widths);
 };
+
+/** the widths a declaration lays out on agbcc */
+const layout = (p: FnProto | undefined) => declaredCallArgs(p, ARMV4T_AGBCC)?.widths;
 
 // WHAT ASMLIFT MAY PRINT is a SMALLER set than what it can size, and the difference is a candidate
 // that does not compile. Measured with the project agbcc, prelude included: `Fixed64 DoThing(void);`
@@ -150,11 +153,11 @@ describe('a void return, whichever key states it', () => {
 // nothing in the assembly separates those two readings.
 describe('declaredReturnWidth', () => {
   test('a spelled return is read through the same widths a parameter is', () => {
-    expect(declaredReturnWidth({ params: [], returns: 'long long' })).toBe(64);
-    expect(declaredReturnWidth({ params: [], returns: 's64' })).toBe(64);
-    expect(declaredReturnWidth({ params: [], returns: 'int' })).toBe(32);
-    expect(declaredReturnWidth({ params: [], returns: 'void *' })).toBe(32);
-    expect(declaredReturnWidth({ params: ['u8', 's32'], returns: 'u8' })).toBe(8);
+    expect(declaredReturnWidth({ params: [], returns: 'long long' }, ARMV4T_AGBCC)).toBe(64);
+    expect(declaredReturnWidth({ params: [], returns: 's64' }, ARMV4T_AGBCC)).toBe(64);
+    expect(declaredReturnWidth({ params: [], returns: 'int' }, ARMV4T_AGBCC)).toBe(32);
+    expect(declaredReturnWidth({ params: [], returns: 'void *' }, ARMV4T_AGBCC)).toBe(32);
+    expect(declaredReturnWidth({ params: ['u8', 's32'], returns: 'u8' }, ARMV4T_AGBCC)).toBe(8);
   });
 
   // SILENCE IS SILENCE, and the ways to be silent must not be several answers. A frontend asks
@@ -167,7 +170,7 @@ describe('declaredReturnWidth', () => {
     ['a struct', { params: [], returns: 'struct Vec' }],
     ['void — an absence of a value, not a width of zero', { params: [], returns: 'void' }],
   ])('%s answers undefined', (_label, proto) => {
-    expect(declaredReturnWidth(proto)).toBeUndefined();
+    expect(declaredReturnWidth(proto, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // A WIDTH THIS READS AND CANNOT GET DECLARED IS NOT A WIDTH IT MAY REPORT, because the two are
@@ -182,14 +185,17 @@ describe('declaredReturnWidth', () => {
     ['a return this can size but not print', { params: [], returns: 'int64_t' }],
   ])('%s is silence even though the width is readable', (_label, proto) => {
     expect(declaredWidth(String(proto.returns))).toBe(64);
-    expect(declaredReturnWidth(proto)).toBeUndefined();
+    expect(declaredReturnWidth(proto, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // …and the zero-argument COUNT form is the one count that CAN be printed: `params: 0` and
   // `params: []` are the same `(void)`.
   test('a zero-argument count is the same declaration as an empty list', () => {
-    expect(declaredReturnWidth({ params: 0, returns: 'long long' })).toBe(64);
-    expect(spellableProto({ params: 0, returns: 'long long' })).toEqual({ params: [], returns: 'long long' });
+    expect(declaredReturnWidth({ params: 0, returns: 'long long' }, ARMV4T_AGBCC)).toBe(64);
+    expect(spellableProto({ params: 0, returns: 'long long' }, ARMV4T_AGBCC)).toEqual({
+      params: [],
+      returns: 'long long',
+    });
   });
 
   // A struct return prints only as the struct a lifted call fills (`returned`, the IR type the lift
@@ -197,29 +203,29 @@ describe('declaredReturnWidth', () => {
   test('a struct return prints as the struct its call fills, or not at all', () => {
     const p = { params: ['s32'], returns: 'Blob', returnLayout: { kind: 'struct' as const } };
     const returned = T.struct('Blob', [{ off: 0, type: T.array(T.u(32), 16), name: 'w' }], 64);
-    expect(spellableProto(p, returned)).toEqual({ params: ['s32'], returns: 'struct Blob' });
-    expect(spellableProto(p)).toBeUndefined();
-    expect(spellableProto({ params: [], returns: 'struct S' })).toBeUndefined();
-    expect(declaredReturnWidth(p)).toBeUndefined();
+    expect(spellableProto(p, ARMV4T_AGBCC, returned)).toEqual({ params: ['s32'], returns: 'struct Blob' });
+    expect(spellableProto(p, ARMV4T_AGBCC)).toBeUndefined();
+    expect(spellableProto({ params: [], returns: 'struct S' }, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredReturnWidth(p, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   // `returnsVoid` IS NOT CONSULTED. It is the other return key and it answers a different
   // question; reading it here would have to invent a width for a function that returns no value.
   test('returnsVoid is not a width', () => {
-    expect(declaredReturnWidth({ params: [], returnsVoid: true })).toBeUndefined();
-    expect(declaredReturnWidth({ params: [], returnsVoid: false })).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returnsVoid: true }, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredReturnWidth({ params: [], returnsVoid: false }, ARMV4T_AGBCC)).toBeUndefined();
   });
 
-  // THE SAME SAFE-READER CONTRACT `declaredArgWidths` HAS: a frontend indexes `prototypes` by a callee's
+  // THE SAME SAFE-READER CONTRACT `declaredCallArgs` HAS: a frontend indexes `prototypes` by a callee's
   // name, so a callee named `toString` reads a `Function` off `Object.prototype`.
   test('an entry that is not an FnProto answers as an undeclared callee does', () => {
     const table: Record<string, unknown> = {};
-    expect(declaredReturnWidth(table['toString'] as never)).toBeUndefined();
-    expect(declaredReturnWidth(null as never)).toBeUndefined();
+    expect(declaredReturnWidth(table['toString'] as never, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredReturnWidth(null as never, ARMV4T_AGBCC)).toBeUndefined();
   });
 });
 
-describe('declaredArgWidths', () => {
+describe('declaredCallArgs', () => {
   test('normalizes the count form, the typed-list form, and absence', () => {
     expect(argRegs({ params: 2 })).toBe(2);
     expect(argRegs({ params: ['u8'] })).toBe(1);
@@ -244,7 +250,7 @@ describe('declaredArgWidths', () => {
     expect(argRegs({ params: ['s32', 'long long'] })).toBe(3);
     expect(argRegs({ params: ['long long'] })).toBe(2);
     expect(argRegs({ params: ['long long', 'unsigned long long'] })).toBe(4);
-    expect(declaredArgWidths({ params: ['s32', 'long long'] })).toEqual([32, 64]);
+    expect(layout({ params: ['s32', 'long long'] })).toEqual([32, 64]);
   });
 
   // ONE SPELLING NOTHING CAN SIZE AND THE WHOLE LIST STATES NO LAYOUT. A parameter of unknown
@@ -260,19 +266,19 @@ describe('declaredArgWidths', () => {
   // next argument register. Neither error is visible from here, which is why the witness is gone
   // rather than repaired.
   test('a spelling it cannot size makes the whole list state nothing', () => {
-    expect(declaredArgWidths({ params: ['s32', 'Direction'] })).toBeUndefined();
-    expect(declaredArgWidths({ params: ['TaskFunc'] })).toBeUndefined();
-    expect(declaredArgWidths({ params: ['void *', 'struct Foo'] })).toBeUndefined();
+    expect(layout({ params: ['s32', 'Direction'] })).toBeUndefined();
+    expect(layout({ params: ['TaskFunc'] })).toBeUndefined();
+    expect(layout({ params: ['void *', 'struct Foo'] })).toBeUndefined();
     // …and the COUNT form can never abstain: it already speaks argument registers, so it is the
     // way past a header asmlift cannot size.
-    expect(declaredArgWidths({ params: 3 })).toEqual([32, 32, 32]);
+    expect(layout({ params: 3 })).toEqual([32, 32, 32]);
   });
 
   // A READABLE LIST IS AUTHORITY AND NOTHING ELSE IS CONSULTED FOR IT: this takes no witness, no
   // target and no SSA, so there is nothing an inference could override it with.
   test('a readable list is a pure reading of the declaration', () => {
-    expect(declaredArgWidths({ params: ['s32', 'long long'] })).toEqual([32, 64]);
-    expect(declaredArgWidths({ params: ['void *', 'const void *', 'size_t'] })).toEqual([32, 32, 32]);
+    expect(layout({ params: ['s32', 'long long'] })).toEqual([32, 64]);
+    expect(layout({ params: ['void *', 'const void *', 'size_t'] })).toEqual([32, 32, 32]);
   });
 });
 
@@ -313,7 +319,7 @@ describe('declaredWidth', () => {
   // many argument registers one occupies is a TARGET fact: `target.ts` sets `hwFloat` on three of
   // its four descriptions, and on a PowerPC EABI with an FPU a `double` argument travels in f1..f8
   // and occupies no general argument register at all. "One register" and "a pair" are both wrong
-  // there, and `declaredArgWidths` has only those two readings to give.
+  // there, and a width has only those two readings to give.
   test('the floating types are absences, `long double` among them', () => {
     expect(['float', 'const float', 'double', 'long double'].map(declaredWidth)).toEqual([
       undefined,
@@ -321,8 +327,9 @@ describe('declaredWidth', () => {
       undefined,
       undefined,
     ]);
-    // …and the absence spreads to the layout, so nothing downstream reads a GPR count off one.
-    expect(declaredArgWidths({ params: ['int', 'double'] })).toBeUndefined();
+    // …and on an FPU target the absence spreads to the layout, so nothing downstream reads a GPR
+    // count off one.
+    expect(declaredCallArgs({ params: ['int', 'double'] }, PPC_MWCC)).toBeUndefined();
   });
 
   // FIXED BY THE STANDARD, NOT BY A PROJECT — the same reason `STANDARD_SIGNATURES` exists. These
@@ -334,6 +341,45 @@ describe('declaredWidth', () => {
     expect(['size_t', 'ssize_t', 'ptrdiff_t', 'intptr_t', 'uintptr_t'].map(declaredWidth)).toEqual([
       32, 32, 32, 32, 32,
     ]);
+  });
+});
+
+// A `double`'s general argument words are a TARGET fact (`TargetDescription.doubleArgWords`), so
+// the reader that lays one out takes the target's answer and `declaredWidth` keeps its absence.
+describe('declaredCallArgs on a double', () => {
+  const soft = ARMV4T_AGBCC;
+
+  test('on agbcc a double is two words, marked, with no alignment', () => {
+    const five = declaredCallArgs({ params: ['s32', 's32', 's32', 's32', 'double'] }, soft)!;
+    expect(five.widths).toEqual([32, 32, 32, 32, 64]);
+    expect(wordsOf(five.widths)).toBe(6);
+    expect([...five.doubles]).toEqual([4]);
+    // qualifiers aside, and a `long long` beside it is 64 bits and no double
+    const mixed = declaredCallArgs({ params: ['s32', 'const double', 'long long'] }, soft)!;
+    expect(mixed.widths).toEqual([32, 64, 64]);
+    expect([...mixed.doubles]).toEqual([1]);
+  });
+
+  // What the frontend lays out is what a candidate may declare, so the printer asks the same reader.
+  test('a double the target lays out is printed, and one it does not is not', () => {
+    const g = { params: ['s32', 'double'], returns: 'int' };
+    expect(spellableProto(g, soft)).toEqual({ params: ['s32', 'double'], returns: 'int' });
+    expect(spellableProto(g, PPC_MWCC)).toBeUndefined();
+    expect(declaredReturnWidth({ ...g, returns: 'long long' }, soft)).toBe(64);
+    expect(declaredReturnWidth({ ...g, returns: 'long long' }, PPC_MWCC)).toBeUndefined();
+  });
+
+  test('a target whose doubles take no general word abstains', () => {
+    expect(declaredCallArgs({ params: ['s32', 'double'] }, PPC_MWCC)).toBeUndefined();
+    expect(declaredCallArgs({ params: ['s32', 's32'] }, PPC_MWCC)).toEqual({ widths: [32, 32], doubles: new Set() });
+  });
+
+  // An undeclared callee is handed a `float` promoted to a `double`, and the candidate declares no
+  // floating parameter, so one word would be the wrong layout for the C that is compiled.
+  test('a float and a long double state no layout, and a count is that many words', () => {
+    expect(declaredCallArgs({ params: ['s32', 'float'] }, soft)).toBeUndefined();
+    expect(declaredCallArgs({ params: ['long double'] }, soft)).toBeUndefined();
+    expect(declaredCallArgs({ params: 5 }, soft)).toEqual({ widths: [32, 32, 32, 32, 32], doubles: new Set() });
   });
 });
 

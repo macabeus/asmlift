@@ -45,8 +45,9 @@
 //     `aggregateReturn`, `largestAlignment`, `enumBytes` and `bitfieldPacking` (aggregate.ts, for
 //     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
-//     (raise/globalshape.ts, run on the LIFTED fn) and `eightByteReturnScratch`
-//     (frontend/thumb.ts, which reads the epilogue). The field names are a SUPERSET of
+//     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
+//     (frontend/thumb.ts, which reads the epilogue) and `roundTripsDoubleLiterals`
+//     (raise/floathelpers.ts). The field names are a SUPERSET of
 //     StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization decisions) are
@@ -161,6 +162,25 @@ export interface TargetDescription {
    *     slot — `float g(int *p, float b)` and `float g(float b, int *p)` are one object, `r3` and
    *     `f1` either way. */
   fpu?: { argRegs: readonly string[]; returnReg: string; slots: 'leading' | 'separate' };
+  /** A `double` crosses a call in GENERAL argument words: the two a 64-bit argument takes wherever
+   *  this target's call placement puts them, HIGH word first, so the sign and exponent are in the
+   *  first word. Its readers are `proto.ts` `declaredCallArgs` (the call's layout) and
+   *  `raise/floathelpers.ts` (a literal's two words). ABSENT ⇒ a declared `double` parameter states
+   *  no layout and the call takes the arg-register guess.
+   *
+   *  IT IS AN ABI FACT BESIDE `fpu`, NOT INSTEAD OF IT. Where the words go is the frontend's 64-bit
+   *  placement, which a `long long` shares; this states only that a double takes them, and their
+   *  order, which a `long long` need not share. agbcc: FLOAT_WORDS_BIG_ENDIAN 1
+   *  (gcc/config/arm/thumb.h:335) on a little-endian target, so the pair is not a `long long`'s
+   *  naming of the same bits; FUNCTION_ARG (:632) places by word offset, FUNCTION_ARG_PARTIAL_NREGS
+   *  (:636) splits a pair across r3 and the stack, FUNCTION_ARG_ADVANCE (:647) rounds to a word and
+   *  PARM_BOUNDARY is 32 (:354).
+   *
+   *  o32 MIPS has an FPU and a double after an integer argument still takes two general words,
+   *  high first, at an even word as its `long long` does (IDO 7.1). The MIPS targets do not state it
+   *  because no MIPS frontend lays out a declared call. PowerPC EABI passes a double in a float
+   *  register that takes no general word (`fpu.slots: 'separate'`), so it has none to state. */
+  doubleArgWords?: 'high-first';
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
@@ -426,8 +446,8 @@ export interface TargetDescription {
     // reaching a call unread declines.
     //
     // Set on agbcc, where the layout was read off `gcc/config/arm/thumb.h` and then measured — the
-    // corpus's `stkarg` (accepting) and `stkwide` (refusing) rows and kleod's `sub_0804C300` all
-    // stage their words at [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
+    // corpus's `stkarg` and `stkwide` rows and kleod's `sub_0804C300` all stage their words at
+    // [sp,#0] upward inside the prologue's own reservation. NOT set anywhere
     // else: a push-based caller would stage nothing inside the frame, and `docs/level-tower.md`'s
     // rule for an unmeasured compiler behavior is to claim nothing. No other frontend calls the
     // analysis today, so a second armv4t compiler must state this premise rather than inherit it.
@@ -694,6 +714,14 @@ export interface TargetDescription {
     // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
     // compute on a float at all.
     contractsFloatProducts?: boolean;
+    // Does this compiler read a double literal's shortest round-trip decimal (`ir/float-bits.ts`
+    // `doubleLiteral`) back as the same double? That is how an `fconst` is printed, so its
+    // producers run only where this is true. agbcc does: c-lex.c:1308 hands the token to
+    // REAL_VALUE_ATOF at DFmode, which is real.c:461 `ereal_atof` → `asctoe53` (:3512) →
+    // `asctoeg(s, y, 53)` (:3533), a conversion in extended precision rounded once to 53 bits.
+    //
+    // ABSENT ⇒ unmeasured, and a literal declines.
+    roundTripsDoubleLiterals?: boolean;
     // How the compiler lays out a FUNCTION-SCOPE STATIC: the least alignment of an array, the
     // alignment of a string-literal initializer, and whether a zero scalar keeps its `.data`. The
     // bytes of a static do not say how the source declared it; these, with the alignment and
@@ -711,6 +739,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
   compiler: 'agbcc',
   argRegs: ['r0', 'r1', 'r2', 'r3'],
   returnReg: 'r0',
+  doubleArgWords: 'high-first',
   // AAPCS passes four in r0-r3, so nothing above them can be an argument. The ATPCS aliases are
   // the spellings this ISA's asm actually uses: censused over the vendored ARM asm, `sb`/`sl`/`ip`/
   // `fp` all occur as operands and no `v<n>`/`a<n>` form does. `sp`, `lr` and `pc` are deliberately
@@ -814,6 +843,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     aggregateReturn: 'apcs',
     enumBytes: 4,
     bitfieldPacking: 'contiguous',
+    roundTripsDoubleLiterals: true,
     // agbcc 2.9 (gcc/varasm.c `assemble_variable`, gcc/thumb.h): an array takes its element's
     // alignment (no DATA_ALIGNMENT); a declaration initialized by a STRING_CST is word-aligned —
     // CONSTANT_ALIGNMENT (thumb.h:361) over DECL_INITIAL (varasm.c:1214-1216), so
