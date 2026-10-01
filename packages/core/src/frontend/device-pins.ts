@@ -183,7 +183,7 @@ export function pinDeviceAccesses(
     return;
   }
   const addresses = literalAddresses(irBlocks, symbols);
-  const { defOf, literalAddrOf } = addresses;
+  const { defOf, constOf, literalAddrOf } = addresses;
   const { stores } = DEVICE_PIN_POLICIES[policy];
   const reach = (target.capabilities.readSourceControl?.offset ?? 2) + 2;
   const window = target.capabilities.deviceRegisters;
@@ -205,6 +205,11 @@ export function pinDeviceAccesses(
   // The literal a pointer is a device register plus a runtime index from. `'cycle'` is a phi
   // already on the walk — a pointer stepped around a loop — which contradicts nothing, so a phi
   // is placed by the incoming values that are not its own back edge.
+  //
+  // Of an `add`, a constant beside a pointer this places — a register, or that phi — is the
+  // pointer's displacement, and the pointer places the sum: `d += 3` on a `vu32 *` is the phi plus
+  // 12, and 12 is no register. Beside anything else the constant is the register and the other
+  // operand its runtime index, `(vu32 *)(0x40000B0 + ch * 12)`.
   const placed = (v: Value, onWalk: Set<Value>, depth = 0): number | 'cycle' | undefined => {
     const lit = literalAddrOf(v);
     if (lit !== undefined || depth > 8) {
@@ -213,6 +218,13 @@ export function pinDeviceAccesses(
     const d = defOf.get(v);
     if (d?.opcode === 'add' && d.operands.length === 2) {
       const [x, y] = d.operands.map((o) => placed(o, onWalk, depth + 1));
+      const [cx, cy] = d.operands.map(constOf);
+      if (cy !== undefined && x !== undefined) {
+        return x;
+      }
+      if (cx !== undefined && y !== undefined) {
+        return y;
+      }
       return typeof x === 'number' ? x : typeof y === 'number' ? y : (x ?? y);
     }
     const ins = d === undefined ? incoming.get(v) : undefined;

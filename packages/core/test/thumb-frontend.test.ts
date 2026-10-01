@@ -3334,6 +3334,24 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
   });
 
+  // …and a pointer stepped through the channels by a constant is placed by the register it starts
+  // at, not by its step. Verbatim agbcc, a fill from a frame temporary and then `vu32 *d = (vu32
+  // *)0x40000B0; for (i = 0; i < 4; i++) { d[2] = 0; d[2]; d += 3; }`: the loop's pointer is a phi
+  // of 0x40000B0 and itself plus 12, and plain, agbcc forwards the stored 0 to the read.
+  test('a device pointer stepped around a loop is placed by where it starts', () => {
+    const stepped =
+      'stopAll:\n\tadd\tsp, sp, #-0x4\n\tmov\tr2, sp\n\tmov\tr1, #0x0\n\tstrh\tr1, [r2]\n' +
+      '\tldr\tr1, .L8\n\tstr\tr2, [r1]\n\tadd\tr1, r1, #0x4\n\tstr\tr0, [r1]\n' +
+      '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L8+0x4\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n' +
+      '\tsub\tr1, r1, #0x2c\n\tmov\tr3, #0x0\n\tmov\tr2, #0x3\n.L6:\n\tstr\tr3, [r1, #0x8]\n' +
+      '\tldr\tr0, [r1, #0x8]\n\tadd\tr1, r1, #0xc\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n' +
+      '\tbge\t.L6\t@cond_branch\n\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n' +
+      '\t.word\t0x40000d4\n\t.word\t-0x7efffff0\n';
+    const src = decompile('stopAll', stepped, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).toContain('        v0 = ((volatile s32 *)v1)[2];\n');
+  });
+
   // A device LOAD too: plain, `while (REG_VCOUNT != 160);` is loop-invariant to agbcc, which hoists
   // the `ldrh` and spins on a register copy forever (compiled).
   test('a function kept as one object keeps a device poll volatile', () => {
