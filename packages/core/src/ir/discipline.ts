@@ -39,6 +39,11 @@
 //   structure/redundant-test.ts `testRereadsOnly` — DELIBERATE: a qualified read renders with its
 //   block, once on each path that runs the block, or declines upstream.
 //     raise/divpow2.ts's bias arm — GAP: the arm is deleted, and a dead qualified read in it with it.
+//   And two accesses the deciders leave unplaced, where a placement would change an answer — GAP:
+//     a device store a pinned read of the same cell re-reads in a loop, under the per-object policy
+//       (frontend/device-pins.ts's header argues it);
+//     a read of a map-declared volatile object through a base that reaches no name, such as a
+//       pointer walked along the object in a loop (structure/declared-volatile.ts).
 import type { Op } from './core';
 import { MEM_BASE_OPS, type OpSig, opSig } from './opcodes';
 
@@ -61,8 +66,8 @@ const PLACEMENT_ANSWERS: Readonly<Record<Placement, PlacementAnswers>> = {
   // The registry's `effects` flag gives a call the first two answers on its own.
   call: { keptWhenDead: true, speculationUnsafe: true, counted: true },
   // The value the helper computes is pure: nothing observes a divide nobody reads, a fold that
-  // moves one under a guard drops the stamp (`forgetHelperPlacement`), and the compiler computes
-  // one value spelled twice in a block once.
+  // moves one under a guard drops the stamp (`forgetHelperPlacement`), and agbcc computes one
+  // spelled twice once (`a / n + a / n` is one `bl __divsi3`).
   helper: { keptWhenDead: false, speculationUnsafe: false, counted: false },
   // The access is what is observable, not the value it yields: its spelling is qualified, through
   // a cast for `device` and through the object's declaration for `declared`.

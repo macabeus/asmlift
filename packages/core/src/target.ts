@@ -29,7 +29,9 @@
 //     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions), and the
 //     device pin (frontend/device-pins.ts), which spells every access in the window `volatile`
 //     in a function the frame-object audit keeps as one object, and in one it accepts object by
-//     object every device read and the device stores a later store in their block overwrites.
+//     object every device read and the device stores a later store in their block overwrites —
+//     under either policy save a read the compiler could not have made of a `volatile`
+//     (`volatileReadsExtendInRegister`).
 //     That last reader makes the answer a correctness one — agbcc deletes or hoists a plain
 //     device access the machine made — so it may be approximate in ONE direction only: the
 //     window must cover every register a source reaches, and covering more costs a spelling,
@@ -264,7 +266,7 @@ export interface TargetDescription {
     // the same SPELLING question — "would a source have written `volatile` here" — and the file
     // header's ledger names them and what each does with the answer. All but one leave the
     // decision to the differ: which cells a source qualified is not derivable from the asm, so
-    // both spellings are enumerated and the differ referees. The frame-object pin decides, because
+    // both spellings are enumerated and the differ referees. The device pin decides, because
     // there the plain spelling recompiles to a different program; that is why the window has to
     // cover every register. ABSENT ⇒ the variation declines everywhere and the tie-break
     // has no preference, which is the neutral direction — outside a declared window the qualifier

@@ -626,7 +626,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
   // raise/shortcircuit.ts never lifts one out of the arm it guards and a genuinely short-circuited
   // effect never reaches a connective here. A memory read is exempt there — C's own short circuit
   // re-guards it at the new point — and stays exempt here for the same reason, the reads for which
-  // re-guarding is not merely a spelling — those of an object the map declares volatile — having
+  // re-guarding is not merely a spelling — the qualified ones (ir/discipline.ts `counted`) — having
   // declined before any loop is looked at (structure.ts, `volatileGuardedRead`).
   //
   // NO SPINE CONDITION, unlike the gates that read the same `Reach`: those ask which LOOP EDGE a
