@@ -238,3 +238,90 @@ test('a lift carrying a region no path reaches declines through the pipeline', (
   const prototypes = { e3: { params: 1 }, f: { params: 0 }, g: { params: 1 }, h: { params: 1, returnsVoid: true } };
   expect(() => decompile('e3', MWCC_DEAD_TAIL, PPC_MWCC, { prototypes })).toThrow(/no path reaches/);
 });
+
+// A memory access the lift pinned (`volatile`, the `device` placement) is an execution the way a
+// call is: the qualified spelling makes the recompile perform it once per render.
+describe('assertEffectsPreserved — a pinned device access', () => {
+  const REG = 0x4000006;
+  /** an IR fn whose entry block makes one pinned `load` of each address in `reads` (null: through a
+   *  runtime-indexed base), and one plain load of each in `plain` */
+  const irReading = (reads: (number | null)[], plain: number[] = []): Fn => {
+    const ops = [];
+    const load = (addr: number | null, volatile: boolean) => {
+      const base = mkValue(T.ptr(T.u(16)));
+      if (addr === null) {
+        const idx = mkValue(T.s(32));
+        ops.push(mkOp('add', { operands: [mkValue(T.ptr(T.u(16))), idx], results: [base] }));
+      } else {
+        ops.push(mkOp('const', { results: [base], attrs: { value: addr } }));
+      }
+      ops.push(
+        mkOp('load', {
+          operands: [base],
+          results: [mkValue(T.u(16))],
+          attrs: { off: 0, width: 2, signed: false, ...(volatile ? { volatile: true } : {}) },
+        }),
+      );
+    };
+    reads.forEach((a) => load(a, true));
+    plain.forEach((a) => load(a, false));
+    ops.push(mkOp('ret', {}));
+    return {
+      name: 'F',
+      blocks: [{ params: [], ops }],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+      localObjects: undefined,
+    };
+  };
+  const at = (addr: Expr, volatile: boolean): Expr => ({
+    k: 'index',
+    base: { k: 'cast', to: T.ptr(T.u(16)), e: addr, ...(volatile ? { volatile: true as const } : {}) },
+    idx: { k: 'const', value: 0 },
+    width: 2,
+    signed: false,
+  });
+  const read = (addr: number, volatile = true): Stmt => ({
+    k: 'exprstmt',
+    value: at({ k: 'const', value: addr }, volatile),
+  });
+  const readThrough = (base: string): Stmt => ({ k: 'exprstmt', value: at({ k: 'var', name: base }, true) });
+  const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+
+  test('one pinned read rendered twice in sequence fails', () => {
+    expect(() => checkReads(irReading([REG]), [read(REG), read(REG)])).toThrow(
+      /emitted 2 accesses to the device register at 0x4000006 on one path/,
+    );
+  });
+
+  test('one pinned read rendered once in each of two exclusive arms passes', () => {
+    const arms: Stmt = { k: 'if', cond: { k: 'var', name: 'c' }, then: [read(REG)], else: [read(REG)] };
+    expect(() => checkReads(irReading([REG]), [arms])).not.toThrow();
+  });
+
+  test('two pinned reads of one register license two renders', () => {
+    expect(() => checkReads(irReading([REG, REG]), [read(REG), read(REG)])).not.toThrow();
+  });
+
+  test('a pinned read with no qualified render fails as dropped', () => {
+    expect(() => checkReads(irReading([REG]), [read(REG, false)])).toThrow(
+      /dropped the access to the device register at 0x4000006/,
+    );
+  });
+
+  test('a plain read is not counted, rendered however often', () => {
+    expect(() => checkReads(irReading([], [REG]), [read(REG, false), read(REG, false)])).not.toThrow();
+  });
+
+  test('a render the contract cannot place may stand for a read at a known address', () => {
+    expect(() => checkReads(irReading([REG]), [readThrough('p')])).not.toThrow();
+  });
+
+  test('a read at no constant address licenses one render on a path, wherever it lands', () => {
+    expect(() => checkReads(irReading([null]), [readThrough('p')])).not.toThrow();
+    expect(() => checkReads(irReading([null]), [readThrough('p'), readThrough('p')])).toThrow(
+      /emitted 2 accesses to device registers on one path in 'F', where the asm makes 1/,
+    );
+  });
+});
