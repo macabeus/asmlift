@@ -9,8 +9,8 @@
 #     skips, and a skip is reported as skipped, not failed.
 #   - it exits 1 on a GREEN run: a worker that holds its thread in synchronous work past vitest's
 #     60 s worker↔main RPC deadline ends the run `Errors  1 error` (`Timeout calling
-#     "onTaskUpdate"`) with every test passed. Load stretches the root suite's longest single tests
-#     past that deadline at any worker count; fewer workers make it rarer.
+#     "onTaskUpdate"`) with every test passed. vitest.worker-yield.ts bounds that hold to one test's
+#     own synchronous span; a test whose span alone passes the deadline still does it.
 #
 # So this reads the summary: `Test Files  N passed (M)` with N == M and no `failed`, `skipped` or
 # `todo` there or on the `Tests` line — a shell without the toolchain env skips single tests, not

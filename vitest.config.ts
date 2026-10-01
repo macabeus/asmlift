@@ -46,6 +46,7 @@ export default defineConfig({
       ASMLIFT_CANDCACHE_DIR: VITEST_CANDCACHE_DIR,
     },
     globalSetup: ['./vitest.candcache-store.ts'],
+    setupFiles: ['./vitest.worker-yield.ts'],
     include: [
       'packages/core/test/**/*.test.ts',
       'packages/cli/test/offline/**/*.test.ts',

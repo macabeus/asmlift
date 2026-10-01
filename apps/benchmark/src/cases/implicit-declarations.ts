@@ -4,6 +4,9 @@
 // The project's own unit declares its callees (in a header, or earlier in the same file), so a
 // vendored TU that does not is not the unit the game was built from.
 import { spawnSync } from 'node:child_process';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { CC } from '../config';
 
@@ -24,46 +27,38 @@ const PROBE_TIMEOUT_MS = 120_000;
 export function undeclaredCallees(tu: string, probe: Probe = {}): string[] {
   const cc = probe.cc ?? CC;
   const timeout = probe.timeoutMs ?? PROBE_TIMEOUT_MS;
-  const r = spawnSync(
-    cc,
-    ['-fsyntax-only', '-std=gnu89', '-Wno-everything', '-Wimplicit-function-declaration', '-x', 'c', '-'],
-    {
-      input: tu,
-      encoding: 'utf8',
-      env: { ...process.env, LC_ALL: 'C' },
-      maxBuffer: 64 * 1024 * 1024,
-      // BOUNDED, because an unbounded syntax probe does not fail — it HANGS. `spawnSync` waits on
-      // the stdio PIPES, not merely on the child, so a compiler that exits promptly still blocks
-      // this call for as long as anything it forked holds stderr open. That is the clang
-      // driver/`-cc1` shape: measured, a probe whose child exited instantly while a forked process
-      // kept the pipe never returned at all, and the same probe with this deadline returns in
-      // 2.0 s. One wedged probe held a whole vitest run for two and a half hours while the suite
-      // reported nothing, so the gate it was meant to be did not run.
-      //
-      // The default SIGTERM, NOT SIGKILL. Measured both ways against real clang: `-cc1` survives
-      // either signal (4 runs, 1 orphan each), so SIGKILL buys nothing there — while against a
-      // driver that traps SIGTERM to tear its child down, SIGTERM reaped the grandchild and
-      // SIGKILL left it running. SIGKILL is strictly worse on the only shape where the signal
-      // makes a difference.
-      timeout,
-    },
-  );
-  const read = (): string[] => {
-    const names = [...r.stderr.matchAll(/function '([^']+)'.*\[-Wimplicit-function-declaration\]/g)].map((m) => m[1]);
-    return [...new Set(names)].sort();
-  };
+  // The diagnostics go to a FILE, not a pipe. `spawnSync` returns once the child has exited AND
+  // every pipe it was handed is closed, and the clang driver forks a `-cc1` that can keep stderr
+  // open after the driver exits — so a piped probe waits on that process, not on the compiler,
+  // and holds the calling thread with it. A file has no reader to wait for.
+  const dir = mkdtempSync(join(tmpdir(), 'asmlift-implicit-'));
+  const errPath = join(dir, 'stderr');
+  const errFd = openSync(errPath, 'w');
+  let r;
+  let stderr: string;
+  try {
+    r = spawnSync(
+      cc,
+      ['-fsyntax-only', '-std=gnu89', '-Wno-everything', '-Wimplicit-function-declaration', '-x', 'c', '-'],
+      {
+        input: tu,
+        stdio: ['pipe', 'ignore', errFd],
+        env: { ...process.env, LC_ALL: 'C' },
+        // BOUNDED, because a wedged compiler does not fail — it hangs, and the gate never reports.
+        // The default SIGTERM, not SIGKILL: against a driver that traps SIGTERM to tear its child
+        // down, SIGTERM reaps the `-cc1` and SIGKILL leaves it running.
+        timeout,
+      },
+    );
+  } finally {
+    closeSync(errFd);
+    stderr = readFileSync(errPath, 'utf8');
+    rmSync(dir, { recursive: true, force: true });
+  }
   if (r.error) {
-    // A DEADLINE IS NOT ALWAYS A MISSING ANSWER. What `spawnSync` waits on is the pipes, so a
-    // compiler that answered and exited 0 still trips the timeout if anything it forked is holding
-    // stderr — and the diagnostics are already in hand. Read them rather than failing a run over a
-    // process that was never the point.
-    if ((r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT' && r.status === 0) {
-      return read();
-    }
     throw new Error(
       (r.error as NodeJS.ErrnoException).code === 'ETIMEDOUT'
-        ? `${cc} did not finish within ${timeout / 1000}s on a ${tu.length}-byte unit and was killed — ` +
-            `either the compiler is wedged, or something it forked is still holding its output open`
+        ? `${cc} did not finish within ${timeout / 1000}s on a ${tu.length}-byte unit and was killed`
         : `${cc} could not run (set ASMLIFT_CC to a gcc or clang): ${r.error.message}`,
     );
   }
@@ -74,8 +69,9 @@ export function undeclaredCallees(tu: string, probe: Probe = {}): string[] {
   if (r.status !== 0) {
     throw new Error(
       `${cc} rejected the unit (exit ${r.status}) instead of syntax-checking it, so no implicit ` +
-        `declaration could be found — the answer would have been a vacuous pass:\n${r.stderr.trim().slice(0, 2000)}`,
+        `declaration could be found — the answer would have been a vacuous pass:\n${stderr.trim().slice(0, 2000)}`,
     );
   }
-  return read();
+  const names = [...stderr.matchAll(/function '([^']+)'.*\[-Wimplicit-function-declaration\]/g)].map((m) => m[1]);
+  return [...new Set(names)].sort();
 }
