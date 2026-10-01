@@ -36,11 +36,14 @@
 //   structure/redundant-test.ts `testRereadsOnly` — DELIBERATE: a qualified read renders with its
 //   block, once on each path that runs the block, or declines upstream.
 //     raise/divpow2.ts's bias arm — GAP: the arm is deleted, and a dead qualified read in it with it.
-//   And two accesses the deciders leave unplaced, where a placement would change an answer — GAP:
+//   And three accesses the deciders leave unplaced, where a placement would change an answer — GAP:
 //     a device store a pinned read of the same cell re-reads in a loop, under the per-object policy
 //       (frontend/device-pins.ts's header argues it);
 //     a read of a map-declared volatile object through a base that reaches no name, such as a
-//       pointer walked along the object in a loop (raise/declared-volatile.ts).
+//       pointer walked along the object in a loop (raise/declared-volatile.ts);
+//     a read the stamp cannot place by byte — a runtime index, an `aload` — of an object the map
+//       qualifies only some members of, which may reach a plain member (symbols.ts
+//       `declaresVolatile`).
 import type { Op } from './core';
 import { MEM_BASE_OPS, type OpSig, opSig } from './opcodes';
 

@@ -316,3 +316,35 @@ describe('a sign-extending read of a declared object', () => {
     expect(src).toMatch(/\(volatile u16 \*\)/);
   });
 });
+
+// agbcc -O2 over `struct S { u16 arr[4]; vu16 reg; }; extern struct S gS;`: `return gS.arr[i];` is
+// `ldr r1; lsl; add; ldrh`, and the same read through `(volatile u16 *)&gS` schedules the `ldr` after
+// the `lsl`. A runtime index names no byte, so only a declaration that qualifies every byte the read
+// could reach places it.
+describe('a read the stamp cannot place by byte', () => {
+  const layout = [
+    { name: 'arr', offset: 0, size: 8, elemSize: 2, length: 4, signed: false },
+    { name: 'reg', offset: 8, size: 2, signed: false, volatile: true },
+  ];
+  const mapOf = (extra: Partial<SymbolInfo>): SymbolMap =>
+    new Map([[0x3001000, [{ name: 'gS', kind: 'data', shape: 'struct', size: 10, layout, ...extra }]]]);
+  const RD =
+    'rd:\n\tldr\tr1, .L3\n\tlsl\tr0, r0, #1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n.L3:\n\t.word\t0x3001000\n';
+  const prototypes = { rd: { params: 1 } };
+
+  test('of an object only some of whose members are volatile stays plain', () => {
+    const src = decompile('rd', RD, ARMV4T_AGBCC, { symbols: mapOf({}), prototypes }).source;
+    expect(src).not.toContain('volatile');
+  });
+
+  test('of an object the map declares volatile is placed', () => {
+    const src = decompile('rd', RD, ARMV4T_AGBCC, { symbols: mapOf({ volatile: true }), prototypes }).source;
+    expect(src).toContain('volatile');
+  });
+
+  test('of an object every member of which is volatile is placed', () => {
+    const all = layout.map((f) => ({ ...f, volatile: true }));
+    const src = decompile('rd', RD, ARMV4T_AGBCC, { symbols: mapOf({ layout: all }), prototypes }).source;
+    expect(src).toContain('volatile');
+  });
+});

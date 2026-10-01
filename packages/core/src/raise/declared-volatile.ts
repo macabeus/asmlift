@@ -33,7 +33,8 @@ export function stampDeclaredVolatile(
     for (const op of b.ops) {
       const read = (op.opcode === 'load' || op.opcode === 'aload') && readCouldBeVolatile(behaviors, op);
       const base = defs && read ? globalBaseOf(defs, op.operands[0]) : null;
-      // A subscript reaches the object while naming no cell, so only a `load` asks by byte.
+      // A subscript reaches the object while naming no cell, so only a `load` asks by byte, and a
+      // read that names no byte is placed only where every byte it could reach is qualified.
       const cell =
         base !== null && op.opcode === 'load' ? globalCellOf(defs!, op.operands[0], op.attrs.off as number) : null;
       const declared = base !== null && declaresVolatile(symbols!.get(base), cell === null ? null : cell.byte);

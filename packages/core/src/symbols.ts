@@ -271,23 +271,22 @@ export function isBitfieldField(f: SymbolStructField): boolean {
 /** Does this declaration make an access at `byte` of the object volatile? The object's own
  *  qualifier answers for every byte. A qualified MEMBER answers only for the bytes it spans — the
  *  `vu16 field;` idiom puts one in a struct whose other members are ordinary cells — and one of
- *  unknown extent spans whatever follows it. `null` is an access whose offset is not pinned: a
- *  runtime index reaches every member, so any qualified one answers it. A member this module cannot
- *  read (`SymbolMap` is caller-supplied) qualifies nothing. */
+ *  unknown extent spans whatever follows it. `null` is an access whose offset is not pinned, which
+ *  may reach any member, so only a layout whose every member is qualified answers it. A member this
+ *  module cannot read (`SymbolMap` is caller-supplied) qualifies nothing. */
 export function declaresVolatile(info: SymbolInfo | undefined, byte: number | null): boolean {
   if (info?.volatile === true) {
     return true;
   }
   const layout: unknown = info?.layout;
-  return (
-    Array.isArray(layout) &&
-    layout.some(
-      (f) =>
-        wellFormedField(f) &&
-        f.volatile === true &&
-        (byte === null || (byte >= f.offset && (f.size === null || byte < f.offset + f.size))),
-    )
-  );
+  if (!Array.isArray(layout) || layout.length === 0) {
+    return false;
+  }
+  const qualified = (f: unknown): f is SymbolStructField => wellFormedField(f) && f.volatile === true;
+  if (byte === null) {
+    return layout.every(qualified);
+  }
+  return layout.some((f) => qualified(f) && byte >= f.offset && (f.size === null || byte < f.offset + f.size));
 }
 
 /** Does the map declare a bitfield member anywhere, in a symbol's own layout or its pointee's? */
