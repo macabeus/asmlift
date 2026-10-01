@@ -68,7 +68,7 @@ import {
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
-import { qualifiedMemoryAccess } from '../l3/volstore';
+import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
@@ -3722,17 +3722,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return { k: 'var', name: '?' };
   };
 
-  // A memory access the lift marked `volatile` is one the recompile must make where the machine
-  // did (frontend/device-pins.ts), so its spelling carries the qualifier or the function declines:
-  // a plain spelling is one agbcc may delete or hoist.
+  // A qualified access is one the recompile must make where the machine did, so its spelling
+  // carries the qualifier or the function declines: a plain spelling is one agbcc may delete or
+  // hoist. A `device` access (frontend/device-pins.ts) carries it on its cast. A `declared` read
+  // carries it through the object's declaration, and on its cast where it reaches the object
+  // through one, since a cast's pointee drops the declaration's qualifiers.
   const pinnedAccess = (op: Op, access: Expr): Expr => {
-    if (placedAt(op) !== 'device') {
+    const placed = placedAt(op);
+    if (placed !== 'device' && !(placed === 'declared' && castOffDeclaration(access, ctype))) {
       return access;
     }
     const q = qualifiedMemoryAccess(access, ctype);
     if (q === null) {
       throw new StructureError(
-        `cannot structure '${fn.name}': a device ${op.opcode} the lift keeps volatile is reached through a ` +
+        `cannot structure '${fn.name}': a ${placed} ${op.opcode} that must stay volatile is reached through a ` +
           'pointer with no type to put the qualifier on',
       );
     }
@@ -4757,8 +4760,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  function spells no read at all — its wait-read is cast-spelled (see `BASECSE_GATES`'
    *  `repeated-const-offset`, whose base local this refusal hands back). */
   const volatileQualifiable = (op: Op): boolean => {
-    // A read the lift pinned is spelled through the qualifier whatever its address arm would say.
-    if (placedAt(op) === 'device') {
+    // A qualified read is spelled through the qualifier whatever its address arm would say.
+    const placed = placedAt(op);
+    if (placed === 'device' || placed === 'declared') {
       return true;
     }
     if (op.opcode !== 'load') {

@@ -142,6 +142,75 @@ describe('a read nothing uses', () => {
   });
 });
 
+// `extern volatile struct S gVolS; do {} while (((volatile u16 *)&gVolS)[3] != 0);` — a read of
+// bytes no member of the declaration names, so the tree reaches it through a cast of `&gVolS`, and a
+// cast to a plain pointee drops the declaration's `volatile`: agbcc -O2 then reads the halfword once,
+// above the loop.
+const POLL_PART = (sym: string, off: number) => `fn poll {
+^bb0():
+  %0: u8* = gaddr {sym="${sym}"}
+  br ^bb1()
+^bb1():
+  %1: u16 = load %0 {off=${off}, signed=false, width=2}
+  %2: u16 = const {value=0}
+  %3: u32 = icmp_ne %1, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb2():
+  ret
+}
+`;
+
+describe('a read through a cast of the object', () => {
+  const struct = new Map<string, SymbolInfo>([
+    [
+      'gVolS',
+      {
+        name: 'gVolS',
+        kind: 'data',
+        volatile: true,
+        shape: 'struct',
+        size: 8,
+        layout: [
+          { name: 'a', offset: 0, size: 2 },
+          { name: 'b', offset: 4, size: 4 },
+        ],
+      },
+    ],
+  ]);
+  const word = new Map<string, SymbolInfo>([
+    ['gVolW', { name: 'gVolW', kind: 'data', volatile: true, shape: 'scalar', size: 4, signed: false }],
+  ]);
+
+  test('puts the qualifier the cast drops on the cast', () => {
+    expect(emit(POLL_PART('gVolS', 6), { symbols: struct, returnsVoid: true })).toContain(
+      '((volatile u16 *)&gVolS)[3] != 0',
+    );
+    expect(emit(POLL_PART('gVolW', 2), { symbols: word, returnsVoid: true })).toContain(
+      '((volatile u16 *)&gVolW)[1] != 0',
+    );
+  });
+
+  test('of an ordinary object stays plain', () => {
+    const plain = new Map([['gVolS', { ...struct.get('gVolS')!, volatile: false }]]);
+    expect(emit(POLL_PART('gVolS', 6), { symbols: plain, returnsVoid: true })).toContain('((u16 *)&gVolS)[3] != 0');
+  });
+
+  test('nothing uses is spelled, qualified', () => {
+    const dead = `fn d {
+^bb0():
+  %0: u8* = gaddr {sym="gVolS"}
+  %1: u16 = load %0 {off=6, signed=false, width=2}
+  ret
+}
+`;
+    expect(emit(dead, { symbols: struct, returnsVoid: true })).toContain('((volatile u16 *)&gVolS)[3];');
+  });
+
+  test('named by the declaration keeps the declaration’s spelling', () => {
+    expect(emit(POLL_PART('gVolS', 0), { symbols: struct, returnsVoid: true })).toContain('gVolS.a != 0');
+  });
+});
+
 describe('the stamp', () => {
   const stamped = (ir: string, symbols?: Map<string, SymbolInfo>): (string | null)[] => {
     const fn = parse(ir);
@@ -188,5 +257,8 @@ describe('the stamp', () => {
       ],
     ]);
     expect(stamped(MEMBER, map)).toEqual(['declared', null]);
+    // and a read of that member nothing uses is spelled, qualified
+    const dead = MEMBER.replace('%3: s32 = add %1, %2\n  ret %3', 'ret %2');
+    expect(emit(dead, { symbols: map })).toContain('\n    ((volatile u16 *)&gMain)[2];\n');
   });
 });

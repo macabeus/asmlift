@@ -875,10 +875,11 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   or `device:?` where a side cannot read the address off it, a `?` on either side standing for any
   address; and `declared:<object>` for a read of an object the symbol map declares volatile. A
   pinned access through a named global and a declared read are counted for re-runs only, because
-  their qualifier may be the declaration, which leaves nothing in the tree to find. The `opaque`
-  ops standing in for unmodelled instructions are checked as never dropped. It is the odd one out
-  and worth the attention: the other four check L3 against _itself_, so they catch a tree that is
-  ill-formed. This one checks L3 against the L2 graph it came from, which is the only way to catch
+  their qualifier may be the declaration, which leaves nothing in the tree to find; a declared read
+  that reaches its object through a cast with no `volatile` is refused, since the cast's pointee
+  drops the declaration's qualifier. The `opaque` ops standing in for unmodelled instructions are
+  checked as never dropped. It is the odd one out and worth the attention: the other four check L3
+  against _itself_, so they catch a tree that is ill-formed. This one checks L3 against the L2 graph it came from, which is the only way to catch
   a pass that **loses** something well-formedly — a dropped call, a hardware read rendered twice,
   or an unmodelled instruction quietly vanishing because its destination register was dead.
 

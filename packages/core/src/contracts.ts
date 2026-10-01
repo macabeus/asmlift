@@ -22,6 +22,7 @@ import {
 } from './l3/ast';
 import { mentionedLocals } from './l3/mentions';
 import { declaredTypes, exprCType } from './l3/typing';
+import { castOffDeclaration } from './l3/volstore';
 
 export class ContractError extends Error {
   constructor(message: string) {
@@ -127,13 +128,16 @@ export function assertResolved(sfn: SFn): void {
 //     Hall's condition over that compatibility, and the dropped rule asks only for a render that
 //     could be the access. An access through a named global is counted for re-runs and never as
 //     dropped: its qualifier may be the global's declaration, which leaves nothing in the tree.
-//   • A declared read is keyed by the object it reads, and counted for re-runs only: a dead one the
-//     tree cannot qualify is dropped by design (structure.ts `volatileQualifiable`). The tree side
+//   • A declared read is keyed by the object it reads, and counted for re-runs only. The tree side
 //     counts each access whose address is that object's name plus arithmetic, once, however it is
-//     spelled — `gSym`, `gSym[i]`, `gSym.f`, `gPtr->f`, a cast through `&gSym` — and never a store
-//     target. An access whose base is another access is the inner one's: through `gPtr->arr[i]` the
-//     object is read once. Objects the asm also reads unstamped are skipped, since nothing tells
-//     their renders apart; so is a qualified render, which is the `device` count's.
+//     spelled — `gSym`, `gSym[i]`, `gSym.f`, `gPtr->f`, a `volatile` cast through `&gSym` — and
+//     never a store target. An access whose base is another access is the inner one's: through
+//     `gPtr->arr[i]` the object is read once. One that reaches the object through a cast with no
+//     `volatile` — the tree's own, or the one the printer puts on a base that does not stride the
+//     access (l3/volstore.ts `castOffDeclaration`) — is a plain read the compiler may hoist or
+//     delete, and is refused. Objects the asm also reads unstamped are skipped, since nothing tells
+//     their renders apart. A pinned access through the object's name may render as one of its
+//     reads.
 /** Executions per key: `call:<target>`, `device:<0xaddress>`, `device:?` for a pinned access at no
  *  address the counting side can read, or `declared:<object>`. */
 type EffectCounts = Map<string, number>;
@@ -149,6 +153,7 @@ function combine(a: EffectCounts, b: EffectCounts, f: (x: number, y: number) => 
 
 const DEVICE_UNPLACED = 'device:?';
 const DECLARED = 'declared:';
+const STRIPPED = 'stripped:';
 const deviceKey = (addr: number | null): string => (addr === null ? DEVICE_UNPLACED : `device:0x${addr.toString(16)}`);
 
 /** Is this access spelled through a `volatile` pointee? A dot member qualifies through the element
@@ -182,29 +187,46 @@ function accessedObject(base: Expr): string | null {
   }
 }
 
+/** What the tree side reads a render against: the objects whose every read the asm makes is
+ *  declared, and the rendered C type of an expression, which decides where the printer casts. */
+interface TreeContext {
+  declared: ReadonlySet<string>;
+  typeOf: (e: Expr) => IrType | undefined;
+}
+
 /** every call under `e`, counted by target name; every qualified memory access, by the address it
- *  denotes; and every other access and bare global read, by the object it names. `selected` marks an
- *  element or member a dot member selects from: that is a part of the one access the member spells,
- *  not an access of its own. `named` marks the base of an access: a `gSym` there is the access's
- *  address, counted with it. `target` marks a store's target, which is a write. */
-function effectsInExpr(e: Expr, into: EffectCounts, selected = false, named = false, target = false): void {
+ *  denotes, or by its object where that object's reads are declared; and every other access and
+ *  bare global read, by the object it names — under `stripped:` where the access reaches a declared
+ *  object through a cast that drops its qualifier. `selected` marks an element or member a dot
+ *  member selects from: that is a part of the one access the member spells, not an access of its
+ *  own. `named` marks the base of an access: a `gSym` there is the access's address, counted with
+ *  it. `target` marks a store's target, which is a write. */
+function effectsInExpr(
+  e: Expr,
+  into: EffectCounts,
+  ctx: TreeContext,
+  selected = false,
+  named = false,
+  target = false,
+): void {
   const bump = (k: string) => into.set(k, (into.get(k) ?? 0) + 1);
   const access = e.k === 'index' || e.k === 'field';
+  const object = access && !selected ? accessedObject(dotSelected(e)) : null;
+  const ofDeclared = object !== null && !target && ctx.declared.has(object);
   if (e.k === 'call') {
     bump(`call:${e.fn}`);
   } else if (!selected && qualifiedAccessChain(e)) {
-    bump(deviceKey(cellAddress(e)));
+    bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(cellAddress(e)));
   } else if (!selected && !target && access) {
-    const object = accessedObject(dotSelected(e));
     if (object !== null) {
-      bump(`${DECLARED}${object}`);
+      bump(`${ofDeclared && castOffDeclaration(e, ctx.typeOf) ? STRIPPED : DECLARED}${object}`);
     }
   } else if (!named && !target && e.k === 'var') {
     bump(`${DECLARED}${e.name}`);
   }
   const partOfThis = e.k === 'field' && e.dot === true;
   exprChildren(e).forEach((c) =>
-    effectsInExpr(c, into, partOfThis && c === e.base, access && c === e.base ? true : named && !access, false),
+    effectsInExpr(c, into, ctx, partOfThis && c === e.base, access && c === e.base ? true : named && !access, false),
   );
 }
 
@@ -261,7 +283,11 @@ const falls = (c: EffectCounts): PathCounts => ({ through: c, ret: null, brk: nu
  *  `if (…) { f(); return; }` arms are one call on any path, not two. `unreached` collects every
  *  statement that follows one no path falls past: the path count skips it, so the caller refuses it
  *  rather than let a duplicated region hide there. */
-function countEffects(stmts: Stmt[], unreached: Stmt[] = []): { total: EffectCounts; paths: PathCounts } {
+function countEffects(
+  stmts: Stmt[],
+  ctx: TreeContext,
+  unreached: Stmt[] = [],
+): { total: EffectCounts; paths: PathCounts } {
   let total: EffectCounts = new Map();
   let paths = falls(new Map());
   for (const s of stmts) {
@@ -269,17 +295,17 @@ function countEffects(stmts: Stmt[], unreached: Stmt[] = []): { total: EffectCou
       unreached.push(s);
     }
     const own: EffectCounts = new Map();
-    stmtExprs(s).forEach((e) => effectsInExpr(e, own, false, false, s.k === 'store' && e === s.lval));
+    stmtExprs(s).forEach((e) => effectsInExpr(e, own, ctx, false, false, s.k === 'store' && e === s.lval));
     total = sum(total, own);
     let here: PathCounts;
     if (s.k === 'if') {
-      const t = countEffects(s.then, unreached);
-      const e = countEffects(s.else, unreached);
+      const t = countEffects(s.then, ctx, unreached);
+      const e = countEffects(s.else, ctx, unreached);
       total = sum(total, sum(t.total, e.total));
       here = after(own, either(t.paths, e.paths));
     } else if (s.k === 'switch') {
-      const arms = s.cases.map((c) => countEffects(c.body, unreached));
-      const dflt = countEffects(s.default ?? [], unreached);
+      const arms = s.cases.map((c) => countEffects(c.body, ctx, unreached));
+      const dflt = countEffects(s.default ?? [], ctx, unreached);
       total = arms.reduce((acc, a) => sum(acc, a.total), sum(total, dflt.total));
       // A fall-through arm continues into the NEXT one emitted (the last into `default`), so a
       // path through arm i runs the chain starting at i — the shape the fall-through round's
@@ -298,7 +324,7 @@ function countEffects(stmts: Stmt[], unreached: Stmt[] = []): { total: EffectCou
       // trip count is not a syntactic occurrence, and the IR side is static too. A `break` or
       // `continue` in the body lands after the loop or at its test, and the test may exit without
       // running the body.
-      const body = countEffects(stmtChildren(s), unreached);
+      const body = countEffects(stmtChildren(s), ctx, unreached);
       total = sum(total, body.total);
       const p = body.paths;
       here = after(own, { through: most(p.through, p.brk, p.cont, new Map()), ret: p.ret, brk: null, cont: null });
@@ -328,6 +354,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   const irDevices: EffectCounts = new Map();
   // Pinned accesses through a named global: in `irDevices` too, and exempt from the dropped rule.
   const namedDevices = new Map<string, number>();
+  // …and the same accesses by the object they name, whose renders may be counted as its reads.
+  const devicesOf: EffectCounts = new Map();
   const irDeclared: EffectCounts = new Map();
   // Objects some unplaced read reads too, whose renders the tree side cannot tell from a declared one.
   const plainlyRead = new Set<string>();
@@ -351,8 +379,10 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
         const plain = op.opcode === 'load' || op.opcode === 'store';
         const key = deviceKey(plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
         bump(irDevices, key);
-        if (globalBaseOf(defs, op.operands[0]) !== null) {
+        const object = globalBaseOf(defs, op.operands[0]);
+        if (object !== null) {
           bump(namedDevices, key);
+          bump(devicesOf, `${DECLARED}${object}`);
         }
       } else if (op.opcode === 'load' || op.opcode === 'aload') {
         const object = globalBaseOf(defs, op.operands[0]);
@@ -393,7 +423,12 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     return;
   }
   const unreached: Stmt[] = [];
-  const { total, paths } = countEffects(sfn.body, unreached);
+  const vt = declaredTypes(sfn);
+  const ctx: TreeContext = {
+    declared: new Set([...irDeclared.keys()].map((k) => k.slice(DECLARED.length))),
+    typeOf: (e) => exprCType(e, vt),
+  };
+  const { total, paths } = countEffects(sfn.body, ctx, unreached);
   if (unreached.length) {
     throw new ContractError(
       `structuring emitted ${unreached.length} statement(s) no path reaches in '${sfn.name}', after one every path leaves`,
@@ -415,11 +450,19 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     devicesPreserved(sfn.name, irDevices, namedDevices, total, path);
   }
   for (const [key, n] of irDeclared) {
-    const p = path.get(key) ?? 0;
-    if (p > n) {
+    const object = key.slice(DECLARED.length);
+    if (total.has(`${STRIPPED}${object}`)) {
       throw new ContractError(
-        `structuring emitted ${p} reads of the volatile object '${key.slice(DECLARED.length)}' on one path in ` +
-          `'${sfn.name}', where the asm makes ${n}`,
+        `structuring spelled a read of the volatile object '${object}' in '${sfn.name}' through a cast that ` +
+          'drops its qualifier',
+      );
+    }
+    const p = path.get(key) ?? 0;
+    const made = n + (devicesOf.get(key) ?? 0);
+    if (p > made) {
+      throw new ContractError(
+        `structuring emitted ${p} reads of the volatile object '${object}' on one path in '${sfn.name}', ` +
+          `where the asm makes ${made}`,
       );
     }
   }

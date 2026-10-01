@@ -331,20 +331,21 @@ describe('assertEffectsPreserved — a pinned device access', () => {
 // each render is a read the recompile makes. Counted for re-runs only, by the object it reads.
 describe('assertEffectsPreserved — a read of a declared volatile object', () => {
   /** an IR fn whose entry block reads `gVolReg` once per entry of `reads`, stamped declared where
-   *  the entry is true */
-  const irReading = (reads: boolean[]): Fn => {
+   *  the entry is true, plus `pinned` reads the lift pinned */
+  const irReading = (reads: boolean[], pinned = 0): Fn => {
     const ops = [];
     const base = mkValue(T.ptr(T.u(16)));
     ops.push(mkOp('gaddr', { results: [base], attrs: { sym: 'gVolReg' } }));
-    for (const declared of reads) {
+    const read = (attrs: Record<string, boolean>) =>
       ops.push(
         mkOp('load', {
           operands: [base],
           results: [mkValue(T.u(16))],
-          attrs: { off: 0, width: 2, signed: false, ...(declared ? { declaredVolatile: true } : {}) },
+          attrs: { off: 0, width: 2, signed: false, ...attrs },
         }),
       );
-    }
+    reads.forEach((declared) => read(declared ? { declaredVolatile: true } : {}));
+    Array.from({ length: pinned }, () => read({ volatile: true }));
     ops.push(mkOp('ret', {}));
     return {
       name: 'F',
@@ -356,9 +357,10 @@ describe('assertEffectsPreserved — a read of a declared volatile object', () =
     };
   };
   const scalar: Expr = { k: 'var', name: 'gVolReg' };
-  const element = (i: number): Expr => ({
+  // `((volatile u16 *)&gVolReg)[i]`, or `((u16 *)&gVolReg)[i]`
+  const element = (i: number, volatile = true): Expr => ({
     k: 'index',
-    base: { k: 'addr', name: 'gVolReg' },
+    base: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'gVolReg' }, ...(volatile ? { volatile: true } : {}) },
     idx: { k: 'const', value: i },
     width: 2,
     signed: false,
@@ -401,6 +403,22 @@ describe('assertEffectsPreserved — a read of a declared volatile object', () =
 
   test('an object the asm also reads unstamped is not counted: its renders cannot be told apart', () => {
     expect(() => checkReads(irReading([true, false]), [use(scalar), use(scalar), use(scalar)])).not.toThrow();
+  });
+
+  test('a read the lift pinned through the object’s name may be rendered as one of its reads', () => {
+    expect(() => checkReads(irReading([true], 1), [use(scalar), use(element(0))])).not.toThrow();
+    expect(() => checkReads(irReading([true], 1), [use(scalar), use(scalar), use(scalar)])).toThrow(
+      /emitted 3 reads of the volatile object 'gVolReg' on one path in 'F', where the asm makes 2/,
+    );
+  });
+
+  test('a read spelled through a cast that drops the qualifier fails', () => {
+    expect(() => checkReads(irReading([true]), [use(element(0, false))])).toThrow(
+      /read of the volatile object 'gVolReg' in 'F' through a cast that drops its qualifier/,
+    );
+    // `(&gVolReg)[0]` is the same render: the printer casts a base that does not stride the access
+    const bare: Expr = { ...(element(0) as Extract<Expr, { k: 'index' }>), base: { k: 'addr', name: 'gVolReg' } };
+    expect(() => checkReads(irReading([true]), [use(bare)])).toThrow(/through a cast that drops its qualifier/);
   });
 
   test('a read never rendered is not refused', () => {
