@@ -195,6 +195,11 @@ as this row's outcome.
 Write the classification down with the evidence that decided it. If it is one of the last two, go
 straight to Phase 7 and report — that is a successful outcome of this command, not a failure.
 
+**A classification, a capability or a refusal that rests on what the compiler does** — keeps,
+deletes, reorders, aliases, lays out, names — cites the compiler's source where this machine has it
+(agbcc) and a compiled probe in every case. Which toolchains have source, and what stands in for it
+where none exists, is the table in `docs/measurement-discipline.md` §2.
+
 ## Phase 2 — Break it down
 
 Split the capability into the smallest sequence of changes where **each one is independently
