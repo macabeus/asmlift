@@ -523,6 +523,33 @@ describe('refusals', () => {
     ).toBe(true);
   });
 
+  test('REFUSED: a READ the arm holds across a helper divide analysis.ts names', () => {
+    // `{ t = k / n; p->f = v; *q = 5; q[1] = t; }`: the `bl __divsi3` runs ahead of two stores its
+    // value is used after, so analysis.ts names it where it ran, and a named helper bars the copy
+    // as a named call does — the copy becomes a local at the arm's head, a second load on agbcc.
+    const { fn, arm, store } = armReadsCondition();
+    const [k, n, t] = [mkValue(T.s(32)), mkValue(T.s(32)), mkValue(T.s(32))];
+    const q = mkValue(T.ptr(T.u(8)));
+    arm.ops.splice(
+      arm.ops.indexOf(store),
+      0,
+      mkOp('const', { results: [k], attrs: { value: 100 } }),
+      mkOp('const', { results: [n], attrs: { value: 7 } }),
+      mkOp('sdiv', { operands: [k, n], results: [t], attrs: { helper: '__divsi3' } }),
+    );
+    arm.ops.splice(
+      arm.ops.indexOf(store) + 1,
+      0,
+      ...storeFive(q, 0),
+      mkOp('store', { operands: [q, t], attrs: { off: 4, width: 4 } }),
+    );
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(
+      recognizeBranchShortCircuit(fn, { ...AGBCC_RELOADS, armReread: without(ARM_REREAD_GATES, 'read-behind-effect') }),
+    ).toBe(true);
+  });
+
   test('a READ the arm uses at its first effect, and only there, is still re-derived', () => {
     // `p->f = v` stores what it reads, so the reader is not "behind" itself. What is held
     // across the effect is the reader AFTER it — here a store to ANOTHER cell of an unrelated base.

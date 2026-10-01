@@ -58,7 +58,7 @@ import {
   replaceAllUsesWith,
   successorsOf,
 } from '../ir/core';
-import { effectful, forgetHelperPlacement, orderSensitive, speculationUnsafe } from '../ir/discipline';
+import { effectful, forgetHelperPlacement, orderSensitive, placedAt, speculationUnsafe } from '../ir/discipline';
 import { NEGATED_ICMP } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -1092,12 +1092,15 @@ function leavesALoop(fn: Fn, g: Block, arm: Block, preds: ReadonlyMap<Block, rea
  *    - it renders nowhere single: some PURE value between it and a statement has two consumers, so
  *      `emitPos` is null and analysis.ts materializes it whatever stands in the way
  *      (`p[2] = p[1] & 0x80; p[3] = p[1] & 0x80;` — one `and`, two stores);
- *    - it has MORE THAN ONE direct reader, and an effect precedes one of their render positions —
- *      the multi-render rule, `isWrite = effectful`, which exempts nothing;
- *    - it has ONE, and an effect precedes its render position that analysis.ts's `isBarrier`
- *      counts: any `astore`/`opaque`, a `call` that is not rendered inside that same statement,
- *      and a `store` UNLESS it is to a provably disjoint slot of the read's own base
- *      (`disjointConstSlots`, ir/alias.ts — the helper `isBarrier` calls).
+ *    - it has MORE THAN ONE direct reader, and an effect or a helper op analysis.ts names precedes
+ *      one of their render positions — the multi-render rule, which exempts nothing;
+ *    - it has ONE, and an op precedes its render position that analysis.ts's `isBarrier` counts:
+ *      any `astore`/`opaque`, a helper op analysis.ts names, a `call` that is not rendered inside
+ *      that same statement, and a `store` UNLESS it is to a provably disjoint slot of the read's own
+ *      base (`disjointConstSlots`, ir/alias.ts — the helper `isBarrier` calls).
+ *
+ *  `isBarrier`'s pinned-read clause has nothing to mirror: ^g holds no pinned read, since the fold
+ *  refuses a ^g with anything `speculationUnsafe` in it.
  *
  *  A reader in any block other than the arm answers yes — the copy then outlives the arm's first
  *  block. What this does NOT mirror, and which way each gap errs, is ARM_REREAD_GATES' RESIDUE. */
@@ -1135,6 +1138,15 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
     }
     return orderSensitive(op) ? posOf(op) : null;
   };
+  // analysis.ts's `namedHelper`: a helper op it names where the asm ran it, which bars a read as a
+  // named call does. It names one whose value renders in another block, or past an effect or
+  // another named helper.
+  const namedHelper = (x: Op): boolean =>
+    placedAt(x) === 'helper' &&
+    (escapes(x.results) ||
+      consumersOf(x.results)
+        .map(at)
+        .some((p) => p === null || c.arm.ops.slice(posOf(x) + 1, p).some((y) => effectful(y) || namedHelper(y))));
   for (const l of reads) {
     if (escapes(l.results)) {
       return true;
@@ -1145,6 +1157,9 @@ function readHeldAcrossEffect(c: ArmRereadSite): boolean {
     }
     const multi = renders.length > 1;
     const bars = (x: Op, pos: number): boolean => {
+      if (namedHelper(x)) {
+        return true;
+      }
       if (!effectful(x)) {
         return false;
       }

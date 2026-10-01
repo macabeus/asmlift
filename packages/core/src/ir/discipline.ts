@@ -21,7 +21,6 @@
 //     structure/hazards.ts `movesPast` — GAP: a pinned read rebuilt past another pinned read.
 //   `effectful` as the barrier a read may not cross, without `isBarrier`'s helper and pin clauses
 //   (structure/analysis.ts):
-//     raise/shortcircuit.ts `readHeldAcrossEffect`, the mirror of `isBarrier` — GAP.
 //     structure/analysis.ts `writeBetween`, `standsOnMovableRead`, the multi-render rule — DELIBERATE:
 //       each asks about a memory write, and a pinned read writes nothing.
 //   The `call` placement alone, in structure/analysis.ts:
