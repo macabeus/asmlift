@@ -3735,7 +3735,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   // A memory access the lift marked `volatile` is one the recompile must make where the machine
-  // did (frontend/frame-objects.ts), so its spelling carries the qualifier or the function declines:
+  // did (frontend/device-pins.ts), so its spelling carries the qualifier or the function declines:
   // a plain spelling is one agbcc may delete or hoist.
   const pinnedAccess = (op: Op, access: Expr): Expr => {
     if (placedAt(op) !== 'device') {

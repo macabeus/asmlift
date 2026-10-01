@@ -18,6 +18,7 @@ import type { Gate } from '../l3/gates';
 import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
+import { type DevicePins, literalAddresses } from './device-pins';
 import { FrontendUnsupportedError } from './errors';
 import { type LiveInModel, slotKeyOffset } from './ssa';
 
@@ -56,6 +57,11 @@ export interface FrameRange {
 export interface FrameObjectRelift {
   readonly oneObject: FrameRange;
 }
+
+/** What an audit answers: lift again (`FrameObjectRelift`), the device pin the accepted function
+ *  owes (`DevicePins`, applied by `pinDeviceAccesses`), or nothing, when no frame address was
+ *  taken. */
+export type FrameObjectVerdict = FrameObjectRelift | DevicePins | undefined;
 
 /** One escaped object, as the rules an escape retracts read it: what it may reach, `[lo, hi)`
  *  from its own offset, whether it may write, and the first other object, keyed slot and
@@ -251,9 +257,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  is dropped, a capture addressed through at fixed offsets is split into the objects its accesses
  *  name, and each surviving `laddr` is stamped with its width, signedness, count and `volatile`.
  *  One object mutates more: every access through a member is re-based onto one minted `laddr`,
- *  the member `laddr`s are deleted or re-minted as that one moved by a `const`, and every device
- *  load and store of the function — through no `laddr` at all — is marked `volatile`. Per object,
- *  only the device stores a later store in their own block overwrites are marked. */
+ *  and the member `laddr`s are deleted or re-minted as that one moved by a `const`. An accepted
+ *  function is answered with the device pin it owes, under the model it was accepted in
+ *  (frontend/device-pins.ts). */
 export function auditFrameObjects({
   name,
   irBlocks,
@@ -267,7 +273,7 @@ export function auditFrameObjects({
   target,
   gates = FRAME_ESCAPE_GATES,
   oneObject,
-}: FrameObjectAudit): FrameObjectRelift | undefined {
+}: FrameObjectAudit): FrameObjectVerdict {
   // A CAPTURE MOVED BY A CONSTANT IS THE CAPTURE AT THE SUM, and here the constant is exact: an
   // `add` of a `laddr` and a `const` — a register the lift could not see through, `mov r0, sp /
   // movs r2, #0 / ldrsh r1, [r0, r2]`, or a move the pre-lift walk does not follow — is re-minted
@@ -336,62 +342,7 @@ export function auditFrameObjects({
   // is total rather than resting on "the capture always survives into the IR".
   if (laddrs.length > 0 || capturedObjectIsTheWholeFrame) {
     const readOnlySinks = new Set(target.capabilities.readOnlyAddressSinks ?? []);
-    const defOf = new Map<Value, Op>();
-    for (const blk of irBlocks) {
-      for (const op of blk.ops) {
-        for (const res of op.results) {
-          defOf.set(res, op);
-        }
-      }
-    }
-    // A NAME IS NOT AN ADDRESS. The same symbol name can sit at two addresses — a symbol map is
-    // free to carry one — and a `gaddr`'s `sym` can also come straight from the assembly text
-    // (`.word REG_DMA3SAD`), where nothing looked it up at all. So names resolve to an address
-    // here or they resolve to nothing: a name at more than one address vouches for neither.
-    const addrOfName = new Map<string, number | null>();
-    for (const [addr, infos] of symbols ?? []) {
-      for (const si of infos) {
-        addrOfName.set(si.name, addrOfName.has(si.name) ? null : addr);
-      }
-    }
-    // The literal address a value denotes, or undefined when this cannot say. `const` is the
-    // bare pool word, `gaddr` is the same word after the symbol map named it, a constant shifted
-    // by a constant is the word agbcc builds without a pool (`mov r0, #0x80; lsl r0, #0x13` is
-    // 0x04000000), and `add` or `sub` of a constant, on either side, is the base+displacement
-    // form an interior attribution or a member access produces — spellings of one address, which
-    // is the point: the answer must not turn on which one the assembly happened to use. A runtime
-    // index is not a constant, and neither is a pointer loaded from memory, a parameter or a phi.
-    const literalAddrOf = (v: Value, depth = 0): number | undefined => {
-      const d = defOf.get(v);
-      if (d === undefined || depth > 8) {
-        return undefined;
-      }
-      if (d.opcode === 'const') {
-        return d.attrs.value as number;
-      }
-      if (d.opcode === 'gaddr') {
-        return addrOfName.get(d.attrs.sym as string) ?? undefined;
-      }
-      if (d.opcode === 'shl') {
-        const shifted = constOfValue(d.operands[0]);
-        const by = d.operands.length === 1 ? (d.attrs.imm as number | undefined) : constOfValue(d.operands[1]);
-        return shifted === undefined || by === undefined || by < 0 || by > 31 ? undefined : (shifted << by) >>> 0;
-      }
-      if ((d.opcode === 'add' || d.opcode === 'sub') && d.operands.length === 2) {
-        const [x, y] = d.operands;
-        const cy = constOfValue(y);
-        if (cy !== undefined) {
-          const base = literalAddrOf(x, depth + 1);
-          return base === undefined ? undefined : d.opcode === 'add' ? base + cy : base - cy;
-        }
-        const cx = d.opcode === 'add' ? constOfValue(x) : undefined;
-        if (cx !== undefined) {
-          const base = literalAddrOf(y, depth + 1);
-          return base === undefined ? undefined : base + cx;
-        }
-      }
-      return undefined;
-    };
+    const { defOf, constOf: constOfValue, literalAddrOf } = literalAddresses(irBlocks, symbols);
     // The register this store hands the WHOLE address to, when it is one a device only reads
     // through, else undefined. Word stores only: a `strh` to a source register hands over half an
     // address, so the device's source is not this object. A base this cannot resolve — computed,
@@ -403,10 +354,6 @@ export function auditFrameObjects({
       const base = literalAddrOf(op.operands[0]);
       const at = base === undefined ? undefined : base + (op.attrs.off as number);
       return at !== undefined && readOnlySinks.has(at) ? at : undefined;
-    };
-    const constOfValue = (v: Value): number | undefined => {
-      const d = defOf.get(v);
-      return d?.opcode === 'const' ? (d.attrs.value as number) : undefined;
     };
     const fail = (why: string): never => {
       throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
@@ -1089,129 +1036,8 @@ export function auditFrameObjects({
       }
     };
 
-    // EVERY DEVICE ACCESS OF A FUNCTION KEPT AS ONE OBJECT (below) IS MARKED `volatile`, as the
-    // source's `REG_*` and `vu32 *dmaRegs` spell them — store and load alike, because agbcc drops
-    // or moves either when it is plain:
-    //   • a plain store to an address a later store overwrites, with nothing between that may alias
-    //     it, is deleted (flow.c:2041-2052), and at -O2 a store of another type does not alias
-    //     (strict aliasing, toplev.c:3616) — so of two transfers armed back to back through one
-    //     channel, with only a `u16` member store between, the first one's source, destination and
-    //     control stores go and that transfer never runs; `REG_IME = 0; … REG_IME = saved;` loses
-    //     its first store the same way;
-    //   • a plain load in a loop that stores nothing it may alias is invariant, so
-    //     `while (REG_VCOUNT != 160);` is hoisted into a loop that never reads the register again.
-    // The address may be a literal, a literal plus a runtime index — `(vu32 *)(0x40000B0 + ch*12)`,
-    // a channel chosen at run time — or a phi each of whose incoming values is one of those: every
-    // way the lift names a device register and not a pointer loaded, passed or computed from
-    // nothing it can place. Over-reach costs a spelling and never an access: `volatile` keeps the
-    // accesses the machine made, and a marked read is placed once, as a call is
-    // (structure/analysis.ts), so the qualifier adds none. The window is the target's
-    // `deviceRegisters`, which has to cover every register a source reaches — an address outside
-    // it stays plain; without one, it is the channels handed a frame address.
-    //
-    // A FUNCTION ACCEPTED OBJECT BY OBJECT pins every device read, and of its device stores only
-    // those of the first kind (`overwritten`). A read is pinned because a plain one is lost either
-    // way: nothing uses the `dmaRegs[2];` that ends a DMA macro, so the lift drops it outright, and
-    // a poll is hoisted as above. The stores pinned are those a later store in their own block
-    // overwrites, with no call between to clear flow.c's list of pending stores (flow.c:1962). A
-    // plain read of its bytes between does not always keep it: one agbcc forwards the stored value
-    // to (cse.c) leaves the store dead, and one of another type does not alias. A read it does not
-    // forward — a `char` read, or one it extends — keeps it, and pinning a store agbcc keeps costs
-    // a spelling. Two fills through one channel back to back is the shape, and plain, the first
-    // transfer is gone. Its other device stores stay plain, their qualified spelling left to
-    // `/vol-store`'s candidate (l3/volstore.ts): pinned in the structured tree they are pinned in
-    // every variation, and the ones that home the base or un-reduce a loop refuse a qualified
-    // base, which costs `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches.
-    const overwritten = (op: Op, blk: Block, at: number): boolean => {
-      if (op.opcode !== 'store') {
-        return false;
-      }
-      const addressOf = (x: Op): number | undefined => {
-        const lit = literalAddrOf(x.operands[0]);
-        return lit === undefined ? undefined : lit + (x.attrs.off as number);
-      };
-      // Where `x` starts relative to `op`, when both name their bytes the same way.
-      const startOf = (x: Op): { from: number; by: number } | undefined => {
-        const sameBase = x.operands[0] === op.operands[0];
-        const from = sameBase ? (op.attrs.off as number) : addressOf(op);
-        const by = sameBase ? (x.attrs.off as number) : addressOf(x);
-        return from === undefined || by === undefined ? undefined : { from, by };
-      };
-      const width = op.attrs.width as number;
-      for (const later of blk.ops.slice(at + 1)) {
-        if (later.opcode === 'call') {
-          return false;
-        }
-        const s = later.opcode === 'store' ? startOf(later) : undefined;
-        if (s !== undefined && s.by <= s.from && s.by + (later.attrs.width as number) >= s.from + width) {
-          return true;
-        }
-      }
-      return false;
-    };
-    const pinDeviceAccesses = (pins: (op: Op, blk: Block, at: number) => boolean): void => {
-      const sinks = [...new Set([...sourceStores.values()].flat().map((s) => s.sink))];
-      if (sinks.length === 0) {
-        return;
-      }
-      const reach = (target.capabilities.readSourceControl?.offset ?? 2) + 2;
-      const window = target.capabilities.deviceRegisters;
-      const isDevice = (a: number, w: number): boolean =>
-        window !== undefined ? a >= window[0] && a + w <= window[1] : sinks.some((s) => a < s + reach && a + w > s);
-      const incoming = new Map<Value, Value[]>();
-      for (const blk of irBlocks) {
-        for (const op of blk.ops) {
-          for (const sx of op.successors ?? []) {
-            sx.args.forEach((arg, i) => {
-              const param = sx.block.params[i];
-              if (param !== undefined) {
-                (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(arg);
-              }
-            });
-          }
-        }
-      }
-      // The literal a pointer is a device register plus a runtime index from. `'cycle'` is a phi
-      // already on the walk — a pointer stepped around a loop — which contradicts nothing, so a phi
-      // is placed by the incoming values that are not its own back edge.
-      const placed = (v: Value, onWalk: Set<Value>, depth = 0): number | 'cycle' | undefined => {
-        const lit = literalAddrOf(v);
-        if (lit !== undefined || depth > 8) {
-          return lit;
-        }
-        const d = defOf.get(v);
-        if (d?.opcode === 'add' && d.operands.length === 2) {
-          const [x, y] = d.operands.map((o) => placed(o, onWalk, depth + 1));
-          return typeof x === 'number' ? x : typeof y === 'number' ? y : (x ?? y);
-        }
-        const ins = d === undefined ? incoming.get(v) : undefined;
-        if (ins === undefined || onWalk.has(v)) {
-          return ins === undefined ? undefined : 'cycle';
-        }
-        onWalk.add(v);
-        const each = ins.map((a) => placed(a, onWalk, depth + 1));
-        onWalk.delete(v);
-        if (each.some((a) => a === undefined || (typeof a === 'number' && !isDevice(a, 1)))) {
-          return undefined;
-        }
-        return each.find((a) => typeof a === 'number') ?? 'cycle';
-      };
-      for (const blk of irBlocks) {
-        blk.ops.forEach((op, at) => {
-          if (op.opcode !== 'store' && op.opcode !== 'load') {
-            return;
-          }
-          const base = placed(op.operands[0], new Set());
-          if (
-            typeof base === 'number' &&
-            isDevice(base + (op.attrs.off as number), op.attrs.width as number) &&
-            pins(op, blk, at)
-          ) {
-            op.attrs = { ...op.attrs, volatile: true };
-          }
-        });
-      }
-    };
+    // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
+    const sinks = [...new Set([...sourceStores.values()].flat().map((s) => s.sink))];
 
     // ONE OBJECT IN MEMORY, the answer a device read nothing bounds is given instead of a refusal
     // (`oneObject`, requested below where the escapes are judged). Every byte of `[from, to)` is
@@ -1329,8 +1155,7 @@ export function auditFrameObjects({
         });
       }
       irBlocks[0].ops.unshift(object);
-      pinDeviceAccesses(() => true);
-      return undefined;
+      return { policy: 'one-object', sinks };
     }
 
     // THE FRAME RESERVATION IS AN EXTENT, when the reserved area is provably one object's alone.
@@ -1719,7 +1544,7 @@ export function auditFrameObjects({
         }
       }
     }
-    pinDeviceAccesses((op, blk, at) => op.opcode === 'load' || overwritten(op, blk, at));
+    return { policy: 'per-object', sinks };
   }
   return undefined;
 }
@@ -1738,6 +1563,6 @@ function returnedSize(call: Op): number {
  *  binding above, so a process outside core can put a wrapped `gates` table in front of a real
  *  lift (`pnpm bench gates --pass frame-objects`): a module-namespace binding is read-only and
  *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
-export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectRelift | undefined } = {
+export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectVerdict } = {
   run: (audit) => auditFrameObjects(audit),
 };

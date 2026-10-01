@@ -27,8 +27,8 @@
 //     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), the
 //     structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
 //     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions), and the
-//     frame-object audit's pin (frontend/frame-objects.ts), which spells every access in the
-//     window `volatile` in a function it keeps as one object, and in one it accepts object by
+//     device pin (frontend/device-pins.ts), which spells every access in the window `volatile`
+//     in a function the frame-object audit keeps as one object, and in one it accepts object by
 //     object every device read and the device stores a later store in their block overwrites.
 //     That last reader makes the answer a correctness one — agbcc deletes or hoists a plain
 //     device access the machine made — so it may be approximate in ONE direction only: the

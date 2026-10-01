@@ -184,7 +184,7 @@ export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Ex
   return { ...lval, base };
 }
 
-/** A memory access the lift marked `volatile` (frontend/frame-objects.ts), spelled through a
+/** A memory access the lift marked `volatile` (frontend/device-pins.ts), spelled through a
  *  `volatile` pointee: an indexed access by {@link qualifiedAccess}; a recovered struct member
  *  through the struct pointer it is reached by — `((volatile struct S *)0x40000B0)[ch].field_0`,
  *  `((volatile struct S *)p)->field_0` — whether that pointer is already a cast or a variable

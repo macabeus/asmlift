@@ -5,7 +5,7 @@
 // `traps`) are facts about an OPCODE. A PLACEMENT is a fact about one OP, decided once by the pass
 // that knew it: `call` is its own opcode; `helper` is the stamp `runtime-helpers.ts` `helperOp` puts
 // on a value op the asm computed by calling a runtime routine; `device` is the `volatile` the
-// frontend's device-pin pass (frontend/frame-objects.ts) puts on a memory access. Every question
+// frontend's device-pin pass (frontend/device-pins.ts) puts on a memory access. Every question
 // below takes the op, so a pass asks one question instead of re-deriving the combination, and
 // `PLACEMENT_ANSWERS` is the one place a placement's answers are written.
 //

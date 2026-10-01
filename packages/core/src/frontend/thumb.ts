@@ -37,6 +37,7 @@ import { type RuntimeHelper, helperPrototypes, isFloatHelper, isWideHelper, look
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
+import { pinDeviceAccesses } from './device-pins';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
@@ -4912,8 +4913,9 @@ function liftOnce(
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
-  // a shape the machine states, or decline (auditFrameObjects).
-  const relift = FRAME_OBJECT_AUDIT.run({
+  // a shape the machine states, or decline (auditFrameObjects); an accepted function then gets the
+  // device pin the audit answers (pinDeviceAccesses).
+  const verdict = FRAME_OBJECT_AUDIT.run({
     name,
     irBlocks,
     ...framePartition(),
@@ -4925,8 +4927,11 @@ function liftOnce(
     target,
     oneObject,
   });
-  if (relift !== undefined) {
-    return relift;
+  if (verdict !== undefined && 'oneObject' in verdict) {
+    return verdict;
+  }
+  if (verdict !== undefined) {
+    pinDeviceAccesses(irBlocks, verdict, target, symbols);
   }
   // A struct returned through memory is spelled `local = f(..)`, which hands the callee that local's
   // address: the destination must be a frame object the audit accepted. A global or a pointer handed
