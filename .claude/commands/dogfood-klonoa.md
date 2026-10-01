@@ -3,6 +3,24 @@ description: Match never-decompiled Klonoa functions and land them, while dogfoo
 argument-hint: [function-count] (default 10)
 ---
 
+**Before anything else, check that this copy is current.** A slash command is loaded from the checkout
+the session started in, which is routinely behind `origin/main`, so the text you are reading may be a
+stale version of this command. In that checkout, run `git fetch -q origin`. If it fails, run it once
+more; if it fails again, the check did not run: tell the user before going on. Then run:
+
+```
+git diff --quiet origin/main -- .claude/commands/dogfood-klonoa.md
+```
+
+- **Exit 0:** this copy is `origin/main`'s. Go on.
+- **Exit 1, and `git diff --quiet "$(git merge-base HEAD origin/main)" -- .claude/commands/dogfood-klonoa.md` exits 1
+  too:** the checkout carries its own edits to this file, committed or not. Ask the user which copy
+  to follow.
+- **Exit 1 otherwise:** the checkout is behind. Stop reading this copy and follow
+  `git show origin/main:.claude/commands/dogfood-klonoa.md` instead.
+- **Any other exit:** the check did not run (no remote, not a repository). Tell the user before going
+  on.
+
 Number of functions: **$1** — if that is empty, use **10**.
 
 This command has **two deliverables of equal standing**:

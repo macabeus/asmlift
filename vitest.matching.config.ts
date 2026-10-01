@@ -6,10 +6,11 @@ import { defineConfig } from 'vitest/config';
 //   • Emulated compiles are single-threaded and CPU-heavy; running several at once just thrashes one
 //     CPU, ballooning each from seconds to minutes past the timeout — serial is both correct and,
 //     for emulated compiles, faster wall-clock.
-//   • Even serially, a slow compile can block the worker's event loop past vitest's hard-coded 60s
-//     worker↔main RPC timeout, surfacing a benign "Timeout calling onTaskUpdate" unhandled error
-//     (the test still passes). `dangerouslyIgnoreUnhandledErrors` keeps that reporting hiccup from
-//     failing an otherwise-green run — real assertion failures and thrown errors still fail loudly.
+//   • vitest.worker-yield.ts lets the worker read its runner's replies between tests, so a file of
+//     compiles holds the thread one test at a time. A single test whose own compiles block past
+//     vitest's fixed 60 s worker↔main RPC deadline still raises "Timeout calling onTaskUpdate";
+//     `dangerouslyIgnoreUnhandledErrors` keeps that from failing a run whose files all passed. A
+//     run that lost its fork over it still fails scripts/gate-vitest.sh, which counts the files.
 // Run via `pnpm test` (which runs the default offline config first, then this one).
 export default defineConfig({
   test: {
@@ -24,6 +25,7 @@ export default defineConfig({
     // use the cache at all, so this is forward defence rather than a gate over the match
     // assertions.
     globalSetup: ['packages/cli/test/matching/global-setup.ts', 'packages/cli/test/matching/candcache-gate.ts'],
+    setupFiles: ['./vitest.worker-yield.ts'],
     fileParallelism: false,
     poolOptions: { forks: { singleFork: true } },
     testTimeout: 240_000,

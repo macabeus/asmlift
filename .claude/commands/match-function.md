@@ -3,6 +3,24 @@ description: Match a benchmark function by building the missing asmlift capabili
 argument-hint: <FunctionName>
 ---
 
+**Before anything else, check that this copy is current.** A slash command is loaded from the checkout
+the session started in, which is routinely behind `origin/main`, so the text you are reading may be a
+stale version of this command. In that checkout, run `git fetch -q origin`. If it fails, run it once
+more; if it fails again, the check did not run: tell the user before going on. Then run:
+
+```
+git diff --quiet origin/main -- .claude/commands/match-function.md
+```
+
+- **Exit 0:** this copy is `origin/main`'s. Go on.
+- **Exit 1, and `git diff --quiet "$(git merge-base HEAD origin/main)" -- .claude/commands/match-function.md` exits 1
+  too:** the checkout carries its own edits to this file, committed or not. Ask the user which copy
+  to follow.
+- **Exit 1 otherwise:** the checkout is behind. Stop reading this copy and follow
+  `git show origin/main:.claude/commands/match-function.md` instead.
+- **Any other exit:** the check did not run (no remote, not a repository). Tell the user before going
+  on.
+
 Target function: **$1**
 
 If `$1` is empty, ask which function before doing anything else. Do not guess.
@@ -178,6 +196,11 @@ as this row's outcome.
 
 Write the classification down with the evidence that decided it. If it is one of the last two, go
 straight to Phase 7 and report — that is a successful outcome of this command, not a failure.
+
+**A classification, a capability or a refusal that rests on what the compiler does** — keeps,
+deletes, reorders, aliases, lays out, names — cites the compiler's source where this machine has it
+(agbcc) and a compiled probe in every case. Which toolchains have source, and what stands in for it
+where none exists, is the table in `docs/measurement-discipline.md` §2.
 
 ## Phase 2 — Break it down
 

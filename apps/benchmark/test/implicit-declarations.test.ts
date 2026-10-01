@@ -50,6 +50,63 @@ describe('undeclaredCallees', () => {
   });
 });
 
+describe('undeclaredCallees answers when the compiler exits', () => {
+  // A stand-in for the clang driver, which forks a `-cc1` that can outlive it with stderr open: it
+  // prints the diagnostic, leaves a child holding stderr, and exits 0.
+  test('a child the compiler leaves holding stderr does not hold the probe', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-forkcc-'));
+    const cc = join(dir, 'cc');
+    const pidFile = join(dir, 'pid');
+    writeFileSync(
+      cc,
+      '#!/bin/sh\n' +
+        `echo "<stdin>:1:25: warning: implicit declaration of function 'g' is invalid in C99 [-Wimplicit-function-declaration]" >&2\n` +
+        `sleep 20 &\necho $! > '${pidFile}'\nexit 0\n`,
+    );
+    chmodSync(cc, 0o755);
+    try {
+      const started = Date.now();
+      expect(undeclaredCallees('int f(void) { return g(); }\n', { cc, timeoutMs: 60_000 })).toEqual(['g']);
+      expect(Date.now() - started, 'it waited for the child, not the compiler').toBeLessThan(10_000);
+    } finally {
+      try {
+        process.kill(Number(readFileSync(pidFile, 'utf8')));
+      } catch {
+        // the child already exited
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // A unit larger than a pipe's buffer, to a stand-in that leaves a child holding the unit's
+  // descriptor unread and exits 0.
+  test('a child the compiler leaves holding the unit does not hold the probe', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'asmlift-forkcc-'));
+    const cc = join(dir, 'cc');
+    const pidFile = join(dir, 'pid');
+    writeFileSync(
+      cc,
+      '#!/bin/sh\n' +
+        `echo "<stdin>:1:25: warning: implicit declaration of function 'g' is invalid in C99 [-Wimplicit-function-declaration]" >&2\n` +
+        `sleep 20 <&0 &\necho $! > '${pidFile}'\nexit 0\n`,
+    );
+    chmodSync(cc, 0o755);
+    try {
+      const unit = `int f(void) { return g(); }\n${'/* padding past a pipe buffer */\n'.repeat(10_000)}`;
+      const started = Date.now();
+      expect(undeclaredCallees(unit, { cc, timeoutMs: 8_000 })).toEqual(['g']);
+      expect(Date.now() - started, 'it waited for the child, not the compiler').toBeLessThan(5_000);
+    } finally {
+      try {
+        process.kill(Number(readFileSync(pidFile, 'utf8')));
+      } catch {
+        // the child already exited
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('every committed vendored TU declares every function it calls', () => {
   const manifests = readdirSync(REAL_DIR)
     .filter((f) => f.endsWith('.json'))

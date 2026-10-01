@@ -28,6 +28,9 @@ So, mechanically:
 - **Brief author:** give the path as `<the worktree you just created>/.claude/commands/…`, or as a
   `git show origin/main:…`. Do not paste an excerpt of the file into the brief — a copy is a
   fourth version to go stale, and this file exists because that already happened.
+- **A slash command's text** is neither: it is loaded from the checkout the session started in,
+  which is the user's, so it can be stale with no path involved. Every command file opens with a
+  check that compares itself with `origin/main` and says which copy to follow; run it first.
 - **Either:** the cheapest check that you are on the current copy is `git -C <dir> log --oneline -1
 origin/main -- .claude/commands`.
 
@@ -52,6 +55,25 @@ This applies to claims about two SOURCE spellings too. "These two spellings are 
 a claim about a compiler: compile both, diff the objects, and do it on the shape you intend to
 GENERALIZE over — an identity that holds in a degenerate one-case shape is not the identity you are
 about to build a variation on.
+
+**Where the compiler's source is on this machine, a premise about it also cites the source.** A
+compiled probe shows what one input does; the source says what the compiler does for every input of
+that shape: what it keeps, deletes or reorders, what it assumes may alias, how it lays out a frame,
+how it names a symbol. A capability or a refusal that rests on such a premise cites `file:line` in
+the compiler's source AND a probe compiled at the row's flags, and the probe covers the shape the
+premise generalizes over. Where there is no source, the claim says "compiled evidence only" and the
+probes carry it alone.
+
+| Toolchain                 | Source here                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | What a premise about it cites                                                               |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `agbcc`                   | pret's GCC 2.9 tree, `$(dirname "$ASMLIFT_AGBCC")/gcc`, and Klonoa's fork under `klonoa-empire-of-dreams/tools/agbcc`: the same compiler. The fork adds diagnostic-only flags that never change the bytes it emits (its README): `-finstrument-src-locs` tags each asm group with its source line, and `-fdump-reg-lifetimes`, `-fdump-function-size` and `-fdump-pool-literals` print what register allocation, size and the literal pool did. Compile a probe with it to see why agbcc emitted what it did. | `file:line` in the source + a probe compiled with `$ASMLIFT_AGBCC` or the fork.             |
+| `gcc2.7.2`, `gcc2.7.2kmc` | None. Upstream GCC 2.7.2 is free software, but these are vendor builds.                                                                                                                                                                                                                                                                                                                                                                                                                                       | Compiled evidence only. An upstream line is a hypothesis about them, which a probe decides. |
+| `ido7.1`                  | None. `ido-static-recomp` is the binary machine-translated to C, not the compiler's source.                                                                                                                                                                                                                                                                                                                                                                                                                   | Compiled evidence only.                                                                     |
+| `mwcc_*`                  | None: proprietary.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Compiled evidence only, on every build the claim covers.                                    |
+
+The source is what tells apart two shapes the asm cannot: whether a stack slot is a member of an
+escaped object or a spill the register allocator chose (alias.c, flow.c, stmt.c) decided how frame
+objects are lifted.
 
 ## 3. Name a refusing site by INSTRUMENTING or ABLATING it, never by reading
 
