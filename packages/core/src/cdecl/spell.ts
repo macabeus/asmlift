@@ -1,12 +1,16 @@
-// asmlift — a declared type printed in asmlift's type vocabulary (`ParamType`): `u8 *`,
-// `void (*)(s32 channel)`, `f32 (*)[3]`. The derivations come from the parser (`parse.ts`), listed from
-// the declarator's name outward, so the printer rebuilds the abstract declarator from the inside: a
-// pointer is written ahead of what it binds, an array or a function after it, and a pointer that an
-// array or a function binds next is grouped in parentheses.
+// asmlift — the PRINTER of what the parser reads: a declared type in asmlift's type vocabulary
+// (`ParamType`): `u8 *`, `void (*)(s32 channel)`, `f32 (*)[3]`, and every run of tokens a spelling
+// holds, as written.
 //
-// A function's parameter list and an array's extent are printed from their tokens as written, one
-// space wherever the source separates two tokens: a function pointer's own parameters are part of
-// its spelling, not types this reads.
+// The derivations come from the parser (`parse.ts`), listed from the declarator's name outward, so
+// the printer rebuilds the abstract declarator from the inside: a pointer is written ahead of what it
+// binds, an array or a function after it, and a pointer that an array or a function binds next is
+// grouped in parentheses.
+//
+// A RUN OF TOKENS IS PRINTED AS WRITTEN, one space wherever the source separates two of them: a type's
+// name (`A::B`, `TVec3<const u8 *>`), a member pointer's class, a function's parameter list and an
+// array's extent alike. A function pointer's own parameters are part of its spelling, not types this
+// reads.
 import type { Tokens } from './lex';
 import type { Derivation, Range } from './parse';
 
@@ -56,7 +60,7 @@ function adjusted(derivations: readonly Derivation[]): readonly Derivation[] {
 }
 
 /** The tokens of `r` as written, one space wherever the source separates two of them. */
-function written(tokens: Tokens, r: Range): string {
+export function written(tokens: Tokens, r: Range): string {
   let out = '';
   for (let k = r.from; k < r.to; k++) {
     if (k > r.from && tokens.start(k) > tokens.end(k - 1)) {
@@ -65,50 +69,4 @@ function written(tokens: Tokens, r: Range): string {
     out += tokens.text(k);
   }
   return out;
-}
-
-const LITERAL = /^(?:0x[0-9a-f]+|0[0-7]*|[1-9]\d*)[ul]*$/i;
-
-/** The value of the integer constant expression in `r`, of literals, `+ - * /` and parentheses — the
- *  `u8 pad3[0x4 - 0x3]` a decomp header sizes its padding with — or undefined for anything else. A
- *  literal reads as C reads it: `0x` hexadecimal, a leading `0` octal. */
-export function constantValue(tokens: Tokens, r: Range): number | undefined {
-  let at = r.from;
-  const next = (): string | undefined => (at < r.to ? tokens.text(at++) : undefined);
-  const primary = (): number | undefined => {
-    const k = at;
-    const t = next();
-    if (t === '(') {
-      const v = sum();
-      return next() === ')' ? v : undefined;
-    }
-    if (t === '-') {
-      const v = primary();
-      return v === undefined ? undefined : -v;
-    }
-    return t !== undefined && tokens.kind(k) === 'number' && LITERAL.test(t)
-      ? Number.parseInt(t, /^0x/i.test(t) ? 16 : /^0\d/.test(t) ? 8 : 10)
-      : undefined;
-  };
-  const product = (): number | undefined => {
-    let v = primary();
-    while (v !== undefined && at < r.to && (tokens.is(at, '*') || tokens.is(at, '/'))) {
-      const op = next();
-      const right = primary();
-      v =
-        right === undefined || (op === '/' && right === 0) ? undefined : op === '*' ? v * right : Math.trunc(v / right);
-    }
-    return v;
-  };
-  const sum = (): number | undefined => {
-    let v = product();
-    while (v !== undefined && at < r.to && (tokens.is(at, '+') || tokens.is(at, '-'))) {
-      const op = next();
-      const right = product();
-      v = right === undefined ? undefined : op === '+' ? v + right : v - right;
-    }
-    return v;
-  };
-  const v = sum();
-  return at === r.to ? v : undefined;
 }

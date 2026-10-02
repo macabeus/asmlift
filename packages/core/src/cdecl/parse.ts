@@ -32,6 +32,7 @@
 // a type keyword: `NAKED void f(…)`, `EWRAM_FN struct Blob64 f(…)`. Valid C puts an identifier in
 // neither place.
 import { type Tokens, lex } from './lex';
+import { written } from './spell';
 
 /** A half-open run of token indices: `from` is the first token, `to` is past the last. */
 export interface Range {
@@ -560,7 +561,7 @@ class Parser {
       }
       this.i++;
     }
-    return this.spelled(from, this.i);
+    return written(this.t, { from, to: this.i });
   }
 
   /** Past a template argument list at `i` (`<`), or false, having moved nothing, where none closes
@@ -723,7 +724,7 @@ class Parser {
     let j = this.i;
     while (this.t.kind(j) === 'identifier' && this.t.is(j + 1, '::')) {
       if (this.t.char(j + 2) === STAR) {
-        const member = this.spelled(this.i, j + 1);
+        const member = written(this.t, { from: this.i, to: j + 1 });
         this.i = j + 2;
         return member;
       }
@@ -818,7 +819,7 @@ class Parser {
         if (this.t.char(this.i) === LESS) {
           const from = this.i;
           if (this.angles(to) && (this.t.char(this.i) === OPEN_PAREN || this.t.is(this.i, '::'))) {
-            parts[parts.length - 1] += this.spelled(from, this.i);
+            parts[parts.length - 1] += written(this.t, { from, to: this.i });
           } else {
             this.i = from;
           }
@@ -846,7 +847,7 @@ class Parser {
     while (this.i < to && this.t.char(this.i) !== OPEN_PAREN) {
       this.i++;
     }
-    return this.spelled(from, this.i);
+    return written(this.t, { from, to: this.i });
   }
 
   /** What may follow a function declarator's `)`: `const`, `throw(…)`, `noexcept`, attributes. */
@@ -937,22 +938,6 @@ class Parser {
   closing(k: number, to: number): number {
     const close = this.t.match(k);
     return close > k && close < to ? close : to;
-  }
-
-  /** The tokens from `from` to `to` as one spelling: a space between two words, none elsewhere. */
-  spelled(from: number, to: number): string {
-    if (to === from + 1) {
-      return this.t.text(from);
-    }
-    let out = '';
-    for (let k = from; k < to; k++) {
-      const word = this.t.kind(k) === 'identifier' || this.t.kind(k) === 'number';
-      if (word && k > from && (this.t.kind(k - 1) === 'identifier' || this.t.kind(k - 1) === 'number')) {
-        out += ' ';
-      }
-      out += this.t.text(k);
-    }
-    return out;
   }
 }
 

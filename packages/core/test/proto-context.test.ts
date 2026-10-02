@@ -150,6 +150,11 @@ describe('prototypes from a declaration context', () => {
     expect(p.JKRAllocFromAram).toEqual({ returns: 'JKRAramBlock *', params: ['u32', 'JKRAramHeap::EAllocMode'] });
   });
 
+  test("a type name is spelled as written, in a parameter and in a function pointer's own list alike", () => {
+    const p = prototypesFromContext('void f(A :: B a, void (*cb)(A :: B), TVec3< u8 > v);', 'c++');
+    expect(p.f?.params).toEqual(['A :: B', 'void (*)(A :: B)', 'TVec3< u8 >']);
+  });
+
   test('a list holding a spelling that cannot be sized is kept, and the frontend abstains on it', () => {
     const p = prototypesFromContext(
       'typedef struct Vec { float x, y; } Vec; float len(Vec v); float sq(float x);',

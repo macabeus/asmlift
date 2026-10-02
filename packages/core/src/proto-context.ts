@@ -1,3 +1,4 @@
+import { constantValue, integerLiteral } from './cdecl/constant';
 import type { Tokens } from './cdecl/lex';
 import {
   type Attribute,
@@ -11,7 +12,7 @@ import {
   memberDeclarations,
   parseDeclarations,
 } from './cdecl/parse';
-import { constantValue, spellType } from './cdecl/spell';
+import { spellType } from './cdecl/spell';
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import {
   declaredCallArgs,
@@ -328,8 +329,6 @@ function realigns(d: Declaration, attributes: readonly Attribute[]): boolean {
   return !(ownBody && d.declarators.length > 0 && d.declarators.every((x) => x.derivations.length === 0));
 }
 
-const LITERAL = /\b(?:0[xX]([0-9a-fA-F]+)|0([0-7]+)|(\d+))([uUlL]*)/g;
-
 /** Whether agbcc may lay an enum with this body out wider than an int. It does for a value past 32
  *  bits (c-decl.c:6116-6123): a literal past 32 bits or of type `long long`, or an enumerator of an
  *  enum already that wide (`wide`). Compiled, `enum {B0, B1 = 0x100000000LL}` is 8 bytes, and so is
@@ -337,16 +336,11 @@ const LITERAL = /\b(?:0[xX]([0-9a-fA-F]+)|0([0-7]+)|(\d+))([uUlL]*)/g;
 function enumMayWiden(tokens: Tokens, body: Range, wide: ReadonlySet<string>): boolean {
   for (let k = body.from; k < body.to; k++) {
     const kind = tokens.kind(k);
-    // a value past 32 bits takes ten characters, as `4294967296`
-    if (kind === 'number' && (tokens.end(k) - tokens.start(k) >= 10 || /[lL]/.test(tokens.text(k)))) {
-      for (const m of tokens.text(k).matchAll(LITERAL)) {
-        const value =
-          m[1] !== undefined ? BigInt(`0x${m[1]}`) : m[2] !== undefined ? BigInt(`0o${m[2]}`) : BigInt(m[3]);
-        if (value > 0xffffffffn || /l.*l/i.test(m[4])) {
-          return true;
-        }
-      }
-    } else if (
+    const literal = kind === 'number' ? integerLiteral(tokens.text(k)) : undefined;
+    if (literal !== undefined && (literal.value > 0xffffffffn || /l.*l/i.test(literal.suffix))) {
+      return true;
+    }
+    if (
       kind === 'identifier' &&
       ((wide.size > 0 && wide.has(tokens.text(k))) || (tokens.is(k, 'long') && tokens.is(k + 1, 'long')))
     ) {

@@ -3,6 +3,7 @@
 // specifiers' type: `rows: * → [8] → f32` is a pointer to an array of 8 `f32`.
 import { describe, expect, test } from 'vitest';
 
+import { constantValue, integerLiteral } from '../src/cdecl/constant';
 import { type Tokens, lex } from '../src/cdecl/lex';
 import {
   type Attribute,
@@ -17,7 +18,7 @@ import {
   parseDeclarations,
   parseTypeName,
 } from '../src/cdecl/parse';
-import { constantValue, spellType } from '../src/cdecl/spell';
+import { spellType } from '../src/cdecl/spell';
 
 const texts = (t: Tokens): string[] => Array.from({ length: t.count }, (_, k) => t.text(k));
 
@@ -529,6 +530,23 @@ describe('a constant expression', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test('an integer literal is its value and its suffix, or none', () => {
+    expect(['0x100000000LL', '010', '0', '0XfU', '4294967296'].map(integerLiteral)).toEqual([
+      { value: 0x100000000n, suffix: 'LL' },
+      { value: 8n, suffix: '' },
+      { value: 0n, suffix: '' },
+      { value: 15n, suffix: 'U' },
+      { value: 4294967296n, suffix: '' },
+    ]);
+    expect(['08', '1.5', 'SIZE', '0x', '1e10'].map(integerLiteral)).toEqual([
       undefined,
       undefined,
       undefined,
