@@ -301,11 +301,13 @@ function laysOut(d: Declaration, attributes: readonly Attribute[]): boolean {
  *  struct tag, a pointer or a scalar such as `unsigned int` is re-aligned, which lays anything that
  *  holds it out anew, and an enum whose body comes later is packed. Compiled, `typedef struct R *RP
  *  __attribute__((aligned(8)))` makes `struct { struct R *p; }` 8 bytes, and `typedef enum E EA
- *  __attribute__((packed))` ahead of `enum E {…}` makes it 1. Which type that is, is not worked out
- *  here. Where the declaration's plain declarators name its own body, `laysOut` leaves that body
- *  unread instead — unless one attribute is `mode`, which hands every attribute after it a shared
- *  scalar type in place of the body (c-common.c:563, 996-1000): compiled, `typedef struct R {…} A
- *  __attribute__((mode(SI), aligned(8)))` makes every `int` 8-aligned. */
+ *  __attribute__((packed))` ahead of `enum E {…}` makes it 1. mwcc's `__declspec` is such an
+ *  attribute too: compiled with mwcc 4.3, `typedef __declspec(align(8)) int AI` lays `struct { char c;
+ *  AI a; }` out in 16 bytes. Which type that is, is not worked out here. Where the declaration's plain
+ *  declarators name its own body, `laysOut` leaves that body unread instead — unless one attribute is
+ *  `mode`, which hands every attribute after it a shared scalar type in place of the body
+ *  (c-common.c:563, 996-1000): compiled, `typedef struct R {…} A __attribute__((mode(SI),
+ *  aligned(8)))` makes every `int` 8-aligned. */
 function realigns(d: Declaration, attributes: readonly Attribute[]): boolean {
   if (!d.specifiers.typedef || attributes.length === 0) {
     return false;

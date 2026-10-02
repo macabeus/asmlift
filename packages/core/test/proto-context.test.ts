@@ -388,6 +388,19 @@ describe('prototypes from a declaration context', () => {
 
   // agbcc reads `__attribute` as `__attribute__` (c-parse.gperf:22-23); compiled, `mkw` below
   // returns in r0, since an attribute on a variable reaches only it
+  // compiled, mwcc 4.3 lays `struct { char c; AI a; }` out in 16 bytes after
+  // `typedef __declspec(align(8)) int AI;`
+  test('a __declspec is an attribute: a typedef that carries one leaves every layout unread', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef __declspec(align(8)) int AI; struct S { u32 a; }; struct S g(void);
+       __declspec(section ".init") void init(int a); __declspec(weak) int w(int a);`,
+      'c',
+    );
+    expect(p.g?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.init).toEqual({ returnsVoid: true, params: ['int'] });
+    expect(p.w).toEqual({ returns: 'int', params: ['int'] });
+  });
+
   test('an attribute reaches a body from its specifier, in either spelling', () => {
     const p = prototypesFromContext(
       `typedef unsigned short u16; typedef int s32;
