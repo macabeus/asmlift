@@ -1152,10 +1152,6 @@ function makeReach(): {
     reachCache.set(b, r);
     return r;
   };
-  // Reachability that never passes THROUGH `avoid` — the def-block-avoiding form for
-  // per-iteration path checks: a path that re-enters the def's block re-executes the def, so
-  // writes on it belong to the NEXT dynamic instance (which re-renders anyway) and must not
-  // count against this one. Uncached (per-decision graphs are small).
   const reachAvoiding = (from: Block, avoid: Block): Set<Block> => {
     const r = new Set<Block>();
     const stack = successorsOf(from).filter((s) => s !== avoid);
@@ -2460,8 +2456,7 @@ function namePreUpdateHelpers(rules: MaterializeRules, state: MaterializeState):
   }
 }
 
-/** Every stage `analyze` runs ahead of its fixpoint, wired as `analyze` wires them, over an empty
- *  `MaterializeState`. */
+/** Every stage `analyze` runs ahead of its fixpoint, over an empty `MaterializeState`. */
 function analysisStages(
   fn: Fn,
   returnsVoid: boolean,

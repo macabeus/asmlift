@@ -265,8 +265,8 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  STAGED, and the order the stages run in is the refusal order: the first stage to refuse names
  *  the decline. Three things cross stages besides their returned records: `irBlocks`, rewritten by
  *  the fold, the split, the one-object answer and the stamp; `foldedHere`, which the split adds to
- *  and the slot-overlap refusal reads; and `ModelChoice.refused`, which the shape stage sets and
- *  the relift test reads. */
+ *  and the slot-overlap refusal reads; and `ModelChoice.refused`, which the model choice and the
+ *  shape stage set and the relift test reads. */
 export function auditFrameObjects({
   name,
   irBlocks,
