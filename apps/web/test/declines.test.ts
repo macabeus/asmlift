@@ -44,6 +44,8 @@ const DECLINE_CTORS = new Set([
   'StructureError',
 ]);
 
+const FAILS_THROUGH_CALLBACK = /\bfail: \(message: string\) => never\b/;
+
 const coreDeclineTemplates = (): { file: string; line: number; text: string }[] => {
   const files: string[] = [];
   (function walk(d: string) {
@@ -59,10 +61,12 @@ const coreDeclineTemplates = (): { file: string; line: number; text: string }[] 
   const out: { file: string; line: number; text: string }[] = [];
   for (const f of files.sort()) {
     const src = readFileSync(f, 'utf8');
-    const re = /throw new (\w+)\(/g;
+    // A FILE HANDED ITS CALLER'S CONSTRUCTOR as `fail: (message: string) => never` throws through
+    // it, so each `fail(` call there is a site too.
+    const re = FAILS_THROUGH_CALLBACK.test(src) ? /throw new (\w+)\(|(?<![\w.])(fail)\(/g : /throw new (\w+)\(/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
-      if (!DECLINE_CTORS.has(m[1])) {
+      if (m[2] === undefined && !DECLINE_CTORS.has(m[1])) {
         continue;
       }
       let i = m.index + m[0].length;
@@ -1176,12 +1180,13 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 34],
+    ['frontend/thumb.ts', 29],
     ['structure/structure.ts', 20],
     ['frontend/mips.ts', 9],
     ['frontend/ppc.ts', 8],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
+    ['frontend/call-plan.ts', 5],
     ['frontend/ssa.ts', 2],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],

@@ -28,26 +28,21 @@
 // "residual shapes only" for that) and it is not a catch-all class.
 // `packages/core/src` throws 167 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
-// subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
+// subclass and `StructureError`, or by the `fail` callback a frontend hands `frontend/call-plan.ts`,
+// harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
 // separate NAME to that harvest, so it is listed separately here too). 90 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       34  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts       29  ARM-mode function, raw data in the code stream, a base alignment the
 //                               input does not determine, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
-//                               `bl` whose target this asm defines as a data label, a call to a
-//                               function declared to return a struct it cannot lower (its
-//                               interpolated reason), one returning it into anything but a
-//                               local, one whose parameters nothing sizes, one whose declaration
-//                               the lifted source cannot print (a type it has no spelling for, or a
-//                               bare parameter count that states none), one declared to return
-//                               both a struct and a 64-bit value, and
-//                               the reaching-compare throw whose reason is interpolated
-//                               (`cross-block-flags` keys on one of its reasons, so the template
-//                               with a placeholder in it matches nothing)
+//                               `bl` whose target this asm defines as a data label, a struct a call
+//                               returns into anything but a local, and the reaching-compare throw
+//                               whose reason is interpolated (`cross-block-flags` keys on one of its
+//                               reasons, so the template with a placeholder in it matches nothing)
 //   structure/structure.ts  20  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
@@ -74,6 +69,11 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/call-plan.ts    5  a call to a function declared to return a struct it cannot lower (its
+//                               interpolated reason), one whose parameters nothing sizes, one whose
+//                               declaration the lifted source cannot print (a type it has no spelling
+//                               for, or a bare parameter count that states none), and one declared to
+//                               return both a struct and a 64-bit value
 //   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
 //                               and a struct one call hands back in the return register passed on
 //                               as the next guessed call's first argument
