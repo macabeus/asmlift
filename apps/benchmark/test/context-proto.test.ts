@@ -1,7 +1,8 @@
 // A real row's prototype table (src/cases/context-proto.ts): the vendored context's declarations
 // under the manifest's own entries, without the row's own declaration, narrowed to what the
 // assembly names before it is published.
-import { parseDeclarations } from '@asmlift/core/cdecl/parse';
+import { type Language, parseDeclarations } from '@asmlift/core/cdecl/parse';
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { validatePrototypes } from '@asmlift/core/proto';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
@@ -11,6 +12,7 @@ import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
 import { m2cDeclarations, referencedPrototypes, rowPrototypes } from '../src/cases/context-proto';
+import { loadManifests } from '../src/cases/manifests';
 
 const at = (ctxI: string, ctxFile = 'test/ctx.i') => ({ ctxI, ctxFile });
 const CTX = 'typedef signed long s32; s32 callee(s32 a); s32 other(s32 a, s32 b); void self(s32 x);';
@@ -105,14 +107,32 @@ describe('every vendored context', () => {
     expect(contexts.length).toBeGreaterThan(100);
   }, 120_000);
 
-  test('is read whole: some declarations, and no statement or parameter list left unread', () => {
-    const unread = vendoredContexts().flatMap(([name, text]) => {
-      const { declarations, tokens, unread } = parseDeclarations(text);
-      return [
-        ...(declarations.length === 0 ? [`${name}: no declaration`] : []),
-        ...unread.map((k) => `${name}:${text.slice(0, tokens.start(k)).split('\n').length}: ${tokens.text(k)}`),
-      ];
-    });
+  test('is read whole in the dialect its rows read it in: some declarations, nothing left unread', () => {
+    const dialects = rowDialects();
+    const unread = vendoredContexts().flatMap(([name, text]) =>
+      // a context no row reads is read as C++, whose keywords are C's and more
+      [...(dialects.get(name) ?? ['c++' as const])].flatMap((language) => {
+        const { declarations, tokens, unread } = parseDeclarations(text, language);
+        return [
+          ...(declarations.length === 0 ? [`${name} (${language}): no declaration`] : []),
+          ...unread.map(
+            (k) => `${name} (${language}):${text.slice(0, tokens.start(k)).split('\n').length}: ${tokens.text(k)}`,
+          ),
+        ];
+      }),
+    );
     expect(unread).toEqual([]);
   }, 120_000);
 });
+
+/** The dialects the real tier reads each vendored context in, by `<project>/<file>`. */
+function rowDialects(): Map<string, Set<Language>> {
+  const out = new Map<string, Set<Language>>();
+  for (const man of loadManifests()) {
+    for (const f of man.functions) {
+      const { ctxFile } = man.vendored(f.sym);
+      out.set(ctxFile, (out.get(ctxFile) ?? new Set()).add(unitLanguage(f.unit, man.units[f.unit].cflags)));
+    }
+  }
+  return out;
+}

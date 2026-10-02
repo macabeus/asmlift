@@ -77,7 +77,7 @@ type LayoutOf = (t: string, depth: number) => AggregateLayout | undefined;
 /** The callee prototypes a preprocessed declaration context states. `language` decides what an
  *  empty parameter list means: none in C++, unstated in C (a pre-ANSI declaration). */
 export function prototypesFromContext(src: string, language: 'c' | 'c++'): Prototypes {
-  const ctx = parseDeclarations(src);
+  const ctx = parseDeclarations(src, language);
   const table = typeTable(ctx, language);
   return functionPrototypes(ctx, table, layoutReader(ctx, table), language);
 }

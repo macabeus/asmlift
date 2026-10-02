@@ -15,6 +15,9 @@
 // reading resumes after its `;` or its body. A function's parameter list that cannot be read is
 // counted the same way, and its derivation carries no parameters.
 //
+// THE LANGUAGE DECIDES THE KEYWORDS. A word C++ alone reserves (`class`, `operator`, `friend`, …) is
+// an identifier in C, which may name a parameter or a member with it.
+//
 // UNKNOWN WORDS. A run of identifiers between the type and the declarator is read as unknown words,
 // the last identifier being the name: `struct Blob64 EWRAM_FN makeblob(…)` is a raw header's
 // unexpanded macro, and the type it qualifies is still the one spelled. Valid C never puts two
@@ -102,19 +105,22 @@ export interface Declaration {
   body?: Range;
 }
 
+export type Language = 'c' | 'c++';
+
 export interface ParsedContext {
   declarations: Declaration[];
   /** the first token of each statement, and the `(` of each parameter list, that was not read */
   unread: number[];
   tokens: Tokens;
+  language: Language;
 }
 
-export function parseDeclarations(src: string): ParsedContext {
+export function parseDeclarations(src: string, language: Language): ParsedContext {
   const tokens = lex(src);
-  const parser = new Parser(tokens);
+  const parser = new Parser(tokens, language);
   const declarations: Declaration[] = [];
   parser.topLevel(0, tokens.count, declarations);
-  return { declarations, unread: parser.unread, tokens };
+  return { declarations, unread: parser.unread, tokens, language };
 }
 
 /** A type name, `const u8 *` or `f32 (*)[3]`: its specifiers and abstract declarator, over its own
@@ -126,7 +132,7 @@ export interface TypeName extends Parameter {
 /** The type name `src` spells, or undefined where it is anything else. */
 export function parseTypeName(src: string): TypeName | undefined {
   const tokens = lex(src);
-  const p = new Parser(tokens);
+  const p = new Parser(tokens, 'c++');
   const specifiers = p.specifiers(tokens.count, 'parameter');
   const declarator = specifiers === null ? null : p.declarator(tokens.count, 'parameter');
   return specifiers !== null && declarator !== null && declarator.name === undefined && p.i === tokens.count
@@ -137,18 +143,18 @@ export function parseTypeName(src: string): TypeName | undefined {
 /** A struct, union or class body's member declarations, or undefined when one of them cannot be
  *  read. A C++ access label is not a member, and a member template or `using` declares no storage. */
 export function memberDeclarations(ctx: ParsedContext, body: Range): Declaration[] | undefined {
-  const p = new Parser(ctx.tokens);
+  const p = new Parser(ctx.tokens, ctx.language);
   const out: Declaration[] = [];
   p.i = body.from;
   while (p.i < body.to) {
     const k = p.i;
     if (p.t.char(k) === SEMICOLON) {
       p.i++;
-    } else if (ACCESS.has(p.t.text(k)) && p.t.char(k + 1) === COLON && !p.t.is(k + 1, '::')) {
+    } else if (p.cxx && ACCESS.has(p.t.text(k)) && p.t.char(k + 1) === COLON && !p.t.is(k + 1, '::')) {
       p.i += 2;
-    } else if (p.t.is(k, 'using')) {
+    } else if (p.cxx && p.t.is(k, 'using')) {
       p.skipStatement(body.to);
-    } else if (p.t.is(k, 'template')) {
+    } else if (p.cxx && p.t.is(k, 'template')) {
       if (!p.template(body.to, 'member')) {
         return undefined;
       }
@@ -185,7 +191,7 @@ const QUALIFIERS: ReadonlyMap<string, Qualifier> = new Map([
   ['const', 'const'],
   ['volatile', 'volatile'],
 ]);
-const STORAGE = new Set([
+const C_STORAGE = [
   'extern',
   'static',
   'inline',
@@ -196,16 +202,19 @@ const STORAGE = new Set([
   'asm',
   '__asm',
   '__asm__',
-  'virtual',
-  'explicit',
-  'friend',
-  'mutable',
-]);
+];
+const STORAGE: Record<Language, ReadonlySet<string>> = {
+  c: new Set(C_STORAGE),
+  'c++': new Set([...C_STORAGE, 'virtual', 'explicit', 'friend', 'mutable']),
+};
 const BASIC = new Set(['void', 'char', 'short', 'int', 'long', 'float', 'double', 'signed', 'unsigned']);
 /** a type word that combines with no other: after one, it is the name being declared, as C89
  *  reserves none of them (`typedef unsigned long bool;`) */
 const LONE = new Set(['bool', '_Bool', 'wchar_t']);
-const TAGS: ReadonlySet<string> = new Set<TagKeyword>(['struct', 'union', 'enum', 'class']);
+const TAGS: Record<Language, ReadonlySet<string>> = {
+  c: new Set<TagKeyword>(['struct', 'union', 'enum']),
+  'c++': new Set<TagKeyword>(['struct', 'union', 'enum', 'class']),
+};
 const ATTRIBUTES = new Set(['__attribute__', '__attribute', '__declspec']);
 const ASM = new Set(['asm', '__asm', '__asm__']);
 const ACCESS = new Set(['public', 'private', 'protected']);
@@ -216,9 +225,15 @@ class Parser {
   readonly t: Tokens;
   i = 0;
   readonly unread: number[] = [];
+  readonly cxx: boolean;
+  readonly storage: ReadonlySet<string>;
+  readonly tags: ReadonlySet<string>;
 
-  constructor(t: Tokens) {
+  constructor(t: Tokens, language: Language) {
     this.t = t;
+    this.cxx = language === 'c++';
+    this.storage = STORAGE[language];
+    this.tags = TAGS[language];
   }
 
   topLevel(from: number, to: number, out: Declaration[]): void {
@@ -237,15 +252,18 @@ class Parser {
           this.topLevel(k + 3, close, out);
         }
         this.i = Math.min(close + 1, to);
-      } else if (this.t.is(k, 'namespace')) {
+      } else if (this.cxx && this.t.is(k, 'namespace')) {
         let j = k + 1;
         while (j < to && this.t.char(j) !== OPEN_BRACE && this.t.char(j) !== SEMICOLON) {
           j++;
         }
         this.i = this.t.char(j) === OPEN_BRACE ? Math.min(this.closing(j, to) + 1, to) : j + 1;
-      } else if (this.t.is(k, 'using') || (ASM.has(this.t.text(k)) && this.t.char(k + 1) === OPEN_PAREN)) {
+      } else if (
+        (this.cxx && this.t.is(k, 'using')) ||
+        (ASM.has(this.t.text(k)) && this.t.char(k + 1) === OPEN_PAREN)
+      ) {
         this.skipStatement(to);
-      } else if (this.t.is(k, 'template')) {
+      } else if (this.cxx && this.t.is(k, 'template')) {
         this.template(to, 'top');
       } else {
         const d = this.declaration(to, 'top');
@@ -409,10 +427,10 @@ class Parser {
         s.qualifiers.push(qualifier);
         written.push(w);
         this.i++;
-      } else if (STORAGE.has(w)) {
+      } else if (this.storage.has(w)) {
         s.storage.push(w);
         this.i++;
-      } else if (w === 'typename') {
+      } else if (this.cxx && w === 'typename') {
         this.i++;
       } else if (BASIC.has(w) || (LONE.has(w) && typed === 'none')) {
         if (typed !== 'none' && typed !== 'basic') {
@@ -422,7 +440,7 @@ class Parser {
         written.push(w);
         typed = 'basic';
         this.i++;
-      } else if (TAGS.has(w)) {
+      } else if (this.tags.has(w)) {
         if (typed !== 'none') {
           break;
         }
@@ -434,7 +452,7 @@ class Parser {
         if (afterBody) {
           s.attributes = s.attributes.map((a) => (a.site === 'specifier' ? { ...a, site: 'before-body' } : a));
         }
-      } else if (w === 'operator') {
+      } else if (this.cxx && w === 'operator') {
         break;
       } else if (typed === 'none') {
         if (context !== 'parameter' && this.namesDeclarator(k)) {
@@ -558,7 +576,7 @@ class Parser {
   startsName(k: number): boolean {
     return (
       (this.t.char(k) === TILDE && this.t.kind(k + 1) === 'identifier') ||
-      this.t.is(k, 'operator') ||
+      (this.cxx && this.t.is(k, 'operator')) ||
       (this.t.kind(k) === 'identifier' && this.namesDeclarator(k))
     );
   }
@@ -724,7 +742,7 @@ class Parser {
       return false;
     }
     const w = this.t.text(k);
-    return !QUALIFIERS.has(w) && !BASIC.has(w) && !TAGS.has(w);
+    return !QUALIFIERS.has(w) && !BASIC.has(w) && !this.tags.has(w);
   }
 
   /** A declarator's name at `i`: `f`, `A::f`, `A::~A`, `operator==`, `A::operator new[]`. */
@@ -734,7 +752,7 @@ class Parser {
       if (this.t.char(this.i) === TILDE) {
         parts.push(`~${this.t.text(this.i + 1)}`);
         this.i += 2;
-      } else if (this.t.is(this.i, 'operator')) {
+      } else if (this.cxx && this.t.is(this.i, 'operator')) {
         parts.push(this.operatorName(to));
       } else {
         parts.push(this.t.text(this.i));

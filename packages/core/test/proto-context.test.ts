@@ -154,6 +154,26 @@ describe('prototypes from a declaration context', () => {
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  test('a word C++ alone reserves names a parameter or a member in C', () => {
+    const src = `typedef unsigned char u8; typedef unsigned short u16;
+       void named(int class, int operator, int friend, int y);
+       struct S { u8 class; u8 typename; u8 mutable; u16 x; }; struct S getS(void);`;
+    const c = prototypesFromContext(src, 'c');
+    expect(c.named?.params).toEqual(['int', 'int', 'int', 'int']);
+    expect(c.getS?.returnLayout).toEqual({
+      kind: 'struct',
+      members: [
+        { name: 'class', type: 'u8' },
+        { name: 'typename', type: 'u8' },
+        { name: 'mutable', type: 'u8' },
+        { name: 'x', type: 'u16' },
+      ],
+    });
+    const cpp = prototypesFromContext(src, 'c++');
+    expect(cpp.named?.params).toBeUndefined();
+    expect(cpp.getS?.returnLayout).toEqual({ kind: 'struct' });
+  });
+
   test('a literal or a comment holds no brace, and a namespace ends at its own brace', () => {
     const p = prototypesFromContext(
       `struct Prop { Prop() : name("}{") {} virtual void read(int s); };
