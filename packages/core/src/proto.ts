@@ -1,3 +1,4 @@
+import { parseTypeName } from './cdecl/parse';
 import type { IrType } from './ir/types';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
@@ -335,7 +336,7 @@ const BASE_WIDTHS: ReadonlyMap<string, number> = new Map([
  *  answer: raise/paramwidth.ts abstains for that one parameter, and `declaredCallArgs` abstains
  *  for the whole list, because one unknown width moves every later argument's home.
  *
- *  A pointer is register-wide whatever it points at, which is the fact the `*` test carries.
+ *  A pointer is register-wide whatever it points at (`isAddress`).
  *
  *  A WIDTH WIDER THAN A REGISTER IS A READABLE ANSWER, not an absence. `long long` and `s64`/`u64`
  *  answer 64, and that is a different fact from silence even though both refuse a narrowing: an
@@ -346,9 +347,7 @@ export function declaredWidth(t: ParamType): number | undefined {
     .replace(/\b(?:const|volatile)\b/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-  // a pointer — including a function pointer's abstract declarator, `void (*)(s32)` — is
-  // register-wide whatever it points at
-  if (s.endsWith('*') || /\(\s*\*\s*\)\s*\(.*\)$/.test(s)) {
+  if (isAddress(s)) {
     return 32;
   }
   const own = /^([su])(8|16|32|64)$/.exec(s);
@@ -361,6 +360,20 @@ export function declaredWidth(t: ParamType): number | undefined {
     .trim()
     .replace(/\s+/g, ' ');
   return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
+}
+
+/** Whether the type name `s` is a pointer by its abstract declarator, the derivation nearest the
+ *  absent name: `u8 *`, `void (*)(s32)`, `f32 (*)[3]`, `void (**)(void)`. A C++ pointer to a data
+ *  member is one too, and a pointer to a member function is not: compiled with mwcc GC/1.2.5n,
+ *  GC/1.3.2 and GC/2.6, `int T::*` is 4 bytes passed in one register, where `void (T::*)(int)` is
+ *  12, passed as the address of a copy the way a struct of that size is. A spelling with neither a
+ *  `(` nor a `::` is a pointer exactly when it ends in its `*`. */
+function isAddress(s: string): boolean {
+  if (!s.includes('(') && !s.includes('::')) {
+    return s.endsWith('*');
+  }
+  const [first, next] = parseTypeName(s)?.declarator.derivations ?? [];
+  return first?.kind === 'pointer' && !(first.member !== undefined && next?.kind === 'function');
 }
 
 /** The scalar vocabulary every candidate's prelude declares: the typedef NAME, and the C89 text it

@@ -294,6 +294,41 @@ describe('declaredWidth', () => {
     expect(declaredWidth('  short   int ')).toBe(16);
   });
 
+  test('the pointer an abstract declarator binds first is register-wide, whatever it points at', () => {
+    // a multi-dimensional array parameter is adjusted to a pointer to its rows: `f32 m[2][3]`
+    expect(
+      ['f32 (*)[3]', 'void (**)(void)', 'void (*)(s32 channel)', 'void (* const)(void)'].map(declaredWidth),
+    ).toEqual([32, 32, 32, 32]);
+    expect(['u8 *(*)(void)', 'const u32 (*(*)(void))(u8 reason, const INFO *info)'].map(declaredWidth)).toEqual([
+      32, 32,
+    ]);
+  });
+
+  test('an array, a function, a reference or a pointer to member function bound first is no pointer', () => {
+    // the `(*)` inside a pointer to member function's own parameter list is not what it is
+    expect(
+      ['int (*[3])(void)', 'void (void)', 'int (&)[3]', 'void (T::*)(int (*)(void))', 'void (*cb)(void)'].map(
+        declaredWidth,
+      ),
+    ).toEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+
+  // compiled with mwcc GC/1.2.5n, GC/1.3.2 and GC/2.6: `sizeof(int T::*)` is 4 and
+  // `void hd(int T::* p, int y) { gd(p, y); }` hands p to gd in r3 and y in r4, where
+  // `sizeof(void (T::*)(int))` is 12 and `hf` copies its three words and passes the copy's address
+  test('a pointer to data member is register-wide, and a pointer to member function is not', () => {
+    expect(['int T::*', 'int T::* const', 'int (T::*)[3]', 'u8 * A::B::*'].map(declaredWidth)).toEqual([
+      32, 32, 32, 32,
+    ]);
+    expect(['void (T::*)(int)', 'void (T::* const)(int)', 'int (A::B::*)(void) const'].map(declaredWidth)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // a pointer to one is an address
+    expect(declaredWidth('void (T::**)(int)')).toBe(32);
+  });
+
   test('the 64-bit spellings answer 64, which is a fact and not an absence', () => {
     // A width WIDER than a register is the fact that says how many argument registers a parameter
     // occupies. Read as `undefined` it is indistinguishable from a project typedef, and the only

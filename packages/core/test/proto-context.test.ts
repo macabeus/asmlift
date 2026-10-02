@@ -58,6 +58,135 @@ describe('prototypes from a declaration context', () => {
     expect(declaredCallArgs(p.sum, PPC_MWCC)?.widths).toEqual([32, 32]);
   });
 
+  test('a multi-dimensional array parameter is a pointer to its inner array', () => {
+    const p = prototypesFromContext(
+      `typedef float f32; typedef signed char s8; typedef unsigned char u8; typedef unsigned int u32;
+       void GXSetIndTexMtx(u32 id, f32 offset[2][3], s8 scale_exp);
+       void GXSetCopyFilter(u8 aa, const u8 sample_pattern[12][2], u8 vf, const u8 *vfilter);`,
+      'c',
+    );
+    expect(p.GXSetIndTexMtx?.params).toEqual(['u32', 'f32 (*)[3]', 's8']);
+    expect(p.GXSetCopyFilter?.params).toEqual(['u8', 'const u8 (*)[2]', 'u8', 'const u8 *']);
+    expect(declaredCallArgs(p.GXSetIndTexMtx, PPC_MWCC)?.widths).toEqual([32, 32, 8]);
+  });
+
+  test('an array parameter of unstated outer extent is a pointer to its inner array', () => {
+    const p = prototypesFromContext(
+      'typedef float f32; typedef unsigned int u32; void GXLoadTexMtxImm(f32 mtx[][4], u32 id, u32 type);',
+      'c',
+    );
+    expect(p.GXLoadTexMtxImm?.params).toEqual(['f32 (*)[4]', 'u32', 'u32']);
+  });
+
+  test('a pointer to an array, a pointer to a function pointer and a function-typed parameter are read', () => {
+    const p = prototypesFromContext(
+      `typedef float f32; typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32;
+       typedef u8 bool8;
+       u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[8]);
+       void func_8008A430_8B030(f32(*)[], f32);
+       u16 SetFlashTimerIntr(u8 timerNum, void (**intrFunc)(void));
+       bool8 CopyablePlayerMovement_None(struct ObjectEvent *objectEvent, u8 playerDirection, bool8 tileCallback(u8));`,
+      'c',
+    );
+    expect(p.LinkMain1?.params).toEqual(['u8 *', 'u16 *', 'u16 (*)[8]']);
+    expect(p.func_8008A430_8B030?.params).toEqual(['f32 (*)[]', 'float']);
+    expect(p.SetFlashTimerIntr?.params).toEqual(['u8', 'void (* *)(void)']);
+    expect(p.CopyablePlayerMovement_None?.params).toEqual(['struct ObjectEvent *', 'u8', 'bool8 (*)(u8)']);
+    expect(declaredCallArgs(p.SetFlashTimerIntr, ARMV4T_AGBCC)?.widths).toEqual([8, 32]);
+  });
+
+  test('a parameter with no name is its whole type, a typedef name included', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef float f32; typedef f32 Mtx33[3][3]; typedef struct Vec Vec;
+       extern void GXLoadNrmMtxImm3x3(const Mtx33, u32 id);
+       void fn_1_91A4(Vec *, Vec *, float[5]);`,
+      'c',
+    );
+    expect(p.GXLoadNrmMtxImm3x3?.params).toEqual(['const Mtx33', 'u32']);
+    expect(p.fn_1_91A4?.params).toEqual(['struct Vec *', 'struct Vec *', 'float *']);
+  });
+
+  test("a typedef name resolves to its own type, which the name's qualifiers qualify nearest the name", () => {
+    const p = prototypesFromContext(
+      `typedef void (*Cb)(int); typedef unsigned char u8; typedef const u8 CU8;
+       void f(const Cb c, Cb const d, const Cb *e, const CU8 k); Cb *g(int y);`,
+      'c',
+    );
+    expect(p.f?.params).toEqual(['void (* const)(int)', 'void (* const)(int)', 'void (* const *)(int)', 'const u8']);
+    expect(p.g?.returns).toBe('void (* *)(int)');
+    // a qualifier inside a template argument is that argument's
+    expect(prototypesFromContext('void h(TVec3<const u8 *> a);', 'c++').h?.params).toEqual(['TVec3<const u8 *>']);
+  });
+
+  // a reference is returned as an address, never through a hidden pointer
+  test('a function returning a reference to a struct states no struct return', () => {
+    const p = prototypesFromContext('struct S { int a; }; struct S &f(int a); typedef struct S T; T &g(int a);', 'c++');
+    expect(p.f).toEqual({ params: ['int'] });
+    expect(p.g).toEqual({ params: ['int'] });
+  });
+
+  test('a function-pointer parameter keeps the qualifiers of its own parameters where they are', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned char u8; typedef unsigned int u32;
+       void sndVirtualSampleSetCallback(u32 (*callback)(u8 reason, const SND_VIRTUALSAMPLE_INFO* info));`,
+      'c',
+    );
+    expect(p.sndVirtualSampleSetCallback?.params).toEqual(['u32 (*)(u8 reason, const SND_VIRTUALSAMPLE_INFO* info)']);
+  });
+
+  // compiled, agbcc passes `void f(long long (x), int y)`'s x in r0:r1 and y in r2, and reads
+  // `int (x)[3]`'s x as an `int *`
+  test('a name in parentheses in a parameter is a type where the context declares one', () => {
+    const c = prototypesFromContext(
+      `typedef int T; typedef int I;
+       void wide(long long (x), int y); int narrow(char (c)); void named(I (x));
+       void arr(int (x)[3], int y); void fun(int (x)(int), int y);
+       void fn(char (T)); void fns(char (T), int (int));`,
+      'c',
+    );
+    expect(c.wide).toEqual({ returnsVoid: true });
+    expect(c.narrow).toEqual({ returns: 'int' });
+    expect(c.named).toEqual({ returnsVoid: true });
+    // a type followed by a list or an extent would be a function returning a function or an array
+    expect(c.arr?.params).toEqual(['int *', 'int']);
+    expect(c.fun?.params).toEqual(['int (*)(int)', 'int']);
+    expect(c.fn?.params).toEqual(['char (*)(T)']);
+    expect(c.fns?.params).toEqual(['char (*)(T)', 'int (*)(int)']);
+    // a C++ tag is a type name
+    const cpp = prototypesFromContext('struct V { int a; }; void tagged(int (V)); void plain(int (v));', 'c++');
+    expect(cpp.tagged?.params).toEqual(['int (*)(V)']);
+    expect(cpp.plain).toEqual({ returnsVoid: true });
+  });
+
+  test('a declarator in parentheses, and an attribute before a second declarator, are read as C reads them', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef int (T); void f(T x); int (g)(int x);
+       u32 h(u32 x) __attribute__((long_call)), k(u32 y);`,
+      'c',
+    );
+    expect(p.f).toEqual({ returnsVoid: true, params: ['int'] });
+    expect(declaredCallArgs(p.f, ARMV4T_AGBCC)?.widths).toEqual([32]);
+    expect(p.g).toEqual({ returns: 'int', params: ['int'] });
+    expect(p.h).toEqual({ returns: 'u32', params: ['u32'] });
+    expect(p.k).toEqual({ returns: 'u32', params: ['u32'] });
+  });
+
+  test('a parameter of a qualified C++ type name is read', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned long u32; struct JKRAramBlock; class JKRAramHeap { public: enum EAllocMode { HEAD, TAIL }; };
+       inline JKRAramBlock* JKRAllocFromAram(u32 size, JKRAramHeap::EAllocMode allocMode = JKRAramHeap::HEAD) {
+         return 0;
+       }`,
+      'c++',
+    );
+    expect(p.JKRAllocFromAram).toEqual({ returns: 'JKRAramBlock *', params: ['u32', 'JKRAramHeap::EAllocMode'] });
+  });
+
+  test("a type name is spelled as written, in a parameter and in a function pointer's own list alike", () => {
+    const p = prototypesFromContext('void f(A :: B a, void (*cb)(A :: B), TVec3< u8 > v);', 'c++');
+    expect(p.f?.params).toEqual(['A :: B', 'void (*)(A :: B)', 'TVec3< u8 >']);
+  });
+
   test('a list holding a spelling that cannot be sized is kept, and the frontend abstains on it', () => {
     const p = prototypesFromContext(
       'typedef struct Vec { float x, y; } Vec; float len(Vec v); float sq(float x);',
@@ -84,6 +213,26 @@ describe('prototypes from a declaration context', () => {
     expect(Object.keys(p).sort()).toEqual(['after', 'last', 'printf', 'same']);
     expect(p.printf).toEqual({ returns: 'int' });
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
+  });
+
+  test('a word C++ alone reserves names a parameter or a member in C', () => {
+    const src = `typedef unsigned char u8; typedef unsigned short u16;
+       void named(int class, int operator, int friend, int y);
+       struct S { u8 class; u8 typename; u8 mutable; u16 x; }; struct S getS(void);`;
+    const c = prototypesFromContext(src, 'c');
+    expect(c.named?.params).toEqual(['int', 'int', 'int', 'int']);
+    expect(c.getS?.returnLayout).toEqual({
+      kind: 'struct',
+      members: [
+        { name: 'class', type: 'u8' },
+        { name: 'typename', type: 'u8' },
+        { name: 'mutable', type: 'u8' },
+        { name: 'x', type: 'u16' },
+      ],
+    });
+    const cpp = prototypesFromContext(src, 'c++');
+    expect(cpp.named?.params).toBeUndefined();
+    expect(cpp.getS?.returnLayout).toEqual({ kind: 'struct' });
   });
 
   test('a literal or a comment holds no brace, and a namespace ends at its own brace', () => {
@@ -244,7 +393,7 @@ describe('prototypes from a declaration context', () => {
        typedef struct R { u32 w[4]; } const CR; CR mk(s32);
        typedef struct { u32 w[4]; } volatile VR, *VRP; VR mkv(s32); VRP mkvp(s32);
        typedef const struct Q { u32 w[4]; } QR; QR mkq(s32); struct Q mkq2(s32);
-       typedef struct R2 { u32 w; } R2T, const *CR2P; CR2P mkp(s32);`,
+       typedef struct R2 { u32 w; } const R2C, *CR2P; CR2P mkp(s32);`,
       'c',
     );
     expect(p.mk).toEqual({ returns: 'CR', returnLayout: { kind: 'struct', members: w4 }, params: ['s32'] });
@@ -252,6 +401,7 @@ describe('prototypes from a declaration context', () => {
     expect(p.mkvp).toEqual({ returns: 'VR *', params: ['s32'] });
     expect(p.mkq?.returnLayout?.members).toEqual(w4);
     expect(p.mkq2?.returnLayout?.members).toEqual(w4);
+    // compiled, `p->w = 1` through a `CR2P p` is an assignment of a read-only member
     expect(p.mkp).toEqual({ returns: 'const struct R2 *', params: ['s32'] });
   });
 
@@ -275,6 +425,19 @@ describe('prototypes from a declaration context', () => {
 
   // agbcc reads `__attribute` as `__attribute__` (c-parse.gperf:22-23); compiled, `mkw` below
   // returns in r0, since an attribute on a variable reaches only it
+  // compiled, mwcc 4.3 lays `struct { char c; AI a; }` out in 16 bytes after
+  // `typedef __declspec(align(8)) int AI;`
+  test('a __declspec is an attribute: a typedef that carries one leaves every layout unread', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef __declspec(align(8)) int AI; struct S { u32 a; }; struct S g(void);
+       __declspec(section ".init") void init(int a); __declspec(weak) int w(int a);`,
+      'c',
+    );
+    expect(p.g?.returnLayout).toEqual({ kind: 'struct' });
+    expect(p.init).toEqual({ returnsVoid: true, params: ['int'] });
+    expect(p.w).toEqual({ returns: 'int', params: ['int'] });
+  });
+
   test('an attribute reaches a body from its specifier, in either spelling', () => {
     const p = prototypesFromContext(
       `typedef unsigned short u16; typedef int s32;
@@ -342,6 +505,16 @@ describe('prototypes from a declaration context', () => {
     expect(p.mode).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  test("a mode on a function pointer parameter's own parameter retypes nothing the function takes", () => {
+    const p = prototypesFromContext(
+      `typedef void (*Wide)(int x __attribute__((mode(DI))));
+       void viaTypedef(Wide w, int y); void written(void (*w)(int x __attribute__((mode(DI)))), int y);`,
+      'c',
+    );
+    expect(declaredCallArgs(p.viaTypedef, ARMV4T_AGBCC)?.widths).toEqual([32, 32]);
+    expect(declaredCallArgs(p.written, ARMV4T_AGBCC)?.widths).toEqual([32, 32]);
+  });
+
   // `mode` hands the attributes after it a shared scalar type (c-common.c:563, 996-1000); compiled,
   // `struct O { int a; }` is 8 bytes and comes back through memory
   test.each(['__attribute__((mode(SI), aligned(8)))', '__attribute__ ( ( __mode__ ( __SI__ ) , aligned ( 8 ) ) )'])(
@@ -356,6 +529,40 @@ describe('prototypes from a declaration context', () => {
   );
 
   // compiled, `struct G2 { G g; }` is 8 bytes and `struct S { s32 v; }` still 4 and in r0
+  // compiled, agbcc refuses `aligned` on a parameter and ignores `packed` there, and lays
+  // `struct { char c; Cb cb; }` out in 8 bytes
+  test("an attribute on a function pointer's own parameter leaves its typedef, its member and layouts read", () => {
+    const p = prototypesFromContext(
+      `typedef unsigned short u16;
+       typedef void (*Cb)(int x __attribute__((unused))); typedef void (*Wide)(int x __attribute__((mode(DI))));
+       void g(Cb c, Wide w); struct S { Cb c; void (*d)(int y __attribute__((packed))); u16 x; }; struct S h(void);`,
+      'c',
+    );
+    expect(p.g?.params).toEqual([
+      'void (*)(int x __attribute__((unused)))',
+      'void (*)(int x __attribute__((mode(DI))))',
+    ]);
+    expect(declaredCallArgs(p.g, ARMV4T_AGBCC)?.widths).toEqual([32, 32]);
+    expect(p.h?.returnLayout?.members?.map((m) => m.name)).toEqual(['c', 'd', 'x']);
+  });
+
+  test('a function pointer member whose own parameter list cannot be read is still a member', () => {
+    const layout = (src: string, language: 'c' | 'c++') =>
+      prototypesFromContext(`typedef unsigned short u16; ${src} struct S h(void);`, language).h?.returnLayout;
+    const members = {
+      kind: 'struct',
+      members: [
+        { name: 'cb', type: 'void *' },
+        { name: 'y', type: 'u16' },
+      ],
+    };
+    expect(layout('struct S { void (*cb)(char (x)); u16 y; };', 'c')).toEqual(members);
+    expect(layout('struct S { void (*cb)(int x, ); u16 y; };', 'c')).toEqual(members);
+    expect(layout('struct S { void (*cb)(int class); u16 y; };', 'c++')).toEqual(members);
+    // a member statement that cannot be read still leaves the layout unread
+    expect(layout('struct S { void (*cb)(int); u16 y[; };', 'c')).toEqual({ kind: 'struct' });
+  });
+
   test('an aligned typedef of its own body leaves that body unread, and no other', () => {
     const p = prototypesFromContext(
       `typedef int s32; typedef struct { s32 v; } G __attribute__((aligned(8)));
@@ -397,6 +604,11 @@ describe('prototypes from a declaration context', () => {
     );
     expect(c.makeblob).toEqual({ returnLayout: { kind: 'struct' }, params: ['const void *'] });
     expect(c.mku).toEqual({ returnLayout: { kind: 'union' }, params: ['s32'] });
+    // …and so does one with an unknown word ahead of the type
+    expect(prototypesFromContext('struct Blob64 { u32 w[16]; }; EWRAM_FN struct Blob64 mk(void);', 'c').mk).toEqual({
+      returnLayout: { kind: 'struct' },
+      params: [],
+    });
     // C++ names a struct by its tag, and a linkage specification declares nothing about the type
     const vec = { kind: 'struct', members: ['x', 'y', 'z'].map((name) => ({ name, type: 'u32' })) };
     for (const decl of ['extern "C" Vec getv(s32 i);', 'extern "C" { Vec getv(s32 i); }']) {
@@ -422,6 +634,20 @@ describe('prototypes from a declaration context', () => {
         params: ['s32'],
       });
     }
+  });
+
+  test('an unknown word ahead of the type leaves the parameters read, and states no return', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32;
+       NAKED void naked(int x); UNUSED static void unused(int x); EWRAM_FN NAKED void two(int x);
+       ARM_FUNC unsigned int words(u32 a, u32 b); void inparam(MACRO int x, int y);`,
+      'c',
+    );
+    expect(p.naked).toEqual({ params: ['int'] });
+    expect(p.unused).toEqual({ params: ['int'] });
+    expect(p.two).toEqual({ params: ['int'] });
+    expect(p.words).toEqual({ params: ['u32', 'u32'] });
+    expect(p.inparam).toEqual({ returnsVoid: true, params: ['MACRO int', 'int'] });
   });
 
   test('C++ default arguments and comments do not reach a spelling', () => {

@@ -1,6 +1,8 @@
 // A real row's prototype table (src/cases/context-proto.ts): the vendored context's declarations
 // under the manifest's own entries, without the row's own declaration, narrowed to what the
 // assembly names before it is published.
+import { type Language, parseDeclarations } from '@asmlift/core/cdecl/parse';
+import { unitLanguage } from '@asmlift/core/codegen-flags';
 import { validatePrototypes } from '@asmlift/core/proto';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { ARMV4T_AGBCC } from '@asmlift/core/target';
@@ -10,6 +12,7 @@ import { gunzipSync } from 'node:zlib';
 import { describe, expect, test } from 'vitest';
 
 import { m2cDeclarations, referencedPrototypes, rowPrototypes } from '../src/cases/context-proto';
+import { loadManifests } from '../src/cases/manifests';
 
 const at = (ctxI: string, ctxFile = 'test/ctx.i') => ({ ctxI, ctxFile });
 const CTX = 'typedef signed long s32; s32 callee(s32 a); s32 other(s32 a, s32 b); void self(s32 x);';
@@ -80,21 +83,56 @@ describe('what m2c is given where it gets no project context', () => {
   });
 });
 
+/** Every vendored context's text, by `<project>/<file>`. */
+function vendoredContexts(): [string, string][] {
+  const root = join(import.meta.dirname, '..', 'dataset', 'real', 'tu');
+  return readdirSync(root).flatMap((project) =>
+    readdirSync(join(root, project))
+      .filter((f) => f.startsWith('ctx-'))
+      .map((f): [string, string] => [
+        `${project}/${f}`,
+        gunzipSync(readFileSync(join(root, project, f))).toString('utf8'),
+      ]),
+  );
+}
+
 describe('every vendored context', () => {
   test('parses to a table the CLI --proto accepts', () => {
-    const root = join(import.meta.dirname, '..', 'dataset', 'real', 'tu');
-    let contexts = 0;
-    for (const project of readdirSync(root)) {
-      for (const f of readdirSync(join(root, project)).filter((x) => x.startsWith('ctx-'))) {
-        const text = gunzipSync(readFileSync(join(root, project, f))).toString('utf8');
-        for (const language of ['c', 'c++'] as const) {
-          expect(validatePrototypes(prototypesFromContext(text, language)), `${project}/${f} (${language})`).toEqual(
-            [],
-          );
-        }
-        contexts++;
+    const contexts = vendoredContexts();
+    for (const [name, text] of contexts) {
+      for (const language of ['c', 'c++'] as const) {
+        expect(validatePrototypes(prototypesFromContext(text, language)), `${name} (${language})`).toEqual([]);
       }
     }
-    expect(contexts).toBeGreaterThan(100);
+    expect(contexts.length).toBeGreaterThan(100);
+  }, 120_000);
+
+  test('is read whole in the dialect its rows read it in: some declarations, nothing left unread', () => {
+    const dialects = rowDialects();
+    const unread = vendoredContexts().flatMap(([name, text]) =>
+      // a context no row reads is read as C++, whose keywords are C's and more
+      [...(dialects.get(name) ?? ['c++' as const])].flatMap((language) => {
+        const { declarations, tokens, unread, unreadLists } = parseDeclarations(text, language);
+        return [
+          ...(declarations.length === 0 ? [`${name} (${language}): no declaration`] : []),
+          ...[...unread, ...unreadLists].map(
+            (k) => `${name} (${language}):${text.slice(0, tokens.start(k)).split('\n').length}: ${tokens.text(k)}`,
+          ),
+        ];
+      }),
+    );
+    expect(unread).toEqual([]);
   }, 120_000);
 });
+
+/** The dialects the real tier reads each vendored context in, by `<project>/<file>`. */
+function rowDialects(): Map<string, Set<Language>> {
+  const out = new Map<string, Set<Language>>();
+  for (const man of loadManifests()) {
+    for (const f of man.functions) {
+      const { ctxFile } = man.vendored(f.sym);
+      out.set(ctxFile, (out.get(ctxFile) ?? new Set()).add(unitLanguage(f.unit, man.units[f.unit].cflags)));
+    }
+  }
+  return out;
+}
