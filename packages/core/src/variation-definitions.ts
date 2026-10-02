@@ -1604,11 +1604,11 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       "same; which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
     compilerBehavior:
       "gcc 2.9's front end sees through the promotion of a narrow variable and not through a cast assigned " +
-      'to an `int`, so compares, divisions and right shifts of the narrow one become unsigned; where none ' +
-      'reads it, agbcc still allocates registers differently. mwcc, IDO, KMC gcc and gcc 2.7.2 each emit ' +
-      'different code for the two spellings too.',
+      'to an `int`, so compares, divisions and right shifts of an unsigned narrow one become unsigned; ' +
+      'where none reads it, agbcc can still allocate registers differently. IDO, KMC gcc and gcc 2.7.2 ' +
+      'each emit different code for the example too, and every mwcc build does for a compare of it.',
     offeredWhen: {
-      when: 'An `s32` local written once, by an integer narrowed to a narrower integer, that lives in no memory.',
+      when: 'An `s32` local written once, outside a `for` init, by an integer narrowed to a narrower integer, that lives in no memory.',
       decidedBy: { symbol: 'narrowDeclarations', file: l3('narrowdecl') },
     },
     example: {

@@ -970,8 +970,9 @@ export function enumerateCandidates(
     // numeric-address pointer local — the joint spelling is reachable from neither variation
     // alone, each composition narrows /volatile to that variation's own locals (volatilePtrLocals'
     // `only`), and each needed a row to demand it. The STACKED variations (STACKED_VARIATIONS) are
-    // derived onto EVERY source: statement order/shape is orthogonal to what any other respell
-    // variation changes — the same kind of independent dimension as signedness —
+    // derived onto EVERY source: statement order/shape, and the width a once-written narrow local
+    // is declared at, are each orthogonal to what any other respell variation changes — the same
+    // kind of independent dimension as signedness —
     // so they are crossed with every source rather than paired; a third blanket composition needs
     // the same argument, not just a row. And a specific PAIRING is admitted on one of two
     // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
@@ -1042,11 +1043,11 @@ export function enumerateCandidates(
         assertNoOrphanedLocals(sfn, alt);
         sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
-        // admission argument). Each is a statement-order/shape fact orthogonal to
-        // representation; subsets compose in the fixed order below. A stacked variation that
+        // admission argument). Each is a statement-order/shape or declaration-width fact
+        // orthogonal to the other respell variations; subsets compose in the fixed order below. A stacked variation that
         // never fires declines and costs nothing.
         if (!alreadyShaped) {
-          // A shape REORDERS statements, and it is derived after a variation has placed its defs —
+          // A shape may REORDER statements, and it is derived after a variation has placed its defs —
           // so the placement is re-checked on the shaped tree (contracts.ts). Differential: judged
           // only where the unshaped tree already satisfied the walk, so a variation whose placement
           // it never described is not dropped on the strength of a model that does not apply.
@@ -2404,7 +2405,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  with no score and no outcome moving. That is a judgement about the source rather than a
  *  measurement of it — the differ never refereed those six — and it is the same judgement this
  *  term was declared to make, taken on the same evidence. What it must never do is change WHICH
- *  candidates exist; that stays an admission question, one variation at a time.
+ *  candidates exist; that stays an admission question, one variation at a time. The CAST COUNT
+ *  below does the same for `/narrow-decl`, which drops one cast per local it narrows and so wins
+ *  every tie against the candidate it is derived onto.
  *
  *  CAST COUNT next, and only WITHIN a preference. A wrong signedness pin is what manufactures casts —
  *  the C backend has to cast a shift operand back to the signedness the machine op needs, so

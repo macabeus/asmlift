@@ -378,7 +378,9 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
  *  variation, derived onto every source. Each fires alone, plus
  *  all of them together in table order — not the full subset lattice; the pairs question is
  *  settled by applyStacked' skip-on-decline below, and a row demanding a true EXCLUSION pair —
- *  all three fire, the match needs exactly two — is what would earn the lattice. */
+ *  every member fires, the match needs a strict subset of them — is what would earn the lattice.
+ *  So a member appended here also changes the all-together candidate wherever it fires beside two
+ *  or more of the others. */
 export const STACKED_VARIATIONS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
   { name: 'initfirst', apply: initFirstGuards },
   { name: 'pollguard', apply: pollGuards },

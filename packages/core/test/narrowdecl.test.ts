@@ -1,6 +1,7 @@
-// A named narrow value declared at its width (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is
-// spelled `u8 v; v = x - 1;`, the spelling agbcc allocates `kleod:sub_0803E8CC`'s registers from.
-// Every refusal is a one-fact edit of the accepted shape.
+// The `/narrow-decl` variation (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is spelled
+// `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from. Each refusal edits one
+// fact of an accepted tree: the structured fixture below, or a hand-built one where the fact (a
+// pointer operand, a `for` init) is not a lift's to produce.
 import { describe, expect, it } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -160,7 +161,7 @@ describe('narrowDeclarations', () => {
     },
   );
 
-  it('reaches no backend that cannot spell the width: Pascal refuses a narrow local', () => {
+  it('leaves Pascal, which cannot spell the width, to refuse the narrow local', () => {
     const wide: SFn = {
       name: 'f',
       params: [{ name: 'a0', type: { kind: 'int', width: 32, signed: true } }],
