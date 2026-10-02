@@ -50,8 +50,9 @@ function rendersAsAddress(op: Op): boolean {
  *  emits it above the guard the source wrote (`p != 0 && *p != 0` becoming `v0 = *p;` above its own
  *  null check). Asked by the def-block placement rule and by the merge-feed-home scope; the
  *  guarded-call rule asks the same set for the opposite answer, since a counted op is
- *  `speculationUnsafe` and so was never folded into the cone in the first place. */
-function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
+ *  `speculationUnsafe` and so was never folded into the cone in the first place — and
+ *  structure.ts asks it for a read placed only as structuring starts, which a fold saw as plain. */
+export function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
   const guarded = new Set<Value>();
   const work: Value[] = [];
   for (const b of fn.blocks) {
@@ -2064,7 +2065,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // inlined C runs it on fewer — agbcc compiles `do { r = cb(p); } while (i++ <= n && r !=
         // 0);` to a `bl cb` ahead of both compares. And the DEF is where to put it back because a
         // counted op is `speculationUnsafe`, so no fold lifted one into this cone
-        // (raise/shortcircuit.ts refuses an arm that holds one). `opaque`, the other hoist-unsafe
+        // (raise/shortcircuit.ts refuses an arm that holds one; structure.ts declines on a read
+        // placed after the folds ran). `opaque`, the other hoist-unsafe
         // op with a result, needs no placement — neither position spells compilable C — and a
         // bottom test holding one still declines in `testSkipsAnEffect`, which is that guard's
         // remaining population.

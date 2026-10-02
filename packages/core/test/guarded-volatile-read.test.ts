@@ -11,15 +11,18 @@ import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
+import { stampDeclaredVolatile } from '../src/raise/declared-volatile';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
 
+/** Structure `ir` under `symbols`, stamped as the lift stamps it, before any raising pass. */
 const emitWith = (ir: string, symbols?: Map<string, SymbolInfo>): string => {
   const fn = parse(ir);
   verify(fn);
+  stampDeclaredVolatile(fn, symbols, ARMV4T_AGBCC.compilerBehaviors);
   recoverTypes(fn);
   return cBackend.emit(structure(fn, { returnsVoid: true, ...(symbols ? { symbols } : {}) }));
 };
@@ -52,6 +55,16 @@ const namedAbove = (read: string): RegExp =>
 
 test('a volatile read in an `&&`’s guarded operand is named above the connective', () => {
   expect(emitWith(GUARDED_READ, VOLATILE_MAP)).toMatch(namedAbove('gVolReg'));
+});
+
+test('a volatile read in that operand placed only as structuring starts declines', () => {
+  // Plain to every raising pass, so a fold may have lifted it out of the arm it ran in.
+  const fn = parse(GUARDED_READ);
+  verify(fn);
+  recoverTypes(fn);
+  expect(() => structure(fn, { returnsVoid: true, symbols: VOLATILE_MAP })).toThrow(
+    "cannot structure 'v': a '&&'/'||' would guard a read of the volatile object 'gVolReg', and which side of the branch the asm read it on is not recoverable",
+  );
 });
 
 test('the declaration is what decides it — an ordinary cell keeps the connective', () => {
@@ -209,4 +222,23 @@ test('a volatile read the asm makes above the guard is named there, on every ent
   expect(decompile('f', ABOVE_THE_GUARD, ARMV4T_AGBCC, { symbols, prototypes }).source).toMatch(above);
   const [first] = enumerateCandidates('f', ABOVE_THE_GUARD, ARMV4T_AGBCC, { symbols, prototypes });
   expect(first.source).toMatch(above);
+});
+
+// agbcc -O2 of `void f1(int a, int b) { volatile u16 *p; if (a) { p = &gVolReg; g(1); } else { p =
+// &gVolReg; g(2); } if (b > 0 && *p != 0) g(3); }`: each arm loads the address into r5, and the
+// `ldrh` through it runs only past the `ble`. The base the read names is the join of the two.
+const BELOW_THE_GUARD_THROUGH_A_JOIN =
+  'f1:\n\tpush\t{r4, r5, lr}\n\tadd\tr4, r1, #0\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tldr\tr5, .L6\n\tmov\tr0, #1\n' +
+  '\tbl\tg\n\tb\t.L4\n.L6:\n\t.word\tgVolReg\n.L3:\n\tldr\tr5, .L8\n\tmov\tr0, #2\n\tbl\tg\n' +
+  '.L4:\n\tcmp\tr4, #0\n\tble\t.L5\n\tldrh\tr0, [r5]\n\tcmp\tr0, #0\n\tbeq\t.L5\n\tmov\tr0, #3\n\tbl\tg\n' +
+  '.L5:\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L8:\n\t.word\tgVolReg\n';
+
+test('a volatile read through a join of two spellings of its address is spelled under the guard', () => {
+  const symbols = new Map([[0x3000000, [{ name: 'gVolReg', kind: 'data' as const, volatile: true }]]]);
+  const prototypes = { f1: { params: 2, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
+  const below = /if \(a1 > 0\) \{\s*if \(gVolReg != 0\) g\(3\);\s*\}/;
+  expect(decompile('f1', BELOW_THE_GUARD_THROUGH_A_JOIN, ARMV4T_AGBCC, { symbols, prototypes }).source).toMatch(below);
+  for (const c of enumerateCandidates('f1', BELOW_THE_GUARD_THROUGH_A_JOIN, ARMV4T_AGBCC, { symbols, prototypes })) {
+    expect(c.source, c.variations.join('/')).not.toMatch(/= gVolReg;/);
+  }
 });

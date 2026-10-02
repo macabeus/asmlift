@@ -136,6 +136,18 @@ describe('a read nothing uses', () => {
     expect(decompile('f', walk, ARMV4T_AGBCC, { symbols, prototypes }).source).toMatch(/\n\s*gVolReg;\n/);
   });
 
+  test('of a declared object through a join of two spellings of its address is spelled', () => {
+    // agbcc -O2 of `volatile u16 *p; if (a) { p = &gVolReg; g(1); } else { p = &gVolReg; g(2); } *p;`
+    const join =
+      'f4:\n\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L11\n\tldr\tr4, .L13\n\tmov\tr0, #1\n\tbl\tg\n\tb\t.L12\n' +
+      '.L13:\n\t.word\t0x3001000\n.L11:\n\tldr\tr4, .L15\n\tmov\tr0, #2\n\tbl\tg\n' +
+      '.L12:\n\tldrh\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L15:\n\t.word\t0x3001000\n';
+    const joinPrototypes = { f4: { params: 1, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
+    expect(decompile('f4', join, ARMV4T_AGBCC, { symbols: mapOf(true), prototypes: joinPrototypes }).source).toMatch(
+      /\n\s*gVolReg;\n/,
+    );
+  });
+
   test('of an ordinary object is deleted', () => {
     const src = decompile('f', asm, ARMV4T_AGBCC, { symbols: mapOf(false), prototypes }).source;
     expect(src).not.toContain('gVolReg;');

@@ -40,8 +40,9 @@
 //   And three accesses the deciders leave unplaced, where a placement would change an answer — GAP:
 //     a device store a pinned read of the same cell re-reads in a loop, under the per-object policy
 //       (frontend/device-pins.ts's header argues it);
-//     a read of a map-declared volatile object through a base that reaches no name, such as a
-//       pointer walked along the object in a loop (raise/declared-volatile.ts);
+//     a read of a map-declared volatile object through a base that reaches no name — a pointer
+//       walked along the object in a loop, a join of two different addresses in it
+//       (raise/declared-volatile.ts);
 //     a read the stamp cannot place by byte — a runtime index, an `aload` — of an object the map
 //       qualifies only some members of, which may reach a plain member (symbols.ts
 //       `declaresVolatile`).

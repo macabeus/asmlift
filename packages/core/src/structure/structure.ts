@@ -42,7 +42,7 @@
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
 // into the `default:` — refuse in `chainArms`, which answers null.
-import { constAddressOf } from '../ir/alias';
+import { constAddressOf, globalBaseOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { CAST_WIDTHS, opSig } from '../ir/opcodes';
@@ -87,7 +87,7 @@ import {
   scalarCellType,
   structFieldInnerExtents,
 } from '../symbols';
-import { analyze } from './analysis';
+import { analyze, shortCircuitGuardedValues } from './analysis';
 import { makeBitfieldSpelling } from './bitfields';
 import {
   addOffset,
@@ -2092,7 +2092,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     inferredSymbols,
     orderLicensedGlobals,
   } = opts;
-  stampDeclaredVolatile(fn, mapSymbols, opts);
+  // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
+  // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
+  // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
+  // branch, which is right only for one no fold could move, so this read declines instead.
+  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, opts);
+  if (stampedLate.length > 0) {
+    const defsNow = defOpMap(fn);
+    const guarded = shortCircuitGuardedValues(fn, defsNow);
+    const moved = stampedLate.find((op) => op.results.some((r) => guarded.has(r)));
+    if (moved !== undefined) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a '&&'/'||' would guard a read of the volatile object ` +
+          `'${globalBaseOf(defsNow, moved.operands[0]) ?? 'a volatile object'}', and which side of the branch the asm read it on is not recoverable`,
+      );
+    }
+  }
   // THE shape dictionary the rendering context asks, map-first. Built as a lookup rather than a
   // merged Map because the map is the PROJECT's and is asked by name for a whole project's worth
   // of symbols — copying it per structuring is work proportional to the project, and a ranked run

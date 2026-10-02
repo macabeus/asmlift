@@ -93,11 +93,8 @@ function keyOf(op: Op): string {
   return `${op.opcode}(${attrs})`;
 }
 
-/**
- * Collapse operand-free pure definitions that share a key down to one apiece, defined in the entry
- * block. Returns the number of definitions removed (0 when nothing changed).
- */
-export function numberPureValues(fn: Fn): number {
+/** The blocks numbering looks in: those the entry reaches through any op's successors. */
+function numberedBlocks(fn: Fn): Set<Block> {
   // REACHABLE blocks only. The entry dominates everything REACHABLE — it does not dominate an
   // unreachable block, and verify()'s dominator fixpoint models that faithfully (a block with no
   // predecessors converges to dom = {itself}). Numbering a group with a member in such a block
@@ -120,6 +117,15 @@ export function numberPureValues(fn: Fn): number {
   if (fn.blocks[0]) {
     walk(fn.blocks[0]);
   }
+  return reachable;
+}
+
+/**
+ * Collapse operand-free pure definitions that share a key down to one apiece, defined in the entry
+ * block. Returns the number of definitions removed (0 when nothing changed).
+ */
+export function numberPureValues(fn: Fn): number {
+  const reachable = numberedBlocks(fn);
   const groups = new Map<string, { op: Op; block: number }[]>();
   fn.blocks.forEach((b, bi) => {
     if (!reachable.has(b)) {
@@ -163,4 +169,19 @@ export function numberPureValues(fn: Fn): number {
   }
   entry.ops.unshift(...hoisted);
   return removed;
+}
+
+/** The class {@link numberPureValues} puts a value in: the key of a numberable definition in a block
+ *  it numbers, or the value itself. Two values of one class are one value once it has run. */
+export function valueNumberOf(fn: Fn): (v: Value) => Value | string {
+  const reachable = numberedBlocks(fn);
+  const key = new Map<Value, string>();
+  for (const b of reachable) {
+    for (const op of b.ops) {
+      if (isNumberable(op.opcode) && op.results.length === 1) {
+        key.set(op.results[0], keyOf(op));
+      }
+    }
+  }
+  return (v) => key.get(v) ?? v;
 }
