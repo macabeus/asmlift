@@ -2488,7 +2488,6 @@ function liftOnce(
   const fill: ThumbFill = {
     name,
     target,
-    prototypes,
     symbols,
     text,
     cfg,
@@ -2817,7 +2816,7 @@ interface ThumbCallDeclarations {
   readonly callClobbers: readonly string[];
   readonly pairReturnClobbers: readonly string[];
   wideHelper(callee: string): RuntimeHelper | null;
-  isRuntimeHelperName(callee: string): boolean;
+  returnsPair(callee: string): boolean;
   registerStructReturn(callee: string | undefined): 'register' | undefined;
   declaredCall(callee: string): DeclaredCall | null;
 }
@@ -2881,6 +2880,25 @@ function thumbCallDeclarations(name: string, target: TargetDescription, prototyp
    *  about a function whose signature is its compiler's, and `refuseUnmodelledHelpers` is going to
    *  gap the call whatever this answers. The table is the authority for every name in it. */
   const isRuntimeHelperName = (callee: string): boolean => lookupHelper(target.runtimeHelpers, callee) !== undefined;
+  // WHETHER THE CALLEE HANDS BACK A PAIR — two sources for one ABI fact, and they answer the same
+  // question about the same two registers. A runtime helper's signature is its compiler's and needs
+  // no header; a project's callee needs one, and `returns` is where a header states it. Silence
+  // means a word — the callee then defines the return register alone and `frontend/ssa.ts` refuses
+  // a read of the other, because in that reading it is right to.
+  //
+  // AND THEY ARE ASKED IN THAT ORDER, never unioned: a name the runtime table carries is answered
+  // by the table or by nothing (`isRuntimeHelperName`), so a header that re-declares a helper
+  // disables the capability rather than restoring it through the other key.
+  const returnsPair = (callee: string): boolean => {
+    const wide = wideHelper(callee);
+    return (
+      (wide
+        ? wide.returns
+        : isRuntimeHelperName(callee)
+          ? undefined
+          : declaredReturnWidth(prototypes[callee], target)) === 64
+    );
+  };
   // A callee the project declares to return a struct in r0, asked where `declaredCall` has no
   // arity to answer with: the return is the declaration's, and needs none.
   const registerStructReturn = (callee: string | undefined): 'register' | undefined => {
@@ -2993,7 +3011,7 @@ function thumbCallDeclarations(name: string, target: TargetDescription, prototyp
       ...(returned === undefined ? {} : { returned }),
     };
   };
-  return { callClobbers, pairReturnClobbers, wideHelper, isRuntimeHelperName, registerStructReturn, declaredCall };
+  return { callClobbers, pairReturnClobbers, wideHelper, returnsPair, registerStructReturn, declaredCall };
 }
 
 // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
@@ -4150,7 +4168,6 @@ interface ThumbFrameUses {
 interface ThumbFill {
   readonly name: string;
   readonly target: TargetDescription;
-  readonly prototypes: Prototypes;
   readonly symbols: SymbolMap | undefined;
   readonly text: ThumbText;
   readonly cfg: ThumbCfg;
@@ -5046,7 +5063,7 @@ function lowerStore(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
 
 /** `bl` / `blx`: the call its callee's declaration (`thumbCallDeclarations`) describes. */
 function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
-  const { name, target, prototypes, text, calls, frame, ssa, pairs } = fill;
+  const { name, target, text, calls, frame, ssa, pairs } = fill;
   const { readVar } = ssa;
   const { usedSlotOffsets } = fill.frameUses;
   const { spAsDataError, writeData } = fill.operands;
@@ -5080,23 +5097,7 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // the same answer the callee would get with no prototype at all.
   const widths = wide?.params ?? declared?.widths ?? null;
   const argc = widths === null ? fallbackArgc(ssa, target.argRegs, bi) : wordsOf(widths);
-  // WHETHER THE CALLEE HANDS BACK A PAIR — two sources for one ABI fact, and they answer
-  // the same question about the same two registers. A runtime helper's signature is its
-  // compiler's and needs no header; a project's callee needs one, and `returns` is where a
-  // header states it. Silence means a word, which is what every call was read as before a
-  // width could be stated — the callee then defines the return register alone and
-  // `frontend/ssa.ts` refuses a read of the other, because in that reading it is right to.
-  //
-  // AND THEY ARE ASKED IN THAT ORDER, never unioned: a name the runtime table carries is
-  // answered by the table or by nothing (`isRuntimeHelperName`), so a header that
-  // re-declares a helper disables the capability rather than restoring it through the
-  // other key.
-  const returnsPair =
-    (wide
-      ? wide.returns
-      : calls.isRuntimeHelperName(targetSym)
-        ? undefined
-        : declaredReturnWidth(prototypes[targetSym], target)) === 64;
+  const returnsPair = calls.returnsPair(targetSym);
   const stackArgs = frame.slotsOk ? frame.outgoingArgs.blocks.get(ins) : undefined;
   const args: Value[] = [];
   // A GUESSED arity reads argument registers to ASK whether the caller set them up, and

@@ -49,7 +49,6 @@ const fillOf = (asm: string, prototypes: Prototypes = {}) => {
   return {
     name: 'f',
     target,
-    prototypes,
     symbols: undefined,
     text,
     cfg,
@@ -194,14 +193,30 @@ describe('thumbCallDeclarations', () => {
   test('declares nothing for a callee no table names', () => {
     const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
     expect(calls.declaredCall('g')).toBeNull();
-    expect(calls.isRuntimeHelperName('g')).toBe(false);
+    expect(calls.returnsPair('g')).toBe(false);
   });
 
   test("lets a project's re-declaration of a runtime helper disable its pair", () => {
-    expect(thumbCallDeclarations('f', ARMV4T_AGBCC, {}).wideHelper('__muldi3')).not.toBeNull();
-    const redeclared = thumbCallDeclarations('f', ARMV4T_AGBCC, { __muldi3: { params: ['s64', 's64'] } });
+    const declared = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
+    expect(declared.wideHelper('__muldi3')).not.toBeNull();
+    expect(declared.returnsPair('__muldi3')).toBe(true);
+    const redeclared = thumbCallDeclarations('f', ARMV4T_AGBCC, {
+      __muldi3: { params: ['s64', 's64'], returns: 's64' },
+    });
     expect(redeclared.wideHelper('__muldi3')).toBeNull();
-    expect(redeclared.isRuntimeHelperName('__muldi3')).toBe(true);
+    expect(redeclared.returnsPair('__muldi3')).toBe(false);
+  });
+
+  test("answers a project callee's pair return from its declared return width", () => {
+    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {
+      g: { params: ['s32'], returns: 'long long' },
+      h: { params: ['s32'], returns: 's32' },
+      __divsi3: { params: ['s32', 's32'], returns: 'long long' },
+    });
+    expect(calls.returnsPair('g')).toBe(true);
+    expect(calls.returnsPair('h')).toBe(false);
+    // a name the runtime table carries is answered by the table alone
+    expect(calls.returnsPair('__divsi3')).toBe(false);
   });
 
   test("leaves a pair-returning call's high register out of what it clobbers", () => {
