@@ -6344,10 +6344,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // above. It is +35 last-out.
   //
   // `dmaback`'S DECLINE, ATTRIBUTED BY INSTRUMENTATION rather than by reading: a temporary
-  // `console.error` on the `isDceSafe` filter in `packages/core/src/pattern/engine.ts` fires
+  // `console.error` on the `deletableWhenDead` filter in `packages/core/src/pattern/engine.ts` fires
   // `dce DROPPED use-less load` on `dmaback` and does not fire on `dmavolsrc`, which drops the
   // same three other ops (`add`, `shl`, `undef`) and no load. The load is eligible because
-  // `isDceSafe` (packages/core/src/ir/opcodes.ts) admits any opcode with no `effects` flag,
+  // `deletableWhenDead` (packages/core/src/ir/discipline.ts) admits any opcode with no `effects` flag,
   // and `load` has none — the flag set is exactly `astore call opaque store`. The read survives
   // the frontend (it is `%20: unk32 = load %13` in the raw IR dump) and is gone by the folded
   // one. The change this row gates is therefore a type-directed one, not a new pass: a read of an
@@ -6627,7 +6627,7 @@ export const SYNTHETIC: SynthSpec[] = [
     // THE ZERO-POINT ROW for the structurer's dead-DEVICE-READ rule (structure.ts
     // `volatileQualifiable`). Its neighbour `dmaback` carries the same `gDma[2];` read-back and
     // does NOT exercise that rule: a dead read in the MIDDLE of a function is reaped by DCE long
-    // before the structurer walks it (`isDceSafe('load')` is true, correctly — nothing observes a
+    // before the structurer walks it (`deletableWhenDead` is true of a plain `load`, correctly — nothing observes a
     // read nobody reads). The rule's whole population is the read that is LAST, whose result is
     // the suppressed phantom return value of a void function — analysis.ts drops the `ret` operand
     // from the use registry, so it arrives at the walk unread. That is why this row's read is the

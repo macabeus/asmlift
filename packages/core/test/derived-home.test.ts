@@ -204,7 +204,7 @@ test('a value inside a loop its read sits outside is not homed', () => {
 });
 
 // A call between the read and the value: it may write anything the read looked at, so moving the
-// read past it is the same refusal a store earns (`call` is in EFFECTFUL_OPS).
+// read past it is the same refusal a store earns (a `call` is `effectful`, ir/discipline.ts).
 const CALLBETWEEN = `fn callbetween {
 ^bb0(%0: u32):
   %1: u32 = const {value=134576844}
@@ -276,8 +276,8 @@ test('a read consumed outside the homed value is not homed — it would render t
 });
 
 // TWO values over ONE read of a global the map declares volatile. Each is the other's second
-// consumer, so the same rule refuses both — and `volatileGlobal`'s contract (a volatile read is
-// neither duplicated nor moved), which `/reread-globals` honours in this same shape, holds here too.
+// consumer, so the same rule refuses both — and the `declared` placement's contract (a volatile read
+// is neither duplicated nor moved), which `/reread-globals` honours in this same shape, holds here too.
 const TWOHOMES = `fn twohomes {
 ^bb0():
   %0: s32* = gaddr {sym="gVolReg"}

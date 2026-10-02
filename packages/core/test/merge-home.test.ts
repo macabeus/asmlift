@@ -446,7 +446,7 @@ test('the default edge is a copy site of its own, even where a case names the sa
 });
 
 // ── refusal: a TRAPPING op ───────────────────────────────────────────────────────────────────
-// `REEVAL_UNSAFE_OPS` is effects ∪ reads ∪ traps, and the divides are the traps half. Homed, a
+// `reevalUnsafe` is effects ∪ reads ∪ traps, and the divides are the traps half. Homed, a
 // divide becomes an unconditional statement at its def block — which raise/shortcircuit.ts or a
 // fold may have made, and which the arms' own guard no longer covers.
 const DIVFEED = `fn divfeed {

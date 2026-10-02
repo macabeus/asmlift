@@ -406,6 +406,33 @@ describe('refusals', () => {
     expect(recognizeBranchShortCircuit(fn)).toBe(false);
   });
 
+  // THE INVARIANT structure/analysis.ts's guarded-operand rule rests on: it names a counted read of
+  // a connective's cone at its def, above the branch, because no fold put one there.
+  test.each([
+    ['a device read', { volatile: true }],
+    ['a declared read', { declaredVolatile: true }],
+    ['a plain read', {}],
+  ])('%s in the second condition stays in its arm unless it is plain', (label, stamp) => {
+    const fn = chain({
+      gOnTaken: false,
+      sharedOnGTaken: true,
+      gBody: (out) => {
+        const v = mkValue(T.u(16));
+        return [
+          mkOp('load', {
+            operands: [mkValue(T.ptr(T.u(16)))],
+            results: [v],
+            attrs: { off: 0, signed: false, width: 2, ...stamp },
+          }),
+          mkOp('icmp_ne', { operands: [v, mkValue(T.unk(32))], results: [out] }),
+        ];
+      },
+    });
+    const plain = label === 'a plain read';
+    expect(recognizeBranchShortCircuit(fn)).toBe(plain);
+    expect(connective(fn)).toBe(plain ? 'logic_or' : null);
+  });
+
   test('a value the ARM re-reads is re-derived there, and the condition folds', () => {
     // `if (a || (p->f & 0x7F) == 0x7F) … else { p->f = … }`: agbcc reads `p->f` once in the second
     // test and carries the register into the arm. Refusing this splits the connective into a nest
@@ -516,6 +543,33 @@ describe('refusals', () => {
     // local at the arm's head — a SECOND load agbcc does not merge — where the nest reads once.
     const { fn, arm, store } = armReadsCondition();
     arm.ops.splice(arm.ops.indexOf(store), 0, call());
+    expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
+    expect(connective(fn)).toBeNull();
+    expect(
+      recognizeBranchShortCircuit(fn, { ...AGBCC_RELOADS, armReread: without(ARM_REREAD_GATES, 'read-behind-effect') }),
+    ).toBe(true);
+  });
+
+  test('REFUSED: a READ the arm holds across a helper divide analysis.ts names', () => {
+    // `{ t = k / n; p->f = v; *q = 5; q[1] = t; }`: the `bl __divsi3` runs ahead of two stores its
+    // value is used after, so analysis.ts names it where it ran, and a named helper bars the copy
+    // as a named call does — the copy becomes a local at the arm's head, a second load on agbcc.
+    const { fn, arm, store } = armReadsCondition();
+    const [k, n, t] = [mkValue(T.s(32)), mkValue(T.s(32)), mkValue(T.s(32))];
+    const q = mkValue(T.ptr(T.u(8)));
+    arm.ops.splice(
+      arm.ops.indexOf(store),
+      0,
+      mkOp('const', { results: [k], attrs: { value: 100 } }),
+      mkOp('const', { results: [n], attrs: { value: 7 } }),
+      mkOp('sdiv', { operands: [k, n], results: [t], attrs: { helper: '__divsi3' } }),
+    );
+    arm.ops.splice(
+      arm.ops.indexOf(store) + 1,
+      0,
+      ...storeFive(q, 0),
+      mkOp('store', { operands: [q, t], attrs: { off: 4, width: 4 } }),
+    );
     expect(recognizeBranchShortCircuit(fn, AGBCC_RELOADS)).toBe(false);
     expect(connective(fn)).toBeNull();
     expect(
@@ -833,7 +887,7 @@ describe('the refusals found by the adversarial round', () => {
   });
 
   test('an `opaque` in the second condition is not hoisted out of the arm it guards', () => {
-    // EFFECTFUL_OPS now includes `opaque`, and analysis.ts treats it as a memory writer and a barrier.
+    // `opaque` is `effectful` (ir/discipline.ts), and analysis.ts treats it as a memory writer and a barrier.
     // This fold takes the stricter model: an unmodelled instruction must not become unconditional.
     const fn = chain({
       gOnTaken: false,

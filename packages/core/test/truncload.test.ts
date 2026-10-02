@@ -377,6 +377,50 @@ describe('truncated-load recovery — one refusal per gate, each ablated', () =>
     expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(1);
     verify(fn);
   });
+  // A DEVICE ACCESS THE LIFT PINNED keeps the width it was made at, wherever its address points.
+  // `fixed-cell` cannot see this one: a DMA channel chosen at run time, `0x40000B0 + ch * 12`, has
+  // no constant address, while the pin (frontend/device-pins.ts) already says it is a register.
+  const RUNTIME_CHANNEL = `fn t {
+^bb0(%0: unk32):
+  %1: unk32 = const {value=67109040}
+  %2: unk32 = const {value=12}
+  %3: unk32 = mul %0, %2
+  %4: unk32 = add %1, %3
+  %5: unk32 = load %4 {off=8, width=4, signed=true, volatile=true}
+  %6: unk32 = load %4 {off=8, width=2, signed=false, volatile=true}
+  %7: unk32 = add %5, %6
+  store %4, %7 {off=0, width=4, volatile=true}
+  ret
+}
+`;
+
+  test('a pinned narrow read through a runtime-indexed base keeps its width and its pin', () => {
+    expect(refusals(RUNTIME_CHANNEL)).toEqual(['qualified-access']);
+    const fn = parse(RUNTIME_CHANNEL);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    const narrow = fn.blocks[0].ops.find((o) => o.opcode === 'load' && o.attrs.width === 2)!;
+    expect(narrow.attrs).toEqual({ off: 8, width: 2, signed: false, volatile: true });
+    const ablated = parse(RUNTIME_CHANNEL);
+    verify(ablated);
+    expect(foldTruncatedLoads(ablated, true, without(TRUNC_LOAD_GATES, 'qualified-access'))).toBe(1);
+  });
+
+  // The same channel walk through an object the map declares volatile (raise/declared-volatile.ts
+  // stamps it as the lift is made, before this pass runs).
+  const DECLARED_CHANNEL = RUNTIME_CHANNEL.replace(
+    '%1: unk32 = const {value=67109040}',
+    '%1: unk32 = gaddr {sym="gVolChannels"}',
+  ).replaceAll('volatile=true', 'declaredVolatile=true');
+
+  test('a narrow read of a declared volatile object through a runtime index keeps its width and its stamp', () => {
+    expect(refusals(DECLARED_CHANNEL)).toEqual(['qualified-access']);
+    const fn = parse(DECLARED_CHANNEL);
+    verify(fn);
+    expect(foldTruncatedLoads(fn, true, TRUNC_LOAD_GATES)).toBe(0);
+    const narrow = fn.blocks[0].ops.find((o) => o.opcode === 'load' && o.attrs.width === 2)!;
+    expect(narrow.attrs).toEqual({ off: 8, width: 2, signed: false, declaredVolatile: true });
+  });
 });
 
 describe('truncated-load recovery — the cover is picked from facts, not from emission order', () => {
@@ -408,10 +452,10 @@ describe('truncated-load recovery — the cover is picked from facts, not from e
 });
 
 describe('truncated-load recovery — a dead read keeps the width the machine used', () => {
-  // A DEAD LOAD is the project's own `volatile` witness (`ir/opcodes.ts` SPELLED_WHEN_DEAD_OPS): an
+  // A DEAD LOAD is the project's own `volatile` witness (`ir/discipline.ts` `spelledWhenDead`): an
   // optimizing compiler deletes every dead read it is allowed to delete, so one still in the target
   // is evidence the source qualified the access. The fold rewrites the narrow load into a `zext`,
-  // which is NOT in that set, and mints a fresh load, which is — so a widened dead read would carry
+  // which is not spelled when dead, and mints a fresh load, which is — so a widened dead read would carry
   // the witness at the wrong width.
   //
   // `fixed-cell` is what stops it, and by construction rather than by luck: `structure.ts`'s

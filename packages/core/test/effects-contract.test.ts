@@ -238,3 +238,309 @@ test('a lift carrying a region no path reaches declines through the pipeline', (
   const prototypes = { e3: { params: 1 }, f: { params: 0 }, g: { params: 1 }, h: { params: 1, returnsVoid: true } };
   expect(() => decompile('e3', MWCC_DEAD_TAIL, PPC_MWCC, { prototypes })).toThrow(/no path reaches/);
 });
+
+// A memory access the lift pinned (`volatile`, the `device` placement) is an execution the way a
+// call is: the qualified spelling makes the recompile perform it once per render.
+describe('assertEffectsPreserved — a pinned device access', () => {
+  const REG = 0x4000006;
+  /** an IR fn whose entry block makes one pinned `load` of each address in `reads` (null: through a
+   *  runtime-indexed base), one plain load of each in `plain`, and one pinned `store` of each in
+   *  `writes` */
+  const irReading = (reads: (number | null)[], plain: number[] = [], writes: (number | null)[] = []): Fn => {
+    const ops = [];
+    const access = (addr: number | null, volatile: boolean, write: boolean) => {
+      const base = mkValue(T.ptr(T.u(16)));
+      if (addr === null) {
+        const idx = mkValue(T.s(32));
+        ops.push(mkOp('add', { operands: [mkValue(T.ptr(T.u(16))), idx], results: [base] }));
+      } else {
+        ops.push(mkOp('const', { results: [base], attrs: { value: addr } }));
+      }
+      const attrs = { off: 0, width: 2, ...(volatile ? { volatile: true } : {}) };
+      ops.push(
+        write
+          ? mkOp('store', { operands: [base, mkValue(T.u(16))], attrs })
+          : mkOp('load', { operands: [base], results: [mkValue(T.u(16))], attrs: { ...attrs, signed: false } }),
+      );
+    };
+    reads.forEach((a) => access(a, true, false));
+    plain.forEach((a) => access(a, false, false));
+    writes.forEach((a) => access(a, true, true));
+    ops.push(mkOp('ret', {}));
+    return {
+      name: 'F',
+      blocks: [{ params: [], ops }],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+      localObjects: undefined,
+    };
+  };
+  const at = (addr: Expr, volatile: boolean): Expr => ({
+    k: 'index',
+    base: { k: 'cast', to: T.ptr(T.u(16)), e: addr, ...(volatile ? { volatile: true as const } : {}) },
+    idx: { k: 'const', value: 0 },
+    width: 2,
+    signed: false,
+  });
+  const read = (addr: number, volatile = true): Stmt => ({
+    k: 'exprstmt',
+    value: at({ k: 'const', value: addr }, volatile),
+  });
+  const readThrough = (base: string): Stmt => ({ k: 'exprstmt', value: at({ k: 'var', name: base }, true) });
+  const write = (addr: number): Stmt => ({
+    k: 'store',
+    lval: at({ k: 'const', value: addr }, true),
+    value: { k: 'const', value: 1 },
+  });
+  const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+
+  test('one pinned read rendered twice in sequence fails', () => {
+    expect(() => checkReads(irReading([REG]), [read(REG), read(REG)])).toThrow(
+      /emitted 2 reads of the device register at 0x4000006 on one path/,
+    );
+  });
+
+  test('one pinned read rendered once in each of two exclusive arms passes', () => {
+    const arms: Stmt = { k: 'if', cond: { k: 'var', name: 'c' }, then: [read(REG)], else: [read(REG)] };
+    expect(() => checkReads(irReading([REG]), [arms])).not.toThrow();
+  });
+
+  test('two pinned reads of one register license two renders', () => {
+    expect(() => checkReads(irReading([REG, REG]), [read(REG), read(REG)])).not.toThrow();
+  });
+
+  test('a pinned read with no qualified render fails as dropped', () => {
+    expect(() => checkReads(irReading([REG]), [read(REG, false)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+  });
+
+  test('a plain read is not counted, rendered however often', () => {
+    expect(() => checkReads(irReading([], [REG]), [read(REG, false), read(REG, false)])).not.toThrow();
+  });
+
+  test('a render the contract cannot place may stand for a read at a known address', () => {
+    expect(() => checkReads(irReading([REG]), [readThrough('p')])).not.toThrow();
+  });
+
+  test('one render the contract cannot place stands for one read, not for every one', () => {
+    expect(() => checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p')])).toThrow(
+      /dropped reads of the device registers at 0x4000006, 0x4000008, 0x400000a in 'F'/,
+    );
+    expect(() =>
+      checkReads(irReading([REG, REG + 2, REG + 4]), [readThrough('p'), readThrough('q'), readThrough('r')]),
+    ).not.toThrow();
+  });
+
+  test('a read at no constant address needs a render no placed access already needs', () => {
+    expect(() => checkReads(irReading([null], [], [REG]), [write(REG)])).toThrow(
+      /dropped a read of a device register in 'F'/,
+    );
+    expect(() => checkReads(irReading([null], [], [REG]), [write(REG), readThrough('p')])).not.toThrow();
+  });
+
+  test('a read does not stand for a write, nor a write for a read', () => {
+    expect(() => checkReads(irReading([REG], [], [REG]), [read(REG), read(REG)])).toThrow(
+      /dropped the write to the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG], [], [REG]), [write(REG), write(REG)])).toThrow(
+      /dropped the read of the device register at 0x4000006/,
+    );
+    expect(() => checkReads(irReading([REG], [], [REG]), [write(REG), read(REG)])).not.toThrow();
+  });
+
+  test('a member of a qualified element is one write, where it is a store’s target', () => {
+    // `astore` through `0x40000B0 + ch * 12`, rendered `((volatile struct S *)0x40000B0)[ch].f = 1;`
+    const base = mkValue(T.ptr(T.u(32)));
+    const fn = irReading([]);
+    fn.blocks[0].ops.unshift(
+      mkOp('const', { results: [base], attrs: { value: 0x40000b0 } }),
+      mkOp('astore', {
+        operands: [base, mkValue(T.s(32)), mkValue(T.u(32))],
+        attrs: { elemSize: 12, fieldOff: 0, volatile: true },
+      }),
+    );
+    const element: Expr = {
+      k: 'index',
+      base: {
+        k: 'cast',
+        to: T.ptr({ kind: 'struct', name: 'S', size: 12, fields: [] }),
+        volatile: true,
+        e: { k: 'const', value: 0x40000b0 },
+      },
+      idx: { k: 'var', name: 'ch' },
+      width: 12,
+      signed: false,
+    };
+    const member: Stmt = {
+      k: 'store',
+      lval: { k: 'field', base: element, name: 'f' },
+      value: { k: 'const', value: 1 },
+    };
+    expect(() => checkReads(fn, [member])).not.toThrow();
+    expect(() => checkReads(fn, [])).toThrow(/dropped a write to a device register in 'F'/);
+  });
+
+  test('a read at no constant address licenses one render on a path, wherever it lands', () => {
+    expect(() => checkReads(irReading([null]), [readThrough('p')])).not.toThrow();
+    expect(() => checkReads(irReading([null]), [readThrough('p'), readThrough('p')])).toThrow(
+      /emitted 2 reads of device registers on one path in 'F', where the asm makes 1/,
+    );
+  });
+});
+
+// A read of an object the symbol map declares volatile (`declaredVolatile`, the `declared` placement)
+// is an execution too: the tree spells it by the object's name, whose declaration qualifies it, so
+// each render is a read the recompile makes. Counted for re-runs only, by the object it reads.
+describe('assertEffectsPreserved — a read of a declared volatile object', () => {
+  /** an IR fn whose entry block reads `gVolReg` once per entry of `reads`, stamped declared where
+   *  the entry is true, plus `pinned` reads the lift pinned */
+  const irReading = (reads: boolean[], pinned = 0): Fn => {
+    const ops = [];
+    const base = mkValue(T.ptr(T.u(16)));
+    ops.push(mkOp('gaddr', { results: [base], attrs: { sym: 'gVolReg' } }));
+    const read = (attrs: Record<string, boolean>) =>
+      ops.push(
+        mkOp('load', {
+          operands: [base],
+          results: [mkValue(T.u(16))],
+          attrs: { off: 0, width: 2, signed: false, ...attrs },
+        }),
+      );
+    reads.forEach((declared) => read(declared ? { declaredVolatile: true } : {}));
+    Array.from({ length: pinned }, () => read({ volatile: true }));
+    ops.push(mkOp('ret', {}));
+    return {
+      name: 'F',
+      blocks: [{ params: [], ops }],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+      localObjects: undefined,
+    };
+  };
+  const scalar: Expr = { k: 'var', name: 'gVolReg' };
+  // `((volatile u16 *)&gVolReg)[i]`, or `((u16 *)&gVolReg)[i]`
+  const element = (i: number, volatile = true): Expr => ({
+    k: 'index',
+    base: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'gVolReg' }, ...(volatile ? { volatile: true } : {}) },
+    idx: { k: 'const', value: i },
+    width: 2,
+    signed: false,
+  });
+  const use = (e: Expr): Stmt => ({ k: 'store', lval: { k: 'var', name: 'gOut' }, value: e });
+  const checkReads = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+
+  test('one read rendered twice in sequence fails', () => {
+    expect(() => checkReads(irReading([true]), [use(scalar), use(scalar)])).toThrow(
+      /emitted 2 reads of the volatile object 'gVolReg' on one path in 'F', where the asm makes 1/,
+    );
+  });
+
+  test('one read spelled twice in one expression fails', () => {
+    expect(() => checkReads(irReading([true]), [use({ k: 'bin', op: '*', l: scalar, r: scalar })])).toThrow(
+      /emitted 2 reads of the volatile object 'gVolReg'/,
+    );
+  });
+
+  test('one read rendered once in each of two exclusive arms passes', () => {
+    const arms: Stmt = { k: 'if', cond: { k: 'var', name: 'c' }, then: [use(scalar)], else: [use(scalar)] };
+    expect(() => checkReads(irReading([true]), [arms])).not.toThrow();
+  });
+
+  test('two reads license two renders, through any spelling of the object', () => {
+    expect(() => checkReads(irReading([true, true]), [use(scalar), use(element(0))])).not.toThrow();
+    expect(() => checkReads(irReading([true, true]), [use(element(0)), use(element(0)), use(scalar)])).toThrow(
+      /emitted 3 reads of the volatile object 'gVolReg'/,
+    );
+  });
+
+  test('a write to the object is not a read', () => {
+    const write: Stmt = { k: 'store', lval: scalar, value: { k: 'const', value: 1 } };
+    expect(() => checkReads(irReading([true]), [write, use(scalar)])).not.toThrow();
+  });
+
+  test('an unstamped read is not counted, rendered however often', () => {
+    expect(() => checkReads(irReading([false]), [use(scalar), use(scalar)])).not.toThrow();
+  });
+
+  test('an object the asm also reads unstamped is not counted: its renders cannot be told apart', () => {
+    expect(() => checkReads(irReading([true, false]), [use(scalar), use(scalar), use(scalar)])).not.toThrow();
+  });
+
+  test('a read the lift pinned through the object’s name may be rendered as one of its reads', () => {
+    expect(() => checkReads(irReading([true], 1), [use(scalar), use(element(0))])).not.toThrow();
+    expect(() => checkReads(irReading([true], 1), [use(scalar), use(scalar), use(scalar)])).toThrow(
+      /emitted 3 reads of the volatile object 'gVolReg' on one path in 'F', where the asm makes 2/,
+    );
+  });
+
+  test('a read spelled through a cast that drops the qualifier fails', () => {
+    expect(() => checkReads(irReading([true]), [use(element(0, false))])).toThrow(
+      /read of the volatile object 'gVolReg' in 'F' through a cast that drops its qualifier/,
+    );
+    // `(&gVolReg)[0]` is the same render: the printer casts a base that does not stride the access
+    const bare: Expr = { ...(element(0) as Extract<Expr, { k: 'index' }>), base: { k: 'addr', name: 'gVolReg' } };
+    expect(() => checkReads(irReading([true]), [use(bare)])).toThrow(/through a cast that drops its qualifier/);
+  });
+
+  test('a read never rendered is not refused', () => {
+    expect(() => checkReads(irReading([true]), [])).not.toThrow();
+  });
+});
+
+describe('assertEffectsPreserved — a write to a declared volatile object', () => {
+  /** an IR fn whose entry block stores to `gVolReg` once per entry of `writes`, stamped declared
+   *  where the entry is true */
+  const irWriting = (writes: boolean[]): Fn => {
+    const base = mkValue(T.ptr(T.u(16)));
+    const value = mkValue(T.u(16));
+    const ops = [
+      mkOp('gaddr', { results: [base], attrs: { sym: 'gVolReg' } }),
+      mkOp('const', { results: [value], attrs: { value: 1 } }),
+      ...writes.map((declared) =>
+        mkOp('store', {
+          operands: [base, value],
+          attrs: { off: 2, width: 2, ...(declared ? { declaredVolatile: true } : {}) },
+        }),
+      ),
+      mkOp('ret', {}),
+    ];
+    return {
+      name: 'F',
+      blocks: [{ params: [], ops }],
+      writeOrder: undefined,
+      slotHomes: undefined,
+      paramEvidence: undefined,
+      localObjects: undefined,
+    };
+  };
+  // `((volatile u16 *)&gVolReg)[1] = 1;`, or the same through `(u16 *)`
+  const write = (volatile: boolean): Stmt => ({
+    k: 'store',
+    lval: {
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'gVolReg' }, ...(volatile ? { volatile } : {}) },
+      idx: { k: 'const', value: 1 },
+      width: 2,
+      signed: false,
+    },
+    value: { k: 'const', value: 1 },
+  });
+  const check = (fn: Fn, body: Stmt[]) => assertEffectsPreserved(fn, sfnWith(body));
+
+  test('a write spelled through a cast that drops the qualifier fails', () => {
+    expect(() => check(irWriting([true, true]), [write(false), write(false)])).toThrow(
+      /write to the volatile object 'gVolReg' in 'F' through a cast that drops its qualifier/,
+    );
+  });
+
+  test('a write whose cast carries the qualifier passes', () => {
+    expect(() => check(irWriting([true, true]), [write(true), write(true)])).not.toThrow();
+  });
+
+  test('an object the asm also writes unstamped is not checked', () => {
+    expect(() => check(irWriting([true, false]), [write(false), write(false)])).not.toThrow();
+  });
+});

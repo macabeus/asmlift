@@ -42,9 +42,10 @@
 // `case` cannot fall through (`spellSwitchFallthrough` false) sends Regime A back to if-recovery,
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
 // into the `default:` — refuse in `chainArms`, which answers null.
-import { constAddressOf, globalCellOf } from '../ir/alias';
+import { constAddressOf, globalBaseOf } from '../ir/alias';
 import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
-import { CAST_WIDTHS, EFFECTFUL_OPS, SPELLED_WHEN_DEAD_OPS, isPinnedAccess, opSig } from '../ir/opcodes';
+import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
+import { CAST_WIDTHS, opSig } from '../ir/opcodes';
 import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
 import {
   BinOp,
@@ -67,8 +68,9 @@ import {
 } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, ptrElemBytes, renderedIntSignedness } from '../l3/typing';
-import { qualifiedMemoryAccess } from '../l3/volstore';
+import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
+import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
 import { collectStructs } from '../raise/structs';
 import {
@@ -85,7 +87,7 @@ import {
   scalarCellType,
   structFieldInnerExtents,
 } from '../symbols';
-import { analyze } from './analysis';
+import { analyze, shortCircuitGuardedValues } from './analysis';
 import { makeBitfieldSpelling } from './bitfields';
 import {
   addOffset,
@@ -1639,6 +1641,10 @@ export interface StructureOptions {
   // `deviceMemoryWriters`, which no structurer rule reads). Used as a REFUSAL: absent, a dead read
   // at a literal address is dropped.
   deviceRegisters?: readonly [number, number];
+  // Does the compiler extend a `volatile` narrow signed read in a register, never in the load? The
+  // `declared` stamp structuring re-derives reads it (TargetDescription.compilerBehaviors'
+  // `volatileReadsExtendInRegister`), so it leaves unplaced the read the lift's stamp did.
+  volatileReadsExtendInRegister?: boolean;
   // Spell `(x << a) >> b` extracts of a struct global as the map's named bitfield member. On by
   // default; rank.ts enumerates the OFF spelling as the `/no-bitfield` variation, because the named
   // read recompiles at the DECLARATION's access width — where that diverges from the asm's load
@@ -2016,7 +2022,7 @@ function earlyReturnArm(
     } // re-enters the loop → not an exit
     if (entryOwned && dom.get(bb)!.has(to)) {
       owned.add(bb);
-    } else if (bb.ops.some((op) => EFFECTFUL_OPS.has(op.opcode))) {
+    } else if (bb.ops.some(effectful)) {
       return null;
     }
     const t = bb.ops[bb.ops.length - 1];
@@ -2086,6 +2092,22 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     inferredSymbols,
     orderLicensedGlobals,
   } = opts;
+  // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
+  // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
+  // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
+  // branch, which is right only for one no fold could move, so this read declines instead.
+  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, opts);
+  if (stampedLate.length > 0) {
+    const defsNow = defOpMap(fn);
+    const guarded = shortCircuitGuardedValues(fn, defsNow);
+    const moved = stampedLate.find((op) => op.results.some((r) => guarded.has(r)));
+    if (moved !== undefined) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': a '&&'/'||' would guard a read of the volatile object ` +
+          `'${globalBaseOf(defsNow, moved.operands[0]) ?? 'a volatile object'}', and which side of the branch the asm read it on is not recoverable`,
+      );
+    }
+  }
   // THE shape dictionary the rendering context asks, map-first. Built as a lookup rather than a
   // merged Map because the map is the PROJECT's and is asked by name for a whole project's worth
   // of symbols — copying it per structuring is work proportional to the project, and a ranked run
@@ -2166,65 +2188,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
-  const {
-    useSitesOf,
-    opIndex,
-    opBlock,
-    liveIn,
-    materialize,
-    preUpdateHomes,
-    reachFrom,
-    emitPos,
-    memWriteBetween,
-    volatileGuardedRead,
-  } = analyze(fn, returnsVoid, {
-    defs,
-    dom,
-    rereadGlobals,
-    materializeJoinFeeds,
-    homeSharedAddresses,
-    homeLoopExprs,
-    homeDerivedReads,
-    homeMergeFeeds,
-    homeEscapingExtensions,
-    readsStayWhereWritten,
-    contractsFloatProducts,
-    // the map's own declaration truth: a volatile object's read may not be duplicated or moved.
-    // A qualified MEMBER answers only for the bytes it spans — the `vu16 field;` idiom puts one in
-    // a struct whose other members are ordinary cells — and a field of unknown extent spans
-    // whatever follows it, which is the refusing way to be wrong.
-    volatileGlobal: (n, byte) => {
-      const si = symbols?.get(n);
-      if (si?.volatile === true) {
-        return true;
-      }
-      return (si?.layout ?? []).some(
-        (f) =>
-          f.volatile === true && (byte === null || (byte >= f.offset && (f.size === null || byte < f.offset + f.size))),
-      );
-    },
-  });
-
-  // A VOLATILE READ THE RENDERED `&&`/`||` DECIDES THE EXISTENCE OF. The connective evaluates its
-  // guarded operand conditionally and the machine's branch did not, for anything the fold brought
-  // into it; a read is exempt from that hazard because C's own short circuit re-guards it at the new
-  // point — but only where re-guarding it is a spelling choice. For a cell the map declares volatile
-  // the two placements are a missing hardware access and a duplicated one, and which one the asm had
-  // is what the fold erased (see `volatileGuardedRead`). Nothing here can re-place it, so decline
-  // LOUD — the answer `testSkipsAnEffect` gives for an effect in the same position.
-  //
-  // WHAT IT STANDS IN FOR is a roster: both placements minted, each published only at a byte-exact
-  // score — `Candidate.matchOnly`, the licence l3/unreduce.ts takes for a spelling whose semantics
-  // no gate over the C can settle. That licence is a VARIATION's, and it is spent standing beside a
-  // default whose semantics the pass did establish; here the fold erased the fact both spellings
-  // rest on, so neither is that default. And the callers with no target object — the playground, a
-  // run without `--score-against` — have no differ to referee a pair with at all.
-  if (volatileGuardedRead !== null) {
-    throw new StructureError(
-      `cannot structure '${fn.name}': a '&&'/'||' would guard a read of the volatile object ` +
-        `'${volatileGuardedRead}', and which side of the branch the asm read it on is not recoverable`,
-    );
-  }
+  const { useSitesOf, opIndex, opBlock, liveIn, materialize, preUpdateHomes, reachFrom, emitPos, memWriteBetween } =
+    analyze(fn, returnsVoid, {
+      defs,
+      dom,
+      rereadGlobals,
+      materializeJoinFeeds,
+      homeSharedAddresses,
+      homeLoopExprs,
+      homeDerivedReads,
+      homeMergeFeeds,
+      homeEscapingExtensions,
+      readsStayWhereWritten,
+      contractsFloatProducts,
+    });
 
   // THE FOLLOW OF A DIVERGENT `if`, over the paths that do not return early. Post-dominance gives
   // such an `if` no join — its arms reach two different `ret`s, and EXIT is the only block on every
@@ -2534,7 +2511,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
               P !== b &&
               pt?.opcode === 'br' &&
               P.params.length === 0 &&
-              P.ops.every((o) => !EFFECTFUL_OPS.has(o.opcode) && !materialize.has(o)) &&
+              P.ops.every((o) => !effectful(o) && !materialize.has(o)) &&
               // at least one def the LOOP BODY reads — the loop-invariant-motion shape this claim
               // exists for. A block that only computes the init args is the do-while path's
               // ordinary entry chain, and that path's sink machinery handles it better.
@@ -2608,7 +2585,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // whose result also feeds the body would be evaluated twice per iteration). A `load` is fine —
     // but NOT a materialized one: its temp assignment renders only via sideEffects(), which a
     // condition-only header never emits, so its uses would read an unassigned variable.
-    const headerPure = !h.ops.some((op) => EFFECTFUL_OPS.has(op.opcode) || materialize.has(op));
+    const headerPure = !h.ops.some((op) => effectful(op) || materialize.has(op));
 
     let exitFrom: Block,
       exit: Block,
@@ -2708,7 +2685,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
-        return owned !== null || (isRet(e.to) && !e.to.ops.some((op) => EFFECTFUL_OPS.has(op.opcode)));
+        return owned !== null || (isRet(e.to) && !e.to.ops.some(effectful));
       });
       if (fits) {
         return {
@@ -3733,17 +3710,20 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return { k: 'var', name: '?' };
   };
 
-  // A memory access the lift marked `volatile` is one the recompile must make where the machine
-  // did (frontend/frame-objects.ts), so its spelling carries the qualifier or the function declines:
-  // a plain spelling is one agbcc may delete or hoist.
+  // A qualified access is one the recompile must make where the machine did, so its spelling
+  // carries the qualifier or the function declines: a plain spelling is one agbcc may delete or
+  // hoist. It carries it where ir/discipline.ts `qualifiedBy` says: on its cast, or through the
+  // object's declaration and on its cast where it reaches the object through one, since a cast's
+  // pointee drops the declaration's qualifiers.
   const pinnedAccess = (op: Op, access: Expr): Expr => {
-    if (!isPinnedAccess(op)) {
+    const by = qualifiedBy(op);
+    if (by === null || (by === 'declaration' && !castOffDeclaration(access, ctype))) {
       return access;
     }
     const q = qualifiedMemoryAccess(access, ctype);
     if (q === null) {
       throw new StructureError(
-        `cannot structure '${fn.name}': a device ${op.opcode} the lift keeps volatile is reached through a ` +
+        `cannot structure '${fn.name}': a ${placedAt(op)} ${op.opcode} that must stay volatile is reached through a ` +
           'pointer with no type to put the qualifier on',
       );
     }
@@ -4720,84 +4700,49 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };
 
-  /** THE REFUSAL for the read half of `unreadResult`. TWO questions, and the statement is spelled
-   *  only where BOTH answer yes; the second is not implied by the first.
+  /** THE REFUSAL for the read half of `unreadResult`: can a `volatile` reach this dead read's
+   *  spelling, here or in some candidate enumerated from this tree?
+   *
+   *  A QUALIFIED read (ir/discipline.ts `qualified`) answers yes: `pinnedAccess` puts the qualifier
+   *  on its spelling, from the device pin or from the map's declaration of the object it reads. Every
+   *  other read is plain in this tree, and only a variation can qualify it, so the statement is
+   *  spelled only where both of these hold:
    *
    *   1. EVIDENCE — would a source plausibly have declared this access `volatile`? The answer has
    *      to come from DATA: the target's declared device-register window
-   *      (`capabilities.deviceRegisters`) or the symbol map's own `volatile` on the named global.
-   *      `volatile` is a CORRECTNESS claim about an address, not a spelling preference, and
-   *      asserting one about ordinary RAM is a wrong answer rather than a wrong spelling.
-   *   2. REACHABILITY — will the spelling this access gets CARRY a qualifier, here or in some
-   *      candidate enumerated from this tree? The payoff of spelling a dead read is that a
-   *      qualifier can land on it and the differ can referee the pair; where none can, the
-   *      statement is a permanent bare deref in the DEFAULT source, which is what the playground
-   *      pins and what a decomp author copies. This question refuses far less than question 1:
-   *      `/volatile` qualifies an EWRAM or ROM address quite happily.
+   *      (`capabilities.deviceRegisters`). `volatile` is a CORRECTNESS claim about an address, not a
+   *      spelling preference, and asserting one about ordinary RAM is a wrong answer rather than a
+   *      wrong spelling.
+   *   2. REACHABILITY — the base value has a use OTHER than this read: l3/volatileptr.ts qualifies a
+   *      pointer LOCAL, and l3/basecse.ts only mints that local for a base something else also
+   *      touches. A single-access read — `*(s32 *)0x04000200;`, the `REG_IF` acknowledge idiom, and
+   *      the shape a WRONG `returnsVoid` on a register accessor produces — has no local to qualify
+   *      and never will, however plainly its address is a device register. "Some other use" is
+   *      NECESSARY for that local, not sufficient; the gate states the necessary half. Where no
+   *      qualifier can land, the statement would be a permanent bare deref in the DEFAULT source,
+   *      which is what the playground pins and what a decomp author copies.
    *
-   *  THE MAP ARM needs the read spelled through the global's own NAME, which is where the map's
-   *  qualifier lands — memAccess's two name-carrying arms for a global, the bare scalar
-   *  (`gStatus;`) and the declared struct MEMBER (`gState.ctl;`). A CAST spelling
-   *  (`((s32 *)&REG_DMA3SAD)[2]`) has thrown the qualifier away in the spelling itself, whatever
-   *  the declaration says. The member arm asks the CONTAINER's qualifier and not the member's own
-   *  (`SymbolStructField.volatile`), which looks backwards and is not: `memberQualsAllow` above
-   *  refuses to NAME a volatile member at all, so a `vu16` member is spelled `((s32 *)&gSym)[k]`
-   *  with nothing in the spelling for a variation to hold, while `volatile struct S gSym;` qualifies
-   *  every member and `gSym.ctl;` really is an observable read. Every other map spelling refuses —
-   *  `gPtr->member`, a bare-name array element, a multidimensional subscript — because
-   *  over-refusing costs a SPELLING and admitting wrongly costs an ANSWER, this file's standing
-   *  asymmetry.
+   *  The address is a LITERAL, which inhabits only `/raw-globals`: with a symbol map the frontend
+   *  spells a pool word as `gaddr`, so `constAddressOf` returns null, and a read of a named object
+   *  is plain because the map does not declare it volatile.
    *
-   *  THE LITERAL ARM needs the base value to have a use OTHER than this read: l3/volatileptr.ts
-   *  qualifies a pointer LOCAL, and l3/basecse.ts only mints that local for a base something else
-   *  also touches. A single-access read — `*(s32 *)0x04000200;`, the `REG_IF` acknowledge idiom,
-   *  and the shape a WRONG `returnsVoid` on a register accessor produces — has no local to qualify
-   *  and never will, however plainly its address is a device register. "Some other use" is
-   *  NECESSARY for that local, not sufficient; the gate states the necessary half.
-   *
-   *  ONLY `load` REACHES EITHER ARM. `aload` carries its index in `operands[1]` and has no `off`
-   *  attr at all, so both address queries would answer for the BARE BASE — `globalCellOf` resolves
-   *  a base and discards the index by construction (ir/alias.ts), `constAddressOf` sees the literal
+   *  ONLY `load` REACHES THE ARM. `aload` carries its index in `operands[1]` and has no `off` attr at
+   *  all, so the address query would answer for the BARE BASE — `constAddressOf` sees the literal
    *  with `off` defaulted to 0 — which admits `volatile s32 *p0 = (s32 *)0x04000000; p0[a0];`, a
    *  qualified access at an address the declared window does not cover. The whitelist is by OPCODE
-   *  so a read op added later refuses until someone answers both questions for it.
-   *
-   *  THE ARMS DO NOT SHARE A POPULATION. With a symbol map the frontend spells a pool word as
-   *  `gaddr`, so `constAddressOf` returns null and the literal arm inhabits only `/raw-globals`,
-   *  which re-structures with NO map. The map arm is the default-source one, and a map-fed DMA
-   *  function spells no read at all — its wait-read is cast-spelled (see `BASECSE_GATES`'
-   *  `repeated-const-offset`, whose base local this refusal hands back). */
+   *  so a read op added later refuses until someone answers both questions for it. */
   const volatileQualifiable = (op: Op): boolean => {
-    // A read the lift pinned is spelled through the qualifier whatever its address arm would say.
-    if (isPinnedAccess(op)) {
+    if (qualified(op)) {
       return true;
     }
     if (op.opcode !== 'load') {
       return false;
     }
-    const off = typeof op.attrs.off === 'number' ? op.attrs.off : 0;
-    const width = op.attrs.width as number;
-    const cell = globalCellOf(defs, op.operands[0], off);
-    if (cell) {
-      const si = symbols?.get(cell.name);
-      if (si === undefined) {
-        return false;
-      }
-      if (si.shape === 'struct') {
-        // the SAME find memAccess's struct arm makes, so the two cannot disagree about which
-        // accesses reach the `gSym.field` spelling this arm's qualifier rides on
-        const fld = symCtx
-          ?.fieldsOf(cell.name)
-          ?.find((f) => f.offset === cell.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f));
-        return fld !== undefined && memberQualsAllow(fld, si.const, false) && si.volatile === true;
-      }
-      return cell.byte === 0 && scalarGlobals.has(cell.name) && si.volatile === true;
-    }
     const window = opts.deviceRegisters;
     if (!window) {
       return false;
     }
-    const addr = constAddressOf(defs, op.operands[0], off);
+    const addr = constAddressOf(defs, op.operands[0], typeof op.attrs.off === 'number' ? op.attrs.off : 0);
     if (addr === null || addr < window[0] || addr >= window[1]) {
       return false;
     }
@@ -4805,11 +4750,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   };
 
   /** Ops the `sideEffects` walk must SPELL even though nothing consumes their result — the
-   *  registry's own derived set (`SPELLED_WHEN_DEAD_OPS`), so the next op to acquire the property
-   *  needs no edit here, plus the address refusal above for the memory-read half.
+   *  question ir/discipline.ts asks of every op (`spelledWhenDead`), so the next op to acquire the
+   *  property needs no edit here, plus the address refusal above for the memory-read half.
    *
-   *  A memory READ is not in `EFFECTFUL_OPS`, deliberately: ir/opcodes.ts calls a load deletable
-   *  when dead, because nothing observes a read nobody reads. That is the C claim. The COMPILER
+   *  A memory READ is not `effectful`, deliberately: ir/discipline.ts calls a load deletable when
+   *  dead, because nothing observes a read nobody reads. That is the C claim. The COMPILER
    *  claim points the other way — an optimizing compiler deletes every dead read it is allowed to
    *  delete, so one still in the target is evidence the source's access was `volatile`, and
    *  dropping it deletes an instruction the machine executed.
@@ -4834,9 +4779,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *     the other preimage is a function whose `returnsVoid` fact is WRONG, so its return value
    *     arrived here as a dead read. The second-use clause removes the common shape of that (a bare
    *     register accessor), leaving a function that both STORES to a device register and reads one
-   *     back — narrow, but not proven empty. The MAP arm has no such problem: `gStatus;` under
-   *     `extern volatile u32 gStatus;` compiles differently from its own absence, so the differ can
-   *     referee it. The clean fix — spell the read only in candidates that also qualify it, paired
+   *     back — narrow, but not proven empty. A qualified read has no such problem: `gStatus;` under
+   *     `extern volatile u32 gStatus;` compiles differently from its own absence. The clean fix — spell the read only in candidates that also qualify it, paired
    *     the way `/livebase/volatile` already pairs — moves every device row's fan shape and wants
    *     its own round and zero-flip gate over BOTH tiers.
    *  2. THE REFUSAL IS SILENT. When this returns false for a `load`, the machine performed a read
@@ -4899,7 +4843,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const hasSpelledUse = (v: Value): boolean => (useSitesOf.get(v) ?? []).some((s) => isSpelled(s.op));
 
   const unreadResult = (op: Op): boolean =>
-    SPELLED_WHEN_DEAD_OPS.has(op.opcode) &&
+    spelledWhenDead(op) &&
     op.results.length > 0 &&
     // NO EXEMPTION FOR A MATERIALIZED DEF HERE, and it is not missing. Such a def already renders
     // at its own position, as `v = f(…)`, which spells the effect as surely as a bare statement
@@ -6147,7 +6091,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const ends = (n: Block): boolean =>
         inBody(n).length === 0 &&
         n.ops[n.ops.length - 1].opcode === 'br' &&
-        n.ops.every((op) => !EFFECTFUL_OPS.has(op.opcode) && !materialize.has(op)) &&
+        n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
         !(successorsOf(n)[0] === fl.header && new Set(preds.get(n)?.filter((q) => fl.body.has(q))).size > 1);
       ipdom = postDominators(fn, fl.body, (n) => inBody(n).filter((x) => !ends(x)));
       foreverJoins.set(fl.header, ipdom);
@@ -6585,9 +6529,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const bodyMap = latchMap ?? activeSub;
       const effectRoots = dw.latch.ops
         .slice(0, -1)
-        .filter(
-          (op) => op.results.length === 0 || materialize.has(op) || EFFECTFUL_OPS.has(op.opcode) || unreadResult(op),
-        )
+        .filter((op) => op.results.length === 0 || materialize.has(op) || effectful(op) || unreadResult(op))
         .flatMap((op) => op.operands);
       const updateRoots = successorTo(dw.latch, dw.header)!.args;
       const regionRoots = rootsOf(exitRegion(dw.exit, dw.body, stop));

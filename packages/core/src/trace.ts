@@ -7,13 +7,12 @@
 import { cBackend } from './backend/c';
 import type { CodegenProfile } from './codegen-flags';
 import type { AsmData } from './frontend/asmdata';
-import { frontendFor } from './frontend/registry';
 import type { Fn } from './ir/core';
 import { print } from './ir/print';
 import { verify } from './ir/verify';
 import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type OnGap, raiseRecovered, structureChecked, stubResult } from './pipeline';
+import { type OnGap, liftStamped, raiseRecovered, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
@@ -195,8 +194,7 @@ function traceTower(
   const patternEvents: PatternEvent[] = [];
 
   // (1) lift → typed-SSA IR
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
-  verify(fn);
+  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols);
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: irDump(fn), verified: true });
   // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as
   // pipeline.ts's runTower: the fold and the tower below destroy the order the licence reads.
@@ -222,7 +220,7 @@ function traceTower(
   // The names the map holds for addresses this machine code built by arithmetic off a named one
   // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
   // runTower.
-  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : [];
+  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols, target.compilerBehaviors) : [];
   trace.push({
     id: 'stage:offsetnames',
     title: 'Name a walked-to address the symbol map knows',

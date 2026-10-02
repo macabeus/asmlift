@@ -23,7 +23,7 @@
 //               ARM ORDER. → do not sink (`arms-are-one-set`).
 //
 // `selcomp` is the case a "both arms are constants" reading of the predicate would refuse and this
-// one admits, and `selload` is the one `REEVAL_UNSAFE_OPS` earns its place on — a load is ONE op and
+// one admits, and `selload` is the one `reevalUnsafe` earns its place on — a load is ONE op and
 // is NOT one speculatable SET (`gcc/rtlanal.c:1770-1771`).
 //
 // Offline: reads committed text, runs no compiler.
@@ -72,7 +72,7 @@ describe('agbcc: a ONE-SET-arm select cannot be spelled with a merge variable', 
 
 describe('agbcc: an arm that is NOT one SET CAN be spelled with a merge variable — both spellings keep the diamond, differing only in arm order', () => {
   // The three refusals `arms-are-one-set` is committed FOR, one per reason `armIsOneSet` gives:
-  // a body, more than one result-producing op, and an op `REEVAL_UNSAFE_OPS` calls unsafe.
+  // a body, more than one result-producing op, and an op `reevalUnsafe` calls unsafe.
   test.each(['selbody', 'selcomp3', 'selload'])('%s keeps its diamond in BOTH spellings', (sym) => {
     expect(uncond(bodyOf(MERGE, sym)), 'the merge spelling keeps it').toBe(1);
     expect(uncond(bodyOf(EARLY, sym)), 'and so does the early-return spelling').toBe(1);

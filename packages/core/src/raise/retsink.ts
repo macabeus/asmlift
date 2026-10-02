@@ -32,7 +32,7 @@
 // retired 2026-09-13).
 //
 // ONE MODEL, NOT TWO. The predicate is `narrowlocal.ts`'s exported `armIsOneSet` — no op that
-// `REEVAL_UNSAFE_OPS` calls unsafe, and EXACTLY one result-producing op — read here by
+// `reevalUnsafe` calls unsafe, and EXACTLY one result-producing op — read here by
 // `arms-are-one-set`. It is cited there line by line to `jump.c:474/:480/:482/:483` and
 // `rtlanal.c:1770-1784`, with the three things an op count alone gets wrong, and a reach census over
 // 13733 blocks. It is SHARED rather than re-derived here because it is one optimizer guard and a

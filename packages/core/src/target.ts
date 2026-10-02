@@ -27,9 +27,11 @@
 //     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), the
 //     structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
 //     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions), and the
-//     frame-object audit's pin (frontend/frame-objects.ts), which spells every access in the
-//     window `volatile` in a function it keeps as one object, and in one it accepts object by
-//     object every device read and the device stores a later store in their block overwrites.
+//     device pin (frontend/device-pins.ts), which spells every access in the window `volatile`
+//     in a function the frame-object audit keeps as one object, and in one it accepts object by
+//     object every device read and the device stores a later store in their block overwrites —
+//     under either policy save a read the compiler could not have made of a `volatile`
+//     (`volatileReadsExtendInRegister`).
 //     That last reader makes the answer a correctness one — agbcc deletes or hoists a plain
 //     device access the machine made — so it may be approximate in ONE direction only: the
 //     window must cover every register a source reaches, and covering more costs a spelling,
@@ -46,8 +48,10 @@
 //     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
-//     (frontend/thumb.ts, which reads the epilogue) and `roundTripsDoubleLiterals`
-//     (raise/floathelpers.ts). The field names are a SUPERSET of
+//     (frontend/thumb.ts, which reads the epilogue), `roundTripsDoubleLiterals`
+//     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
+//     raise/declared-volatile.ts through liftStamped and the offset-name pass). The
+//     field names are a SUPERSET of
 //     StructureOptions' — see `structureOptionsFor`.
 //
 // `capabilities` (HARDWARE facts) vs `compilerBehaviors` (COMPILER canonicalization decisions) are
@@ -58,6 +62,7 @@
 // test/browser-safe.test.ts): the toolchain paths that COMPILE for these targets
 // live in @asmlift/toolchains.
 import { type CodegenProfile, type FlagFamily, dialectOf, parseFlags } from './codegen-flags';
+import type { Op } from './ir/core';
 import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
 import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
 import type { StaticLayout } from './structure/local-statics';
@@ -89,6 +94,19 @@ export function sourceReach(read: SourceRead, off: number): { lo: number; hi: nu
     lo: read.walk === 'decrement' ? -Infinity : 0 - (off % read.unit),
     hi: read.walk === 'increment' ? (read.bytes ?? Infinity) : read.unit,
   };
+}
+
+/** Could the source have made this read through a `volatile` lvalue, on a compiler that behaves as
+ *  `behaviors` says? Not a sign-extending narrow load where the compiler extends a qualified narrow
+ *  read in a register (`volatileReadsExtendInRegister`): the qualified read is another instruction
+ *  sequence. The device pin (frontend/device-pins.ts) and the `declared` stamp
+ *  (raise/declared-volatile.ts) both ask it, so the two placements read one load the same way. */
+export function readCouldBeVolatile(
+  behaviors: Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'>,
+  op: Op,
+): boolean {
+  const width = (op.opcode === 'aload' ? op.attrs.elemSize : op.attrs.width) as number;
+  return !(behaviors.volatileReadsExtendInRegister === true && op.attrs.signed === true && width < 4);
 }
 
 /** A device channel's source control, read off the halfword at `sink + offset` of a
@@ -263,7 +281,7 @@ export interface TargetDescription {
     // the same SPELLING question — "would a source have written `volatile` here" — and the file
     // header's ledger names them and what each does with the answer. All but one leave the
     // decision to the differ: which cells a source qualified is not derivable from the asm, so
-    // both spellings are enumerated and the differ referees. The frame-object pin decides, because
+    // both spellings are enumerated and the differ referees. The device pin decides, because
     // there the plain spelling recompiles to a different program; that is why the window has to
     // cover every register. ABSENT ⇒ the variation declines everywhere and the tie-break
     // has no preference, which is the neutral direction — outside a declared window the qualifier
@@ -731,6 +749,18 @@ export interface TargetDescription {
     // ABSENT ⇒ unmeasured, and a function that defines a static declines: a wrong floor mislays
     // every static after the first, which no score sees.
     staticLayout?: StaticLayout;
+    // Does this compiler load a `volatile` narrow signed read zero-extended and sign-extend it in a
+    // register, never in the load itself? agbcc: yes — `*(volatile s16 *)a` is `ldrh; lsl #16; asr
+    // #16` and `volatile s8` is `ldrb; lsl; asr`, where the plain `s16` read is `ldrsh`: the
+    // sign-extend expander refuses a volatile MEM while expanding (`general_operand`, recog.c:918,
+    // under `init_recog_no_volatile`, function.c:5564) and thumb.md:393-409 then extends in a
+    // register; compiled at the canonical flags. So a lifted sign-extending narrow load is evidence
+    // the source read was plain (`readCouldBeVolatile`): the device pin (frontend/device-pins.ts)
+    // leaves it plain, and the `declared` stamp (raise/declared-volatile.ts) leaves it unplaced.
+    //
+    // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
+    // pinned, and a read of a declared object placed, whatever its extension.
+    volatileReadsExtendInRegister?: boolean;
   };
 }
 
@@ -828,6 +858,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
     nearBaseSpan: 255,
+    volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
     foldsPointerAdvance: true,
     readsStayWhereWritten: true,

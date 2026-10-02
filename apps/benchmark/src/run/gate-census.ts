@@ -173,7 +173,7 @@ export const PASSES: Record<string, CensusablePass> = {
     install: (w) => {
       const restore = OFFSET_NAME_PASS.run;
       const gates = w[0] as readonly Gate<OffsetAddress>[];
-      OFFSET_NAME_PASS.run = (fn, symbols) => nameOffsetAddresses(fn, symbols, gates);
+      OFFSET_NAME_PASS.run = (fn, symbols, behaviors) => nameOffsetAddresses(fn, symbols, behaviors, gates);
       return () => {
         OFFSET_NAME_PASS.run = restore;
       };

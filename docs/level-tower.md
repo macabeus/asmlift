@@ -869,13 +869,41 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
 - **`assertPostIncrUnshared`** (also after structuring): no expression names a `postincr`'s
   variable twice. C89 leaves undefined which value the second read sees, so a pass that brings one
   in has to fail here rather than compile into whichever answer the compiler picked.
-- **`assertEffectsPreserved`** (also after structuring): every call the asm makes is emitted, and
-  none is emitted more times than the asm makes it on any one path — same for the `opaque` ops
-  standing in for unmodelled instructions. It is the odd one out and worth the attention: the
-  other four check L3 against _itself_, so they catch a tree that is ill-formed. This one checks
-  L3 against the L2 graph it came from, which is the only way to catch a pass that **loses**
-  something well-formedly — a dropped call, or an unmodelled instruction quietly vanishing
-  because its destination register was dead.
+- **`assertEffectsPreserved`** (also after structuring): every execution the asm makes is emitted,
+  and none is emitted more times than the asm makes it on any one path. It counts by key:
+  `call:<target>` for a call; `device:r:0x<address>` and `device:w:0x<address>` for a read and a
+  write the lift pinned `volatile`, with `?` for the address where a side cannot read one off, a `?`
+  on either side standing for any address and each render for one access; and `declared:<object>`
+  for a read of an object the symbol map declares volatile. A pinned access through a named global
+  and a declared read are counted for re-runs only, because their qualifier may be the declaration,
+  which leaves nothing in the tree to find; a declared read or store that reaches its object through
+  a cast with no `volatile` is refused, since the cast's pointee drops the declaration's qualifier. The
+  `opaque` ops standing in for unmodelled instructions are checked as never dropped. It is the odd
+  one out and worth the attention: the other four check L3 against _itself_, so they catch a tree
+  that is ill-formed. This one checks L3 against the L2 graph it came from, which is the only way to
+  catch a pass that **loses** something well-formedly — a dropped call, a hardware read rendered
+  twice, or an unmodelled instruction quietly vanishing because its destination register was dead.
+
+**What the effect contract counts is decided once, below it.** Whether an op must run where, and
+as often as, the asm ran it is a fact about the OP, and
+[`ir/discipline.ts`](../packages/core/src/ir/discipline.ts) owns it as a _placement_, stamped by
+the one pass that knew it: `call` is its own opcode; `helper` is the stamp
+[`runtime-helpers.ts`](../packages/core/src/runtime-helpers.ts) `helperOp` puts on a value the asm
+computed by calling a runtime routine; `device` is the `volatile` the frontend's device pin
+([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
+access; `declared` is the stamp
+[`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
+a map-declared volatile object as the lift is made, from the map and the compiler the function is
+lifted and structured under, before any pass asks whether a read may be deleted. A read the
+compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
+by this stamp and by the device pin alike, through the one predicate both ask. Every
+pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,
+`spelledWhenDead`, `speculationUnsafe`, `orderSensitive`, `reevalUnsafe`, `counted` — rather than
+testing an opcode set, an L2 rebuilder carries the stamps through `carryDiscipline`, the contract
+enforces the `counted` ones at L2→L3, and L3 keeps volatility only as a spelling. A helper is
+placed but not counted: its value is pure, and agbcc computes one spelled twice once (`a / n + a / n`
+is one `bl __divsi3`). The module header names every site that still answers from the opcode registry alone,
+each marked deliberate or a gap, so a new placement's reach is read off one list.
 
 **Where they run matters as much as what they say.** The five post-structuring contracts fire
 _before_ the committed L3 rewrites, so a readability pass cannot hide a structuring defect by
@@ -1397,7 +1425,10 @@ fill where the address goes to a transfer's SOURCE register: the device reads th
 register is write-only, so nobody can read the address back out and turn it into a destination. The
 premise the guard _stated_ was false there. The fix was to ask the question the premise names — can
 anything write? — rather than the one that was easy to compute, and the addresses are target data
-(`capabilities.readOnlyAddressSinks`) so no shared pass learns a platform. The accepting half is
+(`capabilities.readOnlyAddressSinks`) so no shared pass learns a platform. A store through a
+register's literal address plus a runtime index — a channel chosen at run time — hands the address
+to every one of those registers the index's stride reaches, when that stride is a multiple of
+their spacing, so no index lands on a destination register between them. The accepting half is
 pinned as `synthetic:dma_fill_uninit:agbcc`. The sibling rule refusing a SECOND address-taken
 object keys on what the escape may REACH rather than on whether it writes, because its argument is
 about frame LAYOUT: a device reading past the object it was given is as wrong as a callee writing
@@ -1412,14 +1443,19 @@ local area, the frontend lifts once more with every word of it routed through `l
 second audit declares those bytes one `u8` array in memory, so every store the machine made there
 is a store the recompile makes. The asm cannot tell a member the
 device reads from a spill nobody reads, and keeping both in memory is right for both. The transfer
-has to run too, so every device access of a function kept this way is `volatile` — at a register's
-literal address, that address plus a runtime index, or a phi of those: agbcc deletes a plain store
-to an address a later store overwrites, so of two transfers armed back to back through one channel
-the first would never start, and it hoists a plain load out of a loop that stores nothing it may
-alias, so a poll of `REG_VCOUNT` would never see the register change. A function accepted object
-by object pins every device read, and of its stores only the first kind, a device store a later
-store in its own block overwrites; its other device stores are left to the `/vol-store` candidate,
-because a qualified base in the structured tree refuses the variations that home it.
+has to run too, so the device pin ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts),
+applied by the frontend from the policy the audit answers) makes every device access of a function
+kept this way `volatile` — at a register's literal address, that address plus a runtime index, a
+pointer stepped from one by a constant, or a phi of those: agbcc deletes a plain store to an address
+a later store overwrites, so of two transfers armed back to back through one channel the first
+would never start, and it hoists a plain load out of a loop that stores nothing it may alias, so a
+poll of `REG_VCOUNT` would never see the register change. A function accepted object by object
+pins every device read, and of its stores only the first kind, a device store a later store in its
+own block overwrites; its other device stores are left to the `/vol-store` candidate, because a
+qualified base in the structured tree refuses the variations that home it. The two policies are two
+rows of one table, `DEVICE_PIN_POLICIES`. Under either, a narrow read the machine sign-extended in
+the load (`ldrsh`, `ldrsb`) stays plain: agbcc loads a `volatile` narrow read zero-extended and
+shifts it, so such a read was plain in the source (`volatileReadsExtendInRegister`).
 
 That split — declarative partition, generic rule — is Ghidra's. Its compiler-spec files carry the
 same thing as data, and `mips32be.cspec` states the very asymmetry that forces it: a `<localrange>` whose own comment notes the 16-byte region is "backup

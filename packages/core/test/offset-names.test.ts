@@ -133,9 +133,9 @@ test('every driver reaches the pass through its record', () => {
   const restore = OFFSET_NAME_PASS.run;
   const seen: string[] = [];
   const run = (label: string, f: () => unknown): void => {
-    OFFSET_NAME_PASS.run = (fn, symbols) => {
+    OFFSET_NAME_PASS.run = (fn, symbols, behaviors) => {
       seen.push(label);
-      return restore(fn, symbols);
+      return restore(fn, symbols, behaviors);
     };
     try {
       f();
@@ -423,7 +423,7 @@ describe('the gates are load-bearing', () => {
    *  branch in the shipped path. */
   const namedWithout = (id: string, symbols: SymbolMap, asm = WALK): string[] => {
     const fn = lift('walk', asm, symbols);
-    nameOffsetAddresses(fn, symbols, without(OFFSET_NAME_GATES, id));
+    nameOffsetAddresses(fn, symbols, ARMV4T_AGBCC.compilerBehaviors, without(OFFSET_NAME_GATES, id));
     return fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'gaddr').map((op) => op.attrs.sym as string));
   };
 

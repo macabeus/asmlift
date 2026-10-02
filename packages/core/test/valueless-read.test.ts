@@ -18,10 +18,11 @@
 //   • NO SPELLING FOR A QUALIFIER TO LAND ON, which is a SEPARATE question and not implied by the
 //     one above — `/volatile` mints `volatile s32 *p0 = (s32 *)33554688;` for an EWRAM address
 //     quite happily, so a reachability argument would admit ordinary RAM and only the evidence
-//     question refuses it. Three populations refuse on THIS question and each has its own test: a
+//     question refuses it. Two populations refuse on THIS question and each has its own test: a
 //     device read that is the base's ONLY access, so basecse mints no local for `/volatile` to
-//     qualify; a map-declared register reached through a CAST, which has dropped the qualifier in
-//     the spelling itself; and a RUNTIME-INDEXED read, whose address neither query can answer for.
+//     qualify; and a RUNTIME-INDEXED read, whose address neither query can answer for. A read of an
+//     object the map declares volatile always has one: the declaration, or a `volatile` cast where
+//     the spelling reaches the object through a cast.
 //
 // The rule's population is narrow: of the 22 kleod benchmark rows that declare `returnsVoid`,
 // `DmaSpriteToObjVram` is the only one whose suppressed value is a memory read. The synthetic row
@@ -188,13 +189,11 @@ test('the SAME global without the map’s `volatile` refuses — the map owns th
   expect(lift(NAMED, true, new Map([[0x03000100, [gInfo(false)]]]))).not.toMatch(/^\s*gStatus;$/m);
 });
 
-test('a map-declared VOLATILE register reached through a CAST refuses — the spelling dropped it', () => {
+test('a map-declared VOLATILE register reached through a CAST is written and read through a `volatile` cast', () => {
   // The target row's own map-fed default: REG_DMA3SAD declared `volatile`, three stores and the
-  // wait read, but the access is spelled `((s32 *)&REG_DMA3SAD)[2]` — a cast to a PLAIN `s32 *`,
-  // which is not a volatile lvalue whatever the declaration says. The declaration's qualifier only
-  // reaches a NAME-spelled access, so this arm refuses and hands `BASECSE_GATES` back the base
-  // local its `repeated-const-offset` rule demotes. The row matches through `/raw-globals`, where
-  // the literal arm spells the read.
+  // wait read, each reaching the register as `((s32 *)&REG_DMA3SAD)[k]` — a cast to a PLAIN `s32 *`,
+  // which is not a volatile lvalue whatever the declaration says. So each access carries the
+  // qualifier on its own cast (structure.ts `pinnedAccess`).
   const asm =
     'f:\n\tldr\tr3, _pool\t@ =0x040000D4\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
     '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
@@ -209,18 +208,17 @@ test('a map-declared VOLATILE register reached through a CAST refuses — the sp
     volatile: true,
   };
   expect(body(lift(asm, true, new Map([[0x040000d4, [reg]]])))).toEqual([
-    's32 *p0;',
-    'p0 = (s32 *)&REG_DMA3SAD;',
-    '*p0 = 1;',
-    'p0[1] = 1;',
-    'p0[2] = 1;',
+    '*(volatile s32 *)&REG_DMA3SAD = 1;',
+    '((volatile s32 *)&REG_DMA3SAD)[1] = 1;',
+    '((volatile s32 *)&REG_DMA3SAD)[2] = 1;',
+    '((volatile s32 *)&REG_DMA3SAD)[2];',
   ]);
 });
 
-test('a volatile CONTAINER admits its named member; a `vu16` MEMBER refuses, because it is never named', () => {
-  // Both halves are one rule. `memberQualsAllow` refuses to spell a volatile member by name at all
-  // (the name would reintroduce a qualifier the cast form it replaces never carried), so a `vu16`
-  // member is reached as `((s32 *)&gState)[2]` — no qualifier in the spelling, nothing to hold.
+test('a volatile CONTAINER admits its named member; a `vu16` MEMBER is accessed through a `volatile` cast', () => {
+  // `memberQualsAllow` refuses to spell a volatile member by name at all (the name would
+  // reintroduce a qualifier the cast form it replaces never carried), so a `vu16` member is reached
+  // as `((s32 *)&gState)[2]`, and its store and read carry the qualifier on that cast.
   // `volatile struct State gState;` qualifies every member, and `gState.ctl;` really is observable.
   const asm =
     'f:\n\tldr\tr3, _pool\t@ =0x03000100\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x8]\n' +
@@ -249,7 +247,10 @@ test('a volatile CONTAINER admits its named member; a `vu16` MEMBER refuses, bec
       ],
     ]);
   expect(body(lift(asm, true, st(false, true)))).toEqual(['gState.ctl = 1;', 'gState.ctl;']);
-  expect(body(lift(asm, true, st(true, false)))).toEqual(['((s32 *)&gState)[2] = 1;']);
+  expect(body(lift(asm, true, st(true, false)))).toEqual([
+    '((volatile s32 *)&gState)[2] = 1;',
+    '((volatile s32 *)&gState)[2];',
+  ]);
   expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;']);
 });
 

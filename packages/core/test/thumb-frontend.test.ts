@@ -3315,6 +3315,40 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src.match(/\(volatile struct Elem0 \*\)67109040\)\[a2\]/g)).toHaveLength(6);
   });
 
+  // …and a frame address handed to a channel chosen at run time reaches that channel's SOURCE
+  // register, so the device only reads it and the function is pinned. Verbatim agbcc, `vu32 *d =
+  // (vu32 *)(0x40000B0 + ch * 12); tmp = 0; d[0] = &tmp; d[1] = dst; d[2] = 0x81000000 | n; d[2];`:
+  // the index is a multiple of the channels' 12-byte stride, so every register it names is a
+  // source. Plain, the closing read is used by nothing and not lifted at all.
+  test('a frame address handed to a runtime channel is read by the device, and pinned', () => {
+    const runtimeFill =
+      'fillChN:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tlsl\tr3, r0, #0x1\n' +
+      '\tadd\tr3, r3, r0\n\tlsl\tr3, r3, #0x2\n\tldr\tr0, .L6\n\tadd\tr3, r3, r0\n' +
+      '\tmov\tr4, sp\n\tmov\tr0, #0x0\n\tstrh\tr0, [r4]\n\tstr\tr4, [r3]\n' +
+      '\tstr\tr1, [r3, #0x4]\n\tmov\tr0, #0x81\n\tlsl\tr0, r0, #0x18\n\torr\tr0, r0, r2\n' +
+      '\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.word\t0x40000b0\n';
+    const src = decompile('fillChN', runtimeFill, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).toContain('    ((volatile struct Elem0 *)67109040)[a0].field_8;\n}');
+  });
+
+  // …but an index of another stride may name a DESTINATION register, which writes the frame: `((vu32
+  // *)0x40000B0)[i] = &tmp` is DMA0SAD at i = 0 and DMA0DAD at i = 1. Verbatim agbcc; the address
+  // stays an escape that may write, so nothing is pinned.
+  test('a frame address handed through an index of another stride may be written', () => {
+    const wordIndexed =
+      'fillWord:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrh\tr3, [r4]\n\tlsl\tr0, r0, #0x2\n\tldr\tr4, .L3\n\tadd\tr3, r0, r4\n' +
+      '\tmov\tr4, sp\n\tstr\tr4, [r3]\n\tldr\tr4, .L3+0x4\n\tadd\tr3, r0, r4\n\tstr\tr1, [r3]\n' +
+      '\tldr\tr1, .L3+0x8\n\tadd\tr0, r0, r1\n\tmov\tr1, #0x81\n\tlsl\tr1, r1, #0x18\n' +
+      '\torr\tr1, r1, r2\n\tstr\tr1, [r0]\n\tldr\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000b0\n' +
+      '\t.word\t0x40000b4\n\t.word\t0x40000b8\n';
+    const src = decompile('fillWord', wordIndexed, ARMV4T_AGBCC).source;
+    expect(src).not.toContain('(volatile s32 *)');
+  });
+
   // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
   // (vu32 *)0x40000BC` armed twice (compiled: 14 stores in this target, 11 plain, 14 here).
   test('a phi of device registers is a device store too', () => {
@@ -3332,6 +3366,24 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const src = decompile('q7', eitherChannel, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u8 sp0[8];');
     expect(src.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
+  });
+
+  // …and a pointer stepped through the channels by a constant is placed by the register it starts
+  // at, not by its step. Verbatim agbcc, a fill from a frame temporary and then `vu32 *d = (vu32
+  // *)0x40000B0; for (i = 0; i < 4; i++) { d[2] = 0; d[2]; d += 3; }`: the loop's pointer is a phi
+  // of 0x40000B0 and itself plus 12, and plain, agbcc forwards the stored 0 to the read.
+  test('a device pointer stepped around a loop is placed by where it starts', () => {
+    const stepped =
+      'stopAll:\n\tadd\tsp, sp, #-0x4\n\tmov\tr2, sp\n\tmov\tr1, #0x0\n\tstrh\tr1, [r2]\n' +
+      '\tldr\tr1, .L8\n\tstr\tr2, [r1]\n\tadd\tr1, r1, #0x4\n\tstr\tr0, [r1]\n' +
+      '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L8+0x4\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n' +
+      '\tsub\tr1, r1, #0x2c\n\tmov\tr3, #0x0\n\tmov\tr2, #0x3\n.L6:\n\tstr\tr3, [r1, #0x8]\n' +
+      '\tldr\tr0, [r1, #0x8]\n\tadd\tr1, r1, #0xc\n\tsub\tr2, r2, #0x1\n\tcmp\tr2, #0\n' +
+      '\tbge\t.L6\t@cond_branch\n\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L9:\n\t.align\t2, 0\n.L8:\n' +
+      '\t.word\t0x40000d4\n\t.word\t-0x7efffff0\n';
+    const src = decompile('stopAll', stepped, ARMV4T_AGBCC).source;
+    expect(src).toContain('volatile u16 sp0;');
+    expect(src).toContain('        v0 = ((volatile s32 *)v1)[2];\n');
   });
 
   // A device LOAD too: plain, `while (REG_VCOUNT != 160);` is loop-invariant to agbcc, which hoists
@@ -3392,7 +3444,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // …and it stays in the arm it was read in: `if (k && (v = REG_VCOUNT) > 5) h(v);` is not folded
-  // into a `&&`, which would re-guard a read whose place the fold does not record.
+  // into a `&&`, whose fold would hoist the read above the branch, onto the path that skips it.
   test('a volatile device read a branch guards stays in its arm', () => {
     const guarded =
       'sc1:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tmov\tr3, #0x0\n' +
@@ -3524,6 +3576,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('volatile u16 sp0;');
     expect(src.match(/^ {4}\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(2);
     expect(src).toContain('    do {\n        v0 = *(volatile u16 *)67108870;\n    } while (v0 != 160);\n');
+  });
+
+  // …save a read agbcc could not have made of a `volatile`: it never sign-extends a qualified read
+  // in the load (the expander refuses a volatile MEM, recog.c:918 under function.c:5564, and
+  // thumb.md:393-409 then loads it zero-extended and shifts), so an `ldrsh` is a plain read in the
+  // source and qualified it recompiles to `ldrh; lsl; asr`. Verbatim agbcc but for one pool label, a
+  // fill from a frame temporary and then `return *(s16 *)0x4000020;`, and the same with `volatile
+  // s16`.
+  test('a device read agbcc sign-extended in the load is not pinned', () => {
+    const preamble = (name: string) =>
+      `${name}:\n\tadd\tsp, sp, #-0x4\n\tmov\tr2, sp\n\tmov\tr1, #0x0\n\tstrh\tr1, [r2]\n` +
+      '\tldr\tr1, .L3\n\tstr\tr2, [r1]\n\tadd\tr1, r1, #0x4\n\tstr\tr0, [r1]\n' +
+      '\tadd\tr1, r1, #0x4\n\tldr\tr0, .L3+0x4\n\tstr\tr0, [r1]\n\tldr\tr0, [r1]\n\tldr\tr0, .L3+0x8\n';
+    const pool =
+      '\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n' +
+      '\t.word\t-0x7efffff0\n\t.word\t0x4000020\n';
+    const signedLoad = preamble('rdPlain') + '\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n' + pool;
+    const extendedAfter = preamble('rdVol') + '\tldrh\tr0, [r0]\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n' + pool;
+    expect(decompile('rdPlain', signedLoad, ARMV4T_AGBCC).source).toContain('    return *(s16 *)67108896;\n');
+    expect(decompile('rdVol', extendedAfter, ARMV4T_AGBCC).source).toContain(
+      '    return (s16)*(volatile u16 *)67108896;\n',
+    );
   });
 
   // A device address agbcc builds without a pool word is placed too: 0x04000000 is `mov #0x80;

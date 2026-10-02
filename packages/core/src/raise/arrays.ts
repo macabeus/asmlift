@@ -20,6 +20,7 @@
 // byte form (`add(base, index)`, elemSize 1) is deferred: without types, base and index are
 // indistinguishable there.
 import { Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
+import { carryDiscipline } from '../ir/discipline';
 
 // If `addr` is `add(base, shl(index, k))` with `1 << k === width`, return {base, index}.
 // The `add` is commutative, so the scaled side may be either operand.
@@ -62,12 +63,11 @@ export function recognizeArrays(fn: Fn): number {
           operands: [m.base, m.index],
           results: [res],
           // listOrder rides along: an ldmia-expanded load keeps its stream-order caveat as an aload
-          attrs: {
+          attrs: carryDiscipline(op, {
             elemSize: op.attrs.width as number,
             signed: op.attrs.signed as boolean,
             ...(op.attrs.listOrder === true && { listOrder: true }),
-            ...(op.attrs.volatile === true && { volatile: true }),
-          },
+          }),
         });
         replaceAllUsesWith(fn, op.results[0], res);
         count++;
@@ -76,10 +76,9 @@ export function recognizeArrays(fn: Fn): number {
         if (!m) {
           continue;
         }
-        // `volatile` rides along: the lift marked an access the recompile must make
         b.ops[i] = mkOp('astore', {
           operands: [m.base, m.index, op.operands[1]],
-          attrs: { elemSize: op.attrs.width as number, ...(op.attrs.volatile === true && { volatile: true }) },
+          attrs: carryDiscipline(op, { elemSize: op.attrs.width as number }),
         });
         count++;
       }

@@ -6,14 +6,8 @@
 // Crucially, rewrites go through replaceAllUsesWith + DCE — never in-place opcode
 // mutation of a live value.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import {
-  EFFECTFUL_OPS,
-  NEGATED_ICMP,
-  ORDER_SENSITIVE_OPS,
-  type Opcode,
-  isDceSafe,
-  isPinnedAccess,
-} from '../ir/opcodes';
+import { deletableWhenDead, effectful, orderSensitive } from '../ir/discipline';
+import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 
@@ -602,7 +596,7 @@ function validatePattern(pat: RewritePattern): void {
  *  leaves, after the idiom's own ops are gone. The fold INVENTS the expression, so it checks the
  *  cones it joins itself.
  *
- *  A cone's members are weighed by ORDER_SENSITIVE_OPS, not EFFECTFUL_OPS: a memory read answers
+ *  A cone's members are weighed by `orderSensitive`, not `effectful`: a memory read answers
  *  whichever stores ran before it, so hoisting a `load` over a `call` — one asmlift may itself be
  *  passing the loaded pointer to — changes the answer as surely as swapping two calls. Two READS
  *  are the exception and commute, the same fact the structurer states as "a plain load never bars
@@ -662,20 +656,18 @@ function reordersUnsequenced(
     return cone;
   };
   const [lc, rc] = names.map(coneOf);
-  const sensitive = (c: Set<Op>) => [...c].filter((o) => ORDER_SENSITIVE_OPS.has(o.opcode));
+  const sensitive = (c: Set<Op>) => [...c].filter(orderSensitive);
   for (const l of sensitive(lc)) {
     for (const r of sensitive(rc)) {
       // One op standing in BOTH cones is one evaluation and cannot be sequenced against itself; two
       // READS commute; and a right-cone op the machine ALREADY runs first loses nothing.
-      if (l === r || at.get(l)! >= at.get(r)! || !(EFFECTFUL_OPS.has(l.opcode) || EFFECTFUL_OPS.has(r.opcode))) {
+      if (l === r || at.get(l)! >= at.get(r)! || !(effectful(l) || effectful(r))) {
         continue;
       }
       // The left one runs first, so an inlined `A op B` would swap them — UNLESS a sibling effect
       // stands between, which the inline-at-use model refuses to cross, forcing a named temp at the
       // def's own position. A cone member is no sibling: it is inlined into this very expression.
-      if (
-        !blk.ops.slice(at.get(l)! + 1, at.get(r)!).some((o) => EFFECTFUL_OPS.has(o.opcode) && !lc.has(o) && !rc.has(o))
-      ) {
+      if (!blk.ops.slice(at.get(l)! + 1, at.get(r)!).some((o) => effectful(o) && !lc.has(o) && !rc.has(o))) {
         return true;
       }
     }
@@ -802,8 +794,8 @@ export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget)
 }
 
 /** Remove effect-free ops whose single result is unused, to a fixed point. Deletability is
- *  derived from the ONE effect table in ir/opcodes.ts, bar a read the lift pinned `volatile`: the
- *  machine made it, so the recompile has to (`isPinnedAccess`). */
+ *  ir/discipline.ts `deletableWhenDead`, which keeps a read the lift pinned `volatile`: the machine
+ *  made it, so the recompile has to. */
 export function dce(fn: Fn): void {
   let changed = true;
   while (changed) {
@@ -823,7 +815,7 @@ export function dce(fn: Fn): void {
     }
     for (const b of fn.blocks) {
       const kept = b.ops.filter(
-        (op) => !(isDceSafe(op.opcode) && !isPinnedAccess(op) && op.results.length === 1 && !used.has(op.results[0])),
+        (op) => !(deletableWhenDead(op) && op.results.length === 1 && !used.has(op.results[0])),
       );
       if (kept.length !== b.ops.length) {
         b.ops = kept;

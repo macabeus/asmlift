@@ -71,7 +71,7 @@ const MATERIALIZED = `fn materialized {
 // the whole of `packages/core/test` passes, 2,589 of 2,589 — this fixture included.
 //
 // The reason it is inert on a CALL is that `unreadResult` already answers yes for one — `effects`
-// puts it in `SPELLED_WHEN_DEAD_OPS` and its `reads` is not `true` — so the base case only changes
+// makes it `spelledWhenDead` and its `reads` is not `true` — so the base case only changes
 // the answer for an op `unreadResult` REFUSES while `sideEffects` still renders it at its own
 // position: a non-volatile `load`/`aload`, whose `reads: true` keeps it out of the `exprstmt`
 // branch. The generator emits no `load`, so no seed here reaches it. What this fixture does pin is

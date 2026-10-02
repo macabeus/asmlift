@@ -95,6 +95,7 @@ import { type IrType, T, scalarTypeForAccess } from '../ir/types';
 import { cellAddress, inRange, qualifiedBase } from './address';
 import { type Expr, type SFn, type Stmt, dotBase, stmtChildren } from './ast';
 import { type Gate, firstRejection } from './gates';
+import { derefStrideOk } from './typing';
 
 /** One STORE lvalue as the gates read it. */
 interface AccessCtx {
@@ -184,7 +185,7 @@ export function qualifiedAccess(lval: Extract<Expr, { k: 'index' }>): Extract<Ex
   return { ...lval, base };
 }
 
-/** A memory access the lift marked `volatile` (frontend/frame-objects.ts), spelled through a
+/** A memory access the lift marked `volatile` (frontend/device-pins.ts), spelled through a
  *  `volatile` pointee: an indexed access by {@link qualifiedAccess}; a recovered struct member
  *  through the struct pointer it is reached by — `((volatile struct S *)0x40000B0)[ch].field_0`,
  *  `((volatile struct S *)p)->field_0` — whether that pointer is already a cast or a variable
@@ -214,6 +215,44 @@ export function qualifiedMemoryAccess(e: Expr, typeOf: (x: Expr) => IrType | und
   const base = qualifiedPointer(e.base, typeOf);
   return base === null ? null : { ...e, base };
 }
+
+/** Does this access reach the object it names through a pointer cast — one the tree spells,
+ *  `((struct T *)&gSym)->f`, or one the C-family printer puts on a base that does not stride the
+ *  access as spelled (backend/cfamily.ts `legalizedIndexBase`), `((u16 *)&gSym)[3]` — rather than
+ *  through the object's own name, element or member? The pointee of such a cast carries none of the
+ *  object's declared qualifiers unless it says so itself. `typeOf` is the rendered C type the
+ *  printer judges a base by. */
+export function castOffDeclaration(e: Expr, typeOf: (x: Expr) => IrType | undefined): boolean {
+  if (e.k === 'field') {
+    // A dot member over an element prints that element's base as spelled.
+    const element = dotBase(e);
+    if (element !== undefined) {
+      return addressCast(element.base, typeOf);
+    }
+    return e.dot === true ? castOffDeclaration(e.base, typeOf) : addressCast(e.base, typeOf);
+  }
+  if (e.k !== 'index') {
+    return false;
+  }
+  if (addressCast(e.base, typeOf)) {
+    return true;
+  }
+  if (e.lead !== undefined && e.lead.length > 0) {
+    return false; // a multidimensional global's subscript prints its base as spelled
+  }
+  return !derefStrideOk(
+    typeOf(e.base) ?? (e.baseElem !== undefined ? T.ptr(e.baseElem) : undefined),
+    e.width,
+    e.signed,
+  );
+}
+
+/** Is there a cast between this address and the object it is taken from: one on it, under its
+ *  arithmetic, or on the access whose element or member it is? */
+const addressCast = (p: Expr, typeOf: (x: Expr) => IrType | undefined): boolean =>
+  p.k === 'cast' ||
+  (p.k === 'bin' && (addressCast(p.l, typeOf) || addressCast(p.r, typeOf))) ||
+  ((p.k === 'index' || p.k === 'field') && castOffDeclaration(p, typeOf));
 
 /** A pointer expression carrying `volatile` on its pointee: a pointer cast takes it in place, and
  *  any other pointer is cast to its own type with it. */

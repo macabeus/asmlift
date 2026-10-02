@@ -25,6 +25,7 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
+import { stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
@@ -154,8 +155,7 @@ function runTower(
   // CALLEES (a function still in assembly has none), which is what makes this transferable.
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, opts.asmData, opts.symbols);
-  verify(fn);
+  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols);
   // Every dump carries the write-order record (ir/print.ts `PrintOptions`): it decides the
   // edge-copy order and the raising folds mutate it, so two dumps compare whole program states.
   const raw = print(fn, { writeOrder: true });
@@ -178,7 +178,7 @@ function runTower(
   // `inferredSymbols`, and the ORDER licence only enables a cast spelling that is byte-correct
   // under any declaration. Measured: with this call moved ABOVE both readings, the three corpus
   // rows the pass fires on keep their fan size, their winner and their score exactly.
-  const walkedNames = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols) : [];
+  const walkedNames = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols, target.compilerBehaviors) : [];
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -220,6 +220,24 @@ function runTower(
     assumedSymbols: assumedShapes(inferredSymbols, sfn, mapSymbols),
     walkedNames,
   };
+}
+
+/** Stage 1 — lift: the target's ISA frontend → L1, verified, with every read of an object
+ *  `symbols` declares volatile stamped `declared` (raise/declared-volatile.ts) before any pass asks
+ *  whether it may be deleted. Every entry path lifts through here, each lift under the map its
+ *  structuring will be handed. */
+export function liftStamped(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  asmData: AsmData | undefined,
+  symbols: SymbolMap | undefined,
+): Fn {
+  const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols);
+  verify(fn);
+  stampDeclaredVolatileUnder(fn, symbols, target.compilerBehaviors);
+  return fn;
 }
 
 // ── the shared raising tower ────────────────────────────────────────────────────────────────

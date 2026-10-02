@@ -10,7 +10,7 @@
 //     "does this function hold a value the variation would home at all" so rank.ts can skip a
 //     variation whose candidate would only duplicate the default. Each mirrors its variation's scope inside `analyze`
 //     and states where it DIVERGES from it, in which direction, and what that costs.
-import { constAddressOf, disjointConstSlots, globalBaseOf, globalCellOf, mayWriteGlobal } from '../ir/alias';
+import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
   Block,
   Fn,
@@ -23,15 +23,8 @@ import {
   predecessors,
   successorsOf,
 } from '../ir/core';
-import {
-  EFFECTFUL_OPS,
-  MEM_BASE_OPS,
-  ORDER_SENSITIVE_OPS,
-  REEVAL_UNSAFE_OPS,
-  isPinnedAccess,
-  opSig,
-} from '../ir/opcodes';
-import { raisedHelper } from '../runtime-helpers';
+import { counted, effectful, orderSensitive, placedAt, reevalUnsafe } from '../ir/discipline';
+import { MEM_BASE_OPS, opSig } from '../ir/opcodes';
 
 export interface UseSite {
   blk: Block;
@@ -56,10 +49,10 @@ function rendersAsAddress(op: Op): boolean {
  *  def block of anything in it is a FOLD ARTIFACT — a rule that names one of these values there
  *  emits it above the guard the source wrote (`p != 0 && *p != 0` becoming `v0 = *p;` above its own
  *  null check). Asked by the def-block placement rule and by the merge-feed-home scope; the
- *  guarded-call rule asks the same set for the opposite answer, since `call` is hoist-unsafe and so
- *  was never folded into the cone in the first place, and `volatileGuardedRead` asks it for the read
- *  whose two placements are not a spelling choice. */
-function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
+ *  guarded-call rule asks the same set for the opposite answer, since a counted op is
+ *  `speculationUnsafe` and so was never folded into the cone in the first place — and
+ *  structure.ts asks it for a read placed only as structuring starts, which a fold saw as plain. */
+export function shortCircuitGuardedValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
   const guarded = new Set<Value>();
   const work: Value[] = [];
   for (const b of fn.blocks) {
@@ -386,8 +379,7 @@ export function hasDerivedReadHome(fn: Fn): boolean {
   }
   /** any op that writes memory strictly between two ops of one block — the rule's `memWriteBetween`
    *  over the straight line the same-block requirement already pins */
-  const writeBetween = (b: Block, lo: number, hi: number): boolean =>
-    b.ops.slice(lo + 1, hi).some((x) => EFFECTFUL_OPS.has(x.opcode));
+  const writeBetween = (b: Block, lo: number, hi: number): boolean => b.ops.slice(lo + 1, hi).some(effectful);
   const standsOnRead = (op0: Op): boolean => {
     const reads = readCone(op0, defOf);
     if (reads === null) {
@@ -523,11 +515,11 @@ function naturalLoops(
  *      re-derive the byte cast (`v0 = (u8 *)*a1 + 6;` then `v0 = (u8 *)v0 + 2;`). Address-shaped
  *      bases belong to the cast-aware machinery in l3/basecse.ts, scopebase.ts and nearbase.ts;
  *      this variation does not offer a second spelling of them.
- *    • an op whose answer depends on WHERE it runs, or that can TRAP — `REEVAL_UNSAFE_OPS`, read
+ *    • an op whose answer depends on WHERE it runs, or that can TRAP — `reevalUnsafe`, read
  *      from the registry rather than re-listed. Both halves carry: for a read WHERE it happens is
  *      the read rules' question, and a homed divide becomes an unconditional statement at a def
  *      block raise/shortcircuit.ts may have made, on paths C's own `&&` would have re-guarded —
- *      the KNOWN GAP `ir/opcodes.ts` books against `HOIST_UNSAFE_OPS`.
+ *      the gap ir/discipline.ts books against `speculationUnsafe`.
  *    • an `undef` — the variation's premise is a value the source COMPUTED once above the branch, and
  *      an uninitialised register was never computed at all: homed, it spells `v0 = uninit_r5;`,
  *      a copy of a value nothing wrote, which no asm can have.
@@ -631,7 +623,7 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
         continue;
       }
       const d = defOf.get(x);
-      if (d && !ORDER_SENSITIVE_OPS.has(d.opcode)) {
+      if (d && !orderSensitive(d)) {
         stack.push(...d.operands);
       }
     }
@@ -645,14 +637,14 @@ function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, O
   const coneHoldsReevalUnsafe = (v: Value): boolean =>
     [...coneOf(v)].some((x) => {
       const d = defOf.get(x);
-      return d !== undefined && REEVAL_UNSAFE_OPS.has(d.opcode);
+      return d !== undefined && reevalUnsafe(d);
     });
   /** may this op's result be materialized at its def — and is this variation the one to do it? */
   const eligible = (op: Op): boolean => {
     const v = op.results[0];
     return (
       v !== undefined &&
-      !REEVAL_UNSAFE_OPS.has(op.opcode) &&
+      !reevalUnsafe(op) &&
       op.opcode !== 'undef' &&
       !(scGuarded.has(v) && coneHoldsReevalUnsafe(v)) &&
       !rendersAsAddress(op) &&
@@ -747,10 +739,6 @@ export interface StructureAnalysis {
   /** may an op `isWrite` accepts execute between `def` and a statement at `render`, on any
    *  def-avoiding path — the fold-ordering gate (see `makeMemWriteBetween`) */
   memWriteBetween: (def: Op, render: { blk: Block; idx: number }, isWrite: (x: Op) => boolean) => boolean;
-  /** the name (or, for a device read the lift pinned, the address) of a VOLATILE object read inside
-   *  a `&&`/`||`'s guarded operand cone, if any — a value in that cone no placement here can answer
-   *  for, reported for the caller to decline on */
-  volatileGuardedRead: string | null;
 }
 
 export interface AnalyzeOptions {
@@ -785,20 +773,6 @@ export interface AnalyzeOptions {
    *  materializes first). That is a pre-emption, not a conflict: a per-arm source read compiles to
    *  a per-arm load on that compiler, so the sunk spelling is one it did not emit from this asm. */
   rereadGlobals?: boolean;
-  /** "does the project declare this CELL volatile?" — a read of a volatile object may NOT be
-   *  duplicated or moved, so the variation above refuses on one. Answers false for a symbol the map
-   *  does not carry (and for no map at all), which is the same posture the multi-render rule has
-   *  always had: without a declaration nothing here can know, and the differ referees the extra
-   *  load. Where the map DOES know, the variation is silent about it rather than wrong.
-   *
-   *  The BYTE is what makes it a cell question: the `vu16 field;` idiom qualifies one member of a
-   *  plainly-declared struct (pokeemerald's `gMain` declares 23 members and qualifies one), so the
-   *  object's own name cannot answer for the member an access names. `null` is an access whose
-   *  offset is not pinned — a runtime index reaches every member — and any volatile one answers it.
-   *
-   *  The second consumer is not silent: `volatileGuardedRead` declines the whole function on a
-   *  read this answers true for, so a declaration a project adds can cost it that function. */
-  volatileGlobal?: (name: string, byte: number | null) => boolean;
   /** The in-place-join variation (rank.ts `/inplace`). A load whose result is a `cond_br` successor
    *  ARG feeds a merge: rendered inline it has no name, so the merge param mints a fresh variable
    *  and BOTH arms must assign it. Materialized, the naming walk can home the merge in the load's
@@ -1197,7 +1171,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     defs,
     dom,
     rereadGlobals = false,
-    volatileGlobal,
     materializeJoinFeeds = false,
     homeSharedAddresses = false,
     homeLoopExprs = false,
@@ -1358,7 +1331,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         hit(x, sites) ||
         sites.some(
           (u) =>
-            !EFFECTFUL_OPS.has(u.op.opcode) &&
+            !effectful(u.op) &&
             u.op.successors.length === 0 &&
             !materialize.has(u.op) &&
             u.op.results.length > 0 &&
@@ -1614,7 +1587,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       const crossesAt = (home: Op): boolean =>
         home !== op &&
         opBlock.get(home) === L.latch &&
-        between(L.latch.ops.indexOf(home)).some((x) => ORDER_SENSITIVE_OPS.has(x.opcode) || namedHelper(x));
+        between(L.latch.ops.indexOf(home)).some((x) => orderSensitive(x) || namedHelper(x));
       const exitArg = L.term.successors.some(
         (sc) =>
           !L.body.has(sc.block) &&
@@ -1741,7 +1714,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  And each read's value must go NOWHERE BUT the cone: exactly one use site. Homing resolves a
    *  render position for a read that had none, so a SECOND use resolves a second one, and the
    *  multi-render load rule then inlines the read at BOTH — two accesses where the asm has one
-   *  `ldrh`, which for a volatile cell is precisely the duplication `volatileGlobal` refuses. Two
+   *  `ldrh`, which for a volatile cell is precisely the duplication the `declared` placement refuses. Two
    *  homed values over one read is the same shape from the other side (each is the other's second
    *  use), so one test covers both. This is what makes "renders once, inside the home" a property
    *  rather than an aspiration: without it the variation silently doubles a hardware read.
@@ -1761,7 +1734,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     const at = { blk, idx: opIndex.get(op0)! };
     const coneReads = new Set(reads);
     const bars = (x: Op): boolean =>
-      EFFECTFUL_OPS.has(x.opcode) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
+      effectful(x) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
     return (
       reads.length > 0 &&
       reads.every(
@@ -1779,17 +1752,20 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *
    *  raise/shortcircuit.ts recovers a connective by hoisting the guarded arm's whole pure body,
    *  memory reads included, into the block ABOVE the branch (its value form and its control-flow
-   *  form both splice that body into the head). ir/opcodes.ts states the safety argument as the
-   *  reason a read is deliberately absent from HOIST_UNSAFE_OPS: the structurer inlines it back
+   *  form both splice that body into the head). ir/discipline.ts states the safety argument as the
+   *  reason a plain read is not `speculationUnsafe`: the structurer inlines it back
    *  into the `&&`/`||` right-hand side, where C's own short circuit re-guards it. So for a READ
    *  the def block is a FOLD ARTIFACT rather than the block the asm read in, and the def-block
    *  placement rule stands down. Naming it also breaks the re-guard: `p != 0 && *p != 0` would
-   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches;
-   *  `volatileGuardedRead` is the read it does not cover.
+   *  emit `v0 = *p;` above its own null check. That argument is about which SPELLING matches, and
+   *  a plain read is the only one it covers.
    *
-   *  A CALL is in HOIST_UNSAFE_OPS, so no fold ever lifted one out of the arm it guards: a call
-   *  that reached this cone ran ABOVE the branch, unconditionally, and the guarded-call rule
-   *  materializes it there rather than letting C's short circuit skip it. The same holds of an op
+   *  A COUNTED op — a call, a qualified read — is `speculationUnsafe`, so no fold ever lifted one
+   *  out of the arm it guards: one that reached this cone ran ABOVE the branch, unconditionally, and
+   *  the guarded-call rule materializes it there rather than letting C's short circuit skip it.
+   *  agbcc emits `int t = gVolReg; if (a > 0 && t != 0)` with the `ldrh` above the `cmp`, and
+   *  `if (a > 0 && gVolReg != 0)` with it past the `ble`, where the fold leaves it in its arm and
+   *  no connective is built. The same holds of an op
    *  the asm reached by calling a runtime helper and the fold did not hoist — one it hoists loses
    *  the stamp — and the helper clause names it by the same argument.
    *
@@ -1797,45 +1773,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
    *  is reached through the outer's cone, operand[0] included, which is what C does with it. */
   const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
-  /** A read of an object the map declares VOLATILE, inside that guarded cone. The fold erased which
-   *  placement the asm had, and here both are observable: a read it LIFTED belongs under the `&&`,
-   *  one already above the branch belongs ahead of the test. agbcc emits the two as two objects
-   *  (`int t = gVolReg; if (a > 0 && t != 0)` puts the `ldr` above the `cmp`; `if (a > 0 && gVolReg
-   *  != 0)` puts it below the `ble`), so for an ordinary cell the choice is a matching question and
-   *  for this one it is a missing hardware access against a duplicated one. Recording its own motion
-   *  is the fold's to do, so this reports and the caller declines — which costs no row: the shape is
-   *  0 of the corpus's 1,203, swept under both map modes.
-   *
-   *  Keyed on the OBJECT the base reaches rather than the cell, because volatility is declared of
-   *  the object and a subscript reaches it while naming no cell — an `aload`, or a `load` through
-   *  walked arithmetic where the map carries no array shape. Where the offset IS pinned the question
-   *  is asked of that byte, so a plain member beside a `vu16` one keeps its connective. A base that
-   *  reaches no name — a pointer parameter, a raw MMIO address — is unknown and does not refuse, the
-   *  posture no map at all has, unless the lift marked the read `volatile` (a device register the
-   *  frame audit pinned), which is the same observable access with no name to report but its address. */
-  const volatileGuardedRead = ((): string | null => {
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        const v = op.results[0];
-        if ((op.opcode !== 'load' && op.opcode !== 'aload') || v === undefined || !shortCircuitGuarded.has(v)) {
-          continue;
-        }
-        if (isPinnedAccess(op)) {
-          const at = defs ? constAddressOf(defs, op.operands[0], (op.attrs.off as number | undefined) ?? 0) : null;
-          return at === null || op.opcode === 'aload' ? 'a device register' : `0x${at.toString(16)}`;
-        }
-        if (!defs || !volatileGlobal) {
-          continue;
-        }
-        const base = globalBaseOf(defs, op.operands[0]);
-        const cell = op.opcode === 'load' ? globalCellOf(defs, op.operands[0], op.attrs.off as number) : null;
-        if (base !== null && volatileGlobal(base, cell === null ? null : cell.byte)) {
-          return base;
-        }
-      }
-    }
-    return null;
-  })();
   /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
    *  i.e. is the value nothing but a block parameter's incoming copy?
    *
@@ -1871,8 +1808,8 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
   /** the divides the pre-update exit rule below named (`rebuiltPast`) */
   const exitDivides = new Set<Op>();
-  /** an op the asm reached by CALLING a runtime helper (runtime-helpers.ts `raisedHelper`) */
-  const isHelper = (op: Op): boolean => raisedHelper(op) !== null;
+  /** an op the asm reached by CALLING a runtime helper */
+  const isHelper = (op: Op): boolean => placedAt(op) === 'helper';
   /** one the helper clause below named: a statement sequenced as a named call is */
   const namedHelper = (op: Op): boolean => materialize.has(op) && isHelper(op);
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
@@ -1968,7 +1905,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               shortCircuitGuarded.has(pr) ||
               ridesEdge(op) ||
               at.some((p) => p.blk !== b) ||
-              at.some((p) => memWriteBetween(op, p, (x) => EFFECTFUL_OPS.has(x.opcode) || namedHelper(x)))
+              at.some((p) => memWriteBetween(op, p, (x) => effectful(x) || namedHelper(x)))
             ) {
               materialize.add(op);
               continue;
@@ -2079,16 +2016,19 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if (!r || !useSitesOf.has(r)) {
           continue;
         } // dead call → exprstmt (unchanged)
+        // A call, or a read whose spelling is qualified (a device read the lift pinned, a read of an
+        // object the map declares volatile), EXECUTES at each render, where a plain duplicate read is
+        // one agbcc CSEs away. It takes the two-site, edge, guarded-operand and one-position rules
+        // below. And it stays in order against every other qualified access, which `isBarrier` says.
+        const once = counted(op);
         // Under the value-home variation: which named global cell this op reads, if any. A constant-
         // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
-        // everything. Null ⇒ every write bars, exactly as before.
-        const pinned = isPinnedAccess(op);
+        // everything. Null ⇒ every write bars.
         const cell =
-          rereadGlobals && defs && op.opcode === 'load' && !pinned
+          rereadGlobals && defs && op.opcode === 'load' && !once
             ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
             : null;
-        const barsThisRead =
-          cell && defs && !volatileGlobal?.(cell.name, cell.byte) ? mayWriteGlobal(defs, cell.name) : null;
+        const barsThisRead = cell && defs ? mayWriteGlobal(defs, cell.name) : null;
         if (materializeJoinFeeds && op.opcode === 'load' && condBrArgFed.has(r)) {
           materialize.add(op);
           continue;
@@ -2096,12 +2036,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         const sites = useSitesOf.get(r)!;
         const consumers = [...new Set(sites.map((s) => s.op))];
         const isCall = op.opcode === 'call';
-        // A device read the lift marked `volatile` executes once too: each spelling of it is a read
-        // the recompile makes, where a plain duplicate is one agbcc CSEs away. It takes the call's
-        // two-site, edge and one-position rules below; in a `&&`/`||` cone `volatileGuardedRead`
-        // declines it instead. And it stays in order against every other device access, which
-        // `isBarrier` says.
-        const once = isCall || pinned;
         // A call must EXECUTE once — any second operand slot duplicates it → named temp.
         if (once && sites.length > 1) {
           materialize.add(op);
@@ -2127,15 +2061,16 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         }
         // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
         // give it away. Two independent facts. A def DOMINATES its uses (ir/verify.ts), so a call
-        // the connective reads ran on every path that evaluates it, while the inlined C runs it on
-        // fewer and takes whatever the callee wrote with it — agbcc compiles `do { r = cb(p); }
-        // while (i++ <= n && r != 0);` to a `bl cb` ahead of both compares. And the DEF is where to
-        // put it back because `call` is hoist-unsafe, so no fold lifted one into this cone.
-        // `opaque`, the other hoist-unsafe op with a result, needs no placement — neither position
-        // spells compilable C — and a bottom test holding one still declines in `testSkipsAnEffect`,
-        // which is that guard's remaining population. What this clause reaches is the row that pins
-        // it, 1 of the corpus's 1,203, swept in both map modes.
-        if (isCall && shortCircuitGuarded.has(r)) {
+        // or a qualified read the connective reads ran on every path that evaluates it, while the
+        // inlined C runs it on fewer — agbcc compiles `do { r = cb(p); } while (i++ <= n && r !=
+        // 0);` to a `bl cb` ahead of both compares. And the DEF is where to put it back because a
+        // counted op is `speculationUnsafe`, so no fold lifted one into this cone
+        // (raise/shortcircuit.ts refuses an arm that holds one; structure.ts declines on a read
+        // placed after the folds ran). `opaque`, the other hoist-unsafe
+        // op with a result, needs no placement — neither position spells compilable C — and a
+        // bottom test holding one still declines in `testSkipsAnEffect`, which is that guard's
+        // remaining population.
+        if (once && shortCircuitGuarded.has(r)) {
           materialize.add(op);
           continue;
         }
@@ -2217,7 +2152,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         // made, and a value read before it and used after it was read once and kept across it
         // (`v = gB; t = v / n; … q[1] = v;` is one `ldr` ahead of the `bl __divsi3`).
         if (poss.length > 1) {
-          const writes = barsThisRead ?? ((x: Op) => EFFECTFUL_OPS.has(x.opcode));
+          const writes = barsThisRead ?? effectful;
           const isWrite = (x: Op): boolean => writes(x) || namedHelper(x);
           if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
             materialize.add(op);
@@ -2300,7 +2235,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           if (x.opcode === 'store') {
             // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load
             // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars — and so does every
-            // store to a pinned read: a device register answers by when it is read, not only by
+            // store to a qualified read: a device register answers by when it is read, not only by
             // which bytes were last written (REG_IF read after the REG_IE write it preceded).
             if (!once && op.opcode === 'load' && disjointConstSlots(op, x)) {
               return false;
@@ -2319,10 +2254,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
               !onlyFeedsCall(x)
             );
           }
-          // Two pinned reads are two device accesses in an order. Rendered in one expression, the
+          // Two qualified reads are two accesses in an order. Rendered in one expression, the
           // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
-          // pinned read spelled as a bare statement because nothing uses it is an access too.
-          if (pinned && (x.opcode === 'load' || x.opcode === 'aload') && isPinnedAccess(x)) {
+          // qualified read spelled as a bare statement because nothing uses it is an access too.
+          if (once && !isCall && (x.opcode === 'load' || x.opcode === 'aload') && counted(x)) {
             return true;
           }
           if (!isCall) {
@@ -2335,9 +2270,10 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
           }
           return false;
         };
-        // A CROSS-BLOCK call's execution would become path-dependent — always materialize. Within
-        // its own block a call is judged like everything else, by the barrier scan below.
-        if (isCall && pos.blk !== b) {
+        // A CROSS-BLOCK call or qualified read would run on the render block's paths instead of
+        // its own — always materialize. Within its own block it is judged like everything else, by the
+        // barrier scan below.
+        if (once && pos.blk !== b) {
           materialize.add(op);
           continue;
         }
@@ -2380,6 +2316,5 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     reachFrom,
     emitPos,
     memWriteBetween,
-    volatileGuardedRead,
   };
 }

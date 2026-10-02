@@ -109,7 +109,7 @@ describe('an unbounded device read keeps the local area as one object', () => {
       { off: 0, width: 2 },
       { off: 4, width: 4 },
     ]);
-    expect(run(blk, [], { from: 0, to: 8 })).toBeUndefined();
+    expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
     const object = blk.ops[0];
     expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8, volatile: true });
     expect(blk.ops.filter((op) => op.opcode === 'store' && op.operands[0] === object.results[0])).toHaveLength(2);

@@ -268,6 +268,27 @@ export function isBitfieldField(f: SymbolStructField): boolean {
   return f.bitWidth !== undefined;
 }
 
+/** Does this declaration make an access at `byte` of the object volatile? The object's own
+ *  qualifier answers for every byte. A qualified MEMBER answers only for the bytes it spans — the
+ *  `vu16 field;` idiom puts one in a struct whose other members are ordinary cells — and one of
+ *  unknown extent spans whatever follows it. `null` is an access whose offset is not pinned, which
+ *  may reach any member, so only a layout whose every member is qualified answers it. A member this
+ *  module cannot read (`SymbolMap` is caller-supplied) qualifies nothing. */
+export function declaresVolatile(info: SymbolInfo | undefined, byte: number | null): boolean {
+  if (info?.volatile === true) {
+    return true;
+  }
+  const layout: unknown = info?.layout;
+  if (!Array.isArray(layout) || layout.length === 0) {
+    return false;
+  }
+  const qualified = (f: unknown): f is SymbolStructField => wellFormedField(f) && f.volatile === true;
+  if (byte === null) {
+    return layout.every(qualified);
+  }
+  return layout.some((f) => qualified(f) && byte >= f.offset && (f.size === null || byte < f.offset + f.size));
+}
+
 /** Does the map declare a bitfield member anywhere, in a symbol's own layout or its pointee's? */
 export function declaresBitfields(symbols: SymbolMap): boolean {
   return [...symbols.values()].some((infos) =>
@@ -635,8 +656,9 @@ function factsOf(info: SymbolInfo): string {
   );
 }
 
-/** NAME-keyed view over every symbol in the map — what the structurer consumes (it sees gaddr
- *  symbol names, not addresses). Aliases at one address each appear under their own name.
+/** NAME-keyed view over every symbol in the map, or over the names in `only` — what the structurer
+ *  consumes (it sees gaddr symbol names, not addresses). Aliases at one address each appear under
+ *  their own name.
  *
  *  One name can sit at SEVERAL addresses in a real project (file-static `sMenu` in two
  *  translation units, a `.symtab` full of same-named locals). Where those entries agree on their
@@ -649,11 +671,14 @@ function factsOf(info: SymbolInfo): string {
  *  spelling question into a compile failure); only the shape facts, which are what could be wrong,
  *  are withheld — the honest cast spellings take over. `kind` is kept: it never disagrees in the
  *  vendored maps, and it is settled address-side by `lookupSymbol` before a name is ever used. */
-export function symbolsByName(map: SymbolMap): Map<string, SymbolInfo> {
+export function symbolsByName(map: SymbolMap, only?: ReadonlySet<string>): Map<string, SymbolInfo> {
   const byName = new Map<string, SymbolInfo>();
   const conflicted = new Set<string>();
   for (const infos of map.values()) {
     for (const info of infos) {
+      if (only !== undefined && !only.has(info.name)) {
+        continue;
+      }
       const prev = byName.get(info.name);
       if (prev === undefined) {
         byName.set(info.name, info);

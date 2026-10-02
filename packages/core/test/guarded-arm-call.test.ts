@@ -5,7 +5,7 @@
 // `verify()` requires a def to dominate its uses, so a value the connective reads was produced on
 // every path that evaluates the connective, while C's own short circuit skips the guarded operand —
 // fewer calls, and whatever the callee wrote goes with them. That materializing the call at its DEF
-// is the fix needs the second: `call` is in `HOIST_UNSAFE_OPS`, so `raise/shortcircuit.ts` never
+// is the fix needs the second: a `call` is `speculationUnsafe`, so `raise/shortcircuit.ts` never
 // lifted one out of the arm it guards, and the def block is the block the asm called in.
 //
 // No contract catches it. `assertEffectsPreserved` (contracts.ts) refuses a call the emitted C

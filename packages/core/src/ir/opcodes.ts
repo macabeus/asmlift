@@ -3,7 +3,6 @@
 // A closed table of signatures. The verifier and the parser are driven by it, so a mnemonic
 // typo or an operand-count mismatch fails at its source instead of surfacing as wrong output
 // several stages later.
-import type { Op } from './core';
 
 export interface OpSig {
   /** exact operand count, or "variadic" (e.g. ret takes 0 or 1). */
@@ -14,8 +13,8 @@ export interface OpSig {
   successors?: number | 'variadic';
   requiredAttrs?: readonly string[];
   /** observable side effect (memory write / call): never deleted when dead, never hoisted into
-   *  an unconditional position. THE one effect vocabulary — DCE (pattern/engine.ts) and the
-   *  short-circuit hoist guard (raise/shortcircuit.ts) both derive from this flag. */
+   *  an unconditional position. THE one effect vocabulary — every question ir/discipline.ts asks of an
+   *  op derives from this flag and the two below. */
   effects?: boolean;
   /** reads memory. Deletable when dead — nothing observes a load nobody reads — but NOT movable:
    *  a load answers whichever stores ran before it, so crossing one changes the value it yields.
@@ -279,17 +278,16 @@ export function opSig(opcode: string): OpSig | undefined {
 
 /** The comparison whose result is the logical NEGATION of each `icmp_*` — `!(a < b)` is `a >= b`.
  *
- *  Unlike EFFECTFUL_OPS/HOIST_UNSAFE_OPS below, this is AUTHORED data seated beside the registry,
- *  not a view derived from it: nothing in `OPCODES` states which comparison opposes which. What is
+ *  AUTHORED data seated beside the registry, not a view derived from it: nothing in `OPCODES`
+ *  states which comparison opposes which. What is
  *  derived is its SYMMETRY — the five involutive pairs are expanded both ways, so `neg(neg(c)) === c`
  *  holds by construction (a hand-written map is one typo away from breaking it, and the symptom is a
  *  plainly inverted condition in the emitted C). Completeness against the icmp family is the part
  *  construction cannot give, so a test asserts it (test/pattern.test.ts) — an eleventh comparison
  *  added to `OPCODES` would otherwise degrade its consumers several different ways.
  *
- *  It lives here for the reason HOIST_UNSAFE_OPS does: every consumer that has to say "the opposite
- *  of this compare" reads THIS one, so they
- *  cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
+ *  It lives here so that every consumer that has to say "the opposite of this compare" reads THIS
+ *  one, and they cannot drift apart the way inline copies did. Two adjacent facts worth knowing: raise/
  *  shortcircuit.ts derives its `BOOL_OPS` from these keys (asserting negatable-icmp == boolean-op,
  *  true today), and l3/ast.ts `NEGATE_REL` is the SAME relation over the neutral L3 operator
  *  vocabulary — deliberately separate, because signedness lives in the operand types there, so the
@@ -308,116 +306,16 @@ export const NEGATED_ICMP: Readonly<Record<string, Opcode>> = Object.fromEntries
   ]),
 );
 
-/** Ops with an observable side effect: the flag on the signature, derived rather than re-listed.
- *  `isDceSafe` asks the same question of the FLAG through `opSig` rather than of this set, so the
- *  two cannot disagree. The SET's own consumers are `HOIST_UNSAFE_OPS` below, structure.ts's
- *  block-purity tests (may this block be folded into a loop header, is this exit owned),
- *  analysis.ts's memory-write barrier, divpow2's bias block (which is DELETED rather than moved),
- *  and the idiom layer's de-sequencing guard (pattern/engine.ts). Derived rather than re-listed
- *  because three of those consumers each carried a hand-written copy of this membership, which is
- *  how the models drifted apart. */
-export const EFFECTFUL_OPS: ReadonlySet<string> = new Set(
-  (Object.keys(OPCODES) as Opcode[]).filter((k) => (OPCODES[k] as OpSig).effects),
-);
-
-/** Ops that may not be SPECULATED — run on a path that did not run them before. Identical to
- *  `EFFECTFUL_OPS`, and kept as its own name because its call sites ask the speculation question
- *  rather than the deletion one.
- *
- *  A memory read is deliberately absent, and that is the one entry worth arguing: its only consumer
- *  is raise/shortcircuit.ts, which hoists an arm's body into the block above, and the structurer
- *  inlines an unnamed value back into the `&&`/`||` right-hand side, where C's own short-circuit
- *  re-guards it. Adding the two reads
- *  here cost three byte-matches (kleod:UpdateHUDCounterDisplay, retired 2026-09-13 with its source,
- *  plus synthetic:breakloop and synthetic:strcmp1), so the argument was load-bearing rather than
- *  merely plausible. Not re-measured since the kleod row's retirement.
- *
- *  AND IT COVERS THE VALUE, NOT THE ACCESS, which is the second class where the re-guard argument
- *  does not carry: a read of an object the project's map declares VOLATILE. Re-guarding it at the
- *  new point moves an observable access rather than a value, so the two placements are a missing
- *  hardware access against a duplicated one and the fold erased which the asm had. The reads stay
- *  OUT of this set — the exemption is worth the three byte-matches above — and the structurer
- *  declines the function on one instead (structure/analysis.ts, `volatileGuardedRead`).
- *
- *  KNOWN GAP: the trapping divides are absent too, and there the re-guard argument does NOT carry
- *  — a hoisted `sdiv` that the structurer NAMES becomes an unconditional statement. Left as it is
- *  because closing it is a separate change with its own measurement; `REEVAL_UNSAFE_OPS` does
- *  refuse them, so the pre-update sink is not exposed to it. A divide the asm reached through a
- *  runtime helper, hoisted, drops the stamp that would have the structurer name it where it lands
- *  (runtime-helpers.ts `forgetHelperPlacement`), so it stays in the connective too.
- *
- *  AND THE EXEMPTION IS NOT TRANSFERABLE, which is worth saying beside it: a second consumer once
- *  read this set to answer "would gcc have SPECULATED this arm above a compare", where nothing
- *  re-guards anything, and admitted single-load arms `gcc/jump.c:483`'s `! may_trap_p` refuses.
- *  Pointing that consumer back at this set costs `synthetic:mergeldcast:agbcc` its byte-match
- *  (MATCH -> diff:6), measured. That consumer is `raise/narrowlocal.ts` and it reads
- *  `REEVAL_UNSAFE_OPS` instead. Reach for this set only when the argument above — a C-level
- *  re-guard at the new point — actually holds at your call site. */
-export const HOIST_UNSAFE_OPS: ReadonlySet<string> = EFFECTFUL_OPS;
-
 /** The ops whose `operands[0]` is a memory-access BASE: `load base`, `store base, value`,
  *  `aload base, index`, `astore base, index, value` (the operand roles are in the registry above).
  *  Authored rather than derived — no registry field records the operand ROLE, and the only other
  *  memory-touching opcode is `call`, whose variadic operands are arguments and not a base.
  *
- *  Two consumers ask two different questions of it and both need the same answer, which is why it
- *  is here and not next to either: `structure/analysis.ts` uses it for the address-home variation's slot
- *  model, and `raise/const.ts` to recognise a folded literal that IS an address. */
+ *  Three consumers ask three different questions of it and all need the same answer, which is why
+ *  it is here and not next to any: `structure/analysis.ts` uses it for the address-home variation's
+ *  slot model, `raise/const.ts` to recognise a folded literal that IS an address, and
+ *  `ir/discipline.ts` to tell a device access's `volatile` from a frame object's. */
 export const MEM_BASE_OPS: ReadonlySet<string> = new Set(['load', 'store', 'aload', 'astore']);
-
-/** A memory access the lift marked `volatile` — a device register access the recompile must make
- *  exactly where, and exactly as often as, the machine did (frontend/frame-objects.ts). The one
- *  predicate every reader of the mark asks. */
-export const isPinnedAccess = (op: Op): boolean => MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true;
-
-/** Ops whose answer depends on WHERE they run: an effect (its order against other effects is
- *  observable) or a memory read (it answers whichever stores ran before it). The question a pass
- *  asks before moving a computation to another point on the SAME path. `SPELLED_WHEN_DEAD_OPS`
- *  below asks a DIFFERENT question and derives, today, the same set. */
-export const ORDER_SENSITIVE_OPS: ReadonlySet<string> = new Set(
-  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
-    const sig = OPCODES[k] as OpSig;
-    return sig.effects || sig.reads;
-  }),
-);
-
-/** Ops the structurer must still SPELL when nothing consumes their result — an effect, or a memory
- *  READ. Consumer: structure.ts's `sideEffects` walk.
- *
- *  The read half is the entry worth arguing, because `reads` documents the OPPOSITE about C — a
- *  load nobody reads is deletable, nothing observes it. That is the C claim. The COMPILER claim
- *  points the other way: an optimizing compiler deletes every dead read it is ALLOWED to delete, so
- *  one still in the target is evidence the source's access was `volatile`. Membership here only
- *  says the structurer may not drop the op silently; whether a `volatile` can actually reach the
- *  access is a second, ADDRESS-level question the call site asks separately
- *  (structure.ts `volatileQualifiable`), and a read it answers no to is dropped as before.
- *
- *  DERIVED FROM THE REGISTRY, not aliased to `ORDER_SENSITIVE_OPS`, even though the two are
- *  extensionally identical today and `HOIST_UNSAFE_OPS` above does alias `EFFECTFUL_OPS`. An alias
- *  makes two DIFFERENT questions incapable of ever differing, so the day one of them acquires an
- *  opcode the other should not have, the edit lands on both silently. The identity is pinned by a
- *  test instead (test/pattern.test.ts), where a future divergence surfaces as a decision to make
- *  rather than a coupling nobody sees. */
-export const SPELLED_WHEN_DEAD_OPS: ReadonlySet<string> = new Set(
-  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
-    const sig = OPCODES[k] as OpSig;
-    return sig.effects || sig.reads;
-  }),
-);
-
-/** Ops that may not be RE-EVALUATED at another program point — order-sensitive, or trapping. The
- *  trap half is what separates this from `ORDER_SENSITIVE_OPS`: it only matters when the new point
- *  can be reached on a path the old one was not, so a consumer that merely re-orders on one path
- *  wants the smaller set. Both are needed because the two consumers differ on exactly the divides:
- *  a collapsed switch re-renders a test block's ops AT THEIR USES, and every use is dominated by
- *  the def, so it evaluates them on a SUBSET of the original paths — a narrowing, never a
- *  speculation. */
-export const REEVAL_UNSAFE_OPS: ReadonlySet<string> = new Set(
-  (Object.keys(OPCODES) as Opcode[]).filter((k) => {
-    const sig = OPCODES[k] as OpSig;
-    return sig.effects || sig.reads || sig.traps;
-  }),
-);
 
 /** Ops that MATERIALIZE a value out of nothing: no operands, no state read, no effect, no trap, no
  *  control flow — so where one sits in a block says nothing about what ran before it. Derived, so a
@@ -431,10 +329,3 @@ export const MATERIALIZING_OPS: ReadonlySet<string> = new Set(
     return sig.operands === 0 && !sig.terminator && !sig.effects && !sig.reads && !sig.traps;
   }),
 );
-
-/** May a dead result of this opcode be deleted? Registered, no observable effects, not control
- *  flow. `opaque` is excluded via its `effects` flag — see the note on its signature. */
-export function isDceSafe(opcode: string): boolean {
-  const sig = opSig(opcode);
-  return !!sig && !sig.effects && !sig.terminator;
-}

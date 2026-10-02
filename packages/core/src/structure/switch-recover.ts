@@ -5,7 +5,7 @@
 // late-bound callbacks into the emission phase, so case bodies reuse the ordinary structuring
 // machinery (loops/ifs inside cases, the onStack guard).
 import { Block, Fn, Op, Value, forwardingTarget, isBodyless, successorsOf } from '../ir/core';
-import { ORDER_SENSITIVE_OPS } from '../ir/opcodes';
+import { orderSensitive } from '../ir/discipline';
 import { Expr, Stmt, SwitchCase } from '../l3/ast';
 
 /** Which side of a relational test a compiler's dispatch lands a pinned case body on. */
@@ -502,7 +502,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   //
   // PRE4 (purity) is the second. A collapsed test block's ops re-render at whichever use inlines
   // them, at a point the switch decides — so the question is motion, not deletion, and
-  // `ORDER_SENSITIVE_OPS` is the set that asks it. NOT the trapping divides: a use is dominated by
+  // `orderSensitive` is the question that asks it. NOT the trapping divides: a use is dominated by
   // its def, so the re-rendered op runs on a subset of the paths it already ran on — nothing is
   // speculated. `emitsOwnStatement` covers what motion cannot save: a statement belonging to the
   // block rather than to a use. The root is exempt from all of it — its ops are already emitted as
@@ -511,8 +511,7 @@ export function makeSwitchRecovery(deps: SwitchRecoverDeps): SwitchRecovery {
   // A block that tests the scrutinee and is NOT collapsible is still dispatch, so the walk must
   // read it as dispatch and decline, never re-read it as a case body — that would spell an arm
   // whose guard the dispatch has already decided.
-  const collapsible = (blk: Block): boolean =>
-    !blk.ops.some((op) => ORDER_SENSITIVE_OPS.has(op.opcode)) && !emitsOwnStatement(blk);
+  const collapsible = (blk: Block): boolean => !blk.ops.some(orderSensitive) && !emitsOwnStatement(blk);
   const testInfo = (blk: Block): TestInfo | null => {
     const term = blk.ops[blk.ops.length - 1];
     if (term.opcode !== 'cond_br') {

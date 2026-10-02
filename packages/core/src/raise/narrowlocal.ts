@@ -137,7 +137,8 @@
 // admits), and `runPreRecovery` reads the shape ahead of the pass that manufactures it —
 // `mergeShapes`.
 import { type Block, type Fn, type Op, type Value, defOpMap, predecessors, replaceAllUsesWith } from '../ir/core';
-import { CAST_WIDTHS, REEVAL_UNSAFE_OPS } from '../ir/opcodes';
+import { reevalUnsafe } from '../ir/discipline';
+import { CAST_WIDTHS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
 
@@ -356,8 +357,8 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
  *    • a MEMORY READ is one op and is NOT one speculatable SET. `gcc/rtlanal.c:1770-1771` sends a
  *      MEM to `rtx_addr_can_trap_p` and `:144-147` says an address held in a plain pseudo CAN trap,
  *      so `jump.c` never hoists a load and the diamond survives under BOTH spellings, carrying no
- *      information. `REEVAL_UNSAFE_OPS` answers this (effects, reads, or traps — `may_trap_p`
- *      refuses the trapping divides too, at `rtlanal.c:1774-1784`); `HOIST_UNSAFE_OPS` does NOT,
+ *      information. `reevalUnsafe` answers this (effects, reads, or traps — `may_trap_p`
+ *      refuses the trapping divides too, at `rtlanal.c:1774-1784`); `speculationUnsafe` does NOT,
  *      because it omits reads for `raise/shortcircuit.ts`, whose arm C's own `&&` re-guards, and
  *      that exemption does not transfer to speculation above a compare.
  *    • a CONSTANT is not free. `v = a + 0x12345` is a literal-pool `ldr` plus the `add` — two
@@ -388,9 +389,7 @@ function mergeArms(preds: Map<Block, Block[]>, fn: Fn, blk: Block): [Block, Bloc
  *  clause in that table is `sound: false`), so the shared conservative predicate is the right one
  *  until a row asks for the cost model neither pass has. */
 export function armIsOneSet(b: Block): boolean {
-  return (
-    !b.ops.some((op) => REEVAL_UNSAFE_OPS.has(op.opcode)) && b.ops.filter((op) => op.results.length > 0).length === 1
-  );
+  return !b.ops.some(reevalUnsafe) && b.ops.filter((op) => op.results.length > 0).length === 1;
 }
 
 /** The join shape of every block, read ONCE off the IR it is handed.
