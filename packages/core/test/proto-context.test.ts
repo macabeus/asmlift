@@ -510,6 +510,11 @@ describe('prototypes from a declaration context', () => {
     );
     expect(c.makeblob).toEqual({ returnLayout: { kind: 'struct' }, params: ['const void *'] });
     expect(c.mku).toEqual({ returnLayout: { kind: 'union' }, params: ['s32'] });
+    // …and so does one with an unknown word ahead of the type
+    expect(prototypesFromContext('struct Blob64 { u32 w[16]; }; EWRAM_FN struct Blob64 mk(void);', 'c').mk).toEqual({
+      returnLayout: { kind: 'struct' },
+      params: [],
+    });
     // C++ names a struct by its tag, and a linkage specification declares nothing about the type
     const vec = { kind: 'struct', members: ['x', 'y', 'z'].map((name) => ({ name, type: 'u32' })) };
     for (const decl of ['extern "C" Vec getv(s32 i);', 'extern "C" { Vec getv(s32 i); }']) {
@@ -535,6 +540,20 @@ describe('prototypes from a declaration context', () => {
         params: ['s32'],
       });
     }
+  });
+
+  test('an unknown word ahead of the type leaves the parameters read, and states no return', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32;
+       NAKED void naked(int x); UNUSED static void unused(int x); EWRAM_FN NAKED void two(int x);
+       ARM_FUNC unsigned int words(u32 a, u32 b); void inparam(MACRO int x, int y);`,
+      'c',
+    );
+    expect(p.naked).toEqual({ params: ['int'] });
+    expect(p.unused).toEqual({ params: ['int'] });
+    expect(p.two).toEqual({ params: ['int'] });
+    expect(p.words).toEqual({ params: ['u32', 'u32'] });
+    expect(p.inparam).toEqual({ returnsVoid: true, params: ['MACRO int', 'int'] });
   });
 
   test('C++ default arguments and comments do not reach a spelling', () => {

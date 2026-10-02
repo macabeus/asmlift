@@ -27,8 +27,9 @@
 //
 // UNKNOWN WORDS. A run of identifiers between the type and the declarator is read as unknown words,
 // the last identifier being the name: `struct Blob64 EWRAM_FN makeblob(…)` is a raw header's
-// unexpanded macro, and the type it qualifies is still the one spelled. Valid C never puts two
-// identifiers there.
+// unexpanded macro, and the type it qualifies is still the one spelled. So is an identifier ahead of
+// a type keyword: `NAKED void f(…)`, `EWRAM_FN struct Blob64 f(…)`. Valid C puts an identifier in
+// neither place.
 import { type Tokens, lex } from './lex';
 
 /** A half-open run of token indices: `from` is the first token, `to` is past the last. */
@@ -68,7 +69,8 @@ export interface Specifiers {
   storage: string[];
   qualifiers: Qualifier[];
   type: TypeSpecifier;
-  /** identifiers between the type and the declarator: an unexpanded macro */
+  /** identifiers ahead of a type keyword or between the type and the declarator: an unexpanded
+   *  macro */
   unknownWords: string[];
   attributes: Attribute[];
   /** the qualifiers, the type and the unknown words in the order they are written, one space apart:
@@ -449,6 +451,11 @@ class Parser {
         this.i++;
       } else if (this.cxx && w === 'typename') {
         this.i++;
+      } else if (typed === 'name' && (BASIC.has(w) || this.tags.has(w))) {
+        // what was read as the type is an unknown word ahead of it
+        s.unknownWords.unshift(...(s.type.kind === 'words' ? s.type.words : []));
+        s.type = { kind: 'words', words: basic };
+        typed = 'none';
       } else if (BASIC.has(w) || (LONE.has(w) && typed === 'none')) {
         if (typed !== 'none' && typed !== 'basic') {
           break;

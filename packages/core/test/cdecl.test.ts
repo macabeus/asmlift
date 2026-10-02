@@ -273,6 +273,15 @@ describe('a declaration', () => {
     expect(members('struct S { u8 public : 1, mutable; };', 'c')).toEqual(['public: u8 : 1; mutable: u8']);
   });
 
+  test('an identifier ahead of a type keyword is an unknown word', () => {
+    const ctx = parseDeclarations('EWRAM_FN NAKED void f(int x); UNUSED static struct Blob64 g(void);', 'c');
+    expect(read(ctx)).toEqual(['f: (x: int) → void', 'g: (_: void) → struct Blob64']);
+    expect(ctx.declarations.map((d) => [d.specifiers.unknownWords, d.specifiers.spelling])).toEqual([
+      [['EWRAM_FN', 'NAKED'], 'EWRAM_FN NAKED void'],
+      [['UNUSED'], 'UNUSED struct Blob64'],
+    ]);
+  });
+
   test('a run of identifiers after the type is unknown words and the name', () => {
     const ctx = parseDeclarations('struct Blob64 EWRAM_FN makeblob(const void *);', 'c');
     expect(read(ctx)).toEqual(['makeblob: (_: * → const void) → struct Blob64']);
