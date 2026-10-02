@@ -346,6 +346,17 @@ describe('lowerCall', () => {
     expect(fill.pairs.pairCallee.get(call.results[0])).toBe('g');
   });
 
+  // `validatePrototypes` refuses this table; `decompile` takes a table it never checked
+  test.each([
+    ['through memory', ['a', 'b']],
+    ['in r0', ['a']],
+  ])('refuses a callee declared to return a 64-bit value and a struct returned %s', (_where, members) => {
+    const returnLayout = { kind: 'struct' as const, members: members.map((name) => ({ name, type: 's32' })) };
+    expect(() => callIn({ g: { params: ['s32'], returns: 's64', returnLayout } })).toThrow(
+      "cannot lift 'f': `g` is declared to return both a struct or union and a 64-bit value",
+    );
+  });
+
   test("defines r0 with a word call's result", () => {
     const { fill, call } = callIn({ g: { params: ['s32'] } });
     expect(call.attrs.target).toBe('g');

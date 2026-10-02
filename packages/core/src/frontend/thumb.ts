@@ -5136,6 +5136,16 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const widths = wide?.params ?? declared?.widths ?? null;
   const argc = widths === null ? fallbackArgc(ssa, target.argRegs, bi) : wordsOf(widths);
   const returnsPair = calls.returnsPair(targetSym);
+  // a struct returned through memory is the call's value, and argument 0 is where it lands; one
+  // returned in r0 is r0's bytes, whether or not anything states the call's arity
+  const returned =
+    declared?.returned ?? (declared === null && !wide ? calls.registerStructReturn(targetSym) : undefined);
+  // two answers to which registers hold the result, and to whether argument 0 is a hidden pointer
+  if (returnsPair && returned !== undefined) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': \`${targetSym}\` is declared to return both a struct or union and a 64-bit value`,
+    );
+  }
   const stackArgs = frame.slotsOk ? frame.outgoingArgs.blocks.get(ins) : undefined;
   const args: Value[] = [];
   // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
@@ -5223,10 +5233,6 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       }
     }
   }
-  // a struct returned through memory is the call's value, and argument 0 is where it lands; one
-  // returned in r0 is r0's bytes, whether or not anything states the call's arity
-  const returned =
-    declared?.returned ?? (declared === null && !wide ? calls.registerStructReturn(targetSym) : undefined);
   const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
   const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
   // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
