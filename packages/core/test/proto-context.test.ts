@@ -58,6 +58,74 @@ describe('prototypes from a declaration context', () => {
     expect(declaredCallArgs(p.sum, PPC_MWCC)?.widths).toEqual([32, 32]);
   });
 
+  test('a multi-dimensional array parameter is a pointer to its inner array', () => {
+    const p = prototypesFromContext(
+      `typedef float f32; typedef signed char s8; typedef unsigned char u8; typedef unsigned int u32;
+       void GXSetIndTexMtx(u32 id, f32 offset[2][3], s8 scale_exp);
+       void GXSetCopyFilter(u8 aa, const u8 sample_pattern[12][2], u8 vf, const u8 *vfilter);`,
+      'c',
+    );
+    expect(p.GXSetIndTexMtx?.params).toEqual(['u32', 'f32 (*)[3]', 's8']);
+    expect(p.GXSetCopyFilter?.params).toEqual(['u8', 'const u8 (*)[2]', 'u8', 'const u8 *']);
+    expect(declaredCallArgs(p.GXSetIndTexMtx, PPC_MWCC)?.widths).toEqual([32, 32, 8]);
+  });
+
+  test('an array parameter of unstated outer extent is a pointer to its inner array', () => {
+    const p = prototypesFromContext(
+      'typedef float f32; typedef unsigned int u32; void GXLoadTexMtxImm(f32 mtx[][4], u32 id, u32 type);',
+      'c',
+    );
+    expect(p.GXLoadTexMtxImm?.params).toEqual(['f32 (*)[4]', 'u32', 'u32']);
+  });
+
+  test('a pointer to an array, a pointer to a function pointer and a function-typed parameter are read', () => {
+    const p = prototypesFromContext(
+      `typedef float f32; typedef unsigned char u8; typedef unsigned short u16; typedef unsigned int u32;
+       typedef u8 bool8;
+       u32 LinkMain1(u8 *shouldAdvanceLinkState, u16 *sendCmd, u16 (*recvCmds)[8]);
+       void func_8008A430_8B030(f32(*)[], f32);
+       u16 SetFlashTimerIntr(u8 timerNum, void (**intrFunc)(void));
+       bool8 CopyablePlayerMovement_None(struct ObjectEvent *objectEvent, u8 playerDirection, bool8 tileCallback(u8));`,
+      'c',
+    );
+    expect(p.LinkMain1?.params).toEqual(['u8 *', 'u16 *', 'u16 (*)[8]']);
+    expect(p.func_8008A430_8B030?.params).toEqual(['f32 (*)[]', 'float']);
+    expect(p.SetFlashTimerIntr?.params).toEqual(['u8', 'void (**)(void)']);
+    expect(p.CopyablePlayerMovement_None?.params).toEqual(['struct ObjectEvent *', 'u8', 'bool8 (*)(u8)']);
+    expect(declaredCallArgs(p.SetFlashTimerIntr, ARMV4T_AGBCC)?.widths).toEqual([8, 32]);
+  });
+
+  test('a parameter with no name is its whole type, a typedef name included', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef float f32; typedef f32 Mtx33[3][3]; typedef struct Vec Vec;
+       extern void GXLoadNrmMtxImm3x3(const Mtx33, u32 id);
+       void fn_1_91A4(Vec *, Vec *, float[5]);`,
+      'c',
+    );
+    expect(p.GXLoadNrmMtxImm3x3?.params).toEqual(['const Mtx33', 'u32']);
+    expect(p.fn_1_91A4?.params).toEqual(['struct Vec *', 'struct Vec *', 'float *']);
+  });
+
+  test('a function-pointer parameter keeps the qualifiers of its own parameters where they are', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned char u8; typedef unsigned int u32;
+       void sndVirtualSampleSetCallback(u32 (*callback)(u8 reason, const SND_VIRTUALSAMPLE_INFO* info));`,
+      'c',
+    );
+    expect(p.sndVirtualSampleSetCallback?.params).toEqual(['u32 (*)(u8 reason, const SND_VIRTUALSAMPLE_INFO* info)']);
+  });
+
+  test('a parameter of a qualified C++ type name is read', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned long u32; struct JKRAramBlock; class JKRAramHeap { public: enum EAllocMode { HEAD, TAIL }; };
+       inline JKRAramBlock* JKRAllocFromAram(u32 size, JKRAramHeap::EAllocMode allocMode = JKRAramHeap::HEAD) {
+         return 0;
+       }`,
+      'c++',
+    );
+    expect(p.JKRAllocFromAram).toEqual({ returns: 'JKRAramBlock *', params: ['u32', 'JKRAramHeap::EAllocMode'] });
+  });
+
   test('a list holding a spelling that cannot be sized is kept, and the frontend abstains on it', () => {
     const p = prototypesFromContext(
       'typedef struct Vec { float x, y; } Vec; float len(Vec v); float sq(float x);',
@@ -244,7 +312,7 @@ describe('prototypes from a declaration context', () => {
        typedef struct R { u32 w[4]; } const CR; CR mk(s32);
        typedef struct { u32 w[4]; } volatile VR, *VRP; VR mkv(s32); VRP mkvp(s32);
        typedef const struct Q { u32 w[4]; } QR; QR mkq(s32); struct Q mkq2(s32);
-       typedef struct R2 { u32 w; } R2T, const *CR2P; CR2P mkp(s32);`,
+       typedef struct R2 { u32 w; } const R2C, *CR2P; CR2P mkp(s32);`,
       'c',
     );
     expect(p.mk).toEqual({ returns: 'CR', returnLayout: { kind: 'struct', members: w4 }, params: ['s32'] });
@@ -252,6 +320,7 @@ describe('prototypes from a declaration context', () => {
     expect(p.mkvp).toEqual({ returns: 'VR *', params: ['s32'] });
     expect(p.mkq?.returnLayout?.members).toEqual(w4);
     expect(p.mkq2?.returnLayout?.members).toEqual(w4);
+    // compiled, `p->w = 1` through a `CR2P p` is an assignment of a read-only member
     expect(p.mkp).toEqual({ returns: 'const struct R2 *', params: ['s32'] });
   });
 

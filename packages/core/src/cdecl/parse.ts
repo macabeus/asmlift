@@ -61,6 +61,9 @@ export interface Specifiers {
   /** identifiers between the type and the declarator: an unexpanded macro */
   unknownWords: string[];
   attributes: Attribute[];
+  /** the qualifiers, the type and the unknown words in the order they are written, one space apart:
+   *  `u8 const`, `struct R2`, `struct Blob64 EWRAM_FN`. A tag's body is not part of it */
+  spelling: string;
 }
 
 export type Derivation =
@@ -198,20 +201,10 @@ const STORAGE = new Set([
   'friend',
   'mutable',
 ]);
-const BASIC = new Set([
-  'void',
-  'char',
-  'short',
-  'int',
-  'long',
-  'float',
-  'double',
-  'signed',
-  'unsigned',
-  'bool',
-  '_Bool',
-  'wchar_t',
-]);
+const BASIC = new Set(['void', 'char', 'short', 'int', 'long', 'float', 'double', 'signed', 'unsigned']);
+/** a type word that combines with no other: after one, it is the name being declared, as C89
+ *  reserves none of them (`typedef unsigned long bool;`) */
+const LONE = new Set(['bool', '_Bool', 'wchar_t']);
 const TAGS: ReadonlySet<string> = new Set<TagKeyword>(['struct', 'union', 'enum', 'class']);
 const ATTRIBUTES = new Set(['__attribute__', '__attribute', '__declspec']);
 const ASM = new Set(['asm', '__asm', '__asm__']);
@@ -374,6 +367,7 @@ class Parser {
   specifiers(to: number, context: Context): Specifiers | null {
     const from = this.i;
     const basic: string[] = [];
+    const written: string[] = [];
     const s: Specifiers = {
       typedef: false,
       storage: [],
@@ -381,6 +375,7 @@ class Parser {
       type: { kind: 'words', words: basic },
       unknownWords: [],
       attributes: [],
+      spelling: '',
     };
     let typed: 'none' | 'basic' | 'name' | 'tag' = 'none';
     let afterBody = false;
@@ -399,6 +394,7 @@ class Parser {
       if (kind !== 'identifier') {
         if (typed === 'none' && this.t.is(k, '::') && this.t.kind(k + 1) === 'identifier') {
           s.type = { kind: 'words', words: [this.typeName(to)] };
+          written.push(s.type.words[0]);
           typed = 'name';
           continue;
         }
@@ -411,17 +407,19 @@ class Parser {
         this.i++;
       } else if (qualifier !== undefined) {
         s.qualifiers.push(qualifier);
+        written.push(w);
         this.i++;
       } else if (STORAGE.has(w)) {
         s.storage.push(w);
         this.i++;
       } else if (w === 'typename') {
         this.i++;
-      } else if (BASIC.has(w)) {
+      } else if (BASIC.has(w) || (LONE.has(w) && typed === 'none')) {
         if (typed !== 'none' && typed !== 'basic') {
           break;
         }
         basic.push(w);
+        written.push(w);
         typed = 'basic';
         this.i++;
       } else if (TAGS.has(w)) {
@@ -430,6 +428,7 @@ class Parser {
         }
         const tag = this.tag(s, w as TagKeyword, to, context);
         s.type = tag;
+        written.push(tag.tag === undefined ? w : `${w} ${tag.tag}`);
         typed = 'tag';
         afterBody = tag.body !== undefined;
         if (afterBody) {
@@ -442,14 +441,17 @@ class Parser {
           break;
         }
         s.type = { kind: 'words', words: [this.typeName(to)] };
+        written.push(s.type.words[0]);
         typed = 'name';
       } else if (this.isUnknownWord(k)) {
         s.unknownWords.push(w);
+        written.push(w);
         this.i++;
       } else {
         break;
       }
     }
+    s.spelling = written.join(' ');
     if (this.i > from) {
       return s;
     }

@@ -234,6 +234,15 @@ describe('a declaration', () => {
     ]);
   });
 
+  // C89 has no `bool` or `wchar_t`: marioparty4's MusyX headers declare `typedef unsigned long bool;`
+  test('a word C++ reserves for a type is the name it declares after another type word', () => {
+    expect(declarations('typedef unsigned long bool; typedef unsigned short wchar_t; bool f(bool b);')).toEqual([
+      'bool: unsigned long',
+      'wchar_t: unsigned short',
+      'f: (b: bool) → bool',
+    ]);
+  });
+
   test('a run of identifiers after the type is unknown words and the name', () => {
     const ctx = parseDeclarations('struct Blob64 EWRAM_FN makeblob(const void *);');
     expect(read(ctx)).toEqual(['makeblob: (_: * → const void) → struct Blob64']);
