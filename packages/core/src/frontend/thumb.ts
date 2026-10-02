@@ -2431,15 +2431,15 @@ export function lift(
   return again;
 }
 
-/** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: the text (`readThumbText`), the CFG
- *  (`thumbCfg`), the target's scratch registers, each callee's declaration
- *  (`thumbCallDeclarations`), the frame (`measureThumbFrame`), then the SSA builder and every block
- *  filled in order (`fillThumbBlock`), the word returns judged (`thumbPairs`), the frame-object
- *  audit, the device pin and the struct-return destinations (`refuseSretOutsideFrame`). Each stage
- *  reads the records of the stages before it; the fill reads them as one record (`ThumbFill`). What
- *  the fill writes as it goes is named state: the slot offsets it keyed and the captures it moved
- *  (`ThumbFrameUses`), which the audit reads; the 64-bit pairs it built (`ThumbPairs`); and the
- *  flags each block leaves (`ThumbFlagCarry`), which a later block inherits. */
+/** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: every stage before the fill (`thumbFillOf`: the
+ *  text, the CFG, the target's scratch registers, each callee's declaration, the frame and the SSA
+ *  builder), then every block filled in order (`fillThumbBlock`), the word returns judged
+ *  (`thumbPairs`), the frame-object audit, the device pin and the struct-return destinations
+ *  (`refuseSretOutsideFrame`). Each stage reads the records of the stages before it; the fill reads
+ *  them as one record (`ThumbFill`). What the fill writes as it goes is named state: the slot
+ *  offsets it keyed and the captures it moved (`ThumbFrameUses`), which the audit reads; the 64-bit
+ *  pairs it built (`ThumbPairs`); and the flags each block leaves (`ThumbFlagCarry`), which a later
+ *  block inherits. */
 function liftOnce(
   name: string,
   asm: string,
@@ -2449,56 +2449,9 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
-  const text = readThumbText(name, asm);
-  const cfg = thumbCfg(name, text.blocks, text.tables);
-  const scratchRegs = assertScratchRegsPartitioned(target);
-  const calls = thumbCallDeclarations(name, target, prototypes);
-  const frame = measureThumbFrame({ target, cfg, calls, oneObject });
-
-  // --- ISA-neutral SSA construction (shared Braun builder) ---
-  // THE LIVE-IN MODEL is the frame's partition (`ThumbFrame.partition`) and a register half.
-  // The register half needs both of its facts, and they come from different places. The target says
-  // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
-  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
-  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
-  // the treatment a target claiming no partition gets. The save is asked only of the registers the
-  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
-  // local the compiler was entitled to put in place with no prologue at all.
-  const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
-    ...frame.partition,
-    ...(target.nonArgRegs
-      ? {
-          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || frame.savedRegs.has(r)),
-          argRegs: target.argRegs,
-        }
-      : {}),
-  }));
+  const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject);
+  const { cfg, frame, ssa, pairs, statics } = fill;
   const { fn, irBlocks, paramReg } = ssa;
-  const statics = makeLocalStatics();
-  const operands = thumbOperands({
-    name,
-    asm,
-    text,
-    ssa,
-    statics,
-    slotsOffReason: frame.slotsOffReason,
-  });
-  const pairs = thumbPairs({ name, target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
-  const flags = thumbFlagCarry(cfg, text.tables);
-  const fill: ThumbFill = {
-    name,
-    target,
-    symbols,
-    text,
-    cfg,
-    calls,
-    frame,
-    ssa,
-    operands,
-    pairs,
-    flags,
-    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set() },
-  };
 
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   cfg.asmBlocks.forEach((ab, bi) => {
@@ -4177,7 +4130,73 @@ interface ThumbFill {
   readonly operands: ThumbOperands;
   readonly pairs: ThumbPairs;
   readonly flags: ThumbFlagCarry;
+  /** the function-scope statics the operands define, finished into the lifted function's objects */
+  readonly statics: LocalStatics;
   readonly frameUses: ThumbFrameUses;
+}
+
+/** EVERY STAGE BEFORE THE FILL, in their refusal order: the text, the CFG, the target's scratch
+ *  registers, each callee's declaration, the frame, the SSA builder and its live-in model, the
+ *  operands, the pairs and the flag carry. The scratch-register check comes before the call
+ *  declarations because both refuse a malformed target, and the scratch register is the one named. */
+function thumbFillOf(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  symbols: SymbolMap | undefined,
+  oneObject: FrameRange | undefined,
+): ThumbFill {
+  const text = readThumbText(name, asm);
+  const cfg = thumbCfg(name, text.blocks, text.tables);
+  const scratchRegs = assertScratchRegsPartitioned(target);
+  const calls = thumbCallDeclarations(name, target, prototypes);
+  const frame = measureThumbFrame({ target, cfg, calls, oneObject });
+
+  // --- ISA-neutral SSA construction (shared Braun builder) ---
+  // THE LIVE-IN MODEL is the frame's partition (`ThumbFrame.partition`) and a register half.
+  // The register half needs both of its facts, and they come from different places. The target says
+  // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
+  // saved, and so could have homed a local in. A register in only the first is one the ABI does not
+  // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
+  // the treatment a target claiming no partition gets. The save is asked only of the registers the
+  // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
+  // local the compiler was entitled to put in place with no prologue at all.
+  const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
+    ...frame.partition,
+    ...(target.nonArgRegs
+      ? {
+          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || frame.savedRegs.has(r)),
+          argRegs: target.argRegs,
+        }
+      : {}),
+  }));
+  const statics = makeLocalStatics();
+  const operands = thumbOperands({
+    name,
+    asm,
+    text,
+    ssa,
+    statics,
+    slotsOffReason: frame.slotsOffReason,
+  });
+  const pairs = thumbPairs({ name, target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
+  const flags = thumbFlagCarry(cfg, text.tables);
+  return {
+    name,
+    target,
+    symbols,
+    text,
+    cfg,
+    calls,
+    frame,
+    ssa,
+    operands,
+    pairs,
+    flags,
+    statics,
+    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set() },
+  };
 }
 
 type FrameWalk = ReturnType<typeof makeFrameWalk>;
@@ -5359,6 +5378,7 @@ export const __testing = {
   thumbOperands,
   thumbPairs,
   thumbFlagCarry,
+  thumbFillOf,
   openBlockCursor,
   fillThumbBlock,
   lowerCall,

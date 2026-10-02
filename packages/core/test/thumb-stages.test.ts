@@ -1,11 +1,9 @@
-// The stages of the Thumb lift, each driven from asm text through the real stages before it — the
-// inputs `liftOnce` hands each one. `thumb-frontend.test.ts` drives the lift whole.
+// The stages of the Thumb lift, each driven from asm text through the stages before it as
+// `liftOnce` runs them (`thumbFillOf`). `thumb-frontend.test.ts` drives the lift whole.
 import { describe, expect, test } from 'vitest';
 
-import { makeLocalStatics } from '../src/frontend/local-object';
-import { makeSsaBuilder } from '../src/frontend/ssa';
 import { __testing } from '../src/frontend/thumb';
-import { type Value, mkValue } from '../src/ir/core';
+import { mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -15,52 +13,16 @@ const {
   thumbCfg,
   assertScratchRegsPartitioned,
   thumbCallDeclarations,
-  measureThumbFrame,
-  thumbOperands,
-  thumbPairs,
-  thumbFlagCarry,
+  thumbFillOf,
   openBlockCursor,
   lowerCall,
 } = __testing;
 
-// Every stage up to the frame, in the lift's order.
-const measure = (asm: string, prototypes: Prototypes = {}) => {
-  const text = readThumbText('f', asm);
-  const cfg = thumbCfg('f', text.blocks, text.tables);
-  assertScratchRegsPartitioned(ARMV4T_AGBCC);
-  const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, prototypes);
-  return measureThumbFrame({ target: ARMV4T_AGBCC, cfg, calls, oneObject: undefined });
-};
+// Every stage up to the fill, as the lift runs them: what `fillThumbBlock` reads.
+const fillOf = (asm: string, prototypes: Prototypes = {}) =>
+  thumbFillOf('f', asm, ARMV4T_AGBCC, prototypes, undefined, undefined);
+const measure = (asm: string, prototypes: Prototypes = {}) => fillOf(asm, prototypes).frame;
 const labels = (blocks: readonly { label: string }[]) => blocks.map((b) => b.label);
-
-// Every stage up to the fill, in the lift's order: what `fillThumbBlock` reads.
-const fillOf = (asm: string, prototypes: Prototypes = {}) => {
-  const target = ARMV4T_AGBCC;
-  const text = readThumbText('f', asm);
-  const cfg = thumbCfg('f', text.blocks, text.tables);
-  const calls = thumbCallDeclarations('f', target, prototypes);
-  const frame = measureThumbFrame({ target, cfg, calls, oneObject: undefined });
-  const ssa = makeSsaBuilder('f', cfg.asmBlocks.length, cfg.preds, () => frame.partition);
-  const statics = makeLocalStatics();
-  const operands = thumbOperands({ name: 'f', asm, text, ssa, statics, slotsOffReason: frame.slotsOffReason });
-  const pairs = thumbPairs({ name: 'f', target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
-  const flags = thumbFlagCarry(cfg, text.tables);
-  const frameUses = { usedSlotOffsets: new Set<number>(), movedCaptures: new Set<Value>() };
-  return {
-    name: 'f',
-    target,
-    symbols: undefined,
-    text,
-    cfg,
-    calls,
-    frame,
-    ssa,
-    operands,
-    pairs,
-    flags,
-    frameUses,
-  };
-};
 
 // agbcc's jump-table dispatch behind one of its two bounds spellings (thumb-switch.test.ts); `pool`
 // holds the table pointer
@@ -291,6 +253,15 @@ describe('measureThumbFrame', () => {
     }
     // declared with four, the staged word is no argument, and nothing reloads it
     expect(measure(STAGED, { g: { params: 4 } }).outgoingArgs.area).toBe(0);
+  });
+});
+
+describe('thumbFillOf', () => {
+  test('reads a saved callee-saved register before any write as an uninitialised local', () => {
+    const { ssa } = fillOf('f:\n\tpush\t{r4, lr}\n\tmov\tr0, r4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n');
+    const r4 = ssa.readVar('r4', 0);
+    expect(ssa.paramReg.has(r4)).toBe(false);
+    expect(ssa.irBlocks[0].ops).toContainEqual(expect.objectContaining({ opcode: 'undef', attrs: { key: 'r4' } }));
   });
 });
 
