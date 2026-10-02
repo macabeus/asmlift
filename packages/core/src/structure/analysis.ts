@@ -8,8 +8,16 @@
 //     the pure defs the homing rules claim);
 //   • the HOMING-VARIATION ENUMERATION GATES — one export per structure variation, each answering
 //     "does this function hold a value the variation would home at all" so rank.ts can skip a
-//     variation whose candidate would only duplicate the default. Each mirrors its variation's scope inside `analyze`
+//     variation whose candidate would only duplicate the default. Each mirrors its variation's scope in `namePureOp`
 //     and states where it DIVERGES from it, in which direction, and what that costs.
+//
+// `analyze` runs stages — `analysisStages` wires `indexUses`, `edgeArgUses`, `makeRenderModel`,
+// `makeInlineReach`, `makeLoopRules` and `homeScopes` — and then the rules over them: `namePureOp`,
+// `nameAccess`, `namePreUpdateHelpers`. The fixpoint driver stays in `analyze` because it IS the
+// order: reverse program order, the escape phase once every other rule has settled, the render
+// caches cleared at the head of each sweep. `MaterializeState.materialize` is shared LIVE with the
+// render model, the inline reach and the loop rules: a rule's verdict for one op turns on the names
+// the same sweep has already given the ops after it.
 import { disjointConstSlots, globalCellOf, mayWriteGlobal } from '../ir/alias';
 import {
   Block,
@@ -264,7 +272,7 @@ function readCone(op0: Op, defOf: Map<Value, Op>): Op[] | null {
 
 /** rank.ts's enumeration gate for the `/addr-home` variation: does the function HAVE a value the
  *  variation would home — a non-const pure def whose merge class is a shared base, with no gaddr/laddr in
- *  its cone? Mirrors the variation's scope rule in `analyze` (the same `sharedBaseClasses` call), minus
+ *  its cone? Mirrors the variation's scope rule in `namePureOp` (the same `sharedBaseClasses` call), minus
  *  the loop-header seat refusal (that needs the loop model; a false positive costs one
  *  duplicate-collapsed candidate, never a wrong one).
  *
@@ -461,15 +469,17 @@ export function hasEscapingExtension(fn: Fn): boolean {
   return escapingExtensions(fn, false).size > 0 || escapingExtensions(fn, true).size > 0;
 }
 
+interface NaturalLoop {
+  header: Block;
+  latch: Block;
+  body: Set<Block>;
+}
+
 /** Natural loops: a back edge is `latch → header` with the header dominating the latch, and the
  *  body is the backward closure from the latch. Shared by the rules inside `analyze` and by the
  *  `/merge-home` gate below, so the two cannot disagree about what "inside a loop" means. */
-function naturalLoops(
-  fn: Fn,
-  dom: Map<Block, Set<Block>>,
-  predsOf: Map<Block, Block[]>,
-): { header: Block; latch: Block; body: Set<Block> }[] {
-  const loops: { header: Block; latch: Block; body: Set<Block> }[] = [];
+function naturalLoops(fn: Fn, dom: Map<Block, Set<Block>>, predsOf: Map<Block, Block[]>): NaturalLoop[] {
+  const loops: NaturalLoop[] = [];
   for (const latch of fn.blocks) {
     for (const header of successorsOf(latch)) {
       if (!dom.get(latch)?.has(header)) {
@@ -540,7 +550,7 @@ function naturalLoops(
  *      joins with params) is refused by this clause and no other, and lifting it takes that
  *      function's map-less enumeration 75264 → 150528 candidates, 102s → 207s. A null there is
  *      this refusal, not an absent idiom.
- *  The `analyze` scope adds nothing to this list — the whole predicate is here, so the variation's
+ *  The `namePureOp` scope adds nothing to this list — the whole predicate is here, so the variation's
  *  enumeration gate can run it rather than approximate it. */
 function mergeFeedHomes(fn: Fn, dom: Map<Block, Set<Block>>, defOf: Map<Value, Op>, inLoop: Set<Block>): Set<Op> {
   // Every block's incoming COPY SITES — the places its edge assignments render, each once. Neither
@@ -1066,7 +1076,7 @@ function copyInterdependentValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
  *  that are ever simultaneously live into one variable name is the textbook silent clobber.
  *
  *  `returnsVoid` suppresses the phantom `ret` operand, the same way the use registry does. */
-function blockLiveIn(fn: Fn, returnsVoid: boolean): Map<Block, Set<Value>> {
+export function blockLiveIn(fn: Fn, returnsVoid: boolean): Map<Block, Set<Value>> {
   const liveIn = new Map<Block, Set<Value>>();
   for (const b of fn.blocks) {
     liveIn.set(b, new Set());
@@ -1166,27 +1176,25 @@ function makeReach(): {
   return { reachFrom, reachAvoiding };
 }
 
-export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
-  const {
-    defs,
-    dom,
-    rereadGlobals = false,
-    materializeJoinFeeds = false,
-    homeSharedAddresses = false,
-    homeLoopExprs = false,
-    homeDerivedReads = false,
-    homeMergeFeeds = false,
-    homeEscapingExtensions = false,
-    readsStayWhereWritten = false,
-    contractsFloatProducts = false,
-  } = opts;
-  // ── use registry ────────────────────────────────────────────────────────────────────────
-  // Every use of a value, POSITIONED: the consuming op and its block/index. Successor args are
-  // uses AT the terminator (they render in argAssigns at block end). A void function's `ret`
-  // operand is a phantom, not a real use — skipping it lets a call whose result ONLY flows into
-  // the suppressed return read as a dead (side-effect) call, so `sideEffects()` emits it.
-  // One operand SLOT = one entry (an op reading a value twice records two uses — that count is
-  // what decides whether an inlined call would EXECUTE twice).
+/** THE USE REGISTRY. Every use of a value, POSITIONED: the consuming op and its block/index.
+ *  Successor args are uses AT the terminator (they render in argAssigns at block end). A void
+ *  function's `ret` operand is a phantom, not a real use — skipping it lets a call whose result
+ *  ONLY flows into the suppressed return read as a dead (side-effect) call, so `sideEffects()`
+ *  emits it. One operand SLOT = one entry (an op reading a value twice records two uses — that
+ *  count is what decides whether an inlined call would EXECUTE twice). */
+export interface UseIndex {
+  /** every positioned use of a value; a value absent here is dead */
+  useSitesOf: Map<Value, UseSite[]>;
+  opIndex: Map<Op, number>;
+  opBlock: Map<Op, Block>;
+  blockPos: Map<Block, number>;
+  /** True if `def`'s value is still needed after a call — a call lies strictly between the def and
+   *  one of its `consumers`. Such a value survives in a callee-saved register (a local), which is
+   *  what materializing it reproduces. */
+  liveAcrossCall(def: Op, consumers: Op[]): boolean;
+}
+
+export function indexUses(fn: Fn, returnsVoid: boolean): UseIndex {
   const useSitesOf = new Map<Value, UseSite[]>();
   const opIndex = new Map<Op, number>();
   const opBlock = new Map<Op, Block>();
@@ -1218,59 +1226,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     }
   }
-  // Which values ride a branch edge as a successor ARG, in two scopes with two different readers.
-  //
-  // `branchArgFed` is EVERY multi-successor terminator's, and it is a correctness fact: an edge
-  // argument is emitted INSIDE the arm it belongs to, so a value that renders only there runs only
-  // on that path. For a call that is an effect the IR performs unconditionally and the C performs
-  // sometimes, and a `switch_br` does it as readily as a `cond_br`. Plain `br` args are excluded
-  // because their edge copy is on the one path that reaches the successor, so nothing conditional
-  // happens to them.
-  //
-  // `condBrArgFed` is the `/inplace` variation's narrower reading — a preference about where a load's
-  // value is homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds.
-  const branchArgFed = new Set<Value>();
-  const condBrArgFed = new Set<Value>();
-  // How many times each value rides a BACK edge (to a block that dominates its own: a loop's
-  // header), which `ridesEdge` weighs apart. Decided by dominance, not layout: a return tail laid
-  // out above the branch into it is still a forward edge, and its copy renders in the arm.
-  //
-  // And only from a latch that is its loop's ONLY exit. Then the latch's test is the bottom test
-  // and its back-edge copy is the update the body runs on every iteration. When another block
-  // leaves the loop too, the structurer may keep that exit as the loop's own test and render the
-  // latch's branch as an `if` in the body, with the copy in one arm: agbcc's `while (n-- > 0) { q
-  // = q - 1; if (u == k) return *q; t = cg(t) + H[n & 3] & cb(q + 1); }` (with `u` 0) runs `bl
-  // cb` ahead of the latch's `bgt`, and inlined into the copy it ran only on the iterations that
-  // went round again. Such an edge weighs as a forward one.
-  const backArgFed = new Map<Value, number>();
-  const domOf = dom ?? dominators(fn);
-  const soleExitLatch = new Set<Block>();
-  for (const L of naturalLoops(fn, domOf, predecessors(fn))) {
-    if (![...L.body].some((x) => x !== L.latch && successorsOf(x).some((t) => !L.body.has(t)))) {
-      soleExitLatch.add(L.latch);
-    }
-  }
-  const backEdge = (from: Block, to: Block): boolean => (domOf.get(from)?.has(to) ?? false) && soleExitLatch.has(from);
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      if (op.successors.length > 1) {
-        for (const s of op.successors) {
-          for (const a of s.args) {
-            branchArgFed.add(a);
-            if (op.opcode === 'cond_br') {
-              condBrArgFed.add(a);
-            }
-            if (backEdge(b, s.block)) {
-              backArgFed.set(a, (backArgFed.get(a) ?? 0) + 1);
-            }
-          }
-        }
-      }
-    }
-  }
-  /** True if `def`'s value is still needed after a call — a call lies strictly between the def and
-   *  one of its `consumers`. Such a value survives in a callee-saved register (a local), which is
-   *  what materializing it reproduces. */
   const liveAcrossCall = (def: Op, consumers: Op[]): boolean => {
     const dp = linPos(def);
     const usePos = consumers.map(linPos);
@@ -1300,78 +1255,124 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       }
     });
   }
+  return { useSitesOf, opIndex, opBlock, blockPos, liveAcrossCall };
+}
 
-  const liveIn = blockLiveIn(fn, returnsVoid);
-
-  // ── the effect-ordering model — inline-at-use barriers ────────────────────────────────────
-  // `expr()` renders a def's computation AT ITS USE, which silently MOVES it: a call executes
-  // once per rendered copy (`foo(a0)+foo(a0)`), a load reads memory at the render point (it can
-  // textually sink past an aliasing store). The model: a call/load/aload def may inline ONLY
-  // when rendering cannot change behavior — exactly one render position, and the program-order
-  // gap between def and render crosses no memory write (loads) / no memory access at all (calls,
-  // whose own reads+writes must not reorder against anything). Every other case gets a NAMED
-  // TEMP assigned at the def's own program position (sideEffects) — which is precisely the
-  // register the compiler used.
-  const materialize = new Set<Op>();
-  /** Does `hit` hold of `call`'s value, or of any value it reaches through the ops it would be
-   *  inlined into? Such an op renders where its consumer does. A load is a read, not an effect, so
-   *  the walk passes through it: `*f()` read twice spells `f()` twice. The walk stops at a named op,
-   *  which renders at its own position, and at another effect, which these same rules place. That
-   *  makes it narrower than `!anchored`: a call whose value is used is not anchored, and the walk
-   *  still stops there. */
-  const reachesThroughInline = (call: Op, hit: (x: Value, sites: readonly UseSite[]) => boolean): boolean => {
-    const seen = new Set<Value>();
-    const walk = (x: Value): boolean => {
-      if (seen.has(x)) {
-        return false;
-      }
-      seen.add(x);
-      const sites = useSitesOf.get(x) ?? [];
-      return (
-        hit(x, sites) ||
-        sites.some(
-          (u) =>
-            !effectful(u.op) &&
-            u.op.successors.length === 0 &&
-            !materialize.has(u.op) &&
-            u.op.results.length > 0 &&
-            walk(u.op.results[0]),
-        )
-      );
-    };
-    return walk(call.results[0]);
-  };
-  /** Does `call`'s value reach an edge argument through the ops it would be inlined into, and
-   *  so render where that edge copy does? Such an op renders where its consumer does, so a call under
-   *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does.
+/** Which values ride a branch edge as a successor ARG, in two scopes with two different readers. */
+export interface EdgeArgUses {
+  /** EVERY multi-successor terminator's, and it is a correctness fact: an edge argument is emitted
+   *  INSIDE the arm it belongs to, so a value that renders only there runs only on that path. For a
+   *  call that is an effect the IR performs unconditionally and the C performs sometimes, and a
+   *  `switch_br` does it as readily as a `cond_br`. Plain `br` args are excluded because their edge
+   *  copy is on the one path that reaches the successor, so nothing conditional happens to them. */
+  branchArgFed: Set<Value>;
+  /** the `/inplace` variation's narrower reading — a preference about where a load's value is
+   *  homed, whose own scope note is on AnalyzeOptions.materializeJoinFeeds */
+  condBrArgFed: Set<Value>;
+  /** How many times each value rides a BACK edge (to a block that dominates its own: a loop's
+   *  header), which `ridesEdge` weighs apart. Decided by dominance, not layout: a return tail laid
+   *  out above the branch into it is still a forward edge, and its copy renders in the arm.
    *
-   *  A FORWARD edge's copy renders in an arm or after the loop, and a value two back-edge args carry
-   *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once, in
-   *  the update copy at the foot of the body, and a forward edge carrying it too reads the loop
-   *  variable that copy wrote. That copy moves the call only past what the latch runs after it, and
-   *  the barrier scan below already weighs exactly that: a store, a call or a read in another part of
-   *  the terminator bars the call and names it, and a read in the same copy renders after the call,
-   *  as every compiler evaluates it. So `s = s + g(i)` stays inline (`for (…) s = s + g(i);`). */
-  const ridesEdge = (call: Op): boolean =>
-    reachesThroughInline(call, (x) => {
-      const carried = backArgFed.get(x) ?? 0;
-      return carried > 1 || (carried === 0 && branchArgFed.has(x));
-    });
-  /** Does `call`'s value, through the ops it would be inlined into, reach ONE op that reads it
-   *  twice? That op spells it twice — both operands of `s * s`, or both edge copies of a `br
-   *  ^bb3(%9, %9)` — and the call runs once per spelling. A multi-successor terminator's arguments
-   *  are `ridesEdge`'s question, which weighs a do-while's exit copy reading the loop variable its
-   *  update copy wrote. */
-  const spelledTwice = (call: Op): boolean =>
-    reachesThroughInline(call, (_, sites) =>
-      sites.some((u, i) => u.op.successors.length <= 1 && sites.findIndex((v) => v.op === u.op) !== i),
-    );
-  const { reachFrom, reachAvoiding } = makeReach();
-  // Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
-  // terminator, materialized def) it inlines into, transitively through single-use pure ops.
-  // null = renders in several places / unresolvable (treated conservatively by the caller).
-  const emitPosCache = new Map<Op, { blk: Block; idx: number } | null>();
+   *  And only from a latch that is its loop's ONLY exit. Then the latch's test is the bottom test
+   *  and its back-edge copy is the update the body runs on every iteration. When another block
+   *  leaves the loop too, the structurer may keep that exit as the loop's own test and render the
+   *  latch's branch as an `if` in the body, with the copy in one arm: agbcc's `while (n-- > 0) { q
+   *  = q - 1; if (u == k) return *q; t = cg(t) + H[n & 3] & cb(q + 1); }` (with `u` 0) runs `bl
+   *  cb` ahead of the latch's `bgt`, and inlined into the copy it ran only on the iterations that
+   *  went round again. Such an edge weighs as a forward one. */
+  backArgFed: Map<Value, number>;
+}
+
+export function edgeArgUses(fn: Fn, domOf: Map<Block, Set<Block>>): EdgeArgUses {
+  const branchArgFed = new Set<Value>();
+  const condBrArgFed = new Set<Value>();
+  const backArgFed = new Map<Value, number>();
+  const soleExitLatch = new Set<Block>();
+  for (const L of naturalLoops(fn, domOf, predecessors(fn))) {
+    if (![...L.body].some((x) => x !== L.latch && successorsOf(x).some((t) => !L.body.has(t)))) {
+      soleExitLatch.add(L.latch);
+    }
+  }
+  const backEdge = (from: Block, to: Block): boolean => (domOf.get(from)?.has(to) ?? false) && soleExitLatch.has(from);
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.successors.length > 1) {
+        for (const s of op.successors) {
+          for (const a of s.args) {
+            branchArgFed.add(a);
+            if (op.opcode === 'cond_br') {
+              condBrArgFed.add(a);
+            }
+            if (backEdge(b, s.block)) {
+              backArgFed.set(a, (backArgFed.get(a) ?? 0) + 1);
+            }
+          }
+        }
+      }
+    }
+  }
+  return { branchArgFed, condBrArgFed, backArgFed };
+}
+
+/** THE EFFECT-ORDERING MODEL — inline-at-use barriers. `expr()` renders a def's computation AT ITS
+ *  USE, which silently MOVES it: a call executes once per rendered copy (`foo(a0)+foo(a0)`), a load
+ *  reads memory at the render point (it can textually sink past an aliasing store). The model: a
+ *  call/load/aload def may inline ONLY when rendering cannot change behavior — exactly one render
+ *  position, and the program-order gap between def and render crosses no memory write (loads) / no
+ *  memory access at all (calls, whose own reads+writes must not reorder against anything). Every
+ *  other case gets a NAMED TEMP assigned at the def's own program position (sideEffects) — which is
+ *  precisely the register the compiler used. */
+export interface MaterializeState {
+  /** defs that must emit as named temps at their own position */
+  materialize: Set<Op>;
+  /** the members of `materialize` that name a pre-update read */
+  preUpdateHomes: Set<Op>;
+  /** the divides the pre-update exit rule named (`rebuiltPast`) */
+  exitDivides: Set<Op>;
+  /** result values the address-home variation materialized — the load rule's admission key */
+  addressHomedBases: Set<Value>;
+}
+
+/** an op the asm reached by CALLING a runtime helper */
+function isHelper(op: Op): boolean {
+  return placedAt(op) === 'helper';
+}
+
+/** one the helper clause named: a statement sequenced as a named call is */
+function namedHelper(materialize: ReadonlySet<Op>, op: Op): boolean {
+  return materialize.has(op) && isHelper(op);
+}
+
+/** WHERE A VALUE'S EXPRESSION RENDERS, read off `materialize` as it stands when asked. The two
+ *  position caches hold until `invalidate()`. */
+export interface RenderModel {
   /** an op that renders AT ITS OWN position: a statement, a terminator, a materialized or dead def */
+  anchored(op: Op): boolean;
+  consumersOf(op: Op): Op[];
+  /** Does `op`'s value reach a float add or subtract, directly or through negations only? */
+  feedsFloatAdd(op: Op): boolean;
+  /** Where a value's expression is ultimately EMITTED: the anchored consumer (statement op,
+   *  terminator, materialized def) it inlines into, transitively through single-use pure ops.
+   *  null = renders in several places / unresolvable (treated conservatively by the caller). */
+  emitPos(op: Op): { blk: Block; idx: number } | null;
+  /** EVERY position a value's expression renders at — `emitPos` generalized to the whole set (it
+   *  answers one place or gives up), by following ALL consumers transitively. That matters for the
+   *  value-home variation: a pure expression with two consumers (`gOut = e; return e;`) has no
+   *  single emit position, so `emitPos` answers null and every memory read feeding it is forced
+   *  into a local — even when re-reading at both places is provably equivalent. Null only for a
+   *  genuine cycle (defensive: SSA use-def is acyclic through ops), which the caller treats as
+   *  unresolvable.
+   *
+   *  NEVER for a call: two render positions mean two executions, so a call whose consumer renders
+   *  in several places must keep answering null and materialize. */
+  emitPositions(op: Op): { blk: Block; idx: number }[] | null;
+  /** clears both position caches */
+  invalidate(): void;
+}
+
+export function makeRenderModel(uses: UseIndex, materialize: ReadonlySet<Op>): RenderModel {
+  const { useSitesOf, opIndex, opBlock, blockPos } = uses;
+  const emitPosCache = new Map<Op, { blk: Block; idx: number } | null>();
   const anchored = (op: Op): boolean =>
     op.successors.length > 0 ||
     op.opcode === 'ret' ||
@@ -1381,7 +1382,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     !op.results.length ||
     !useSitesOf.has(op.results[0]);
   const consumersOf = (op: Op): Op[] => [...new Set((useSitesOf.get(op.results[0]) ?? []).map((s) => s.op))];
-  /** Does `op`'s value reach a float add or subtract, directly or through negations only? */
   const feedsFloatAdd = (op: Op): boolean =>
     consumersOf(op).some(
       (c) => c.opcode === 'fadd' || c.opcode === 'fsub' || (c.opcode === 'fneg' && feedsFloatAdd(c)),
@@ -1400,15 +1400,6 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     emitPosCache.set(op, res);
     return res;
   };
-  // EVERY position a value's expression renders at — `emitPos` generalized to the whole set (it
-  // answers one place or gives up), by following ALL consumers transitively. That matters for
-  // the value-home variation: a pure expression with two consumers (`gOut = e; return e;`) has no single
-  // emit position, so `emitPos` answers null and every memory read feeding it is forced into a
-  // local — even when re-reading at both places is provably equivalent. Null only for a genuine
-  // cycle (defensive: SSA use-def is acyclic through ops), which the caller treats as unresolvable.
-  //
-  // NEVER for a call: two render positions mean two executions, so a call whose consumer renders in
-  // several places must keep answering null and materialize.
   const emitPosSetCache = new Map<Op, { blk: Block; idx: number }[] | null>();
   const emitPositions = (op: Op, visiting: Set<Op> = new Set()): { blk: Block; idx: number }[] | null => {
     const hit = emitPosSetCache.get(op);
@@ -1445,21 +1436,116 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     emitPosSetCache.set(op, res);
     return res;
   };
-  const memWriteBetween = makeMemWriteBetween({ opBlock, opIndex, reachAvoiding });
-  const defOf = defs ?? defOpMap(fn);
-  const copyInterdependent = copyInterdependentValues(fn, defOf);
-  // ── natural loops, for the live-across-a-loop rule ────────────────────────────────────────
-  // From the caller's dominators (a back edge is `latch → header` with the header dominating the
-  // latch); the body is the backward closure from the latch. With no `dom` the rule stands
-  // down — the same posture as the `defs`-carried rules.
-  const predsOf = predecessors(fn);
+  const invalidate = (): void => {
+    emitPosCache.clear();
+    emitPosSetCache.clear();
+  };
+  return { anchored, consumersOf, feedsFloatAdd, emitPos, emitPositions, invalidate };
+}
+
+export interface InlineReach {
+  ridesEdge(call: Op): boolean;
+  spelledTwice(call: Op): boolean;
+}
+
+export function makeInlineReach(uses: UseIndex, edges: EdgeArgUses, materialize: ReadonlySet<Op>): InlineReach {
+  const { useSitesOf } = uses;
+  const { branchArgFed, backArgFed } = edges;
+  /** Does `hit` hold of `call`'s value, or of any value it reaches through the ops it would be
+   *  inlined into? Such an op renders where its consumer does. A load is a read, not an effect, so
+   *  the walk passes through it: `*f()` read twice spells `f()` twice. The walk stops at a named op,
+   *  which renders at its own position, and at another effect, which these same rules place. That
+   *  makes it narrower than `!anchored`: a call whose value is used is not anchored, and the walk
+   *  still stops there. */
+  const reachesThroughInline = (call: Op, hit: (x: Value, sites: readonly UseSite[]) => boolean): boolean => {
+    const seen = new Set<Value>();
+    const walk = (x: Value): boolean => {
+      if (seen.has(x)) {
+        return false;
+      }
+      seen.add(x);
+      const sites = useSitesOf.get(x) ?? [];
+      return (
+        hit(x, sites) ||
+        sites.some(
+          (u) =>
+            !effectful(u.op) &&
+            u.op.successors.length === 0 &&
+            !materialize.has(u.op) &&
+            u.op.results.length > 0 &&
+            walk(u.op.results[0]),
+        )
+      );
+    };
+    return walk(call.results[0]);
+  };
+  /** Does `call`'s value reach an edge argument through the ops it would be inlined into, and
+   *  so render where that edge copy does? Such an op renders where its consumer does, so a call under
+   *  `f(x) + 1` or `*f(x)` rides the copy exactly as a bare `f(x)` does.
+   *
+   *  A FORWARD edge's copy renders in an arm or after the loop, and a value two back-edge args carry
+   *  renders twice, so reaching either is enough. A value ONE back-edge arg carries renders once, in
+   *  the update copy at the foot of the body, and a forward edge carrying it too reads the loop
+   *  variable that copy wrote. That copy moves the call only past what the latch runs after it, and
+   *  the barrier scan in `nameAccess` already weighs exactly that: a store, a call or a read in
+   *  another part of the terminator bars the call and names it, and a read in the same copy renders
+   *  after the call, as every compiler evaluates it. So `s = s + g(i)` stays inline (`for (…) s = s
+   *  + g(i);`). */
+  const ridesEdge = (call: Op): boolean =>
+    reachesThroughInline(call, (x) => {
+      const carried = backArgFed.get(x) ?? 0;
+      return carried > 1 || (carried === 0 && branchArgFed.has(x));
+    });
+  /** Does `call`'s value, through the ops it would be inlined into, reach ONE op that reads it
+   *  twice? That op spells it twice — both operands of `s * s`, or both edge copies of a `br
+   *  ^bb3(%9, %9)` — and the call runs once per spelling. A multi-successor terminator's arguments
+   *  are `ridesEdge`'s question, which weighs a do-while's exit copy reading the loop variable its
+   *  update copy wrote. */
+  const spelledTwice = (call: Op): boolean =>
+    reachesThroughInline(call, (_, sites) =>
+      sites.some((u, i) => u.op.successors.length <= 1 && sites.findIndex((v) => v.op === u.op) !== i),
+    );
+  return { ridesEdge, spelledTwice };
+}
+
+/** A natural loop whose latch's terminator branches back to the header: the test sits at the
+ *  bottom of the body. */
+type BottomTestedLoop = NaturalLoop & { term: Op; back: Successor };
+
+/** The natural loops, from the caller's dominators, and the loop rules over them. With no `dom`
+ *  there are no loops and every rule stands down — the same posture as the `defs`-carried rules. */
+export interface LoopRules {
+  loopBodies: NaturalLoop[];
+  /** Never seat a materialized def in a MULTI-BLOCK loop header: a test-at-top `while`'s condition
+   *  has no seat for a materialized temp (the structurer's headerPure gate), so materializing there
+   *  trades a structuring function for a decline. Self-loop headers stay eligible — their
+   *  kept-guard do-while form hosts the temp. */
+  multiBlockHeaders: Set<Block>;
+  bottomTested: BottomTestedLoop[];
+  /** The def's value enters some loop's header live and every consumer sits outside that loop, as
+   *  does the def: the value is carried ACROSS the loop, not into it. */
+  liveAcrossLoop(def: Op, r: Value, consumers: Op[]): boolean;
+  /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
+  readsPreUpdate(L: BottomTestedLoop, op: Op, r: Value): boolean;
+  escapesAheadOfUpdate(op: Op, r: Value, consumers: Op[]): boolean;
+  rebuiltPast(op: Op, r: Value): boolean;
+  /** Is `r` read where the update has run: after the loop, or by its bottom test? */
+  readAfterUpdate(L: BottomTestedLoop, r: Value, consumers: Op[]): boolean;
+}
+
+export function makeLoopRules(a: {
+  fn: Fn;
+  dom: Map<Block, Set<Block>> | undefined;
+  predsOf: Map<Block, Block[]>;
+  liveIn: Map<Block, Set<Value>>;
+  uses: UseIndex;
+  defOf: Map<Value, Op>;
+  render: RenderModel;
+  materialize: ReadonlySet<Op>;
+}): LoopRules {
+  const { fn, dom, predsOf, liveIn, defOf, render, materialize } = a;
+  const { opBlock } = a.uses;
   const loopBodies = dom ? naturalLoops(fn, dom, predsOf) : [];
-  /** The def's value enters some loop's header live and every consumer sits outside that loop,
-   *  as does the def: the value is carried ACROSS the loop, not into it. */
-  // Never for a def in a MULTI-BLOCK loop header: a test-at-top `while`'s condition has no seat
-  // for a materialized temp (the structurer's headerPure gate), so materializing there trades a
-  // structuring function for a decline. Self-loop headers stay eligible — their kept-guard
-  // do-while form hosts the temp.
   const multiBlockHeaders = new Set(loopBodies.filter((L) => L.body.size > 1).map((L) => L.header));
   const liveAcrossLoop = (def: Op, r: Value, consumers: Op[]): boolean =>
     !multiBlockHeaders.has(opBlock.get(def)!) &&
@@ -1488,18 +1574,16 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  outside the body lies past the latch's exit, where the update has run. The structurer adds one
    *  refusal of its own, on names (`preUpdateHomes`, structure.ts).
    *
-   *  Asked only once every other rule has settled (`escapePhase` below), so the walk stops at each
-   *  def those rules name: a materialized def renders as its name. It stops at a BACK-EDGE ARG too —
-   *  reading it is reading the post-update value, which is what the name holds. */
+   *  Asked only once every other rule has settled (`escapePhase` in `analyze`), so the walk stops at
+   *  each def those rules name: a materialized def renders as its name. It stops at a BACK-EDGE ARG
+   *  too — reading it is reading the post-update value, which is what the name holds. */
   const bottomTested = loopBodies.flatMap((L) => {
     const term = L.latch.ops[L.latch.ops.length - 1];
     const back = term.successors.find((sc) => sc.block === L.header);
     return back ? [{ ...L, term, back }] : [];
   });
   const escapeLoops = bottomTested.filter((L) => L.body.size === 1);
-  const preUpdateHomes = new Set<Op>();
-  /** Does `r`, computed by `op` in `L`'s body, read a loop variable the update overwrites? */
-  const readsPreUpdate = (L: (typeof bottomTested)[number], op: Op, r: Value): boolean => {
+  const readsPreUpdate = (L: BottomTestedLoop, op: Op, r: Value): boolean => {
     const seen = new Set<Value>();
     const readsUpdated = (x: Value): boolean => {
       if (seen.has(x) || L.back.args.includes(x)) {
@@ -1538,7 +1622,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  latch op the value is computed at.
    *
    *  Never for a divide in a multi-block loop header with an edge out of `L`: named, it is a
-   *  pre-update home (`preUpdateHomes`, below), and the structurer refuses a home in a loop whose
+   *  pre-update home (`preUpdateHomes`), and the structurer refuses a home in a loop whose
    *  variable's name a block after the loop also holds (`sharesALoopName`), where the loop lifts
    *  with the divide unnamed. mwcc's `do { t = k / n; if (*q == 5) break; … } while (--n);` puts
    *  the `divw` ahead of the header's `beq` out. */
@@ -1587,7 +1671,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       const crossesAt = (home: Op): boolean =>
         home !== op &&
         opBlock.get(home) === L.latch &&
-        between(L.latch.ops.indexOf(home)).some((x) => orderSensitive(x) || namedHelper(x));
+        between(L.latch.ops.indexOf(home)).some((x) => orderSensitive(x) || namedHelper(materialize, x));
       const exitArg = L.term.successors.some(
         (sc) =>
           !L.body.has(sc.block) &&
@@ -1601,14 +1685,13 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         L.latch.ops.some(
           (h) =>
             h.results[0] !== undefined &&
-            consumersOf(h).some((c) => !L.body.has(opBlock.get(c)!)) &&
+            render.consumersOf(h).some((c) => !L.body.has(opBlock.get(c)!)) &&
             reaches(h.results[0]) &&
             crossesAt(h),
         )
       );
     });
-  /** Is `r` read where the update has run: after the loop, or by its bottom test? */
-  const readAfterUpdate = (L: (typeof bottomTested)[number], r: Value, consumers: Op[]): boolean => {
+  const readAfterUpdate = (L: BottomTestedLoop, r: Value, consumers: Op[]): boolean => {
     if (!consumers.every((c) => L.body.has(opBlock.get(c)!))) {
       return true;
     }
@@ -1626,49 +1709,49 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     };
     return L.term.opcode === 'cond_br' && inTest(L.term.operands[0]);
   };
+  return {
+    loopBodies,
+    multiBlockHeaders,
+    bottomTested,
+    liveAcrossLoop,
+    readsPreUpdate,
+    escapesAheadOfUpdate,
+    rebuiltPast,
+    readAfterUpdate,
+  };
+}
+
+/** The variation scopes and the placement sets the rules read, each settled before the fixpoint:
+ *  none reads `materialize`. */
+export interface HomeScopes {
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
    *  that home an address; a rule homing the SCALAR a load returns is not this case — the name
    *  holds the loaded value and the address stays inline at the deref, which is why the load rules
    *  (live-across-a-loop, join feeds, /addr-home's, def-block placement) do not ask it. */
-  const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
-  // ── the address-home variation's scope ────────────────────────────────────────────────────
-  // Over the MERGE CLASS, so a base the arms derive and the join dereferences counts as the one
-  // register it is — see `sharedBaseClasses`. Computed once, and only under the variation.
-  const sharedBaseClass = homeSharedAddresses ? sharedBaseClasses(fn, returnsVoid) : new Set<Value>();
-  // The seventh scope's members, read the same way and for the same reason — one definition, run
-  // under this function's own `returnsVoid` where the gate must ask under both.
-  const escapeHomeOps = homeEscapingExtensions ? escapingExtensions(fn, returnsVoid) : new Set<Op>();
-  // The same question asked of the VALUE ALONE, which is what the two variations below need: their
-  // "shared bases stay the address-home scope's" exclusion is a hand-off between scopes, and
-  // widening it to the class would make them refuse values the address-home scope only claims
-  // when its own variation is ON — a candidate lost with no candidate gained. Where both variations run the
-  // two scopes may claim one value, which is a no-op: `materialize` is a set and the address-home
-  // scope, running first, is what registers `addressHomedBases`.
-  const usedOnlyAsSharedBase = (v: Value): boolean => {
-    const sites = useSitesOf.get(v) ?? [];
-    const consumers = new Set(sites.map((s) => s.op));
-    return (
-      consumers.size >= 2 &&
-      [...consumers].every(
-        (c) => MEM_BASE_OPS.has(c.opcode) && c.operands[0] === v && !c.operands.some((o, i) => i > 0 && o === v),
-      )
-    );
-  };
-  // The merge-feed-home variation's ops, settled BEFORE the fixpoint: the scope reads the IR alone (no
-  // render positions, no `materialize`), so it cannot change as the set grows. Unlike the rules
-  // that stand down without the caller's `dom`, this one computes its own: rank.ts has already
-  // admitted the candidate on `hasMergeFeedHome`, which runs the same scope, so standing down here
-  // would be a refusal nothing reports.
-  let mergeFeedOps = new Set<Op>();
-  if (homeMergeFeeds) {
-    const mdom = dom ?? dominators(fn);
-    const mloops = mdom === dom ? loopBodies : naturalLoops(fn, mdom, predsOf);
-    mergeFeedOps = mergeFeedHomes(fn, mdom, defOf, new Set(mloops.flatMap((L) => [...L.body])));
-  }
-  /** result values the address-home variation materialized — the load rule's admission key */
-  const addressHomedBases = new Set<Value>();
+  addressCone(op0: Op): boolean;
+  /** The address-home variation's scope. Over the MERGE CLASS, so a base the arms derive and the
+   *  join dereferences counts as the one register it is — see `sharedBaseClasses`. Computed only
+   *  under the variation. */
+  sharedBaseClass: Set<Value>;
+  /** The seventh scope's members, read the same way and for the same reason — one definition, run
+   *  under this function's own `returnsVoid` where the gate must ask under both. */
+  escapeHomeOps: Set<Op>;
+  /** The address-home question asked of the VALUE ALONE, which is what the loop-expression and
+   *  derived-read scopes need: their "shared bases stay the address-home scope's" exclusion is a
+   *  hand-off between scopes, and widening it to the class would make them refuse values the
+   *  address-home scope only claims when its own variation is ON — a candidate lost with no
+   *  candidate gained. Where both variations run the two scopes may claim one value, which is a
+   *  no-op: `materialize` is a set and the address-home scope, running first, is what registers
+   *  `addressHomedBases`. */
+  usedOnlyAsSharedBase(v: Value): boolean;
+  /** The merge-feed-home variation's ops: the scope reads the IR alone (no render positions, no
+   *  `materialize`), so it cannot change as the set grows. Unlike the rules that stand down without
+   *  the caller's `dom`, this one computes its own: rank.ts has already admitted the candidate on
+   *  `hasMergeFeedHome`, which runs the same scope, so standing down here would be a refusal nothing
+   *  reports. */
+  mergeFeedOps: Set<Op>;
   /** The loop-expression-home variation's scope: 2+ distinct consumers of the value, at least one of
    *  them inside a loop the def's block is outside (loop model = the caller's dominators; absent ⇒
    *  never).
@@ -1680,13 +1763,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  single-use value inlines at its one use with the same bytes either way, so homing it can only
    *  add a copy. Values consumed only OUTSIDE any loop are the straight-line class `/derived-home`
    *  serves on its own evidence. */
-  const loopSharedConsumers = (v: Value, defBlk: Block): boolean => {
-    const consumers = [...new Set((useSitesOf.get(v) ?? []).map((s) => s.op))];
-    return (
-      consumers.length >= 2 &&
-      loopBodies.some((L) => !L.body.has(defBlk) && consumers.some((c) => L.body.has(opBlock.get(c)!)))
-    );
-  };
+  loopSharedConsumers(v: Value, defBlk: Block): boolean;
   /** The derived-read-home variation's scope: does `op0` stand on a memory READ that may render at
    *  `op0`'s own position?
    *
@@ -1726,27 +1803,11 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  run, a value inside a loop pulls it in to run per iteration. Neither is a write, so no
    *  barrier sees either; for an ordinary cell they are worse spellings, and for a volatile one
    *  they are a missing access and a duplicated one. */
-  const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
-    const reads = readCone(op0, defOf);
-    if (reads === null) {
-      return false;
-    }
-    const at = { blk, idx: opIndex.get(op0)! };
-    const coneReads = new Set(reads);
-    const bars = (x: Op): boolean =>
-      effectful(x) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
-    return (
-      reads.length > 0 &&
-      reads.every(
-        (r) =>
-          opBlock.get(r) === blk && (useSitesOf.get(r.results[0])?.length ?? 0) === 1 && !memWriteBetween(r, at, bars),
-      )
-    );
-  };
+  standsOnMovableRead(op0: Op, blk: Block): boolean;
   /** 2+ distinct consuming ops — the multi-use the pure-op rule reads as a reused register. */
-  const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
+  multiConsumer(v: Value): boolean;
   /** Values C evaluates only under a `&&`/`||` — the SECOND operand of every
-   *  `logic_and`/`logic_or`, and everything it reads. Two rules below read it and they read it the
+   *  `logic_and`/`logic_or`, and everything it reads. Two rules read it and they read it the
    *  opposite way round, because the fold that built the connective treats a READ and an EFFECT
    *  differently.
    *
@@ -1772,7 +1833,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  Only the guarded side is SEEDED. A connective's own operand[0] is evaluated whenever the
    *  connective is, so neither rule wants it — but an inner connective sitting under an outer guard
    *  is reached through the outer's cone, operand[0] included, which is what C does with it. */
-  const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
+  shortCircuitGuarded: Set<Value>;
   /** THE def-block placement rule's copy refusal: is every use of the value a successor ARGUMENT,
    *  i.e. is the value nothing but a block parameter's incoming copy?
    *
@@ -1787,11 +1848,72 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
    *  Note what this does NOT claim: those reads really do sit above the loop guard in the asm, so
    *  the placement inference was right and the SPELLING is what fails. Seating the read above the
    *  guard AND as the loop variable is loop-init hoisting, a capability this rule does not have. */
+  onlyFeedsBlockParams(v: Value): boolean;
+}
+
+export function homeScopes(a: {
+  fn: Fn;
+  returnsVoid: boolean;
+  opts: AnalyzeOptions;
+  uses: UseIndex;
+  defOf: Map<Value, Op>;
+  predsOf: Map<Block, Block[]>;
+  loops: LoopRules;
+  memWriteBetween: StructureAnalysis['memWriteBetween'];
+}): HomeScopes {
+  const { fn, returnsVoid, opts, defOf, predsOf, loops, memWriteBetween } = a;
+  const { useSitesOf, opIndex, opBlock } = a.uses;
+  const { dom } = opts;
+  const addressCone = (op0: Op): boolean => coneHoldsAddr(op0, defOf);
+  const sharedBaseClass = opts.homeSharedAddresses ? sharedBaseClasses(fn, returnsVoid) : new Set<Value>();
+  const escapeHomeOps = opts.homeEscapingExtensions ? escapingExtensions(fn, returnsVoid) : new Set<Op>();
+  const usedOnlyAsSharedBase = (v: Value): boolean => {
+    const sites = useSitesOf.get(v) ?? [];
+    const consumers = new Set(sites.map((s) => s.op));
+    return (
+      consumers.size >= 2 &&
+      [...consumers].every(
+        (c) => MEM_BASE_OPS.has(c.opcode) && c.operands[0] === v && !c.operands.some((o, i) => i > 0 && o === v),
+      )
+    );
+  };
+  let mergeFeedOps = new Set<Op>();
+  if (opts.homeMergeFeeds) {
+    const mdom = dom ?? dominators(fn);
+    const mloops = mdom === dom ? loops.loopBodies : naturalLoops(fn, mdom, predsOf);
+    mergeFeedOps = mergeFeedHomes(fn, mdom, defOf, new Set(mloops.flatMap((L) => [...L.body])));
+  }
+  const loopSharedConsumers = (v: Value, defBlk: Block): boolean => {
+    const consumers = [...new Set((useSitesOf.get(v) ?? []).map((s) => s.op))];
+    return (
+      consumers.length >= 2 &&
+      loops.loopBodies.some((L) => !L.body.has(defBlk) && consumers.some((c) => L.body.has(opBlock.get(c)!)))
+    );
+  };
+  const standsOnMovableRead = (op0: Op, blk: Block): boolean => {
+    const reads = readCone(op0, defOf);
+    if (reads === null) {
+      return false;
+    }
+    const at = { blk, idx: opIndex.get(op0)! };
+    const coneReads = new Set(reads);
+    const bars = (x: Op): boolean =>
+      effectful(x) || ((x.opcode === 'load' || x.opcode === 'aload') && !coneReads.has(x));
+    return (
+      reads.length > 0 &&
+      reads.every(
+        (r) =>
+          opBlock.get(r) === blk && (useSitesOf.get(r.results[0])?.length ?? 0) === 1 && !memWriteBetween(r, at, bars),
+      )
+    );
+  };
+  const multiConsumer = (v: Value): boolean => new Set((useSitesOf.get(v) ?? []).map((s) => s.op)).size >= 2;
+  const shortCircuitGuarded = shortCircuitGuardedValues(fn, defOf);
   const argUsedValues = new Set<Value>();
   const operandUsedValues = new Set<Value>();
-  // Both sets serve that rule alone, so they are built only where it can fire — the same posture
-  // `condBrArgFed` takes above (every other target pays nothing for a behavior it never declares).
-  if (readsStayWhereWritten) {
+  // Both sets serve the copy refusal alone, so they are built only where it can fire — the same
+  // posture `condBrArgFed` takes (every other target pays nothing for a behavior it never declares).
+  if (opts.readsStayWhereWritten) {
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         for (const v of op.operands) {
@@ -1806,12 +1928,596 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     }
   }
   const onlyFeedsBlockParams = (v: Value): boolean => argUsedValues.has(v) && !operandUsedValues.has(v);
-  /** the divides the pre-update exit rule below named (`rebuiltPast`) */
-  const exitDivides = new Set<Op>();
-  /** an op the asm reached by CALLING a runtime helper */
-  const isHelper = (op: Op): boolean => placedAt(op) === 'helper';
-  /** one the helper clause below named: a statement sequenced as a named call is */
-  const namedHelper = (op: Op): boolean => materialize.has(op) && isHelper(op);
+  return {
+    addressCone,
+    sharedBaseClass,
+    escapeHomeOps,
+    usedOnlyAsSharedBase,
+    mergeFeedOps,
+    loopSharedConsumers,
+    standsOnMovableRead,
+    multiConsumer,
+    shortCircuitGuarded,
+    onlyFeedsBlockParams,
+  };
+}
+
+/** Every stage output the materialization rules read. */
+export interface MaterializeRules {
+  opts: AnalyzeOptions;
+  uses: UseIndex;
+  edges: EdgeArgUses;
+  render: RenderModel;
+  reach: InlineReach;
+  loops: LoopRules;
+  scopes: HomeScopes;
+  defOf: Map<Value, Op>;
+  predsOf: Map<Block, Block[]>;
+  memWriteBetween: StructureAnalysis['memWriteBetween'];
+  copyInterdependent: Set<Value>;
+}
+
+/** The rules for a PURE value-producing op (a constant, an address computation, arithmetic — NOT a
+ *  memory access), in order. The helper clause and the exit-divide rule end the walk when they name
+ *  the op; every rule after them runs whatever an earlier one decided, so the address-home scope
+ *  registers `addressHomedBases` even for an op a rule ahead of it already named.
+ *
+ *  A value with ≥2 distinct-STATEMENT uses in the SSA is one the compiler kept in a register and
+ *  reused: the frontend never dedups, so multi-use exists ONLY because the asm loaded/computed the
+ *  value once and read the same register again. Inlining it re-derives the value at each use (a
+ *  fresh pool load / repeated address arithmetic) — which the compiler did NOT do — so materialize
+ *  it into a local instead, reproducing that register. Pure ⇒ every render is value-identical, so
+ *  (unlike a load) no intervening memory write can invalidate a later render: multi-consumer
+ *  suffices, no barrier scan. Scope: a `const` that is LIVE ACROSS A CALL. A value the compiler
+ *  needs after a call must survive in a CALLEE-SAVED register — i.e. a local — because the call
+ *  clobbers the caller-saved ones; the compiler therefore loads it ONCE and keeps it, exactly what
+ *  materializing into a local reproduces (the base of `((s32 *)C)[i]` reused across `foo(...)`
+ *  calls). WITHOUT a call in its live range the const is instead cheaply re-materialized at each
+ *  use (a bare `movs r, #0` per init), so materializing it would ADD pointless copies and MISS —
+ *  hence the call gate (the small-constant regression). Cheap deref casts still land on the `index`
+ *  node at the use, preserving byte strides. Second scope: a NON-const read by a sibling
+ *  parallel-copy arg (`copyInterdependent`) — the one place a pure value's inlining is not
+ *  value-identical rendering but a re-derivation the copy machinery is forced into. Address cones
+ *  are excluded from it (an `&g + i` rendered standalone loses the memAccess's inline `(u8 *)` cast
+ *  — cast-aware base materialization is separate), and consts are not in it at all: a re-derived
+ *  const is re-materialization, which is the compiler's own behavior. */
+export function namePureOp(
+  rules: MaterializeRules,
+  state: MaterializeState,
+  op: Op,
+  b: Block,
+  escapePhase: boolean,
+): void {
+  const { opts, uses, render, reach, loops, scopes, memWriteBetween, copyInterdependent } = rules;
+  const { useSitesOf } = uses;
+  const { materialize } = state;
+  const pr = op.results[0];
+  // AN OP THE ASM CALLED A HELPER FOR is placed as the call it was (`isHelper`: `bl
+  // __divsi3` for `k / n` and `k / 5` on agbcc, `bl __ashrdi3` for a 64-bit `>>`, `bl
+  // __div2i` for a 64-bit `/` on mwcc). A call runs once, where the asm ran it, and agbcc,
+  // with no scheduler, EMITS the call where the source spells the operation, so naming it
+  // where the asm ran it recompiles to that asm; inlined at its use it moves there. One
+  // direction only, as target.ts `readsStayWhereWritten` says of reads: the asm's position
+  // is not always where the source computed it — loop.c hoists an invariant `bl __divsi3`
+  // into the loop's guarded preheader, and naming it there is what recompiles. So it is
+  // named at its def when:
+  //   • an effect, or another helper named there, lies between the def and a place it
+  //     renders — `t = k / n; *q = n; return t + 1;` is `bl; str`, and inlined it comes
+  //     back `*q = n; return k / n + 1;`, `str; bl`. A named one bars what the barrier
+  //     scan in `nameAccess` places, as a named call does, so a call the asm ran ahead of it
+  //     stays ahead of it;
+  //   • it renders in a block other than its own, or rides a branch's edge copy
+  //     (`ridesEdge`): then it runs on the paths that render it, not where the asm ran it
+  //     once. `t = k / n; if (c) return t + 1; return t - 3;` is one `bl`
+  //     above the `cmp`, and inlined into both arms it recompiles to one per arm;
+  //   • it sits in a `&&`/`||` guarded cone. raise/shortcircuit.ts drops the stamp from a
+  //     helper op it hoists out of the arm it guards (`forgetHelperPlacement`), so one that
+  //     still carries it ran above the branch, and C's short circuit would skip it (the
+  //     guarded-call rule in `nameAccess`).
+  // A divide the ISA computes is none of these: kmc, IDO and mwcc compile `t = k / n; *q
+  // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte. The rule
+  // after this one names it only where the loop's exit value needs the name.
+  if (isHelper(op) && pr && useSitesOf.has(pr)) {
+    const at = render.emitPositions(op);
+    if (
+      !at ||
+      scopes.shortCircuitGuarded.has(pr) ||
+      reach.ridesEdge(op) ||
+      at.some((p) => p.blk !== b) ||
+      at.some((p) => memWriteBetween(op, p, (x) => effectful(x) || namedHelper(materialize, x)))
+    ) {
+      materialize.add(op);
+      return;
+    }
+  }
+  // A DIVIDE THE ISA COMPUTES, in a value read past the loop's update that reads a loop
+  // variable, is named at its def when that value would be rebuilt behind a memory access
+  // or an effect the asm ran after it (`rebuiltPast`) — once every other rule has settled
+  // (`escapePhase`), as the escape rule is. kmc's `do { t = k / n; *q = n; r = t + 1; }
+  // while (--n);` is `div; …; sw; …; addiu v0, v1, 1`. Unnamed, the loop declines —
+  // `arg-safe-to-reevaluate` (hazards.ts) refuses the sink's move, and a read after the loop
+  // re-reads the updated counter — or, where the back edge carries the value too, the
+  // update copy rebuilds the divide behind the store. Named, the value reads the name and
+  // the divide stays where the asm ran it.
+  if (escapePhase && opSig(op.opcode)?.traps && pr && useSitesOf.has(pr) && loops.rebuiltPast(op, pr)) {
+    materialize.add(op);
+    state.exitDivides.add(op);
+    return;
+  }
+  if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
+    const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
+    if (cons.length > 1 && uses.liveAcrossCall(op, cons)) {
+      materialize.add(op);
+    }
+  } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !scopes.addressCone(op)) {
+    materialize.add(op);
+  }
+  // A float PRODUCT read by a float add or subtract, directly or through a negation, is named
+  // on a compiler that contracts (target.ts `contractsFloatProducts`): it fuses only WITHIN
+  // one expression, so the inline `a * b + c` recompiles to one `fmadds` — one rounding, a
+  // different value — while `t = a * b; t + c` is the unfused pair the object holds.
+  // KNOWN GAP: not at a multi-block loop header, the seat the scopes below refuse too.
+  if (
+    opts.contractsFloatProducts &&
+    op.opcode === 'fmul' &&
+    render.feedsFloatAdd(op) &&
+    !loops.multiBlockHeaders.has(b)
+  ) {
+    materialize.add(op);
+  }
+  // Folding the FIVE VARIATION scopes below into one predicate-parameterized scope is BOOKED
+  // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
+  // along with the gate duplication that is its price.
+  // Third scope, under the address-home variation only (see AnalyzeOptions.homeSharedAddresses):
+  // a non-const pure value whose MERGE CLASS is used only as the base of 2+ memory
+  // accesses.
+  if (
+    opts.homeSharedAddresses &&
+    op.opcode !== 'const' &&
+    pr &&
+    scopes.sharedBaseClass.has(pr) &&
+    !scopes.addressCone(op) &&
+    !loops.multiBlockHeaders.has(b)
+  ) {
+    materialize.add(op);
+    state.addressHomedBases.add(pr);
+  }
+  // Fourth scope, under the loop-expression-home variation (AnalyzeOptions.homeLoopExprs): a
+  // pure non-const value with 2+ distinct consumers, at least one of them inside a loop the
+  // def sits outside. Shared bases stay the previous scope's (its load rule needs the
+  // registration).
+  if (
+    opts.homeLoopExprs &&
+    op.opcode !== 'const' &&
+    pr &&
+    !scopes.usedOnlyAsSharedBase(pr) &&
+    scopes.loopSharedConsumers(pr, b) &&
+    !scopes.addressCone(op) &&
+    !loops.multiBlockHeaders.has(b)
+  ) {
+    materialize.add(op);
+  }
+  // Fifth scope, under the derived-read-home variation (AnalyzeOptions.homeDerivedReads): a
+  // pure non-const value with 2+ consumers standing on a memory read. Shared bases stay
+  // the third scope's and values consumed across a loop the fourth's; what this one adds
+  // is the straight-line case, which neither reaches.
+  if (
+    opts.homeDerivedReads &&
+    op.opcode !== 'const' &&
+    pr &&
+    !scopes.usedOnlyAsSharedBase(pr) &&
+    !rendersAsAddress(op) &&
+    scopes.multiConsumer(pr) &&
+    scopes.standsOnMovableRead(op, b) &&
+    !loops.multiBlockHeaders.has(b)
+  ) {
+    materialize.add(op);
+  }
+  // Sixth scope, under the merge-feed-home variation (AnalyzeOptions.homeMergeFeeds) —
+  // `mergeFeedHomes` above. The only one of the FIVE VARIATION scopes that admits a `const`; the
+  // other const clientele is the first scope, a const live across a call. For the sibling
+  // variations a re-derived const is re-materialization, the compiler's own behavior, while a
+  // const the arms of a branch merge is one it held in a register across them
+  // (`mov r5, #0` once, not per arm).
+  if (opts.homeMergeFeeds && scopes.mergeFeedOps.has(op)) {
+    materialize.add(op);
+  }
+  // Seventh scope, under the escaping-extension-home variation
+  // (AnalyzeOptions.homeEscapingExtensions) — `escapingExtensions` above, which the
+  // enumeration gate also runs. The siblings all admit a value the def block also consumes;
+  // this one admits only the value that left, which is the register the asm carried across
+  // the boundary. The seat refusal is the rule's, not the scope's — and unlike the third
+  // scope's, which `sharedBaseClasses` prices with a named row, it has NO structurable
+  // inhabitant here: four constructions of a header defining a multi-consumer escaping
+  // value decline before any variation is consulted, `xor` included
+  // (`escape-home.test.ts`). It stands because the seat is a property of the block.
+  if (opts.homeEscapingExtensions && scopes.escapeHomeOps.has(op) && !loops.multiBlockHeaders.has(b)) {
+    materialize.add(op);
+  }
+}
+
+/** A read or call the barrier scan places at its one render position. */
+interface PlacedAccess {
+  op: Op;
+  /** `counted(op)`: it EXECUTES at each render */
+  once: boolean;
+  sites: UseSite[];
+  pos: { blk: Block; idx: number };
+  /** which part of its anchor the op renders in (`partOf`) */
+  ownPart: string | null;
+  /** under the value-home variation, the writes that may reach the global cell the op reads */
+  barsThisRead: ((x: Op) => boolean) | null;
+}
+
+/** Which part of its anchor `x` renders in: '' when the anchor is not a terminator, null when it
+ *  has no one part. A terminator renders in parts — its own operands, then one copy per edge
+ *  argument, each a statement of its own. */
+function partOf(render: RenderModel, x: Op): string | null {
+  for (let cur = x; ;) {
+    const cons = render.consumersOf(cur);
+    if (cons.length !== 1) {
+      return null;
+    }
+    const [c] = cons;
+    if (c.successors.length > 0) {
+      const v = cur.results[0];
+      const parts = [
+        ...c.operands.flatMap((o, i) => (o === v ? [`op${i}`] : [])),
+        ...c.successors.flatMap((sc, si) => sc.args.flatMap((a, ai) => (a === v ? [`${si}:${ai}`] : []))),
+      ];
+      return parts.length === 1 ? parts[0] : null;
+    }
+    if (render.anchored(c)) {
+      return '';
+    }
+    cur = c;
+  }
+}
+
+/** Does `x` render in the same statement as the placed access: the same anchor, and the same part
+ *  of it? */
+function sameStatement(render: RenderModel, access: PlacedAccess, x: Op): boolean {
+  const q = render.emitPos(x);
+  return (
+    q !== null &&
+    q.blk === access.pos.blk &&
+    q.idx === access.pos.idx &&
+    access.ownPart !== null &&
+    partOf(render, x) === access.ownPart
+  );
+}
+
+/** Is every use of the placed access inside `call`'s arguments, as rendered? */
+function onlyFeedsCall(defOf: Map<Value, Op>, materialize: ReadonlySet<Op>, access: PlacedAccess, call: Op): boolean {
+  const cone = new Set<Op>([call]);
+  const walk = (v: Value): void => {
+    const d = defOf.get(v);
+    if (d !== undefined && d !== access.op && !cone.has(d) && !materialize.has(d)) {
+      cone.add(d);
+      d.operands.forEach(walk);
+    }
+  };
+  call.operands.forEach(walk);
+  return access.sites.every((u) => cone.has(u.op));
+}
+
+/** A between-op is a BARRIER when it renders as a sequenced statement the def would cross:
+ *  stores/opaque always; a call/load that is dead (statement), materialized (statement), or
+ *  inlined into a DIFFERENT statement. Loads never bar a load (reads don't conflict).
+ *
+ *  Inside ONE statement the order is the compiler's, and every compiler the corpus builds
+ *  with evaluates a call before the memory reads beside it — agbcc, IDO 7.1, both gcc 2.7.2
+ *  builds and mwcc all compile `*p + cb(p)`, `cb(p) - *p`, `(*p ^ 3) * cb(p)` and `*p <<
+ *  cb(p)` to the call, then the load. So a CALL ahead of a read it shares a statement with
+ *  is the order the recompile gives back, and bars nothing. A READ ahead of such a call is
+ *  the order no single expression gives back — `int t = *p; return t + cb(p);` compiles
+ *  `ldr; bl; add`, and inlined as `*p + cb(p)` it recompiles `bl; ldr` — so that call bars
+ *  the read, which is named where it ran. Unless the read is only the call's argument,
+ *  which every compiler evaluates first; read a second time beside the call (`G & cg(G)`
+ *  for one `ldr`), that second read comes back after it.
+ *
+ *  TWO CALLS in one statement have no such order: agbcc calls `cg(k) - cb(p)` in operand
+ *  order and mwcc in its own, so `bl cb; bl cg` inlined as that comes back reversed. A call
+ *  ahead of another is named too, unless its value is only the later call's argument.
+ *
+ *  AND A TERMINATOR IS NOT ONE STATEMENT. It renders in parts (`partOf`), so a read in one edge
+ *  copy and a call in its sibling are sequenced, whatever order the copies come out in: agbcc's
+ *  `bl cb; ldr r1, [r5]` into a merge came back `a1 = *a0; a2 = cb(a0) + a2;`. Two ops share a
+ *  statement only when they render in the same part. */
+function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access: PlacedAccess, x: Op): boolean {
+  const { op, once, barsThisRead } = access;
+  const isCall = op.opcode === 'call';
+  // Value-home variation: a store/astore this read is PROVABLY disjoint from (a different named
+  // global) does not sequence against it, so the read may still render at its use.
+  if (barsThisRead && (x.opcode === 'store' || x.opcode === 'astore') && !barsThisRead(x)) {
+    return false;
+  }
+  if (x.opcode === 'store') {
+    // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load
+    // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars — and so does every
+    // store to a qualified read: a device register answers by when it is read, not only by
+    // which bytes were last written (REG_IF read after the REG_IE write it preceded).
+    if (!once && op.opcode === 'load' && disjointConstSlots(op, x)) {
+      return false;
+    }
+    return true;
+  }
+  if (x.opcode === 'astore' || x.opcode === 'opaque' || namedHelper(materialize, x)) {
+    return true;
+  }
+  if (x.opcode === 'call') {
+    return (
+      !x.results.length ||
+      !rules.uses.useSitesOf.has(x.results[0]) ||
+      materialize.has(x) ||
+      !sameStatement(rules.render, access, x) ||
+      !onlyFeedsCall(rules.defOf, materialize, access, x)
+    );
+  }
+  // Two qualified reads are two accesses in an order. Rendered in one expression, the
+  // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
+  // qualified read spelled as a bare statement because nothing uses it is an access too.
+  if (once && !isCall && (x.opcode === 'load' || x.opcode === 'aload') && counted(x)) {
+    return true;
+  }
+  if (!isCall) {
+    return false;
+  } // a plain load never bars a load
+  if (x.opcode === 'load' || x.opcode === 'aload') {
+    return !x.results.length || !rules.uses.useSitesOf.has(x.results[0])
+      ? false // dead load: never emitted at all
+      : materialize.has(x) || !sameStatement(rules.render, access, x);
+  }
+  return false;
+}
+
+/** The rules for a memory access — a `call`, `load` or `aload` — in order; the first that names
+ *  the op ends the walk. */
+export function nameAccess(rules: MaterializeRules, state: MaterializeState, op: Op, b: Block): void {
+  const { opts, uses, edges, render, reach, loops, scopes, predsOf, memWriteBetween } = rules;
+  const { useSitesOf } = uses;
+  const { materialize } = state;
+  const { defs, dom } = opts;
+  const r = op.results[0];
+  if (!r || !useSitesOf.has(r)) {
+    return;
+  } // dead call → exprstmt (unchanged)
+  // A call, or a read whose spelling is qualified (a device read the lift pinned, a read of an
+  // object the map declares volatile), EXECUTES at each render, where a plain duplicate read is
+  // one agbcc CSEs away. It takes the two-site, edge, guarded-operand and one-position rules
+  // below. And it stays in order against every other qualified access, which `isBarrier` says.
+  const once = counted(op);
+  // Under the value-home variation: which named global cell this op reads, if any. A constant-
+  // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
+  // everything. Null ⇒ every write bars.
+  const cell =
+    opts.rereadGlobals && defs && op.opcode === 'load' && !once
+      ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
+      : null;
+  const barsThisRead = cell && defs ? mayWriteGlobal(defs, cell.name) : null;
+  if (opts.materializeJoinFeeds && op.opcode === 'load' && edges.condBrArgFed.has(r)) {
+    materialize.add(op);
+    return;
+  }
+  const sites = useSitesOf.get(r)!;
+  const consumers = [...new Set(sites.map((s) => s.op))];
+  // A call must EXECUTE once — any second operand slot duplicates it → named temp.
+  if (once && sites.length > 1) {
+    materialize.add(op);
+    return;
+  }
+  // …and ONCE means once on EVERY path the asm runs it on, which the multi-site rule above
+  // does not say. `anchored` calls a terminator a single render position, but a branch's edge
+  // copies are emitted inside the ARMS, so a call whose only consumer is an edge argument
+  // renders in one arm and is skipped on the others. Compiled: `s32 t = f2(a); if (a > 0) {
+  // return t; } return 0;` gives `bl f2` ahead of the `cmp`, and inlined at the edge the
+  // recovered C calls `f2` only in the `else`; a `switch_br` arm hides it the same way.
+  // Materializing puts it back at the position the asm executed it. Sole-use only in
+  // practice — a second use already materialized above.
+  //
+  // And the same under the ops it is inlined into (`ridesEdge`): `f1(a0) - v` riding a
+  // do-while's exit edge renders the call after the loop, once, where the body ran it every
+  // iteration; riding the back edge of a loop that also exits elsewhere it renders in an arm;
+  // riding two edge args it renders twice. And one op reading it twice spells it twice
+  // (`spelledTwice`).
+  if (once && (edges.branchArgFed.has(r) || reach.ridesEdge(op) || reach.spelledTwice(op))) {
+    materialize.add(op);
+    return;
+  }
+  // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
+  // give it away. Two independent facts. A def DOMINATES its uses (ir/verify.ts), so a call
+  // or a qualified read the connective reads ran on every path that evaluates it, while the
+  // inlined C runs it on fewer — agbcc compiles `do { r = cb(p); } while (i++ <= n && r !=
+  // 0);` to a `bl cb` ahead of both compares. And the DEF is where to put it back because a
+  // counted op is `speculationUnsafe`, so no fold lifted one into this cone
+  // (raise/shortcircuit.ts refuses an arm that holds one; structure.ts declines on a read
+  // placed after the folds ran). `opaque`, the other hoist-unsafe
+  // op with a result, needs no placement — neither position spells compilable C — and a
+  // bottom test holding one still declines in `testSkipsAnEffect`, which is that guard's
+  // remaining population.
+  if (once && scopes.shortCircuitGuarded.has(r)) {
+    materialize.add(op);
+    return;
+  }
+  // Live across a LOOP neither side belongs to: the access ran before the loop and the
+  // value crossed it in a callee-saved register (hipress's `keep = p[1]`, homed in r8 and
+  // touched only by `mov`). Rendering at the use would re-schedule the access to the far
+  // side of the loop — the same refusal liveAcrossCall makes for a call, applied to a loop.
+  if (loops.liveAcrossLoop(op, r, consumers)) {
+    materialize.add(op);
+    return;
+  }
+  // ── DEF-BLOCK PLACEMENT (readsStayWhereWritten; see AnalyzeOptions) ──────────────────
+  // Every render in a block this one strictly dominates, with a branch between ⇒ the asm
+  // read once above that branch, and re-spelling the read there reproduces it. ONE render
+  // suffices — the short-circuit-into-a-call shape has exactly one — and an unresolvable
+  // render position refuses, as everywhere else. Both memory reads, spelled positively: a
+  // `call` is the enclosing arm's other member and has its own execute-once rules above.
+  if (
+    (op.opcode === 'load' || op.opcode === 'aload') &&
+    opts.readsStayWhereWritten &&
+    dom &&
+    !loops.multiBlockHeaders.has(b) &&
+    !scopes.shortCircuitGuarded.has(r) &&
+    !scopes.onlyFeedsBlockParams(r)
+  ) {
+    const at = consumers.map((c) => render.emitPos(c));
+    const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
+    if (
+      rb &&
+      rb.length > 0 &&
+      rb.every((x) => x !== b && dom.get(x)!.has(b)) &&
+      !preheaderOfRenderLoop(loops.loopBodies, b, rb) &&
+      !fallThroughSeam(predsOf, b, rb)
+    ) {
+      materialize.add(op);
+      return;
+    }
+  }
+  // Address-home variation: a multi-render load THROUGH a base this variation homed re-reads what the
+  // asm read once into the register the home just reproduced — home the value too, at the
+  // load's own position. Only through variation-homed bases (the fixpoint's later sweep sees them
+  // even though reverse order visits the load first); the general multi-render re-read stays
+  // the default rule below. addressHomedBases registers on the same sweep that materializes the
+  // base — safe because no other rule can pre-empt a value the variation would home: base-slot-only
+  // means no successor-arg use (outside copyInterdependent's read set), and the variation's scope
+  // excludes consts, the const arm's only clientele.
+  if (
+    opts.homeSharedAddresses &&
+    op.opcode === 'load' &&
+    consumers.length > 1 &&
+    state.addressHomedBases.has(op.operands[0]) &&
+    !loops.multiBlockHeaders.has(b)
+  ) {
+    materialize.add(op);
+    return;
+  }
+  // A MULTI-RENDER load re-reads memory at each render — which is exactly what the original
+  // per-use source spelling did (`while (*s != EOS) *d = *s;` reads *s twice per iteration),
+  // so it is sound iff every render still sees the def-time memory: NO write anywhere
+  // between the def and ANY render (cycle-aware, conservative write set). Otherwise a temp.
+  //
+  // WHERE it renders. Without the variation: one position per consumer, and a consumer with no
+  // single position (its own value renders in several places) refuses. With the variation a load
+  // resolves the whole SET instead — the second half of the value-home defect, where the
+  // local is invented not by a barrier but because the pure expression downstream is itself
+  // duplicated (`gOut = (gValue << 1) + gValue; return (gValue << 1) + gValue;`). Never for a
+  // call or a marked read: several positions there mean several executions.
+  const poss =
+    opts.rereadGlobals && !once
+      ? render.emitPositions(op)
+      : consumers.length > 1
+        ? consumers.map((c) => render.emitPos(c))
+        : [render.emitPos(consumers[0])];
+  if (!poss || poss.some((p) => p === null)) {
+    materialize.add(op);
+    return;
+  }
+  // A named helper op bars it too, as it bars the single render below: it is the call the asm
+  // made, and a value read before it and used after it was read once and kept across it
+  // (`v = gB; t = v / n; … q[1] = v;` is one `ldr` ahead of the `bl __divsi3`).
+  if (poss.length > 1) {
+    const writes = barsThisRead ?? effectful;
+    const isWrite = (x: Op): boolean => writes(x) || namedHelper(materialize, x);
+    if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
+      materialize.add(op);
+    }
+    return;
+  }
+  const pos = poss[0]!;
+  const access: PlacedAccess = { op, once, sites, pos, ownPart: partOf(render, op), barsThisRead };
+  // A CROSS-BLOCK call or qualified read would run on the render block's paths instead of
+  // its own — always materialize. Within its own block it is judged like everything else, by the
+  // barrier scan below.
+  if (once && pos.blk !== b) {
+    materialize.add(op);
+    return;
+  }
+  // Otherwise: inline only if no barrier stands on any def-avoiding def→render path.
+  if (memWriteBetween(op, pos, (x) => isBarrier(rules, materialize, access, x))) {
+    materialize.add(op);
+  }
+}
+
+/** A helper op the helper clause named, or a divide the exit rule did, is a pre-update home too
+ *  when its value reads a loop variable and is read where the update has run. Named, it lifts the
+ *  loop the pre-update hazard declines, in a body of any size — so the structurer's refusal on
+ *  homes (`preUpdateHomes`) must see it, as it sees the escape rule's.
+ *  KNOWN GAP: `readAfterUpdate` asks of the op's own consumers, so a divide whose value leaves the
+ *  loop only through a body op it feeds (`t + 1`) is not a home. Walked through that op, it would
+ *  be one, and the refusal would decline every such loop over a counter the function takes as a
+ *  parameter: its post-loop names include the entry block's. */
+export function namePreUpdateHelpers(rules: MaterializeRules, state: MaterializeState): void {
+  const { uses, render, loops } = rules;
+  for (const op of state.materialize) {
+    const r = op.results[0];
+    if (!r || state.preUpdateHomes.has(op) || !(isHelper(op) || state.exitDivides.has(op))) {
+      continue;
+    }
+    const consumers = render.consumersOf(op);
+    if (
+      loops.bottomTested.some(
+        (L) =>
+          L.body.has(uses.opBlock.get(op)!) && loops.readAfterUpdate(L, r, consumers) && loops.readsPreUpdate(L, op, r),
+      )
+    ) {
+      state.preUpdateHomes.add(op);
+    }
+  }
+}
+
+/** Every stage `analyze` runs ahead of its fixpoint, wired as `analyze` wires them, over an empty
+ *  `MaterializeState`. */
+export function analysisStages(
+  fn: Fn,
+  returnsVoid: boolean,
+  opts: AnalyzeOptions,
+): {
+  liveIn: Map<Block, Set<Value>>;
+  reachFrom: (b: Block) => Set<Block>;
+  state: MaterializeState;
+  rules: MaterializeRules;
+} {
+  const { dom } = opts;
+  const uses = indexUses(fn, returnsVoid);
+  const edges = edgeArgUses(fn, dom ?? dominators(fn));
+  const liveIn = blockLiveIn(fn, returnsVoid);
+  const state: MaterializeState = {
+    materialize: new Set(),
+    preUpdateHomes: new Set(),
+    exitDivides: new Set(),
+    addressHomedBases: new Set(),
+  };
+  const { materialize } = state;
+  const render = makeRenderModel(uses, materialize);
+  const reach = makeInlineReach(uses, edges, materialize);
+  const { reachFrom, reachAvoiding } = makeReach();
+  const memWriteBetween = makeMemWriteBetween({ opBlock: uses.opBlock, opIndex: uses.opIndex, reachAvoiding });
+  const defOf = opts.defs ?? defOpMap(fn);
+  const predsOf = predecessors(fn);
+  const loops = makeLoopRules({ fn, dom, predsOf, liveIn, uses, defOf, render, materialize });
+  const scopes = homeScopes({ fn, returnsVoid, opts, uses, defOf, predsOf, loops, memWriteBetween });
+  const copyInterdependent = copyInterdependentValues(fn, defOf);
+  const rules = {
+    opts,
+    uses,
+    edges,
+    render,
+    reach,
+    loops,
+    scopes,
+    defOf,
+    predsOf,
+    memWriteBetween,
+    copyInterdependent,
+  };
+  return { liveIn, reachFrom, state, rules };
+}
+
+export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {}): StructureAnalysis {
+  const { liveIn, reachFrom, state, rules } = analysisStages(fn, returnsVoid, opts);
+  const { materialize, preUpdateHomes } = state;
+  const { uses, render, loops } = rules;
   // Decide in REVERSE program order so a consumer's own materialization is settled before any
   // producer asks for its emit position (SSA: uses follow defs in dominance/layout order) — and
   // iterate to a fixpoint for IR whose block layout does not follow dominance (hand-built IR):
@@ -1827,8 +2533,7 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
       escapePhase = true;
     }
     sizeBefore = materialize.size;
-    emitPosCache.clear();
-    emitPosSetCache.clear(); // both render-position caches read `materialize`, which just grew
+    render.invalidate(); // both render-position caches read `materialize`, which just grew
     for (let bi = fn.blocks.length - 1; bi >= 0; bi--) {
       const b = fn.blocks[bi];
       for (let oi = b.ops.length - 1; oi >= 0; oi--) {
@@ -1836,485 +2541,37 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
         if (materialize.has(op)) {
           continue;
         }
-        // A call needs no rule: read outside its block it is named by the cross-block rule below.
+        // A call needs no rule: read outside its block it is named by `nameAccess`'s cross-block rule.
         const er = op.results[0];
         if (
           escapePhase &&
           op.opcode !== 'call' &&
           er &&
-          useSitesOf.has(er) &&
-          escapesAheadOfUpdate(op, er, consumersOf(op))
+          uses.useSitesOf.has(er) &&
+          loops.escapesAheadOfUpdate(op, er, render.consumersOf(op))
         ) {
           materialize.add(op);
           preUpdateHomes.add(op);
           continue;
         }
         if (op.opcode !== 'call' && op.opcode !== 'load' && op.opcode !== 'aload') {
-          // PURE value-producing op (a constant, an address computation, arithmetic — NOT a
-          // memory access). A value with ≥2 distinct-STATEMENT uses in the SSA is one the compiler
-          // kept in a register and reused: the frontend never dedups, so multi-use exists ONLY
-          // because the asm loaded/computed the value once and read the same register again.
-          // Inlining it re-derives the value at each use (a fresh pool load / repeated address
-          // arithmetic) — which the compiler did NOT do — so materialize it into a local instead,
-          // reproducing that register. Pure ⇒ every render is value-identical, so (unlike a load)
-          // no intervening memory write can invalidate a later render: multi-consumer suffices, no
-          // barrier scan. Scope: a `const` that is LIVE ACROSS A CALL. A value the compiler needs
-          // after a call must survive in a CALLEE-SAVED register — i.e. a local — because the call
-          // clobbers the caller-saved ones; the compiler therefore loads it ONCE and keeps it,
-          // exactly what materializing into a local reproduces (the base of `((s32 *)C)[i]` reused
-          // across `foo(...)` calls). WITHOUT a call in its live range the const is instead cheaply
-          // re-materialized at each use (a bare `movs r, #0` per init), so materializing it would
-          // ADD pointless copies and MISS — hence the call gate (the small-constant regression).
-          // Cheap deref casts still land on the `index` node at the use, preserving byte strides.
-          // Second scope: a NON-const read by a sibling parallel-copy arg (`copyInterdependent`) —
-          // the one place a pure value's inlining is not value-identical rendering but a
-          // re-derivation the copy machinery is forced into. Address cones are excluded from it
-          // (an `&g + i` rendered standalone loses the memAccess's inline `(u8 *)` cast —
-          // cast-aware base materialization is separate), and consts are not in it at all: a
-          // re-derived const is re-materialization, which is the compiler's own behavior.
-          const pr = op.results[0];
-          // AN OP THE ASM CALLED A HELPER FOR is placed as the call it was (`isHelper`: `bl
-          // __divsi3` for `k / n` and `k / 5` on agbcc, `bl __ashrdi3` for a 64-bit `>>`, `bl
-          // __div2i` for a 64-bit `/` on mwcc). A call runs once, where the asm ran it, and agbcc,
-          // with no scheduler, EMITS the call where the source spells the operation, so naming it
-          // where the asm ran it recompiles to that asm; inlined at its use it moves there. One
-          // direction only, as target.ts `readsStayWhereWritten` says of reads: the asm's position
-          // is not always where the source computed it — loop.c hoists an invariant `bl __divsi3`
-          // into the loop's guarded preheader, and naming it there is what recompiles. So it is
-          // named at its def when:
-          //   • an effect, or another helper named there, lies between the def and a place it
-          //     renders — `t = k / n; *q = n; return t + 1;` is `bl; str`, and inlined it comes
-          //     back `*q = n; return k / n + 1;`, `str; bl`. A named one bars what the barrier
-          //     scan below places, as a named call does, so a call the asm ran ahead of it stays
-          //     ahead of it;
-          //   • it renders in a block other than its own, or rides a branch's edge copy
-          //     (`ridesEdge`): then it runs on the paths that render it, not where the asm ran it
-          //     once. `t = k / n; if (c) return t + 1; return t - 3;` is one `bl`
-          //     above the `cmp`, and inlined into both arms it recompiles to one per arm;
-          //   • it sits in a `&&`/`||` guarded cone. raise/shortcircuit.ts drops the stamp from a
-          //     helper op it hoists out of the arm it guards (`forgetHelperPlacement`), so one that
-          //     still carries it ran above the branch, and C's short circuit would skip it (the
-          //     guarded-call rule below).
-          // A divide the ISA computes is none of these: kmc, IDO and mwcc compile `t = k / n; *q
-          // = n;` and `*q = n; … k / n` to the same object, so naming it buys no byte. The rule
-          // after this one names it only where the loop's exit value needs the name.
-          if (isHelper(op) && pr && useSitesOf.has(pr)) {
-            const at = emitPositions(op);
-            if (
-              !at ||
-              shortCircuitGuarded.has(pr) ||
-              ridesEdge(op) ||
-              at.some((p) => p.blk !== b) ||
-              at.some((p) => memWriteBetween(op, p, (x) => effectful(x) || namedHelper(x)))
-            ) {
-              materialize.add(op);
-              continue;
-            }
-          }
-          // A DIVIDE THE ISA COMPUTES, in a value read past the loop's update that reads a loop
-          // variable, is named at its def when that value would be rebuilt behind a memory access
-          // or an effect the asm ran after it (`rebuiltPast`) — once every other rule has settled
-          // (`escapePhase`), as the escape rule is. kmc's `do { t = k / n; *q = n; r = t + 1; }
-          // while (--n);` is `div; …; sw; …; addiu v0, v1, 1`. Unnamed, the loop declines —
-          // `arg-safe-to-reevaluate` (hazards.ts) refuses the sink's move, and a read after the loop
-          // re-reads the updated counter — or, where the back edge carries the value too, the
-          // update copy rebuilds the divide behind the store. Named, the value reads the name and
-          // the divide stays where the asm ran it.
-          if (escapePhase && opSig(op.opcode)?.traps && pr && useSitesOf.has(pr) && rebuiltPast(op, pr)) {
-            materialize.add(op);
-            exitDivides.add(op);
-            continue;
-          }
-          if (op.opcode === 'const' && pr && useSitesOf.has(pr)) {
-            const cons = [...new Set((useSitesOf.get(pr) ?? []).map((s) => s.op))];
-            if (cons.length > 1 && liveAcrossCall(op, cons)) {
-              materialize.add(op);
-            }
-          } else if (op.opcode !== 'const' && pr && copyInterdependent.has(pr) && !addressCone(op)) {
-            materialize.add(op);
-          }
-          // A float PRODUCT read by a float add or subtract, directly or through a negation, is named
-          // on a compiler that contracts (target.ts `contractsFloatProducts`): it fuses only WITHIN
-          // one expression, so the inline `a * b + c` recompiles to one `fmadds` — one rounding, a
-          // different value — while `t = a * b; t + c` is the unfused pair the object holds.
-          // KNOWN GAP: not at a multi-block loop header, the seat the scopes below refuse too.
-          if (contractsFloatProducts && op.opcode === 'fmul' && feedsFloatAdd(op) && !multiBlockHeaders.has(b)) {
-            materialize.add(op);
-          }
-          // Folding the FIVE VARIATION scopes below into one predicate-parameterized scope is BOOKED
-          // in docs/level-tower.md and deliberately unpaid; what it cannot absorb is named there,
-          // along with the gate duplication that is its price.
-          // Third scope, under the address-home variation only (see AnalyzeOptions.homeSharedAddresses):
-          // a non-const pure value whose MERGE CLASS is used only as the base of 2+ memory
-          // accesses.
-          if (
-            homeSharedAddresses &&
-            op.opcode !== 'const' &&
-            pr &&
-            sharedBaseClass.has(pr) &&
-            !addressCone(op) &&
-            !multiBlockHeaders.has(b)
-          ) {
-            materialize.add(op);
-            addressHomedBases.add(pr);
-          }
-          // Fourth scope, under the loop-expression-home variation (AnalyzeOptions.homeLoopExprs): a
-          // pure non-const value with 2+ distinct consumers, at least one of them inside a loop the
-          // def sits outside. Shared bases stay the previous scope's (its load rule needs the
-          // registration).
-          if (
-            homeLoopExprs &&
-            op.opcode !== 'const' &&
-            pr &&
-            !usedOnlyAsSharedBase(pr) &&
-            loopSharedConsumers(pr, b) &&
-            !addressCone(op) &&
-            !multiBlockHeaders.has(b)
-          ) {
-            materialize.add(op);
-          }
-          // Fifth scope, under the derived-read-home variation (AnalyzeOptions.homeDerivedReads): a
-          // pure non-const value with 2+ consumers standing on a memory read. Shared bases stay
-          // the third scope's and values consumed across a loop the fourth's; what this one adds
-          // is the straight-line case, which neither reaches.
-          if (
-            homeDerivedReads &&
-            op.opcode !== 'const' &&
-            pr &&
-            !usedOnlyAsSharedBase(pr) &&
-            !rendersAsAddress(op) &&
-            multiConsumer(pr) &&
-            standsOnMovableRead(op, b) &&
-            !multiBlockHeaders.has(b)
-          ) {
-            materialize.add(op);
-          }
-          // Sixth scope, under the merge-feed-home variation (AnalyzeOptions.homeMergeFeeds) —
-          // `mergeFeedHomes` above. The only one of the FIVE VARIATION scopes that admits a `const`; the
-          // other const clientele is the first scope, a const live across a call. For the sibling
-          // variations a re-derived const is re-materialization, the compiler's own behavior, while a
-          // const the arms of a branch merge is one it held in a register across them
-          // (`mov r5, #0` once, not per arm).
-          if (homeMergeFeeds && mergeFeedOps.has(op)) {
-            materialize.add(op);
-          }
-          // Seventh scope, under the escaping-extension-home variation
-          // (AnalyzeOptions.homeEscapingExtensions) — `escapingExtensions` above, which the
-          // enumeration gate also runs. The siblings all admit a value the def block also consumes;
-          // this one admits only the value that left, which is the register the asm carried across
-          // the boundary. The seat refusal is the rule's, not the scope's — and unlike the third
-          // scope's, which `sharedBaseClasses` prices with a named row, it has NO structurable
-          // inhabitant here: four constructions of a header defining a multi-consumer escaping
-          // value decline before any variation is consulted, `xor` included
-          // (`escape-home.test.ts`). It stands because the seat is a property of the block.
-          if (homeEscapingExtensions && escapeHomeOps.has(op) && !multiBlockHeaders.has(b)) {
-            materialize.add(op);
-          }
-          continue;
-        }
-        const r = op.results[0];
-        if (!r || !useSitesOf.has(r)) {
-          continue;
-        } // dead call → exprstmt (unchanged)
-        // A call, or a read whose spelling is qualified (a device read the lift pinned, a read of an
-        // object the map declares volatile), EXECUTES at each render, where a plain duplicate read is
-        // one agbcc CSEs away. It takes the two-site, edge, guarded-operand and one-position rules
-        // below. And it stays in order against every other qualified access, which `isBarrier` says.
-        const once = counted(op);
-        // Under the value-home variation: which named global cell this op reads, if any. A constant-
-        // offset `load` only — an `aload`'s runtime index names no single cell, and a call reads
-        // everything. Null ⇒ every write bars.
-        const cell =
-          rereadGlobals && defs && op.opcode === 'load' && !once
-            ? globalCellOf(defs, op.operands[0], op.attrs.off as number)
-            : null;
-        const barsThisRead = cell && defs ? mayWriteGlobal(defs, cell.name) : null;
-        if (materializeJoinFeeds && op.opcode === 'load' && condBrArgFed.has(r)) {
-          materialize.add(op);
-          continue;
-        }
-        const sites = useSitesOf.get(r)!;
-        const consumers = [...new Set(sites.map((s) => s.op))];
-        const isCall = op.opcode === 'call';
-        // A call must EXECUTE once — any second operand slot duplicates it → named temp.
-        if (once && sites.length > 1) {
-          materialize.add(op);
-          continue;
-        }
-        // …and ONCE means once on EVERY path the asm runs it on, which the multi-site rule above
-        // does not say. `anchored` calls a terminator a single render position, but a branch's edge
-        // copies are emitted inside the ARMS, so a call whose only consumer is an edge argument
-        // renders in one arm and is skipped on the others. Compiled: `s32 t = f2(a); if (a > 0) {
-        // return t; } return 0;` gives `bl f2` ahead of the `cmp`, and inlined at the edge the
-        // recovered C calls `f2` only in the `else`; a `switch_br` arm hides it the same way.
-        // Materializing puts it back at the position the asm executed it. Sole-use only in
-        // practice — a second use already materialized above.
-        //
-        // And the same under the ops it is inlined into (`ridesEdge`): `f1(a0) - v` riding a
-        // do-while's exit edge renders the call after the loop, once, where the body ran it every
-        // iteration; riding the back edge of a loop that also exits elsewhere it renders in an arm;
-        // riding two edge args it renders twice. And one op reading it twice spells it twice
-        // (`spelledTwice`).
-        if (once && (branchArgFed.has(r) || ridesEdge(op) || spelledTwice(op))) {
-          materialize.add(op);
-          continue;
-        }
-        // …and a `&&`/`||` skips its guarded operand the same way, without a branch of its own to
-        // give it away. Two independent facts. A def DOMINATES its uses (ir/verify.ts), so a call
-        // or a qualified read the connective reads ran on every path that evaluates it, while the
-        // inlined C runs it on fewer — agbcc compiles `do { r = cb(p); } while (i++ <= n && r !=
-        // 0);` to a `bl cb` ahead of both compares. And the DEF is where to put it back because a
-        // counted op is `speculationUnsafe`, so no fold lifted one into this cone
-        // (raise/shortcircuit.ts refuses an arm that holds one; structure.ts declines on a read
-        // placed after the folds ran). `opaque`, the other hoist-unsafe
-        // op with a result, needs no placement — neither position spells compilable C — and a
-        // bottom test holding one still declines in `testSkipsAnEffect`, which is that guard's
-        // remaining population.
-        if (once && shortCircuitGuarded.has(r)) {
-          materialize.add(op);
-          continue;
-        }
-        // Live across a LOOP neither side belongs to: the access ran before the loop and the
-        // value crossed it in a callee-saved register (hipress's `keep = p[1]`, homed in r8 and
-        // touched only by `mov`). Rendering at the use would re-schedule the access to the far
-        // side of the loop — the same refusal liveAcrossCall makes for a call, applied to a loop.
-        if (liveAcrossLoop(op, r, consumers)) {
-          materialize.add(op);
-          continue;
-        }
-        // ── DEF-BLOCK PLACEMENT (readsStayWhereWritten; see AnalyzeOptions) ──────────────────
-        // Every render in a block this one strictly dominates, with a branch between ⇒ the asm
-        // read once above that branch, and re-spelling the read there reproduces it. ONE render
-        // suffices — the short-circuit-into-a-call shape has exactly one — and an unresolvable
-        // render position refuses, as everywhere else. Both memory reads, spelled positively: a
-        // `call` is the enclosing arm's other member and has its own execute-once rules above.
-        if (
-          (op.opcode === 'load' || op.opcode === 'aload') &&
-          readsStayWhereWritten &&
-          dom &&
-          !multiBlockHeaders.has(b) &&
-          !shortCircuitGuarded.has(r) &&
-          !onlyFeedsBlockParams(r)
-        ) {
-          const at = consumers.map((c) => emitPos(c));
-          const rb = at.some((p) => p === null) ? null : [...new Set(at.map((p) => p!.blk))];
-          if (
-            rb &&
-            rb.length > 0 &&
-            rb.every((x) => x !== b && dom.get(x)!.has(b)) &&
-            !preheaderOfRenderLoop(loopBodies, b, rb) &&
-            !fallThroughSeam(predsOf, b, rb)
-          ) {
-            materialize.add(op);
-            continue;
-          }
-        }
-        // Address-home variation: a multi-render load THROUGH a base this variation homed re-reads what the
-        // asm read once into the register the home just reproduced — home the value too, at the
-        // load's own position. Only through variation-homed bases (the fixpoint's later sweep sees them
-        // even though reverse order visits the load first); the general multi-render re-read stays
-        // the default rule below. addressHomedBases registers on the same sweep that materializes the
-        // base — safe because no other rule can pre-empt a value the variation would home: base-slot-only
-        // means no successor-arg use (outside copyInterdependent's read set), and the variation's scope
-        // excludes consts, the const arm's only clientele.
-        if (
-          homeSharedAddresses &&
-          op.opcode === 'load' &&
-          consumers.length > 1 &&
-          addressHomedBases.has(op.operands[0]) &&
-          !multiBlockHeaders.has(b)
-        ) {
-          materialize.add(op);
-          continue;
-        }
-        // A MULTI-RENDER load re-reads memory at each render — which is exactly what the original
-        // per-use source spelling did (`while (*s != EOS) *d = *s;` reads *s twice per iteration),
-        // so it is sound iff every render still sees the def-time memory: NO write anywhere
-        // between the def and ANY render (cycle-aware, conservative write set). Otherwise a temp.
-        //
-        // WHERE it renders. Without the variation: one position per consumer, and a consumer with no
-        // single position (its own value renders in several places) refuses. With the variation a load
-        // resolves the whole SET instead — the second half of the value-home defect, where the
-        // local is invented not by a barrier but because the pure expression downstream is itself
-        // duplicated (`gOut = (gValue << 1) + gValue; return (gValue << 1) + gValue;`). Never for a
-        // call or a marked read: several positions there mean several executions.
-        const poss =
-          rereadGlobals && !once
-            ? emitPositions(op)
-            : consumers.length > 1
-              ? consumers.map((c) => emitPos(c))
-              : [emitPos(consumers[0])];
-        if (!poss || poss.some((p) => p === null)) {
-          materialize.add(op);
-          continue;
-        }
-        // A named helper op bars it too, as it bars the single render below: it is the call the asm
-        // made, and a value read before it and used after it was read once and kept across it
-        // (`v = gB; t = v / n; … q[1] = v;` is one `ldr` ahead of the `bl __divsi3`).
-        if (poss.length > 1) {
-          const writes = barsThisRead ?? effectful;
-          const isWrite = (x: Op): boolean => writes(x) || namedHelper(x);
-          if (poss.some((p) => memWriteBetween(op, p!, isWrite))) {
-            materialize.add(op);
-          }
-          continue;
-        }
-        const pos = poss[0]!;
-        // A between-op is a BARRIER when it renders as a sequenced statement the def would cross:
-        // stores/opaque always; a call/load that is dead (statement), materialized (statement), or
-        // inlined into a DIFFERENT statement. Loads never bar a load (reads don't conflict).
-        //
-        // Inside ONE statement the order is the compiler's, and every compiler the corpus builds
-        // with evaluates a call before the memory reads beside it — agbcc, IDO 7.1, both gcc 2.7.2
-        // builds and mwcc all compile `*p + cb(p)`, `cb(p) - *p`, `(*p ^ 3) * cb(p)` and `*p <<
-        // cb(p)` to the call, then the load. So a CALL ahead of a read it shares a statement with
-        // is the order the recompile gives back, and bars nothing. A READ ahead of such a call is
-        // the order no single expression gives back — `int t = *p; return t + cb(p);` compiles
-        // `ldr; bl; add`, and inlined as `*p + cb(p)` it recompiles `bl; ldr` — so that call bars
-        // the read, which is named where it ran. Unless the read is only the call's argument,
-        // which every compiler evaluates first; read a second time beside the call (`G & cg(G)`
-        // for one `ldr`), that second read comes back after it.
-        //
-        // TWO CALLS in one statement have no such order: agbcc calls `cg(k) - cb(p)` in operand
-        // order and mwcc in its own, so `bl cb; bl cg` inlined as that comes back reversed. A call
-        // ahead of another is named too, unless its value is only the later call's argument.
-        //
-        // AND A TERMINATOR IS NOT ONE STATEMENT. It renders in parts — its own operands, then one
-        // copy per edge argument, each a statement of its own — so a read in one edge copy and a
-        // call in its sibling are sequenced, whatever order the copies come out in: agbcc's `bl cb;
-        // ldr r1, [r5]` into a merge came back `a1 = *a0; a2 = cb(a0) + a2;`. Two ops share a
-        // statement only when they render in the same part.
-        //
-        // Which part of its anchor `x` renders in: '' when the anchor is not a terminator, null
-        // when it has no one part.
-        const partOf = (x: Op): string | null => {
-          for (let cur = x; ;) {
-            const cons = consumersOf(cur);
-            if (cons.length !== 1) {
-              return null;
-            }
-            const [c] = cons;
-            if (c.successors.length > 0) {
-              const v = cur.results[0];
-              const parts = [
-                ...c.operands.flatMap((o, i) => (o === v ? [`op${i}`] : [])),
-                ...c.successors.flatMap((sc, si) => sc.args.flatMap((a, ai) => (a === v ? [`${si}:${ai}`] : []))),
-              ];
-              return parts.length === 1 ? parts[0] : null;
-            }
-            if (anchored(c)) {
-              return '';
-            }
-            cur = c;
-          }
-        };
-        const ownPart = partOf(op);
-        const sameStatement = (x: Op): boolean => {
-          const q = emitPos(x);
-          return q !== null && q.blk === pos.blk && q.idx === pos.idx && ownPart !== null && partOf(x) === ownPart;
-        };
-        // Is every use of the def inside `call`'s arguments, as rendered?
-        const onlyFeedsCall = (call: Op): boolean => {
-          const cone = new Set<Op>([call]);
-          const walk = (v: Value): void => {
-            const d = defOf.get(v);
-            if (d !== undefined && d !== op && !cone.has(d) && !materialize.has(d)) {
-              cone.add(d);
-              d.operands.forEach(walk);
-            }
-          };
-          call.operands.forEach(walk);
-          return sites.every((u) => cone.has(u.op));
-        };
-        const isBarrier = (x: Op): boolean => {
-          // Value-home variation: a store/astore this read is PROVABLY disjoint from (a different named
-          // global) does not sequence against it, so the read may still render at its use.
-          if (barsThisRead && (x.opcode === 'store' || x.opcode === 'astore') && !barsThisRead(x)) {
-            return false;
-          }
-          if (x.opcode === 'store') {
-            // A store to a PROVABLY-DISJOINT slot of the same base never aliases the load
-            // (`disjointConstSlots`, ir/alias.ts). Anything less certain bars — and so does every
-            // store to a qualified read: a device register answers by when it is read, not only by
-            // which bytes were last written (REG_IF read after the REG_IE write it preceded).
-            if (!once && op.opcode === 'load' && disjointConstSlots(op, x)) {
-              return false;
-            }
-            return true;
-          }
-          if (x.opcode === 'astore' || x.opcode === 'opaque' || namedHelper(x)) {
-            return true;
-          }
-          if (x.opcode === 'call') {
-            return (
-              !x.results.length ||
-              !useSitesOf.has(x.results[0]) ||
-              materialize.has(x) ||
-              !sameStatement(x) ||
-              !onlyFeedsCall(x)
-            );
-          }
-          // Two qualified reads are two accesses in an order. Rendered in one expression, the
-          // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
-          // qualified read spelled as a bare statement because nothing uses it is an access too.
-          if (once && !isCall && (x.opcode === 'load' || x.opcode === 'aload') && counted(x)) {
-            return true;
-          }
-          if (!isCall) {
-            return false;
-          } // a plain load never bars a load
-          if (x.opcode === 'load' || x.opcode === 'aload') {
-            return !x.results.length || !useSitesOf.has(x.results[0])
-              ? false // dead load: never emitted at all
-              : materialize.has(x) || !sameStatement(x);
-          }
-          return false;
-        };
-        // A CROSS-BLOCK call or qualified read would run on the render block's paths instead of
-        // its own — always materialize. Within its own block it is judged like everything else, by the
-        // barrier scan below.
-        if (once && pos.blk !== b) {
-          materialize.add(op);
-          continue;
-        }
-        // Otherwise: inline only if no barrier stands on any def-avoiding def→render path.
-        if (memWriteBetween(op, pos, isBarrier)) {
-          materialize.add(op);
+          namePureOp(rules, state, op, b, escapePhase);
+        } else {
+          nameAccess(rules, state, op, b);
         }
       }
     }
   }
-  // A helper op the helper clause named, or a divide the exit rule did, is a pre-update home too
-  // when its value reads a loop variable and is read where the update has run. Named, it lifts the
-  // loop the pre-update hazard declines, in a body of any size — so the structurer's refusal on
-  // homes (`preUpdateHomes`) must see it, as it sees the escape rule's.
-  // KNOWN GAP: `readAfterUpdate` asks of the op's own consumers, so a divide whose value leaves the
-  // loop only through a body op it feeds (`t + 1`) is not a home. Walked through that op, it would
-  // be one, and the refusal would decline every such loop over a counter the function takes as a
-  // parameter: its post-loop names include the entry block's.
-  for (const op of materialize) {
-    const r = op.results[0];
-    if (!r || preUpdateHomes.has(op) || !(isHelper(op) || exitDivides.has(op))) {
-      continue;
-    }
-    const consumers = consumersOf(op);
-    if (
-      bottomTested.some(
-        (L) => L.body.has(opBlock.get(op)!) && readAfterUpdate(L, r, consumers) && readsPreUpdate(L, op, r),
-      )
-    ) {
-      preUpdateHomes.add(op);
-    }
-  }
+  namePreUpdateHelpers(rules, state);
   return {
-    useSitesOf,
-    opIndex,
-    opBlock,
+    useSitesOf: uses.useSitesOf,
+    opIndex: uses.opIndex,
+    opBlock: uses.opBlock,
     liveIn,
     materialize,
     preUpdateHomes,
     reachFrom,
-    emitPos,
-    memWriteBetween,
+    emitPos: render.emitPos,
+    memWriteBetween: rules.memWriteBetween,
   };
 }
