@@ -255,12 +255,14 @@ export function registerishSpellings(sfn: SFn): RegcopySpelling[] {
           //   • E and the cond pure; the cond's non-E operand must NOT mention v (a clamp's
           //     `if (a < v)` would compare against the POST-assignment v — reproduced);
           //   • the copy w carries E's RENDERED type, not v's declared one (retyping a u32
-          //     comparison signed flipped its sense — reproduced).
+          //     comparison signed flipped its sense — reproduced), PROMOTED: the update assigns
+          //     back into w, and a narrow w would truncate what the update computed.
           if (!isPure(E) || !isPure(cond) || condOtherMentions(cond, E, v)) {
             out.push(s);
             continue;
           }
-          const wType = exprCType(E, declaredTypes({ ...sfn, locals })) ?? typeOf(v);
+          const rendered = exprCType(E, declaredTypes({ ...sfn, locals })) ?? typeOf(v);
+          const wType = rendered.kind === 'int' && rendered.width < 32 ? T.s(32) : rendered;
           const w = freshVar(wType);
           const condOnW = rewriteCond(cond, E, w);
           if (condOnW) {
