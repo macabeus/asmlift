@@ -14,7 +14,9 @@ import {
   type Specifiers,
   memberDeclarations,
   parseDeclarations,
+  parseTypeName,
 } from '../src/cdecl/parse';
+import { constantValue, spellType } from '../src/cdecl/spell';
 
 const texts = (t: Tokens): string[] => Array.from({ length: t.count }, (_, k) => t.text(k));
 
@@ -351,5 +353,126 @@ describe('a body read for its members', () => {
 
   test('is none when a member cannot be read', () => {
     expect(members('struct T { int ok; int (; };')).toBeUndefined();
+  });
+});
+
+describe('a type name', () => {
+  test('is its specifiers and an abstract declarator', () => {
+    const t = parseTypeName('const f32 (*)[3]');
+    expect(t && declarator({ declarations: [], unread: [], tokens: t.tokens }, t.specifiers, t.declarator)).toBe(
+      '_: * → [3] → const f32',
+    );
+  });
+
+  test('is none for a declarator with a name, or text left after the declarator', () => {
+    expect(['void (*cb)(void)', 'u8 * p', 'int (*)[3] x', '(*)(void)'].map(parseTypeName)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+});
+
+/** Each declarator of each declaration, spelled as a parameter or not. */
+const spelledTypes = (src: string, parameter: boolean): string[] => {
+  const ctx = parseDeclarations(src);
+  expect(ctx.unread).toEqual([]);
+  return ctx.declarations.flatMap((d) =>
+    d.declarators.map((x) => spellType(typeOf(d.specifiers), x.derivations, ctx.tokens, { parameter })),
+  );
+};
+
+/** The type of each parameter of the one function `src` declares. */
+const parameterTypes = (src: string): string[] => {
+  const ctx = parseDeclarations(src);
+  const fn = ctx.declarations[0].declarators[0].derivations[0];
+  if (fn.kind !== 'function' || fn.params === undefined) {
+    throw new Error('no parameter list');
+  }
+  return fn.params.map((p) =>
+    spellType(typeOf(p.specifiers), p.declarator.derivations, ctx.tokens, { parameter: true }),
+  );
+};
+
+describe('a type printed in the prototype vocabulary', () => {
+  test('a pointer after its base, each pointer with its own qualifiers', () => {
+    expect(parameterTypes('void f(u8 *a, const u8 * const * b, char **c, u8 ** const d, const Vec& r);')).toEqual([
+      'u8 *',
+      'const u8 * const *',
+      'char **',
+      'u8 ** const',
+      'const Vec &',
+    ]);
+  });
+
+  test('a parameter array is a pointer to its element, and a multi-dimensional one to its rows', () => {
+    expect(parameterTypes('void f(f32 v[3], f32 offset[2][3], f32 mtx[][4], f32 (*rows)[8]);')).toEqual([
+      'f32 *',
+      'f32 (*)[3]',
+      'f32 (*)[4]',
+      'f32 (*)[8]',
+    ]);
+  });
+
+  test('a parameter function is a pointer to it', () => {
+    expect(parameterTypes('void f(int fn(int), int (u8), void (**cb)(void), void (* const k)(void));')).toEqual([
+      'int (*)(int)',
+      'int (*)(u8)',
+      'void (**)(void)',
+      'void (* const)(void)',
+    ]);
+  });
+
+  test("a function pointer's own parameter list is printed as written, one space for any gap", () => {
+    expect(
+      parameterTypes(
+        'void f(void (*h)( s32  chan,\n u8* /* c */ p ), u8 *(*mk)(const INFO *info), void (*v)(int, ...));',
+      ),
+    ).toEqual(['void (*)(s32 chan, u8* p)', 'u8 *(*)(const INFO *info)', 'void (*)(int, ...)']);
+  });
+
+  test('outside a parameter, an array and a function stay what they are', () => {
+    expect(
+      spelledTypes('int (*table[4])(void); f32 grid[2][3]; void (*getcb(void))(u8 reason); u8 pad[0x4 - 0x3];', false),
+    ).toEqual(['int (*[4])(void)', 'f32 [2][3]', 'void (*(void))(u8 reason)', 'u8 [0x4 - 0x3]']);
+  });
+
+  test('a pointer to member names its class, and is not spelled as a pointer', () => {
+    expect(spelledTypes('typedef void (particleGenerator::*DrawCallBack)(Mtx&, f32&); int * C::* m;', false)).toEqual([
+      'void (particleGenerator::*)(Mtx&, f32&)',
+      'int * C::*',
+    ]);
+  });
+});
+
+describe('a constant expression', () => {
+  const value = (src: string): number | undefined => {
+    const t = lex(src);
+    return constantValue(t, { from: 0, to: t.count });
+  };
+
+  test('literals as C reads them, with + - * / and parentheses', () => {
+    expect(['0x4 - 0x3', '(2 + 3) * 4', '010', '-1 + 2', '0x10UL', '7 / 2', '2 - 3 - 4', '--3'].map(value)).toEqual([
+      1, 20, 8, 1, 16, 3, -5, 3,
+    ]);
+  });
+
+  test('is none for anything else', () => {
+    expect(['16 / 0', 'SIZE', '4 4', '1.5', '(2', '08', '', 'sizeof(int)'].map(value)).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+  });
+
+  test('reads only its range', () => {
+    const t = lex('u8 pad[0x8 - 0x3];');
+    expect(constantValue(t, { from: 3, to: 6 })).toBe(5);
   });
 });

@@ -1,3 +1,4 @@
+import { parseTypeName } from './cdecl/parse';
 import type { IrType } from './ir/types';
 import type { SymbolInfo, SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
@@ -346,9 +347,9 @@ export function declaredWidth(t: ParamType): number | undefined {
     .replace(/\b(?:const|volatile)\b/g, ' ')
     .trim()
     .replace(/\s+/g, ' ');
-  // a pointer — including a function pointer's abstract declarator, `void (*)(s32)` — is
-  // register-wide whatever it points at
-  if (s.endsWith('*') || /\(\s*\*\s*\)\s*\(.*\)$/.test(s)) {
+  // a pointer — including the one an abstract declarator binds first, `void (*)(s32)`,
+  // `f32 (*)[3]`, `void (**)(void)` — is register-wide whatever it points at
+  if (s.endsWith('*') || (s.includes('(') && bindsPointer(s))) {
     return 32;
   }
   const own = /^([su])(8|16|32|64)$/.exec(s);
@@ -361,6 +362,13 @@ export function declaredWidth(t: ParamType): number | undefined {
     .trim()
     .replace(/\s+/g, ' ');
   return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
+}
+
+/** Whether the type name `s` is a pointer by its abstract declarator: the derivation nearest the
+ *  absent name is a `*`, and not a C++ pointer to member, which is no address. */
+function bindsPointer(s: string): boolean {
+  const first = parseTypeName(s)?.declarator.derivations[0];
+  return first?.kind === 'pointer' && first.member === undefined;
 }
 
 /** The scalar vocabulary every candidate's prelude declares: the typedef NAME, and the C89 text it

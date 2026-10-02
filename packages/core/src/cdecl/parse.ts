@@ -114,6 +114,23 @@ export function parseDeclarations(src: string): ParsedContext {
   return { declarations, unread: parser.unread, tokens };
 }
 
+/** A type name, `const u8 *` or `f32 (*)[3]`: its specifiers and abstract declarator, over its own
+ *  tokens. */
+export interface TypeName extends Parameter {
+  tokens: Tokens;
+}
+
+/** The type name `src` spells, or undefined where it is anything else. */
+export function parseTypeName(src: string): TypeName | undefined {
+  const tokens = lex(src);
+  const p = new Parser(tokens);
+  const specifiers = p.specifiers(tokens.count, 'parameter');
+  const declarator = specifiers === null ? null : p.declarator(tokens.count, 'parameter');
+  return specifiers !== null && declarator !== null && declarator.name === undefined && p.i === tokens.count
+    ? { specifiers, declarator, tokens }
+    : undefined;
+}
+
 /** A struct, union or class body's member declarations, or undefined when one of them cannot be
  *  read. A C++ access label is not a member, and a member template or `using` declares no storage. */
 export function memberDeclarations(ctx: ParsedContext, body: Range): Declaration[] | undefined {
