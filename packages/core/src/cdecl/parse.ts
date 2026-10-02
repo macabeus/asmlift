@@ -13,7 +13,8 @@
 //
 // A STATEMENT THIS CANNOT READ IS COUNTED, never guessed at: its first token goes to `unread`, and
 // reading resumes after its `;` or its body. A function's parameter list that cannot be read is
-// counted the same way, and its derivation carries no parameters.
+// counted apart, in `unreadLists`, and its derivation carries no parameters: the declaration around
+// it is still read.
 //
 // THE LANGUAGE DECIDES THE KEYWORDS. A word C++ alone reserves (`class`, `operator`, `friend`, …) is
 // an identifier in C, which may name a parameter or a member with it.
@@ -118,8 +119,10 @@ export type Language = 'c' | 'c++';
 
 export interface ParsedContext {
   declarations: Declaration[];
-  /** the first token of each statement, and the `(` of each parameter list, that was not read */
+  /** the first token of each statement that was not read */
   unread: number[];
+  /** the `(` of each parameter list that was not read */
+  unreadLists: number[];
   tokens: Tokens;
   language: Language;
   /** the names the top level declares as types: each typedef's, and in C++ each tag's */
@@ -132,7 +135,7 @@ export function parseDeclarations(src: string, language: Language): ParsedContex
   const parser = new Parser(tokens, language, typeNames);
   const declarations: Declaration[] = [];
   parser.topLevel(0, tokens.count, declarations, typeNames);
-  return { declarations, unread: parser.unread, tokens, language, typeNames };
+  return { declarations, unread: parser.unread, unreadLists: parser.unreadLists, tokens, language, typeNames };
 }
 
 /** A type name, `const u8 *` or `f32 (*)[3]`: its specifiers and abstract declarator, over its own
@@ -154,7 +157,8 @@ export function parseTypeName(src: string): TypeName | undefined {
 }
 
 /** A struct, union or class body's member declarations, or undefined when one of them cannot be
- *  read. A C++ access label is not a member, and a member template or `using` declares no storage. */
+ *  read. A C++ access label is not a member, and a member template or `using` declares no storage.
+ *  A member's parameter list that cannot be read leaves the member read, as at the top level. */
 export function memberDeclarations(ctx: ParsedContext, body: Range): Declaration[] | undefined {
   const p = new Parser(ctx.tokens, ctx.language, ctx.typeNames);
   const out: Declaration[] = [];
@@ -179,7 +183,7 @@ export function memberDeclarations(ctx: ParsedContext, body: Range): Declaration
       out.push(d);
     }
   }
-  return p.unread.length === 0 ? out : undefined;
+  return out;
 }
 
 type Context = 'top' | 'member' | 'parameter';
@@ -238,6 +242,7 @@ class Parser {
   readonly t: Tokens;
   i = 0;
   readonly unread: number[] = [];
+  readonly unreadLists: number[] = [];
   readonly cxx: boolean;
   readonly storage: ReadonlySet<string>;
   readonly tags: ReadonlySet<string>;
@@ -692,7 +697,7 @@ class Parser {
       } else if (c === OPEN_PAREN) {
         const read = this.parameters(this.i + 1, close);
         if (read === undefined) {
-          this.unread.push(this.i);
+          this.unreadLists.push(this.i);
         }
         suffixes.push({
           kind: 'function',

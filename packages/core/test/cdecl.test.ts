@@ -61,7 +61,7 @@ const read = (ctx: ParsedContext, ds: Declaration[] = ctx.declarations): string[
 
 const declarations = (src: string, language: Language): string[] => {
   const ctx = parseDeclarations(src, language);
-  expect(ctx.unread).toEqual([]);
+  expect([...ctx.unread, ...ctx.unreadLists]).toEqual([]);
   return read(ctx);
 };
 
@@ -174,7 +174,8 @@ describe('a declarator, read from its name outward', () => {
       'g: (?) → void',
       'h: (?) → void',
     ]);
-    expect(ctx.unread.map((k) => ctx.tokens.text(k - 1))).toEqual(['g', 'h']);
+    expect(ctx.unread).toEqual([]);
+    expect(ctx.unreadLists.map((k) => ctx.tokens.text(k - 1))).toEqual(['g', 'h']);
   });
 
   test('a function returning a function pointer', () => {
@@ -369,7 +370,9 @@ describe('what the top level reads, descends into and skips', () => {
 
   test('a statement it cannot read is counted at its first token, and reading goes on after it', () => {
     const ctx = parseDeclarations('int bad[;\nvoid g(int, = 3);\n}\nint after;', 'c');
-    expect(ctx.unread.map((k) => ctx.tokens.text(k))).toEqual(['int', '(', '}']);
+    expect(ctx.unread.map((k) => ctx.tokens.text(k))).toEqual(['int', '}']);
+    // a parameter list it cannot read is counted apart, and its declaration is read
+    expect(ctx.unreadLists.map((k) => ctx.tokens.text(k - 1))).toEqual(['g']);
     expect(read(ctx)).toEqual(['g: (?) → void', 'after: int']);
   });
 });
@@ -415,6 +418,10 @@ describe('a body read for its members', () => {
   test('is none when a member cannot be read', () => {
     expect(members('struct T { int ok; int (; };', 'c')).toBeUndefined();
   });
+
+  test("is read when a member's own parameter list cannot be", () => {
+    expect(members('struct T { void (*cb)(char (x)); int ok; };', 'c')).toEqual(['cb: * → (?) → void', 'ok: int']);
+  });
 });
 
 describe('a type name', () => {
@@ -436,7 +443,7 @@ describe('a type name', () => {
 /** Each declarator of each declaration, spelled as a parameter or not. */
 const spelledTypes = (src: string, language: Language, parameter: boolean): string[] => {
   const ctx = parseDeclarations(src, language);
-  expect(ctx.unread).toEqual([]);
+  expect([...ctx.unread, ...ctx.unreadLists]).toEqual([]);
   return ctx.declarations.flatMap((d) =>
     d.declarators.map((x) => spellType(typeOf(d.specifiers), x.derivations, ctx.tokens, { parameter })),
   );

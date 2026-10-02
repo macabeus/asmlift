@@ -112,10 +112,10 @@ describe('every vendored context', () => {
     const unread = vendoredContexts().flatMap(([name, text]) =>
       // a context no row reads is read as C++, whose keywords are C's and more
       [...(dialects.get(name) ?? ['c++' as const])].flatMap((language) => {
-        const { declarations, tokens, unread } = parseDeclarations(text, language);
+        const { declarations, tokens, unread, unreadLists } = parseDeclarations(text, language);
         return [
           ...(declarations.length === 0 ? [`${name} (${language}): no declaration`] : []),
-          ...unread.map(
+          ...[...unread, ...unreadLists].map(
             (k) => `${name} (${language}):${text.slice(0, tokens.start(k)).split('\n').length}: ${tokens.text(k)}`,
           ),
         ];

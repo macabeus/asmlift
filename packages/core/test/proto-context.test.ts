@@ -499,6 +499,23 @@ describe('prototypes from a declaration context', () => {
     expect(p.h?.returnLayout?.members?.map((m) => m.name)).toEqual(['c', 'd', 'x']);
   });
 
+  test('a function pointer member whose own parameter list cannot be read is still a member', () => {
+    const layout = (src: string, language: 'c' | 'c++') =>
+      prototypesFromContext(`typedef unsigned short u16; ${src} struct S h(void);`, language).h?.returnLayout;
+    const members = {
+      kind: 'struct',
+      members: [
+        { name: 'cb', type: 'void *' },
+        { name: 'y', type: 'u16' },
+      ],
+    };
+    expect(layout('struct S { void (*cb)(char (x)); u16 y; };', 'c')).toEqual(members);
+    expect(layout('struct S { void (*cb)(int x, ); u16 y; };', 'c')).toEqual(members);
+    expect(layout('struct S { void (*cb)(int class); u16 y; };', 'c++')).toEqual(members);
+    // a member statement that cannot be read still leaves the layout unread
+    expect(layout('struct S { void (*cb)(int); u16 y[; };', 'c')).toEqual({ kind: 'struct' });
+  });
+
   test('an aligned typedef of its own body leaves that body unread, and no other', () => {
     const p = prototypesFromContext(
       `typedef int s32; typedef struct { s32 v; } G __attribute__((aligned(8)));
