@@ -158,6 +158,19 @@ describe('prototypes from a declaration context', () => {
     expect(cpp.plain).toEqual({ returnsVoid: true });
   });
 
+  test('a declarator in parentheses, and an attribute before a second declarator, are read as C reads them', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; typedef int (T); void f(T x); int (g)(int x);
+       u32 h(u32 x) __attribute__((long_call)), k(u32 y);`,
+      'c',
+    );
+    expect(p.f).toEqual({ returnsVoid: true, params: ['int'] });
+    expect(declaredCallArgs(p.f, ARMV4T_AGBCC)?.widths).toEqual([32]);
+    expect(p.g).toEqual({ returns: 'int', params: ['int'] });
+    expect(p.h).toEqual({ returns: 'u32', params: ['u32'] });
+    expect(p.k).toEqual({ returns: 'u32', params: ['u32'] });
+  });
+
   test('a parameter of a qualified C++ type name is read', () => {
     const p = prototypesFromContext(
       `typedef unsigned long u32; struct JKRAramBlock; class JKRAramHeap { public: enum EAllocMode { HEAD, TAIL }; };
