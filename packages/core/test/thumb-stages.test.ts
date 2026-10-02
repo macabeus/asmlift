@@ -1,13 +1,27 @@
-// The stages the Thumb lift runs before it fills a block, each driven from asm text through the
-// real stages before it — the inputs `liftOnce` hands each one. `thumb-frontend.test.ts` drives the
-// lift whole.
+// The stages of the Thumb lift, each driven from asm text through the real stages before it — the
+// inputs `liftOnce` hands each one. `thumb-frontend.test.ts` drives the lift whole.
 import { describe, expect, test } from 'vitest';
 
+import { makeLocalStatics } from '../src/frontend/local-object';
+import { makeSsaBuilder } from '../src/frontend/ssa';
 import { __testing } from '../src/frontend/thumb';
+import { type Value, mkValue } from '../src/ir/core';
+import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const { readThumbText, thumbCfg, assertScratchRegsPartitioned, thumbCallDeclarations, measureThumbFrame } = __testing;
+const {
+  readThumbText,
+  thumbCfg,
+  assertScratchRegsPartitioned,
+  thumbCallDeclarations,
+  measureThumbFrame,
+  thumbOperands,
+  thumbPairs,
+  thumbFlagCarry,
+  openBlockCursor,
+  lowerCall,
+} = __testing;
 
 // Every stage up to the frame, in the lift's order.
 const measure = (asm: string, prototypes: Prototypes = {}) => {
@@ -18,6 +32,36 @@ const measure = (asm: string, prototypes: Prototypes = {}) => {
   return measureThumbFrame({ target: ARMV4T_AGBCC, cfg, calls, oneObject: undefined });
 };
 const labels = (blocks: readonly { label: string }[]) => blocks.map((b) => b.label);
+
+// Every stage up to the fill, in the lift's order: what `fillThumbBlock` reads.
+const fillOf = (asm: string, prototypes: Prototypes = {}) => {
+  const target = ARMV4T_AGBCC;
+  const text = readThumbText('f', asm);
+  const cfg = thumbCfg('f', text.blocks, text.tables);
+  const calls = thumbCallDeclarations('f', target, prototypes);
+  const frame = measureThumbFrame({ target, cfg, calls, oneObject: undefined });
+  const ssa = makeSsaBuilder('f', cfg.asmBlocks.length, cfg.preds, () => frame.partition);
+  const statics = makeLocalStatics();
+  const operands = thumbOperands({ name: 'f', asm, text, ssa, statics, slotsOffReason: frame.slotsOffReason });
+  const pairs = thumbPairs({ name: 'f', target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
+  const flags = thumbFlagCarry(cfg, text.tables);
+  const frameUses = { usedSlotOffsets: new Set<number>(), movedCaptures: new Set<Value>() };
+  return {
+    name: 'f',
+    target,
+    prototypes,
+    symbols: undefined,
+    text,
+    cfg,
+    calls,
+    frame,
+    ssa,
+    operands,
+    pairs,
+    flags,
+    frameUses,
+  };
+};
 
 // agbcc's jump-table dispatch behind one of its two bounds spellings (thumb-switch.test.ts); `pool`
 // holds the table pointer
@@ -232,5 +276,66 @@ describe('measureThumbFrame', () => {
     }
     // declared with four, the staged word is no argument, and nothing reloads it
     expect(measure(STAGED, { g: { params: 4 } }).outgoingArgs.area).toBe(0);
+  });
+});
+
+describe('thumbPairs', () => {
+  test('fuses the two halves of one value back into that value, with no op', () => {
+    const { pairs, ssa } = fillOf('f:\n\tbx\tlr\n');
+    const irb = ssa.irBlocks[0];
+    const [at] = readThumbText('f', 'f:\n\tbx\tlr\n').blocks[0].instrs;
+    const whole = mkValue(T.unk(64));
+    const lo = pairs.projectHalf(irb, whole, 'lo', at);
+    const hi = pairs.projectHalf(irb, whole, 'hi', at);
+    const ops = irb.ops.length;
+    expect(pairs.fuseHalves(irb, lo, hi)).toBe(whole);
+    expect(irb.ops.length).toBe(ops);
+  });
+
+  test("builds a `concat` of halves that are not one value's, or not in order", () => {
+    const { pairs, ssa } = fillOf('f:\n\tbx\tlr\n');
+    const irb = ssa.irBlocks[0];
+    const [at] = readThumbText('f', 'f:\n\tbx\tlr\n').blocks[0].instrs;
+    const [v, w] = [mkValue(T.unk(64)), mkValue(T.unk(64))];
+    const fused = [
+      pairs.fuseHalves(irb, pairs.projectHalf(irb, v, 'lo', at), pairs.projectHalf(irb, w, 'hi', at)),
+      pairs.fuseHalves(irb, pairs.projectHalf(irb, v, 'hi', at), pairs.projectHalf(irb, v, 'lo', at)),
+    ];
+    expect(fused).not.toContain(v);
+    expect(irb.ops.filter((op) => op.opcode === 'concat').map((op) => op.results[0])).toEqual(fused);
+  });
+});
+
+describe('lowerCall', () => {
+  const CALL = 'f:\n\tpush\t{lr}\n\tbl\tg\n\tpop\t{pc}\n';
+  const callIn = (prototypes: Prototypes = {}) => {
+    const fill = fillOf(CALL, prototypes);
+    const ab = fill.cfg.asmBlocks[0];
+    const cur = openBlockCursor(fill, ab, 0);
+    lowerCall(
+      fill,
+      cur,
+      ab.instrs.find((ins) => ins.mnemonic === 'bl')!,
+    );
+    const call = cur.irb.ops.find((op) => op.opcode === 'call')!;
+    return { fill, cur, call };
+  };
+
+  test('passes a declared `long long` as one value of its two words, and splits a pair it returns', () => {
+    const { fill, cur, call } = callIn({ g: { params: ['long long'], returns: 'long long' } });
+    expect(cur.irb.ops.map((op) => op.opcode)).toEqual(['concat', 'call', 'lo32', 'hi32']);
+    const [concat] = cur.irb.ops;
+    expect(call.operands).toEqual([concat.results[0]]);
+    expect(concat.operands.map((v) => fill.ssa.paramReg.get(v))).toEqual(['r0', 'r1']);
+    expect(call.results[0].type).toEqual(T.unk(64));
+    expect(fill.pairs.pairCallee.get(call.results[0])).toBe('g');
+  });
+
+  test("defines r0 with a word call's result", () => {
+    const { fill, call } = callIn({ g: { params: ['s32'] } });
+    expect(call.attrs.target).toBe('g');
+    expect(call.operands.map((v) => fill.ssa.paramReg.get(v))).toEqual(['r0']);
+    expect(fill.ssa.readVar('r0', 0)).toBe(call.results[0]);
+    expect(call.results[0].type).toEqual(T.unk(32));
   });
 });
