@@ -163,6 +163,20 @@ describe('a declarator, read from its name outward', () => {
     ).toEqual([['s32 * chan , ...'], ['int , = 3']]);
   });
 
+  test('a name in parentheses in a parameter: a type where one is declared, a name before a list or an extent', () => {
+    const ctx = parseDeclarations(
+      'typedef int T; void f(char (T), int (x)[3], void (cb)(void *)); void g(long long (x)); void h(int (x[2]));',
+      'c',
+    );
+    expect(read(ctx)).toEqual([
+      'T: int',
+      'f: (_: (_: T) → char, x: [3] → int, cb: (_: * → void) → void) → void',
+      'g: (?) → void',
+      'h: (?) → void',
+    ]);
+    expect(ctx.unread.map((k) => ctx.tokens.text(k - 1))).toEqual(['g', 'h']);
+  });
+
   test('a function returning a function pointer', () => {
     expect(declarations('const u32 (*getcb(void))(u8 reason, const INFO *info);', 'c')).toEqual([
       'getcb: (_: void) → * → (reason: u8, info: * → const INFO) → const u32',
@@ -419,10 +433,10 @@ const spelledTypes = (src: string, language: Language, parameter: boolean): stri
   );
 };
 
-/** The type of each parameter of the one function `src` declares. */
+/** The type of each parameter of the function `src` declares last. */
 const parameterTypes = (src: string, language: Language): string[] => {
   const ctx = parseDeclarations(src, language);
-  const fn = ctx.declarations[0].declarators[0].derivations[0];
+  const fn = ctx.declarations[ctx.declarations.length - 1].declarators[0].derivations[0];
   if (fn.kind !== 'function' || fn.params === undefined) {
     throw new Error('no parameter list');
   }
@@ -448,12 +462,12 @@ describe('a type printed in the prototype vocabulary', () => {
   });
 
   test('a parameter function is a pointer to it', () => {
-    expect(parameterTypes('void f(int fn(int), int (u8), void (**cb)(void), void (* const k)(void));', 'c')).toEqual([
-      'int (*)(int)',
-      'int (*)(u8)',
-      'void (**)(void)',
-      'void (* const)(void)',
-    ]);
+    expect(
+      parameterTypes(
+        'typedef unsigned char u8; void f(int fn(int), int (u8), void (**cb)(void), void (* const k)(void));',
+        'c',
+      ),
+    ).toEqual(['int (*)(int)', 'int (*)(u8)', 'void (**)(void)', 'void (* const)(void)']);
   });
 
   test("a function pointer's own parameter list is printed as written, one space for any gap", () => {

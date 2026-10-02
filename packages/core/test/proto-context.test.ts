@@ -115,6 +115,30 @@ describe('prototypes from a declaration context', () => {
     expect(p.sndVirtualSampleSetCallback?.params).toEqual(['u32 (*)(u8 reason, const SND_VIRTUALSAMPLE_INFO* info)']);
   });
 
+  // compiled, agbcc passes `void f(long long (x), int y)`'s x in r0:r1 and y in r2, and reads
+  // `int (x)[3]`'s x as an `int *`
+  test('a name in parentheses in a parameter is a type where the context declares one', () => {
+    const c = prototypesFromContext(
+      `typedef int T; typedef int I;
+       void wide(long long (x), int y); int narrow(char (c)); void named(I (x));
+       void arr(int (x)[3], int y); void fun(int (x)(int), int y);
+       void fn(char (T)); void fns(char (T), int (int));`,
+      'c',
+    );
+    expect(c.wide).toEqual({ returnsVoid: true });
+    expect(c.narrow).toEqual({ returns: 'int' });
+    expect(c.named).toEqual({ returnsVoid: true });
+    // a type followed by a list or an extent would be a function returning a function or an array
+    expect(c.arr?.params).toEqual(['int *', 'int']);
+    expect(c.fun?.params).toEqual(['int (*)(int)', 'int']);
+    expect(c.fn?.params).toEqual(['char (*)(T)']);
+    expect(c.fns?.params).toEqual(['char (*)(T)', 'int (*)(int)']);
+    // a C++ tag is a type name
+    const cpp = prototypesFromContext('struct V { int a; }; void tagged(int (V)); void plain(int (v));', 'c++');
+    expect(cpp.tagged?.params).toEqual(['int (*)(V)']);
+    expect(cpp.plain).toEqual({ returnsVoid: true });
+  });
+
   test('a parameter of a qualified C++ type name is read', () => {
     const p = prototypesFromContext(
       `typedef unsigned long u32; struct JKRAramBlock; class JKRAramHeap { public: enum EAllocMode { HEAD, TAIL }; };

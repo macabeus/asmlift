@@ -18,6 +18,13 @@
 // THE LANGUAGE DECIDES THE KEYWORDS. A word C++ alone reserves (`class`, `operator`, `friend`, …) is
 // an identifier in C, which may name a parameter or a member with it.
 //
+// A NAME IN PARENTHESES IN A PARAMETER IS A TYPE WHERE IT NAMES ONE (C99 6.7.5.3p11): with `typedef
+// int T;`, `char (T)` is a function taking a T, and `char (c)` is a char named c. The names a context
+// declares as types are gathered as it is read, and a name it does not declare as one may still be a
+// type it never saw (a raw header's), so a parameter that parenthesises one is not read — unless a
+// list or an extent follows, as in `void (callback)(void *)`: a type there would make a function
+// that returns a function or an array.
+//
 // UNKNOWN WORDS. A run of identifiers between the type and the declarator is read as unknown words,
 // the last identifier being the name: `struct Blob64 EWRAM_FN makeblob(…)` is a raw header's
 // unexpanded macro, and the type it qualifies is still the one spelled. Valid C never puts two
@@ -113,14 +120,17 @@ export interface ParsedContext {
   unread: number[];
   tokens: Tokens;
   language: Language;
+  /** the names the top level declares as types: each typedef's, and in C++ each tag's */
+  typeNames: ReadonlySet<string>;
 }
 
 export function parseDeclarations(src: string, language: Language): ParsedContext {
   const tokens = lex(src);
-  const parser = new Parser(tokens, language);
+  const typeNames = new Set<string>();
+  const parser = new Parser(tokens, language, typeNames);
   const declarations: Declaration[] = [];
-  parser.topLevel(0, tokens.count, declarations);
-  return { declarations, unread: parser.unread, tokens, language };
+  parser.topLevel(0, tokens.count, declarations, typeNames);
+  return { declarations, unread: parser.unread, tokens, language, typeNames };
 }
 
 /** A type name, `const u8 *` or `f32 (*)[3]`: its specifiers and abstract declarator, over its own
@@ -129,10 +139,11 @@ export interface TypeName extends Parameter {
   tokens: Tokens;
 }
 
-/** The type name `src` spells, or undefined where it is anything else. */
+/** The type name `src` spells, or undefined where it is anything else. A type name declares no name,
+ *  so every name in it is a type. */
 export function parseTypeName(src: string): TypeName | undefined {
   const tokens = lex(src);
-  const p = new Parser(tokens, 'c++');
+  const p = new Parser(tokens, 'c++', 'every');
   const specifiers = p.specifiers(tokens.count, 'parameter');
   const declarator = specifiers === null ? null : p.declarator(tokens.count, 'parameter');
   return specifiers !== null && declarator !== null && declarator.name === undefined && p.i === tokens.count
@@ -143,7 +154,7 @@ export function parseTypeName(src: string): TypeName | undefined {
 /** A struct, union or class body's member declarations, or undefined when one of them cannot be
  *  read. A C++ access label is not a member, and a member template or `using` declares no storage. */
 export function memberDeclarations(ctx: ParsedContext, body: Range): Declaration[] | undefined {
-  const p = new Parser(ctx.tokens, ctx.language);
+  const p = new Parser(ctx.tokens, ctx.language, ctx.typeNames);
   const out: Declaration[] = [];
   p.i = body.from;
   while (p.i < body.to) {
@@ -228,15 +239,20 @@ class Parser {
   readonly cxx: boolean;
   readonly storage: ReadonlySet<string>;
   readonly tags: ReadonlySet<string>;
+  /** the names declared as types so far; in a type name, every name */
+  readonly types: ReadonlySet<string> | 'every';
 
-  constructor(t: Tokens, language: Language) {
+  constructor(t: Tokens, language: Language, types: ReadonlySet<string> | 'every') {
     this.t = t;
     this.cxx = language === 'c++';
     this.storage = STORAGE[language];
     this.tags = TAGS[language];
+    this.types = types;
   }
 
-  topLevel(from: number, to: number, out: Declaration[]): void {
+  /** The declarations from `from` to `to`, into `out`, and the names they declare as types, into
+   *  `types`. */
+  topLevel(from: number, to: number, out: Declaration[], types: Set<string>): void {
     this.i = from;
     while (this.i < to) {
       const k = this.i;
@@ -249,7 +265,7 @@ class Parser {
       } else if (this.t.is(k, 'extern') && this.t.kind(k + 1) === 'string' && this.t.char(k + 2) === OPEN_BRACE) {
         const close = this.closing(k + 2, to);
         if (this.t.is(k + 1, '"C"')) {
-          this.topLevel(k + 3, close, out);
+          this.topLevel(k + 3, close, out, types);
         }
         this.i = Math.min(close + 1, to);
       } else if (this.cxx && this.t.is(k, 'namespace')) {
@@ -273,6 +289,7 @@ class Parser {
           this.skipStatement(to);
         } else {
           out.push(d);
+          declaresTypes(d, this.cxx, types);
         }
       }
     }
@@ -636,7 +653,11 @@ class Parser {
     }
     let inner: Declarator | undefined;
     let name: string | undefined;
-    if (this.t.char(this.i) === OPEN_PAREN && this.groupsDeclarator(this.i, context)) {
+    const groups = this.t.char(this.i) === OPEN_PAREN && this.groupsDeclarator(this.i, context);
+    if (groups === undefined) {
+      return null;
+    }
+    if (groups) {
       const close = this.t.match(this.i);
       if (close < 0 || close >= to) {
         return null;
@@ -715,12 +736,37 @@ class Parser {
   }
 
   /** Whether the `(` at `k`, where a declarator's name could start, opens a nested declarator
-   *  (`(*f)`, `(T::*m)`, `(name)`) rather than a parameter list. In a parameter, `(T)` is a
-   *  parameter list. */
-  groupsDeclarator(k: number, context: Context): boolean {
+   *  (`(*f)`, `(T::*m)`, `(name)`) rather than a parameter list; undefined in a parameter, where a
+   *  name in it that is no type may be either. */
+  groupsDeclarator(k: number, context: Context): boolean | undefined {
+    if (this.opensPointer(k)) {
+      return true;
+    }
+    if (this.t.kind(k + 1) !== 'identifier' || this.isAttribute(k + 1)) {
+      return false;
+    }
+    if (context !== 'parameter') {
+      return true;
+    }
+    if (this.startsType(k + 1)) {
+      return false;
+    }
+    const next = this.t.char(k + 3);
+    return this.t.match(k) === k + 2 && (next === OPEN_PAREN || next === OPEN_BRACKET) ? true : undefined;
+  }
+
+  /** Whether the identifier at `k` starts a type: a word only a declaration's specifiers start
+   *  with, a name declared as a type, or a C++ qualified or template name. */
+  startsType(k: number): boolean {
+    const w = this.t.text(k);
     return (
-      this.opensPointer(k) ||
-      (context !== 'parameter' && this.t.kind(k + 1) === 'identifier' && !this.isAttribute(k + 1))
+      QUALIFIERS.has(w) ||
+      BASIC.has(w) ||
+      this.storage.has(w) ||
+      this.tags.has(w) ||
+      (this.cxx && (LONE.has(w) || w === 'typename' || this.t.is(k + 1, '::') || this.t.char(k + 1) === LESS)) ||
+      this.types === 'every' ||
+      this.types.has(w)
     );
   }
 
@@ -895,5 +941,20 @@ class Parser {
       out += this.t.text(k);
     }
     return out;
+  }
+}
+
+/** The names a top-level declaration declares as types, into `types`: a typedef's, and in C++ the tag
+ *  it names. */
+function declaresTypes(d: Declaration, cxx: boolean, types: Set<string>): void {
+  if (d.specifiers.typedef) {
+    for (const x of d.declarators) {
+      if (x.name !== undefined) {
+        types.add(x.name);
+      }
+    }
+  }
+  if (cxx && d.specifiers.type.kind === 'tag' && d.specifiers.type.tag !== undefined) {
+    types.add(d.specifiers.type.tag);
   }
 }
