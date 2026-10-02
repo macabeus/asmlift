@@ -52,8 +52,8 @@ function pasType(t: IrType): string {
     return '^' + pasType(t.to);
   }
   if (t.kind === 'int') {
-    // `Integer`/`Cardinal` are the machine word, and a NARROWER integer fits in one, which is what
-    // this backend spells it as. A WIDER one does not: upas has no verified 64-bit type,
+    // `Integer`/`Cardinal` are the machine word, and a NARROWER parameter or return fits in one,
+    // which is what this backend spells it as (a narrow local is refused where it is declared). A WIDER one does not: upas has no verified 64-bit type,
     // and spelling a 64-bit value `Integer` would silently drop its high half. Loud, like every
     // other unspellable construct in this backend.
     if (t.width > 32) {
@@ -318,6 +318,14 @@ export const pascalBackend: LanguageBackend = {
         : `function ${fn.name}(${params}): ${pasType(fn.retType)};`,
     ];
     if (fn.locals.length) {
+      // A narrow LOCAL truncates every value assigned to it, and `Integer`/`Cardinal` would not: the
+      // width is the declaration's whole meaning, so it has no spelling here. A narrow parameter
+      // arrives already narrowed and keeps the word spelling.
+      for (const l of fn.locals) {
+        if (l.type.kind === 'int' && l.type.width < 32) {
+          throw new Error(`pascal backend: no spelling for a narrow local (${l.type.width} bits)`);
+        }
+      }
       lines.push('var', ...fn.locals.map((l) => `  ${l.name}: ${pasType(l.type)};`));
     }
     lines.push('begin');

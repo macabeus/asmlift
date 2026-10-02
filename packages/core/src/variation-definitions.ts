@@ -1595,6 +1595,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('pollguard'),
     seeAlso: ['pollguard'],
   },
+  'narrow-decl': {
+    title: 'Narrow value declared at its width',
+    summary: 'a local holding one narrowed value is declared at that width instead of as an `s32` with a cast',
+    detail:
+      'A value narrowed once and read as a local can be spelled two ways: an `s32` assigned the narrowing ' +
+      'cast, or a local declared at the narrow width. Every read is an `int` either way, so the value is the ' +
+      "same; which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
+    compilerBehavior:
+      "gcc 2.9's front end sees through the promotion of a narrow variable and not through a cast assigned " +
+      'to an `int`, so compares, divisions and right shifts of an unsigned narrow one become unsigned; ' +
+      'where none reads it, agbcc can still allocate registers differently. IDO, KMC gcc and gcc 2.7.2 ' +
+      'each emit different code for the example too, and every mwcc build does for a compare of it.',
+    offeredWhen: {
+      when: 'An `s32` local written once, outside a `for` init, by an integer narrowed to a narrower integer, that lives in no memory.',
+      decidedBy: { symbol: 'narrowDeclarations', file: l3('narrowdecl') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: CALLS + 'extern u8 gA[]; extern u8 gB[]; void example(void) { @ }',
+      before: 's32 v; v = (u8)(gA[12] - 1); gB[14] = (v & 1) + f() % (5 - v) + 1;',
+      after: 'u8 v; v = gA[12] - 1; gB[14] = (v & 1) + f() % (5 - v) + 1;',
+    },
+    implementedIn: l3('narrowdecl'),
+    seeAlso: ['derived-home', 'escape-home'],
+  },
 
   // ── symbol map ──────────────────────────────────────────────────────────────────────────────
   'raw-globals': {

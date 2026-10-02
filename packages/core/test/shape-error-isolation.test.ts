@@ -51,7 +51,7 @@ describe('one throwing shape does not take the others with it', () => {
     // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
     expect(errors.every((e) => hasVariation(e.variations, 'initfirst'))).toBe(true);
     const subsets = new Set(errors.map((e) => e.variations.slice(e.variations.indexOf('initfirst')).join('/')));
-    expect([...subsets].sort()).toEqual(['initfirst', 'initfirst/pollguard/pollread']);
+    expect([...subsets].sort()).toEqual(['initfirst', 'initfirst/pollguard/pollread/narrow-decl']);
   });
 
   test('…while the LATER subsets are still derived ONTO THE RESPELLED TREES', () => {

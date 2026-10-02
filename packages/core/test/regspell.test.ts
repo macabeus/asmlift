@@ -56,6 +56,18 @@ describe('R1 — diamond → copy + in-place update', () => {
     expect(src).toContain('return w0 << 8 >> 16;'); // downstream renamed v0 → w0
   });
 
+  test('the copy of a narrow value is declared at its promoted width, so the update is not truncated', () => {
+    const src = cBackend.emit(registerishSpellings(diamond({ k: 'cast', to: T.u(8), e: v('a0') }))[0].sfn);
+    expect(src).toContain('w0 = w0 + 255;');
+    expect(src).toMatch(/\bs32 w0;/);
+  });
+
+  test('declines a diamond whose variable is narrow, which the copy would stop truncating', () => {
+    const narrow = diamond({ k: 'cast', to: T.u(8), e: v('a0') });
+    narrow.locals = [{ name: 'v0', type: T.u(8) }];
+    expect(registerishSpellings(narrow).some((r) => cBackend.emit(r.sfn).includes('w0'))).toBe(false);
+  });
+
   test('R3 reuses the DEAD value var for the tail (the byte-exactness depends on it)', () => {
     const src = cBackend.emit(registerishSpellings(diamond(MUL))[1].sfn);
     expect(src).toContain('v0 = w0 << 8 >> 16;'); // reused v0, not a fresh w1
