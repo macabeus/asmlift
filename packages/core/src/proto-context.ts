@@ -4,15 +4,18 @@ import {
   type Attribute,
   type Declaration,
   type Declarator,
+  type DeclaredType,
   type Derivation,
   type Parameter,
   type ParsedContext,
+  type Qualifier,
   type Range,
   type TypeSpecifier,
+  declaredType,
   memberDeclarations,
   parseDeclarations,
 } from './cdecl/parse';
-import { spellType } from './cdecl/spell';
+import { asParameter, spellType } from './cdecl/spell';
 import type { AggregateLayout, AggregateMember, FnProto, ParamType, Prototypes } from './proto';
 import {
   declaredCallArgs,
@@ -44,7 +47,10 @@ import type { TargetDescription } from './target';
 // project's own headers (`declare.ts`), where a different type is a conflicting declaration. So a
 // typedef resolves along its chain only until `declaredWidth` can size the spelling (`BOOL` →
 // `int`); a function-pointer typedef resolves to its own abstract declarator (`void (*)(s32)`);
-// a struct or enum keeps its name, which sizes to nothing and makes the list abstain.
+// a struct or enum keeps its name, which sizes to nothing and makes the list abstain. Resolution
+// is on the parsed type, never its spelling: a typedef name stands for its base and derivations,
+// and the name's own qualifiers qualify the derivation they bind (`const Cb` is
+// `void (* const)(s32)`).
 //
 // A TYPEDEF WITH AN ATTRIBUTE NAMES NO TYPE HERE: the attribute may make it a different type from
 // the one it spells (`realigns`), so no spelling resolves through it. One on a parameter of a
@@ -52,8 +58,8 @@ import type { TargetDescription } from './target';
 
 /** What the declarations say about the types a prototype or a layout spells. */
 interface TypeTable {
-  /** each typedef name, and the type it stands for as spelled, before resolution */
-  readonly typedefs: ReadonlyMap<string, string>;
+  /** each typedef name, and the type it stands for, before resolution */
+  readonly typedefs: ReadonlyMap<string, DeclaredType>;
   /** struct and union bodies by `struct Tag` spelling; none for a body an attribute lays out
    *  (`laysOut`) */
   readonly tagged: ReadonlyMap<string, Range | undefined>;
@@ -73,8 +79,8 @@ interface TypeTable {
   readonly realigned: boolean;
 }
 
-/** The layout of the struct or union a spelling names, at a nesting depth. */
-type LayoutOf = (t: string, depth: number) => AggregateLayout | undefined;
+/** The layout of the struct or union a type names, at a nesting depth. */
+type LayoutOf = (t: DeclaredType, depth: number) => AggregateLayout | undefined;
 
 /** The callee prototypes a preprocessed declaration context states. `language` decides what an
  *  empty parameter list means: none in C++, unstated in C (a pre-ANSI declaration). */
@@ -106,7 +112,7 @@ function typeTable(ctx: ParsedContext, language: 'c' | 'c++'): TypeTable {
     table.realigned ||= realigns(d, attributes);
     const unsizedEnum = tag !== undefined && readTag(table, d, tag, laysOut(d, attributes), ctx.tokens, language);
     if (d.specifiers.typedef && attributes.length === 0) {
-      readTypedefs(table, d, ctx.tokens, unsizedEnum);
+      readTypedefs(table, d, unsizedEnum);
     }
   }
   return table;
@@ -114,7 +120,7 @@ function typeTable(ctx: ParsedContext, language: 'c' | 'c++'): TypeTable {
 
 /** The type table while the declarations are read. */
 interface TableBuilder {
-  typedefs: Map<string, string>;
+  typedefs: Map<string, DeclaredType>;
   tagged: Map<string, Range | undefined>;
   named: Map<string, { kind: AggregateLayout['kind']; body?: Range }>;
   unspelledPointers: Set<string>;
@@ -172,10 +178,10 @@ function readTag(
 
 /** Every name a typedef declares, into the table. `unsizedEnum`: the body it names is an enum the
  *  target does not size. */
-function readTypedefs(table: TableBuilder, d: Declaration, tokens: Tokens, unsizedEnum: boolean): void {
+function readTypedefs(table: TableBuilder, d: Declaration, unsizedEnum: boolean): void {
   const { type } = d.specifiers;
   const keyword = type.kind === 'tag' ? type.keyword : undefined;
-  for (const td of typedefNames(d, tokens)) {
+  for (const td of typedefNames(d)) {
     table.typedefs.set(td.name, td.type);
     if (td.names === 'unspelled pointer') {
       table.unspelledPointers.add(td.name);
@@ -203,14 +209,39 @@ function forwardDeclares(d: Declaration): boolean {
   );
 }
 
-/** One name a `typedef` declares: the type it stands for (as a spelling, before resolution), and
- *  whether it names the struct, union or enum body the declaration defines, or a pointer to one that
- *  has no other name to spell it by. */
+/** One name a `typedef` declares: the type it stands for (before resolution), and whether it names
+ *  the struct, union or enum body the declaration defines, or a pointer to one that has no other name
+ *  to spell it by. */
 interface TypedefName {
   name: string;
-  type: string;
+  type: DeclaredType;
   names: 'body' | 'unspelled pointer' | 'other';
 }
+
+/** The type a lone name spells, which resolves to itself. */
+const named = (name: string): DeclaredType => ({
+  qualifiers: [],
+  type: { kind: 'words', words: [name] },
+  unknownWords: [],
+  spelling: name,
+  derivations: [],
+});
+
+/** The one name `t` is, where it is a name and nothing else: what a typedef may have declared. */
+const nameOf = (t: DeclaredType): string | undefined =>
+  t.derivations.length === 0 && t.unknownWords.length === 0 && t.type.kind === 'words' && t.type.words.length === 1
+    ? t.type.words[0]
+    : undefined;
+
+/** `struct Tag`, `union Tag` or `enum Tag` where `t` is that tag and nothing else, qualifiers aside. */
+const tagOf = (t: DeclaredType): string | undefined =>
+  t.derivations.length === 0 &&
+  t.unknownWords.length === 0 &&
+  t.type.kind === 'tag' &&
+  t.type.tag !== undefined &&
+  WORD.test(t.type.tag)
+    ? `${t.type.keyword} ${t.type.tag}`
+    : undefined;
 
 const isPointer = (x: Derivation): boolean => x.kind === 'pointer' && x.member === undefined;
 
@@ -234,37 +265,38 @@ function functionPointer(derivations: readonly Derivation[]): readonly Derivatio
  *  (`typedef struct {…} *PS;`). Without a body, a name is read when its type is the specifiers'
  *  own, a pointer to it (`u8 *`, `u8 * const *`) or a function pointer (`void (*)(s32)`); any other
  *  type, an array's or one that groups more than a function pointer, is not read. */
-function typedefNames(d: Declaration, tokens: Tokens): TypedefName[] {
+function typedefNames(d: Declaration): TypedefName[] {
   const s = d.specifiers;
   const declared = d.declarators.flatMap((x) =>
     x.name !== undefined && WORD.test(x.name) ? [{ ...x, name: x.name }] : [],
   );
-  const spell = (base: string, derivations: readonly Derivation[]): string =>
-    spellType(base, derivations, tokens, { parameter: false });
   if (s.type.kind === 'tag' && s.type.body !== undefined) {
     // a plain name stands for the body with its qualifiers; a tag, without them
     const plain = declared.find((x) => x.derivations.length === 0)?.name;
+    const tag = tagOf({ ...declaredType(s, []), unknownWords: [] });
     const pointee =
-      s.type.tag !== undefined && WORD.test(s.type.tag)
-        ? [...s.qualifiers, s.type.keyword, s.type.tag].join(' ')
-        : plain;
+      tag !== undefined
+        ? { ...declaredType(s, []), unknownWords: [], spelling: tag }
+        : plain !== undefined
+          ? named(plain)
+          : undefined;
     return declared.flatMap((x): TypedefName[] => {
       if (x.derivations.length === 0) {
-        return [{ name: x.name, type: x.name, names: 'body' }];
+        return [{ name: x.name, type: named(x.name), names: 'body' }];
       }
       if (!x.derivations.every(isPointer)) {
         return [];
       }
       return [
         pointee === undefined
-          ? { name: x.name, type: x.name, names: 'unspelled pointer' }
-          : { name: x.name, type: spell(pointee, x.derivations), names: 'other' },
+          ? { name: x.name, type: named(x.name), names: 'unspelled pointer' }
+          : { name: x.name, type: { ...pointee, derivations: x.derivations }, names: 'other' },
       ];
     });
   }
   return declared
     .filter((x) => x.derivations.every(isPointer) || functionPointer(x.derivations) !== undefined)
-    .map((x) => ({ name: x.name, type: spell(s.spelling, x.derivations), names: 'other' }));
+    .map((x) => ({ name: x.name, type: declaredType(s, x.derivations), names: 'other' }));
 }
 
 /** The attributes a declaration writes on what it declares: among its specifiers and on its
@@ -361,50 +393,76 @@ function enumerators(tokens: Tokens, body: Range): string[] {
   return out;
 }
 
-/** Resolve a spelling through the typedef table until `declaredWidth` can size it, keeping it the
- *  same type throughout; a pointer resolves its pointee the same way. */
-function resolve(t: string, typedefs: ReadonlyMap<string, string>): string {
-  const s = t.replace(/\s+/g, ' ').trim();
-  // a pointer resolves its pointee, qualifiers and all, and keeps its own
-  const pointer = /^(.*?)\s*\*\s*((?:\b(?:const|volatile)\b\s*)*)$/.exec(s);
-  if (pointer) {
-    return `${resolve(pointer[1], typedefs)} *${pointer[2] ? ` ${pointer[2].trim()}` : ''}`;
+/** `t` with the typedef names it is built on resolved, each to the same type, until `declaredWidth`
+ *  can size it: a pointer resolves what it points at, and a typedef name is replaced by the type it
+ *  stands for. An array, a function, a reference or a pointer to member is kept as declared. */
+function resolve(t: DeclaredType, typedefs: ReadonlyMap<string, DeclaredType>, tokens: Tokens): DeclaredType {
+  const [first, ...rest] = t.derivations;
+  if (first !== undefined) {
+    if (!isPointer(first)) {
+      return t;
+    }
+    const pointee = resolve({ ...t, derivations: rest }, typedefs, tokens);
+    return { ...pointee, derivations: [first, ...pointee.derivations] };
   }
-  const qualifiers = (s.match(/\b(?:const|volatile)\b/g) ?? []).join(' ');
-  let cur = s
-    .replace(/\b(?:const|volatile)\b/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  for (let hops = 0; hops < 16 && declaredWidth(cur) === undefined; hops++) {
-    const next = typedefs.get(cur);
-    if (next === undefined || next === cur) {
+  let cur = t;
+  for (let hops = 0; hops < 16 && declaredWidth(spellType(cur, tokens)) === undefined; hops++) {
+    const name = nameOf(cur);
+    const next = name === undefined ? undefined : typedefs.get(name);
+    if (next === undefined || nameOf(next) === name) {
       break;
     }
-    cur = next.replace(/\s+/g, ' ').trim();
+    cur = qualified(next, cur.qualifiers);
   }
-  return qualifiers ? `${qualifiers} ${cur}` : cur;
+  return cur;
 }
 
-/** The layout of each struct or union a spelling names, read from its body when asked for.
+/** `t` qualified by `q`, as a typedef name's qualifiers qualify the type it stands for: the derivation
+ *  nearest the name, or the base where there is none. An array's qualifier is its element's, and a
+ *  function or a reference takes none. */
+function qualified(t: DeclaredType, q: readonly Qualifier[]): DeclaredType {
+  const union = (own: readonly Qualifier[]): Qualifier[] => [...q, ...own.filter((x) => !q.includes(x))];
+  const [first, ...rest] = t.derivations;
+  if (q.length === 0 || first?.kind === 'function' || first?.kind === 'reference') {
+    return t;
+  }
+  if (first === undefined) {
+    return { ...t, qualifiers: union(t.qualifiers) };
+  }
+  if (first.kind === 'pointer') {
+    return { ...t, derivations: [{ ...first, qualifiers: union(first.qualifiers) }, ...rest] };
+  }
+  const element = qualified({ ...t, derivations: rest }, q);
+  return { ...element, derivations: [first, ...element.derivations] };
+}
+
+/** A pointer to `t`, or `t` where it is a pointer already. */
+const pointerTo = (t: DeclaredType): DeclaredType =>
+  t.derivations.length > 0 && t.derivations.every(isPointer)
+    ? t
+    : { ...t, derivations: [{ kind: 'pointer', qualifiers: [] }, ...t.derivations] };
+
+/** The layout of each struct or union a type names, read from its body when asked for.
  *  Memoised per type and depth: a body whose members point at bodies is walked once per depth, not
  *  once per path to it — each pointer member lays its pointee out, and K of them to depth 8 is K^8
  *  walks. */
 function layoutReader(ctx: ParsedContext, table: TypeTable): LayoutOf {
   const laidOut = new Map<string, AggregateLayout | undefined>();
   const layoutOf: LayoutOf = (t, depth) => {
-    const bare = t
-      .replace(/\b(?:const|volatile)\b/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-    const key = `${depth} ${bare}`;
+    const keyword = t.type.kind === 'tag' ? t.type.keyword : undefined;
+    const tag = keyword === 'struct' || keyword === 'union' ? tagOf(t) : undefined;
+    const name = tag ?? nameOf(t);
+    if (name === undefined) {
+      return undefined;
+    }
+    const key = `${depth} ${name}`;
     if (laidOut.has(key)) {
       return laidOut.get(key);
     }
-    const tag = /^(struct|union) [A-Za-z_]\w*$/.exec(bare);
-    const kind = (tag?.[1] as AggregateLayout['kind'] | undefined) ?? table.named.get(bare)?.kind;
+    const kind = tag !== undefined ? (keyword as AggregateLayout['kind']) : table.named.get(name)?.kind;
     let layout: AggregateLayout | undefined;
     if (kind !== undefined) {
-      const body = tag ? table.tagged.get(bare) : table.named.get(bare)?.body;
+      const body = tag !== undefined ? table.tagged.get(tag) : table.named.get(name)?.body;
       const members = body === undefined || table.realigned ? undefined : readMembers(body, depth);
       layout = members === undefined ? { kind } : { kind, members };
     }
@@ -453,44 +511,47 @@ function layoutReader(ctx: ParsedContext, table: TypeTable): LayoutOf {
     for (const d of m.declarators) {
       const shape = memberShape(d, ctx.tokens);
       const type =
-        shape === undefined
-          ? undefined
-          : (inline ??
-            memberType(spellType(s.spelling, shape.returns, ctx.tokens, { parameter: false }), shape.pointer, depth));
+        shape === undefined ? undefined : (inline ?? memberType(declaredType(s, shape.returns), shape.pointer, depth));
       if (shape === undefined || type === undefined || (typeof type !== 'string' && shape.bits !== undefined)) {
         return undefined;
       }
       out.push({
         name: shape.name,
-        type: shape.pointer ? (typeof type === 'string' ? `${type.replace(/ \*$/, '')} *` : 'void *') : type,
+        type: shape.pointer && typeof type !== 'string' ? 'void *' : type,
         ...(shape.dims ? { dims: shape.dims } : {}),
         ...(shape.bits !== undefined ? { bits: shape.bits } : {}),
       });
     }
     return out;
   };
-  // The type a member's base spells, or undefined where it cannot be laid out.
-  const memberType = (base: string, pointer: boolean, depth: number): ParamType | AggregateLayout | undefined => {
-    const t = resolve(base, table.typedefs);
-    if (declaredWidth(t) !== undefined || t === 'float' || t === 'double') {
-      return t;
+  // The type of a member of `base`, or of a pointer to one (`pointer`), or undefined where it cannot
+  // be laid out.
+  const memberType = (base: DeclaredType, pointer: boolean, depth: number): ParamType | AggregateLayout | undefined => {
+    const t = resolve(base, table.typedefs, ctx.tokens);
+    const spelled = spellType(t, ctx.tokens);
+    const spell = (x: DeclaredType): string => spellType(pointer ? pointerTo(x) : x, ctx.tokens);
+    if (declaredWidth(spelled) !== undefined || spelled === 'float' || spelled === 'double') {
+      return spell(t);
     }
-    if (table.unspelledPointers.has(t)) {
+    if (table.unspelledPointers.has(spelled)) {
       return 'void *';
     }
-    if (table.unsizedEnums.has(t)) {
+    if (table.unsizedEnums.has(spelled)) {
       return undefined;
     }
-    if (/^enum [A-Za-z_]\w*$/.test(t) || table.enums.has(t)) {
-      // an enum, which the target sizes whatever it is called: spelled `enum` and its name
-      return table.enums.has(t) ? `enum ${t}` : t;
+    // an enum, which the target sizes whatever it is called: spelled `enum` and its name
+    if (table.enums.has(spelled)) {
+      return spell(named(`enum ${spelled}`));
+    }
+    if (t.qualifiers.length === 0 && t.type.kind === 'tag' && t.type.keyword === 'enum' && tagOf(t) !== undefined) {
+      return spell(t);
     }
     const nested = layoutOf(t, depth + 1);
     if (nested?.members !== undefined) {
       return nested;
     }
     // a pointer to it is still a word; anything else of it cannot be laid out
-    return pointer ? `${t} *` : undefined;
+    return pointer ? spell(t) : undefined;
   };
   return layoutOf;
 }
@@ -552,7 +613,7 @@ function functionPrototypes(
     const s = d.specifiers;
     if (
       s.typedef ||
-      s.spelling === '' ||
+      (s.spelling === '' && s.qualifiers.length === 0) ||
       (s.type.kind === 'tag' && (s.type.body !== undefined || s.type.keyword === 'class'))
     ) {
       continue;
@@ -571,8 +632,9 @@ function functionPrototypes(
       if (retyped) {
         unreadParams.add(x.name);
       }
-      const ret = spellType(s.spelling, returns, ctx.tokens, { parameter: false });
-      const read = readSignature(ret, fn, ctx.tokens, language, table.typedefs, (t) => layoutOf(t, 0));
+      const read = readSignature(declaredType(s, returns), fn, ctx.tokens, language, table.typedefs, (t) =>
+        layoutOf(t, 0),
+      );
       const proto = unreadParams.has(x.name) ? returnOnly(read) : read;
       const prior = found.get(x.name);
       const had = prior && unreadParams.has(x.name) ? returnOnly(prior) : prior;
@@ -602,15 +664,16 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
 }
 
 function readSignature(
-  ret: string,
+  ret: DeclaredType,
   fn: Extract<Derivation, { kind: 'function' }>,
   tokens: Tokens,
   language: 'c' | 'c++',
-  typedefs: ReadonlyMap<string, string>,
-  layoutOf: (t: string) => AggregateLayout | undefined,
+  typedefs: ReadonlyMap<string, DeclaredType>,
+  layoutOf: (t: DeclaredType) => AggregateLayout | undefined,
 ): FnProto {
   const proto: FnProto = {};
-  const r = resolve(ret, typedefs);
+  const resolved = resolve(ret, typedefs, tokens);
+  const r = spellType(resolved, tokens);
   // A struct or union returned by value is kept, spelled as the header spells it: it is the fact
   // that moves every argument one register up on a target that returns it through a hidden pointer.
   // A spelling that names one and reads as no type (`struct Blob64 EWRAM_FN`, a macro this never
@@ -622,8 +685,8 @@ function readSignature(
   // `#include` that the lexer skips) may be a struct returned through memory, whose hidden pointer
   // is then read as argument 0; a symbol map that sizes the return closes it
   // (`prototypesFromSymbols`).
-  const layout = declaredWidth(r) === undefined ? layoutOf(r) : undefined;
-  const keyword = /\b(struct|union|class)\b/.exec(r);
+  const layout = declaredWidth(r) === undefined ? layoutOf(resolved) : undefined;
+  const keyword = resolved.type.kind === 'tag' ? resolved.type.keyword : undefined;
   if (r === 'void') {
     proto.returnsVoid = true;
   } else if (declaredWidth(r) !== undefined) {
@@ -631,8 +694,8 @@ function readSignature(
   } else if (layout !== undefined) {
     proto.returns = r;
     proto.returnLayout = layout;
-  } else if (keyword && !r.includes('*')) {
-    proto.returnLayout = { kind: keyword[1] === 'union' ? 'union' : 'struct' };
+  } else if (keyword !== undefined && keyword !== 'enum' && resolved.derivations.length === 0) {
+    proto.returnLayout = { kind: keyword === 'union' ? 'union' : 'struct' };
   }
   const { params } = fn;
   if (params === undefined) {
@@ -655,17 +718,11 @@ function readSignature(
   return proto;
 }
 
-/** A parameter's type, its name taken off. An array nearest the name is a pointer, which resolves
- *  like any other; a spelling that groups a pointer — `f32 (*)[3]`, `void (*)(const T *)` — is
- *  register-wide already and keeps its own parameter list as written. */
-function parameterType(p: Parameter, tokens: Tokens, typedefs: ReadonlyMap<string, string>): ParamType {
-  const { derivations } = p.declarator;
-  const spelled = spellType(p.specifiers.spelling, derivations, tokens, { parameter: true });
-  const grouped = derivations.some(
-    (x, i) =>
-      x.kind === 'function' || (x.kind === 'array' && i > 0) || (x.kind === 'pointer' && x.member !== undefined),
-  );
-  return grouped ? spelled : resolve(spelled, typedefs);
+/** A parameter's type, its name taken off: an array or a function nearest the name is a pointer, and
+ *  the typedef names it is built on resolve as a return's do. */
+function parameterType(p: Parameter, tokens: Tokens, typedefs: ReadonlyMap<string, DeclaredType>): ParamType {
+  const t = asParameter(declaredType(p.specifiers, p.declarator.derivations));
+  return spellType(resolve(t, typedefs, tokens), tokens);
 }
 
 /** The prototypes a lift of `own` reads when a context is in hand: `stated` — a caller's own

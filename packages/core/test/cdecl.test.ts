@@ -14,11 +14,12 @@ import {
   type ParsedContext,
   type Range,
   type Specifiers,
+  declaredType,
   memberDeclarations,
   parseDeclarations,
   parseTypeName,
 } from '../src/cdecl/parse';
-import { spellType } from '../src/cdecl/spell';
+import { asParameter, spellType } from '../src/cdecl/spell';
 
 const texts = (t: Tokens): string[] => Array.from({ length: t.count }, (_, k) => t.text(k));
 
@@ -446,7 +447,10 @@ const spelledTypes = (src: string, language: Language, parameter: boolean): stri
   const ctx = parseDeclarations(src, language);
   expect([...ctx.unread, ...ctx.unreadLists]).toEqual([]);
   return ctx.declarations.flatMap((d) =>
-    d.declarators.map((x) => spellType(typeOf(d.specifiers), x.derivations, ctx.tokens, { parameter })),
+    d.declarators.map((x) => {
+      const t = declaredType(d.specifiers, x.derivations);
+      return spellType(parameter ? asParameter(t) : t, ctx.tokens);
+    }),
   );
 };
 
@@ -457,16 +461,14 @@ const parameterTypes = (src: string, language: Language): string[] => {
   if (fn.kind !== 'function' || fn.params === undefined) {
     throw new Error('no parameter list');
   }
-  return fn.params.map((p) =>
-    spellType(typeOf(p.specifiers), p.declarator.derivations, ctx.tokens, { parameter: true }),
-  );
+  return fn.params.map((p) => spellType(asParameter(declaredType(p.specifiers, p.declarator.derivations)), ctx.tokens));
 };
 
 describe('a type printed in the prototype vocabulary', () => {
   test('a pointer after its base, each pointer with its own qualifiers', () => {
     expect(
       parameterTypes('void f(u8 *a, const u8 * const * b, char **c, u8 ** const d, const Vec& r);', 'c++'),
-    ).toEqual(['u8 *', 'const u8 * const *', 'char **', 'u8 ** const', 'const Vec &']);
+    ).toEqual(['u8 *', 'const u8 * const *', 'char * *', 'u8 * * const', 'const Vec &']);
   });
 
   test('a parameter array is a pointer to its element, and a multi-dimensional one to its rows', () => {
@@ -484,7 +486,7 @@ describe('a type printed in the prototype vocabulary', () => {
         'typedef unsigned char u8; void f(int fn(int), int (u8), void (**cb)(void), void (* const k)(void));',
         'c',
       ),
-    ).toEqual(['int (*)(int)', 'int (*)(u8)', 'void (**)(void)', 'void (* const)(void)']);
+    ).toEqual(['int (*)(int)', 'int (*)(u8)', 'void (* *)(void)', 'void (* const)(void)']);
   });
 
   test("a function pointer's own parameter list is printed as written, one space for any gap", () => {
@@ -493,7 +495,7 @@ describe('a type printed in the prototype vocabulary', () => {
         'void f(void (*h)( s32  chan,\n u8* /* c */ p ), u8 *(*mk)(const INFO *info), void (*v)(int, ...));',
         'c',
       ),
-    ).toEqual(['void (*)(s32 chan, u8* p)', 'u8 *(*)(const INFO *info)', 'void (*)(int, ...)']);
+    ).toEqual(['void (*)(s32 chan, u8* p)', 'u8 * (*)(const INFO *info)', 'void (*)(int, ...)']);
   });
 
   test('outside a parameter, an array and a function stay what they are', () => {

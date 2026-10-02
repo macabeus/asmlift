@@ -75,8 +75,8 @@ export interface Specifiers {
    *  macro */
   unknownWords: string[];
   attributes: Attribute[];
-  /** the qualifiers, the type and the unknown words in the order they are written, one space apart:
-   *  `u8 const`, `struct R2`, `struct Blob64 EWRAM_FN`. A tag's body is not part of it */
+  /** the type and the unknown words in the order they are written, one space apart: `u8`,
+   *  `struct R2`, `struct Blob64 EWRAM_FN`. Neither the qualifiers nor a tag's body are part of it */
   spelling: string;
 }
 
@@ -108,6 +108,25 @@ export interface Parameter {
   specifiers: Specifiers;
   declarator: Declarator;
 }
+
+/** A type as one declarator declares it: its specifiers' type, qualifiers and unknown words, and its
+ *  derivations. */
+export interface DeclaredType {
+  readonly qualifiers: readonly Qualifier[];
+  readonly type: TypeSpecifier;
+  readonly unknownWords: readonly string[];
+  /** as `Specifiers.spelling` */
+  readonly spelling: string;
+  readonly derivations: readonly Derivation[];
+}
+
+export const declaredType = (s: Specifiers, derivations: readonly Derivation[]): DeclaredType => ({
+  qualifiers: s.qualifiers,
+  type: s.type,
+  unknownWords: s.unknownWords,
+  spelling: s.spelling,
+  derivations,
+});
 
 export interface Declaration {
   specifiers: Specifiers;
@@ -450,7 +469,6 @@ class Parser {
         this.i++;
       } else if (qualifier !== undefined) {
         s.qualifiers.push(qualifier);
-        written.push(w);
         this.i++;
       } else if (this.storage.has(w)) {
         s.storage.push(w);

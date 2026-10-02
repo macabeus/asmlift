@@ -90,7 +90,7 @@ describe('prototypes from a declaration context', () => {
     );
     expect(p.LinkMain1?.params).toEqual(['u8 *', 'u16 *', 'u16 (*)[8]']);
     expect(p.func_8008A430_8B030?.params).toEqual(['f32 (*)[]', 'float']);
-    expect(p.SetFlashTimerIntr?.params).toEqual(['u8', 'void (**)(void)']);
+    expect(p.SetFlashTimerIntr?.params).toEqual(['u8', 'void (* *)(void)']);
     expect(p.CopyablePlayerMovement_None?.params).toEqual(['struct ObjectEvent *', 'u8', 'bool8 (*)(u8)']);
     expect(declaredCallArgs(p.SetFlashTimerIntr, ARMV4T_AGBCC)?.widths).toEqual([8, 32]);
   });
@@ -104,6 +104,25 @@ describe('prototypes from a declaration context', () => {
     );
     expect(p.GXLoadNrmMtxImm3x3?.params).toEqual(['const Mtx33', 'u32']);
     expect(p.fn_1_91A4?.params).toEqual(['struct Vec *', 'struct Vec *', 'float *']);
+  });
+
+  test("a typedef name resolves to its own type, which the name's qualifiers qualify nearest the name", () => {
+    const p = prototypesFromContext(
+      `typedef void (*Cb)(int); typedef unsigned char u8; typedef const u8 CU8;
+       void f(const Cb c, Cb const d, const Cb *e, const CU8 k); Cb *g(int y);`,
+      'c',
+    );
+    expect(p.f?.params).toEqual(['void (* const)(int)', 'void (* const)(int)', 'void (* const *)(int)', 'const u8']);
+    expect(p.g?.returns).toBe('void (* *)(int)');
+    // a qualifier inside a template argument is that argument's
+    expect(prototypesFromContext('void h(TVec3<const u8 *> a);', 'c++').h?.params).toEqual(['TVec3<const u8 *>']);
+  });
+
+  // a reference is returned as an address, never through a hidden pointer
+  test('a function returning a reference to a struct states no struct return', () => {
+    const p = prototypesFromContext('struct S { int a; }; struct S &f(int a); typedef struct S T; T &g(int a);', 'c++');
+    expect(p.f).toEqual({ params: ['int'] });
+    expect(p.g).toEqual({ params: ['int'] });
   });
 
   test('a function-pointer parameter keeps the qualifiers of its own parameters where they are', () => {
