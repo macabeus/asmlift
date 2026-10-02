@@ -318,6 +318,14 @@ export const pascalBackend: LanguageBackend = {
         : `function ${fn.name}(${params}): ${pasType(fn.retType)};`,
     ];
     if (fn.locals.length) {
+      // A narrow LOCAL truncates every value assigned to it, and `Integer`/`Cardinal` would not: the
+      // width is the declaration's whole meaning, so it has no spelling here. A narrow parameter
+      // arrives already narrowed and keeps the word spelling.
+      for (const l of fn.locals) {
+        if (l.type.kind === 'int' && l.type.width < 32) {
+          throw new Error(`pascal backend: no spelling for a narrow local (${l.type.width} bits)`);
+        }
+      }
       lines.push('var', ...fn.locals.map((l) => `  ${l.name}: ${pasType(l.type)};`));
     }
     lines.push('begin');

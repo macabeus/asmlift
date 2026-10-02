@@ -70,7 +70,7 @@ describe('bench repro — the ways it can find no row', () => {
 });
 
 describe('bench repro — the script it hands over', () => {
-  const id = 'kleod:sub_0803E8CC:agbcc';
+  const id = 'kleod:MultiplyQ8:agbcc';
   const fn = results.find((r) => r.id === id)!;
 
   test("carries the row's own input asm and the built-bin invocation, with no placeholder left", async () => {
@@ -79,7 +79,7 @@ describe('bench repro — the script it hands over', () => {
     expect(r.code).toBe(0);
     const script = readFileSync(join(dir, 'repro-asmlift.sh'), 'utf8');
     expect(script).toContain(fn.targetAsm.trimEnd());
-    expect(script).toContain('bench target kleod:sub_0803E8CC:agbcc');
+    expect(script).toContain(`bench target ${id}`);
     expect(script).toContain('--score-against target.o');
     // materialize() filled the placeholders — an unfilled one is a script that cd's to /path/to
     expect(script).not.toContain("ASMLIFT_PATH='/path/to/asmlift'");
@@ -100,7 +100,7 @@ describe('bench repro — the script it hands over', () => {
   });
 
   test("--tool m2c states M2C's published figure, not asmlift's", async () => {
-    // These differ on this row — asmlift 8/26, m2c 0/24 — so printing the asmlift one beside the
+    // These differ on this row — asmlift 0/12, m2c 3/12 — so printing the asmlift one beside the
     // m2c script hands the reader the wrong thing to compare out.c against.
     const r = await run(id, { out: scratch(), tool: 'm2c' });
     expect(fn.m2c.score).not.toBe(fn.asmlift.score);

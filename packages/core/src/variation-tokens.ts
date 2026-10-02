@@ -130,6 +130,7 @@ const TOKENS = [
   { name: 'initfirst', variationKind: 'respell' },
   { name: 'pollguard', variationKind: 'respell' },
   { name: 'pollread', variationKind: 'respell' },
+  { name: 'narrow-decl', variationKind: 'respell' },
   // symbol map: the map's shaped spellings withheld; always the last part
   { name: 'raw-globals', variationKind: 'symbol-map' },
 ] as const satisfies readonly VariationToken[];

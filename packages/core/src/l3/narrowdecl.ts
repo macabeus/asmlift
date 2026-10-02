@@ -1,43 +1,58 @@
-// A NAMED NARROW VALUE, declared at its width: `s32 v; v = (u8)(x - 1);` becomes
-// `u8 v; v = x - 1;`.
+// L3 stacked variation `/narrow-decl`: a named narrow value declared at its width. `s32 v; v = (u8)(x - 1);`
+// becomes `u8 v; v = x - 1;`.
 //
 // The two spellings compute the same C value at every read. The declaration truncates where the
 // cast did, and a `u8`, `s8`, `u16` or `s16` read is promoted to `int`, which is what an `s32` read
-// already is, so no operator a read meets changes type. What changes is the object the compiler
-// holds the value in, and agbcc allocates registers around it differently. Compiled with agbcc
-// `-O2 -mthumb-interwork -fhex-asm -fprologue-bugfix`, both spellings of
+// already is. They are not the same program to gcc 2.9's front end. `get_narrower`
+// (gcc/tree.c:4516) sees through the promotion of a narrow VARIABLE and not through an `int` that
+// a cast was assigned to, so for the narrow one `shorten_compare` (gcc/c-common.c:1158) makes a
+// compare against a constant unsigned and folds `>= 0`, `/` and `%` are shortened to their unsigned
+// helpers (gcc/c-typeck.c:2036-2041), and `>>` becomes a logical shift (gcc/c-typeck.c:2119).
+// An AND, OR, XOR, `+` or `-` that feeds a narrow store differs too, at expansion:
+// `convert_to_integer` pushes the store's truncation into those operands (gcc/convert.c:278-284),
+// and a `u8` local is a pseudo PROMOTE_MODE already zero-extended (gcc/thumb.h:344,
+// gcc/stmt.c:3318-3323), whose low byte is free to read (gcc/expr.c:830-836), where an `s32` one
+// takes a fresh byte pseudo and a register copy. Compiled with agbcc `-O2 -mthumb-interwork
+// -fhex-asm -fprologue-bugfix`,
 //
 //   v = g.c - 1;  h.d = (v & 1) + rnd() % (5 - v) + 1;
 //
-// load, subtract and zero-extend into the same register, but under `s32 v` the AND copies `v`
-// first (`mov r1, #1; add r4, r5, #0; and r4, r4, r1`), where under `u8 v` it operates on it in
-// place (`mov r5, #1; and r5, r5, r4`), which is what `kleod:sub_0803E8CC` holds. Where the two
-// allocate alike, as on the `/derived-home` winner of `kleod:HBlankIntr_DeleteAllSaveDataScreen`,
-// both compile to the same bytes.
+// copies `v` before the AND under `s32 v` (`mov r1, #1; add r4, r5, #0; and r4, r4, r1`) and
+// operates on it in place under `u8 v` (`mov r5, #1; and r5, r5, r4`), which is what
+// `kleod:sub_0803E8CC` holds. Over `v + 3`, `v | 2`, `v ^ 2` and `v * 3` the two compile alike. mwcc, IDO, KMC gcc and gcc 2.7.2 each emit different code for the two
+// spellings as well. Which one the source declared is not in the asm, so the differ referees, and
+// the candidate it is derived onto stays in the fan.
 //
-// REFUSED, each because the two spellings would stop being the same program, or stop being one
-// the asm can tell apart from the other's:
-//   • a local that is not `s32`. A `u32` read is unsigned, and narrowing it would turn its compares,
-//     divisions and shifts into signed ones;
-//   • a local written more than once, or by `v++`. A second write is a loop's update or a merge's
-//     arm, where the width decides the loop agbcc emits (raise/narrowlocal.ts), which this does
-//     not weigh;
-//   • a local whose one write is not a narrowing integer cast, or is a `for` loop's init;
+// A STACKED variation (rank-variations.ts), derived onto every other candidate's tree: the width of
+// a declaration is orthogonal to every other respell variation, and the row that needs it needs it on top
+// of `/offmember`.
+//
+// REFUSED, each because the two spellings would stop computing the same value:
+//   • a local that is not `s32`. A `u32` read is unsigned, and narrowing it would turn its
+//     compares, divisions and shifts into signed ones;
+//   • a local written more than once, or by `v++`, where a later write could store a value the
+//     narrow declaration would truncate;
+//   • a local whose one write is not an integer narrowed to a narrower integer, or is a `for`
+//     loop's init;
 //   • a local whose address is taken, or that is volatile, a frame object, uninitialized, or homed
 //     in a stack slot. Each of those is an object in memory, whose width is its access width.
 import type { IrType } from '../ir/types';
 import { type Expr, type SFn, type Stmt, mapStmtLists } from './ast';
 import { localMentions } from './mentions';
+import { declaredTypes, exprCType } from './typing';
 
 type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'int' }> };
 
-const isNarrowing = (e: Expr): e is Narrowing =>
-  e.k === 'cast' && !e.volatile && e.to.kind === 'int' && e.to.width < 32;
+/** An integer narrowed to a narrower integer. A pointer or a float operand keeps its cast: C converts
+ *  neither to an integer by assignment alone. */
+const isNarrowing = (e: Expr, env: ReturnType<typeof declaredTypes>): e is Narrowing =>
+  e.k === 'cast' && !e.volatile && e.to.kind === 'int' && e.to.width < 32 && exprCType(e.e, env)?.kind === 'int';
 
-/** The tree with every local the header admits declared at its narrowing's width, or the tree
- *  itself when none is. */
-export function narrowDeclarations(sfn: SFn): SFn {
+/** The tree with every local the header admits declared at its narrowing's width, or null when
+ *  none is. */
+export function narrowDeclarations(sfn: SFn): SFn | null {
   const mentions = localMentions(sfn);
+  const env = declaredTypes(sfn);
   let body = sfn.body;
   const narrowed = new Map<string, IrType>();
   for (const l of sfn.locals) {
@@ -51,7 +66,6 @@ export function narrowDeclarations(sfn: SFn): SFn {
       declared.width !== 32 ||
       !declared.signed ||
       l.volatile ||
-      l.pointeeVolatile ||
       l.frame ||
       l.uninit ||
       l.slots
@@ -61,7 +75,7 @@ export function narrowDeclarations(sfn: SFn): SFn {
     let to: IrType | undefined;
     const rewrite = (list: Stmt[]): Stmt[] =>
       list.map((s) => {
-        if (s.k === 'assign' && s.name === l.name && isNarrowing(s.value)) {
+        if (s.k === 'assign' && s.name === l.name && isNarrowing(s.value, env)) {
           to = s.value.to;
           return { ...s, value: s.value.e };
         }
@@ -74,7 +88,7 @@ export function narrowDeclarations(sfn: SFn): SFn {
     }
   }
   if (narrowed.size === 0) {
-    return sfn;
+    return null;
   }
   return { ...sfn, body, locals: sfn.locals.map((l) => ({ ...l, type: narrowed.get(l.name) ?? l.type })) };
 }
