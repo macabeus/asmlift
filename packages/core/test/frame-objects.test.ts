@@ -4,10 +4,15 @@
 // `laddr` yet; the audit asks nothing of the frontend beyond these fields.
 import { describe, expect, test } from 'vitest';
 
+import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import { auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { ARMV4T_AGBCC, blockTransferRead, sourceControlRead, sourceReach } from '../src/target';
+
+// `g` is declared to return nothing, so no hidden return pointer rides in its argument 0
+const declaresNoHiddenPointer = (callee: string): boolean =>
+  returnsWithoutHiddenPointer(callee, { g: { params: 1, returnsVoid: true } }, ARMV4T_AGBCC);
 
 // `laddr off` handed to `callee` at argument 0, stored through first when `written`
 const frame = (off: number, callee: string, written: boolean): { blk: Block; object: Op } => {
@@ -31,7 +36,7 @@ const audit = (blk: Block, owned: [number, number], declared: [number, number]) 
     usedSlotOffsets: new Set(),
     capturedObjectIsTheWholeFrame: false,
     movedCaptures: new Set(),
-    prototypes: { g: { params: 1, returnsVoid: true } },
+    returnsWithoutHiddenPointer: declaresNoHiddenPointer,
     symbols: undefined,
     target: ARMV4T_AGBCC,
   });
@@ -94,7 +99,7 @@ describe('an unbounded device read keeps the local area as one object', () => {
       usedSlotOffsets: new Set(slots),
       capturedObjectIsTheWholeFrame: false,
       movedCaptures: new Set(),
-      prototypes: { g: { params: 1, returnsVoid: true } },
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
       target: ARMV4T_AGBCC,
       oneObject,

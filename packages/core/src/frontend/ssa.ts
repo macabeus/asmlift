@@ -272,8 +272,7 @@ export function makeSsaBuilder(
   name: string,
   blockCount: number,
   preds: number[][],
-  /** A supplier because half the partition is MEASURED rather than declared: Thumb's local area
-   *  comes from a prologue walk that runs after this call. Evaluated once, on first use. Omitted ⇒
+  /** Evaluated once, at its first use, which is where `checkedLiveInModel` checks it. Omitted ⇒
    *  no partition is claimed, so every slot refuses and every register is a parameter. */
   liveInOf: () => LiveInModel = () => ({}),
   /** The type of a value that stands for `key` before any instruction defines it — a parameter, a
