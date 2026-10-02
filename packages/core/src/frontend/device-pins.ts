@@ -6,8 +6,10 @@
  *  The frame-object audit (frontend/frame-objects.ts) decides WHETHER a function is pinned and
  *  under which policy: it is the pass that sees a frame address handed to a device that reads
  *  through it, and that chooses the one-object or the per-object model. This module decides WHICH
- *  accesses, from the policy row the audit names. Nothing here decodes, so the pass is the same for
- *  every ISA whose target declares its device registers.
+ *  accesses, from the policy row the audit names. Nothing here decodes, but the pass pins only
+ *  behind a sink that audit hands it — a `readOnlyAddressSinks` register a frame address was
+ *  stored to — and pins nothing without one, whatever the target's `deviceRegisters` window
+ *  says. thumb.ts is the one frontend that runs that audit.
  *
  *  EVERY DEVICE ACCESS OF A FUNCTION KEPT AS ONE OBJECT IS PINNED, as the source's `REG_*` and
  *  `vu32 *dmaRegs` spell them — store and load alike, because agbcc drops or moves either when it
@@ -185,7 +187,7 @@ function overwritten(op: Op, blk: Block, at: number, { literalAddrOf }: LiteralA
   return false;
 }
 
-/** Stamp `volatile` on the device accesses `pins.policy` pins. */
+/** Stamp `volatile` on the device accesses `pins.policy` pins — none when `pins.sinks` is empty. */
 export function pinDeviceAccesses(
   irBlocks: Block[],
   { policy, sinks }: DevicePins,
