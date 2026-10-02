@@ -61,7 +61,7 @@ import { makeHighHalves } from './high-half';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, mintArgSlotHoles, stackSlotKey } from './ssa';
 import { clobberedByCall, makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -588,6 +588,10 @@ export function lift(
     isFpKey(k) ? (fpType ?? T.f32()) : undefined,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
+  /** This frontend's refusal, for the shared code that refuses on its behalf. */
+  const fail = (message: string): never => {
+    throw new PpcUnsupportedError(message);
+  };
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
    *  way a placeholder could leak past it, lives in frontend/high-half.ts — shared with
@@ -606,9 +610,7 @@ export function lift(
     hi: '@ha',
     hiArticle: 'an',
     lo: '@l',
-    fail: (message) => {
-      throw new PpcUnsupportedError(message);
-    },
+    fail,
   });
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
@@ -624,45 +626,6 @@ export function lift(
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
   const CALL_CLOBBERS = clobberedByCall(target);
-
-  // Best-effort call arity when a callee has no prototype: the count of contiguous argument
-  // registers (r3..) with a VALUE reaching the call. A prototype's `params` is authoritative when
-  // supplied; this liveness heuristic covers the rest.
-  //
-  // A pending `@ha` high half is a def but not a value, and it must not raise the count: a `lis`
-  // hoisted into the prologue leaves its half in r4 across an intervening call, and counted, it
-  // makes `strlen(s)` into `strlen(s, <half>)` — which then refuses at the read. Measured on
-  // `pikmin:searchKanjiCode__FUs`, whose `lis r4` at 0x4 pairs only at 0x28, past the `bl strlen`.
-  //
-  // A GAP REFUSES. The count is contiguous, so an argument register with nothing reaching it ends
-  // it — and one is empty for two opposite reasons. Either the call really takes that few
-  // arguments, or the register still holds this function's own untouched incoming argument, a value
-  // the machine passes on that SSA has no definition for because nothing ever wrote it. When a
-  // LATER argument register does hold a value the second reading is the only one left, and taking
-  // the first drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` sets
-  // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
-  // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
-  // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`declaredCallArgs` is asked
-  // first), and this scan is never weighed against one: it is a guess, and a guess that cannot
-  // fail cannot witness a width a declaration left open.
-  const fallbackArgc = (bi: number, at: number): number => {
-    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
-    let n = 0;
-    while (n < ARG_REGS.length && holdsValue(n)) {
-      n++;
-    }
-    for (let k = n + 1; k < ARG_REGS.length; k++) {
-      if (holdsValue(k)) {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${ARG_REGS[k]} holds a ` +
-            `value and ${ARG_REGS[n]} holds none — an argument register left at its incoming value and one ` +
-            `the call does not pass look the same here, so the argument count is not decidable`,
-        );
-      }
-    }
-    return n;
-  };
 
   // THE FRAME, as two kinds of word slot, each named by its offset from the ENTRY r1
   // (`r1Displacements`).
@@ -1129,7 +1092,13 @@ export function lift(
                 'value rather than building the pair the ABI hands back',
             );
           }
-          const argc = declared ?? fallbackArgc(bi, ins.addr);
+          // a pending `@ha` half is not an argument, and a gap refuses (`fallbackArgc`)
+          const argc =
+            declared ??
+            fallbackArgc(ssa, ARG_REGS, bi, {
+              accept: (v) => !highHalves.has(v),
+              gap: { name, at: ins.addr, fail },
+            });
           // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
           // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the
           // back chain and the LR save word), and a value stored there that reaches the call is that

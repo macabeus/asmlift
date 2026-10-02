@@ -1128,7 +1128,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', 'carries a data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
-    ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ppc.ts'],
+    ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ssa.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],

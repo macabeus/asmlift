@@ -956,15 +956,51 @@ export function makeSsaBuilder(
 /** Best-effort call arity when a callee has no prototype: the count of contiguous argument
  *  registers with a value reaching the call's block. Correct when the arguments are set up in
  *  the calling block; it can under-count pass-through parameters — which is why a prototype's
- *  declared `params` is authoritative when available. */
+ *  declared `params` is authoritative when available.
+ *
+ *  `accept` says which definitions are values (`SsaBuilder.hasReachingDef`). A pending high half
+ *  is a def but not a value, and counted it raises the arity: a `lis` hoisted into the prologue
+ *  leaves its half in r4 across an intervening call and makes `strlen(s)` into
+ *  `strlen(s, <half>)`, which then refuses at the read.
+ *
+ *  `gap` MAKES A GAP REFUSE. The count is contiguous, so an argument register with nothing reaching
+ *  it ends it — and one is empty for two opposite reasons. Either the call really takes that few
+ *  arguments, or the register still holds this function's own untouched incoming argument, a value
+ *  the machine passes on that SSA has no definition for because nothing ever wrote it. When a
+ *  LATER argument register does hold a value the second reading is the only one left, and taking
+ *  the first drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` sets
+ *  up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
+ *  `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
+ *  cannot be decided here — the function's own arity is exactly what is missing — so this refuses
+ *  and names the gap rather than guessing. A declaration answers it, and this scan is never
+ *  weighed against one: it is a guess, and a guess that cannot fail cannot witness a width a
+ *  declaration left open. */
 export function fallbackArgc(
-  ssa: { hasReachingDef(reg: string, b: number): boolean },
-  argRegs: string[],
+  ssa: { hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean },
+  argRegs: readonly string[],
   bi: number,
+  opts: {
+    accept?: (v: Value) => boolean;
+    /** the call's function and address, and the frontend's own refusal */
+    gap?: { name: string; at: number; fail: (message: string) => never };
+  } = {},
 ): number {
+  const holdsValue = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
   let n = 0;
-  while (n < argRegs.length && ssa.hasReachingDef(argRegs[n], bi)) {
+  while (n < argRegs.length && holdsValue(n)) {
     n++;
+  }
+  if (opts.gap !== undefined) {
+    const { name, at, fail } = opts.gap;
+    for (let k = n + 1; k < argRegs.length; k++) {
+      if (holdsValue(k)) {
+        fail(
+          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${argRegs[k]} holds a ` +
+            `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
+            `the call does not pass look the same here, so the argument count is not decidable`,
+        );
+      }
+    }
   }
   return n;
 }
