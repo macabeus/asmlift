@@ -352,9 +352,9 @@ export function auditFrameObjects({
 }
 
 /** Refuses the whole function, naming the address-taken local as what it cannot lift. */
-export type Refuse = (why: string) => never;
+type Refuse = (why: string) => never;
 
-export function frameRefusal(name: string): Refuse {
+function frameRefusal(name: string): Refuse {
   return (why) => {
     throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
   };
@@ -369,7 +369,7 @@ export function frameRefusal(name: string): Refuse {
  *  (`failIfSlotKeysIt`).
  *
  *  Returns every `laddr` that survives, in block order. */
-export function foldMovedCaptures(
+function foldMovedCaptures(
   irBlocks: Block[],
   movedCaptures: ReadonlySet<Value>,
 ): { laddrs: Op[]; foldedHere: Set<Op> } {
@@ -435,13 +435,13 @@ export function foldMovedCaptures(
 /** What the audit reads a value as: its defining op, its constant, the literal address it denotes,
  *  and the read-only device registers a store hands it to. Read off the IR as the fold left it, so
  *  `defOf` names no `laddr` the split mints after. */
-export interface FrameAddressFacts extends LiteralAddresses {
+interface FrameAddressFacts extends LiteralAddresses {
   /** the registers this store hands the WHOLE address to, when each is one a device only reads
    *  through, else none */
   readsThrough(op: Op): readonly number[];
 }
 
-export function frameAddressFacts(
+function frameAddressFacts(
   irBlocks: readonly Block[],
   symbols: SymbolMap | undefined,
   target: TargetDescription,
@@ -551,7 +551,7 @@ function factorOf(facts: LiteralAddresses, v: Value): number {
  *  sends the improvement loop to build the wrong thing. Per CAPTURE and not per offset: every
  *  direct `[sp,#k]` word access is a capture of its own at k, refused here for its width, and a
  *  different capture at k whose access is refused for another reason must not be handed that one. */
-export function splitAddressingCopies(
+function splitAddressingCopies(
   irBlocks: Block[],
   laddrs: Op[],
   foldedHere: Set<Op>,
@@ -632,7 +632,7 @@ export function splitAddressingCopies(
  *  different offsets are different objects, so width, signedness, escape and the overlap
  *  window are decided per offset — one width shared by every capture in the function would
  *  declare a halfword spill and a word spill as one object. */
-export function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): Map<number, Op[]> {
+function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): Map<number, Op[]> {
   const objects = new Map<number, Op[]>();
   for (const op of laddrs) {
     const off = op.attrs.off as number;
@@ -663,12 +663,12 @@ export function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Ref
 
 /** Where each frame address may flow: `taint`, the object a value may hold the address of on SOME
  *  path, and `frameOnEveryPath`, the values that hold a frame address on EVERY path. */
-export interface AddressFlow {
+interface AddressFlow {
   readonly taint: ReadonlyMap<Value, number>;
   readonly frameOnEveryPath: ReadonlySet<Value>;
 }
 
-export function addressFlow(
+function addressFlow(
   irBlocks: readonly Block[],
   objects: ReadonlyMap<number, readonly Op[]>,
   facts: LiteralAddresses,
@@ -756,7 +756,7 @@ export function addressFlow(
 }
 
 /** One fixed-offset access at an object's own address. */
-export interface FrameAccess {
+interface FrameAccess {
   readonly width: number;
   readonly signed: boolean;
   readonly isLoad: boolean;
@@ -764,7 +764,7 @@ export interface FrameAccess {
 
 /** Every use of every frame object, by offset — what each later stage reads. Each field is
  *  declared, with the question it answers, where `classifyFrameUses` builds it. */
-export interface FrameUses {
+interface FrameUses {
   readonly accesses: ReadonlyMap<number, readonly FrameAccess[]>;
   readonly escaped: ReadonlySet<number>;
   readonly mayWrite: ReadonlySet<number>;
@@ -783,7 +783,7 @@ export interface FrameUses {
 }
 
 /** Judges every use of a tainted value, against the object it names. */
-export function classifyFrameUses({
+function classifyFrameUses({
   irBlocks,
   objects,
   flow: { taint, frameOnEveryPath },
@@ -1042,14 +1042,14 @@ function indexedAccess(
 
 /** The bytes an escape may reach, `[lo, hi)` from the object's own offset, and how it reads them
  *  as a refusal words it. */
-export interface ReadWindow {
+interface ReadWindow {
   readonly lo: number;
   readonly hi: number;
   readonly why: string;
 }
 
 /** Each op's block and index, over the IR as the classification judged it. */
-export function opPositions(irBlocks: readonly Block[]): Map<Op, { blk: Block; i: number }> {
+function opPositions(irBlocks: readonly Block[]): Map<Op, { blk: Block; i: number }> {
   const at = new Map<Op, { blk: Block; i: number }>();
   for (const blk of irBlocks) {
     blk.ops.forEach((op, i) => at.set(op, { blk, i }));
@@ -1058,7 +1058,7 @@ export function opPositions(irBlocks: readonly Block[]): Map<Op, { blk: Block; i
 }
 
 /** The read window of every escaped object, in the order the classification found the escapes. */
-export function escapeWindows(
+function escapeWindows(
   irBlocks: readonly Block[],
   uses: FrameUses,
   flow: AddressFlow,
@@ -1095,7 +1095,7 @@ const unbounded = (why: string): ReadWindow => ({ lo: -Infinity, hi: Infinity, w
  *  does not unbound the read, and neither does an interrupt at any instruction: whatever re-arms
  *  the channel with this frame's address still in the source register is this function's own
  *  store, and the walk sees every one of those. */
-export function readWindow(
+function readWindow(
   off: number,
   {
     at,
@@ -1189,7 +1189,7 @@ export function readWindow(
 /** Which model the audit judges the frame in. `refused` is the one mutable fact the audit
  *  carries across stages: set when a shape the per-object model refuses is met while the
  *  one-object answer is on offer, and read by the relift test. */
-export interface ModelChoice {
+interface ModelChoice {
   readonly onOffer: boolean;
   refused: boolean;
   /** refuses `why` where it stands, or, with the one-object answer on offer, asks for it instead */
@@ -1203,7 +1203,7 @@ export interface ModelChoice {
  *  there each of those refusals asks for that answer instead of declining (`shapeRefused`), and
  *  the second audit judges the bytes as one object by its own rules — two types at one byte
  *  still refuse there. Where the answer is not on offer, each refuses where it stands. */
-export function chooseFrameModel(
+function chooseFrameModel(
   oneObject: FrameRange | undefined,
   uses: FrameUses,
   windows: ReadonlyMap<number, ReadWindow>,
@@ -1260,7 +1260,7 @@ export function chooseFrameModel(
  *  of the facts the walk has. `packages/core/test/thumb-frontend.test.ts` carries the input.
  *
  *  NOT A STRUCT-RETURN TEMP, which `hiddenReturnPointerStands` asks. */
-export function recheckWholeFramePremise({
+function recheckWholeFramePremise({
   uses,
   returnsWithoutHiddenPointer,
   fail,
@@ -1408,7 +1408,7 @@ function failIfSlotKeysIt(
  *  store in the same block overwrites it). And it is right whichever the source had there: a
  *  member of the escaped object, which the device may read, or a spill, which no one reads —
  *  the asm spells both as a store and a reload, and keeping a spill in memory changes no value. */
-export function keepAsOneObject({
+function keepAsOneObject({
   oneObject: { from, to },
   irBlocks,
   objects,
@@ -1529,13 +1529,13 @@ export function keepAsOneObject({
 }
 
 /** One object's shape: `count` elements of `width` bytes. */
-export interface ObjectShape {
+interface ObjectShape {
   readonly width: number;
   readonly count: number;
 }
 
 /** The per-object model's reading of every object. */
-export interface ObjectShapes {
+interface ObjectShapes {
   readonly extent: ReadonlyMap<number, ObjectShape>;
   /** the declared struct each return temp is, by offset */
   readonly aggregateAt: ReadonlyMap<number, IrType>;
@@ -1557,7 +1557,7 @@ function slotKeys(usedSlotOffsets: ReadonlySet<number>, off: number, width: numb
  *  overlap, and refusing first would decline exactly the frames it exists for — an object at
  *  [sp,#0] whose first member is a word stored `str rN, [sp]`. The other per-object refusals here
  *  go through `shapeRefused`, for the same reason. */
-export function objectShapes({
+function objectShapes({
   objects,
   uses,
   owned,
@@ -1807,7 +1807,7 @@ function notTheWholeArea(
 /** Every escaped object as the rules an escape retracts read it (`FRAME_ESCAPE_GATES`), computed
  *  ONCE, with whether the escape may write and how it left, so a new bound — a callee's declared
  *  extent — has one place to go. */
-export function frameEscapes({
+function frameEscapes({
   irBlocks,
   uses,
   windows,
@@ -1950,7 +1950,7 @@ function escapeRefusal(id: string, e: FrameEscape): string {
  *  compiled at the corpus's flags, the qualified and plain spellings are byte-identical and
  *  differ in two `discards qualifiers` warnings. So the rule is the same rule, and the reason
  *  it is free here is not the reason it is free on a scalar read once. */
-export function stampObjects(
+function stampObjects(
   objects: ReadonlyMap<number, readonly Op[]>,
   { extent, aggregateAt }: ObjectShapes,
   uses: FrameUses,
@@ -1997,4 +1997,24 @@ function returnedSize(call: Op): number {
  *  cannot be swapped (`apps/benchmark/src/run/gate-census.ts`, WHAT PUTS A PASS IN THE REGISTRY). */
 export const FRAME_OBJECT_AUDIT: { run: (audit: FrameObjectAudit) => FrameObjectVerdict } = {
   run: (audit) => auditFrameObjects(audit),
+};
+
+/** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
+ *  every source path under `./*`, so a plain `export` here would put the audit's stages into the
+ *  package's public API, where no consumer should be able to depend on them. The name says what it
+ *  is; nothing in `src` reads it. */
+export const __testing = {
+  frameRefusal,
+  foldMovedCaptures,
+  frameAddressFacts,
+  splitAddressingCopies,
+  frameObjects,
+  addressFlow,
+  classifyFrameUses,
+  opPositions,
+  escapeWindows,
+  readWindow,
+  chooseFrameModel,
+  objectShapes,
+  frameEscapes,
 };

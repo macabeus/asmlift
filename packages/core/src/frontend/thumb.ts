@@ -5379,10 +5379,9 @@ function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[]): void 
 export const thumbFrontend: Frontend = { id: 'thumb', inputFormat: 'gnu-as', lift };
 
 /** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
- *  every source path under `./*`, so a plain `export` here would put the pad table, the pad
- *  predicate and the witness serialisation into the package's public API — three things no
- *  consumer should be able to depend on, exported only so a cross-check test could reach them.
- *  The name says what it is; nothing in `src` reads it. */
+ *  every source path under `./*`, so a plain `export` here would put the pad table, the pad predicate, the witness serialisation and the lift's stages into the
+ *  package's public API, where no consumer should be able to depend on them. The name says what it
+ *  is; nothing in `src` reads it. */
 export const __testing = {
   PAD_ENCODINGS,
   isPadInstr,
@@ -5392,12 +5391,7 @@ export const __testing = {
   thumbCfg,
   assertScratchRegsPartitioned,
   thumbCallDeclarations,
-  measureThumbFrame,
-  thumbOperands,
-  thumbPairs,
-  thumbFlagCarry,
   thumbFillOf,
   openBlockCursor,
-  fillThumbBlock,
   lowerCall,
 };

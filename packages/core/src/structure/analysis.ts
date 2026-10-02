@@ -1076,7 +1076,7 @@ function copyInterdependentValues(fn: Fn, defOf: Map<Value, Op>): Set<Value> {
  *  that are ever simultaneously live into one variable name is the textbook silent clobber.
  *
  *  `returnsVoid` suppresses the phantom `ret` operand, the same way the use registry does. */
-export function blockLiveIn(fn: Fn, returnsVoid: boolean): Map<Block, Set<Value>> {
+function blockLiveIn(fn: Fn, returnsVoid: boolean): Map<Block, Set<Value>> {
   const liveIn = new Map<Block, Set<Value>>();
   for (const b of fn.blocks) {
     liveIn.set(b, new Set());
@@ -1182,7 +1182,7 @@ function makeReach(): {
  *  ONLY flows into the suppressed return read as a dead (side-effect) call, so `sideEffects()`
  *  emits it. One operand SLOT = one entry (an op reading a value twice records two uses — that
  *  count is what decides whether an inlined call would EXECUTE twice). */
-export interface UseIndex {
+interface UseIndex {
   /** every positioned use of a value; a value absent here is dead */
   useSitesOf: Map<Value, UseSite[]>;
   opIndex: Map<Op, number>;
@@ -1194,7 +1194,7 @@ export interface UseIndex {
   liveAcrossCall(def: Op, consumers: Op[]): boolean;
 }
 
-export function indexUses(fn: Fn, returnsVoid: boolean): UseIndex {
+function indexUses(fn: Fn, returnsVoid: boolean): UseIndex {
   const useSitesOf = new Map<Value, UseSite[]>();
   const opIndex = new Map<Op, number>();
   const opBlock = new Map<Op, Block>();
@@ -1259,7 +1259,7 @@ export function indexUses(fn: Fn, returnsVoid: boolean): UseIndex {
 }
 
 /** Which values ride a branch edge as a successor ARG, in two scopes with two different readers. */
-export interface EdgeArgUses {
+interface EdgeArgUses {
   /** EVERY multi-successor terminator's, and it is a correctness fact: an edge argument is emitted
    *  INSIDE the arm it belongs to, so a value that renders only there runs only on that path. For a
    *  call that is an effect the IR performs unconditionally and the C performs sometimes, and a
@@ -1283,7 +1283,7 @@ export interface EdgeArgUses {
   backArgFed: Map<Value, number>;
 }
 
-export function edgeArgUses(fn: Fn, domOf: Map<Block, Set<Block>>): EdgeArgUses {
+function edgeArgUses(fn: Fn, domOf: Map<Block, Set<Block>>): EdgeArgUses {
   const branchArgFed = new Set<Value>();
   const condBrArgFed = new Set<Value>();
   const backArgFed = new Map<Value, number>();
@@ -1322,7 +1322,7 @@ export function edgeArgUses(fn: Fn, domOf: Map<Block, Set<Block>>): EdgeArgUses 
  *  memory access at all (calls, whose own reads+writes must not reorder against anything). Every
  *  other case gets a NAMED TEMP assigned at the def's own program position (sideEffects) — which is
  *  precisely the register the compiler used. */
-export interface MaterializeState {
+interface MaterializeState {
   /** defs that must emit as named temps at their own position */
   materialize: Set<Op>;
   /** the members of `materialize` that name a pre-update read */
@@ -1345,7 +1345,7 @@ function namedHelper(materialize: ReadonlySet<Op>, op: Op): boolean {
 
 /** WHERE A VALUE'S EXPRESSION RENDERS, read off `materialize` as it stands when asked. The two
  *  position caches hold until `invalidate()`. */
-export interface RenderModel {
+interface RenderModel {
   /** an op that renders AT ITS OWN position: a statement, a terminator, a materialized or dead def */
   anchored(op: Op): boolean;
   consumersOf(op: Op): Op[];
@@ -1370,7 +1370,7 @@ export interface RenderModel {
   invalidate(): void;
 }
 
-export function makeRenderModel(uses: UseIndex, materialize: ReadonlySet<Op>): RenderModel {
+function makeRenderModel(uses: UseIndex, materialize: ReadonlySet<Op>): RenderModel {
   const { useSitesOf, opIndex, opBlock, blockPos } = uses;
   const emitPosCache = new Map<Op, { blk: Block; idx: number } | null>();
   const anchored = (op: Op): boolean =>
@@ -1443,12 +1443,12 @@ export function makeRenderModel(uses: UseIndex, materialize: ReadonlySet<Op>): R
   return { anchored, consumersOf, feedsFloatAdd, emitPos, emitPositions, invalidate };
 }
 
-export interface InlineReach {
+interface InlineReach {
   ridesEdge(call: Op): boolean;
   spelledTwice(call: Op): boolean;
 }
 
-export function makeInlineReach(uses: UseIndex, edges: EdgeArgUses, materialize: ReadonlySet<Op>): InlineReach {
+function makeInlineReach(uses: UseIndex, edges: EdgeArgUses, materialize: ReadonlySet<Op>): InlineReach {
   const { useSitesOf } = uses;
   const { branchArgFed, backArgFed } = edges;
   /** Does `hit` hold of `call`'s value, or of any value it reaches through the ops it would be
@@ -1514,7 +1514,7 @@ type BottomTestedLoop = NaturalLoop & { term: Op; back: Successor };
 
 /** The natural loops, from the caller's dominators, and the loop rules over them. With no `dom`
  *  there are no loops and every rule stands down — the same posture as the `defs`-carried rules. */
-export interface LoopRules {
+interface LoopRules {
   loopBodies: NaturalLoop[];
   /** Never seat a materialized def in a MULTI-BLOCK loop header: a test-at-top `while`'s condition
    *  has no seat for a materialized temp (the structurer's headerPure gate), so materializing there
@@ -1533,7 +1533,7 @@ export interface LoopRules {
   readAfterUpdate(L: BottomTestedLoop, r: Value, consumers: Op[]): boolean;
 }
 
-export function makeLoopRules(a: {
+function makeLoopRules(a: {
   fn: Fn;
   dom: Map<Block, Set<Block>> | undefined;
   predsOf: Map<Block, Block[]>;
@@ -1723,7 +1723,7 @@ export function makeLoopRules(a: {
 
 /** The variation scopes and the placement sets the rules read, each settled before the fixpoint:
  *  none reads `materialize`. */
-export interface HomeScopes {
+interface HomeScopes {
   /** Would naming THIS op's own result change its value? Yes when the result is an ADDRESS built
    *  over a gaddr/laddr: rendered standalone an `&g + i` loses the memAccess's inline byte-stride
    *  cast, and the cast-aware base machinery in l3/ serves those bases instead. Asked by the rules
@@ -1851,7 +1851,7 @@ export interface HomeScopes {
   onlyFeedsBlockParams(v: Value): boolean;
 }
 
-export function homeScopes(a: {
+function homeScopes(a: {
   fn: Fn;
   returnsVoid: boolean;
   opts: AnalyzeOptions;
@@ -1943,7 +1943,7 @@ export function homeScopes(a: {
 }
 
 /** Every stage output the materialization rules read. */
-export interface MaterializeRules {
+interface MaterializeRules {
   opts: AnalyzeOptions;
   uses: UseIndex;
   edges: EdgeArgUses;
@@ -1981,13 +1981,7 @@ export interface MaterializeRules {
  *  are excluded from it (an `&g + i` rendered standalone loses the memAccess's inline `(u8 *)` cast
  *  — cast-aware base materialization is separate), and consts are not in it at all: a re-derived
  *  const is re-materialization, which is the compiler's own behavior. */
-export function namePureOp(
-  rules: MaterializeRules,
-  state: MaterializeState,
-  op: Op,
-  b: Block,
-  escapePhase: boolean,
-): void {
+function namePureOp(rules: MaterializeRules, state: MaterializeState, op: Op, b: Block, escapePhase: boolean): void {
   const { opts, uses, render, reach, loops, scopes, memWriteBetween, copyInterdependent } = rules;
   const { useSitesOf } = uses;
   const { materialize } = state;
@@ -2273,7 +2267,7 @@ function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access
 
 /** The rules for a memory access — a `call`, `load` or `aload` — in order; the first that names
  *  the op ends the walk. */
-export function nameAccess(rules: MaterializeRules, state: MaterializeState, op: Op, b: Block): void {
+function nameAccess(rules: MaterializeRules, state: MaterializeState, op: Op, b: Block): void {
   const { opts, uses, edges, render, reach, loops, scopes, predsOf, memWriteBetween } = rules;
   const { useSitesOf } = uses;
   const { materialize } = state;
@@ -2447,7 +2441,7 @@ export function nameAccess(rules: MaterializeRules, state: MaterializeState, op:
  *  loop only through a body op it feeds (`t + 1`) is not a home. Walked through that op, it would
  *  be one, and the refusal would decline every such loop over a counter the function takes as a
  *  parameter: its post-loop names include the entry block's. */
-export function namePreUpdateHelpers(rules: MaterializeRules, state: MaterializeState): void {
+function namePreUpdateHelpers(rules: MaterializeRules, state: MaterializeState): void {
   const { uses, render, loops } = rules;
   for (const op of state.materialize) {
     const r = op.results[0];
@@ -2468,7 +2462,7 @@ export function namePreUpdateHelpers(rules: MaterializeRules, state: Materialize
 
 /** Every stage `analyze` runs ahead of its fixpoint, wired as `analyze` wires them, over an empty
  *  `MaterializeState`. */
-export function analysisStages(
+function analysisStages(
   fn: Fn,
   returnsVoid: boolean,
   opts: AnalyzeOptions,
@@ -2575,3 +2569,18 @@ export function analyze(fn: Fn, returnsVoid: boolean, opts: AnalyzeOptions = {})
     memWriteBetween: rules.memWriteBetween,
   };
 }
+
+/** Internal surface for this module's own tests, and for nothing else. `@asmlift/core` exports
+ *  every source path under `./*`, so a plain `export` here would put the stages `analyze` runs into the
+ *  package's public API, where no consumer should be able to depend on them. The name says what it
+ *  is; nothing in `src` reads it. */
+export const __testing = {
+  analysisStages,
+  blockLiveIn,
+  indexUses,
+  edgeArgUses,
+  makeRenderModel,
+  makeLoopRules,
+  namePureOp,
+  nameAccess,
+};

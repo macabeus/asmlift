@@ -3,8 +3,12 @@
 import { describe, expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
-import {
-  type FrameRange,
+import { type FrameRange, __testing } from '../src/frontend/frame-objects';
+import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
+import { T } from '../src/ir/types';
+import { ARMV4T_AGBCC } from '../src/target';
+
+const {
   addressFlow,
   chooseFrameModel,
   classifyFrameUses,
@@ -18,10 +22,7 @@ import {
   opPositions,
   readWindow,
   splitAddressingCopies,
-} from '../src/frontend/frame-objects';
-import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
-import { T } from '../src/ir/types';
-import { ARMV4T_AGBCC } from '../src/target';
+} = __testing;
 
 const DMA3SAD = 0x040000d4;
 const DMA3CNT_H = DMA3SAD + 0xa;

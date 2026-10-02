@@ -5,16 +5,10 @@ import { expect, test } from 'vitest';
 import { type Fn, type Op, defOpMap, dominators, predecessors } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import {
-  analysisStages,
-  blockLiveIn,
-  edgeArgUses,
-  indexUses,
-  makeLoopRules,
-  makeRenderModel,
-  nameAccess,
-  namePureOp,
-} from '../src/structure/analysis';
+import { __testing } from '../src/structure/analysis';
+
+const { analysisStages, blockLiveIn, edgeArgUses, indexUses, makeLoopRules, makeRenderModel, nameAccess, namePureOp } =
+  __testing;
 
 const built = (ir: string): Fn => {
   const fn = parse(ir);
