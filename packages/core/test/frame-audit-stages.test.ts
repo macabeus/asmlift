@@ -2,6 +2,7 @@
 // the inputs `auditFrameObjects` hands each one. `frame-objects.test.ts` drives the audit whole.
 import { describe, expect, test } from 'vitest';
 
+import { returnsWithoutHiddenPointer } from '../src/aggregate';
 import {
   type FrameRange,
   addressFlow,
@@ -24,7 +25,9 @@ import { ARMV4T_AGBCC } from '../src/target';
 
 const DMA3SAD = 0x040000d4;
 const DMA3CNT_H = DMA3SAD + 0xa;
-const prototypes = { g: { params: 1, returnsVoid: true } };
+// `g` is declared to return nothing, so no hidden return pointer rides in its argument 0
+const declaresNoHiddenPointer = (callee: string): boolean =>
+  returnsWithoutHiddenPointer(callee, { g: { params: 1, returnsVoid: true } }, ARMV4T_AGBCC);
 
 const value = (): Value => mkValue(T.unk(32));
 const laddr = (off: number): Op => mkOp('laddr', { results: [value()], attrs: { off } });
@@ -66,8 +69,8 @@ const shape = (irBlocks: Block[], slots: number[], range: FrameRange = { from: 0
   const windows = escapeWindows(irBlocks, uses, flow, facts, ARMV4T_AGBCC);
   const model = chooseFrameModel(undefined, uses, windows, fail);
   const usedSlotOffsets = new Set(slots);
-  const args = { objects, uses, owned: range, declared: range, usedSlotOffsets, prototypes, target: ARMV4T_AGBCC };
-  const shapes = objectShapes({ ...args, model, fail });
+  const args = { objects, uses, owned: range, declared: range, usedSlotOffsets };
+  const shapes = objectShapes({ ...args, returnsWithoutHiddenPointer: declaresNoHiddenPointer, model, fail });
   return { uses, windows, model, shapes, usedSlotOffsets };
 };
 

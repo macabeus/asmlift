@@ -181,6 +181,26 @@ describe('thumbCallDeclarations', () => {
     expect(calls.returnsPair('__divsi3')).toBe(false);
   });
 
+  test("names the runtime's soft-float helpers, and nothing else, as float helpers", () => {
+    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
+    expect(calls.isFloatHelper('__adddf3')).toBe(true);
+    expect(calls.isFloatHelper('__muldi3')).toBe(false);
+    expect(calls.isFloatHelper('g')).toBe(false);
+    expect(calls.isFloatHelper('toString')).toBe(false);
+  });
+
+  test("answers whether a callee's declaration rules out a hidden return pointer", () => {
+    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {
+      g: { params: 1, returnsVoid: true },
+      h: { params: [] },
+    });
+    expect(calls.returnsWithoutHiddenPointer('g')).toBe(true);
+    expect(calls.returnsWithoutHiddenPointer('h')).toBe(false);
+    expect(calls.returnsWithoutHiddenPointer('k')).toBe(false);
+    // a signature the C standard fixes
+    expect(calls.returnsWithoutHiddenPointer('memcpy')).toBe(true);
+  });
+
   test("leaves a pair-returning call's high register out of what it clobbers", () => {
     const { callClobbers, pairReturnClobbers } = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
     expect(callClobbers).toContain('r1');

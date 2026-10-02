@@ -18,7 +18,7 @@
 // incoming stack argument at `[sp, #N]` locatable at all. Because agbcc may
 // copy a callee-saved argument (e.g. into r4) before touching r0, entry parameters are
 // ordered by ABI register (r0, r1, …), not by the order they were first read.
-import { aggregateType, returnedAggregate, returnsInMemory } from '../aggregate';
+import { aggregateType, returnedAggregate, returnsInMemory, returnsWithoutHiddenPointer } from '../aggregate';
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { type IrType, T, typeToString } from '../ir/types';
@@ -2488,7 +2488,7 @@ function liftOnce(
     usedSlotOffsets: fill.frameUses.usedSlotOffsets,
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
     movedCaptures: fill.frameUses.movedCaptures,
-    prototypes,
+    returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
     symbols,
     target,
     oneObject,
@@ -2763,14 +2763,21 @@ interface DeclaredCall {
 }
 
 /** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
- *  name. The outgoing-argument analysis (`measureThumbFrame`) and the `bl` lowering both read a
- *  callee's declaration here and nowhere else. */
+ *  name. A declaration is the project's prototype or the compiler's runtime table, and this file
+ *  reads either only here: the outgoing-argument analysis (`measureThumbFrame`), the `bl`
+ *  lowering and the frame-object audit (`FrameObjectAudit.returnsWithoutHiddenPointer`) ask
+ *  these questions. */
 interface ThumbCallDeclarations {
   readonly callClobbers: readonly string[];
   readonly pairReturnClobbers: readonly string[];
   wideHelper(callee: string): RuntimeHelper | null;
+  /** whether the runtime table names the callee one of its soft-float helpers */
+  isFloatHelper(callee: string): boolean;
   returnsPair(callee: string): boolean;
   registerStructReturn(callee: string | undefined): 'register' | undefined;
+  /** whether a declaration rules out a struct returned through a hidden pointer at argument 0
+   *  (`returnsWithoutHiddenPointer`, aggregate.ts) */
+  returnsWithoutHiddenPointer(callee: string): boolean;
   declaredCall(callee: string): DeclaredCall | null;
 }
 
@@ -2964,7 +2971,19 @@ function thumbCallDeclarations(name: string, target: TargetDescription, prototyp
       ...(returned === undefined ? {} : { returned }),
     };
   };
-  return { callClobbers, pairReturnClobbers, wideHelper, returnsPair, registerStructReturn, declaredCall };
+  return {
+    callClobbers,
+    pairReturnClobbers,
+    wideHelper,
+    isFloatHelper: (callee) => {
+      const h = lookupHelper(target.runtimeHelpers, callee);
+      return h !== undefined && isFloatHelper(h);
+    },
+    returnsPair,
+    registerStructReturn,
+    returnsWithoutHiddenPointer: (callee) => returnsWithoutHiddenPointer(callee, prototypes, target),
+    declaredCall,
+  };
 }
 
 // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
@@ -5181,8 +5200,7 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
       // and a pair built here for a callee declared to take a `long long` is refused there.
       const producer = half && pairs.pairCallee.get(half.whole);
-      const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
-      if (half && helper && isFloatHelper(helper)) {
+      if (half && producer && calls.isFloatHelper(producer)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
             `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +

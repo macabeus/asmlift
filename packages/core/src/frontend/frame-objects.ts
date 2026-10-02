@@ -11,11 +11,9 @@
  *
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
-import { returnsWithoutHiddenPointer } from '../aggregate';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
 import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
-import type { Prototypes } from '../proto';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
 import { type DevicePins, type LiteralAddresses, literalAddresses } from './device-pins';
@@ -35,7 +33,10 @@ export interface FrameObjectAudit {
   capturedObjectIsTheWholeFrame: boolean;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
-  prototypes: Prototypes;
+  /** whether a callee's declaration rules out a struct returned through a hidden pointer at
+   *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
+   *  declarations */
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
   symbols: SymbolMap | undefined;
   target: TargetDescription;
   /** the retraction rules an escape is judged by; `FRAME_ESCAPE_GATES` when absent, and a
@@ -274,7 +275,7 @@ export function auditFrameObjects({
   usedSlotOffsets,
   capturedObjectIsTheWholeFrame,
   movedCaptures,
-  prototypes,
+  returnsWithoutHiddenPointer,
   symbols,
   target,
   gates = FRAME_ESCAPE_GATES,
@@ -295,7 +296,7 @@ export function auditFrameObjects({
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
   const model = chooseFrameModel(oneObject, uses, windows, fail);
   if (capturedObjectIsTheWholeFrame) {
-    recheckWholeFramePremise({ uses, prototypes, target, fail });
+    recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
@@ -303,7 +304,16 @@ export function auditFrameObjects({
     keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, fail });
     return { policy: 'one-object', sinks };
   }
-  const shapes = objectShapes({ objects, uses, owned, declared, usedSlotOffsets, prototypes, target, model, fail });
+  const shapes = objectShapes({
+    objects,
+    uses,
+    owned,
+    declared,
+    usedSlotOffsets,
+    returnsWithoutHiddenPointer,
+    model,
+    fail,
+  });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
   // THE ONE-OBJECT ANSWER, where it is on offer (every escape only READS and one of them reads
   // without bound) and the per-object model does not describe the frame: it refused a shape, an
@@ -1252,13 +1262,11 @@ export function chooseFrameModel(
  *  NOT A STRUCT-RETURN TEMP, which `hiddenReturnPointerStands` asks. */
 export function recheckWholeFramePremise({
   uses,
-  prototypes,
-  target,
+  returnsWithoutHiddenPointer,
   fail,
 }: {
   uses: FrameUses;
-  prototypes: Prototypes;
-  target: TargetDescription;
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
 }): void {
   if (!uses.passedToCallee.has(0) && !uses.publishedOutward.has(0)) {
@@ -1269,7 +1277,7 @@ export function recheckWholeFramePremise({
     );
   }
   const writtenHere = uses.accesses.get(0)?.some((a) => !a.isLoad) === true;
-  const whyItStands = writtenHere ? null : hiddenReturnPointerStands(0, uses.arg0Callees, prototypes, target);
+  const whyItStands = writtenHere ? null : hiddenReturnPointerStands(0, uses.arg0Callees, returnsWithoutHiddenPointer);
   if (whyItStands !== null) {
     fail(`the one-word frame is never written here, and ${whyItStands}`);
   }
@@ -1299,10 +1307,11 @@ export function recheckWholeFramePremise({
  *  THE THIRD IS A DECLARATION, NOT AN INFERENCE, and so is its converse: a callee declared to
  *  return a struct through memory, whose call the frontend stamps `sret`, makes the object that
  *  call's return storage (`returnTemps`). Those two are the only answers here read off something
- *  other than the instruction stream. `returnsWithoutHiddenPointer` (aggregate.ts) is where the
- *  third is answered, from the project's own `returnsVoid`, from a struct its declaration returns
- *  that the target hands back in a register, or from the `returns` of a signature the C standard
- *  fixes — the same table whose `params` this file already trusts to decide a call's arity. It is
+ *  other than the instruction stream. The frontend's call declarations answer the third
+ *  (`FrameObjectAudit.returnsWithoutHiddenPointer`, which aggregate.ts's
+ *  `returnsWithoutHiddenPointer` decides), from the project's own `returnsVoid`, from a struct its
+ *  declaration returns that the target hands back in a register, or from the `returns` of a
+ *  signature the C standard fixes — the same table whose `params` decide a call's arity. It is
  *  asked of EVERY callee that took the address at argument 0, because the object gets one
  *  decision: one callee about whose return nothing is known leaves the ambiguity standing and the
  *  refusal fires.
@@ -1341,14 +1350,13 @@ export function recheckWholeFramePremise({
 function hiddenReturnPointerStands(
   off: number,
   arg0Callees: FrameUses['arg0Callees'],
-  prototypes: Prototypes,
-  target: TargetDescription,
+  returnsWithoutHiddenPointer: (callee: string) => boolean,
 ): string | null {
   const cs = arg0Callees.get(off);
   if (cs === undefined || cs.size === 0) {
     return null;
   }
-  const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c, prototypes, target));
+  const unknown = [...cs].filter((c) => c === null || !returnsWithoutHiddenPointer(c));
   if (unknown.length === 0) {
     return null;
   }
@@ -1555,8 +1563,7 @@ export function objectShapes({
   owned,
   declared,
   usedSlotOffsets,
-  prototypes,
-  target,
+  returnsWithoutHiddenPointer,
   model,
   fail,
 }: {
@@ -1565,8 +1572,7 @@ export function objectShapes({
   owned: FrameRange;
   declared: FrameRange;
   usedSlotOffsets: ReadonlySet<number>;
-  prototypes: Prototypes;
-  target: TargetDescription;
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
   model: ModelChoice;
   fail: Refuse;
 }): ObjectShapes {
@@ -1620,8 +1626,7 @@ export function objectShapes({
         usedSlotOffsets,
         owned,
         declared,
-        prototypes,
-        target,
+        returnsWithoutHiddenPointer,
       });
       if (why !== null) {
         model.shapeRefused(
@@ -1693,7 +1698,7 @@ export function objectShapes({
     // question the whole-frame and untyped arms ask, asked of every object.
     const whyItStands = acc.some((a) => !a.isLoad)
       ? null
-      : hiddenReturnPointerStands(off, uses.arg0Callees, prototypes, target);
+      : hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
     if (whyItStands !== null) {
       fail(`the object at [sp,#${off}) is never written here, and ${whyItStands}`);
     }
@@ -1750,16 +1755,14 @@ function notTheWholeArea(
     usedSlotOffsets,
     owned,
     declared,
-    prototypes,
-    target,
+    returnsWithoutHiddenPointer,
   }: {
     objects: ReadonlyMap<number, readonly Op[]>;
     uses: FrameUses;
     usedSlotOffsets: ReadonlySet<number>;
     owned: FrameRange;
     declared: FrameRange;
-    prototypes: Prototypes;
-    target: TargetDescription;
+    returnsWithoutHiddenPointer: (callee: string) => boolean;
   },
 ): string | null {
   if (objects.size !== 1) {
@@ -1798,7 +1801,7 @@ function notTheWholeArea(
   }
   // The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question
   // is the one the one-word arm asks, asked here of the same callees.
-  return hiddenReturnPointerStands(off, uses.arg0Callees, prototypes, target);
+  return hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
 }
 
 /** Every escaped object as the rules an escape retracts read it (`FRAME_ESCAPE_GATES`), computed
