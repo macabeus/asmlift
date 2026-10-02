@@ -306,24 +306,19 @@ function ownAttributes(d: Declaration): Attribute[] {
   return [...d.specifiers.attributes, ...d.declarators.flatMap((x) => x.attributes)];
 }
 
-/** Every attribute a declaration writes outside a body: its own, and those inside the parameter lists
- *  its declarators hold. */
-function attributesOf(d: Declaration): Attribute[] {
-  const out: Attribute[] = [...d.specifiers.attributes];
-  for (const x of d.declarators) {
-    declaratorAttributes(x, out);
-  }
-  return out;
-}
-
-function declaratorAttributes(x: Declarator, out: Attribute[]): void {
-  out.push(...x.attributes);
-  for (const v of x.derivations) {
-    for (const p of v.kind === 'function' ? (v.params ?? []) : []) {
-      out.push(...p.specifiers.attributes);
-      declaratorAttributes(p.declarator, out);
-    }
-  }
+/** The attributes a declaration writes on what it declares and on the parameters of each function it
+ *  declares, each parameter's own. One inside a parameter's own parameter list is that inner
+ *  parameter's, and no parameter of the function. */
+function parameterAttributes(d: Declaration): Attribute[] {
+  return [
+    ...ownAttributes(d),
+    ...d.declarators.flatMap((x) => {
+      const fn = x.derivations[0];
+      return fn?.kind === 'function'
+        ? (fn.params ?? []).flatMap((p) => [...p.specifiers.attributes, ...p.declarator.attributes])
+        : [];
+    }),
+  ];
 }
 
 /** Whether an attribute in this declaration can move the layout of the body it defines. One in the
@@ -618,7 +613,7 @@ function functionPrototypes(
     ) {
       continue;
     }
-    const retyped = attributesOf(d).some((a) => MODE.test(a.text));
+    const retyped = parameterAttributes(d).some((a) => MODE.test(a.text));
     for (const x of d.declarators) {
       const [fn, ...returns] = x.derivations;
       if (

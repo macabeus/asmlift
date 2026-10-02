@@ -492,6 +492,16 @@ describe('prototypes from a declaration context', () => {
     expect(p.mode).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  test("a mode on a function pointer parameter's own parameter retypes nothing the function takes", () => {
+    const p = prototypesFromContext(
+      `typedef void (*Wide)(int x __attribute__((mode(DI))));
+       void viaTypedef(Wide w, int y); void written(void (*w)(int x __attribute__((mode(DI)))), int y);`,
+      'c',
+    );
+    expect(declaredCallArgs(p.viaTypedef, ARMV4T_AGBCC)?.widths).toEqual([32, 32]);
+    expect(declaredCallArgs(p.written, ARMV4T_AGBCC)?.widths).toEqual([32, 32]);
+  });
+
   // `mode` hands the attributes after it a shared scalar type (c-common.c:563, 996-1000); compiled,
   // `struct O { int a; }` is 8 bytes and comes back through memory
   test.each(['__attribute__((mode(SI), aligned(8)))', '__attribute__ ( ( __mode__ ( __SI__ ) , aligned ( 8 ) ) )'])(
