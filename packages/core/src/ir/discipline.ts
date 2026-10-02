@@ -10,7 +10,11 @@
 // a read only where the compiler could have made it of a `volatile` — as the lift is made and again
 // when structuring starts. Every question below takes the op, so a pass
 // asks one question instead of re-deriving the combination, and `PLACEMENT_ANSWERS` is the one
-// place a placement's answers are written.
+// place a placement's answers are written, the attrs a rebuilt op carries it by among them.
+//
+// A new placement is three edits: its `Placement` member with a `PLACEMENT_ANSWERS` row, the
+// `placedAt` clause that reads its stamp, and its key in contracts.ts `assertEffectsPreserved`,
+// whose switch over `placedAt` does not compile until the member is keyed or answered as uncounted.
 //
 // NAMED RESIDUE. The sites below ask a registry question where a placement could change the answer,
 // and keep the registry's answer. DELIBERATE: the placement does not bear on what the site asks.
@@ -68,18 +72,39 @@ interface PlacementAnswers {
   counted: boolean;
   /** an access whose spelling must carry `volatile`, and where it carries it */
   qualifiedBy: Qualifier | null;
+  /** the attrs that put this placement on an op a pass builds to stand for `from` */
+  carried: (from: Op) => Op['attrs'];
 }
 
 const PLACEMENT_ANSWERS: Readonly<Record<Placement, PlacementAnswers>> = {
-  // The registry's `effects` flag gives a call the first two answers on its own.
-  call: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: null },
+  // The registry's `effects` flag gives a call the first two answers on its own, and its opcode is
+  // its placement, which an op built to stand for it does not inherit.
+  call: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: null, carried: () => ({}) },
   // The value the helper computes is pure: nothing observes a divide nobody reads, a fold that
   // moves one under a guard drops the stamp (`forgetHelperPlacement`), and agbcc computes one
   // spelled twice once (`a / n + a / n` is one `bl __divsi3`).
-  helper: { keptWhenDead: false, speculationUnsafe: false, counted: false, qualifiedBy: null },
+  helper: {
+    keptWhenDead: false,
+    speculationUnsafe: false,
+    counted: false,
+    qualifiedBy: null,
+    carried: (from) => ({ helper: from.attrs.helper }),
+  },
   // The access is what is observable, not the value it yields, so its spelling is qualified.
-  device: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: 'cast' },
-  declared: { keptWhenDead: true, speculationUnsafe: true, counted: true, qualifiedBy: 'declaration' },
+  device: {
+    keptWhenDead: true,
+    speculationUnsafe: true,
+    counted: true,
+    qualifiedBy: 'cast',
+    carried: () => ({ volatile: true }),
+  },
+  declared: {
+    keptWhenDead: true,
+    speculationUnsafe: true,
+    counted: true,
+    qualifiedBy: 'declaration',
+    carried: () => ({ [DECLARED_VOLATILE]: true }),
+  },
 };
 
 /** The placement an op carries, or null for an op that may render wherever its value is used. */
@@ -218,14 +243,6 @@ export function forgetHelperPlacement(op: Op): Op {
  *  carries the stamps through here, so a placement decided once is not lost to a rebuild that
  *  forgot to copy it. */
 export function carryDiscipline(from: Op, attrs: Op['attrs']): Op['attrs'] {
-  switch (placedAt(from)) {
-    case 'device':
-      return { ...attrs, volatile: true };
-    case 'declared':
-      return { ...attrs, [DECLARED_VOLATILE]: true };
-    case 'helper':
-      return { ...attrs, helper: from.attrs.helper };
-    default:
-      return attrs;
-  }
+  const p = placedAt(from);
+  return p === null ? attrs : { ...attrs, ...PLACEMENT_ANSWERS[p].carried(from) };
 }

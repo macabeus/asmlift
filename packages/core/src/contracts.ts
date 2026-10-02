@@ -6,6 +6,7 @@
 import { constAddressOf, globalBaseOf } from './ir/alias';
 import { type Fn, type Op, type Value, reachableBlocks } from './ir/core';
 import { placedAt } from './ir/discipline';
+import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
 import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
@@ -393,33 +394,54 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   const bump = (m: EffectCounts, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
   for (const b of seen) {
     for (const op of b.ops) {
-      if (op.opcode === 'call' && typeof op.attrs.target === 'string') {
-        bump(irCalls, op.attrs.target);
-      } else if (op.opcode === 'opaque') {
-        irOpaques.add(gapReasonFor(op.attrs));
-      } else if (placedAt(op) === 'device') {
-        const plain = op.opcode === 'load' || op.opcode === 'store';
-        const dir = op.opcode === 'load' || op.opcode === 'aload' ? 'r' : 'w';
-        const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
-        bump(irDevices, key);
-        const object = globalBaseOf(defs, op.operands[0]);
-        if (object !== null) {
-          bump(namedDevices, key);
-          if (dir === 'r') {
-            bump(pinnedReadsOf, `${DECLARED}${object}`);
+      const reads = op.opcode === 'load' || op.opcode === 'aload';
+      const placement = placedAt(op);
+      switch (placement) {
+        case 'call':
+          if (typeof op.attrs.target === 'string') {
+            bump(irCalls, op.attrs.target);
           }
+          break;
+        case 'helper':
+          // Placed, not counted: the value it computes is pure.
+          break;
+        case 'device': {
+          const plain = op.opcode === 'load' || op.opcode === 'store';
+          const dir = reads ? 'r' : 'w';
+          const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
+          bump(irDevices, key);
+          const object = globalBaseOf(defs, op.operands[0]);
+          if (object !== null) {
+            bump(namedDevices, key);
+            if (dir === 'r') {
+              bump(pinnedReadsOf, `${DECLARED}${object}`);
+            }
+          }
+          break;
         }
-      } else if (op.opcode === 'load' || op.opcode === 'aload') {
-        const object = globalBaseOf(defs, op.operands[0]);
-        if (object !== null && placedAt(op) === 'declared') {
-          bump(irDeclared, `${DECLARED}${object}`);
-        } else if (object !== null) {
-          plainlyRead.add(object);
+        case 'declared': {
+          const object = globalBaseOf(defs, op.operands[0]);
+          if (object !== null && reads) {
+            bump(irDeclared, `${DECLARED}${object}`);
+          } else if (object !== null) {
+            declaredWritten.add(object);
+          }
+          break;
         }
-      } else if (op.opcode === 'store' || op.opcode === 'astore') {
-        const object = globalBaseOf(defs, op.operands[0]);
-        if (object !== null) {
-          (placedAt(op) === 'declared' ? declaredWritten : plainlyWritten).add(object);
+        case null:
+          if (op.opcode === 'opaque') {
+            irOpaques.add(gapReasonFor(op.attrs));
+          } else if (MEM_BASE_OPS.has(op.opcode)) {
+            const object = globalBaseOf(defs, op.operands[0]);
+            if (object !== null) {
+              (reads ? plainlyRead : plainlyWritten).add(object);
+            }
+          }
+          break;
+        default: {
+          // A new placement is keyed here before it is counted, or answered as not counted.
+          const unkeyed: never = placement;
+          throw new ContractError(`the effect contract keys no '${unkeyed as string}' placement`);
         }
       }
     }

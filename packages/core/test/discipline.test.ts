@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { Op } from '../src/ir/core';
 import {
+  type Placement,
   carryDiscipline,
   counted,
   deletableWhenDead,
@@ -230,5 +231,19 @@ describe('carryDiscipline', () => {
     expect(carryDiscipline(load, { elemSize: 2 })).toEqual({ elemSize: 2 });
     // a call's placement is its opcode, which the rebuilt op does not inherit
     expect(carryDiscipline(call, {})).toEqual({});
+  });
+
+  // One op of every placement, keyed by it, so a new placement does not compile here without one.
+  const ONE_OF: Record<Placement, string> = {
+    call: 'call',
+    helper: 'helperSdiv',
+    device: 'pinnedLoad',
+    declared: 'declaredLoad',
+  };
+
+  test.each(Object.entries(ONE_OF))('a rebuilt %s op stands where the op it is built for did', (placement, name) => {
+    const from = kinds()[name];
+    expect(placedAt(from)).toBe(placement);
+    expect(placedAt({ ...from, attrs: carryDiscipline(from, {}) })).toBe(placement);
   });
 });
