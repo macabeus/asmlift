@@ -42,13 +42,14 @@ import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange } from './frame-objects';
+import { FRAME_OBJECT_AUDIT, type FrameObjectAudit, type FrameObjectRelift, type FrameRange } from './frame-objects';
 import type { Frontend } from './frontend';
-import { gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
+import { type LocalStatics, gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
   type ArgSlots,
+  type SsaBuilder,
   abiSortEntryParams,
   clobberedByCall,
   fallbackArgc,
@@ -1984,8 +1985,8 @@ function poolWordSymbol(w: string): { sym: string; addend: number | null } | nul
  *  does, and it asks before calling this. */
 function recordedWords(
   label: string,
-  dataWords: Map<string, string[]>,
-  nonWordData: Map<string, string>,
+  dataWords: ReadonlyMap<string, string[]>,
+  nonWordData: ReadonlyMap<string, string>,
 ): string[] | null {
   return nonWordData.has(label) ? null : (dataWords.get(label) ?? null);
 }
@@ -2015,7 +2016,11 @@ type PoolRef =
  *  the whole file needs belongs to {@link recordedWords}, which every reader of `dataWords` goes
  *  through. This one is passed the map as well because it is the reader that turns the caveat
  *  into a MESSAGE. */
-function poolRef(operand: string, dataWords: Map<string, string[]>, nonWordData: Map<string, string>): PoolRef | null {
+function poolRef(
+  operand: string,
+  dataWords: ReadonlyMap<string, string[]>,
+  nonWordData: ReadonlyMap<string, string>,
+): PoolRef | null {
   // The pool readers below index `dataWords` in units of four bytes, and `dataWords` holds only
   // what the `.word` pass recorded. A label carrying a directive that pass does not read breaks
   // that index in BOTH directions, which is why this arm sits ahead of the `dataWords` lookup
@@ -2414,6 +2419,14 @@ export function lift(
   return again;
 }
 
+/** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: the text (`readThumbText`), the CFG
+ *  (`thumbCfg`), the target's scratch registers, each callee's declaration
+ *  (`thumbCallDeclarations`), the frame (`measureThumbFrame`), then the SSA builder and every block
+ *  filled in order, the word returns judged (`thumbPairs`), the frame-object audit and the device
+ *  pin. Each stage reads the records of the stages before it. What the fill writes as it goes is
+ *  named state: the slot offsets it keyed and the captures it moved, which the audit reads; the
+ *  64-bit pairs it built (`ThumbPairs`); and the flags each block leaves (`ThumbFlagCarry`), which
+ *  a later block inherits. */
 function liftOnce(
   name: string,
   asm: string,
@@ -2423,231 +2436,14 @@ function liftOnce(
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
-  assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
-
-  // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
-  // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
-  // dispatch block is ELIDED from the CFG. A `mov pc` that is NOT a recognised table falls through
-  // to the loud-fail below.
-  const blockLabels = new Set(rawBlocks.map((b) => b.label));
-  // Whether THIS asm preserves symbol names in its literal pools — the witness the numeric-pool
-  // naming veto needs (see poolNamesASymbol).
-  const poolNamesSymbols = poolNamesASymbol(dataWords, nonWordData, blockLabels);
-  // Any label referenced as a branch target (so we can tell if an elided dispatch block has a SECOND
-  // predecessor — a `b disp` from elsewhere — which would dangle after elision; decline if so).
-  // How many branches name each label — not just whether any does, because the long-jump bounds
-  // form legitimately branches to its own dispatch block exactly once.
-  const branchRefs = new Map<string, number>();
-  for (const b of rawBlocks) {
-    for (const ins of b.instrs) {
-      if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic]) && ins.ops.length) {
-        const t = ins.ops[ins.ops.length - 1];
-        branchRefs.set(t, (branchRefs.get(t) ?? 0) + 1);
-      }
-    }
-  }
-  const tables = new Map<AsmBlock, JumpTable>(); // bounds block → recovered table
-  const elided = new Set<AsmBlock>(); // dispatch (and long-jump default) blocks removed from the CFG
-  rawBlocks.forEach((d, i) => {
-    const last = d.instrs[d.instrs.length - 1];
-    if (!last || last.mnemonic !== 'mov' || last.ops[0] !== 'pc' || last.ops[1] === 'lr') {
-      return;
-    }
-    const refs = branchRefs.get(d.label) ?? 0;
-    const prev = rawBlocks[i - 1];
-    // Direct form: the dispatch is reached ONLY by falling through from its bounds predecessor. A
-    // `b disp` from anywhere else would leave a dangling edge after elision, so decline (→ loud-fail).
-    if (prev && refs === 0) {
-      const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels);
-      if (jt) {
-        tables.set(prev, jt);
-        elided.add(d);
-        return;
-      }
-    }
-    // Long-jump form: `bounds` (cmp; bls DISP), then a lone `b DEF` block, then the dispatch. The
-    // dispatch is entered by exactly that one `bls` and nothing else, and the `b DEF` block —
-    // synthetically labelled, so unnameable and unreachable once the bounds block dispatches — is
-    // elided WITH it. Leaving it would make it a parameterless predecessor of the default block,
-    // and wiring a phi through it fabricates an entry parameter (the phantom-param miscompile).
-    const boundsB = rawBlocks[i - 2];
-    const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
-    if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
-      const jt = recoverJumpTable(boundsB, d, dataWords, nonWordData, blockLabels, prev.instrs[0].ops[0]);
-      if (jt) {
-        tables.set(boundsB, jt);
-        elided.add(d);
-        elided.add(prev);
-      }
-    }
-  });
-  const asmBlocks = rawBlocks.filter((b) => !elided.has(b));
-
-  // TRUSTWORTHINESS: loud-fail on a control transfer this frontend cannot model, rather than
-  // silently dropping it. A computed/loaded PC write (`mov pc, rN`, `ldr pc, …`, `add/sub pc`,
-  // `ldmia rN!,{…,pc}` with rN≠sp) is a jump table / computed goto / register tail call — decode
-  // ends the block at it, but it has no static successor, so it must be a catchable "out of scope"
-  // signal, not a vanished branch. Mirrors MIPS `jr`/PPC `bctr`. (A RECOGNISED jump table's
-  // dispatch block is already elided above, so it is not scanned here.)
-  //
-  // The same rule for a `bl` whose target is inside this function's own text. agbcc relays a
-  // conditional branch past Thumb's ±256-byte reach through an unconditional one, and past THAT
-  // branch's own ±2 KB reach the relay becomes `bl .Lfar @far jump` — an intra-function long
-  // branch wearing the call mnemonic. The decode switch reads it as a call, so without this the
-  // lift emits a call to a block label (`.L3(a0, a1, a2)`): not a branch that vanished but a
-  // transfer turned into something that RETURNS, and syntactically not C.
-  //
-  // The refusal is wider than that one shape because the asm does not separate it from a
-  // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
-  // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
-  // Both are a `bl` to a bare label the slice defines, both sit under a conditional branch that
-  // skips them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
-  // Lifting the relay as a `br` is the other half of the gap and needs the same distinction plus a
-  // proof that `lr` is dead there, since `bl` overwrites it and a branch must not.
-  //
-  // DECLARED function starts are excluded: a `.thumb_func`/`thumb_func_start` label is a function
-  // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
-  // itself (recursion), or a sibling a shared-tail slice extends through.
-  for (const ab of asmBlocks) {
-    for (const ins of ab.instrs) {
-      // Asked of the SELECTED function's blocks, not of the file as it is parsed: an upper-case
-      // register in some other function's body is not this one's problem.
-      const upper = upperCaseRegIn(ins.ops);
-      if (upper !== null) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': register '${upper}' in '${ins.mnemonic} ${ins.ops.join(', ')}' is spelled in ` +
-            `upper case — this frontend identifies registers by spelling and models the lower-case forms only`,
-        );
-      }
-      if (classifyXfer(ins) === 'indirect') {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' ` +
-            `— jump tables / computed gotos / register tail calls not supported`,
-        );
-      }
-      const callee = (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && ins.ops.length === 1 ? ins.ops[0] : undefined;
-      if (callee !== undefined && !funcLabels.has(callee) && blockLabels.has(callee)) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': '${ins.mnemonic} ${callee}' targets a label inside this function ` +
-            `and not a declared function — an intra-function long branch and a locally-defined call ` +
-            `thunk are the same shape here, so this declines rather than guessing which`,
-        );
-      }
-    }
-  }
-
-  // --- CFG (successors per block) as label lists; fallthrough + branch targets (via classifyXfer) ---
-  const buildCfg = (blocks: AsmBlock[]) => {
-    const labelIndex = new Map<string, number>();
-    blocks.forEach((b, i) => labelIndex.set(b.label, i));
-    const succLabels: string[][] = blocks.map((b, i) => {
-      // A recovered jump-table BOUNDS block dispatches to its case blocks + default (the elided
-      // dispatch block's targets); its `bhi`/fall-through successors are replaced entirely.
-      const jt = tables.get(b);
-      if (jt) {
-        return [...jt.caseLabels, jt.defaultLabel];
-      }
-      const last = b.instrs[b.instrs.length - 1];
-      const fall = i + 1 < blocks.length ? blocks[i + 1].label : null;
-      const kind = last ? classifyXfer(last) : null;
-      if (kind === 'return') {
-        return [];
-      } // bx lr / pop {…,pc} / mov pc,lr
-      if (kind === 'uncond') {
-        return [last!.ops[0]];
-      } // unconditional
-      if (kind === 'cond') {
-        return [last!.ops[0], fall!];
-      } // taken, fallthrough
-      return fall ? [fall] : []; // fallthrough (or non-transfer last op / EMPTY synthetic block)
-    });
-    const preds: number[][] = blocks.map(() => []);
-    // A branch to a label that is not a code block (a data label, or a target outside the sliced
-    // function) cannot be modelled — fail loud, mirroring the MIPS/PPC non-block-boundary guards.
-    succLabels.forEach((ss, i) =>
-      ss.forEach((s) => {
-        const ti = labelIndex.get(s);
-        if (ti === undefined) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': branch target '${s}' is not a code block in this function (a data label, or outside the sliced function)`,
-          );
-        }
-        preds[ti].push(i);
-      }),
-    );
-    return { labelIndex, succLabels, preds };
-  };
-
-  // A function whose ENTRY block is itself a loop header (some block branches back to it — the tight
-  // `strcpy`/`strlen`/`memset` shape where block 0 IS the loop) has no preheader to carry the
-  // incoming argument registers into the header's phis. Braun SSA would then build each loop-carried
-  // register's phi from the back-edge ALONE, dropping the entry value → a use-before-def on the
-  // header's first op. Insert a synthetic EMPTY preheader that falls through to the old entry: it
-  // becomes the true entry (its arg-register reads create the params), and the old header now has a
-  // forward predecessor supplying the entry operand of each phi. Guarded on `preds[0]` so ordinary
-  // functions (entry not a branch target) are untouched.
-  let { labelIndex, preds } = buildCfg(asmBlocks);
-  if (preds[0].length > 0) {
-    let ph = '.Lasmlift_preheader';
-    while (labelIndex.has(ph)) {
-      ph += '_';
-    }
-    asmBlocks.unshift({ label: ph, instrs: [] });
-    ({ labelIndex, preds } = buildCfg(asmBlocks));
-  }
-
-  // ENTRY-REACHABLE BLOCKS. Dead code is not evidence about anything: a reload in a block that
-  // never executes is not a read of the slot, and an instruction there is not a fact about the
-  // frame this function actually builds. Two analyses below rest on that, so it is computed once
-  // rather than once each — the second one was written without it and a single unreachable
-  // `mov r0, sp; bl use` appended to a five-argument forwarder was enough to turn a loud decline
-  // into a call with every argument dropped.
-  const entryReachable = ((): Set<number> => {
-    const live = new Set<number>([0]);
-    for (let changed = true; changed;) {
-      changed = false;
-      for (let b = 0; b < asmBlocks.length; b++) {
-        if (!live.has(b) && preds[b].some((q) => live.has(q))) {
-          live.add(b);
-          changed = true;
-        }
-      }
-    }
-    return live;
-  })();
-
-  // A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the
-  // list would go on reading as if it exempted something. Refused as a target bug, like the
-  // argRegs/uninitRegs contradiction, rather than declined as a property of the input.
-  const scratchRegs: ReadonlySet<string> = new Set(target.scratchRegs ?? []);
-  for (const r of scratchRegs) {
-    if (!(target.nonArgRegs ?? []).includes(r)) {
-      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
-    }
-  }
+  const text = readThumbText(name, asm);
+  const cfg = thumbCfg(name, text.blocks, text.tables);
+  const scratchRegs = assertScratchRegsPartitioned(target);
+  const calls = thumbCallDeclarations(name, target, prototypes);
+  const frame = measureThumbFrame({ target, cfg, calls, oneObject });
 
   // --- ISA-neutral SSA construction (shared Braun builder) ---
-  // THE LIVE-IN PARTITION (frontend/ssa.ts, LiveInModel). `[0, localArea)` is the whole of what this
-  // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
-  // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
-  // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
-  // `slotOff` applies the same bound when minting keys, so this is the independent check. It is
-  // stated once, as ranges, for the two consumers that read it: this builder and the frame-object
-  // audit (`auditFrameObjects`), which is ISA-neutral because of it.
-  const framePartition = () => ({
-    ownedLocals: { from: 0, to: localArea },
-    // NOT THE SAME RANGE, AND NOT THE SAME CLAIM. `ownedLocals` answers "is a def-less read here
-    // an uninitialised local?" — and the outgoing stack-argument area IS owned, so it starts at 0.
-    // `declaredLocals` answers "is a spill here a DECLARATION RANK?", which `ir/core.ts`
-    // `SlotHomes` and `l3/slotorder.ts` consume, and an argument slot's offset is an ABI POSITION,
-    // not an `expand_decl` rank. Under agbcc's ACCUMULATE_OUTGOING_ARGS that area sits at the
-    // BOTTOM of `localArea`, so the declared range starts where the largest licensed block ends
-    // (`frontend/stackargs.ts`). A refusal there licenses nothing and reports `area` 0, so the two
-    // ranges coincide exactly when no argument word was proved, and the narrowing can only ever
-    // skip offsets a callee's declaration and this function's own stores agreed on.
-    declaredLocals: { from: outgoingArgs.area, to: localArea },
-  });
+  // THE LIVE-IN MODEL is the frame's partition (`ThumbFrame.partition`) and a register half.
   // The register half needs both of its facts, and they come from different places. The target says
   // which registers no caller can hand a value over in; `savedRegs` says which ones THIS function
   // saved, and so could have homed a local in. A register in only the first is one the ABI does not
@@ -2655,1194 +2451,35 @@ function liftOnce(
   // the treatment a target claiming no partition gets. The save is asked only of the registers the
   // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
   // local the compiler was entitled to put in place with no prologue at all.
-  const ssa = makeSsaBuilder(name, asmBlocks.length, preds, () => ({
-    ...framePartition(),
+  const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
+    ...frame.partition,
     ...(target.nonArgRegs
       ? {
-          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
+          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || frame.savedRegs.has(r)),
           argRegs: target.argRegs,
         }
       : {}),
   }));
   const { fn, irBlocks, readVar, writeVar, paramReg } = ssa;
   const statics = makeLocalStatics();
-  /** A function-scope static a pool word names, its definition read out of this same asm and
-   *  recorded — or a decline naming why there is none, or why it is not this function's alone. */
-  const localStatic = (symbol: string): string => {
-    const read = readGasLocalObject(asm, symbol);
-    if ('refused' in read) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
-          `('${symbol}') ${read.refused}`,
-      );
-    }
-    const others = [...gasPoolReferrers(asm, symbol)].filter((f) => f !== name);
-    if (others.length > 0) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
-          `('${symbol}') that ${others.join(', ')} also names — it is not this function's alone`,
-      );
-    }
-    return statics.define(read);
-  };
-
-  const constVal = (n: number, b: number): Value => {
-    const v = mkValue(T.unk(32));
-    irBlocks[b].ops.push(mkOp('const', { results: [v], attrs: { value: n } }));
-    return v;
-  };
-
-  // Writing sp is transparent frame bookkeeping ONLY in the one shape that cannot change anything
-  // observable: `sp = sp ± immediate`. Two producers feed this frontend and each emits exactly ONE
-  // spelling, which is why both must work and why handling only one silently halved the input:
-  //
-  //     producer                                    `add sp, #N`   `add sp, sp, #N`
-  //     agbcc's own .s (checkouts/*/build/src)            0                98
-  //     disassembly (klonoa asm/ · sa3 asm/)           203 · 1250           0
-  //
-  // So this is not "one tool with two spellings" — it is the compiler's convention against the
-  // disassembler's, and asmlift reads both kinds of file.
-  //
-  // Everything else that writes sp is a
-  // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
-  // way of spelling a frame too large for the 7-bit immediate), a computed stack pointer
-  // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them deletes a
-  // frame change with no diagnostic, which is the exact
-  // loud-becomes-silent trade this frontend's guards exist to prevent.
-  //
-  // Flag-setting spellings (`adds`/`subs`) are excluded deliberately: ARMv4T's SP-adjust encoding
-  // does not set flags, so a flag-setting one can only come from hand-written asm, where dropping
-  // it would leave a stale compare for a following conditional branch to fold. There are 0 in the
-  // benchmark corpus and 0 across the klonoa and sa3 checkouts, so excluding them costs nothing.
-  // The decline names WHY the slot model is off when it is (slotsOffReason, assigned below —
-  // referenced through the closure, so this reads the final value at throw time). The gap
-  // histogram is the improvement loop's work-list, and "local stack frames not supported" was a
-  // false attribution for a function whose frame IS modelled but whose blocker is, say, an
-  // address-taken local or an outgoing stack argument — it sent the loop to build the wrong thing.
-  const spAsDataError = () =>
-    new FrontendUnsupportedError(
-      `cannot lift '${name}': stack pointer used as data — ` +
-        (slotsOffReason ?? 'not a modelled slot (address-taken local / frame arithmetic / above the local area)'),
-    );
-
-  // Reading sp as a DATA operand means an address-taken local (`add rD, sp, #N` = `&local`),
-  // an sp-relative spill slot (`ldr/str …, [sp, #N]`), or frame-pointer arithmetic — none
-  // modellable without a stack abstraction. Without this guard Braun SSA would materialize sp as a
-  // fabricated PHANTOM parameter that scrambles the signature. Fail LOUD instead, mirroring MIPS
-  // (`isStackPtr`) and PPC (`r1`).
-  //
-  // sp is never WRITTEN either — but by `writeData` declining, NOT because sp-dest ops are inert.
-  // Five decode arms (`lsl`/`neg`/`mvn` with an sp destination, `ldr sp`, `ldmia` with sp in the
-  // list) reach a write with no arm-local sp check of their own, so the guard has to sit on the
-  // write itself. The single transparent shape is `sp = sp ± imm`, whitelisted in the add/sub arms.
-  // Read and write are guarded symmetrically.
-  const readData = (r: string, b: number): Value => {
-    if (isSpReg(r)) {
-      throw spAsDataError();
-    }
-    if (r === 'pc' || r === 'r15') {
-      // A pc-relative literal load is rewritten to a pool label before reaching here (decode's
-      // isPcRelLdr pass); a `pc`/`r15` base that survives to a data read is an unmodelled shape
-      // (`ldr [pc]` with no `#imm`, computed-pc arithmetic) — decline, never fabricate a param.
-      throw new FrontendUnsupportedError(`cannot lift '${name}': program counter used as a data base — not modelled`);
-    }
-    // DOES THIS OPERAND NAME A DATA LABEL? Read through POOL_LABEL_LEAD, the same reader `poolRef`
-    // uses, because an operand can carry an offset — `sTab+0x4`, `[sTab+0x4]` — and an exact
-    // `Map.has` answers "no" for it. That answer is not a decline, it is `readVar`, which
-    // materialises the label as a phantom pointer parameter the function does not have. One
-    // question, one reader: the two have drifted apart twice, and both times the drift was silent.
-    const lead = r.match(POOL_LABEL_LEAD)?.[0];
-    if (lead !== undefined && nonWordData.has(lead)) {
-      // The label heads data this pass did not read into words, used as a BASE (`ldrh rD, [sHw]`).
-      // It may be absent from `dataWords` entirely, or present at offsets the unread directive
-      // shifted; either way the guard below cannot answer it. Named separately because answering
-      // it means reading that directive's bytes, not widening a label check.
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': data label '${lead}', which carries a '.${nonWordData.get(lead)}' directive this reader does not read as words, is used as a register — not modelled`,
-      );
-    }
-    if (lead !== undefined && dataWords.has(lead)) {
-      // The operand is a literal-pool / data LABEL, not a register — reading it as dataflow would
-      // fabricate a phantom parameter. `poolRef` resolves upstream exactly the whole-word load it
-      // models; everything else reaching here declines — a label used in arithmetic, a load
-      // narrower than the word the pool resolver reads, a base spelled at an offset.
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': data label '${lead}' used as a register — not modelled`,
-      );
-    }
-    // …and anything else that is not a register — an immediate this frontend cannot evaluate
-    // (`#(4)`, `#SYM`) reaching an arm that reads a register operand — is the same phantom.
-    if (!REG_SPELLINGS.test(r)) {
-      throw new FrontendUnsupportedError(`cannot lift '${name}': operand '${r}' read as a register — not modelled`);
-    }
-    return readVar(r, b);
-  };
-
-  // LOCAL STACK SLOTS. A spill or a local that never has its address taken is transparent to
-  // dataflow: `str rX,[sp,#k]` … `ldr rY,[sp,#k]` moves a value, it does not touch memory anyone
-  // else can see. Modelling it as an SSA variable keyed by the offset (the same `sp@<off>` spelling
-  // the MIPS frontend uses) makes it exactly that, and Braun's phi construction handles a slot that
-  // is read-modify-written across a loop with no extra machinery.
-  //
-  // What Thumb does NOT inherit from MIPS: keying by the RAW sp offset is only sound while sp holds
-  // the same value at every access, and MIPS gets that for free (IDO establishes sp with one
-  // `addiu` and never moves it). Thumb's `push` moves sp, so constancy has to be PROVEN here.
-  const slotKey = stackSlotKey; // shared spelling: frontend/ssa.ts
-  // What a `bl` leaves holding nothing this function can name — checked against `argRegs` there.
-  const callClobbers = clobberedByCall(target);
-  // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
-  // the low half is the return register (already excluded) and this frontend writes the high one
-  // itself from the callee's own result, right below. The two arms of one rule: where the callee
-  // hands a register back, the frontend names it; where it does not, nobody can.
-  //
-  // `argRegs[1]` IS THE PAIR'S HIGH REGISTER ONLY WHERE THE ABI ALIASES THE FIRST ARGUMENT ONTO
-  // THE RETURN REGISTER, which makes the returned pair occupy the first two argument registers.
-  // True here (r0:r1) and on PowerPC (r3:r4); FALSE on MIPS o32, which returns in v0:v1 and passes
-  // in a0:a1, so reading a high half out of `argRegs[1]` there would name an argument register.
-  // This is an ARM file and the spelling is ISA-local, but it is written through the generic
-  // `target.` surface, so the identity it depends on is stated rather than left to be generalised.
-  const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
-  // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
-  // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
-  // reports zero on a compiler whose runtime spells them `__ll_*`.
-  const helperProtos = helperPrototypes(target.runtimeHelpers);
-  const wideHelper = (callee: string): RuntimeHelper | null => {
-    // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
-    // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
-    // `isWideHelper` to read. The `prototypes` read below needs no such guard because
-    // `declaresParams` is that table's designated safe reader — it answers "nothing is declared"
-    // for an entry that is not an `FnProto`, whatever it is.
-    const h = lookupHelper(target.runtimeHelpers, callee);
-    if (!h || !isWideHelper(h)) {
-      return null;
-    }
-    // A PROJECT RE-DECLARATION DISABLES THE CAPABILITY, it does not redirect it, and the comment
-    // that said the header "wins" oversold both arms. A runtime helper's signature is its
-    // COMPILER's — `proto.ts` holds the signatures the C standard fixes, which this is precisely
-    // not — so a header declaring `__muldi3` is not a better source for the same fact; it is a
-    // claim that the name is the project's own function. Neither reading can be honoured: as the
-    // table's helper it would contradict the header, and as an ordinary call it becomes the
-    // pass-through that MATCHES for free. So no pair is built and `raise/widehelpers.ts` gaps the
-    // call, at whichever arity was declared.
-    if (declaresParams(prototypes[callee])) {
-      return null;
-    }
-    return h;
-  };
-  /** Whether the target's own runtime table claims this name — asked of the TABLE, not of what
-   *  `wideHelper` made of it.
-   *
-   *  A PROJECT'S `returns` NEVER BUILDS A PAIR FOR A RUNTIME HELPER'S NAME, and that is the #244
-   *  decision above holding for both sources rather than for the one it was written against.
-   *  `wideHelper` answers null for a re-declared helper, which stops the ARGUMENT pair; the
-   *  RESULT pair is built from a separate source, and `raise/widehelpers.ts` folds on the result
-   *  alone (`arrivesAsDeclared` needs `results[0]` 64 bits wide). Measured before this line:
-   *  `--proto '{"__muldi3":{"params":["s64","s64"]}}'` throws `no model for the runtime helper
-   *  '__muldi3'`, and adding `"returns":"s64"` printed `return a0 * a1;` — the compiler's own
-   *  multiply re-emitted as the project's arithmetic, at exit 0, for a name the project says is
-   *  its own function.
-   *
-   *  A NON-WIDE ENTRY IS COVERED TOO, and deliberately: a `returns` on `__divsi3` states a width
-   *  about a function whose signature is its compiler's, and `refuseUnmodelledHelpers` is going to
-   *  gap the call whatever this answers. The table is the authority for every name in it. */
-  const isRuntimeHelperName = (callee: string): boolean => lookupHelper(target.runtimeHelpers, callee) !== undefined;
-  // THE 64-BIT VALUE each `lo32`/`hi32` this lift emitted projects, and the INSTRUCTION that put
-  // the pair in registers. A pair that goes straight back out as one — a helper's result becoming
-  // the next helper's argument — re-fuses to the value itself instead of rebuilding a `concat`
-  // nothing above it would recognise; the instruction is what `wideReturn` walks forward from,
-  // since half of the question it asks is about the machine rather than about the value graph.
-  const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi'; at: Instr }>();
-  /** The callee that handed back each pair a call returned, by the pair's value. */
-  const pairCallee = new Map<Value, string>();
-  const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value => {
-    const v = mkValue(T.unk(32));
-    irb.ops.push(mkOp(half === 'lo' ? 'lo32' : 'hi32', { operands: [whole], results: [v] }));
-    halfOf.set(v, { whole, half, at });
-    return v;
-  };
-  const fuseHalves = (irb: Block, lo: Value, hi: Value): Value => {
-    const a = halfOf.get(lo);
-    const b = halfOf.get(hi);
-    if (a?.half === 'lo' && b?.half === 'hi' && a.whole === b.whole) {
-      return a.whole; // `concat(lo32(v), hi32(v))` IS v
-    }
-    const v = mkValue(T.unk(64));
-    irb.ops.push(mkOp('concat', { operands: [lo, hi], results: [v] }));
-    return v;
-  };
-  /** The 64-bit value a `ret` is really returning, or null. The return register has to hold the LOW
-   *  half of some `v`, and the pair's high register has to still hold that same `v`'s high half when
-   *  the function returns.
-   *
-   *  THE SECOND HALF IS READ OFF THE VALUE GRAPH AND THE ASM TOGETHER, because each is blind to
-   *  what the other sees. The value graph follows the high half through register copies — agbcc
-   *  returns `s64 f(s64 a, s32 b){ return a + b; }` through `add r1,r3,#0`, which writes r1 with the
-   *  very value `hi32` named. The asm sees what the value graph cannot (`highRegisterHeld`).
-   *
-   *  ASKED WITHOUT READING r1, through `hasReachingDef`: a read of a register some path leaves
-   *  undefined mints a live-in, which is a PARAMETER. The answer is exact here because the pair was
-   *  built in this block, so its `hi32` can only reach r1 through this block's own definition.
-   *
-   *  BLOCK-LOCAL, like every other acceptance here: a pair built in another block is
-   *  `refuseWordReturns`'s to judge.
-   *
-   *  WHERE THE EPILOGUE DOES NOT DISCRIMINATE, THE WIDTH IS NOT PINNED, and this widens. Without
-   *  `-mthumb-interwork` both spellings compile to `push {lr}; bl __muldi3; pop {pc}`, byte for
-   *  byte, and a LEAF returns through `bx lr` whatever its width: nothing in such a function
-   *  distinguishes them, so what is published recompiles to the target either way and only a
-   *  PROTOTYPE copied out of it can be wrong. */
-  const wideReturn = (lo: Value, bi: number): Value | null => {
-    const a = halfOf.get(lo);
-    if (a?.half !== 'lo') {
-      return null;
-    }
-    const sameHigh = (v: Value) => halfOf.get(v)?.half === 'hi' && halfOf.get(v)?.whole === a.whole;
-    if (!ssa.hasReachingDef(target.argRegs[1], bi, sameHigh)) {
-      return null;
-    }
-    const from = asmBlocks[bi].instrs.indexOf(a.at);
-    return from >= 0 && highRegisterHeld(bi, from + 1) ? a.whole : null;
-  };
-  /** Whether, from instruction `from` of block `bi` to its end, nothing puts into the pair's high
-   *  register a value the value graph misnames — the asm half of `wideReturn`'s question, and the
-   *  half the value graph cannot answer.
-   *
-   *  TWO WRITES THE VALUE GRAPH CANNOT SEE. A `pop`, since the frame is transparent to it — so a pop
-   *  or a control transfer naming the high register ends the question (`pop {r1}; bx r1` is agbcc's
-   *  interworking epilogue for a WORD return); a pop of anything else leaves what it loaded
-   *  unknown. And a CALL, which destroys every caller-saved register while `ssa.ts` goes on
-   *  answering its pre-call value. (A pair-returning call's r1 is one the frontend names; taking it
-   *  as unknown too errs toward a word return, and only a return block that makes such a call
-   *  after the pair it returns could see the difference.)
-   *
-   *  SO WHAT A REGISTER HOLDS IS KNOWN ONLY THROUGH IDENTITIES. agbcc returns a pair it held across
-   *  a call by parking the halves in r4:r5 and copying them back (`s64 x = a*b; g(); return x;`).
-   *  The value graph reads a register copy, and a store to a stack slot and its reload, as the same
-   *  value moving, so a register is known exactly when it is a copy or a reload of a known one;
-   *  every other write leaves it unknown, since no other write can put a pair's half there in the
-   *  value graph's eyes. Registers are keyed by spelling, as `ssa.ts` keys them (`ip` is not
-   *  `r12`), and a slot by its offset until `sp` moves, after which a reload is unknown. */
-  const highRegisterHeld = (bi: number, from: number): boolean => {
-    const hi = target.argRegs[1];
-    const regTok = (t: string | undefined): t is string =>
-      t !== undefined && (isThumbReg(t) || HIGH_REGS.has(t) || t === 'lr');
-    const unknown = new Set<string>();
-    const slots = new Map<number, boolean>(); // offset -> whether what was stored there is unknown
-    let spMoved = false;
-    const slotOff = (t: string | undefined): number | null => {
-      const m = /^\[sp(?:,\s*#(-?(?:0x[0-9a-f]+|\d+)))?\]$/i.exec(t ?? '');
-      return m ? (m[1] === undefined ? 0 : Number(m[1])) : null;
-    };
-    for (const ins of asmBlocks[bi].instrs.slice(from)) {
-      const [d, src, k] = ins.ops;
-      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-        callClobbers.forEach((r) => unknown.add(r));
-        continue;
-      }
-      if ((ins.mnemonic === 'pop' || classifyXfer(ins) !== null) && mentionsReg(ins, hi)) {
-        return false;
-      }
-      if (ins.mnemonic === 'pop' || ins.mnemonic === 'push' || isSpReg(d ?? '')) {
-        (ins.mnemonic === 'pop' ? (regListOf(ins.ops) ?? []) : []).forEach((r) => unknown.add(r));
-        spMoved = true;
-        continue;
-      }
-      const copy = /^movs?$/.test(ins.mnemonic) ? k === undefined : /^adds?$/.test(ins.mnemonic) && immEq(k, 0);
-      if (copy && regTok(d) && regTok(src)) {
-        if (unknown.has(src)) {
-          unknown.add(d);
-        } else {
-          unknown.delete(d);
-        }
-      } else if (ins.mnemonic === 'str' && regTok(d) && slotOff(src) !== null) {
-        slots.set(slotOff(src)!, unknown.has(d));
-      } else if (ins.mnemonic === 'ldr' && regTok(d) && slotOff(src) !== null) {
-        const stored = slots.get(slotOff(src)!);
-        if (stored === false || (stored === undefined && !spMoved)) {
-          unknown.delete(d);
-        } else {
-          unknown.add(d);
-        }
-      } else if (/^ldmia$/.test(ins.mnemonic)) {
-        [reg(d ?? '').replace(/!$/, ''), ...(regListOf(ins.ops.slice(1)) ?? [])].forEach((r) => unknown.add(r));
-      } else if (regTok(d) && !/^(str|stm|cmp|cmn|tst)/.test(ins.mnemonic)) {
-        unknown.add(d);
-      }
-    }
-    return !unknown.has(hi);
-  };
-  // The returns `wideReturn` answered null for — the value in the return register, and whether the
-  // epilogue says the return type is 5 to 8 bytes — judged by `refuseWordReturns` once every block
-  // is filled.
-  const wordReturns: Array<{ bi: number; lo: Value; widerEpilogue: boolean }> = [];
-  /** THE WORD RETURNS THAT WOULD DROP A HIGH HALF, refused. Run after every block is filled and
-   *  before `ssa.finish()`: a join's phi operands are wired by then, and not yet folded away.
-   *
-   *  A PAIR BUILT IN ANOTHER BLOCK THAT REACHES THE RETURN, because `wideReturn` is block-local:
-   *  `if (c) return a * b; return 0;` joins `lo32(a*b)`/0 in r0 and `hi32(a*b)`/0 in r1, and
-   *  returning r0 alone drops the high half of a function that computed it. So where the return
-   *  register holds a low half and the high register a high half, each through any join, and the
-   *  return block leaves the high register held, asmlift cannot decide the width. A 64-bit phi is the
-   *  capability this stands in for. The classes are `mergeClasses`'s, whose undirected closure can
-   *  only over-approximate a half reaching the return — which costs a decline — and, as in
-   *  `wideReturn`, r1 is asked about and never read.
-   *
-   *  AN EPILOGUE THAT SAYS THE RETURN TYPE IS 5 TO 8 BYTES (`compilerBehaviors.
-   *  eightByteReturnScratch`), over r0:r1 that hold no pair this lift built — a high word computed
-   *  from shifts, a `double`, or an 8-byte aggregate returned through memory, which agbcc sizes
-   *  the same way. A word return drops r1 in the first two, and the third is a false decline the
-   *  epilogue cannot tell apart from them. */
-  const refuseWordReturns = () => {
-    const classes = halfOf.size ? mergeClasses({ blocks: irBlocks }) : new Map<Value, readonly Value[]>();
-    const carries = (v: Value, half: 'lo' | 'hi') => (classes.get(v) ?? [v]).some((m) => halfOf.get(m)?.half === half);
-    for (const { bi, lo, widerEpilogue } of wordReturns) {
-      if (
-        halfOf.size &&
-        carries(lo, 'lo') &&
-        highRegisterHeld(bi, 0) &&
-        ssa.hasReachingDef(target.argRegs[1], bi, (v) => carries(v, 'hi'))
-      ) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the return in '${asmBlocks[bi].label}' holds halves of a 64-bit pair ` +
-            'another block built, and asmlift decides a 64-bit return only in the block that builds it',
-        );
-      }
-      if (widerEpilogue) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the epilogue of '${asmBlocks[bi].label}' says the return type is 5 to 8 bytes ` +
-            '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
-        );
-      }
-    }
-  };
-
-  // WHICH FRAME ADDRESS DOES EACH REGISTER HOLD WHEN `consumes` FIRES? Every question this file
-  // asks of a captured frame address before the lift is this one — the two frame-base escapes, and
-  // which offsets a constant capture names — so they get ONE walk, the same rule `definiteRegList`
-  // and `regListOf` are written down for, and for the same reason: two
-  // hand-rolled copies of a safety walk drift to unequal strength, and the one a future editor
-  // does not fix is an ACCEPTANCE that over-approximates. `held` maps a register to the frame
-  // offset its value is sp plus; `consumes` is called on every instruction, before the call clear.
-  //
-  // ENTRY-REACHABLE, BLOCK-LOCAL AND KILLED WHERE `ends` SAYS, because this feeds ACCEPTANCES and
-  // so may never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload
-  // scan skips them — an instruction that never executes is not a fact about the frame, and one
-  // appended `mov r0, sp; bl use` after the return would license a whole function. A block is
-  // straight-line, so a capture that is still held when the consuming instruction is decoded is
-  // held on every execution that reaches it; and a register is dropped at any instruction `ends`
-  // says ends it, which over-kills wherever it cannot name the written register and over-killing
-  // only costs a decline.
-  //
-  // TWO KILL RULES, because the walk answers two questions. WHICH OFFSET A REGISTER HOLDS changes
-  // only at a write (`mayWriteReg`): agbcc addresses through a capture and then moves it (`mov r2,
-  // sp / adds r2, #5 / strb r0, [r2] / … / adds r2, #2`), so the `strb` must not end the walk
-  // before the second move. WHETHER THE FRAME BASE WAS HANDED OVER is the escape licences'
-  // question, and there the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy
-  // addressed through and still live at a call is an addressing copy, not an argument —
-  // `EReader_Reset` is `mov r1, sp / strh r0, [r1] / … / bl` into callees that take nothing.
-  //
-  // A `bl` CLEARS EVERY HELD REGISTER, and for the callee escape that is the ABI — the argument
-  // registers are the only ones it tests and the callee clobbers them. The publish escape can hold
-  // r4-r7, which AAPCS says the callee PRESERVES, so there the clear is not an ISA fact but a
-  // deliberate blunt over-kill in the direction that costs a decline; a test pins the decline so
-  // the over-approximation is a decision on the record rather than a regression found later.
-  const heldFrameWalk = (
-    ends: (ins: Instr, r: string) => boolean,
-    consumes: (ins: Instr, held: ReadonlyMap<string, number>) => boolean,
-  ): boolean => {
-    for (const b of entryReachable) {
-      const ab = asmBlocks[b];
-      const held = new Map<string, number>();
-      for (const ins of ab.instrs) {
-        if (consumes(ins, held)) {
-          return true;
-        }
-        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          held.clear();
-          continue;
-        }
-        const carried = frameAddressDefined(ins, held);
-        for (const r of [...held.keys()]) {
-          if (ends(ins, r)) {
-            held.delete(r);
-          }
-        }
-        if (carried !== null) {
-          held.set(carried[0], carried[1]);
-        }
-      }
-    }
-    return false;
-  };
-  // The register an instruction leaves holding a frame address, and that address's offset, or
-  // null. The shapes that carry one: the capture itself (`mov rD, sp`, `add rD, sp, #k`), a copy
-  // of a held register (`mov rD, rS`, and agbcc's `add rD, rS, #0`), and a held register moved by
-  // a constant (`add rD, rS, #c`, `add rD, #c`). Everything else only kills.
-  const frameAddressDefined = (ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null => {
-    const [d, s1, s2] = ins.ops;
-    if (d === undefined || isSpReg(d)) {
-      return null;
-    }
-    if (capturesSp(ins)) {
-      return [reg(d), 0];
-    }
-    if (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && held.has(reg(s1))) {
-      return [reg(d), held.get(reg(s1))!];
-    }
-    if (/^adds?$/.test(ins.mnemonic)) {
-      const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
-      if (src === undefined || by === undefined || !IMM_LITERAL.test(by)) {
-        return null;
-      }
-      const from = isSpReg(src) ? 0 : held.get(reg(src));
-      return from === undefined ? null : [reg(d), from + imm(by)];
-    }
-    return null;
-  };
-
-  // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
-  // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
-  // register that is still an ARGUMENT register at a `bl`. It is a fact about a REGISTER, not about
-  // the frame's layout — an earlier cut of this treated it as proof that "[sp,#0] is an addressable
-  // local", and agbcc falsified that outright. The layout question is settled by the gate this
-  // feeds (`capturedObjectIsTheWholeFrame`, below `localArea`), not here.
-  //
-  // ARGUMENT registers only: the frame base merely live across a call is not evidence that it was
-  // passed to one, and for `blx rN` the TARGET register is not an argument either.
-  const frameBasePassedToCallee = heldFrameWalk(mentionsReg, (ins, held) => {
-    if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
-      return false;
-    }
-    // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3` branches
-    // THROUGH the frame base, it does not pass it.
-    const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : null;
-    return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
+  const { localStatic, constVal, spAsDataError, readData, writeData } = thumbOperands({
+    name,
+    asm,
+    text,
+    ssa,
+    statics,
+    slotsOffReason: frame.slotsOffReason,
   });
-
-  // THE FRAME BASE PUBLISHED TO MEMORY — the other way an agbcc frame address escapes, and the
-  // one the corpus's GBA code is full of. `*(vu32 *)REG_DMA3SAD = (u32)&tmp` hands the address to
-  // a DEVICE, which then reads the object; no `bl` is involved and the function may contain none
-  // at all. `sa3:sa2__sub_80078D4` is exactly that shape and nothing else.
-  //
-  // THE AUDIT ALREADY KNOWS THIS ESCAPE. `published` is a first-class set there, distinct from
-  // `passedToCallee`, with its own `volatile` stamp and its own `readsThrough` exemption for a
-  // device source. What was narrower than the audit was the PRE-LIFT licence that decides whether
-  // [sp,#0] is an object at all — so a published frame base had its object re-modelled as an SSA
-  // slot, and the audit then correctly refused the collision it had just been handed.
-  //
-  // THE SOUNDNESS ARGUMENT IS A PRODUCER TABLE, like its sibling's, and it is a different table
-  // because the escape is different. `capturedObjectIsTheWholeFrame`'s worry is that [sp,#0] is
-  // really an outgoing argument slot, a by-value struct argument's block-copy base or a struct
-  // return's hidden pointer. Every producer in its table is `bl`-shaped. Compiled, agbcc
-  // 2.9-arm-000512, `-Wimplicit -Wparentheses -fhex-asm -mthumb-interwork -O2`:
-  //
-  //   the publish itself, `vu32 x = v; *(vu32*)0x040000D4 = (u32)&x;`
-  //     → `add sp,#-4 / str r0,[sp] / ldr r0,.L3 / mov r1,sp / str r1,[r0]` — frame 4, PUBLISHED
-  //   by-value struct argument past r0-r3, `take1(1,2,3,4,*p)`
-  //     → 1 word: `ldr r0,[r0] / str r0,[sp]` — NO capture at all, nothing to publish
-  //     → 2 words: two `str`s to [sp] and [sp,#4] — frame 8, still no capture
-  //     → 13 words: `mov r1,sp / ldmia/stmia` — frame 0x24, the capture is a copy BASE and is
-  //       never stored to memory
-  //   struct return through a hidden pointer, `struct R4 r = mk4(x);` (non-integer-like, 1 word)
-  //     → `mov r0,sp / bl mk4` — frame 4, the capture goes to a CALLEE, never to a store
-  //
-  // So at a one-word frame no agbcc shape publishes a block-copy base or a hidden return pointer
-  // to memory: a block copy needs two frame words before the base is named with a register at
-  // all, and a hidden return pointer is argument 0 of a `bl`, which is not a store.
-  //
-  // AND THE OUTGOING-ARGUMENT CONFUSION IS EXCLUDED BY THAT TABLE AND BY NOTHING ELSE HERE, which
-  // is worth saying plainly because it is the one place this escape is weaker than its sibling. A
-  // frame that BOTH stages a fifth argument and publishes a local's address is not a one-word
-  // frame — agbcc reserves eight bytes and puts the local ABOVE the argument, where its address is
-  // spelled `add rD, sp, #4` and not `mov rD, sp`: `void h(s32 x, u32 v){ vu32 t = v;
-  // *(vu32*)0x040000D4 = (u32)&t; five(1,2,3,4,x); }` compiles to `add sp,#-8 / str r1,[sp,#4] /
-  // ldr r1,.L3 / add r2,sp,#4 / str r2,[r1] / str r0,[sp] / … / bl five` (measured, both call
-  // orders, and under a block scope and a conditional scope too).
-  //
-  // What it does NOT get is the sibling's structural coincidence. The callee escape needs the base
-  // live in an argument register AT a `bl`, so the call that would stage a fifth argument is the
-  // same call whose argument register holds the frame base — the two facts contradict at one
-  // instruction. A publish is decoupled from every call in the function, so hand-written asm with
-  // `localArea === 4`, a bare `mov rD, sp` published to a pool address, and four argument
-  // registers set before a `bl` satisfies this and drops the outgoing argument at [sp,#0]. It is
-  // a stated residual cost and not a refuted one: no agbcc source shape produces that frame (the
-  // table above is what rules it out), the playground lifts it and no oracle referees it.
-  //
-  // WHICH IS ALSO WHY `localArea === 4` IS NOT WIDENED FOR THIS ESCAPE EITHER, and the reason is
-  // sharper here than for the callee one: `struct B { s32 a[17]; } b = gK; *(vu32*)0x040000D4 =
-  // (u32)&b;` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy / ldr r0,.L9+4 /
-  // mov r1,sp / str r1,[r0]` — a block-copy base that IS published to memory (measured). At a
-  // wider frame the publish escape admits exactly the shape the callee escape's table warns
-  // about; at one word it cannot occur.
-  //
-  // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
-  // question is the same one and only the consuming event differs. Here that event is a WORD store
-  // whose SOURCE operand is a held capture — a `strh` hands over half an address, so the device's
-  // source is not this object — through a base that is neither sp nor another held capture: a
-  // frame address written back INTO its own frame is a different question and keeps its refusal.
-  // Both of those exclusions are conditions of the licence, so the post-lift audit re-proves them
-  // rather than the weaker "reached memory somehow" (`publishedOutward`, in `auditFrameObjects`).
-  //
-  // EACH OF THE THREE CLAUSES HAS ITS OWN ROW, including the one a reader skips: a word store
-  // through a pool address, in a function that holds a capture, whose stored VALUE is an ordinary
-  // argument publishes nothing, and dropping that clause leaves the whole battery green while the
-  // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
-  // clause without a row is decoration until an input says otherwise.
-  //
-  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, and the one place they part is worth
-  // knowing: this walk is BLOCK-LOCAL while `taint` is whole-function, so a base captured in an
-  // earlier block is excluded there and not here. The containment still holds — whole-function
-  // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
-  // and more — and the difference therefore lands on the refusing side. Pinned as a row.
-  const frameBasePublishedToMemory = heldFrameWalk(mentionsReg, (ins, held) => {
-    if (ins.mnemonic !== 'str' || held.get(reg(ins.ops[0] ?? '')) !== 0) {
-      return false;
-    }
-    const { base } = parseAddr(ins.ops[1] ?? '');
-    return !isSpReg(base) && !held.has(reg(base));
-  });
-
-  // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
-  // access on the old path, which declines — so the answer to "not sure" is the loud one.
-  // Returns null when the word-slot model is SAFE for this function, else the reason it is off —
-  // which the sp declines append, so a refused function names the capability actually missing
-  // instead of the generic "local stack frames". The gap histogram is the improvement loop's
-  // work-list; a misattributed refusal sends that loop to build the wrong thing.
-  const slotModelBlocker = (outgoing: OutgoingArgs<Instr>): string | null => {
-    for (const ab of asmBlocks) {
-      for (const ins of ab.instrs) {
-        const acc = spMemAccess(ins);
-        // A SUB-WORD access aliasing a word slot is the hazard MIPS paid for the hard way: routing
-        // the word store to an SSA slot while the byte reload stays on the memory path drops the
-        // store and reads uninitialised memory. One anywhere disables the model for the whole
-        // function. A register offset can alias any slot, so it disqualifies the same way.
-        if (acc && (acc.width !== 4 || acc.regOff)) {
-          return acc.regOff
-            ? 'a register-offset sp access can alias any slot'
-            : 'a sub-word sp access aliases the word-slot model';
-        }
-        // sp escaping into a register is NOT a blocker. A plain COPY (`mov rD, sp`), a CONSTANT
-        // offset from it (`add rD, sp, #k`) and a RUNTIME one (`add rD, sp, rX`, `add rD, sp`) are
-        // the address-taken-local capability — the mov and add arms emit a `laddr`, plus the
-        // index for the runtime form, and the post-lift frame-object audit proves every use. The
-        // model's remaining precondition is a reserved local area for the object to live in: a
-        // frameless function taking sp's address has nothing to model and refuses in those arms.
-      }
-    }
-    // sp must be CONSTANT wherever a slot is keyed, because the key IS the raw offset. Two shapes
-    // are legitimate and everything else refuses: a PROLOGUE (sp moves before the block touches the
-    // frame) and an EPILOGUE (sp moves after it has finished touching it, and the block returns, so
-    // nothing downstream can key a slot against the changed sp). A modification BETWEEN two
-    // accesses moves the frame under a slot already keyed, and only the entry block may deepen —
-    // elsewhere a pre-access modification would put the block at a different depth from the one the
-    // prologue established.
-    for (let bi = 0; bi < asmBlocks.length; bi++) {
-      const ins = asmBlocks[bi].instrs;
-      const mems = ins.map((x, i) => (touchesFrame(x) ? i : -1)).filter((i) => i >= 0);
-      const mods = ins.map((x, i) => (modifiesSp(x) ? i : -1)).filter((i) => i >= 0);
-      if (mods.length === 0) {
-        continue;
-      }
-      const last = ins[ins.length - 1];
-      const returns = last !== undefined && classifyXfer(last) === 'return';
-      if (mems.length === 0) {
-        // moves sp and never keys a slot itself: safe only if nothing downstream can key one
-        if (!returns && bi !== 0) {
-          return 'sp moves in a block that neither returns nor is the entry';
-        }
-        continue;
-      }
-      for (const m of mods) {
-        if (m < mems[0]) {
-          if (bi !== 0) {
-            return 'a non-entry block establishes its own frame depth'; // not the prologue's
-          }
-        } else if (m > mems[mems.length - 1]) {
-          if (!returns) {
-            return 'sp unwinds mid-function and execution continues';
-          }
-        } else {
-          return 'the frame moves between two accesses that keyed slots against it';
-        }
-      }
-    }
-    // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
-    // decides per call whether the words staged at the bottom of the frame are a callee's
-    // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
-    // function still declines loud.
-    if (outgoing.blocker !== null) {
-      return outgoing.blocker;
-    }
-    // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
-    // taken while the local area is still reserved reads a slot this model has retargeted into SSA
-    // — the load simply disagrees with the store. A real epilogue releases the locals first
-    // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
-    for (const ab of asmBlocks) {
-      let released = 0;
-      for (const ins of ab.instrs) {
-        if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
-          const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
-          if (isSpReg(base)) {
-            return 'a pop reads the frame while the local area is still reserved';
-          }
-        }
-        if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
-          const d = spAdjust(ins);
-          if (d !== null && d > 0) {
-            released += d;
-          }
-        }
-      }
-    }
-    return null;
-  };
-  // THE EXPLICITLY RESERVED LOCAL AREA — the prologue's `add sp,sp,#-N`, and the frame the body
-  // sees. "Prologue" is everything before the entry block first touches the frame (or the whole
-  // block if it never does). A frame this cannot measure yields 0, which disables every slot
-  // (`off + 4 <= localArea` is then false).
-  //
-  // A slot must live strictly inside this, not merely inside the whole frame: the rest of the frame
-  // is the callee-saved block the entry `push` wrote, which belongs to the epilogue's `pop`, so a
-  // `str` there is retargeted away from the memory the pop will read. Which is also why this is NOT
-  // the walk `argIndex` uses — `makeFrameWalk`'s `delta` counts a `push` at 4 bytes per register and
-  // this skips it, because the callee-saved block sits ABOVE the local area. The cost of that
-  // difference is the push/pop arm below.
-  const localArea = ((): number => {
-    // The PROLOGUE only — everything before the entry block first touches the frame. Summing the
-    // whole block instead let a store made BEFORE the reservation fall inside the window, so
-    // `str r0,[sp]; add sp,sp,#-4; …` claimed a write to the CALLER's frame as a private local and
-    // deleted it.
-    //
-    // NET, not the sum of the negatives. Counting only reservations and discarding releases leaves
-    // localArea larger than the region that is actually below the callee-saved block, and `off <
-    // localArea` then claims the SAVED REGISTERS as private locals — which the epilogue's `pop`
-    // reads back. `push {lr}; add sp,#-8; add sp,#8; str r0,[sp]; pop {r1}; bx r1` deleted the
-    // store and rendered a computed `bx` as an ordinary return, and it fooled the pop gate too
-    // (`released` is compared against this number). Not corpus-reachable — 0 of 2805 Thumb
-    // functions adjust sp upward before their first frame access — which is exactly why only a
-    // probe finds it. That 2805 is a CHECKOUT sweep this repo does not vendor, not a benchmark
-    // count, and it has not been re-run since.
-    //
-    // An sp write this cannot read poisons the whole thing to 0, disabling every slot, rather than
-    // being skipped as if it were no movement: the same rule `makeFrameWalk`'s `delta` follows.
-    const ins = asmBlocks[0].instrs;
-    const firstMem = ins.findIndex((x) => touchesFrame(x));
-    let reserved = 0;
-    let reservedYet = false;
-    for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
-      const d = spAdjust(x);
-      if (d !== null) {
-        reserved -= d; // d > 0 = sp rises = the frame shrinks
-        reservedYet ||= reserved > 0;
-      } else if (x.mnemonic === 'push' || x.mnemonic === 'pop') {
-        // BEFORE any reservation this is the callee-saved block, measured from below — the
-        // ordinary agbcc prologue, and why push/pop are skipped at all. AFTER one it slides sp
-        // under the window just measured, so `[0, localArea)` stops naming the reserved area and
-        // starts naming the pushed words. Those words ARE written, by an instruction that is
-        // dataflow-transparent, so nothing downstream can tell:
-        // `push {r4,lr}; add sp,#-8; push {r0}; … ldr r1,[sp]` reads back the pushed `r0` on every
-        // path and the def-less shape renders it as an uninitialised local — 0 from the machine,
-        // garbage from the C. Poisoned to 0 rather than corrected by subtracting the push bytes,
-        // the same rule the sp-write arm follows. Not corpus-reachable — agbcc pushes before it
-        // reserves in all 2343 Thumb functions of the same un-vendored CHECKOUT sweep as the 2805
-        // above, not re-run since — which is why only a probe finds it.
-        if (reservedYet) {
-          return 0;
-        }
-      } else if (isSpReg((x.ops[0] ?? '').replace(/!$/, ''))) {
-        return 0; // an sp write of a shape this does not model
-      }
-    }
-    return Math.max(0, reserved);
-  })();
-
-  // WHAT THE PROLOGUE SAVED — the second half of the register partition (frontend/ssa.ts,
-  // LiveInModel.uninitRegs), in operand spellings. "The ABI does not pass arguments here" is a fact
-  // about the CALLER and cannot on its own make a def-less read an uninitialised local; what does is
-  // that the compiler homed a local in the register, which it may only do after saving it. Asm that
-  // saves nothing follows no such convention, and some of it really is handed live values there:
-  // the MP2K engine's hand-written `ChnVolSetAsm`, vendored in klonoa, sa3 and pokeemerald alike,
-  // takes two pointers in r4/r5 and has no prologue at all — classified by the ABI alone it lost its
-  // signature and stored through reads of registers nothing ever wrote.
-  //
-  // PER REGISTER, because saving r5 says nothing about r4 — a mid-function fragment reached by
-  // agbcc's `bl`-as-a-long-branch saves what it uses and is handed the rest.
-  //
-  // The prologue is the LEADING run of saves and reservations, so a `push` in the body cannot join
-  // the set. `HIGH_REGS` have no `push` encoding, so agbcc saves them as `mov rLow, rHi; push
-  // {rLow}` and the source of such a `mov` joins the set when its low register is pushed — every
-  // high-register inhabitant in the corpus goes through that idiom.
-  const savedRegs = ((): ReadonlySet<string> => {
-    const saved = new Set<string>();
-    const carries = new Map<string, string>(); // low register ← the high one moved into it
-    for (const x of asmBlocks[0].instrs) {
-      if (x.mnemonic === 'push') {
-        const list = regListOf(x.ops);
-        if (list === null) {
-          break; // a list this cannot read is a save set this cannot vouch for
-        }
-        for (const r of list) {
-          saved.add(r);
-          const hi = carries.get(r);
-          if (hi !== undefined) {
-            saved.add(hi);
-          }
-        }
-      } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
-        carries.set(x.ops[0], x.ops[1]);
-      } else if (spAdjust(x) === null) {
-        break;
-      }
-    }
-    return saved;
-  })();
-
-  // …AND THE FRAME IS THAT OBJECT. The two escape scans above are facts about a REGISTER — that a
-  // bare `mov rD, sp` is still held when a callee is entered, or when it is stored to memory.
-  // This is the LAYOUT fact, and it is the one that licenses turning the outgoing-argument
-  // refusals off. Either escape will do: the address leaving this function is what makes [sp,#0]
-  // an object other code can reach, and whether it left through r0 at a `bl` or through a device
-  // register changes nothing about the layout. What each escape DOES change is which producers
-  // could have emitted the same instructions, so each carries its own compiled table — the
-  // publish one sits at `frameBasePublishedToMemory`, and this is the callee one.
-  //
-  // The reason it is needed at all: a bare `mov rD, sp` names frame offset 0, but agbcc emits one
-  // for TWO different things, and only one of them is an addressable local. The other is a
-  // BLOCK-COPY BASE — the destination of a by-value struct argument (which IS the outgoing argument
-  // area) and the hidden return pointer of a struct-returning call. Both compiled, agbcc
-  // 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`:
-  //
-  //   by-value struct argument, `void f(struct S *p){ take(*p); }`, by stack words beyond r0-r3:
-  //     1 word  → `ldr r0,[r3,#0x10]; str r0,[sp]`  — no capture at all, frame 4
-  //     2 words → `mov r1, sp; ldmia r0!,{…}; stmia r1!,{…}` — frame 8
-  //     13+     → `mov r0, sp; mov r2,#0x44; bl memcpy` — frame 0x44 and up
-  //   struct return, `void f(int x){ struct R r = mk(x); use2(r.a[0]); }`:
-  //     1 word, INTEGER-LIKE (`{int a;}`, `{int a[1];}`, `{float f;}`) → r0, no frame temp
-  //     1 word, otherwise (`{char a,b,c,d;}`, `{short a,b;}`) → `mov r0, sp; bl mk` — frame 4
-  //     2 words → `mov r0, sp; bl mk` — frame 8
-  //
-  // Left unguarded that cost an argument: `void g3(struct Huge *p, int x){ takesH(*p);
-  // five(1,2,3,4,x); }` puts `str r5,[sp]` — argument 5 of `five` — in a frame whose offset 0 the
-  // memcpy also names, and the lift emitted `five(1, 2, 3, 4)` with the fifth argument written into
-  // a fabricated 4-byte local, in a frame declared 4 bytes where the machine reserves 0x90. Order
-  // is not the discriminator either: with the five-argument call FIRST the same thing happens.
-  //
-  // So the gate is the MODEL'S OWN EXTENT. This frontend models the captured object as the single
-  // word at [sp,#0] (`isFrameObjectAccess` below), and a one-word model is a description of the
-  // frame only when the frame IS that word. `localArea === 4` says exactly that. It excludes every
-  // block-copy base — each needs two frame words before agbcc names its base with a register at
-  // all — and the two-word struct returns with them. Any larger frame has bytes this model does not
-  // describe, and they are either the rest of a wider object the callee writes or another call's
-  // argument slots; neither is provable here, so the answer stays the decline.
-  //
-  // What the frame size does NOT exclude is the one-word struct return in the table above, which is
-  // instruction-for-instruction an out-parameter call. That one is settled after the lift, by the
-  // premise re-check in the frame-object audit — which is also where the licence's other half is
-  // re-proven.
-  //
-  // WHAT THIS GATE IS NOT. It switches the outgoing-argument refusals off, and nothing else. The
-  // object model runs on ANY frame — the `laddrs` path in the audit below — so a `u8 buf[12]`
-  // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
-  // its extent is the audit's frame-accounting rule rather than anything here.
-  //
-  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next change. Three shapes,
-  // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
-  // -fprologue-bugfix`, and only the first is about extent at all:
-  //
-  // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
-  // owns [sp,#4] compile to one instruction stream, byte for byte, with eight values live across
-  // the calls so one of them spills:
-  //
-  //   s32 loc; s32 t0..t7;                   loc = x;  t0 = h(0); … g(&loc); k(loc + t0 + …);
-  //   struct P { s32 a, b; } p; s32 t1..t7;  p.a = x;  p.b = h(0); … g(&p);   k(p.a + p.b + …);
-  //
-  // The first says a callee may not touch [sp,#4]; the second says it may, and the reload after the
-  // call must read what it wrote. Nothing distinguishes them, so a licence over THAT slot would be
-  // a guess — which is why the slot rule in the audit refuses the shape rather than deciding it.
-  //
-  // PINNED, and refused by the MODEL — sub-word members. Thumb has no sp-relative `strb`, so a
-  // byte or halfword member is reached through a copy of sp, and the access at +4 witnesses that
-  // the object reaches past its first word: `struct Q { u8 a; u8 pad[3]; u8 b; }` filled and then
-  // handed over compiles to `mov r1, sp / strb r0, [r1] / strb r0, [r1, #0x4] / mov r0, sp / bl g`.
-  // The escape is a use that is not an access, so the capture cannot be split per offset, and the
-  // audit judges the [+4] access against the one object it does model — "only a scalar at the
-  // captured address is modelled", and the SAME message when this conjunct is widened to
-  // `localArea >= 4` (measured).
-  //
-  // PINNED, and ambiguous in its ROLE — a frame-covering block copy. `struct Big { s32 a[17]; };
-  // b = gK; g(&b);` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy`: the copy
-  // bounds the object from below and the reservation from above, so the extent is exact. What is
-  // NOT pinned is what the object IS — the producer table above records those same instructions
-  // for a by-value struct ARGUMENT block and for a struct-return temp. Widening this conjunct
-  // moves it exactly there: it then declines at "which is how a hidden struct-return pointer
-  // looks" (measured), never at anything about extent.
-  //
-  // So a wider frame licence admits nothing this model can describe. `extent` is one scalar width
-  // from one access, and the second access that would build a wider object is a `[+k]` the audit
-  // refuses first: widened, the sub-word shape declines on the very same message and the
-  // block-copy one moves onto the struct-return refusal (both measured).
-  //
-  // RESIDUE: the producer table is agbcc's, so hand-written asm that reserves one word, stages it
-  // as a call's fifth argument and ALSO puts sp in an argument register defeats this — the same
-  // producer assumption the contiguity filter below makes. The producer is named in the gate
-  // rather than left to the prose, and it is named as DATA — `compilerBehaviors
-  // .oneWordFrameIsTheCapturedObject`, declared in `target.ts` beside the layout facts it belongs
-  // with, because a compiler fact is one field and not a `compiler ==` branch
-  // (`docs/level-tower.md`). `armv4t` has one compiler entry today, and a second one free to
-  // overlay a dead one-word local with a one-word outgoing area has to state this itself rather
-  // than inherit an acceptance whose only evidence is an agbcc compile table.
-  //
-  // WHICH CONJUNCT REFUSES WHAT, for a reader arriving with a wide frame in hand. klonoa's
-  // `LoadBGTilemapData` (a checkout function, not a benchmark row) reserves 0x3C and fails on the
-  // SIZE alone: its `mov r5, sp` is the DMA-fill PUBLISH (`strh r7, [r5]` / `mov r0, sp` /
-  // `str r0, [r2]`, r2 = 0x040000D4), which satisfies the escape conjunct, and it arrives with
-  // localArea=60. It does not need this gate: it lifts through the `laddrs` path with the object
-  // modelled as `volatile u16 sp0`, and its lift is byte-identical with this conjunct widened to
-  // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
-  // makes it the wrong function to reason about a wider licence from.
-  const capturedObjectIsTheWholeFrame =
-    target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
-    (frameBasePassedToCallee || frameBasePublishedToMemory) &&
-    localArea === 4;
-
-  // THE FRAME ADDRESS EACH INSTRUCTION DEFINES, off `heldFrameWalk` — and the lift's mov and add
-  // arms fold a capture at an offset only where this says so, so the offsets the slot model and
-  // the outgoing-argument analysis set aside below are, by construction, the ones the lift names.
-  // What the walk cannot follow (a move in another block than the capture) the lift does not
-  // fold either; the audit folds it from the IR, and refuses it by that name where the object
-  // lands on a word this left keyed as a slot.
-  const captureOffsetOf = new Map<Instr, number>();
-  heldFrameWalk(mayWriteReg, (ins, held) => {
-    const defined = frameAddressDefined(ins, held);
-    if (defined !== null) {
-      captureOffsetOf.set(ins, defined[1]);
-    }
-    return false;
-  });
-  // …and the offsets themselves, nonzero only — the frame base has its own licence,
-  // `capturedObjectIsTheWholeFrame`. A word whose address is taken is not an outgoing argument —
-  // C gives an argument no address — so the outgoing-argument analysis below does not see these
-  // offsets either: a store there reaching a call unread is the object being filled for the
-  // callee that is handed it.
-  const constantCaptureOffsets: ReadonlySet<number> = new Set([...captureOffsetOf.values()].filter((o) => o > 0));
-
-  // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
-  // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
-  // slots, which instructions are calls, and what each callee's DECLARATION asks for. `blx rN`
-  // names a REGISTER in the operand slot, so it matches no prototype and its block is null, which
-  // is correct: nothing here knows what an indirect call takes.
-  //
-  // A WHOLE WORD OF THE RESERVED LOCAL AREA is the same bytes `isOwnFrameWordSlot` models, minus
-  // `slotsOk` — which is the answer this analysis is being asked to help compute.
-  const slotAcc = (ins: Instr): number | null => {
-    const a = spMemAccess(ins);
-    return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea ? a.off : null;
-  };
-  // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. The analysis below and the
-  // `bl` lowering both come through here, so the arity that LICENSED a block and the arity that
-  // CONSUMES it cannot drift apart; a disagreement between two spellings of this lookup would read
-  // `r4` as argument 5 or throw a slot-model error naming the wrong thing.
-  //
-  // WHERE THE BLOCK IS is `compilerBehaviors.stagesOutgoingArgsInFrame`, not an assumption: the
-  // area sits at the bottom of the frame this function reserved because agbcc's thumb.h defines
-  // ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing here, and every
-  // call keeps the refusal it had before the licence existed.
-  //
-  // THE BLOCK IS WORDS AND SO ARE THE WIDTHS SUMMED HERE, which is why they are what is asked for:
-  // the area holds arguments |argRegs|..n at [sp,#0] upward, one WORD each, and the lowering maps
-  // word k to slot k - |argRegs|. A C PARAMETER COUNT would be the wrong number the moment one
-  // parameter is wider than a word — a `long long` adds a word AND moves every later argument's
-  // home, in the block and in the registers alike — so `proto.ts` converts the declaration into
-  // words once and both readers of it take the same answer.
-  //
-  // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
-  // spell — including `long long`, which is why a pair no longer needs guessing at — and
-  // `undefined` for a project typedef, a by-value struct or a floating type. `declaredCallArgs`
-  // sizes a `double` from the target (`TargetDescription.doubleArgWords`); one other such spelling
-  // and it states no layout at all, because the question here is not how wide that
-  // parameter is but whether it occupies one argument register or two, and the choice moves every
-  // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
-  // the call is lifted at the arg-register guess, exactly as a callee the project never declared
-  // is, and the guess retracts the registers a call destroyed where a stated width would assert
-  // them.
-  //
-  // The COUNT form (`{ params: 5 }`) carries no spellings at all: it is the user's word for how
-  // many argument REGISTERS the call takes, and a count that lies is garbage in —
-  // `validatePrototypes` can no more check it than it can check `returnsVoid`. The machine-derived
-  // side upholds the premise at its source: `prototypesFromSymbols` drops a whole entry rather
-  // than spell a parameter that is not 1, 2 or 4 bytes (test/proto.test.ts).
-  //
-  // `block` is null for the case that licenses nothing: an arity that fits in registers, where
-  // there IS no outgoing block. This runs over every `bl` while the outgoing-argument analysis is
-  // being built, so a refusal thrown here reaches the caller ahead of every other slot-model
-  // refusal, which is right because it is the most specific thing that was seen.
-  // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
-  // memory: the caller hands it the storage in r0 and every declared argument one register up
-  // (agbcc thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in r0
-  // is not a value the caller reads (calls.c: the struct is the memory at the address). One the
-  // target returns in r0 takes its arguments where they are declared, and its r0 is the struct's
-  // bytes, which nothing here reads as a struct: the call is `'register'` and a read of r0 after it
-  // refuses. Every other struct-returning call refuses, naming why.
-  const structReturnOf = (callee: string, own: FnProto): StructReturn | 'register' => {
-    const refuse = (why: string): never => {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': \`${callee}\` is declared to return ${own.returns ?? 'a struct or union'} by value, and ${why}`,
-      );
-    };
-    const layout = returnedAggregate(own);
-    const inMemory = returnsInMemory(layout, target);
-    if (inMemory === undefined) {
-      refuse(
-        'nothing here says whether it comes back through a hidden pointer — its members are not all known, this target does not ' +
-          'say how it lays one of them out (an enum, a bitfield), or it states no rule ' +
-          '(a prototype states them as `returnLayout`, a context by defining the struct)',
-      );
-    }
-    if (inMemory === false) {
-      return 'register';
-    }
-    // the local it lands in is declared as the header spells the type, qualifiers aside; the tag
-    // is what the declarations block defines it by, and a typedef name is that tag too
-    const spelling = (own.returns ?? '')
-      .replace(/\b(?:const|volatile)\b/g, ' ')
-      .trim()
-      .replace(/\s+/g, ' ');
-    const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
-    if (tag === undefined) {
-      refuse('it names no type a local of it could be declared with');
-    }
-    const type = aggregateType(tag!, spelling, layout, target);
-    if (type === undefined) {
-      refuse(
-        'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
-          '(an enum, a bitfield) — the local it lands in has no type here',
-      );
-    }
-    return { type: type! };
-  };
-  // A callee the project declares to return a struct in r0, asked where `declaredCall` has no
-  // arity to answer with: the return is the declaration's, and needs none.
-  const registerStructReturn = (callee: string | undefined): 'register' | undefined => {
-    const own = callee !== undefined && Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
-    return declaresAggregateReturn(own) && structReturnOf(callee!, own!) === 'register' ? 'register' : undefined;
-  };
-  const declaredCall = (
-    callee: string,
-  ): {
-    widths: readonly number[];
-    doubles: ReadonlySet<number>;
-    block: readonly number[] | null;
-    params: number;
-    returned?: StructReturn | 'register';
-  } | null => {
-    // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
-    // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
-    // last two wins — it may be building against its own re-declaration.
-    //
-    // THE TIER QUESTION IS WHETHER THE PROJECT DECLARED THE CALLEE, not whether the declaration
-    // could be sized. A header that spells `memcpy`'s third parameter through a project typedef
-    // has still re-declared `memcpy`, and reading the standard's signature past it would answer
-    // for a different function — which is the one reading this tier order exists to prevent.
-    //
-    // `Object.hasOwn` on all three tables: a callee named `toString` or `valueOf` would otherwise
-    // read a `Function` off `Object.prototype` as its prototype entry.
-    const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
-    const own = known(prototypes);
-    const returned = declaresAggregateReturn(own) ? structReturnOf(callee, own!) : undefined;
-    const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const declared = declaredCallArgs(proto, target);
-    const params = declared?.widths;
-    if (params === undefined && returned !== undefined && returned !== 'register') {
-      // a guessed arity reads argument registers from r0, which holds the hidden pointer
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': \`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden ` +
-          'pointer in r0, and its parameters are not all sized, so which registers carry its arguments is not known',
-      );
-    }
-    if (params === undefined) {
-      return null;
-    }
-    // THE STRUCT'S LOCAL NEEDS THE CALLEE PRINTED. A self-declared candidate defines the struct only
-    // beside the callee's printed prototype (`declare.ts`), so a declaration the printer cannot spell
-    // (`double *`, `size_t`, or a bare parameter count, which states no type) lifts to a candidate
-    // that does not compile. Asked of the printer's own predicate, so the two cannot disagree; a
-    // headers world, which would declare the callee itself, loses the lift with it.
-    if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
-      const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in r0`;
-      if (typeof own!.params === 'number') {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': ${via}, and its declaration states only a count of parameters, no type the lifted source can declare it with`,
-        );
-      }
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': ${via}, and a parameter type of its declaration has no spelling the lifted source can declare it with`,
-      );
-    }
-    const hidden = returned === undefined || returned === 'register' ? 0 : 1;
-    const widths = hidden === 0 ? params : [32, ...params];
-    const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
-    // A 64-BIT PARAMETER TAKES THE NEXT TWO ARGUMENT WORDS WHEREVER THEY FALL, with no even
-    // alignment: two registers, r3 and [sp,#0], or two words of the outgoing block. That is agbcc's
-    // placement for a `long long` and a `double` alike — FUNCTION_ARG places by word offset
-    // (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack (:636),
-    // FUNCTION_ARG_ADVANCE rounds to a word (:647); `test/corpus/agbcc-double-args.s` compiles all
-    // three. The walk below reads each word where it falls, so the block counts both of a pair's
-    // stack words.
-    const words = wordsOf(widths) - target.argRegs.length;
-    // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
-    // not claim to stage arguments inside the caller's own frame at all.
-    const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
-    return {
-      widths,
-      doubles,
-      block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
-      params: params.length,
-      ...(returned === undefined ? {} : { returned }),
-    };
-  };
-  const outgoingArgs = analyzeOutgoingArgs<Instr>({
-    blocks: asmBlocks.map((ab) => ({
-      events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
-        const off = slotAcc(ins);
-        if (off !== null && !constantCaptureOffsets.has(off)) {
-          return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
-        }
-        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          const callee = ins.ops[0] ?? '?';
-          const declared = declaredCall(callee);
-          return [{ kind: 'call', call: ins, callee, declared: declared?.block ?? null, params: declared?.params }];
-        }
-        return [];
-      }),
-    })),
-    preds,
-    live: entryReachable,
-    localArea,
-    argRegs: target.argRegs.length,
-    capturedWholeFrame: capturedObjectIsTheWholeFrame,
-    localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
-  });
-
-  const slotsOffReason = slotModelBlocker(outgoingArgs);
-  const slotsOk = slotsOffReason === null;
+  const pairs = thumbPairs({ name, target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
+  const flags = thumbFlagCarry(cfg, text.tables);
   // Every offset the body actually keys as an SSA slot — the frame-object audit checks the
   // address-taken object cannot overlap one (two models for one byte is a silent disagreement).
   const usedSlotOffsets = new Set<number>();
   // Every capture the add arm moved by a constant: the audit drops one nothing else reads.
   const movedCaptures = new Set<Value>();
 
-  // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
-  // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
-  // to THAT OBJECT — provisionally, since the audit is what proves the object is a local at all. Keying it as an SSA slot instead moves the value into a
-  // register and deletes the store from memory — and the callee reading it through the pointer is
-  // invisible to every check the slot model makes, so the deletion would be silent.
-  //
-  // The frame-object audit does catch the collision today ("one byte, two models"), as a DECLINE.
-  // Routing the access through an `laddr` here is what turns that decline into the lift, and it
-  // hands the audit the same object it would have judged anyway — offset, width and escape all
-  // come from the machine.
-  //
-  // Word accesses only, and only while the slot model is on: a sub-word or register-offset
-  // `[sp,#k]` anywhere turns the whole model off (slotModelBlocker), and the `mov rD, sp` arm then
-  // declines the capture rather than reaching this.
-  //
-  // THE SAME HOLDS AT EVERY OFFSET A CONSTANT CAPTURE NAMES. `vu32 t = -1; CpuSet(&t, …)` above an
-  // outgoing block is `str r4, [sp, #0x4] / add r0, sp, #0x4 / bl CpuSet`: the store is to the
-  // object whose address the call is handed. Those offsets are read off the text before the lift
-  // (`constantCaptureOffsets`), from the same walk the lift folds captures by. Above the outgoing
-  // block only — a word staged there is an argument the call reads as a slot — and inside the
-  // reserved area, where a slot could have been.
-  //
-  // …AND EVERY WORD OF THE BYTES A FIRST AUDIT ASKED TO KEEP AS ONE OBJECT (`oneObject`), where a
-  // device may read the frame without bound: a word there is memory the device reads, not a slot.
-  const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
-    slotsOk &&
-    isSpReg(base) &&
-    regOff === undefined &&
-    width === 4 &&
-    ((capturedObjectIsTheWholeFrame && off === 0) ||
-      (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
-      (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
-
-  // A WHOLE WORD OF THIS FUNCTION'S OWN RESERVED LOCAL AREA — the shape the ldr and str arms model
-  // as an SSA slot (`sp@<off>`) instead of memory. The two arms spelled these seven terms out
-  // twice — the ldr arm with the reaching-def test as an eighth — which is one edit away from
-  // disagreeing about which bytes are private.
-  //
-  // Each term is a refusal:
-  //   * `slotsOk`      — the frame must be proven private and immovable (slotModelBlocker)
-  //   * sp base, no register index — `[sp, rX]` names no fixed slot
-  //   * word width, word-aligned, non-negative — the model keys whole aligned words and nothing else
-  //   * `off + 4 <= localArea` — strictly inside the EXPLICITLY reserved area. Not merely inside the
-  //     frame: above it sits the callee-saved block the epilogue pops, and above THAT the incoming
-  //     argument area, so a slot straying up there would either fight the `pop` or claim the
-  //     caller's word.
-  //
-  // What is NOT here, deliberately: the load side's reaching-def test. That one is impure (it asks
-  // the SSA builder) and one-sided — a store needs no reaching def — so it stays at the ldr arm.
-  const isOwnFrameWordSlot = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
-    slotsOk &&
-    isSpReg(base) &&
-    regOff === undefined &&
-    width === 4 &&
-    off % 4 === 0 &&
-    off >= 0 &&
-    off + 4 <= localArea;
-
-  // The WRITE dual of readData, and it guards the WRITE rather than the arms that perform one,
-  // because an enumeration of arms can only cover the arms someone thought of. Checking sp in the
-  // mov/add/sub arms alone leaves `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`, `ldr sp, [r0,#4]`
-  // and `ldmia r0!, {sp}` lifting, each dropping the sp write silently. Guarding the write ITSELF
-  // cannot be incomplete.
-  //
-  // sp is writable in exactly one shape — the frame adjust the add/sub arms `break` on before
-  // reaching here (see isFrameAdjust). Anything else that writes sp is a frame change this frontend
-  // cannot model, and dropping it silently deletes that change while the function keeps compiling.
-  //
-  // Known residual, zero inhabitants: `pop {sp}` never reaches here (push/pop are skipSafe in the
-  // opaque policy), so it stays silently transparent. ARMv4T Thumb cannot encode sp in a pop reglist.
-  const writeData = (r: string, b: number, v: Value): void => {
-    if (isSpReg(r)) {
-      throw spAsDataError();
-    }
-    writeVar(r, b, v);
-  };
-
   // Best-effort call arity via the shared helper (frontend/ssa.ts).
   const fallbackArgcHere = (b: number): number => fallbackArgc(ssa, target.argRegs, b);
-
-  // What each block leaves in the flags for a successor to pick up: the live compare, or — when
-  // there is none — THE SENTENCE SAYING WHY, which crosses the edge with the state rather than
-  // being re-invented on the far side. Minting a fresh reason at the edge is how a block whose
-  // `sub` wrote the flags came to be described as a block that set none: the successor could see
-  // that nothing arrived, and not what stopped it.
-  //
-  // Every such sentence names the block it is about, so it needs no re-pointing as it travels and
-  // one gap reads the same however the labels fall. Written as the block is filled, so a lookup
-  // can only find a block filled EARLIER — which is what makes an unlifted predecessor answer "not
-  // known" rather than "none".
-  const exitCmp = new Map<number, PendingCmp | string>();
-
-  /** The compare a block starts with, inherited from its predecessor — or the sentence saying why
-   *  it starts with none. The rule is `inheritFlags` (frontend/flags-edge.ts), shared with the
-   *  PowerPC frontend; what is Thumb's here is only the answer to its last question. Thumb's `b<cc>`
-   *  preserves the flags, so carrying across a conditional edge would be sound, but no ARM row
-   *  inhabits that shape, so this side refuses it as UNBUILT. */
-  const inheritedCmp = (bi: number): PendingCmp | string =>
-    inheritFlags(bi, {
-      preds,
-      exit: exitCmp,
-      label: (i) => asmBlocks[i].label,
-      dispatches: (i) => tables.has(asmBlocks[i]),
-      // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it
-      // is in nobody's `preds`, and an `indirect` one throws before the CFG is built, so asking
-      // about either would be a question no input reaches. `uncond` and a fall-through (`null`)
-      // are the edges the rule exists to carry.
-      refusesConditional: (i) => {
-        const plast = asmBlocks[i].instrs[asmBlocks[i].instrs.length - 1];
-        return plast !== undefined && classifyXfer(plast) === 'cond';
-      },
-    });
 
   // --- fill each block in order, sealing blocks as their predecessors complete ---
   const fillBlock = (ab: AsmBlock, bi: number) => {
@@ -3850,7 +2487,7 @@ function liftOnce(
     // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
     // judged by the in-block clear below exactly as one this block made itself would be: a block
     // that inherits flags and then writes its own must lose them.
-    const inherited = inheritedCmp(bi);
+    const inherited = flags.inheritedCmp(bi);
     let pendingCmp: PendingCmp | null = typeof inherited === 'string' ? null : inherited;
     // Why there are no flags to fold, kept alongside the `null` that says there are none. A block
     // that made a compare and then overwrote it is a different gap from one that never had a
@@ -3861,7 +2498,7 @@ function liftOnce(
     // closed over: `preds` is final long before the first `fillBlock` runs, so the boolean is the
     // same for every block, and passing it in makes that a property of this line instead of a
     // property of wherever the walk happens to be declared.
-    const frame = makeFrameWalk({ argRegs: target.argRegs, entryHasPreds: preds[0].length > 0 });
+    const walk = makeFrameWalk({ argRegs: target.argRegs, entryHasPreds: cfg.preds[0].length > 0 });
 
     // TRUSTWORTHINESS GUARD (mirrors the MIPS/PPC frontends): an unmodelled instruction must not
     // silently drop its destination register — emit an honest `opaque`, which fails LOUD at
@@ -3979,12 +2616,16 @@ function liftOnce(
       }
       // Every read before either write: the machine reads the high halves after the low write,
       // and the guard above is what makes that the same thing.
-      const a = fuseHalves(irb, readData(lhs, bi), readData(hd, bi));
-      const b = fuseHalves(irb, rhs.startsWith('#') ? constVal(imm(rhs), bi) : readData(rhs, bi), readData(hx, bi));
+      const a = pairs.fuseHalves(irb, readData(lhs, bi), readData(hd, bi));
+      const b = pairs.fuseHalves(
+        irb,
+        rhs.startsWith('#') ? constVal(imm(rhs), bi) : readData(rhs, bi),
+        readData(hx, bi),
+      );
       const v = mkValue(T.unk(64));
       irb.ops.push(mkOp(op, { operands: [a, b], results: [v] }));
-      writeData(d, bi, projectHalf(irb, v, 'lo', next));
-      writeData(hd, bi, projectHalf(irb, v, 'hi', next));
+      writeData(d, bi, pairs.projectHalf(irb, v, 'lo', next));
+      writeData(hd, bi, pairs.projectHalf(irb, v, 'hi', next));
       return true;
     };
     // The carry instruction `carryPair` already decoded, skipped when the loop reaches it.
@@ -4057,7 +2698,7 @@ function liftOnce(
           `, and only a compare's are modelled`;
         pendingCmp = null;
       }
-      frame.step(ins);
+      walk.step(ins);
       if (ins === consumed) {
         consumed = null;
         continue;
@@ -4073,7 +2714,7 @@ function liftOnce(
           // loudly there. Gated on the slot model (the frame must be private and immovable) and on
           // a reserved local area for the object to live in.
           if (!b?.startsWith('#') && isSpReg(b ?? '') && !isSpReg(a ?? '')) {
-            if (slotsOk && localArea > 0) {
+            if (frame.slotsOk && frame.localArea > 0) {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: 0 } }));
               writeData(reg(a), bi, res);
@@ -4101,7 +2742,7 @@ function liftOnce(
           // places above an outgoing argument block or beside another local. Same gate, same
           // audit; only the offset differs.
           if (isSpReg(b ?? '') && !isSpReg(a ?? '') && c !== undefined && IMM_LITERAL.test(c)) {
-            if (slotsOk && localArea > 0) {
+            if (frame.slotsOk && frame.localArea > 0) {
               const res = mkValue(T.unk(32));
               irb.ops.push(mkOp('laddr', { results: [res], attrs: { off: imm(c) } }));
               writeData(reg(a), bi, res);
@@ -4119,7 +2760,7 @@ function liftOnce(
             if (!isSpReg(a ?? '') && x !== undefined && y !== undefined && isSpReg(x) !== isSpReg(y)) {
               const index = isSpReg(x) ? y : x;
               if (!IMM_LITERAL.test(index)) {
-                if (!slotsOk || localArea <= 0) {
+                if (!frame.slotsOk || frame.localArea <= 0) {
                   throw spAsDataError();
                 }
                 const base = mkValue(T.unk(32));
@@ -4136,7 +2777,7 @@ function liftOnce(
           // r2, #0x8`. The two-operand `add rD, #c` moves rD itself. Where `heldFrameWalk` says so
           // and nowhere else (`captureOffsetOf`); a move by 0 is the copy below, one value.
           {
-            const at = captureOffsetOf.get(ins);
+            const at = frame.captureOffsetOf.get(ins);
             const [src, by] = c === undefined ? [a, b] : [b, c];
             if (at !== undefined && src !== undefined && by !== undefined && !immEq(by, 0)) {
               movedCaptures.add(readData(reg(src), bi));
@@ -4434,7 +3075,7 @@ function liftOnce(
           // through it to `gSym`), anything else → loud decline. It must NEVER fall to the load
           // path below, which would materialise the pool label as a phantom pointer parameter.
           if (ins.mnemonic === 'ldr' && b !== undefined) {
-            const ref = poolRef(b, dataWords, nonWordData);
+            const ref = poolRef(b, text.dataWords, text.nonWordData);
             // A function-scope static is the address of an object this function DEFINES: the
             // `gaddr` below under its linker name, with the definition recorded beside the Fn.
             const pr: PoolRef | null =
@@ -4459,7 +3100,7 @@ function liftOnce(
               // cells through exactly such macros). Nothing is guessed in either case: a vetoed
               // word stays the raw constant the target says it is.
               const found = symbols ? lookupSymbol(symbols, pr.value) : null;
-              const si = found && (!poolNamesSymbols || found.macroBody !== undefined) ? found : null;
+              const si = found && (!text.poolNamesSymbols || found.macroBody !== undefined) ? found : null;
               if (si) {
                 const res = mkValue(T.unk(32));
                 irb.ops.push(
@@ -4477,7 +3118,7 @@ function liftOnce(
               // unattributed address stays a raw const — nothing guesses.
               // Interior attribution is always an `&gSym + K` spelling — extern-shaped, hence
               // relocated — so the veto applies to it without the macro exemption above.
-              const interior = symbols && !poolNamesSymbols ? lookupInterior(symbols, pr.value) : null;
+              const interior = symbols && !text.poolNamesSymbols ? lookupInterior(symbols, pr.value) : null;
               if (interior) {
                 const g = mkValue(T.unk(32));
                 const k = mkValue(T.unk(32));
@@ -4532,7 +3173,7 @@ function liftOnce(
           // `argIndex` can make, and the soundness proof that each one is needed for, lives on the
           // predicate itself — restating them here is how the two copies drifted.
           {
-            const index = frame.argIndex({ base, off, regOff }, width, bi);
+            const index = walk.argIndex({ base, off, regOff }, width, bi);
             if (index !== null) {
               writeData(reg(a), bi, readVar(stackArgKey(index), bi));
               break;
@@ -4542,7 +3183,7 @@ function liftOnce(
           // read with a real `load` through its `laddr` (see isFrameObjectAccess). No
           // reaching-def test — the callee holding the address is a writer this function cannot
           // see, so "never stored here" is not "holds nothing".
-          if (isFrameObjectAccess(base, off, regOff, width)) {
+          if (frame.isFrameObjectAccess(base, off, regOff, width)) {
             const addr = mkValue(T.unk(32));
             irb.ops.push(mkOp('laddr', { results: [addr], attrs: { off } }));
             const res = mkValue(T.unk(32));
@@ -4559,9 +3200,9 @@ function liftOnce(
           // above; INSIDE the frame it is an uninitialised local (or one whose address escaped
           // through a path the model missed), and the honest answer is the decline this falls
           // through to.
-          if (isOwnFrameWordSlot(base, off, regOff, width) && ssa.hasReachingDef(slotKey(off), bi)) {
+          if (frame.isOwnFrameWordSlot(base, off, regOff, width) && ssa.hasReachingDef(stackSlotKey(off), bi)) {
             usedSlotOffsets.add(off);
-            writeData(reg(a), bi, readVar(slotKey(off), bi));
+            writeData(reg(a), bi, readVar(stackSlotKey(off), bi));
             break;
           }
           let baseVal = readData(base, bi);
@@ -4590,15 +3231,15 @@ function liftOnce(
           // is never reloaded becomes a dead def and drops.
           // …unless the offset is an address-taken object (see isFrameObjectAccess), where the
           // store is a real write to memory that the callee holding the address reads back.
-          if (isFrameObjectAccess(base, off, regOff, width)) {
+          if (frame.isFrameObjectAccess(base, off, regOff, width)) {
             const addr = mkValue(T.unk(32));
             irb.ops.push(mkOp('laddr', { results: [addr], attrs: { off } }));
             irb.ops.push(mkOp('store', { operands: [addr, readData(reg(a), bi)], attrs: { off: 0, width } }));
             break;
           }
-          if (isOwnFrameWordSlot(base, off, regOff, width)) {
+          if (frame.isOwnFrameWordSlot(base, off, regOff, width)) {
             usedSlotOffsets.add(off);
-            writeVar(slotKey(off), bi, readData(reg(a), bi));
+            writeVar(stackSlotKey(off), bi, readData(reg(a), bi));
             break;
           }
           let storeBase = readData(base, bi);
@@ -4622,15 +3263,15 @@ function liftOnce(
           // callable and is then wrong in a way that reads as right. The label check is by exact
           // name because a branch operand carries no offset spelling. Both maps, because the
           // directive under the label decides nothing here: `.word` or `.short`, it is data.
-          if (targetSym !== undefined && (dataWords.has(targetSym) || nonWordData.has(targetSym))) {
+          if (targetSym !== undefined && (text.dataWords.has(targetSym) || text.nonWordData.has(targetSym))) {
             throw new FrontendUnsupportedError(
               `cannot lift '${name}': '${ins.mnemonic} ${targetSym}' branches to '${targetSym}', which this asm defines as a data label — not modelled`,
             );
           }
           // Caller-supplied prototype wins; otherwise a known runtime helper (`__divsi3` &c.)
           // supplies its arity so its arguments are recovered; only then fall back to guessing.
-          const wide = wideHelper(targetSym);
-          const declared = wide ? null : declaredCall(targetSym);
+          const wide = calls.wideHelper(targetSym);
+          const declared = wide ? null : calls.declaredCall(targetSym);
           // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
           // runtime table or the project's headers. Both answer the same question, so the walk that
           // reads argument registers off the answer is written once; two walks would be two chances
@@ -4655,10 +3296,10 @@ function liftOnce(
           const returnsPair =
             (wide
               ? wide.returns
-              : isRuntimeHelperName(targetSym)
+              : calls.isRuntimeHelperName(targetSym)
                 ? undefined
                 : declaredReturnWidth(prototypes[targetSym], target)) === 64;
-          const stackArgs = slotsOk ? outgoingArgs.blocks.get(ins) : undefined;
+          const stackArgs = frame.slotsOk ? frame.outgoingArgs.blocks.get(ins) : undefined;
           const args: Value[] = [];
           // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
           // `finish()` answers by dropping the ones a call has been through; a STATED width asserts
@@ -4680,7 +3321,7 @@ function liftOnce(
               throw spAsDataError();
             }
             usedSlotOffsets.add(off);
-            return readVar(slotKey(off), bi);
+            return readVar(stackSlotKey(off), bi);
           };
           let k = 0;
           for (const w of widths ?? Array.from({ length: argc }, () => 32)) {
@@ -4689,7 +3330,7 @@ function liftOnce(
               // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
               // the second reading anyway, since the structurer materialises an effectful call once
               // per result. Its words are wherever `declaredCall` placed them.
-              args.push(fuseHalves(irb, word(k), word(k + 1)));
+              args.push(pairs.fuseHalves(irb, word(k), word(k + 1)));
             } else {
               args.push(k < target.argRegs.length ? readArg(`r${k}`, bi) : word(k));
             }
@@ -4716,12 +3357,12 @@ function liftOnce(
           // line, and blaming an absent prototype would be false about its own input.
           if (widths === null) {
             for (const [j, v] of args.entries()) {
-              const half = halfOf.get(v);
+              const half = pairs.halfOf.get(v);
               // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
               // reader to the wrong declaration: a double leaves a soft-float helper only into
               // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
               // and a pair built here for a callee declared to take a `long long` is refused there.
-              const producer = half && pairCallee.get(half.whole);
+              const producer = half && pairs.pairCallee.get(half.whole);
               const helper = producer ? lookupHelper(target.runtimeHelpers, producer) : undefined;
               if (half && helper && isFloatHelper(helper)) {
                 throw new FrontendUnsupportedError(
@@ -4749,7 +3390,7 @@ function liftOnce(
           // a struct returned through memory is the call's value, and argument 0 is where it lands; one
           // returned in r0 is r0's bytes, whether or not anything states the call's arity
           const returned =
-            declared?.returned ?? (declared === null && !wide ? registerStructReturn(targetSym) : undefined);
+            declared?.returned ?? (declared === null && !wide ? calls.registerStructReturn(targetSym) : undefined);
           const sret = returned !== undefined && returned !== 'register' ? returned.type : undefined;
           const res = mkValue(sret ?? T.unk(returnsPair ? 64 : 32));
           // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
@@ -4777,20 +3418,20 @@ function liftOnce(
             // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
             // named here and neither is in the clobber set — which is the acceptance arm of the
             // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
-            writeData(target.returnReg, bi, projectHalf(irb, res, 'lo', ins));
-            writeData(target.argRegs[1], bi, projectHalf(irb, res, 'hi', ins));
-            pairCallee.set(res, targetSym);
-            ssa.noteCall(bi, pairReturnClobbers);
+            writeData(target.returnReg, bi, pairs.projectHalf(irb, res, 'lo', ins));
+            writeData(target.argRegs[1], bi, pairs.projectHalf(irb, res, 'hi', ins));
+            pairs.pairCallee.set(res, targetSym);
+            ssa.noteCall(bi, calls.pairReturnClobbers);
             break;
           }
           if (returned !== undefined) {
             // the struct is the memory at argument 0, or r0's bytes as a struct; either way r0
             // holds nothing the caller may read as a value
-            ssa.noteCall(bi, [...callClobbers, target.returnReg]);
+            ssa.noteCall(bi, [...calls.callClobbers, target.returnReg]);
             break;
           }
           writeData('r0', bi, res); // the callee defines r0 …
-          ssa.noteCall(bi, callClobbers); // … and the clobber is recorded after it, so that def is the CALLEE's
+          ssa.noteCall(bi, calls.callClobbers); // … and the clobber is recorded after it, so that def is the CALLEE's
           break;
         }
         default:
@@ -4810,13 +3451,13 @@ function liftOnce(
     // `noCmpWhy` is non-empty exactly when `pendingCmp` is null — it is set on every path that
     // nulls one, and the only path that starts null is the one that took it from `inheritedCmp`'s
     // sentence — so this never stores an empty reason for a successor to repeat.
-    exitCmp.set(bi, pendingCmp ?? noCmpWhy);
+    flags.exitCmp.set(bi, pendingCmp ?? noCmpWhy);
 
     // terminator (via classifyXfer — the single source of truth shared with decode/succLabels)
     const last = ab.instrs[ab.instrs.length - 1];
     const kind = last ? classifyXfer(last) : null;
-    const succ = (label: string): Successor => ({ block: irBlocks[labelIndex.get(label)!], args: [] });
-    const jt = tables.get(ab);
+    const succ = (label: string): Successor => ({ block: irBlocks[cfg.labelIndex.get(label)!], args: [] });
+    const jt = text.tables.get(ab);
     if (jt) {
       // Regime B: the bounds block dispatches a `switch_br` over the scrutinee — N case blocks (values
       // 0..N-1, dense) followed by the default block (last successor). The `cmp`/`bhi` are subsumed.
@@ -4844,7 +3485,7 @@ function liftOnce(
         irb.ops.push(mkOp('ret'));
       } else {
         const lo = readVar(target.returnReg, bi);
-        const whole = wideReturn(lo, bi);
+        const whole = pairs.wideReturn(lo, bi);
         if (whole === null) {
           const scratch = target.compilerBehaviors.eightByteReturnScratch;
           const prev = ab.instrs[ab.instrs.length - 2];
@@ -4854,7 +3495,7 @@ function liftOnce(
             last.ops[0] === scratch &&
             prev?.mnemonic === 'pop' &&
             regListOf(prev.ops)?.join() === scratch;
-          wordReturns.push({ bi, lo, widerEpilogue });
+          pairs.wordReturns.push({ bi, lo, widerEpilogue });
         }
         irb.ops.push(mkOp('ret', { operands: [whole ?? lo] }));
       }
@@ -4880,20 +3521,20 @@ function liftOnce(
   // The fall-through label after block `bi` — a LAST block needing one means control runs off
   // the end of the function (truncated/misparsed input): decline loud, never a TypeError.
   const fallLabel = (bi: number): string => {
-    const nb = asmBlocks[bi + 1];
+    const nb = cfg.asmBlocks[bi + 1];
     if (!nb) {
       throw new FrontendUnsupportedError(
-        `cannot lift '${name}': control falls off the end (block '${asmBlocks[bi].label}' has no terminator and no successor)`,
+        `cannot lift '${name}': control falls off the end (block '${cfg.asmBlocks[bi].label}' has no terminator and no successor)`,
       );
     }
     return nb.label;
   };
-  asmBlocks.forEach((ab, bi) => {
+  cfg.asmBlocks.forEach((ab, bi) => {
     fillBlock(ab, bi);
     ssa.markFilled(bi);
   });
 
-  refuseWordReturns();
+  pairs.refuseWordReturns();
   // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
   // One word per argument, which is what this frontend assumes everywhere: an 8-byte argument,
   // which AAPCS may align into r1 or straddle across r3 and the stack, would break the index-slot
@@ -4909,7 +3550,7 @@ function liftOnce(
         k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k),
       ),
   };
-  mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
+  mintArgSlotHoles(ssa, cfg.preds[0].length > 0, argSlots);
   ssa.finish();
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
@@ -4918,9 +3559,9 @@ function liftOnce(
   const verdict = FRAME_OBJECT_AUDIT.run({
     name,
     irBlocks,
-    ...framePartition(),
+    ...frame.partition,
     usedSlotOffsets,
-    capturedObjectIsTheWholeFrame,
+    capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
     movedCaptures,
     prototypes,
     symbols,
@@ -4950,9 +3591,1591 @@ function liftOnce(
     }
   }
 
-  abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
+  abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);
   fn.localObjects = statics.finish();
   return fn;
+}
+
+/** THE TEXT A LIFT READS: the decoded blocks with every recovered jump table's dispatch elided,
+ *  and the data its pool loads read. Every control transfer the CFG cannot model is refused by the
+ *  time this exists. */
+interface ThumbText {
+  /** The blocks the CFG is built from — read by `thumbCfg` alone; every later stage indexes
+   *  `ThumbCfg.asmBlocks`. */
+  readonly blocks: readonly AsmBlock[];
+  /** A recovered jump table, by its bounds block. */
+  readonly tables: ReadonlyMap<AsmBlock, JumpTable>;
+  readonly dataWords: ReadonlyMap<string, string[]>;
+  readonly nonWordData: ReadonlyMap<string, string>;
+  /** Whether THIS asm preserves symbol names in its literal pools — the witness the numeric-pool
+   *  naming veto needs (see poolNamesASymbol). */
+  readonly poolNamesSymbols: boolean;
+}
+
+function readThumbText(name: string, asm: string): ThumbText {
+  assertInputFormat('thumb', 'gnu-as', asm);
+  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
+
+  // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
+  // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
+  // dispatch block is ELIDED from the CFG. A `mov pc` that is NOT a recognised table falls through
+  // to the loud-fail below.
+  const blockLabels = new Set(rawBlocks.map((b) => b.label));
+  const poolNamesSymbols = poolNamesASymbol(dataWords, nonWordData, blockLabels);
+  // Any label referenced as a branch target (so we can tell if an elided dispatch block has a SECOND
+  // predecessor — a `b disp` from elsewhere — which would dangle after elision; decline if so).
+  // How many branches name each label — not just whether any does, because the long-jump bounds
+  // form legitimately branches to its own dispatch block exactly once.
+  const branchRefs = new Map<string, number>();
+  for (const b of rawBlocks) {
+    for (const ins of b.instrs) {
+      if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic]) && ins.ops.length) {
+        const t = ins.ops[ins.ops.length - 1];
+        branchRefs.set(t, (branchRefs.get(t) ?? 0) + 1);
+      }
+    }
+  }
+  const tables = new Map<AsmBlock, JumpTable>(); // bounds block → recovered table
+  const elided = new Set<AsmBlock>(); // dispatch (and long-jump default) blocks removed from the CFG
+  rawBlocks.forEach((d, i) => {
+    const last = d.instrs[d.instrs.length - 1];
+    if (!last || last.mnemonic !== 'mov' || last.ops[0] !== 'pc' || last.ops[1] === 'lr') {
+      return;
+    }
+    const refs = branchRefs.get(d.label) ?? 0;
+    const prev = rawBlocks[i - 1];
+    // Direct form: the dispatch is reached ONLY by falling through from its bounds predecessor. A
+    // `b disp` from anywhere else would leave a dangling edge after elision, so decline (→ loud-fail).
+    if (prev && refs === 0) {
+      const jt = recoverJumpTable(prev, d, dataWords, nonWordData, blockLabels);
+      if (jt) {
+        tables.set(prev, jt);
+        elided.add(d);
+        return;
+      }
+    }
+    // Long-jump form: `bounds` (cmp; bls DISP), then a lone `b DEF` block, then the dispatch. The
+    // dispatch is entered by exactly that one `bls` and nothing else, and the `b DEF` block —
+    // synthetically labelled, so unnameable and unreachable once the bounds block dispatches — is
+    // elided WITH it. Leaving it would make it a parameterless predecessor of the default block,
+    // and wiring a phi through it fabricates an entry parameter (the phantom-param miscompile).
+    const boundsB = rawBlocks[i - 2];
+    const prevNamed = prev ? (branchRefs.get(prev.label) ?? 0) > 0 : false;
+    if (refs === 1 && prev && boundsB && !prevNamed && prev.instrs.length === 1 && prev.instrs[0].mnemonic === 'b') {
+      const jt = recoverJumpTable(boundsB, d, dataWords, nonWordData, blockLabels, prev.instrs[0].ops[0]);
+      if (jt) {
+        tables.set(boundsB, jt);
+        elided.add(d);
+        elided.add(prev);
+      }
+    }
+  });
+  const asmBlocks = rawBlocks.filter((b) => !elided.has(b));
+
+  // TRUSTWORTHINESS: loud-fail on a control transfer this frontend cannot model, rather than
+  // silently dropping it. A computed/loaded PC write (`mov pc, rN`, `ldr pc, …`, `add/sub pc`,
+  // `ldmia rN!,{…,pc}` with rN≠sp) is a jump table / computed goto / register tail call — decode
+  // ends the block at it, but it has no static successor, so it must be a catchable "out of scope"
+  // signal, not a vanished branch. Mirrors MIPS `jr`/PPC `bctr`. (A RECOGNISED jump table's
+  // dispatch block is already elided above, so it is not scanned here.)
+  //
+  // The same rule for a `bl` whose target is inside this function's own text. agbcc relays a
+  // conditional branch past Thumb's ±256-byte reach through an unconditional one, and past THAT
+  // branch's own ±2 KB reach the relay becomes `bl .Lfar @far jump` — an intra-function long
+  // branch wearing the call mnemonic. The decode switch reads it as a call, so without this the
+  // lift emits a call to a block label (`.L3(a0, a1, a2)`): not a branch that vanished but a
+  // transfer turned into something that RETURNS, and syntactically not C.
+  //
+  // The refusal is wider than that one shape because the asm does not separate it from a
+  // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
+  // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
+  // Both are a `bl` to a bare label the slice defines, both sit under a conditional branch that
+  // skips them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
+  // Lifting the relay as a `br` is the other half of the gap and needs the same distinction plus a
+  // proof that `lr` is dead there, since `bl` overwrites it and a branch must not.
+  //
+  // DECLARED function starts are excluded: a `.thumb_func`/`thumb_func_start` label is a function
+  // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
+  // itself (recursion), or a sibling a shared-tail slice extends through.
+  for (const ab of asmBlocks) {
+    for (const ins of ab.instrs) {
+      // Asked of the SELECTED function's blocks, not of the file as it is parsed: an upper-case
+      // register in some other function's body is not this one's problem.
+      const upper = upperCaseRegIn(ins.ops);
+      if (upper !== null) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': register '${upper}' in '${ins.mnemonic} ${ins.ops.join(', ')}' is spelled in ` +
+            `upper case — this frontend identifies registers by spelling and models the lower-case forms only`,
+        );
+      }
+      if (classifyXfer(ins) === 'indirect') {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' ` +
+            `— jump tables / computed gotos / register tail calls not supported`,
+        );
+      }
+      const callee = (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') && ins.ops.length === 1 ? ins.ops[0] : undefined;
+      if (callee !== undefined && !funcLabels.has(callee) && blockLabels.has(callee)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${ins.mnemonic} ${callee}' targets a label inside this function ` +
+            `and not a declared function — an intra-function long branch and a locally-defined call ` +
+            `thunk are the same shape here, so this declines rather than guessing which`,
+        );
+      }
+    }
+  }
+  return { blocks: asmBlocks, tables, dataWords, nonWordData, poolNamesSymbols };
+}
+
+/** The control-flow graph every stage after the text indexes. */
+interface ThumbCfg {
+  /** The blocks lifted, by index: the text's, behind a synthetic preheader where the entry block
+   *  is a loop header. */
+  readonly asmBlocks: readonly AsmBlock[];
+  readonly labelIndex: ReadonlyMap<string, number>;
+  /** Each block's predecessors, one entry per edge. */
+  readonly preds: number[][];
+  readonly entryReachable: ReadonlySet<number>;
+}
+
+function thumbCfg(name: string, blocks: readonly AsmBlock[], tables: ReadonlyMap<AsmBlock, JumpTable>): ThumbCfg {
+  // A function whose ENTRY block is itself a loop header (some block branches back to it — the tight
+  // `strcpy`/`strlen`/`memset` shape where block 0 IS the loop) has no preheader to carry the
+  // incoming argument registers into the header's phis. Braun SSA would then build each loop-carried
+  // register's phi from the back-edge ALONE, dropping the entry value → a use-before-def on the
+  // header's first op. Insert a synthetic EMPTY preheader that falls through to the old entry: it
+  // becomes the true entry (its arg-register reads create the params), and the old header now has a
+  // forward predecessor supplying the entry operand of each phi. Guarded on `preds[0]` so ordinary
+  // functions (entry not a branch target) are untouched.
+  let { labelIndex, preds } = buildCfg(name, blocks, tables);
+  let asmBlocks = blocks;
+  if (preds[0].length > 0) {
+    let ph = '.Lasmlift_preheader';
+    while (labelIndex.has(ph)) {
+      ph += '_';
+    }
+    asmBlocks = [{ label: ph, instrs: [] }, ...blocks];
+    ({ labelIndex, preds } = buildCfg(name, asmBlocks, tables));
+  }
+
+  // ENTRY-REACHABLE BLOCKS. Dead code is not evidence about anything: a reload in a block that
+  // never executes is not a read of the slot, and an instruction there is not a fact about the
+  // frame this function actually builds. Two frame analyses rest on that, so it is computed once
+  // rather than once each — the second one was written without it and a single unreachable
+  // `mov r0, sp; bl use` appended to a five-argument forwarder was enough to turn a loud decline
+  // into a call with every argument dropped.
+  const entryReachable = ((): Set<number> => {
+    const live = new Set<number>([0]);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let b = 0; b < asmBlocks.length; b++) {
+        if (!live.has(b) && preds[b].some((q) => live.has(q))) {
+          live.add(b);
+          changed = true;
+        }
+      }
+    }
+    return live;
+  })();
+  return { asmBlocks, labelIndex, preds, entryReachable };
+}
+
+// --- CFG (successors per block) as label lists; fallthrough + branch targets (via classifyXfer) ---
+function buildCfg(
+  name: string,
+  blocks: readonly AsmBlock[],
+  tables: ReadonlyMap<AsmBlock, JumpTable>,
+): { labelIndex: Map<string, number>; preds: number[][] } {
+  const labelIndex = new Map<string, number>();
+  blocks.forEach((b, i) => labelIndex.set(b.label, i));
+  const succLabels: string[][] = blocks.map((b, i) => {
+    // A recovered jump-table BOUNDS block dispatches to its case blocks + default (the elided
+    // dispatch block's targets); its `bhi`/fall-through successors are replaced entirely.
+    const jt = tables.get(b);
+    if (jt) {
+      return [...jt.caseLabels, jt.defaultLabel];
+    }
+    const last = b.instrs[b.instrs.length - 1];
+    const fall = i + 1 < blocks.length ? blocks[i + 1].label : null;
+    const kind = last ? classifyXfer(last) : null;
+    if (kind === 'return') {
+      return [];
+    } // bx lr / pop {…,pc} / mov pc,lr
+    if (kind === 'uncond') {
+      return [last!.ops[0]];
+    } // unconditional
+    if (kind === 'cond') {
+      return [last!.ops[0], fall!];
+    } // taken, fallthrough
+    return fall ? [fall] : []; // fallthrough (or non-transfer last op / EMPTY synthetic block)
+  });
+  const preds: number[][] = blocks.map(() => []);
+  // A branch to a label that is not a code block (a data label, or a target outside the sliced
+  // function) cannot be modelled — fail loud, mirroring the MIPS/PPC non-block-boundary guards.
+  succLabels.forEach((ss, i) =>
+    ss.forEach((s) => {
+      const ti = labelIndex.get(s);
+      if (ti === undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': branch target '${s}' is not a code block in this function (a data label, or outside the sliced function)`,
+        );
+      }
+      preds[ti].push(i);
+    }),
+  );
+  return { labelIndex, preds };
+}
+
+// A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the
+// list would go on reading as if it exempted something. Refused as a target bug, like the
+// argRegs/uninitRegs contradiction, rather than declined as a property of the input.
+function assertScratchRegsPartitioned(target: TargetDescription): ReadonlySet<string> {
+  const scratchRegs = new Set(target.scratchRegs ?? []);
+  for (const r of scratchRegs) {
+    if (!(target.nonArgRegs ?? []).includes(r)) {
+      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
+    }
+  }
+  return scratchRegs;
+}
+
+/** What one callee's declaration states about a call (`ThumbCallDeclarations.declaredCall`). */
+interface DeclaredCall {
+  /** each argument's width, in bits, a hidden struct-return pointer first */
+  readonly widths: readonly number[];
+  /** the indices into `widths` that are a `double` */
+  readonly doubles: ReadonlySet<number>;
+  /** the frame offset of each word of the call's outgoing block, or null where it stages none */
+  readonly block: readonly number[] | null;
+  /** the declared parameter count, a hidden pointer aside */
+  readonly params: number;
+  readonly returned?: StructReturn | 'register';
+}
+
+/** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
+ *  name. The outgoing-argument analysis (`measureThumbFrame`) and the `bl` lowering both read a
+ *  callee's declaration here and nowhere else. */
+interface ThumbCallDeclarations {
+  readonly callClobbers: readonly string[];
+  readonly pairReturnClobbers: readonly string[];
+  wideHelper(callee: string): RuntimeHelper | null;
+  isRuntimeHelperName(callee: string): boolean;
+  registerStructReturn(callee: string | undefined): 'register' | undefined;
+  declaredCall(callee: string): DeclaredCall | null;
+}
+
+function thumbCallDeclarations(name: string, target: TargetDescription, prototypes: Prototypes): ThumbCallDeclarations {
+  // What a `bl` leaves holding nothing this function can name — checked against `argRegs` there.
+  const callClobbers = clobberedByCall(target);
+  // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
+  // the low half is the return register (already excluded) and this frontend writes the high one
+  // itself from the callee's own result, right below. The two arms of one rule: where the callee
+  // hands a register back, the frontend names it; where it does not, nobody can.
+  //
+  // `argRegs[1]` IS THE PAIR'S HIGH REGISTER ONLY WHERE THE ABI ALIASES THE FIRST ARGUMENT ONTO
+  // THE RETURN REGISTER, which makes the returned pair occupy the first two argument registers.
+  // True here (r0:r1) and on PowerPC (r3:r4); FALSE on MIPS o32, which returns in v0:v1 and passes
+  // in a0:a1, so reading a high half out of `argRegs[1]` there would name an argument register.
+  // This is an ARM file and the spelling is ISA-local, but it is written through the generic
+  // `target.` surface, so the identity it depends on is stated rather than left to be generalised.
+  const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
+  // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
+  // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
+  // reports zero on a compiler whose runtime spells them `__ll_*`.
+  const helperProtos = helperPrototypes(target.runtimeHelpers);
+  const wideHelper = (callee: string): RuntimeHelper | null => {
+    // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
+    // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
+    // `isWideHelper` to read. The `prototypes` read below needs no such guard because
+    // `declaresParams` is that table's designated safe reader — it answers "nothing is declared"
+    // for an entry that is not an `FnProto`, whatever it is.
+    const h = lookupHelper(target.runtimeHelpers, callee);
+    if (!h || !isWideHelper(h)) {
+      return null;
+    }
+    // A PROJECT RE-DECLARATION DISABLES THE CAPABILITY, it does not redirect it, and the comment
+    // that said the header "wins" oversold both arms. A runtime helper's signature is its
+    // COMPILER's — `proto.ts` holds the signatures the C standard fixes, which this is precisely
+    // not — so a header declaring `__muldi3` is not a better source for the same fact; it is a
+    // claim that the name is the project's own function. Neither reading can be honoured: as the
+    // table's helper it would contradict the header, and as an ordinary call it becomes the
+    // pass-through that MATCHES for free. So no pair is built and `raise/widehelpers.ts` gaps the
+    // call, at whichever arity was declared.
+    if (declaresParams(prototypes[callee])) {
+      return null;
+    }
+    return h;
+  };
+  /** Whether the target's own runtime table claims this name — asked of the TABLE, not of what
+   *  `wideHelper` made of it.
+   *
+   *  A PROJECT'S `returns` NEVER BUILDS A PAIR FOR A RUNTIME HELPER'S NAME, and that is the #244
+   *  decision above holding for both sources rather than for the one it was written against.
+   *  `wideHelper` answers null for a re-declared helper, which stops the ARGUMENT pair; the
+   *  RESULT pair is built from a separate source, and `raise/widehelpers.ts` folds on the result
+   *  alone (`arrivesAsDeclared` needs `results[0]` 64 bits wide). Measured before this line:
+   *  `--proto '{"__muldi3":{"params":["s64","s64"]}}'` throws `no model for the runtime helper
+   *  '__muldi3'`, and adding `"returns":"s64"` printed `return a0 * a1;` — the compiler's own
+   *  multiply re-emitted as the project's arithmetic, at exit 0, for a name the project says is
+   *  its own function.
+   *
+   *  A NON-WIDE ENTRY IS COVERED TOO, and deliberately: a `returns` on `__divsi3` states a width
+   *  about a function whose signature is its compiler's, and `refuseUnmodelledHelpers` is going to
+   *  gap the call whatever this answers. The table is the authority for every name in it. */
+  const isRuntimeHelperName = (callee: string): boolean => lookupHelper(target.runtimeHelpers, callee) !== undefined;
+  // A callee the project declares to return a struct in r0, asked where `declaredCall` has no
+  // arity to answer with: the return is the declaration's, and needs none.
+  const registerStructReturn = (callee: string | undefined): 'register' | undefined => {
+    const own = callee !== undefined && Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
+    return declaresAggregateReturn(own) && structReturnOf(name, target, callee!, own!) === 'register'
+      ? 'register'
+      : undefined;
+  };
+  // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. The outgoing-argument
+  // analysis and the `bl` lowering both come through here, so the arity that LICENSED a block and
+  // the arity that CONSUMES it cannot drift apart; a disagreement between two spellings of this
+  // lookup would read `r4` as argument 5 or throw a slot-model error naming the wrong thing.
+  //
+  // WHERE THE BLOCK IS is `compilerBehaviors.stagesOutgoingArgsInFrame`, not an assumption: the
+  // area sits at the bottom of the frame this function reserved because agbcc's thumb.h defines
+  // ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing here, and every
+  // call keeps the refusal it had before the licence existed.
+  //
+  // THE BLOCK IS WORDS AND SO ARE THE WIDTHS SUMMED HERE, which is why they are what is asked for:
+  // the area holds arguments |argRegs|..n at [sp,#0] upward, one WORD each, and the lowering maps
+  // word k to slot k - |argRegs|. A C PARAMETER COUNT would be the wrong number the moment one
+  // parameter is wider than a word — a `long long` adds a word AND moves every later argument's
+  // home, in the block and in the registers alike — so `proto.ts` converts the declaration into
+  // words once and both readers of it take the same answer.
+  //
+  // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
+  // spell — including `long long`, which is why a pair no longer needs guessing at — and
+  // `undefined` for a project typedef, a by-value struct or a floating type. `declaredCallArgs`
+  // sizes a `double` from the target (`TargetDescription.doubleArgWords`); one other such spelling
+  // and it states no layout at all, because the question here is not how wide that
+  // parameter is but whether it occupies one argument register or two, and the choice moves every
+  // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
+  // the call is lifted at the arg-register guess, exactly as a callee the project never declared
+  // is, and the guess retracts the registers a call destroyed where a stated width would assert
+  // them.
+  //
+  // The COUNT form (`{ params: 5 }`) carries no spellings at all: it is the user's word for how
+  // many argument REGISTERS the call takes, and a count that lies is garbage in —
+  // `validatePrototypes` can no more check it than it can check `returnsVoid`. The machine-derived
+  // side upholds the premise at its source: `prototypesFromSymbols` drops a whole entry rather
+  // than spell a parameter that is not 1, 2 or 4 bytes (test/proto.test.ts).
+  //
+  // `block` is null for the case that licenses nothing: an arity that fits in registers, where
+  // there IS no outgoing block. This runs over every `bl` while the outgoing-argument analysis is
+  // being built, so a refusal thrown here reaches the caller ahead of every other slot-model
+  // refusal, which is right because it is the most specific thing that was seen.
+  const declaredCall = (callee: string): DeclaredCall | null => {
+    // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
+    // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
+    // last two wins — it may be building against its own re-declaration.
+    //
+    // THE TIER QUESTION IS WHETHER THE PROJECT DECLARED THE CALLEE, not whether the declaration
+    // could be sized. A header that spells `memcpy`'s third parameter through a project typedef
+    // has still re-declared `memcpy`, and reading the standard's signature past it would answer
+    // for a different function — which is the one reading this tier order exists to prevent.
+    //
+    // `Object.hasOwn` on all three tables: a callee named `toString` or `valueOf` would otherwise
+    // read a `Function` off `Object.prototype` as its prototype entry.
+    const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+    const own = known(prototypes);
+    const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!) : undefined;
+    const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
+    const declared = declaredCallArgs(proto, target);
+    const params = declared?.widths;
+    if (params === undefined && returned !== undefined && returned !== 'register') {
+      // a guessed arity reads argument registers from r0, which holds the hidden pointer
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': \`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden ` +
+          'pointer in r0, and its parameters are not all sized, so which registers carry its arguments is not known',
+      );
+    }
+    if (params === undefined) {
+      return null;
+    }
+    // THE STRUCT'S LOCAL NEEDS THE CALLEE PRINTED. A self-declared candidate defines the struct only
+    // beside the callee's printed prototype (`declare.ts`), so a declaration the printer cannot spell
+    // (`double *`, `size_t`, or a bare parameter count, which states no type) lifts to a candidate
+    // that does not compile. Asked of the printer's own predicate, so the two cannot disagree; a
+    // headers world, which would declare the callee itself, loses the lift with it.
+    if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
+      const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in r0`;
+      if (typeof own!.params === 'number') {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${via}, and its declaration states only a count of parameters, no type the lifted source can declare it with`,
+        );
+      }
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${via}, and a parameter type of its declaration has no spelling the lifted source can declare it with`,
+      );
+    }
+    const hidden = returned === undefined || returned === 'register' ? 0 : 1;
+    const widths = hidden === 0 ? params : [32, ...params];
+    const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
+    // A 64-BIT PARAMETER TAKES THE NEXT TWO ARGUMENT WORDS WHEREVER THEY FALL, with no even
+    // alignment: two registers, r3 and [sp,#0], or two words of the outgoing block. That is agbcc's
+    // placement for a `long long` and a `double` alike — FUNCTION_ARG places by word offset
+    // (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack (:636),
+    // FUNCTION_ARG_ADVANCE rounds to a word (:647); `test/corpus/agbcc-double-args.s` compiles all
+    // three. The walk below reads each word where it falls, so the block counts both of a pair's
+    // stack words.
+    const words = wordsOf(widths) - target.argRegs.length;
+    // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
+    // not claim to stage arguments inside the caller's own frame at all.
+    const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
+    return {
+      widths,
+      doubles,
+      block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
+      params: params.length,
+      ...(returned === undefined ? {} : { returned }),
+    };
+  };
+  return { callClobbers, pairReturnClobbers, wideHelper, isRuntimeHelperName, registerStructReturn, declaredCall };
+}
+
+// A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
+// memory: the caller hands it the storage in r0 and every declared argument one register up
+// (agbcc thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in r0
+// is not a value the caller reads (calls.c: the struct is the memory at the address). One the
+// target returns in r0 takes its arguments where they are declared, and its r0 is the struct's
+// bytes, which nothing here reads as a struct: the call is `'register'` and a read of r0 after it
+// refuses. Every other struct-returning call refuses, naming why.
+function structReturnOf(
+  name: string,
+  target: TargetDescription,
+  callee: string,
+  own: FnProto,
+): StructReturn | 'register' {
+  const refuse = (why: string): never => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': \`${callee}\` is declared to return ${own.returns ?? 'a struct or union'} by value, and ${why}`,
+    );
+  };
+  const layout = returnedAggregate(own);
+  const inMemory = returnsInMemory(layout, target);
+  if (inMemory === undefined) {
+    refuse(
+      'nothing here says whether it comes back through a hidden pointer — its members are not all known, this target does not ' +
+        'say how it lays one of them out (an enum, a bitfield), or it states no rule ' +
+        '(a prototype states them as `returnLayout`, a context by defining the struct)',
+    );
+  }
+  if (inMemory === false) {
+    return 'register';
+  }
+  // the local it lands in is declared as the header spells the type, qualifiers aside; the tag
+  // is what the declarations block defines it by, and a typedef name is that tag too
+  const spelling = (own.returns ?? '')
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  const tag = /^(?:(?:struct|union)\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
+  if (tag === undefined) {
+    refuse('it names no type a local of it could be declared with');
+  }
+  const type = aggregateType(tag!, spelling, layout, target);
+  if (type === undefined) {
+    refuse(
+      'it is a union, or its members are not all known or this target does not say how it lays one of them out ' +
+        '(an enum, a bitfield) — the local it lands in has no type here',
+    );
+  }
+  return { type: type! };
+}
+
+/** Every fact about the frame the lift reads before it fills a block, measured off the text. */
+interface ThumbFrame {
+  readonly localArea: number;
+  readonly savedRegs: ReadonlySet<string>;
+  readonly capturedObjectIsTheWholeFrame: boolean;
+  /** the frame offset each instruction leaves a register holding, where `heldFrameWalk` follows it */
+  readonly captureOffsetOf: ReadonlyMap<Instr, number>;
+  readonly outgoingArgs: OutgoingArgs<Instr>;
+  /** why the word-slot model is off, or null when it is on (`slotModelBlocker`) */
+  readonly slotsOffReason: string | null;
+  readonly slotsOk: boolean;
+  readonly partition: Readonly<Pick<FrameObjectAudit, 'ownedLocals' | 'declaredLocals'>>;
+  isFrameObjectAccess(base: string, off: number, regOff: string | undefined, width: number): boolean;
+  isOwnFrameWordSlot(base: string, off: number, regOff: string | undefined, width: number): boolean;
+}
+
+function measureThumbFrame({
+  target,
+  cfg: { asmBlocks, preds, entryReachable },
+  calls,
+  oneObject,
+}: {
+  target: TargetDescription;
+  cfg: ThumbCfg;
+  calls: ThumbCallDeclarations;
+  oneObject: FrameRange | undefined;
+}): ThumbFrame {
+  // THE FRAME BASE PASSED TO A CALLEE. What this computes is exactly what its name says and nothing
+  // more: somewhere in entry-reachable code a bare `mov rD, sp` copies the frame base into a
+  // register that is still an ARGUMENT register at a `bl`. It is a fact about a REGISTER, not about
+  // the frame's layout — an earlier cut of this treated it as proof that "[sp,#0] is an addressable
+  // local", and agbcc falsified that outright. The layout question is settled by the gate this
+  // feeds (`capturedObjectIsTheWholeFrame`, below `localArea`), not here.
+  //
+  // ARGUMENT registers only: the frame base merely live across a call is not evidence that it was
+  // passed to one, and for `blx rN` the TARGET register is not an argument either.
+  const frameBasePassedToCallee = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
+    if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
+      return false;
+    }
+    // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3` branches
+    // THROUGH the frame base, it does not pass it.
+    const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : null;
+    return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
+  });
+
+  // THE FRAME BASE PUBLISHED TO MEMORY — the other way an agbcc frame address escapes, and the
+  // one the corpus's GBA code is full of. `*(vu32 *)REG_DMA3SAD = (u32)&tmp` hands the address to
+  // a DEVICE, which then reads the object; no `bl` is involved and the function may contain none
+  // at all. `sa3:sa2__sub_80078D4` is exactly that shape and nothing else.
+  //
+  // THE AUDIT ALREADY KNOWS THIS ESCAPE. `published` is a first-class set there, distinct from
+  // `passedToCallee`, with its own `volatile` stamp and its own `readsThrough` exemption for a
+  // device source. What was narrower than the audit was the PRE-LIFT licence that decides whether
+  // [sp,#0] is an object at all — so a published frame base had its object re-modelled as an SSA
+  // slot, and the audit then correctly refused the collision it had just been handed.
+  //
+  // THE SOUNDNESS ARGUMENT IS A PRODUCER TABLE, like its sibling's, and it is a different table
+  // because the escape is different. `capturedObjectIsTheWholeFrame`'s worry is that [sp,#0] is
+  // really an outgoing argument slot, a by-value struct argument's block-copy base or a struct
+  // return's hidden pointer. Every producer in its table is `bl`-shaped. Compiled, agbcc
+  // 2.9-arm-000512, `-Wimplicit -Wparentheses -fhex-asm -mthumb-interwork -O2`:
+  //
+  //   the publish itself, `vu32 x = v; *(vu32*)0x040000D4 = (u32)&x;`
+  //     → `add sp,#-4 / str r0,[sp] / ldr r0,.L3 / mov r1,sp / str r1,[r0]` — frame 4, PUBLISHED
+  //   by-value struct argument past r0-r3, `take1(1,2,3,4,*p)`
+  //     → 1 word: `ldr r0,[r0] / str r0,[sp]` — NO capture at all, nothing to publish
+  //     → 2 words: two `str`s to [sp] and [sp,#4] — frame 8, still no capture
+  //     → 13 words: `mov r1,sp / ldmia/stmia` — frame 0x24, the capture is a copy BASE and is
+  //       never stored to memory
+  //   struct return through a hidden pointer, `struct R4 r = mk4(x);` (non-integer-like, 1 word)
+  //     → `mov r0,sp / bl mk4` — frame 4, the capture goes to a CALLEE, never to a store
+  //
+  // So at a one-word frame no agbcc shape publishes a block-copy base or a hidden return pointer
+  // to memory: a block copy needs two frame words before the base is named with a register at
+  // all, and a hidden return pointer is argument 0 of a `bl`, which is not a store.
+  //
+  // AND THE OUTGOING-ARGUMENT CONFUSION IS EXCLUDED BY THAT TABLE AND BY NOTHING ELSE HERE, which
+  // is worth saying plainly because it is the one place this escape is weaker than its sibling. A
+  // frame that BOTH stages a fifth argument and publishes a local's address is not a one-word
+  // frame — agbcc reserves eight bytes and puts the local ABOVE the argument, where its address is
+  // spelled `add rD, sp, #4` and not `mov rD, sp`: `void h(s32 x, u32 v){ vu32 t = v;
+  // *(vu32*)0x040000D4 = (u32)&t; five(1,2,3,4,x); }` compiles to `add sp,#-8 / str r1,[sp,#4] /
+  // ldr r1,.L3 / add r2,sp,#4 / str r2,[r1] / str r0,[sp] / … / bl five` (measured, both call
+  // orders, and under a block scope and a conditional scope too).
+  //
+  // What it does NOT get is the sibling's structural coincidence. The callee escape needs the base
+  // live in an argument register AT a `bl`, so the call that would stage a fifth argument is the
+  // same call whose argument register holds the frame base — the two facts contradict at one
+  // instruction. A publish is decoupled from every call in the function, so hand-written asm with
+  // `localArea === 4`, a bare `mov rD, sp` published to a pool address, and four argument
+  // registers set before a `bl` satisfies this and drops the outgoing argument at [sp,#0]. It is
+  // a stated residual cost and not a refuted one: no agbcc source shape produces that frame (the
+  // table above is what rules it out), the playground lifts it and no oracle referees it.
+  //
+  // WHICH IS ALSO WHY `localArea === 4` IS NOT WIDENED FOR THIS ESCAPE EITHER, and the reason is
+  // sharper here than for the callee one: `struct B { s32 a[17]; } b = gK; *(vu32*)0x040000D4 =
+  // (u32)&b;` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy / ldr r0,.L9+4 /
+  // mov r1,sp / str r1,[r0]` — a block-copy base that IS published to memory (measured). At a
+  // wider frame the publish escape admits exactly the shape the callee escape's table warns
+  // about; at one word it cannot occur.
+  //
+  // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
+  // question is the same one and only the consuming event differs. Here that event is a WORD store
+  // whose SOURCE operand is a held capture — a `strh` hands over half an address, so the device's
+  // source is not this object — through a base that is neither sp nor another held capture: a
+  // frame address written back INTO its own frame is a different question and keeps its refusal.
+  // Both of those exclusions are conditions of the licence, so the post-lift audit re-proves them
+  // rather than the weaker "reached memory somehow" (`publishedOutward`, in `auditFrameObjects`).
+  //
+  // EACH OF THE THREE CLAUSES HAS ITS OWN ROW, including the one a reader skips: a word store
+  // through a pool address, in a function that holds a capture, whose stored VALUE is an ordinary
+  // argument publishes nothing, and dropping that clause leaves the whole battery green while the
+  // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
+  // clause without a row is decoration until an input says otherwise.
+  //
+  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, and the one place they part is worth
+  // knowing: this walk is BLOCK-LOCAL while `taint` is whole-function, so a base captured in an
+  // earlier block is excluded there and not here. The containment still holds — whole-function
+  // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
+  // and more — and the difference therefore lands on the refusing side. Pinned as a row.
+  const frameBasePublishedToMemory = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
+    if (ins.mnemonic !== 'str' || held.get(reg(ins.ops[0] ?? '')) !== 0) {
+      return false;
+    }
+    const { base } = parseAddr(ins.ops[1] ?? '');
+    return !isSpReg(base) && !held.has(reg(base));
+  });
+
+  const localArea = reservedLocalArea(asmBlocks[0]);
+  const savedRegs = prologueSavedRegs(asmBlocks[0]);
+
+  // …AND THE FRAME IS THAT OBJECT. The two escape scans above are facts about a REGISTER — that a
+  // bare `mov rD, sp` is still held when a callee is entered, or when it is stored to memory.
+  // This is the LAYOUT fact, and it is the one that licenses turning the outgoing-argument
+  // refusals off. Either escape will do: the address leaving this function is what makes [sp,#0]
+  // an object other code can reach, and whether it left through r0 at a `bl` or through a device
+  // register changes nothing about the layout. What each escape DOES change is which producers
+  // could have emitted the same instructions, so each carries its own compiled table — the
+  // publish one sits at `frameBasePublishedToMemory`, and this is the callee one.
+  //
+  // The reason it is needed at all: a bare `mov rD, sp` names frame offset 0, but agbcc emits one
+  // for TWO different things, and only one of them is an addressable local. The other is a
+  // BLOCK-COPY BASE — the destination of a by-value struct argument (which IS the outgoing argument
+  // area) and the hidden return pointer of a struct-returning call. Both compiled, agbcc
+  // 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm -fprologue-bugfix`:
+  //
+  //   by-value struct argument, `void f(struct S *p){ take(*p); }`, by stack words beyond r0-r3:
+  //     1 word  → `ldr r0,[r3,#0x10]; str r0,[sp]`  — no capture at all, frame 4
+  //     2 words → `mov r1, sp; ldmia r0!,{…}; stmia r1!,{…}` — frame 8
+  //     13+     → `mov r0, sp; mov r2,#0x44; bl memcpy` — frame 0x44 and up
+  //   struct return, `void f(int x){ struct R r = mk(x); use2(r.a[0]); }`:
+  //     1 word, INTEGER-LIKE (`{int a;}`, `{int a[1];}`, `{float f;}`) → r0, no frame temp
+  //     1 word, otherwise (`{char a,b,c,d;}`, `{short a,b;}`) → `mov r0, sp; bl mk` — frame 4
+  //     2 words → `mov r0, sp; bl mk` — frame 8
+  //
+  // Left unguarded that cost an argument: `void g3(struct Huge *p, int x){ takesH(*p);
+  // five(1,2,3,4,x); }` puts `str r5,[sp]` — argument 5 of `five` — in a frame whose offset 0 the
+  // memcpy also names, and the lift emitted `five(1, 2, 3, 4)` with the fifth argument written into
+  // a fabricated 4-byte local, in a frame declared 4 bytes where the machine reserves 0x90. Order
+  // is not the discriminator either: with the five-argument call FIRST the same thing happens.
+  //
+  // So the gate is the MODEL'S OWN EXTENT. This frontend models the captured object as the single
+  // word at [sp,#0] (`isFrameObjectAccess` below), and a one-word model is a description of the
+  // frame only when the frame IS that word. `localArea === 4` says exactly that. It excludes every
+  // block-copy base — each needs two frame words before agbcc names its base with a register at
+  // all — and the two-word struct returns with them. Any larger frame has bytes this model does not
+  // describe, and they are either the rest of a wider object the callee writes or another call's
+  // argument slots; neither is provable here, so the answer stays the decline.
+  //
+  // What the frame size does NOT exclude is the one-word struct return in the table above, which is
+  // instruction-for-instruction an out-parameter call. That one is settled after the lift, by the
+  // premise re-check in the frame-object audit — which is also where the licence's other half is
+  // re-proven.
+  //
+  // WHAT THIS GATE IS NOT. It switches the outgoing-argument refusals off, and nothing else. The
+  // object model runs on ANY frame — the `laddrs` path in the audit below — so a `u8 buf[12]`
+  // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
+  // its extent is the audit's frame-accounting rule rather than anything here.
+  //
+  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next change. Three shapes,
+  // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+  // -fprologue-bugfix`, and only the first is about extent at all:
+  //
+  // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
+  // owns [sp,#4] compile to one instruction stream, byte for byte, with eight values live across
+  // the calls so one of them spills:
+  //
+  //   s32 loc; s32 t0..t7;                   loc = x;  t0 = h(0); … g(&loc); k(loc + t0 + …);
+  //   struct P { s32 a, b; } p; s32 t1..t7;  p.a = x;  p.b = h(0); … g(&p);   k(p.a + p.b + …);
+  //
+  // The first says a callee may not touch [sp,#4]; the second says it may, and the reload after the
+  // call must read what it wrote. Nothing distinguishes them, so a licence over THAT slot would be
+  // a guess — which is why the slot rule in the audit refuses the shape rather than deciding it.
+  //
+  // PINNED, and refused by the MODEL — sub-word members. Thumb has no sp-relative `strb`, so a
+  // byte or halfword member is reached through a copy of sp, and the access at +4 witnesses that
+  // the object reaches past its first word: `struct Q { u8 a; u8 pad[3]; u8 b; }` filled and then
+  // handed over compiles to `mov r1, sp / strb r0, [r1] / strb r0, [r1, #0x4] / mov r0, sp / bl g`.
+  // The escape is a use that is not an access, so the capture cannot be split per offset, and the
+  // audit judges the [+4] access against the one object it does model — "only a scalar at the
+  // captured address is modelled", and the SAME message when this conjunct is widened to
+  // `localArea >= 4` (measured).
+  //
+  // PINNED, and ambiguous in its ROLE — a frame-covering block copy. `struct Big { s32 a[17]; };
+  // b = gK; g(&b);` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy`: the copy
+  // bounds the object from below and the reservation from above, so the extent is exact. What is
+  // NOT pinned is what the object IS — the producer table above records those same instructions
+  // for a by-value struct ARGUMENT block and for a struct-return temp. Widening this conjunct
+  // moves it exactly there: it then declines at "which is how a hidden struct-return pointer
+  // looks" (measured), never at anything about extent.
+  //
+  // So a wider frame licence admits nothing this model can describe. `extent` is one scalar width
+  // from one access, and the second access that would build a wider object is a `[+k]` the audit
+  // refuses first: widened, the sub-word shape declines on the very same message and the
+  // block-copy one moves onto the struct-return refusal (both measured).
+  //
+  // RESIDUE: the producer table is agbcc's, so hand-written asm that reserves one word, stages it
+  // as a call's fifth argument and ALSO puts sp in an argument register defeats this — the same
+  // producer assumption the contiguity filter below makes. The producer is named in the gate
+  // rather than left to the prose, and it is named as DATA — `compilerBehaviors
+  // .oneWordFrameIsTheCapturedObject`, declared in `target.ts` beside the layout facts it belongs
+  // with, because a compiler fact is one field and not a `compiler ==` branch
+  // (`docs/level-tower.md`). `armv4t` has one compiler entry today, and a second one free to
+  // overlay a dead one-word local with a one-word outgoing area has to state this itself rather
+  // than inherit an acceptance whose only evidence is an agbcc compile table.
+  //
+  // WHICH CONJUNCT REFUSES WHAT, for a reader arriving with a wide frame in hand. klonoa's
+  // `LoadBGTilemapData` (a checkout function, not a benchmark row) reserves 0x3C and fails on the
+  // SIZE alone: its `mov r5, sp` is the DMA-fill PUBLISH (`strh r7, [r5]` / `mov r0, sp` /
+  // `str r0, [r2]`, r2 = 0x040000D4), which satisfies the escape conjunct, and it arrives with
+  // localArea=60. It does not need this gate: it lifts through the `laddrs` path with the object
+  // modelled as `volatile u16 sp0`, and its lift is byte-identical with this conjunct widened to
+  // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
+  // makes it the wrong function to reason about a wider licence from.
+  const capturedObjectIsTheWholeFrame =
+    target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
+    (frameBasePassedToCallee || frameBasePublishedToMemory) &&
+    localArea === 4;
+
+  // THE FRAME ADDRESS EACH INSTRUCTION DEFINES, off `heldFrameWalk` — and the lift's mov and add
+  // arms fold a capture at an offset only where this says so, so the offsets the slot model and
+  // the outgoing-argument analysis set aside below are, by construction, the ones the lift names.
+  // What the walk cannot follow (a move in another block than the capture) the lift does not
+  // fold either; the audit folds it from the IR, and refuses it by that name where the object
+  // lands on a word this left keyed as a slot.
+  const captureOffsetOf = new Map<Instr, number>();
+  heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
+    const defined = frameAddressDefined(ins, held);
+    if (defined !== null) {
+      captureOffsetOf.set(ins, defined[1]);
+    }
+    return false;
+  });
+  // …and the offsets themselves, nonzero only — the frame base has its own licence,
+  // `capturedObjectIsTheWholeFrame`. A word whose address is taken is not an outgoing argument —
+  // C gives an argument no address — so the outgoing-argument analysis below does not see these
+  // offsets either: a store there reaching a call unread is the object being filled for the
+  // callee that is handed it.
+  const constantCaptureOffsets: ReadonlySet<number> = new Set([...captureOffsetOf.values()].filter((o) => o > 0));
+
+  // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
+  // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
+  // slots, which instructions are calls, and what each callee's DECLARATION asks for. `blx rN`
+  // names a REGISTER in the operand slot, so it matches no prototype and its block is null, which
+  // is correct: nothing here knows what an indirect call takes.
+  //
+  // A WHOLE WORD OF THE RESERVED LOCAL AREA is the same bytes `isOwnFrameWordSlot` models, minus
+  // `slotsOk` — which is the answer this analysis is being asked to help compute.
+  const slotAcc = (ins: Instr): number | null => {
+    const a = spMemAccess(ins);
+    return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea ? a.off : null;
+  };
+  const outgoingArgs = analyzeOutgoingArgs<Instr>({
+    blocks: asmBlocks.map((ab) => ({
+      events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
+        const off = slotAcc(ins);
+        if (off !== null && !constantCaptureOffsets.has(off)) {
+          return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
+        }
+        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+          const callee = ins.ops[0] ?? '?';
+          const declared = calls.declaredCall(callee);
+          return [{ kind: 'call', call: ins, callee, declared: declared?.block ?? null, params: declared?.params }];
+        }
+        return [];
+      }),
+    })),
+    preds,
+    live: entryReachable,
+    localArea,
+    argRegs: target.argRegs.length,
+    capturedWholeFrame: capturedObjectIsTheWholeFrame,
+    localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
+  });
+
+  const slotsOffReason = slotModelBlocker(asmBlocks, localArea, outgoingArgs);
+  const slotsOk = slotsOffReason === null;
+
+  // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
+  // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
+  // to THAT OBJECT — provisionally, since the audit is what proves the object is a local at all. Keying it as an SSA slot instead moves the value into a
+  // register and deletes the store from memory — and the callee reading it through the pointer is
+  // invisible to every check the slot model makes, so the deletion would be silent.
+  //
+  // The frame-object audit does catch the collision today ("one byte, two models"), as a DECLINE.
+  // Routing the access through an `laddr` here is what turns that decline into the lift, and it
+  // hands the audit the same object it would have judged anyway — offset, width and escape all
+  // come from the machine.
+  //
+  // Word accesses only, and only while the slot model is on: a sub-word or register-offset
+  // `[sp,#k]` anywhere turns the whole model off (slotModelBlocker), and the `mov rD, sp` arm then
+  // declines the capture rather than reaching this.
+  //
+  // THE SAME HOLDS AT EVERY OFFSET A CONSTANT CAPTURE NAMES. `vu32 t = -1; CpuSet(&t, …)` above an
+  // outgoing block is `str r4, [sp, #0x4] / add r0, sp, #0x4 / bl CpuSet`: the store is to the
+  // object whose address the call is handed. Those offsets are read off the text before the lift
+  // (`constantCaptureOffsets`), from the same walk the lift folds captures by. Above the outgoing
+  // block only — a word staged there is an argument the call reads as a slot — and inside the
+  // reserved area, where a slot could have been.
+  //
+  // …AND EVERY WORD OF THE BYTES A FIRST AUDIT ASKED TO KEEP AS ONE OBJECT (`oneObject`), where a
+  // device may read the frame without bound: a word there is memory the device reads, not a slot.
+  const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
+    slotsOk &&
+    isSpReg(base) &&
+    regOff === undefined &&
+    width === 4 &&
+    ((capturedObjectIsTheWholeFrame && off === 0) ||
+      (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
+      (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
+
+  // LOCAL STACK SLOTS. A spill or a local that never has its address taken is transparent to
+  // dataflow: `str rX,[sp,#k]` … `ldr rY,[sp,#k]` moves a value, it does not touch memory anyone
+  // else can see. Modelling it as an SSA variable keyed by the offset (the same `sp@<off>` spelling
+  // the MIPS frontend uses) makes it exactly that, and Braun's phi construction handles a slot that
+  // is read-modify-written across a loop with no extra machinery.
+  //
+  // What Thumb does NOT inherit from MIPS: keying by the RAW sp offset is only sound while sp holds
+  // the same value at every access, and MIPS gets that for free (IDO establishes sp with one
+  // `addiu` and never moves it). Thumb's `push` moves sp, so constancy has to be PROVEN here.
+  //
+  // A WHOLE WORD OF THIS FUNCTION'S OWN RESERVED LOCAL AREA — the shape the ldr and str arms model
+  // as an SSA slot (`sp@<off>`) instead of memory. The two arms spelled these seven terms out
+  // twice — the ldr arm with the reaching-def test as an eighth — which is one edit away from
+  // disagreeing about which bytes are private.
+  //
+  // Each term is a refusal:
+  //   * `slotsOk`      — the frame must be proven private and immovable (slotModelBlocker)
+  //   * sp base, no register index — `[sp, rX]` names no fixed slot
+  //   * word width, word-aligned, non-negative — the model keys whole aligned words and nothing else
+  //   * `off + 4 <= localArea` — strictly inside the EXPLICITLY reserved area. Not merely inside the
+  //     frame: above it sits the callee-saved block the epilogue pops, and above THAT the incoming
+  //     argument area, so a slot straying up there would either fight the `pop` or claim the
+  //     caller's word.
+  //
+  // What is NOT here, deliberately: the load side's reaching-def test. That one is impure (it asks
+  // the SSA builder) and one-sided — a store needs no reaching def — so it stays at the ldr arm.
+  const isOwnFrameWordSlot = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
+    slotsOk &&
+    isSpReg(base) &&
+    regOff === undefined &&
+    width === 4 &&
+    off % 4 === 0 &&
+    off >= 0 &&
+    off + 4 <= localArea;
+
+  // THE LIVE-IN PARTITION (frontend/ssa.ts, LiveInModel). `[0, localArea)` is the whole of what this
+  // function owns: an incoming stack argument is keyed `@sarg<k>` rather than `sp@<off>` precisely
+  // because it sits at or above this frame, so `callerParams` is empty. `localArea` is 0 whenever
+  // the prologue walk cannot measure the frame, and the empty range then refuses every slot —
+  // `slotOff` applies the same bound when minting keys, so this is the independent check. It is
+  // stated once, as ranges, for the two consumers that read it: the SSA builder and the frame-object
+  // audit (`auditFrameObjects`), which is ISA-neutral because of it.
+  const partition = {
+    ownedLocals: { from: 0, to: localArea },
+    // NOT THE SAME RANGE, AND NOT THE SAME CLAIM. `ownedLocals` answers "is a def-less read here
+    // an uninitialised local?" — and the outgoing stack-argument area IS owned, so it starts at 0.
+    // `declaredLocals` answers "is a spill here a DECLARATION RANK?", which `ir/core.ts`
+    // `SlotHomes` and `l3/slotorder.ts` consume, and an argument slot's offset is an ABI POSITION,
+    // not an `expand_decl` rank. Under agbcc's ACCUMULATE_OUTGOING_ARGS that area sits at the
+    // BOTTOM of `localArea`, so the declared range starts where the largest licensed block ends
+    // (`frontend/stackargs.ts`). A refusal there licenses nothing and reports `area` 0, so the two
+    // ranges coincide exactly when no argument word was proved, and the narrowing can only ever
+    // skip offsets a callee's declaration and this function's own stores agreed on.
+    declaredLocals: { from: outgoingArgs.area, to: localArea },
+  };
+  return {
+    localArea,
+    savedRegs,
+    capturedObjectIsTheWholeFrame,
+    captureOffsetOf,
+    outgoingArgs,
+    slotsOffReason,
+    slotsOk,
+    partition,
+    isFrameObjectAccess,
+    isOwnFrameWordSlot,
+  };
+}
+
+// WHICH FRAME ADDRESS DOES EACH REGISTER HOLD WHEN `consumes` FIRES? Every question this file
+// asks of a captured frame address before the lift is this one — the two frame-base escapes, and
+// which offsets a constant capture names — so they get ONE walk, the same rule `definiteRegList`
+// and `regListOf` are written down for, and for the same reason: two
+// hand-rolled copies of a safety walk drift to unequal strength, and the one a future editor
+// does not fix is an ACCEPTANCE that over-approximates. `held` maps a register to the frame
+// offset its value is sp plus; `consumes` is called on every instruction, before the call clear.
+//
+// ENTRY-REACHABLE, BLOCK-LOCAL AND KILLED WHERE `ends` SAYS, because this feeds ACCEPTANCES and
+// so may never over-approximate. Unreachable blocks are skipped for the same reason (a)'s reload
+// scan skips them — an instruction that never executes is not a fact about the frame, and one
+// appended `mov r0, sp; bl use` after the return would license a whole function. A block is
+// straight-line, so a capture that is still held when the consuming instruction is decoded is
+// held on every execution that reaches it; and a register is dropped at any instruction `ends`
+// says ends it, which over-kills wherever it cannot name the written register and over-killing
+// only costs a decline.
+//
+// TWO KILL RULES, because the walk answers two questions. WHICH OFFSET A REGISTER HOLDS changes
+// only at a write (`mayWriteReg`): agbcc addresses through a capture and then moves it (`mov r2,
+// sp / adds r2, #5 / strb r0, [r2] / … / adds r2, #2`), so the `strb` must not end the walk
+// before the second move. WHETHER THE FRAME BASE WAS HANDED OVER is the escape licences'
+// question, and there the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy
+// addressed through and still live at a call is an addressing copy, not an argument —
+// `EReader_Reset` is `mov r1, sp / strh r0, [r1] / … / bl` into callees that take nothing.
+//
+// A `bl` CLEARS EVERY HELD REGISTER, and for the callee escape that is the ABI — the argument
+// registers are the only ones it tests and the callee clobbers them. The publish escape can hold
+// r4-r7, which AAPCS says the callee PRESERVES, so there the clear is not an ISA fact but a
+// deliberate blunt over-kill in the direction that costs a decline; a test pins the decline so
+// the over-approximation is a decision on the record rather than a regression found later.
+function heldFrameWalk(
+  asmBlocks: readonly AsmBlock[],
+  entryReachable: ReadonlySet<number>,
+  ends: (ins: Instr, r: string) => boolean,
+  consumes: (ins: Instr, held: ReadonlyMap<string, number>) => boolean,
+): boolean {
+  for (const b of entryReachable) {
+    const ab = asmBlocks[b];
+    const held = new Map<string, number>();
+    for (const ins of ab.instrs) {
+      if (consumes(ins, held)) {
+        return true;
+      }
+      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+        held.clear();
+        continue;
+      }
+      const carried = frameAddressDefined(ins, held);
+      for (const r of [...held.keys()]) {
+        if (ends(ins, r)) {
+          held.delete(r);
+        }
+      }
+      if (carried !== null) {
+        held.set(carried[0], carried[1]);
+      }
+    }
+  }
+  return false;
+}
+// The register an instruction leaves holding a frame address, and that address's offset, or
+// null. The shapes that carry one: the capture itself (`mov rD, sp`, `add rD, sp, #k`), a copy
+// of a held register (`mov rD, rS`, and agbcc's `add rD, rS, #0`), and a held register moved by
+// a constant (`add rD, rS, #c`, `add rD, #c`). Everything else only kills.
+function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null {
+  const [d, s1, s2] = ins.ops;
+  if (d === undefined || isSpReg(d)) {
+    return null;
+  }
+  if (capturesSp(ins)) {
+    return [reg(d), 0];
+  }
+  if (/^movs?$/.test(ins.mnemonic) && s2 === undefined && s1 !== undefined && held.has(reg(s1))) {
+    return [reg(d), held.get(reg(s1))!];
+  }
+  if (/^adds?$/.test(ins.mnemonic)) {
+    const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
+    if (src === undefined || by === undefined || !IMM_LITERAL.test(by)) {
+      return null;
+    }
+    const from = isSpReg(src) ? 0 : held.get(reg(src));
+    return from === undefined ? null : [reg(d), from + imm(by)];
+  }
+  return null;
+}
+
+// Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
+// access on the old path, which declines — so the answer to "not sure" is the loud one.
+// Returns null when the word-slot model is SAFE for this function, else the reason it is off —
+// which the sp declines append, so a refused function names the capability actually missing
+// instead of the generic "local stack frames". The gap histogram is the improvement loop's
+// work-list; a misattributed refusal sends that loop to build the wrong thing.
+function slotModelBlocker(
+  asmBlocks: readonly AsmBlock[],
+  localArea: number,
+  outgoing: OutgoingArgs<Instr>,
+): string | null {
+  for (const ab of asmBlocks) {
+    for (const ins of ab.instrs) {
+      const acc = spMemAccess(ins);
+      // A SUB-WORD access aliasing a word slot is the hazard MIPS paid for the hard way: routing
+      // the word store to an SSA slot while the byte reload stays on the memory path drops the
+      // store and reads uninitialised memory. One anywhere disables the model for the whole
+      // function. A register offset can alias any slot, so it disqualifies the same way.
+      if (acc && (acc.width !== 4 || acc.regOff)) {
+        return acc.regOff
+          ? 'a register-offset sp access can alias any slot'
+          : 'a sub-word sp access aliases the word-slot model';
+      }
+      // sp escaping into a register is NOT a blocker. A plain COPY (`mov rD, sp`), a CONSTANT
+      // offset from it (`add rD, sp, #k`) and a RUNTIME one (`add rD, sp, rX`, `add rD, sp`) are
+      // the address-taken-local capability — the mov and add arms emit a `laddr`, plus the
+      // index for the runtime form, and the post-lift frame-object audit proves every use. The
+      // model's remaining precondition is a reserved local area for the object to live in: a
+      // frameless function taking sp's address has nothing to model and refuses in those arms.
+    }
+  }
+  // sp must be CONSTANT wherever a slot is keyed, because the key IS the raw offset. Two shapes
+  // are legitimate and everything else refuses: a PROLOGUE (sp moves before the block touches the
+  // frame) and an EPILOGUE (sp moves after it has finished touching it, and the block returns, so
+  // nothing downstream can key a slot against the changed sp). A modification BETWEEN two
+  // accesses moves the frame under a slot already keyed, and only the entry block may deepen —
+  // elsewhere a pre-access modification would put the block at a different depth from the one the
+  // prologue established.
+  for (let bi = 0; bi < asmBlocks.length; bi++) {
+    const ins = asmBlocks[bi].instrs;
+    const mems = ins.map((x, i) => (touchesFrame(x) ? i : -1)).filter((i) => i >= 0);
+    const mods = ins.map((x, i) => (modifiesSp(x) ? i : -1)).filter((i) => i >= 0);
+    if (mods.length === 0) {
+      continue;
+    }
+    const last = ins[ins.length - 1];
+    const returns = last !== undefined && classifyXfer(last) === 'return';
+    if (mems.length === 0) {
+      // moves sp and never keys a slot itself: safe only if nothing downstream can key one
+      if (!returns && bi !== 0) {
+        return 'sp moves in a block that neither returns nor is the entry';
+      }
+      continue;
+    }
+    for (const m of mods) {
+      if (m < mems[0]) {
+        if (bi !== 0) {
+          return 'a non-entry block establishes its own frame depth'; // not the prologue's
+        }
+      } else if (m > mems[mems.length - 1]) {
+        if (!returns) {
+          return 'sp unwinds mid-function and execution continues';
+        }
+      } else {
+        return 'the frame moves between two accesses that keyed slots against it';
+      }
+    }
+  }
+  // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
+  // decides per call whether the words staged at the bottom of the frame are a callee's
+  // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
+  // function still declines loud.
+  if (outgoing.blocker !== null) {
+    return outgoing.blocker;
+  }
+  // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
+  // taken while the local area is still reserved reads a slot this model has retargeted into SSA
+  // — the load simply disagrees with the store. A real epilogue releases the locals first
+  // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
+  for (const ab of asmBlocks) {
+    let released = 0;
+    for (const ins of ab.instrs) {
+      if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
+        const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
+        if (isSpReg(base)) {
+          return 'a pop reads the frame while the local area is still reserved';
+        }
+      }
+      if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
+        const d = spAdjust(ins);
+        if (d !== null && d > 0) {
+          released += d;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// THE EXPLICITLY RESERVED LOCAL AREA — the prologue's `add sp,sp,#-N`, and the frame the body
+// sees. "Prologue" is everything before the entry block first touches the frame (or the whole
+// block if it never does). A frame this cannot measure yields 0, which disables every slot
+// (`off + 4 <= localArea` is then false).
+//
+// A slot must live strictly inside this, not merely inside the whole frame: the rest of the frame
+// is the callee-saved block the entry `push` wrote, which belongs to the epilogue's `pop`, so a
+// `str` there is retargeted away from the memory the pop will read. Which is also why this is NOT
+// the walk `argIndex` uses — `makeFrameWalk`'s `delta` counts a `push` at 4 bytes per register and
+// this skips it, because the callee-saved block sits ABOVE the local area. The cost of that
+// difference is the push/pop arm below.
+function reservedLocalArea(entry: AsmBlock): number {
+  // The PROLOGUE only — everything before the entry block first touches the frame. Summing the
+  // whole block instead let a store made BEFORE the reservation fall inside the window, so
+  // `str r0,[sp]; add sp,sp,#-4; …` claimed a write to the CALLER's frame as a private local and
+  // deleted it.
+  //
+  // NET, not the sum of the negatives. Counting only reservations and discarding releases leaves
+  // localArea larger than the region that is actually below the callee-saved block, and `off <
+  // localArea` then claims the SAVED REGISTERS as private locals — which the epilogue's `pop`
+  // reads back. `push {lr}; add sp,#-8; add sp,#8; str r0,[sp]; pop {r1}; bx r1` deleted the
+  // store and rendered a computed `bx` as an ordinary return, and it fooled the pop gate too
+  // (`released` is compared against this number). Not corpus-reachable — 0 of 2805 Thumb
+  // functions adjust sp upward before their first frame access — which is exactly why only a
+  // probe finds it. That 2805 is a CHECKOUT sweep this repo does not vendor, not a benchmark
+  // count, and it has not been re-run since.
+  //
+  // An sp write this cannot read poisons the whole thing to 0, disabling every slot, rather than
+  // being skipped as if it were no movement: the same rule `makeFrameWalk`'s `delta` follows.
+  const ins = entry.instrs;
+  const firstMem = ins.findIndex((x) => touchesFrame(x));
+  let reserved = 0;
+  let reservedYet = false;
+  for (const x of ins.slice(0, firstMem === -1 ? ins.length : firstMem)) {
+    const d = spAdjust(x);
+    if (d !== null) {
+      reserved -= d; // d > 0 = sp rises = the frame shrinks
+      reservedYet ||= reserved > 0;
+    } else if (x.mnemonic === 'push' || x.mnemonic === 'pop') {
+      // BEFORE any reservation this is the callee-saved block, measured from below — the
+      // ordinary agbcc prologue, and why push/pop are skipped at all. AFTER one it slides sp
+      // under the window just measured, so `[0, localArea)` stops naming the reserved area and
+      // starts naming the pushed words. Those words ARE written, by an instruction that is
+      // dataflow-transparent, so nothing downstream can tell:
+      // `push {r4,lr}; add sp,#-8; push {r0}; … ldr r1,[sp]` reads back the pushed `r0` on every
+      // path and the def-less shape renders it as an uninitialised local — 0 from the machine,
+      // garbage from the C. Poisoned to 0 rather than corrected by subtracting the push bytes,
+      // the same rule the sp-write arm follows. Not corpus-reachable — agbcc pushes before it
+      // reserves in all 2343 Thumb functions of the same un-vendored CHECKOUT sweep as the 2805
+      // above, not re-run since — which is why only a probe finds it.
+      if (reservedYet) {
+        return 0;
+      }
+    } else if (isSpReg((x.ops[0] ?? '').replace(/!$/, ''))) {
+      return 0; // an sp write of a shape this does not model
+    }
+  }
+  return Math.max(0, reserved);
+}
+
+// WHAT THE PROLOGUE SAVED — the second half of the register partition (frontend/ssa.ts,
+// LiveInModel.uninitRegs), in operand spellings. "The ABI does not pass arguments here" is a fact
+// about the CALLER and cannot on its own make a def-less read an uninitialised local; what does is
+// that the compiler homed a local in the register, which it may only do after saving it. Asm that
+// saves nothing follows no such convention, and some of it really is handed live values there:
+// the MP2K engine's hand-written `ChnVolSetAsm`, vendored in klonoa, sa3 and pokeemerald alike,
+// takes two pointers in r4/r5 and has no prologue at all — classified by the ABI alone it lost its
+// signature and stored through reads of registers nothing ever wrote.
+//
+// PER REGISTER, because saving r5 says nothing about r4 — a mid-function fragment reached by
+// agbcc's `bl`-as-a-long-branch saves what it uses and is handed the rest.
+//
+// The prologue is the LEADING run of saves and reservations, so a `push` in the body cannot join
+// the set. `HIGH_REGS` have no `push` encoding, so agbcc saves them as `mov rLow, rHi; push
+// {rLow}` and the source of such a `mov` joins the set when its low register is pushed — every
+// high-register inhabitant in the corpus goes through that idiom.
+function prologueSavedRegs(entry: AsmBlock): ReadonlySet<string> {
+  const saved = new Set<string>();
+  const carries = new Map<string, string>(); // low register ← the high one moved into it
+  for (const x of entry.instrs) {
+    if (x.mnemonic === 'push') {
+      const list = regListOf(x.ops);
+      if (list === null) {
+        break; // a list this cannot read is a save set this cannot vouch for
+      }
+      for (const r of list) {
+        saved.add(r);
+        const hi = carries.get(r);
+        if (hi !== undefined) {
+          saved.add(hi);
+        }
+      }
+    } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
+      carries.set(x.ops[0], x.ops[1]);
+    } else if (spAdjust(x) === null) {
+      break;
+    }
+  }
+  return saved;
+}
+
+/** How the fill reads and writes an operand: the guards that keep sp, pc and a data label from
+ *  being read or written as a register, and the function-scope statics a pool word names. */
+interface ThumbOperands {
+  localStatic(symbol: string): string;
+  constVal(n: number, b: number): Value;
+  spAsDataError(): FrontendUnsupportedError;
+  readData(r: string, b: number): Value;
+  writeData(r: string, b: number, v: Value): void;
+}
+
+function thumbOperands({
+  name,
+  asm,
+  text: { dataWords, nonWordData },
+  ssa: { irBlocks, readVar, writeVar },
+  statics,
+  slotsOffReason,
+}: {
+  name: string;
+  asm: string;
+  text: ThumbText;
+  ssa: SsaBuilder;
+  statics: LocalStatics;
+  slotsOffReason: string | null;
+}): ThumbOperands {
+  /** A function-scope static a pool word names, its definition read out of this same asm and
+   *  recorded — or a decline naming why there is none, or why it is not this function's alone. */
+  const localStatic = (symbol: string): string => {
+    const read = readGasLocalObject(asm, symbol);
+    if ('refused' in read) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
+          `('${symbol}') ${read.refused}`,
+      );
+    }
+    const others = [...gasPoolReferrers(asm, symbol)].filter((f) => f !== name);
+    if (others.length > 0) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
+          `('${symbol}') that ${others.join(', ')} also names — it is not this function's alone`,
+      );
+    }
+    return statics.define(read);
+  };
+
+  const constVal = (n: number, b: number): Value => {
+    const v = mkValue(T.unk(32));
+    irBlocks[b].ops.push(mkOp('const', { results: [v], attrs: { value: n } }));
+    return v;
+  };
+
+  // Writing sp is transparent frame bookkeeping ONLY in the one shape that cannot change anything
+  // observable: `sp = sp ± immediate`. Two producers feed this frontend and each emits exactly ONE
+  // spelling, which is why both must work and why handling only one silently halved the input:
+  //
+  //     producer                                    `add sp, #N`   `add sp, sp, #N`
+  //     agbcc's own .s (checkouts/*/build/src)            0                98
+  //     disassembly (klonoa asm/ · sa3 asm/)           203 · 1250           0
+  //
+  // So this is not "one tool with two spellings" — it is the compiler's convention against the
+  // disassembler's, and asmlift reads both kinds of file.
+  //
+  // Everything else that writes sp is a
+  // frame change this frontend cannot model: a register-sized adjustment (`add sp, r4`, agbcc's
+  // way of spelling a frame too large for the 7-bit immediate), a computed stack pointer
+  // (`add sp, r0, #4`), or `mov sp, rN`. Those must DECLINE, not vanish — dropping them deletes a
+  // frame change with no diagnostic, which is the exact
+  // loud-becomes-silent trade this frontend's guards exist to prevent.
+  //
+  // Flag-setting spellings (`adds`/`subs`) are excluded deliberately: ARMv4T's SP-adjust encoding
+  // does not set flags, so a flag-setting one can only come from hand-written asm, where dropping
+  // it would leave a stale compare for a following conditional branch to fold. There are 0 in the
+  // benchmark corpus and 0 across the klonoa and sa3 checkouts, so excluding them costs nothing.
+  // The decline names WHY the slot model is off when it is (`slotsOffReason`). The gap
+  // histogram is the improvement loop's work-list, and "local stack frames not supported" was a
+  // false attribution for a function whose frame IS modelled but whose blocker is, say, an
+  // address-taken local or an outgoing stack argument — it sent the loop to build the wrong thing.
+  const spAsDataError = () =>
+    new FrontendUnsupportedError(
+      `cannot lift '${name}': stack pointer used as data — ` +
+        (slotsOffReason ?? 'not a modelled slot (address-taken local / frame arithmetic / above the local area)'),
+    );
+
+  // Reading sp as a DATA operand means an address-taken local (`add rD, sp, #N` = `&local`),
+  // an sp-relative spill slot (`ldr/str …, [sp, #N]`), or frame-pointer arithmetic — none
+  // modellable without a stack abstraction. Without this guard Braun SSA would materialize sp as a
+  // fabricated PHANTOM parameter that scrambles the signature. Fail LOUD instead, mirroring MIPS
+  // (`isStackPtr`) and PPC (`r1`).
+  //
+  // sp is never WRITTEN either — but by `writeData` declining, NOT because sp-dest ops are inert.
+  // Five decode arms (`lsl`/`neg`/`mvn` with an sp destination, `ldr sp`, `ldmia` with sp in the
+  // list) reach a write with no arm-local sp check of their own, so the guard has to sit on the
+  // write itself. The single transparent shape is `sp = sp ± imm`, whitelisted in the add/sub arms.
+  // Read and write are guarded symmetrically.
+  const readData = (r: string, b: number): Value => {
+    if (isSpReg(r)) {
+      throw spAsDataError();
+    }
+    if (r === 'pc' || r === 'r15') {
+      // A pc-relative literal load is rewritten to a pool label before reaching here (decode's
+      // isPcRelLdr pass); a `pc`/`r15` base that survives to a data read is an unmodelled shape
+      // (`ldr [pc]` with no `#imm`, computed-pc arithmetic) — decline, never fabricate a param.
+      throw new FrontendUnsupportedError(`cannot lift '${name}': program counter used as a data base — not modelled`);
+    }
+    // DOES THIS OPERAND NAME A DATA LABEL? Read through POOL_LABEL_LEAD, the same reader `poolRef`
+    // uses, because an operand can carry an offset — `sTab+0x4`, `[sTab+0x4]` — and an exact
+    // `Map.has` answers "no" for it. That answer is not a decline, it is `readVar`, which
+    // materialises the label as a phantom pointer parameter the function does not have. One
+    // question, one reader: the two have drifted apart twice, and both times the drift was silent.
+    const lead = r.match(POOL_LABEL_LEAD)?.[0];
+    if (lead !== undefined && nonWordData.has(lead)) {
+      // The label heads data this pass did not read into words, used as a BASE (`ldrh rD, [sHw]`).
+      // It may be absent from `dataWords` entirely, or present at offsets the unread directive
+      // shifted; either way the guard below cannot answer it. Named separately because answering
+      // it means reading that directive's bytes, not widening a label check.
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': data label '${lead}', which carries a '.${nonWordData.get(lead)}' directive this reader does not read as words, is used as a register — not modelled`,
+      );
+    }
+    if (lead !== undefined && dataWords.has(lead)) {
+      // The operand is a literal-pool / data LABEL, not a register — reading it as dataflow would
+      // fabricate a phantom parameter. `poolRef` resolves upstream exactly the whole-word load it
+      // models; everything else reaching here declines — a label used in arithmetic, a load
+      // narrower than the word the pool resolver reads, a base spelled at an offset.
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': data label '${lead}' used as a register — not modelled`,
+      );
+    }
+    // …and anything else that is not a register — an immediate this frontend cannot evaluate
+    // (`#(4)`, `#SYM`) reaching an arm that reads a register operand — is the same phantom.
+    if (!REG_SPELLINGS.test(r)) {
+      throw new FrontendUnsupportedError(`cannot lift '${name}': operand '${r}' read as a register — not modelled`);
+    }
+    return readVar(r, b);
+  };
+
+  // The WRITE dual of readData, and it guards the WRITE rather than the arms that perform one,
+  // because an enumeration of arms can only cover the arms someone thought of. Checking sp in the
+  // mov/add/sub arms alone leaves `lsl sp, r4, #2`, `neg sp, r4`, `mvn sp, r4`, `ldr sp, [r0,#4]`
+  // and `ldmia r0!, {sp}` lifting, each dropping the sp write silently. Guarding the write ITSELF
+  // cannot be incomplete.
+  //
+  // sp is writable in exactly one shape — the frame adjust the add/sub arms `break` on before
+  // reaching here (see isFrameAdjust). Anything else that writes sp is a frame change this frontend
+  // cannot model, and dropping it silently deletes that change while the function keeps compiling.
+  //
+  // Known residual, zero inhabitants: `pop {sp}` never reaches here (push/pop are skipSafe in the
+  // opaque policy), so it stays silently transparent. ARMv4T Thumb cannot encode sp in a pop reglist.
+  const writeData = (r: string, b: number, v: Value): void => {
+    if (isSpReg(r)) {
+      throw spAsDataError();
+    }
+    writeVar(r, b, v);
+  };
+  return { localStatic, constVal, spAsDataError, readData, writeData };
+}
+
+/** One half of a 64-bit value this lift projected into a register. */
+interface PairHalf {
+  whole: Value;
+  half: 'lo' | 'hi';
+  at: Instr;
+}
+
+/** The 64-bit pairs a lift builds and reads back: the halves it projected, the callee that
+ *  returned each pair, and the returns judged once every block is filled. */
+interface ThumbPairs {
+  readonly halfOf: ReadonlyMap<Value, PairHalf>;
+  readonly pairCallee: Map<Value, string>;
+  readonly wordReturns: { bi: number; lo: Value; widerEpilogue: boolean }[];
+  projectHalf(irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value;
+  fuseHalves(irb: Block, lo: Value, hi: Value): Value;
+  wideReturn(lo: Value, bi: number): Value | null;
+  refuseWordReturns(): void;
+}
+
+function thumbPairs({
+  name,
+  target,
+  ssa,
+  asmBlocks,
+  callClobbers,
+}: {
+  name: string;
+  target: TargetDescription;
+  ssa: SsaBuilder;
+  asmBlocks: readonly AsmBlock[];
+  callClobbers: readonly string[];
+}): ThumbPairs {
+  // THE 64-BIT VALUE each `lo32`/`hi32` this lift emitted projects, and the INSTRUCTION that put
+  // the pair in registers. A pair that goes straight back out as one — a helper's result becoming
+  // the next helper's argument — re-fuses to the value itself instead of rebuilding a `concat`
+  // nothing above it would recognise; the instruction is what `wideReturn` walks forward from,
+  // since half of the question it asks is about the machine rather than about the value graph.
+  const halfOf = new Map<Value, PairHalf>();
+  /** The callee that handed back each pair a call returned, by the pair's value. */
+  const pairCallee = new Map<Value, string>();
+  const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value => {
+    const v = mkValue(T.unk(32));
+    irb.ops.push(mkOp(half === 'lo' ? 'lo32' : 'hi32', { operands: [whole], results: [v] }));
+    halfOf.set(v, { whole, half, at });
+    return v;
+  };
+  const fuseHalves = (irb: Block, lo: Value, hi: Value): Value => {
+    const a = halfOf.get(lo);
+    const b = halfOf.get(hi);
+    if (a?.half === 'lo' && b?.half === 'hi' && a.whole === b.whole) {
+      return a.whole; // `concat(lo32(v), hi32(v))` IS v
+    }
+    const v = mkValue(T.unk(64));
+    irb.ops.push(mkOp('concat', { operands: [lo, hi], results: [v] }));
+    return v;
+  };
+  /** The 64-bit value a `ret` is really returning, or null. The return register has to hold the LOW
+   *  half of some `v`, and the pair's high register has to still hold that same `v`'s high half when
+   *  the function returns.
+   *
+   *  THE SECOND HALF IS READ OFF THE VALUE GRAPH AND THE ASM TOGETHER, because each is blind to
+   *  what the other sees. The value graph follows the high half through register copies — agbcc
+   *  returns `s64 f(s64 a, s32 b){ return a + b; }` through `add r1,r3,#0`, which writes r1 with the
+   *  very value `hi32` named. The asm sees what the value graph cannot (`highRegisterHeld`).
+   *
+   *  ASKED WITHOUT READING r1, through `hasReachingDef`: a read of a register some path leaves
+   *  undefined mints a live-in, which is a PARAMETER. The answer is exact here because the pair was
+   *  built in this block, so its `hi32` can only reach r1 through this block's own definition.
+   *
+   *  BLOCK-LOCAL, like every other acceptance here: a pair built in another block is
+   *  `refuseWordReturns`'s to judge.
+   *
+   *  WHERE THE EPILOGUE DOES NOT DISCRIMINATE, THE WIDTH IS NOT PINNED, and this widens. Without
+   *  `-mthumb-interwork` both spellings compile to `push {lr}; bl __muldi3; pop {pc}`, byte for
+   *  byte, and a LEAF returns through `bx lr` whatever its width: nothing in such a function
+   *  distinguishes them, so what is published recompiles to the target either way and only a
+   *  PROTOTYPE copied out of it can be wrong. */
+  const wideReturn = (lo: Value, bi: number): Value | null => {
+    const a = halfOf.get(lo);
+    if (a?.half !== 'lo') {
+      return null;
+    }
+    const sameHigh = (v: Value) => halfOf.get(v)?.half === 'hi' && halfOf.get(v)?.whole === a.whole;
+    if (!ssa.hasReachingDef(target.argRegs[1], bi, sameHigh)) {
+      return null;
+    }
+    const from = asmBlocks[bi].instrs.indexOf(a.at);
+    return from >= 0 && highRegisterHeld(asmBlocks[bi], from + 1, target.argRegs[1], callClobbers) ? a.whole : null;
+  };
+  // The returns `wideReturn` answered null for — the value in the return register, and whether the
+  // epilogue says the return type is 5 to 8 bytes — judged by `refuseWordReturns` once every block
+  // is filled.
+  const wordReturns: ThumbPairs['wordReturns'] = [];
+  /** THE WORD RETURNS THAT WOULD DROP A HIGH HALF, refused. Run after every block is filled and
+   *  before `ssa.finish()`: a join's phi operands are wired by then, and not yet folded away.
+   *
+   *  A PAIR BUILT IN ANOTHER BLOCK THAT REACHES THE RETURN, because `wideReturn` is block-local:
+   *  `if (c) return a * b; return 0;` joins `lo32(a*b)`/0 in r0 and `hi32(a*b)`/0 in r1, and
+   *  returning r0 alone drops the high half of a function that computed it. So where the return
+   *  register holds a low half and the high register a high half, each through any join, and the
+   *  return block leaves the high register held, asmlift cannot decide the width. A 64-bit phi is the
+   *  capability this stands in for. The classes are `mergeClasses`'s, whose undirected closure can
+   *  only over-approximate a half reaching the return — which costs a decline — and, as in
+   *  `wideReturn`, r1 is asked about and never read.
+   *
+   *  AN EPILOGUE THAT SAYS THE RETURN TYPE IS 5 TO 8 BYTES (`compilerBehaviors.
+   *  eightByteReturnScratch`), over r0:r1 that hold no pair this lift built — a high word computed
+   *  from shifts, a `double`, or an 8-byte aggregate returned through memory, which agbcc sizes
+   *  the same way. A word return drops r1 in the first two, and the third is a false decline the
+   *  epilogue cannot tell apart from them. */
+  const refuseWordReturns = () => {
+    const classes = halfOf.size ? mergeClasses({ blocks: ssa.irBlocks }) : new Map<Value, readonly Value[]>();
+    const carries = (v: Value, half: 'lo' | 'hi') => (classes.get(v) ?? [v]).some((m) => halfOf.get(m)?.half === half);
+    for (const { bi, lo, widerEpilogue } of wordReturns) {
+      if (
+        halfOf.size &&
+        carries(lo, 'lo') &&
+        highRegisterHeld(asmBlocks[bi], 0, target.argRegs[1], callClobbers) &&
+        ssa.hasReachingDef(target.argRegs[1], bi, (v) => carries(v, 'hi'))
+      ) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the return in '${asmBlocks[bi].label}' holds halves of a 64-bit pair ` +
+            'another block built, and asmlift decides a 64-bit return only in the block that builds it',
+        );
+      }
+      if (widerEpilogue) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the epilogue of '${asmBlocks[bi].label}' says the return type is 5 to 8 bytes ` +
+            '(a 64-bit integer, a double, or an 8-byte aggregate), and no 64-bit pair this lift built is in r0:r1',
+        );
+      }
+    }
+  };
+  return { halfOf, pairCallee, wordReturns, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
+}
+
+/** Whether, from instruction `from` of block `bi` to its end, nothing puts into the pair's high
+ *  register a value the value graph misnames — the asm half of `wideReturn`'s question, and the
+ *  half the value graph cannot answer.
+ *
+ *  TWO WRITES THE VALUE GRAPH CANNOT SEE. A `pop`, since the frame is transparent to it — so a pop
+ *  or a control transfer naming the high register ends the question (`pop {r1}; bx r1` is agbcc's
+ *  interworking epilogue for a WORD return); a pop of anything else leaves what it loaded
+ *  unknown. And a CALL, which destroys every caller-saved register while `ssa.ts` goes on
+ *  answering its pre-call value. (A pair-returning call's r1 is one the frontend names; taking it
+ *  as unknown too errs toward a word return, and only a return block that makes such a call
+ *  after the pair it returns could see the difference.)
+ *
+ *  SO WHAT A REGISTER HOLDS IS KNOWN ONLY THROUGH IDENTITIES. agbcc returns a pair it held across
+ *  a call by parking the halves in r4:r5 and copying them back (`s64 x = a*b; g(); return x;`).
+ *  The value graph reads a register copy, and a store to a stack slot and its reload, as the same
+ *  value moving, so a register is known exactly when it is a copy or a reload of a known one;
+ *  every other write leaves it unknown, since no other write can put a pair's half there in the
+ *  value graph's eyes. Registers are keyed by spelling, as `ssa.ts` keys them (`ip` is not
+ *  `r12`), and a slot by its offset until `sp` moves, after which a reload is unknown. */
+function highRegisterHeld(ab: AsmBlock, from: number, hi: string, callClobbers: readonly string[]): boolean {
+  const regTok = (t: string | undefined): t is string =>
+    t !== undefined && (isThumbReg(t) || HIGH_REGS.has(t) || t === 'lr');
+  const unknown = new Set<string>();
+  const slots = new Map<number, boolean>(); // offset -> whether what was stored there is unknown
+  let spMoved = false;
+  const slotOff = (t: string | undefined): number | null => {
+    const m = /^\[sp(?:,\s*#(-?(?:0x[0-9a-f]+|\d+)))?\]$/i.exec(t ?? '');
+    return m ? (m[1] === undefined ? 0 : Number(m[1])) : null;
+  };
+  for (const ins of ab.instrs.slice(from)) {
+    const [d, src, k] = ins.ops;
+    if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+      callClobbers.forEach((r) => unknown.add(r));
+      continue;
+    }
+    if ((ins.mnemonic === 'pop' || classifyXfer(ins) !== null) && mentionsReg(ins, hi)) {
+      return false;
+    }
+    if (ins.mnemonic === 'pop' || ins.mnemonic === 'push' || isSpReg(d ?? '')) {
+      (ins.mnemonic === 'pop' ? (regListOf(ins.ops) ?? []) : []).forEach((r) => unknown.add(r));
+      spMoved = true;
+      continue;
+    }
+    const copy = /^movs?$/.test(ins.mnemonic) ? k === undefined : /^adds?$/.test(ins.mnemonic) && immEq(k, 0);
+    if (copy && regTok(d) && regTok(src)) {
+      if (unknown.has(src)) {
+        unknown.add(d);
+      } else {
+        unknown.delete(d);
+      }
+    } else if (ins.mnemonic === 'str' && regTok(d) && slotOff(src) !== null) {
+      slots.set(slotOff(src)!, unknown.has(d));
+    } else if (ins.mnemonic === 'ldr' && regTok(d) && slotOff(src) !== null) {
+      const stored = slots.get(slotOff(src)!);
+      if (stored === false || (stored === undefined && !spMoved)) {
+        unknown.delete(d);
+      } else {
+        unknown.add(d);
+      }
+    } else if (/^ldmia$/.test(ins.mnemonic)) {
+      [reg(d ?? '').replace(/!$/, ''), ...(regListOf(ins.ops.slice(1)) ?? [])].forEach((r) => unknown.add(r));
+    } else if (regTok(d) && !/^(str|stm|cmp|cmn|tst)/.test(ins.mnemonic)) {
+      unknown.add(d);
+    }
+  }
+  return !unknown.has(hi);
+}
+
+/** What each block leaves in the flags, and what a block inherits from its predecessor. */
+interface ThumbFlagCarry {
+  readonly exitCmp: Map<number, PendingCmp | string>;
+  inheritedCmp(bi: number): PendingCmp | string;
+}
+
+function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmBlock, JumpTable>): ThumbFlagCarry {
+  // What each block leaves in the flags for a successor to pick up: the live compare, or — when
+  // there is none — THE SENTENCE SAYING WHY, which crosses the edge with the state rather than
+  // being re-invented on the far side. Minting a fresh reason at the edge is how a block whose
+  // `sub` wrote the flags came to be described as a block that set none: the successor could see
+  // that nothing arrived, and not what stopped it.
+  //
+  // Every such sentence names the block it is about, so it needs no re-pointing as it travels and
+  // one gap reads the same however the labels fall. Written as the block is filled, so a lookup
+  // can only find a block filled EARLIER — which is what makes an unlifted predecessor answer "not
+  // known" rather than "none".
+  const exitCmp = new Map<number, PendingCmp | string>();
+
+  /** The compare a block starts with, inherited from its predecessor — or the sentence saying why
+   *  it starts with none. The rule is `inheritFlags` (frontend/flags-edge.ts), shared with the
+   *  PowerPC frontend; what is Thumb's here is only the answer to its last question. Thumb's `b<cc>`
+   *  preserves the flags, so carrying across a conditional edge would be sound, but no ARM row
+   *  inhabits that shape, so this side refuses it as UNBUILT. */
+  const inheritedCmp = (bi: number): PendingCmp | string =>
+    inheritFlags(bi, {
+      preds,
+      exit: exitCmp,
+      label: (i) => asmBlocks[i].label,
+      dispatches: (i) => tables.has(asmBlocks[i]),
+      // `cond` is the only kind left to refuse. A `return` block has no successors at all, so it
+      // is in nobody's `preds`, and an `indirect` one throws before the CFG is built, so asking
+      // about either would be a question no input reaches. `uncond` and a fall-through (`null`)
+      // are the edges the rule exists to carry.
+      refusesConditional: (i) => {
+        const plast = asmBlocks[i].instrs[asmBlocks[i].instrs.length - 1];
+        return plast !== undefined && classifyXfer(plast) === 'cond';
+      },
+    });
+  return { exitCmp, inheritedCmp };
 }
 
 /** The ARMv4T / Thumb (agbcc) frontend, registered for the `armv4t` target. */
@@ -4963,4 +5186,14 @@ export const thumbFrontend: Frontend = { id: 'thumb', inputFormat: 'gnu-as', lif
  *  predicate and the witness serialisation into the package's public API — three things no
  *  consumer should be able to depend on, exported only so a cross-check test could reach them.
  *  The name says what it is; nothing in `src` reads it. */
-export const __testing = { PAD_ENCODINGS, isPadInstr, factKey, sayFact };
+export const __testing = {
+  PAD_ENCODINGS,
+  isPadInstr,
+  factKey,
+  sayFact,
+  readThumbText,
+  thumbCfg,
+  assertScratchRegsPartitioned,
+  thumbCallDeclarations,
+  measureThumbFrame,
+};
