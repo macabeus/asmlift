@@ -2,7 +2,7 @@
 // `liftOnce` runs them (`thumbFillOf`). `thumb-frontend.test.ts` drives the lift whole.
 import { describe, expect, test } from 'vitest';
 
-import { __testing } from '../src/frontend/thumb';
+import { __testing, lift } from '../src/frontend/thumb';
 import { mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
@@ -262,6 +262,15 @@ describe('thumbFillOf', () => {
     const r4 = ssa.readVar('r4', 0);
     expect(ssa.paramReg.has(r4)).toBe(false);
     expect(ssa.irBlocks[0].ops).toContainEqual(expect.objectContaining({ opcode: 'undef', attrs: { key: 'r4' } }));
+  });
+});
+
+describe('lift', () => {
+  test('names the scratch register first when the target also lists too few caller-saved registers', () => {
+    const target = { ...ARMV4T_AGBCC, scratchRegs: ['r3'], callerSaved: ['r0'] };
+    expect(() => lift('f', 'f:\n\tbx\tlr\n', target)).toThrow(
+      /^target 'armv4t': scratch register r3 is not among the non-argument registers$/,
+    );
   });
 });
 
