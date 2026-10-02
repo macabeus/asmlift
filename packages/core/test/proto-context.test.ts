@@ -482,6 +482,23 @@ describe('prototypes from a declaration context', () => {
   );
 
   // compiled, `struct G2 { G g; }` is 8 bytes and `struct S { s32 v; }` still 4 and in r0
+  // compiled, agbcc refuses `aligned` on a parameter and ignores `packed` there, and lays
+  // `struct { char c; Cb cb; }` out in 8 bytes
+  test("an attribute on a function pointer's own parameter leaves its typedef, its member and layouts read", () => {
+    const p = prototypesFromContext(
+      `typedef unsigned short u16;
+       typedef void (*Cb)(int x __attribute__((unused))); typedef void (*Wide)(int x __attribute__((mode(DI))));
+       void g(Cb c, Wide w); struct S { Cb c; void (*d)(int y __attribute__((packed))); u16 x; }; struct S h(void);`,
+      'c',
+    );
+    expect(p.g?.params).toEqual([
+      'void (*)(int x __attribute__((unused)))',
+      'void (*)(int x __attribute__((mode(DI))))',
+    ]);
+    expect(declaredCallArgs(p.g, ARMV4T_AGBCC)?.widths).toEqual([32, 32]);
+    expect(p.h?.returnLayout?.members?.map((m) => m.name)).toEqual(['c', 'd', 'x']);
+  });
+
   test('an aligned typedef of its own body leaves that body unread, and no other', () => {
     const p = prototypesFromContext(
       `typedef int s32; typedef struct { s32 v; } G __attribute__((aligned(8)));

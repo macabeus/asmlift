@@ -46,7 +46,8 @@ import type { TargetDescription } from './target';
 // a struct or enum keeps its name, which sizes to nothing and makes the list abstain.
 //
 // A TYPEDEF WITH AN ATTRIBUTE NAMES NO TYPE HERE: the attribute may make it a different type from
-// the one it spells (`realigns`), so no spelling resolves through it.
+// the one it spells (`realigns`), so no spelling resolves through it. One on a parameter of a
+// function the typedef points at is that parameter's (`ownAttributes`).
 
 /** What the declarations say about the types a prototype or a layout spells. */
 interface TypeTable {
@@ -100,7 +101,7 @@ function typeTable(ctx: ParsedContext, language: 'c' | 'c++'): TypeTable {
   };
   for (const d of ctx.declarations) {
     const tag = d.specifiers.type.kind === 'tag' ? d.specifiers.type : undefined;
-    const attributes = d.specifiers.typedef || tag?.body !== undefined ? attributesOf(d) : [];
+    const attributes = d.specifiers.typedef || tag?.body !== undefined ? ownAttributes(d) : [];
     table.realigned ||= realigns(d, attributes);
     const unsizedEnum = tag !== undefined && readTag(table, d, tag, laysOut(d, attributes), ctx.tokens, language);
     if (d.specifiers.typedef && attributes.length === 0) {
@@ -265,8 +266,15 @@ function typedefNames(d: Declaration, tokens: Tokens): TypedefName[] {
     .map((x) => ({ name: x.name, type: spell(s.spelling, x.derivations), names: 'other' }));
 }
 
-/** Every attribute a declaration writes outside a body: among its specifiers, on its declarators,
- *  and inside the parameter lists they hold. */
+/** The attributes a declaration writes on what it declares: among its specifiers and on its
+ *  declarators. One inside a parameter list is the parameter's, and compiled, agbcc lets it reach no
+ *  type outside it: it refuses `aligned` there and ignores `packed`. */
+function ownAttributes(d: Declaration): Attribute[] {
+  return [...d.specifiers.attributes, ...d.declarators.flatMap((x) => x.attributes)];
+}
+
+/** Every attribute a declaration writes outside a body: its own, and those inside the parameter lists
+ *  its declarators hold. */
 function attributesOf(d: Declaration): Attribute[] {
   const out: Attribute[] = [...d.specifiers.attributes];
   for (const x of d.declarators) {
@@ -411,8 +419,8 @@ function layoutReader(ctx: ParsedContext, table: TypeTable): LayoutOf {
   };
   // A body's members, or undefined when one of them is a type this cannot lay out — a project
   // typedef that resolves to nothing sized, a nested aggregate with no body here, a flexible extent
-  // or one that is not a constant expression — or carries an attribute, which may place it anywhere.
-  // Bounded in depth, since a body may name its own tag.
+  // or one that is not a constant expression — or carries an attribute of its own, which may place it
+  // anywhere. Bounded in depth, since a body may name its own tag.
   const readMembers = (body: Range, depth: number): AggregateMember[] | undefined => {
     const declarations = depth > 8 ? undefined : memberDeclarations(ctx, body);
     if (declarations === undefined) {
@@ -432,7 +440,7 @@ function layoutReader(ctx: ParsedContext, table: TypeTable): LayoutOf {
   // places.
   const members = (m: Declaration, depth: number): AggregateMember[] | undefined => {
     const s = m.specifiers;
-    if (s.typedef || s.storage.length > 0 || m.declarators.length === 0 || attributesOf(m).length > 0) {
+    if (s.typedef || s.storage.length > 0 || m.declarators.length === 0 || ownAttributes(m).length > 0) {
       return undefined;
     }
     let inline: AggregateLayout | undefined;
