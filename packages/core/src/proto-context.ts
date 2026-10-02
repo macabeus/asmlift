@@ -6,6 +6,7 @@ import {
   type Declarator,
   type DeclaredType,
   type Derivation,
+  type Language,
   type Parameter,
   type ParsedContext,
   type Qualifier,
@@ -34,9 +35,8 @@ import type { TargetDescription } from './target';
 // arity is a candidate the context then refuses; read here, the declarations decide the arity
 // instead of the argument-register scan.
 //
-// WHAT IS READ. Top-level function declarations and definitions, and the typedefs their spellings
-// name. A block that is not `extern "C"` — a struct, class, namespace or function body — is
-// skipped whole: what it declares has C++ linkage or is a member, and its symbol is mangled.
+// WHAT IS READ is what the parser reads (`cdecl/parse.ts`). Of it, this takes the functions the top
+// level declares or defines, and the typedefs, tags and bodies their types name.
 //
 // KEYED BY THE DECLARED NAME, which is the symbol a call in the assembly names only for C linkage:
 // a C++ free function is called by its mangled symbol, so linkage decides itself at the lookup. A
@@ -56,38 +56,15 @@ import type { TargetDescription } from './target';
 // the one it spells (`realigns`), so no spelling resolves through it. One on a parameter of a
 // function the typedef points at is that parameter's (`ownAttributes`).
 
-/** What the declarations say about the types a prototype or a layout spells. */
-interface TypeTable {
-  /** each typedef name, and the type it stands for, before resolution */
-  readonly typedefs: ReadonlyMap<string, DeclaredType>;
-  /** struct and union bodies by `struct Tag` spelling; none for a body an attribute lays out
-   *  (`laysOut`) */
-  readonly tagged: ReadonlyMap<string, Range | undefined>;
-  /** struct and union bodies by a typedef name bound to a body, which resolves to itself and spells
-   *  no keyword — as C++ spells every tag, a declared one with no body included */
-  readonly named: ReadonlyMap<string, { kind: AggregateLayout['kind']; body?: Range }>;
-  /** a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own */
-  readonly unspelledPointers: ReadonlySet<string>;
-  /** a typedef name bound to an enum body */
-  readonly enums: ReadonlySet<string>;
-  /** an enum, by `enum Tag` or typedef name, that is not the target's enumBytes: `packed` makes it
-   *  the smallest integer its values fit (agbcc c-common.c:446, c-decl.c:6123), and so does a value
-   *  an int cannot hold (`enumMayWiden`) */
-  readonly unsizedEnums: ReadonlySet<string>;
-  /** a typedef changed a type after its layout (`realigns`), which moves the layout of whatever
-   *  holds it, so no layout is read */
-  readonly realigned: boolean;
-}
-
 /** The layout of the struct or union a type names, at a nesting depth. */
 type LayoutOf = (t: DeclaredType, depth: number) => AggregateLayout | undefined;
 
 /** The callee prototypes a preprocessed declaration context states. `language` decides what an
  *  empty parameter list means: none in C++, unstated in C (a pre-ANSI declaration). */
-export function prototypesFromContext(src: string, language: 'c' | 'c++'): Prototypes {
+export function prototypesFromContext(src: string, language: Language): Prototypes {
   const ctx = parseDeclarations(src, language);
-  const table = typeTable(ctx, language);
-  return functionPrototypes(ctx, table, layoutReader(ctx, table), language);
+  const table = typeTable(ctx);
+  return functionPrototypes(ctx, table, layoutReader(ctx, table));
 }
 
 const WORD = /^[A-Za-z_]\w*$/;
@@ -95,7 +72,7 @@ const WORD = /^[A-Za-z_]\w*$/;
 /** `mode(…)` in an attribute, in either spelling: it retypes what it is written on */
 const MODE = /\b(?:__)?mode(?:__)?\s*\(/;
 
-function typeTable(ctx: ParsedContext, language: 'c' | 'c++'): TypeTable {
+function typeTable(ctx: ParsedContext): TypeTable {
   const table: TableBuilder = {
     typedefs: new Map(),
     tagged: new Map(),
@@ -110,7 +87,7 @@ function typeTable(ctx: ParsedContext, language: 'c' | 'c++'): TypeTable {
     const tag = d.specifiers.type.kind === 'tag' ? d.specifiers.type : undefined;
     const attributes = d.specifiers.typedef || tag?.body !== undefined ? ownAttributes(d) : [];
     table.realigned ||= realigns(d, attributes);
-    const unsizedEnum = tag !== undefined && readTag(table, d, tag, laysOut(d, attributes), ctx.tokens, language);
+    const unsizedEnum = tag !== undefined && readTag(table, d, tag, laysOut(d, attributes), ctx);
     if (d.specifiers.typedef && attributes.length === 0) {
       readTypedefs(table, d, unsizedEnum);
     }
@@ -118,18 +95,33 @@ function typeTable(ctx: ParsedContext, language: 'c' | 'c++'): TypeTable {
   return table;
 }
 
-/** The type table while the declarations are read. */
+/** What the declarations say about the types a prototype or a layout spells, while they are read. */
 interface TableBuilder {
+  /** each typedef name, and the type it stands for, before resolution */
   typedefs: Map<string, DeclaredType>;
+  /** struct and union bodies by `struct Tag` spelling; none for a body an attribute lays out
+   *  (`laysOut`) */
   tagged: Map<string, Range | undefined>;
+  /** struct and union bodies by a typedef name bound to a body, which resolves to itself and spells
+   *  no keyword — as C++ spells every tag, a declared one with no body included */
   named: Map<string, { kind: AggregateLayout['kind']; body?: Range }>;
+  /** a typedef name for a pointer to a body nothing else names: a word, and no spelling of its own */
   unspelledPointers: Set<string>;
+  /** a typedef name bound to an enum body */
   enums: Set<string>;
+  /** an enum, by `enum Tag` or typedef name, that is not the target's enumBytes: `packed` makes it
+   *  the smallest integer its values fit (agbcc c-common.c:446, c-decl.c:6123), and so does a value
+   *  an int cannot hold (`enumMayWiden`) */
   unsizedEnums: Set<string>;
   /** the enumerators of an enum wider than an int, which widen any enum that names one */
   wideEnumerators: Set<string>;
+  /** a typedef changed a type after its layout (`realigns`), which moves the layout of whatever
+   *  holds it, so no layout is read */
   realigned: boolean;
 }
+
+/** What the declarations say about the types a prototype or a layout spells, once read. */
+type TypeTable = Readonly<Omit<TableBuilder, 'wideEnumerators'>>;
 
 /** What a struct, union, enum or class specifier says about its tag; whether it defines an enum
  *  the target does not size (`unsizedEnums`). `attributed`: an attribute lays its body out. */
@@ -138,8 +130,7 @@ function readTag(
   d: Declaration,
   tag: Extract<TypeSpecifier, { kind: 'tag' }>,
   attributed: boolean,
-  tokens: Tokens,
-  language: 'c' | 'c++',
+  ctx: ParsedContext,
 ): boolean {
   const name = tag.tag !== undefined && WORD.test(tag.tag) ? tag.tag : undefined;
   const { body, keyword } = tag;
@@ -152,7 +143,7 @@ function readTag(
   // the members are not. A forward declaration states the kind alone, so a definition after it
   // replaces it, and nothing replaces a definition.
   if (
-    language === 'c++' &&
+    ctx.language === 'c++' &&
     keyword !== 'enum' &&
     name !== undefined &&
     (body !== undefined || forwardDeclares(d)) &&
@@ -164,9 +155,9 @@ function readTag(
   if (keyword !== 'enum' || body === undefined) {
     return false;
   }
-  const wide = enumMayWiden(tokens, body, table.wideEnumerators);
+  const wide = enumMayWiden(ctx.tokens, body, table.wideEnumerators);
   if (wide) {
-    for (const e of enumerators(tokens, body)) {
+    for (const e of enumerators(ctx.tokens, body)) {
       table.wideEnumerators.add(e);
     }
   }
@@ -591,12 +582,7 @@ function memberShape(
 /** Every function the declarations name by a plain identifier, keyed by it. A declaration that
  *  spells no type is a constructor's, a destructor's or a conversion operator's; one that defines a
  *  body, or spells a `class`, declares no C function. */
-function functionPrototypes(
-  ctx: ParsedContext,
-  table: TypeTable,
-  layoutOf: LayoutOf,
-  language: 'c' | 'c++',
-): Prototypes {
+function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: LayoutOf): Prototypes {
   const found = new Map<string, FnProto | null>();
   // a function one of whose declarations retypes a parameter with `mode`, which gives it the type
   // the mode names in place of the one spelled (c-common.c:563): compiled, `int x
@@ -627,9 +613,7 @@ function functionPrototypes(
       if (retyped) {
         unreadParams.add(x.name);
       }
-      const read = readSignature(declaredType(s, returns), fn, ctx.tokens, language, table.typedefs, (t) =>
-        layoutOf(t, 0),
-      );
+      const read = readSignature(declaredType(s, returns), fn, ctx, table.typedefs, (t) => layoutOf(t, 0));
       const proto = unreadParams.has(x.name) ? returnOnly(read) : read;
       const prior = found.get(x.name);
       const had = prior && unreadParams.has(x.name) ? returnOnly(prior) : prior;
@@ -661,8 +645,7 @@ function admissible(name: string, p: FnProto): FnProto | undefined {
 function readSignature(
   ret: DeclaredType,
   fn: Extract<Derivation, { kind: 'function' }>,
-  tokens: Tokens,
-  language: 'c' | 'c++',
+  { tokens, language }: ParsedContext,
   typedefs: ReadonlyMap<string, DeclaredType>,
   layoutOf: (t: DeclaredType) => AggregateLayout | undefined,
 ): FnProto {
