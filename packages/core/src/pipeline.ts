@@ -21,6 +21,7 @@ import { VerifyError, verify } from './ir/verify';
 import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
+import { narrowDeclarations } from './l3/narrowdecl';
 import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
@@ -393,8 +394,9 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
 
 /** The committed readability/quality rewrites, in the order they are committed in: merge a
  *  statement common to every arm of an if, drop the void returns the assembly did not spell, drop
- *  dead stores (whose empty-then peephole flips the arm the merge empties), then hoist each leaf
- *  base the DEFAULT gate table admits into a typed local pointer.
+ *  dead stores (whose empty-then peephole flips the arm the merge empties), hoist each leaf base
+ *  the DEFAULT gate table admits into a typed local pointer, then declare each once-written local
+ *  at the width of the narrowing that writes it.
  *
  *  THE ORDER IS OBSERVABLE, not a preference: drop the returns before the merge and the same arms
  *  become peelable, emptying both of them. `l3/tailret.ts` states the mechanism, and
@@ -405,7 +407,9 @@ function attributeOpaques<T>(fn: Fn, body: () => T): T {
  *  cost a MATCH instead of a candidate (docs/level-tower.md). A committed policy that reads as
  *  "whatever the default is" is the policy nobody reviews. */
 export function readabilityRewrites(raw: SFn): SFn {
-  return hoistBaseLocals(eliminateDeadStores(dropUnspelledReturns(mergeCommonTails(raw))), BASECSE_GATES, 'head');
+  return narrowDeclarations(
+    hoistBaseLocals(eliminateDeadStores(dropUnspelledReturns(mergeCommonTails(raw))), BASECSE_GATES, 'head'),
+  );
 }
 
 /** Stage 4 — structure + its boundary contracts, always as a pair. */
