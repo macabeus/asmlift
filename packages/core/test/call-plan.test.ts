@@ -3,10 +3,11 @@
 // call lowering that reads it.
 import { describe, expect, test } from 'vitest';
 
-import { type CallLowering, callDeclarations } from '../src/frontend/call-plan';
+import { type CallLowering, type CallPairs, callDeclarations } from '../src/frontend/call-plan';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
-import { makeSsaBuilder } from '../src/frontend/ssa';
-import type { Value } from '../src/ir/core';
+import { type SsaBuilder, makeSsaBuilder } from '../src/frontend/ssa';
+import { type Value, mkOp, mkValue } from '../src/ir/core';
+import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -240,6 +241,24 @@ describe('callDeclarations.lower', () => {
   };
   const miswired = (target: string) =>
     `target '${target}': a call site's pairs and stack words must be what its lowering states`;
+  /** pairs built and split in block 0, as Thumb builds them */
+  const pairsIn = (ssa: SsaBuilder): CallPairs => {
+    const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi' }>();
+    const emit = (opcode: 'concat' | 'lo32' | 'hi32', operands: Value[], bits: number) => {
+      const v = mkValue(T.unk(bits));
+      ssa.irBlocks[0].ops.push(mkOp(opcode, { operands, results: [v] }));
+      return v;
+    };
+    return {
+      fuse: (lo, hi) => emit('concat', [lo, hi], 64),
+      project: (whole, half) => {
+        const v = emit(half === 'lo' ? 'lo32' : 'hi32', [whole], 32);
+        halfOf.set(v, { whole, half });
+        return v;
+      },
+      halfOf,
+    };
+  };
 
   test('lowers a call whose site is wired as its lowering states', () => {
     const { stackWord: _, ...s } = site('g');
@@ -258,6 +277,20 @@ describe('callDeclarations.lower', () => {
 
   test('refuses a site that builds no pair for a lowering that builds them', () => {
     expect(() => thumbCalls({ g: { params: ['s32'] } }).lower(site('g'))).toThrow(miswired('armv4t'));
+  });
+
+  test('refuses a site that places no stack word for a lowering that reads them', () => {
+    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+    const { stackWord: _, ...s } = site('g');
+    const calls = callDeclarations('f', MIPS_IDO, { g: { params: Array(5).fill('int') } }, O32, fail);
+    expect(() => calls.lower(s)).toThrow(miswired('mips'));
+  });
+
+  test('refuses a site that builds pairs for a lowering that builds none', () => {
+    const { stackWord: _, ...s } = site('g');
+    const lower = () =>
+      callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower({ ...s, pairs: pairsIn(s.ssa) });
+    expect(lower).toThrow(miswired('ppc'));
   });
 });
 
