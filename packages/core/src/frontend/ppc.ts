@@ -1029,9 +1029,10 @@ export function lift(
             bi,
             read,
             write,
-            // a pending `@ha` half is not an argument, and a gap refuses (`fallbackArgc`)
+            // a pending `@ha` half is not an argument
             highHalves,
             guess: {
+              // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
               at: ins.addr,
               // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
               // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the

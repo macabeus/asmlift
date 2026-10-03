@@ -1478,9 +1478,10 @@ export function lift(
           }
           return readVar(stackSlot(off), bi);
         },
-        // a pending `%hi` half is not an argument, and a gap refuses (`fallbackArgc`)
+        // a pending `%hi` half is not an argument
         highHalves,
         guess: {
+          // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
           at: ins.addr,
           // A GUESS THAT FILLS a0..a3 CANNOT SAY WHERE THE LIST ENDS: a word of the outgoing area that
           // reaches the call is argument 5 onward, or a local the compiler put there.
