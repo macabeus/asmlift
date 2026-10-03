@@ -44,7 +44,10 @@ const DECLINE_CTORS = new Set([
   'StructureError',
 ]);
 
-const coreDeclineTemplates = (): { file: string; line: number; text: string }[] => {
+/** The type a frontend hands its refusal to shared code as (frontend/errors.ts). */
+const SHARED_REFUSAL = /\bFrontendRefusal\b/;
+
+const coreSources = (): { file: string; src: string }[] => {
   const files: string[] = [];
   (function walk(d: string) {
     for (const e of readdirSync(d)) {
@@ -56,13 +59,18 @@ const coreDeclineTemplates = (): { file: string; line: number; text: string }[] 
       }
     }
   })(CORE_SRC);
+  return files.sort().map((f) => ({ file: f.slice(CORE_SRC.length + 1), src: readFileSync(f, 'utf8') }));
+};
+
+const declineTemplates = (sources: readonly { file: string; src: string }[]) => {
   const out: { file: string; line: number; text: string }[] = [];
-  for (const f of files.sort()) {
-    const src = readFileSync(f, 'utf8');
-    const re = /throw new (\w+)\(/g;
+  for (const { file, src } of sources) {
+    // A FILE THAT HOLDS A `FrontendRefusal` throws through it, so each call of one there, `fail(`
+    // or a dialect's `d.fail(`, is a site too.
+    const re = SHARED_REFUSAL.test(src) ? /throw new (\w+)\(|(?<!\w)(?:\w+\.)?(fail)\(/g : /throw new (\w+)\(/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
-      if (!DECLINE_CTORS.has(m[1])) {
+      if (m[2] === undefined && !DECLINE_CTORS.has(m[1])) {
         continue;
       }
       let i = m.index + m[0].length;
@@ -89,14 +97,15 @@ const coreDeclineTemplates = (): { file: string; line: number; text: string }[] 
         .replace(/\s+/g, ' ')
         .trim();
       if (text) {
-        out.push({ file: f.slice(CORE_SRC.length + 1), line: src.slice(0, m.index).split('\n').length, text });
+        out.push({ file, line: src.slice(0, m.index).split('\n').length, text });
       }
     }
   }
   return out;
 };
 
-const CORE_TEMPLATES = coreDeclineTemplates();
+const CORE_SOURCES = coreSources();
+const CORE_TEMPLATES = declineTemplates(CORE_SOURCES);
 const classOfText = (t: string) => DECLINE_CLASSES.find((c) => c.pattern.test(t))?.key ?? OTHER_CLASS.key;
 
 /** a declined row carrying exactly these markers */
@@ -515,6 +524,16 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
+  });
+
+  // `frontend/high-half.ts` throws this through the MIPS frontend's refusal (mips-reloc-globals.test.ts)
+  test('a high half no low half completes -> reloc-halves', () => {
+    expect(
+      classOf(
+        "lift: cannot lift 'two': 'lui' at 0x0 carries the '%hi' half of 'gDropped' and no modelled instruction " +
+          "consumes its '%lo' half — the address is never completed",
+      ),
+    ).toBe('reloc-halves');
   });
 
   // `pool-word-shape` used to have its published marker here, `sa3:OamMalloc`'s
@@ -992,9 +1011,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // 69 rows whose attribution rested on this file's line order. It is absent now, and that is the
   // measurable half of core naming the register file: `unmodelled floating-point instruction` is
   // matched by no other class, so the ordering is no longer load-bearing for any of them. The two
-  // transfer pairs are the control-transfer capabilities sitting above `branch-form`.
+  // transfer pairs are the control-transfer capabilities sitting above `branch-form`, and
+  // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
+    ['address-taken-local > stack-frames', 4],
     ['ctr-transfer > branch-form', 4],
   ];
 
@@ -1057,6 +1078,9 @@ describe('a class may not outlive the message it classifies', () => {
     ['address-taken-local', 'address-taken stack local', 'packages/core/src/frontend/frame-objects.ts'],
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/ppc.ts'],
+    ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/call-plan.ts'],
+    ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/mips.ts'],
+    ['outgoing-stack-args', 'outgoing stack argument ', 'packages/core/src/frontend/mips.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
@@ -1085,9 +1109,10 @@ describe('a class may not outlive the message it classifies', () => {
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'unmodelled floating-point instruction', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'both single and double precision', 'packages/core/src/frontend/fpu.ts'],
+    ['float', 'the floating-point registers a call', 'packages/core/src/frontend/mips.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
-    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/ppc.ts'],
+    ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/call-plan.ts'],
     ['wide-call-arg', 'is a `double` its callee declares', 'packages/core/src/raise/floathelpers.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
@@ -1124,7 +1149,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', 'carries a data relocation', 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
-    ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ppc.ts'],
+    ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ssa.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
@@ -1170,23 +1195,39 @@ describe('the classifier is measured against the messages core can throw, not on
     expect(new Set(CORE_TEMPLATES.map((t) => t.file)).size).toBeGreaterThan(8);
   });
 
+  // A REFUSAL IS A SITE HOWEVER IT IS SPELT: through the frontend's own constructor, or through the
+  // `FrontendRefusal` a frontend holds, which is how one refuses beside the code it shares.
+  test.each([
+    ['fail(`cannot lift a: an injected refusal`);', 'cannot lift a: an injected refusal'],
+    ['highHalves.fail(`cannot lift b: an injected refusal`);', 'cannot lift b: an injected refusal'],
+    ['throw new FrontendUnsupportedError(`cannot lift c: an injected refusal`);', 'cannot lift c: an injected refusal'],
+  ])('an injected `%s` in frontend/mips.ts is one more site', (line, text) => {
+    const injected = CORE_SOURCES.map((s) =>
+      s.file === 'frontend/mips.ts' ? { ...s, src: `${s.src}\n${line}\n` } : s,
+    );
+    const harvested = declineTemplates(injected);
+    expect(harvested).toHaveLength(CORE_TEMPLATES.length + 1);
+    expect(harvested.filter((t) => t.file === 'frontend/mips.ts' && t.text === text)).toHaveLength(1);
+  });
+
   // The count the header paragraph publishes. It is a RESIDUE and not a defect — some of these are
   // input errors rather than capability gaps (`disasm.ts` "symbol not found", `format.ts`'s
   // frontend mismatch), and the rest are gaps nothing in the corpus has reached, which is why they
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 33],
+    ['frontend/thumb.ts', 29],
     ['structure/structure.ts', 20],
-    ['frontend/mips.ts', 9],
-    ['frontend/ppc.ts', 8],
+    ['frontend/mips.ts', 16],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
+    ['frontend/ppc.ts', 7],
+    ['frontend/call-plan.ts', 6],
     ['frontend/ssa.ts', 2],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 89;
+  const RESIDUE_TOTAL = 97;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

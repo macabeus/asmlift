@@ -133,11 +133,9 @@ export type Prototypes = Record<string, FnProto>;
  *
  *  AN ABI THAT DOES ALIGN HAS NO READER HERE YET, which is why the rule is flat rather than a
  *  knob on `TargetDescription` beside `argRegs` and `stagesOutgoingArgsInFrame`. MIPS o32 aligns a
- *  64-bit argument to an even register pair and is the target that will want one — and
- *  `frontend/mips.ts` takes `_prototypes` and reads none of them, so the knob would be a
- *  per-target setting with zero consumers and nothing measuring it. The round that teaches MIPS to
- *  read a prototype is the round that owes the rule a home; adding it now would be a second ABI
- *  fact nobody could be wrong about. */
+ *  64-bit argument to an even register pair and is the target that will want one, and
+ *  `frontend/mips.ts` refuses a declared 64-bit parameter (`CallLowering.pairs`), so every list it
+ *  counts is one word per parameter. The lowering that builds an o32 pair owes the rule a home. */
 export function wordsOf(params: readonly number[]): number {
   return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
 }
@@ -217,6 +215,16 @@ export function declaredCallArgs(
 
 /** Whether a declared type is `double`, qualifiers aside. */
 const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
+
+/** Whether a declared type is a floating type, qualifiers aside: a C keyword, or a typedef of one
+ *  every project declares (`FLOAT_TYPEDEFS`). */
+export const isFloatingSpelling = (t: ParamType): boolean => {
+  const bare = t
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return /^(?:float|double|long double)$/.test(FLOAT_TYPEDEFS.get(bare) ?? bare);
+};
 
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
  *  prototype is a lower bound assembled from whatever a header extraction could read, and omits
@@ -400,6 +408,15 @@ export const PRELUDE_TYPEDEFS: ReadonlyMap<string, string> = new Map([
   ['u64', 'unsigned long long'],
 ]);
 
+/** The floating typedefs a decomp project declares (`f32`, `f64`), and the C keyword each stands for.
+ *  A candidate's prelude does not declare them: a candidate spells a float with the keyword
+ *  (backend/cfamily.ts), so a project context that typedefs them cannot collide with it. They are
+ *  read to tell that a declared spelling is floating. */
+const FLOAT_TYPEDEFS: ReadonlyMap<string, string> = new Map([
+  ['f32', 'float'],
+  ['f64', 'double'],
+]);
+
 /** The C89 integer bases, which need no declaration anywhere. `signed`/`unsigned` is stripped
  *  before the lookup, exactly as {@link declaredWidth} strips it. */
 const C89_INTEGER_BASES: ReadonlySet<string> = new Set([
@@ -483,10 +500,10 @@ export function spellableType(t: ParamType): boolean {
  *    how a parameterless callee is stated and it already prints `(void)`.
  *
  *    `void` AS THE RETURN, which is `returnsVoid` under the other spelling ({@link
- *    declaresVoidReturn} is where the two are one fact). The frontend models no void CALL — it
- *    reads the return register whatever the callee is — so `void DoThing(void);` printed beside a
- *    candidate that USES the result is "void value not ignored as it ought to be", exit 1 on the
- *    same compiler. It is also what the paragraph below already decided: `returnsVoid` is not a
+ *    declaresVoidReturn} is where the two are one fact). The Thumb and PowerPC lowerings read the
+ *    return register whatever the callee is (`CallLowering.voidReturn`), so `void DoThing(void);`
+ *    printed beside a candidate that USES the result is "void value not ignored as it ought to be",
+ *    exit 1 on the same compiler. It is also what the paragraph below already decided: `returnsVoid` is not a
  *    source for the printed prototype, and one fact cannot be barred under one spelling and
  *    admitted under the other. So what this prints is always a VALUE-returning prototype, which is
  *    what makes {@link declaredReturnWidth} total on its output.

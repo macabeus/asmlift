@@ -16,6 +16,7 @@ import { type IrType, T, typeEquals, typeToString } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
+import type { CallDeclarations } from './call-plan';
 import { type DevicePins, type LiteralAddresses, literalAddresses } from './device-pins';
 import { FrontendUnsupportedError } from './errors';
 import { type LiveInModel, slotKeyOffset } from './ssa';
@@ -36,7 +37,7 @@ export interface FrameObjectAudit {
   /** whether a callee's declaration rules out a struct returned through a hidden pointer at
    *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
    *  declarations */
-  returnsWithoutHiddenPointer: (callee: string) => boolean;
+  returnsWithoutHiddenPointer: CallDeclarations['returnsWithoutHiddenPointer'];
   symbols: SymbolMap | undefined;
   target: TargetDescription;
   /** the retraction rules an escape is judged by; `FRAME_ESCAPE_GATES` when absent, and a

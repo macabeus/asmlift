@@ -26,27 +26,23 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 166 distinct decline messages (the texts reached by
+// `packages/core/src` throws 185 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
-// subclass and `StructureError`, harvested by taking each throw's balanced-paren argument, keeping
+// subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
+// harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 89 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 97 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       33  ARM-mode function, raw data in the code stream, a base alignment the
+//   frontend/thumb.ts       29  ARM-mode function, raw data in the code stream, a base alignment the
 //                               input does not determine, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
-//                               `bl` whose target this asm defines as a data label, a call to a
-//                               function declared to return a struct it cannot lower (its
-//                               interpolated reason), one returning it into anything but a
-//                               local, one whose parameters nothing sizes, one whose declaration
-//                               the lifted source cannot print (a type it has no spelling for, or a
-//                               bare parameter count that states none), and
-//                               the reaching-compare throw whose reason is interpolated
-//                               (`cross-block-flags` keys on one of its reasons, so the template
-//                               with a placeholder in it matches nothing)
+//                               `bl` whose target this asm defines as a data label, a struct a call
+//                               returns into anything but a local, and the reaching-compare throw
+//                               whose reason is interpolated (`cross-block-flags` keys on one of its
+//                               reasons, so the template with a placeholder in it matches nothing)
 //   structure/structure.ts  20  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
@@ -55,24 +51,33 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts         9  a relocation with an addend, an address below the symbol, an indirect
-//                               `jr`, a non-numeric immediate, and five refusals about a disassembly
-//                               the reader cannot account for
-//   frontend/ppc.ts          8  `stwu` with update, a relocation on a stack-pointer adjust, a call to
-//                               a function declared to return a struct or union by value, a branch
+//   frontend/mips.ts        16  a relocation with an addend, an address below the symbol, an indirect
+//                               `jr`, a non-numeric immediate, the caller's value a restore writes
+//                               read as a value (at the read, or through a merge), five refusals
+//                               about a disassembly the reader cannot account for, a `jal` no
+//                               relocation names, one relocated against a section, one in a delay
+//                               slot, one whose own slot is not the next word of its block, and a
+//                               `j` to another function (a tail call)
+//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
+//                               branch, an unparsable constant expression, and a magnitude with a
+//                               leading zero (octal to the assembler)
+//   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/ppc.ts          7  `stwu` with update, a relocation on a stack-pointer adjust, a branch
 //                               testing a cr field a call destroyed (no compiler emits it), a return
 //                               address `mflr` copied out and the body read as a value, the same
 //                               address stored anywhere but the link register's save word, the
 //                               reaching-compare throw whose reason is interpolated (as Thumb's), and
 //                               the two-armed branch denylist, whose template is interpolation end to end
-//                               (its two 64-bit refusals are NOT here — both carry `wide-call-arg`'s
-//                               phrase, because they are that capability gap seen from the frontend
-//                               with no register pair: one for a declared wide PARAMETER and one for
-//                               a declared wide RETURN)
-//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
-//                               branch, an unparsable constant expression, and a magnitude with a
-//                               leading zero (octal to the assembler)
-//   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/call-plan.ts    6  a call to a function declared to return a struct it cannot lower (its
+//                               interpolated reason), one whose parameters nothing sizes, one whose
+//                               declaration the lifted source cannot print (a type it has no spelling
+//                               for, or a bare parameter count that states none), one declared to
+//                               return both a struct and a 64-bit value, and one declared to return a
+//                               struct or union by value to a lowering that receives none through
+//                               memory (its two 64-bit refusals are NOT here — both carry
+//                               `wide-call-arg`'s phrase, because they are that capability gap seen
+//                               from a lowering with no register pair: one for a declared wide
+//                               PARAMETER and one for a declared wide RETURN)
 //   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
 //                               and a struct one call hands back in the return register passed on
 //                               as the next guessed call's first argument
@@ -125,7 +130,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
-    // disjunction is 17 of the 17 rows, so a pattern requiring the word only Thumb writes claims
+    // disjunction is 21 of the 21 rows, so a pattern requiring the word only Thumb writes claims
     // 0 of them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -247,7 +252,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     key: 'mips-calls',
-    label: 'MIPS calls (jal/jalr)',
+    label: 'MIPS calls through a register (jalr)',
     pattern: /MIPS calls not yet modelled/,
   },
   {
@@ -310,12 +315,13 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 53 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 57 rows whose own message names an FPU instruction.
     //
-    // The same file's ABI refusals are this class too (`frontend/fpu.ts`, and PowerPC's float-plus-
-    // call refusal): the single-precision arithmetic lifts through the float homes, and what still
-    // refuses there is the rest of the floating-point ABI — a float argument the homes cannot
-    // place, a call whose floating-point registers are unmodelled, a function computing in both
+    // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
+    // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision
+    // arithmetic lifts through the float homes, and what still refuses there is the rest of the
+    // floating-point ABI — a float argument the homes cannot place, a call whose floating-point
+    // registers are unmodelled, a function computing in both
     // precisions (`fmuls` feeding an `fadd`: the rounding between them is unmodelled).
     pattern:
       /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision/,
@@ -537,7 +543,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // which is why neither the key nor the label names one of them.
     key: 'reloc-halves',
     label: 'Relocated address halves (%hi / %lo, @l / @ha)',
-    pattern: /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half/,
+    pattern:
+      /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half|the address is never completed/,
   },
   {
     key: 'no-prototype-args',

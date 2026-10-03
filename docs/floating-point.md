@@ -115,14 +115,14 @@ table, whose biggest is 171. (The denominators are not the same and must not be 
 19,613 remaining functions across ten checkouts by each project's own convention; this counts 24,327
 `glabel`-delimited functions in the three MIPS `asm/` trees. The comparison is of magnitudes.)
 
-But **87% of the 7,371 also contain a `jal` or `jalr`**, and the MIPS frontend refuses a call
-outright — `grep -n "MIPS calls not yet modelled" packages/core/src/frontend/mips.ts` — so an FP
-model _alone_ reaches **950 = 39 per 1,000**. For scale, the 64-bit gap a round built in September
-is 1.8 per 1,000 of the same remaining work.
+But **87% of the 7,371 also contain a `jal` or `jalr`**, and the MIPS frontend refuses a call in a
+function that names an FPU register — `grep -n "the floating-point registers a call"
+packages/core/src/frontend/mips.ts` — so an FP model _alone_ reaches **950 = 39 per 1,000**. For
+scale, the 64-bit gap a round built in September is 1.8 per 1,000 of the same remaining work.
 
-**So: MIPS calls gate floating point**, which is the same conclusion board 004 reached from the
-other end, counting what the 64-bit ceiling costs. A float model shipped before them buys 39/1,000,
-not 303/1,000.
+**So: a float across a MIPS call gates floating point.** Board 004 put calls first from the other
+end, counting what the 64-bit ceiling costs. A float model shipped before it buys 39/1,000, not
+303/1,000.
 
 ## 2. The four layers, and which one the refusal names
 
@@ -253,11 +253,11 @@ recogniser together or neither** — the file says so, and this is the first kin
 
 ## 5. The recommendation
 
-**Do not build hardware floating point before MIPS calls — for MIPS remaining work.** The ordering
-is not a preference there; it is the 87% above. A float model landed first reaches 39 functions per
-1,000 of remaining MIPS work and turns 69 corpus declines into candidates, most of which would then decline one guard later on the
-call they also contain. Board 004 reached the same ordering from the 64-bit side; two independent
-gaps now point at the same missing capability.
+**Do not build hardware floating point before a float across a MIPS call — for MIPS remaining
+work.** The ordering is not a preference there; it is the 87% above. A float model landed first
+reaches 39 functions per 1,000 of remaining MIPS work and turns 69 corpus declines into candidates,
+most of which would then decline one guard later on the call they also contain. Board 004 put calls
+first from the 64-bit side; two independent gaps point at calls.
 
 It does not bind the corpus or PowerPC, which is why §6 exists: every MIPS row that declines on the
 FPU is a leaf. And when it is built, build it **downwards, not upwards**: the type and its spelling
@@ -310,7 +310,7 @@ are all synthetic — `fadd`, `fsub`, `fmul` and `fdiv` on ido7.1, gcc2.7.2kmc a
 FPU in the corpus is a leaf, and PowerPC calls are modelled, so 58 of the 69 are reachable with no call
 work. What bounds the PowerPC half is a refusal of this layer's own: a function that computes on a
 float and makes a call refuses, because which FPRs a callee reads, returns in and destroys is not
-modelled.
+modelled. MIPS refuses the same way, on any FPU register in a function that makes a call.
 
 **The next layer is 32-bit FP load and store** (`lwc1`/`swc1`, `lfs`/`stfs`): the second count above,
 15 rows, 6 of which m2c matches, real rows among them. §3 is the warning that comes with it — the type

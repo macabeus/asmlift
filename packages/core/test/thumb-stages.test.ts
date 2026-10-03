@@ -8,15 +8,7 @@ import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC } from '../src/target';
 
-const {
-  readThumbText,
-  thumbCfg,
-  assertScratchRegsPartitioned,
-  thumbCallDeclarations,
-  thumbFillOf,
-  openBlockCursor,
-  lowerCall,
-} = __testing;
+const { readThumbText, thumbCfg, assertScratchRegsPartitioned, thumbFillOf, openBlockCursor, lowerCall } = __testing;
 
 // Every stage up to the fill, as the lift runs them: what `fillThumbBlock` reads.
 const fillOf = (asm: string, prototypes: Prototypes = {}) =>
@@ -123,88 +115,6 @@ describe('assertScratchRegsPartitioned', () => {
     expect(() => assertScratchRegsPartitioned({ ...ARMV4T_AGBCC, scratchRegs: ['r3'] })).toThrow(
       /scratch register r3 is not among the non-argument registers/,
     );
-  });
-});
-
-describe('thumbCallDeclarations', () => {
-  const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
-  const ONE = { kind: 'struct' as const, members: [{ name: 'a', type: 's32' }] };
-
-  test('places a `long long` in two argument words, the second one staged', () => {
-    const { declaredCall } = thumbCallDeclarations('f', ARMV4T_AGBCC, {
-      g: { params: ['s32', 's32', 's32', 'long long'] },
-    });
-    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], doubles: new Set(), block: [0], params: 4 });
-  });
-
-  test('puts the hidden pointer of a struct returned through memory first', () => {
-    const { declaredCall } = thumbCallDeclarations('f', ARMV4T_AGBCC, {
-      mk4: { params: ['s32'], returns: 'struct S4', returnLayout: S4 },
-    });
-    const declared = declaredCall('mk4');
-    expect(declared).toMatchObject({ widths: [32, 32], block: null, params: 1 });
-    expect(declared?.returned).toMatchObject({ type: { kind: 'struct' } });
-  });
-
-  test('answers a struct returned in r0 with no arity stated', () => {
-    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, { mv: { returns: 'struct One', returnLayout: ONE } });
-    expect(calls.declaredCall('mv')).toBeNull();
-    expect(calls.registerStructReturn('mv')).toBe('register');
-  });
-
-  test('declares nothing for a callee no table names', () => {
-    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
-    expect(calls.declaredCall('g')).toBeNull();
-    expect(calls.returnsPair('g')).toBe(false);
-  });
-
-  test("lets a project's re-declaration of a runtime helper disable its pair", () => {
-    const declared = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
-    expect(declared.wideHelper('__muldi3')).not.toBeNull();
-    expect(declared.returnsPair('__muldi3')).toBe(true);
-    const redeclared = thumbCallDeclarations('f', ARMV4T_AGBCC, {
-      __muldi3: { params: ['s64', 's64'], returns: 's64' },
-    });
-    expect(redeclared.wideHelper('__muldi3')).toBeNull();
-    expect(redeclared.returnsPair('__muldi3')).toBe(false);
-  });
-
-  test("answers a project callee's pair return from its declared return width", () => {
-    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {
-      g: { params: ['s32'], returns: 'long long' },
-      h: { params: ['s32'], returns: 's32' },
-      __divsi3: { params: ['s32', 's32'], returns: 'long long' },
-    });
-    expect(calls.returnsPair('g')).toBe(true);
-    expect(calls.returnsPair('h')).toBe(false);
-    // a name the runtime table carries is answered by the table alone
-    expect(calls.returnsPair('__divsi3')).toBe(false);
-  });
-
-  test("names the runtime's soft-float helpers, and nothing else, as float helpers", () => {
-    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
-    expect(calls.isFloatHelper('__adddf3')).toBe(true);
-    expect(calls.isFloatHelper('__muldi3')).toBe(false);
-    expect(calls.isFloatHelper('g')).toBe(false);
-    expect(calls.isFloatHelper('toString')).toBe(false);
-  });
-
-  test("answers whether a callee's declaration rules out a hidden return pointer", () => {
-    const calls = thumbCallDeclarations('f', ARMV4T_AGBCC, {
-      g: { params: 1, returnsVoid: true },
-      h: { params: [] },
-    });
-    expect(calls.returnsWithoutHiddenPointer('g')).toBe(true);
-    expect(calls.returnsWithoutHiddenPointer('h')).toBe(false);
-    expect(calls.returnsWithoutHiddenPointer('k')).toBe(false);
-    // a signature the C standard fixes
-    expect(calls.returnsWithoutHiddenPointer('memcpy')).toBe(true);
-  });
-
-  test("leaves a pair-returning call's high register out of what it clobbers", () => {
-    const { callClobbers, pairReturnClobbers } = thumbCallDeclarations('f', ARMV4T_AGBCC, {});
-    expect(callClobbers).toContain('r1');
-    expect(pairReturnClobbers).toEqual(callClobbers.filter((r) => r !== 'r1'));
   });
 });
 
@@ -344,6 +254,17 @@ describe('lowerCall', () => {
     expect(concat.operands.map((v) => fill.ssa.paramReg.get(v))).toEqual(['r0', 'r1']);
     expect(call.results[0].type).toEqual(T.unk(64));
     expect(fill.pairs.pairCallee.get(call.results[0])).toBe('g');
+  });
+
+  // `validatePrototypes` refuses this table; `decompile` takes a table it never checked
+  test.each([
+    ['through memory', ['a', 'b']],
+    ['in r0', ['a']],
+  ])('refuses a callee declared to return a 64-bit value and a struct returned %s', (_where, members) => {
+    const returnLayout = { kind: 'struct' as const, members: members.map((name) => ({ name, type: 's32' })) };
+    expect(() => callIn({ g: { params: ['s32'], returns: 's64', returnLayout } })).toThrow(
+      "cannot lift 'f': `g` is declared to return both a struct or union and a 64-bit value",
+    );
   });
 
   test("defines r0 with a word call's result", () => {

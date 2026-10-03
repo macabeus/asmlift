@@ -29,7 +29,7 @@ import {
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
-import { FrontendUnsupportedError } from './errors';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 
 export interface SsaBuilder {
   fn: Fn;
@@ -53,8 +53,7 @@ export interface SsaBuilder {
    *  pass argument 0 in the return register (r0/r0, r3/r3), so on them the exemption is the whole
    *  of the gap. MIPS returns in `v0` and passes in `a0`, so `clobberedByCall` lists `a0` for both
    *  MIPS targets and there is no exemption to reason about — which is the sound direction, not a
-   *  hole. What bounds the path today is earlier still: `frontend/mips.ts` refuses on the `jal`
-   *  before any argument is read, so neither MIPS target reaches this at all.
+   *  hole.
    *
    *  A DECLARED arity uses `readVar`, and must: there the callee says the argument exists, so
    *  reading a destroyed register for it is a wrong value with nothing to retract it. */
@@ -86,12 +85,20 @@ export interface SsaBuilder {
    *  "a def reaches here" and "a value reaches here" are the same question only when every def is
    *  a value. */
   hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
+  /** {@link hasReachingDef}, with a path ending where a call destroyed `reg` (`noteCall`): whether a
+   *  value this function named reaches it here on some path. A path that brings the destroyed bytes
+   *  and one that brings a value still answer yes, and the read that follows refuses at `finish`. */
+  holdsValue(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
   /** The entry parameter `reg` still holds at this point of block `b`, taken WITHOUT a read. A read
    *  leaves a definition behind, and `hasReachingDef` counts it as argument setup, so a frontend that
    *  only moves the argument somewhere (a frame store) would raise the guessed arity of every later
    *  prototype-less call. `undefined` where "still the entry value" is not shown: a definition or a
    *  call reaches from some path, or a block on the way is not filled yet. */
   entryValue(reg: string, b: number): Value | undefined;
+  /** Whether `reg` still holds its entry value at this point of block `b`, in {@link entryValue}'s
+   *  sense, answered without the entry parameter that one hands back. A callee-saved register stored
+   *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
+  holdsEntryValue(reg: string, b: number): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
    *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
@@ -687,8 +694,11 @@ export function makeSsaBuilder(
     obligedParams[b].set(key, p);
   };
 
-  const hasReachingDef = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean => {
+  const reaches = (reg: string, b: number, accept: (v: Value) => boolean, throughCalls: boolean): boolean => {
     const walk = (at: number, seen: Set<number>): boolean => {
+      if (!throughCalls && clobberedLocal[at].has(reg)) {
+        return false;
+      }
       const own = defs[at].get(reg);
       // A def `accept` rejects does not fall through to the predecessors: it is still a def, and
       // nothing older than it reaches past it.
@@ -703,8 +713,12 @@ export function makeSsaBuilder(
     };
     return walk(b, new Set<number>());
   };
+  const hasReachingDef = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean =>
+    reaches(reg, b, accept, true);
+  const holdsValue = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean =>
+    reaches(reg, b, accept, false);
 
-  const entryValue = (reg: string, b: number): Value | undefined => {
+  const holdsEntryValue = (reg: string, b: number): boolean => {
     // A predecessor is known only once filled, and `b` itself only up to here — so a path that comes
     // back round to `b` carries writes this walk has not seen.
     const untouched = (at: number, seen: Set<number>): boolean => {
@@ -725,7 +739,10 @@ export function makeSsaBuilder(
       const ps = distinctPreds(at);
       return ps.length === 0 ? at === 0 : ps.every((p) => untouched(p, seen));
     };
-    if (!clean(b, new Set())) {
+    return clean(b, new Set());
+  };
+  const entryValue = (reg: string, b: number): Value | undefined => {
+    if (!holdsEntryValue(reg, b)) {
       return undefined;
     }
     ensureParam(reg, 0);
@@ -812,7 +829,9 @@ export function makeSsaBuilder(
     paramReg,
     ensureParam,
     hasReachingDef,
+    holdsValue,
     entryValue,
+    holdsEntryValue,
     noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see
@@ -956,15 +975,52 @@ export function makeSsaBuilder(
 /** Best-effort call arity when a callee has no prototype: the count of contiguous argument
  *  registers with a value reaching the call's block. Correct when the arguments are set up in
  *  the calling block; it can under-count pass-through parameters — which is why a prototype's
- *  declared `params` is authoritative when available. */
+ *  declared `params` is authoritative when available.
+ *
+ *  `accept` says which definitions are values (`SsaBuilder.hasReachingDef`). A pending high half
+ *  is a def but not a value, and counted it raises the arity: a `lis` hoisted into the prologue
+ *  leaves its half in r4 across an intervening call and makes `strlen(s)` into
+ *  `strlen(s, <half>)`, which then refuses at the read.
+ *
+ *  `gap` MAKES A GAP REFUSE. The count is contiguous, so an argument register with nothing reaching
+ *  it ends it — and one is empty for two opposite reasons. Either the call really takes that few
+ *  arguments, or the register still holds this function's own untouched incoming argument, a value
+ *  the machine passes on that SSA has no definition for because nothing ever wrote it. When a
+ *  LATER argument register does hold a value the second reading is the only one left, and taking
+ *  the first drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` sets
+ *  up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
+ *  `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
+ *  cannot be decided here — the function's own arity is exactly what is missing — so this refuses
+ *  and names the gap rather than guessing. A declaration answers it, and this scan is never
+ *  weighed against one: it is a guess, and a guess that cannot fail cannot witness a width a
+ *  declaration left open. */
 export function fallbackArgc(
-  ssa: { hasReachingDef(reg: string, b: number): boolean },
-  argRegs: string[],
+  ssa: { hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean },
+  argRegs: readonly string[],
   bi: number,
+  opts: {
+    accept?: (v: Value) => boolean;
+    /** the call's function and address, and the frontend's own refusal */
+    gap?: { name: string; at: number; fail: FrontendRefusal };
+  } = {},
 ): number {
+  // whether the caller set argument register k up: a definition reaches it, through a call too
+  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
   let n = 0;
-  while (n < argRegs.length && ssa.hasReachingDef(argRegs[n], bi)) {
+  while (n < argRegs.length && setUp(n)) {
     n++;
+  }
+  if (opts.gap !== undefined) {
+    const { name, at, fail } = opts.gap;
+    for (let k = n + 1; k < argRegs.length; k++) {
+      if (setUp(k)) {
+        fail(
+          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${argRegs[k]} holds a ` +
+            `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
+            `the call does not pass look the same here, so the argument count is not decidable`,
+        );
+      }
+    }
   }
   return n;
 }

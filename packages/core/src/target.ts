@@ -64,7 +64,13 @@
 import { type CodegenProfile, type FlagFamily, dialectOf, parseFlags } from './codegen-flags';
 import type { Op } from './ir/core';
 import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
-import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
+import {
+  AGBCC_RUNTIME_HELPERS,
+  IDO_RUNTIME_HELPERS,
+  MIPS_GCC_RUNTIME_HELPERS,
+  PPC_MWCC_RUNTIME_HELPERS,
+  type RuntimeHelper,
+} from './runtime-helpers';
 import type { StaticLayout } from './structure/local-statics';
 import type { StructureOptions } from './structure/structure';
 import type { SwitchBoundCase } from './structure/switch-recover';
@@ -196,8 +202,9 @@ export interface TargetDescription {
    *
    *  o32 MIPS has an FPU and a double after an integer argument still takes two general words,
    *  high first, at an even word as its `long long` does (IDO 7.1). The MIPS targets do not state it
-   *  because no MIPS frontend lays out a declared call. PowerPC EABI passes a double in a float
-   *  register that takes no general word (`fpu.slots: 'separate'`), so it has none to state. */
+   *  because their frontend lays out no 64-bit argument (`CallLowering.pairs`). PowerPC EABI passes
+   *  a double in a float register that takes no general word (`fpu.slots: 'separate'`), so it has
+   *  none to state. */
   doubleArgWords?: 'high-first';
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
@@ -246,13 +253,7 @@ export interface TargetDescription {
    *  (`raise/widehelpers.ts` states this at the refusal it exists to make). Absence is still the
    *  right default, because a name outside the table cannot be told from a project's own
    *  `__`-prefixed function by spelling — but it buys nothing on a target whose runtime has simply
-   *  not been enumerated.
-   *
-   *  BOTH MIPS TARGETS SIT THERE TODAY, and IDO's runtime is a family of its own (`__ll_mul`,
-   *  `__ll_div`, `__ull_div`), so a scan for either of the other two spellings reports zero on it.
-   *  What that costs today is nothing, and the gate bounding it is not here: `frontend/mips.ts`
-   *  refuses on the `jal` before any call is modelled at all. The moment it does not, enumerating
-   *  those names is owed with it. */
+   *  not been enumerated. */
   runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
@@ -917,9 +918,8 @@ export const MIPS_IDO: TargetDescription = {
   compiler: 'ido',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
-  // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. DECLARED and not yet exercised —
-  // `frontend/mips.ts` refuses a call outright, so nothing on this target reaches the read past one.
-  // Stated anyway, because the field is what makes the refusal unforgettable rather than optional.
+  // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. `frontend/mips.ts` reads the rest, and
+  // `ra`, as the registers a frame store SAVES.
   callerSaved: [
     'at',
     'v0',
@@ -940,6 +940,7 @@ export const MIPS_IDO: TargetDescription = {
     't9',
     'ra',
   ],
+  runtimeHelpers: IDO_RUNTIME_HELPERS,
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
   // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
   fpu: O32_FPU,
@@ -965,8 +966,7 @@ export const MIPS_IDO: TargetDescription = {
     // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
     // correspondence off it: 16 of 16 spills, and rank → offset unchanged when the declaration
     // list is reversed, which is what separates declaration rank from the order of the
-    // assignments. No ido7.1 benchmark row lifts with two or more spilled user locals — the only
-    // spilling shape in the corpus carries a call, and this frontend declines a call — so no row
+    // assignments. No ido7.1 benchmark row lifts with two or more spilled user locals, so no row
     // can tell a wrong value from a right one here.
     //
     // FLIP CONDITION, and it has TWO parts because the second is easy to miss. (1) The first
@@ -987,8 +987,7 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
-  // The same O32 convention MIPS_IDO carries, and declared for the same reason: the frontend
-  // refuses a call, so it is the field's presence rather than its use that matters here.
+  // The same O32 convention MIPS_IDO carries, read the same way.
   callerSaved: [
     'at',
     'v0',
@@ -1009,6 +1008,7 @@ export const MIPS_GCC: TargetDescription = {
     't9',
     'ra',
   ],
+  runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
   // and the row it comes from matches only with the parameters as the loop's homes. The other

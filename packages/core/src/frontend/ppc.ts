@@ -37,13 +37,13 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
-import { returnedAggregate, returnsInMemory } from '../aggregate';
 import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredCallArgs, declaredReturnWidth, declaresAggregateReturn } from '../proto';
+import type { Prototypes } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
+import { callDeclarations } from './call-plan';
 import {
   type DisasmInstr,
   parseImm,
@@ -52,7 +52,7 @@ import {
   sliceSymbol,
 } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
-import { FrontendUnsupportedError } from './errors';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
@@ -61,8 +61,8 @@ import { makeHighHalves } from './high-half';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
-import { clobberedByCall, makeSsaBuilder } from './ssa';
+import { abiSortEntryParams, fallbackArgc, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -588,6 +588,17 @@ export function lift(
     isFpKey(k) ? (fpType ?? T.f32()) : undefined,
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
+  /** This frontend's refusal, for the shared code that refuses on its behalf. */
+  const fail: FrontendRefusal = (message) => {
+    throw new PpcUnsupportedError(message);
+  };
+  const calls = callDeclarations(
+    name,
+    target,
+    prototypes,
+    { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false },
+    fail,
+  );
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
    *  way a placeholder could leak past it, lives in frontend/high-half.ts — shared with
@@ -606,9 +617,7 @@ export function lift(
     hi: '@ha',
     hiArticle: 'an',
     lo: '@l',
-    fail: (message) => {
-      throw new PpcUnsupportedError(message);
-    },
+    fail,
   });
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
@@ -623,46 +632,6 @@ export function lift(
   const returnAddresses = new Map<Value, number>();
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
-  const CALL_CLOBBERS = clobberedByCall(target);
-
-  // Best-effort call arity when a callee has no prototype: the count of contiguous argument
-  // registers (r3..) with a VALUE reaching the call. A prototype's `params` is authoritative when
-  // supplied; this liveness heuristic covers the rest.
-  //
-  // A pending `@ha` high half is a def but not a value, and it must not raise the count: a `lis`
-  // hoisted into the prologue leaves its half in r4 across an intervening call, and counted, it
-  // makes `strlen(s)` into `strlen(s, <half>)` — which then refuses at the read. Measured on
-  // `pikmin:searchKanjiCode__FUs`, whose `lis r4` at 0x4 pairs only at 0x28, past the `bl strlen`.
-  //
-  // A GAP REFUSES. The count is contiguous, so an argument register with nothing reaching it ends
-  // it — and one is empty for two opposite reasons. Either the call really takes that few
-  // arguments, or the register still holds this function's own untouched incoming argument, a value
-  // the machine passes on that SSA has no definition for because nothing ever wrote it. When a
-  // LATER argument register does hold a value the second reading is the only one left, and taking
-  // the first drops that argument and every one after it: `ac-decomp:evw_anime_colreg_manual` sets
-  // up seven registers for `evw_color_set` and, with r4 at its incoming value, lifts to
-  // `evw_color_set(a0);` — its divide, its multiply and five arguments gone. Which reading it is
-  // cannot be decided here — the function's own arity is exactly what is missing — so this refuses
-  // and names the gap rather than guessing. A prototype answers it (`declaredCallArgs` is asked
-  // first), and this scan is never weighed against one: it is a guess, and a guess that cannot
-  // fail cannot witness a width a declaration left open.
-  const fallbackArgc = (bi: number, at: number): number => {
-    const holdsValue = (k: number) => ssa.hasReachingDef(ARG_REGS[k], bi, (v) => !highHalves.has(v));
-    let n = 0;
-    while (n < ARG_REGS.length && holdsValue(n)) {
-      n++;
-    }
-    for (let k = n + 1; k < ARG_REGS.length; k++) {
-      if (holdsValue(k)) {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${ARG_REGS[k]} holds a ` +
-            `value and ${ARG_REGS[n]} holds none — an argument register left at its incoming value and one ` +
-            `the call does not pass look the same here, so the argument count is not decidable`,
-        );
-      }
-    }
-    return n;
-  };
 
   // THE FRAME, as two kinds of word slot, each named by its offset from the ENTRY r1
   // (`r1Displacements`).
@@ -1054,82 +1023,22 @@ export function lift(
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
-          // ONE QUESTION, ONE ANSWER, AND THE OTHER FRONTEND ASKS IT THE SAME WAY. A declaration
-          // states C PARAMETERS and a call site walks argument REGISTERS; `proto.ts`
-          // `declaredCallArgs` converts between them and `frontend/thumb.ts` reads the same
-          // answer out of the same function. A user-supplied fact that two frontends convert
-          // differently is a bug wherever it is read second.
-          //
-          // A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `declaredCallArgs` abstains for the
-          // whole list and this falls to `fallbackArgc` — the guess a callee with no prototype gets,
-          // which reads each argument register through `readGuessedArg` so `finish()` can retract
-          // the ones a call destroyed. A declaration is not an excuse to ASSERT registers whose
-          // count came out of the same guess.
-          //
-          // A PARAMETER WIDER THAN A REGISTER TRAVELS IN A PAIR, and this frontend has no pair.
-          // Every argument register it reads becomes its own value, so a declaration that spends
-          // two registers on one parameter is honoured by handing the callee one HALF — the high
-          // half here, since PowerPC is big-endian — and losing the other. That is a compiling,
-          // plausible, wrong program rather than a gap, so it refuses too.
-          //
-          // `Object.hasOwn` because `prototypes` is caller-supplied JSON read by symbol name: a
-          // callee named `toString` otherwise reads a `Function` off `Object.prototype`.
-          const own = Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined;
-          // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE. One the target returns through
-          // memory is handed a hidden pointer in r3, with every argument one register up — a call
-          // this frontend does not lower. One it returns in r3/r3:r4 takes its arguments where they
-          // are declared, and those registers hold the struct's bytes, which nothing here reads as
-          // a struct: they are destroyed by the call, so a read of one past it refuses.
-          const aggregateInRegisters = declaresAggregateReturn(own);
-          if (aggregateInRegisters && returnsInMemory(returnedAggregate(own!), target) !== false) {
-            throw new PpcUnsupportedError(
-              `cannot lift '${name}': '${sym}' is declared to return ${own?.returns ?? 'a struct or union'} by value — ` +
-                'a struct returned through a hidden pointer, or one nothing here can size, is not modelled',
-            );
-          }
-          const widths = declaredCallArgs(own, target)?.widths;
-          let declared: number | undefined;
-          if (widths !== undefined) {
-            const wideAt = widths.findIndex((w) => w > 32);
-            if (wideAt >= 0) {
-              throw new PpcUnsupportedError(
-                `cannot lift '${name}': one half of a 64-bit value would be handed to '${sym}' — its parameter ` +
-                  `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
-                  'register as its own value rather than building the pair the ABI passes it in',
-              );
-            }
-            // Every width here is a single register — the refusal above is what makes that true —
-            // so the parameter count and the argument-register count are the same number.
-            declared = widths.length;
-            if (declared > ARG_REGS.length) {
-              throw new PpcUnsupportedError(
-                `cannot lift '${name}': outgoing stack arguments not modelled — '${sym}' is declared with ` +
-                  `${declared} parameters and the argument registers carry ${ARG_REGS.length}, so the rest ` +
-                  `travel in its parameter area on the stack`,
-              );
-            }
-          }
-          // THE SAME RULE ON THE WAY BACK, and it needs its own refusal because the declaration
-          // reaches the candidate whether or not this frontend can act on it. `FnProto.returns`
-          // states how many registers a callee hands back, `frontend/thumb.ts` reads the pair, and
-          // `l3/symbol-refs.ts` prints `long long g(void);` into the candidate's own translation
-          // unit on EVERY target. This frontend reads the return register alone, so honouring the
-          // declaration silently would lift `return g();` off r3 — the HIGH half on big-endian
-          // PowerPC — under a declaration that makes `return g();` mean the LOW one. Same source,
-          // opposite value, compiles, no gap: the outcome the parameter refusal above exists to
-          // prevent, arriving through the return.
-          //
-          // The other half of the pair already refuses (`r4 is read on a path where a call has
-          // destroyed it`), so this is the arm that was left, not a second reading of one gap.
-          const returned = declaredReturnWidth(Object.hasOwn(prototypes, sym) ? prototypes[sym] : undefined, target);
-          if (returned !== undefined && returned > 32) {
-            throw new PpcUnsupportedError(
-              `cannot lift '${name}': '${sym}' would hand back one half of a 64-bit value — its return is ` +
-                'declared wider than a register, and this frontend reads the return register as the whole ' +
-                'value rather than building the pair the ABI hands back',
-            );
-          }
-          const argc = declared ?? fallbackArgc(bi, ins.addr);
+          // WHAT THE CALL IS comes from its callee's declaration, read where every frontend reads
+          // one (`calls.plan`). A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `widths` is null
+          // and this falls to `fallbackArgc` — the guess a callee with no declaration gets, which
+          // reads each argument register through `readGuessedArg` so `finish()` can retract the
+          // ones a call destroyed. A declaration is not an excuse to ASSERT registers whose count
+          // came out of the same guess.
+          const plan = calls.plan(sym);
+          // every width is one register: this lowering builds no pair (`CallLowering.pairs`)
+          const declared = plan.widths?.length;
+          // a pending `@ha` half is not an argument, and a gap refuses (`fallbackArgc`)
+          const argc =
+            declared ??
+            fallbackArgc(ssa, ARG_REGS, bi, {
+              accept: (v) => !highHalves.has(v),
+              gap: { name, at: ins.addr, fail },
+            });
           // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
           // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the
           // back chain and the LR save word), and a value stored there that reaches the call is that
@@ -1180,12 +1089,12 @@ export function lift(
           if (declared === undefined) {
             ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
           }
-          if (aggregateInRegisters) {
-            ssa.noteCall(bi, [...CALL_CLOBBERS, RET]);
-          } else {
+          // a struct handed back in registers is their bytes, which nothing here reads as a struct:
+          // the call destroys them, so a read of one past it refuses
+          if (plan.returns.kind !== 'register-struct') {
             write(RET, res);
-            ssa.noteCall(bi, CALL_CLOBBERS);
           }
+          ssa.noteCall(bi, plan.clobbers);
           for (const cr of CR_VOLATILE) {
             cmpDef.set(
               cr,

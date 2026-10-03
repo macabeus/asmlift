@@ -14,7 +14,7 @@ import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
 import { recognizeWideHelpers } from '../src/raise/widehelpers';
 import { PPC_MWCC_RUNTIME_HELPERS } from '../src/runtime-helpers';
-import { PPC_MWCC } from '../src/target';
+import { MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const rel = (at: string, sym: string) => `\t\t\t${at}: R_PPC_REL24\t${sym}\n`;
 
@@ -141,5 +141,78 @@ describe('the op each PPC runtime helper computes', () => {
       PPC_MWCC,
     );
     expect(block.ops[0].opcode).toBe('call');
+  });
+});
+
+// THE TWO MIPS RUNTIMES, as their compilers call them (`runtime-helpers.ts`, compiled at each
+// toolchain's canonical flags). Driven through the recognizer over the pair shape, as the PPC
+// table is above, because `frontend/mips.ts` builds no pair either and no lift reaches the fold.
+describe('the op each MIPS runtime helper computes', () => {
+  const folded = (target: TargetDescription, callee: string): string => {
+    const [a, b, r] = [mkValue(T.unk(64)), mkValue(T.unk(64)), mkValue(T.unk(64))];
+    const block: Block = {
+      params: [a, b],
+      ops: [
+        mkOp('call', { operands: [a, b], results: [r], attrs: { target: callee } }),
+        mkOp('ret', { operands: [r] }),
+      ],
+    };
+    recognizeWideHelpers(
+      {
+        name: 'f',
+        blocks: [block],
+        writeOrder: undefined,
+        slotHomes: undefined,
+        paramEvidence: undefined,
+        localObjects: undefined,
+      },
+      target,
+    );
+    return block.ops[0].opcode;
+  };
+
+  test("IDO's `__ll_*` and `__ull_*`, one multiply and one left shift for both signednesses", () => {
+    expect(
+      Object.fromEntries(
+        [
+          '__ll_mul',
+          '__ll_div',
+          '__ull_div',
+          '__ll_rem',
+          '__ull_rem',
+          '__ll_lshift',
+          '__ll_rshift',
+          '__ull_rshift',
+        ].map((h) => [h, folded(MIPS_IDO, h)]),
+      ),
+    ).toEqual({
+      __ll_mul: 'mul',
+      __ll_div: 'sdiv',
+      __ull_div: 'udiv',
+      __ll_rem: 'smod',
+      __ull_rem: 'umod',
+      __ll_lshift: 'shl',
+      __ll_rshift: 'shr_s',
+      __ull_rshift: 'shr_u',
+    });
+  });
+
+  test("GCC's four divisions, and no multiply or shift, which it open-codes", () => {
+    expect(['__divdi3', '__udivdi3', '__moddi3', '__umoddi3'].map((h) => folded(MIPS_GCC, h))).toEqual([
+      'sdiv',
+      'udiv',
+      'smod',
+      'umod',
+    ]);
+    expect(Object.values(MIPS_GCC.runtimeHelpers ?? {}).flatMap((h) => (h.op === undefined ? [] : [h.op]))).toEqual([
+      'sdiv',
+      'udiv',
+      'smod',
+      'umod',
+    ]);
+  });
+
+  test('an IDO shift count is a 64-bit parameter: the caller builds it as a pair', () => {
+    expect(MIPS_IDO.runtimeHelpers?.__ll_lshift?.params).toEqual([64, 64]);
   });
 });
