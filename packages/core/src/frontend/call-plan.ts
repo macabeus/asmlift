@@ -8,9 +8,13 @@
 // Every answer is read through the generic `TargetDescription` surface. WHERE each argument word
 // travels is the frontend's own placement (Thumb's outgoing block, O32's `16(sp)`): a width list
 // here counts words as `wordsOf` does, which is agbcc's placement, and a lowering that builds no
-// pair (`CallLowering.pairs`) refuses a 64-bit width before any count is taken.
+// pair (`CallLowering.pairs`) refuses a 64-bit width before any count is taken. The call a plan
+// lowers to is built here too (`CallDeclarations.lower`), and asks the frontend (`CallSite`) only
+// what its ISA alone knows: how it reads and writes a register, where an argument word past the
+// registers lives, and how it builds a pair.
 import { aggregateType, returnedAggregate, returnsInMemory, returnsWithoutHiddenPointer } from '../aggregate';
-import { type IrType, typeToString } from '../ir/types';
+import { type Value, mkOp, mkValue } from '../ir/core';
+import { type IrType, T, typeToString } from '../ir/types';
 import {
   type FnProto,
   type Prototypes,
@@ -27,7 +31,8 @@ import {
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import type { FrontendRefusal } from './errors';
-import { clobberedByCall } from './ssa';
+import type { HighHalves } from './high-half';
+import { type SsaBuilder, clobberedByCall, fallbackArgc } from './ssa';
 
 /** What the frontend's own call lowering can carry out. */
 export interface CallLowering {
@@ -78,13 +83,11 @@ export interface CallPlan {
 
 /** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
  *  name. A declaration is the project's prototype or the compiler's runtime table, and a frontend
- *  reads either only here: its outgoing-argument analysis, its call lowering (`plan`) and the
- *  frame-object audit (`FrameObjectAudit.returnsWithoutHiddenPointer`) ask these questions. */
+ *  reads either only here: its outgoing-argument analysis, its call lowering (`plan`, `lower`) and
+ *  the frame-object audit (`FrameObjectAudit.returnsWithoutHiddenPointer`) ask these questions. */
 export interface CallDeclarations {
   /** what any call leaves holding nothing this function can name (`clobberedByCall`) */
   readonly callClobbers: readonly string[];
-  /** whether the runtime table names the callee one of its soft-float helpers */
-  isFloatHelper(callee: string): boolean;
   /** whether a declaration rules out a struct returned through a hidden pointer at argument 0
    *  (`returnsWithoutHiddenPointer`, aggregate.ts) */
   returnsWithoutHiddenPointer(callee: string): boolean;
@@ -92,6 +95,44 @@ export interface CallDeclarations {
    *  call; null where no declaration sizes them */
   declaredCall(callee: string): DeclaredCall | null;
   plan(callee: string): CallPlan;
+  /** the call `site` makes, planned and lowered: its `call` op, its result and its clobbers */
+  lower(site: CallSite): void;
+}
+
+/** WHAT ONE ISA ALONE KNOWS ABOUT A CALL: everything `CallDeclarations.lower` asks a frontend. The
+ *  argument and return registers are the target's. */
+export interface CallSite {
+  readonly callee: string;
+  readonly ssa: SsaBuilder;
+  /** the block the call is made in */
+  readonly bi: number;
+  /** an argument register the plan states, read as this frontend reads a register */
+  read(reg: string): Value;
+  /** the call's result, written as this frontend writes a register */
+  write(reg: string, v: Value): void;
+  /** argument word `k` past the registers, where this ABI places it (`CallLowering.stackArgs`) */
+  stackWord?(k: number): Value;
+  /** how this frontend builds and splits a pair (`CallLowering.pairs`) */
+  readonly pairs?: CallPairs;
+  /** the high halves this frontend defines registers with, which are no argument */
+  readonly highHalves?: HighHalves;
+  /** what a guessed arity refuses on; without it a gap in the argument registers ends the count */
+  readonly guess?: {
+    /** the call's address, for the gap refusal */
+    readonly at: number;
+    /** refuses a guess of `argc` words this ABI's outgoing area could extend */
+    refuse(argc: number): void;
+  };
+}
+
+/** How a frontend builds a 64-bit value out of two words and splits one. */
+export interface CallPairs {
+  fuse(lo: Value, hi: Value): Value;
+  project(whole: Value, half: 'lo' | 'hi'): Value;
+  /** the pair each projected half was split from */
+  readonly halfOf: ReadonlyMap<Value, { readonly whole: Value; readonly half: 'lo' | 'hi' }>;
+  /** the callee that handed back each pair a call returned */
+  readonly pairCallee: Map<Value, string>;
 }
 
 export function callDeclarations(
@@ -120,6 +161,10 @@ export function callDeclarations(
     );
   }
   const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
+  const isFloatHelperName = (callee: string): boolean => {
+    const h = lookupHelper(target.runtimeHelpers, callee);
+    return h !== undefined && isFloatHelper(h);
+  };
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
@@ -376,15 +421,150 @@ export function callDeclarations(
           : [...callClobbers, target.returnReg],
     };
   };
+  // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
+  // `call` op, the guessed arity's record, the result and the clobbers.
+  const lower = (site: CallSite): void => {
+    const { callee, ssa, bi, pairs, guess, highHalves } = site;
+    if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
+      throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
+    }
+    const p = plan(callee);
+    // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
+    // runtime table or the project's headers. Both answer the same question, so the walk that
+    // reads argument registers off the answer is written once; two walks would be two chances
+    // for the pairing rule and the arity rule to disagree.
+    //
+    // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
+    // `declaredCallArgs`), so `widths` is null for it and this falls to the guess below —
+    // the same answer the callee would get with no prototype at all.
+    const { widths, returns } = p;
+    const argc =
+      widths === null
+        ? fallbackArgc(ssa, target.argRegs, bi, {
+            accept: (v) => !highHalves?.has(v),
+            gap: guess && { name, at: guess.at, fail },
+          })
+        : wordsOf(widths);
+    if (widths === null) {
+      guess?.refuse(argc);
+    }
+    // ARGUMENT WORD `k`: a register, or past the registers the word the frontend's ABI places
+    // there. A guess never exceeds `argRegs.length`, so a stack word can only come from a stated
+    // width.
+    const word = (k: number): Value => (k < target.argRegs.length ? site.read(target.argRegs[k]) : site.stackWord!(k));
+    // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
+    // `finish()` answers by dropping the ones a call has been through; a STATED width asserts
+    // they exist, so a destroyed register read for it is a wrong value nothing retracts. A
+    // guess is a list of single words by construction — `fallbackArgc` counts registers.
+    const guessed = (k: number): Value => {
+      const r = target.argRegs[k];
+      const v = ssa.readGuessedArg(r, bi);
+      return highHalves ? highHalves.guardRead(name, r, v) : v;
+    };
+    const args: Value[] = [];
+    let k = 0;
+    for (const w of widths ?? Array.from({ length: argc }, () => 32)) {
+      // A 64-BIT PARAMETER IS TWO ARGUMENT WORDS AND ONE VALUE, so the pair is built here
+      // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
+      // the second reading anyway, since the structurer materialises an effectful call once
+      // per result. Its words are wherever the frontend's ABI placed them.
+      args.push(w > 32 ? pairs!.fuse(word(k), word(k + 1)) : widths === null ? guessed(k) : word(k));
+      k += w > 32 ? 2 : 1;
+    }
+    // A 64-BIT VALUE MAY NOT LEAVE AS A WORD WHERE NOTHING SAYS HOW WIDE THE PARAMETER IS,
+    // and this is the refusal — GUARDED ON `widths === null`, which is the whole of the
+    // condition. A guessed arity counts argument registers, so a caller that computes a pair
+    // and a caller that computes two words set up the same two registers: passing the low
+    // half alone invents a truncation the asm never wrote, passing both halves as two words
+    // invents an argument. Both recompile to the very call being lifted, so the differ
+    // scores them exactly as it scores the right answer and nothing downstream can referee
+    // either.
+    //
+    // A STATED WIDTH IS THE DISAMBIGUATION AND IT IS ONE WHETHER IT SAYS 64 OR 32. A stated
+    // 64 built the pair in the walk above. A stated 32 says the callee takes a word, so
+    // handing it a half is the narrowing the header authorises — `void sink(int)` against
+    // `sink((int)(a * b))` — and refusing it here would contradict a fact the user supplied.
+    //
+    // SO THE MESSAGE IS ABOUT THE WIDTH AND NOT ABOUT A PROTOTYPE, because a supplied one
+    // reaches here too: a typed list holding a spelling `declaredWidth` cannot size states
+    // no layout at all (`proto.ts` `declaredCallArgs`), and a bare COUNT states argument
+    // registers rather than widths. Both leave `widths` null with a `--proto` on the command
+    // line, and blaming an absent prototype would be false about its own input.
+    if (widths === null && pairs !== undefined) {
+      for (const [j, v] of args.entries()) {
+        const half = pairs.halfOf.get(v);
+        // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
+        // reader to the wrong declaration: a double leaves a soft-float helper only into
+        // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
+        // and a pair built here for a callee declared to take a `long long` is refused there.
+        const producer = half && pairs.pairCallee.get(half.whole);
+        if (half && producer && isFloatHelperName(producer)) {
+          fail(
+            `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
+              `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
+              `returned, and nothing states how wide '${callee}'s parameters are. A double is ` +
+              "modelled into the runtime's arithmetic helpers, the return and a parameter a prototype " +
+              'declares `double`, so a runtime compare or conversion declines; a callee that takes a ' +
+              'double, or fewer arguments than its registers suggest, lifts once a prototype states ' +
+              `them (\`{"${callee}": {"params": [...]}}\`)`,
+          );
+        }
+        if (half) {
+          fail(
+            `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
+              `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and nothing states ` +
+              `how wide '${callee}'s parameters are, so a pair cannot be told from two ` +
+              `ordinary arguments. A typed prototype states it (\`{"${callee}": {"params": ` +
+              '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, ' +
+              'does not',
+          );
+        }
+      }
+    }
+    const sret = returns.kind === 'memory-struct' ? returns.type : undefined;
+    const res = mkValue(sret ?? T.unk(returns.kind === 'pair' ? 64 : 32));
+    // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
+    // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
+    // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
+    // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
+    const doubles = p.doubles.size ? [...p.doubles] : undefined;
+    const call = mkOp('call', {
+      operands: args,
+      results: [res],
+      attrs: {
+        target: callee,
+        ...(sret === undefined ? {} : { sret: true }),
+        ...(doubles === undefined ? {} : { doubles }),
+      },
+    });
+    ssa.irBlocks[bi].ops.push(call);
+    // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
+    // known whether every path to here passes through another call, which would have clobbered
+    // the argument registers this guess just read.
+    if (widths === null) {
+      ssa.recordGuessedCall(call, bi, target);
+    }
+    if (returns.kind === 'pair') {
+      // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
+      // named here and neither is in the clobber set — which is the acceptance arm of the
+      // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
+      site.write(target.returnReg, pairs!.project(res, 'lo'));
+      site.write(target.argRegs[1], pairs!.project(res, 'hi'));
+      pairs!.pairCallee.set(res, callee);
+    } else if (returns.kind === 'word') {
+      site.write(target.returnReg, res); // the callee defines the return register …
+    }
+    // … and the clobber is recorded after it, so that def is the CALLEE's; a struct, the memory at
+    // argument 0 or the return register's bytes, leaves that register holding nothing the caller
+    // may read as a value
+    ssa.noteCall(bi, p.clobbers);
+  };
   return {
     callClobbers,
-    isFloatHelper: (callee) => {
-      const h = lookupHelper(target.runtimeHelpers, callee);
-      return h !== undefined && isFloatHelper(h);
-    },
     returnsWithoutHiddenPointer: (callee) => returnsWithoutHiddenPointer(callee, prototypes, target),
     declaredCall,
     plan,
+    lower,
   };
 }
 

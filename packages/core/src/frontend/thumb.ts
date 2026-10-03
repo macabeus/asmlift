@@ -40,7 +40,6 @@ import {
   type ArgSlots,
   type SsaBuilder,
   abiSortEntryParams,
-  fallbackArgc,
   makeSsaBuilder,
   mintArgSlotHoles,
   stackSlotKey,
@@ -4832,162 +4831,48 @@ function lowerStore(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   irb.ops.push(mkOp('store', { operands: [storeBase, readData(reg(a), bi)], attrs: { off, width } }));
 }
 
-/** `bl` / `blx`: the call its callee's declaration plans (`CallDeclarations.plan`). */
+/** `bl` / `blx`: the call its callee's declaration plans, lowered by `CallDeclarations.lower`. */
 function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const { name, target, text, calls, frame, ssa, pairs } = fill;
-  const { readVar } = ssa;
   const { usedSlotOffsets } = fill.frameUses;
   const { spAsDataError, writeData } = fill.operands;
   const { bi, irb } = cur;
-  const [a] = ins.ops;
-  // A call: read the argument registers (r0..), produce the return value in r0, and record
-  // that the callee destroyed the rest of the caller-saved set — a read of one past here
-  // names bytes the callee overwrote, and `finish()` refuses it (frontend/ssa.ts).
-  const targetSym = a;
+  const [callee] = ins.ops;
   // A BRANCH TO A DATA LABEL THIS ASM DEFINES IS NOT A CALL. Lifting it emits `sTab()` —
   // a call to a `.rodata` object, which compiles wherever the name is declared as anything
   // callable and is then wrong in a way that reads as right. The label check is by exact
   // name because a branch operand carries no offset spelling. Both maps, because the
   // directive under the label decides nothing here: `.word` or `.short`, it is data.
-  if (targetSym !== undefined && (text.dataWords.has(targetSym) || text.nonWordData.has(targetSym))) {
+  if (callee !== undefined && (text.dataWords.has(callee) || text.nonWordData.has(callee))) {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': '${ins.mnemonic} ${targetSym}' branches to '${targetSym}', which this asm defines as a data label — not modelled`,
+      `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to '${callee}', which this asm defines as a data label — not modelled`,
     );
   }
-  const plan = calls.plan(targetSym);
-  // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
-  // runtime table or the project's headers. Both answer the same question, so the walk that
-  // reads argument registers off the answer is written once; two walks would be two chances
-  // for the pairing rule and the arity rule to disagree.
-  //
-  // A DECLARATION HOLDING A SPELLING NOTHING CAN SIZE STATES NO LAYOUT (`proto.ts`
-  // `declaredCallArgs`), so `widths` is null for it and this falls to the guess below —
-  // the same answer the callee would get with no prototype at all.
-  const { widths, returns } = plan;
-  const argc = widths === null ? fallbackArgc(ssa, target.argRegs, bi) : wordsOf(widths);
-  const stackArgs = frame.slotsOk ? frame.outgoingArgs.blocks.get(ins) : undefined;
-  const args: Value[] = [];
-  // A GUESSED arity reads argument registers to ASK whether the caller set them up, and
-  // `finish()` answers by dropping the ones a call has been through; a STATED width asserts
-  // they exist, so a destroyed register read for it is a wrong value nothing retracts. A
-  // guess is a list of single words by construction — `fallbackArgc` counts registers.
-  const readArg = widths === null ? ssa.readGuessedArg : readVar;
-  // ARGUMENT WORD `j`: a register, or past the registers a word of this frame's outgoing
-  // area, at [sp,#0] upward — the block `analyzeOutgoingArgs` licensed for THIS call, and
-  // only that block. `fallbackArgc` never exceeds `argRegs.length`, so an unlicensed
-  // stack word can only come from a stated width; reaching one with no block means the slot
-  // model is off for another reason, and the decline names it rather than reading `r4` as if
-  // it were argument 5.
-  const word = (j: number): Value => {
-    if (j < target.argRegs.length) {
-      return readVar(`r${j}`, bi);
-    }
-    const off = stackArgs?.[j - target.argRegs.length];
-    if (off === undefined) {
-      throw spAsDataError();
-    }
-    usedSlotOffsets.add(off);
-    return readVar(stackSlotKey(off), bi);
-  };
-  let k = 0;
-  for (const w of widths ?? Array.from({ length: argc }, () => 32)) {
-    if (w > 32) {
-      // A 64-BIT PARAMETER IS TWO ARGUMENT WORDS AND ONE VALUE, so the pair is built here
-      // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
-      // the second reading anyway, since the structurer materialises an effectful call once
-      // per result. Its words are wherever `outgoingBlock` placed them.
-      args.push(pairs.fuseHalves(irb, word(k), word(k + 1)));
-    } else {
-      args.push(k < target.argRegs.length ? readArg(`r${k}`, bi) : word(k));
-    }
-    k += w > 32 ? 2 : 1;
-  }
-  // A 64-BIT VALUE MAY NOT LEAVE AS A WORD WHERE NOTHING SAYS HOW WIDE THE PARAMETER IS,
-  // and this is the refusal — GUARDED ON `widths === null`, which is the whole of the
-  // condition. A guessed arity counts argument registers, so a caller that computes a pair
-  // and a caller that computes two words set up the same two registers: passing the low
-  // half alone invents a truncation the asm never wrote, passing both halves as two words
-  // invents an argument. Both recompile to the very `bl` being lifted, so the differ
-  // scores them exactly as it scores the right answer and nothing downstream can referee
-  // either.
-  //
-  // A STATED WIDTH IS THE DISAMBIGUATION AND IT IS ONE WHETHER IT SAYS 64 OR 32. A stated
-  // 64 built the pair in the walk above. A stated 32 says the callee takes a word, so
-  // handing it a half is the narrowing the header authorises — `void sink(int)` against
-  // `sink((int)(a * b))` — and refusing it here would contradict a fact the user supplied.
-  //
-  // SO THE MESSAGE IS ABOUT THE WIDTH AND NOT ABOUT A PROTOTYPE, because a supplied one
-  // reaches here too: a typed list holding a spelling `declaredWidth` cannot size states
-  // no layout at all (`proto.ts` `declaredCallArgs`), and a bare COUNT states argument
-  // registers rather than widths. Both leave `widths` null with a `--proto` on the command
-  // line, and blaming an absent prototype would be false about its own input.
-  if (widths === null) {
-    for (const [j, v] of args.entries()) {
-      const half = pairs.halfOf.get(v);
-      // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
-      // reader to the wrong declaration: a double leaves a soft-float helper only into
-      // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
-      // and a pair built here for a callee declared to take a `long long` is refused there.
-      const producer = half && pairs.pairCallee.get(half.whole);
-      if (half && producer && calls.isFloatHelper(producer)) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
-            `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
-            `returned, and nothing states how wide '${targetSym}'s parameters are. A double is ` +
-            "modelled into the runtime's arithmetic helpers, the return and a parameter a prototype " +
-            'declares `double`, so a runtime compare or conversion declines; a callee that takes a ' +
-            'double, or fewer arguments than its registers suggest, lifts once a prototype states ' +
-            `them (\`{"${targetSym}": {"params": [...]}}\`)`,
-        );
+  calls.lower({
+    callee,
+    ssa,
+    bi,
+    read: (r) => ssa.readVar(r, bi),
+    write: (r, v) => writeData(r, bi, v),
+    // ARGUMENT WORD `k` past the registers is a word of this frame's outgoing area, at [sp,#0]
+    // upward — the block `analyzeOutgoingArgs` licensed for THIS call, and only that block.
+    // Reaching one with no block means the slot model is off for another reason, and the decline
+    // names it rather than reading `r4` as if it were argument 5.
+    stackWord: (k) => {
+      const off = frame.slotsOk ? frame.outgoingArgs.blocks.get(ins)?.[k - target.argRegs.length] : undefined;
+      if (off === undefined) {
+        throw spAsDataError();
       }
-      if (half) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': argument ${j + 1} of the call to '${targetSym}' is the ` +
-            `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and nothing states ` +
-            `how wide '${targetSym}'s parameters are, so a pair cannot be told from two ` +
-            `ordinary arguments. A typed prototype states it (\`{"${targetSym}": {"params": ` +
-            '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, ' +
-            'does not',
-        );
-      }
-    }
-  }
-  const sret = returns.kind === 'memory-struct' ? returns.type : undefined;
-  const res = mkValue(sret ?? T.unk(returns.kind === 'pair' ? 64 : 32));
-  // A DECLARED `double` IS TWO WORDS THAT ARE NOT A `long long`: its first word holds the
-  // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
-  // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
-  // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
-  const doubles = plan.doubles.size ? [...plan.doubles] : undefined;
-  const callOp = mkOp('call', {
-    operands: args,
-    results: [res],
-    attrs: {
-      target: targetSym,
-      ...(sret === undefined ? {} : { sret: true }),
-      ...(doubles === undefined ? {} : { doubles }),
+      usedSlotOffsets.add(off);
+      return ssa.readVar(stackSlotKey(off), bi);
+    },
+    pairs: {
+      fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
+      project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),
+      halfOf: pairs.halfOf,
+      pairCallee: pairs.pairCallee,
     },
   });
-  irb.ops.push(callOp);
-  // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
-  // known whether every path to here passes through another call, which would have clobbered
-  // the argument registers this guess just read.
-  if (widths === null) {
-    ssa.recordGuessedCall(callOp, bi, target);
-  }
-  if (returns.kind === 'pair') {
-    // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
-    // named here and neither is in the clobber set — which is the acceptance arm of the
-    // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
-    writeData(target.returnReg, bi, pairs.projectHalf(irb, res, 'lo', ins));
-    writeData(target.argRegs[1], bi, pairs.projectHalf(irb, res, 'hi', ins));
-    pairs.pairCallee.set(res, targetSym);
-  } else if (returns.kind === 'word') {
-    writeData('r0', bi, res); // the callee defines r0 …
-  }
-  // … and the clobber is recorded after it, so that def is the CALLEE's; a struct, the memory at
-  // argument 0 or r0's bytes, leaves r0 holding nothing the caller may read as a value
-  ssa.noteCall(bi, plan.clobbers);
 }
 
 /** The block's control transfer, via classifyXfer — the single source of truth shared with

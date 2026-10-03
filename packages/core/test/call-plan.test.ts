@@ -38,14 +38,6 @@ describe('callDeclarations', () => {
     expect(thumbCalls({}).declaredCall('g')).toBeNull();
   });
 
-  test("names the runtime's soft-float helpers, and nothing else, as float helpers", () => {
-    const calls = thumbCalls({});
-    expect(calls.isFloatHelper('__adddf3')).toBe(true);
-    expect(calls.isFloatHelper('__muldi3')).toBe(false);
-    expect(calls.isFloatHelper('g')).toBe(false);
-    expect(calls.isFloatHelper('toString')).toBe(false);
-  });
-
   test("answers whether a callee's declaration rules out a hidden return pointer", () => {
     const calls = thumbCalls({
       g: { params: 1, returnsVoid: true },
