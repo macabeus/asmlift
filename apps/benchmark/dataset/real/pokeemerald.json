@@ -342,6 +342,134 @@
         "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
         "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/ereader_screen.c | tools/preproc/preproc -i -g build/assets src/ereader_screen.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/ereader_screen.o -"
       }
+    },
+    "src/rtc.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/rtc.c | tools/preproc/preproc -i -g build/assets src/rtc.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/rtc.o -"
+      }
+    },
+    "src/coins.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/coins.c | tools/preproc/preproc -i -g build/assets src/coins.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/coins.o -"
+      }
+    },
+    "src/field_effect.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/field_effect.c | tools/preproc/preproc -i -g build/assets src/field_effect.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/field_effect.o -"
+      }
+    },
+    "src/mystery_gift_menu.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/mystery_gift_menu.c | tools/preproc/preproc -i -g build/assets src/mystery_gift_menu.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/mystery_gift_menu.o -"
+      }
+    },
+    "src/event_object_movement.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/event_object_movement.c | tools/preproc/preproc -i -g build/assets src/event_object_movement.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/event_object_movement.o -"
+      }
+    },
+    "src/tv.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/tv.c | tools/preproc/preproc -i -g build/assets src/tv.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/tv.o -"
+      }
+    },
+    "src/walda_phrase.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/walda_phrase.c | tools/preproc/preproc -i -g build/assets src/walda_phrase.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/walda_phrase.o -"
+      }
+    },
+    "src/battle_pyramid_bag.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_pyramid_bag.c | tools/preproc/preproc -i -g build/assets src/battle_pyramid_bag.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_pyramid_bag.o -"
+      }
     }
   },
   "functions": [
@@ -1022,6 +1150,148 @@
           "params": [
             "struct EReaderData *"
           ]
+        }
+      }
+    },
+    {
+      "sym": "RtcGetDayCount",
+      "addr": "0x0802f1e0",
+      "unit": "src/rtc.c",
+      "romDigest": "6c974b2ab471709787573d96e3620f45b20d8e111f72e71540c3308e0f5db721",
+      "features": [
+        "narrow",
+        "struct",
+        "field"
+      ],
+      "funcC": "u16 RtcGetDayCount(struct SiiRtcInfo *rtc)\n{\n    u8 year = ConvertBcdToBinary(rtc->year);\n    u8 month = ConvertBcdToBinary(rtc->month);\n    u8 day = ConvertBcdToBinary(rtc->day);\n    return ConvertDateToDayCount(year, month, day);\n}",
+      "prependC": "#include \"global.h\"\n#include \"rtc.h\"\n#include \"string_util.h\"\n#include \"text.h\"\nu32 ConvertBcdToBinary(u8 bcd);\nu16 ConvertDateToDayCount(u8 year, u8 month, u8 day);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/rtc.c#L89-L95"
+    },
+    {
+      "sym": "ShowCoinsWindow",
+      "addr": "0x08145bac",
+      "unit": "src/coins.c",
+      "romDigest": "228b92a314ae411fa17daaee15c5860f4a06f074382bbafe97e53d822ccd120e",
+      "features": [
+        "stack-addr",
+        "multi-arg",
+        "struct",
+        "global"
+      ],
+      "funcC": "void ShowCoinsWindow(u32 coinAmount, u8 x, u8 y)\n{\n    struct WindowTemplate template;\n    SetWindowTemplateFields(&template, 0, x, y, 8, 2, 0xF, 0x141);\n    sCoinsWindowId = AddWindow(&template);\n    FillWindowPixelBuffer(sCoinsWindowId, PIXEL_FILL(0));\n    PutWindowTilemap(sCoinsWindowId);\n    DrawStdFrameWithCustomTileAndPalette(sCoinsWindowId, FALSE, 0x214, 0xE);\n    PrintCoinsString(coinAmount);\n}",
+      "prependC": "#include \"global.h\"\n#include \"coins.h\"\n#include \"text.h\"\n#include \"window.h\"\n#include \"strings.h\"\n#include \"string_util.h\"\n#include \"menu.h\"\n#include \"international_string_util.h\"\n#include \"constants/coins.h\"\nstatic u8 sCoinsWindowId = 0;\nvoid PrintCoinsString(u32 coinAmount);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/coins.c#L24-L33",
+      "proto": {
+        "ShowCoinsWindow": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "DiveFieldEffect_TryWarp",
+      "addr": "0x080b7580",
+      "unit": "src/field_effect.c",
+      "romDigest": "88943f1a70b5175b80210fa18e7faacf9fd29215ccfab93c6cf53fc60cc61076",
+      "features": [
+        "stack-addr",
+        "struct",
+        "field",
+        "global",
+        "branch"
+      ],
+      "funcC": "static bool8 DiveFieldEffect_TryWarp(struct Task *task)\n{\n    struct MapPosition mapPosition;\n    PlayerGetDestCoords(&mapPosition.x, &mapPosition.y);\n\n    // Wait for show mon first\n    if (!FieldEffectActiveListContains(FLDEFF_FIELD_MOVE_SHOW_MON))\n    {\n        TryDoDiveWarp(&mapPosition, gObjectEvents[gPlayerAvatar.objectEventId].currentMetatileBehavior);\n        DestroyTask(FindTaskIdByFunc(Task_UseDive));\n        FieldEffectActiveListRemove(FLDEFF_USE_DIVE);\n    }\n    return FALSE;\n}",
+      "prependC": "#include \"global.h\"\n#include \"decompress.h\"\n#include \"event_object_movement.h\"\n#include \"field_camera.h\"\n#include \"field_control_avatar.h\"\n#include \"field_effect.h\"\n#include \"field_effect_helpers.h\"\n#include \"field_player_avatar.h\"\n#include \"field_screen_effect.h\"\n#include \"field_weather.h\"\n#include \"fieldmap.h\"\n#include \"fldeff.h\"\n#include \"gpu_regs.h\"\n#include \"main.h\"\n#include \"mirage_tower.h\"\n#include \"menu.h\"\n#include \"metatile_behavior.h\"\n#include \"overworld.h\"\n#include \"palette.h\"\n#include \"party_menu.h\"\n#include \"pokemon.h\"\n#include \"script.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"task.h\"\n#include \"trainer_pokemon_sprites.h\"\n#include \"trig.h\"\n#include \"util.h\"\n#include \"constants/field_effects.h\"\n#include \"constants/event_object_movement.h\"\n#include \"constants/metatile_behaviors.h\"\n#include \"constants/rgb.h\"\n#include \"constants/songs.h\"\n#define subsprite_table(ptr) {.subsprites = ptr, .subspriteCount = (sizeof ptr) / (sizeof(struct Subsprite))}\n#define tState           data[0]\n#define tNumMons         data[1]\n#define tFirstBallX      data[2]\n#define tFirstBallY      data[3]\n#define tMonitorX        data[4]\n#define tMonitorY        data[5]\n#define tBallSpriteId    data[6]\n#define tMonitorSpriteId data[7]\n#define tStartHofFlash   data[15]\n#define sState      data[0]\n#define sTimer      data[1]\n#define sCounter    data[2]\n#define sPlayHealSe data[5]\n#define sNumMons    data[6]\n#define sSpriteId   data[7]\n#define sEffectSpriteId data[0]\n#define tState      data[0]\n#define tFallOffset data[1]\n#define tTotalFall  data[2]\n#define tSetTrigger data[3]\n#define tSubsprMode data[4]\n#define tVertShake  data[1] // re-used\n#define tNumShakes  data[2]\n#define tState   data[0]\n#define tGoingUp data[1]\n#define tState data[0]\n#define tState data[0]\n#define tMonId data[1]\nstatic void Task_UseDive(u8);\nstatic void SetFlyBirdPlayerSpriteId(u8, u8);\nvoid FieldEffectActiveListRemove(u8 id);\nbool8 FieldEffectActiveListContains(u8 id);\nvoid Task_UseDive(u8 taskId);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/field_effect.c#L1933-L1946"
+    },
+    {
+      "sym": "SaveOnMysteryGiftMenu",
+      "addr": "0x08018e94",
+      "unit": "src/mystery_gift_menu.c",
+      "romDigest": "cc614c9c7bcf974d1a91e65880d9fc952bdc84593188797467b07152b430f25a",
+      "features": [
+        "pointer",
+        "global",
+        "branch"
+      ],
+      "funcC": "static bool32 SaveOnMysteryGiftMenu(u8 *state)\n{\n    switch (*state)\n    {\n    case 0:\n        MG_AddMessageTextPrinter(gText_DataWillBeSaved);\n        (*state)++;\n        break;\n    case 1:\n        TrySavingData(SAVE_NORMAL);\n        (*state)++;\n        break;\n    case 2:\n        MG_AddMessageTextPrinter(gText_SaveCompletedPressA);\n        (*state)++;\n        break;\n    case 3:\n        if (JOY_NEW(A_BUTTON | B_BUTTON))\n            (*state)++;\n        break;\n    case 4:\n        *state = 0;\n        ClearMessage();\n        return TRUE;\n    }\n\n    return FALSE;\n}",
+      "prependC": "#include \"global.h\"\n#include \"main.h\"\n#include \"text.h\"\n#include \"task.h\"\n#include \"malloc.h\"\n#include \"gpu_regs.h\"\n#include \"scanline_effect.h\"\n#include \"text_window.h\"\n#include \"bg.h\"\n#include \"window.h\"\n#include \"strings.h\"\n#include \"text_window.h\"\n#include \"menu.h\"\n#include \"palette.h\"\n#include \"constants/songs.h\"\n#include \"sound.h\"\n#include \"mystery_gift_menu.h\"\n#include \"union_room.h\"\n#include \"title_screen.h\"\n#include \"ereader_screen.h\"\n#include \"international_string_util.h\"\n#include \"list_menu.h\"\n#include \"string_util.h\"\n#include \"mystery_gift.h\"\n#include \"mystery_gift_view.h\"\n#include \"save.h\"\n#include \"link.h\"\n#include \"mystery_gift_client.h\"\n#include \"mystery_gift_server.h\"\n#include \"event_data.h\"\n#include \"link_rfu.h\"\n#include \"wonder_news.h\"\n#include \"constants/cable_club.h\"\n#define LIST_MENU_TILE_NUM 10\n#define LIST_MENU_PAL_NUM BG_PLTT_ID(14)\n#define DOWN_ARROW_X 208\n#define DOWN_ARROW_Y 20\nenum {\n    WIN_HEADER,\n    WIN_MSG,\n    WIN_UNK, // Cleared, but nothing is ever apparently rendered on it\n};\nstruct MysteryGiftTaskData\n{\n    u16 var; // Multipurpose\n    u16 unused1;\n    u16 unused2;\n    u16 unused3;\n    u8 state;\n    u8 textState;\n    u8 unused4;\n    u8 unused5;\n    bool8 isWonderNews;\n    bool8 sourceIsFriend;\n    u8 msgId;\n    u8 *clientMsg;\n};\nvoid MG_AddMessageTextPrinter(const u8 *str);\nstatic void ClearMessage(void);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/mystery_gift_menu.c#L871-L898"
+    },
+    {
+      "sym": "ObjectEventCB2_BerryTree",
+      "addr": "0x0808fe70",
+      "unit": "src/event_object_movement.c",
+      "romDigest": "30f6a9529bc98b3e8afdf594d028b826cb560393925e18cf0dfa5ee8ccabb702",
+      "features": [
+        "fnptr",
+        "table",
+        "array",
+        "struct",
+        "field"
+      ],
+      "funcC": "static bool8 ObjectEventCB2_BerryTree(struct ObjectEvent *objectEvent, struct Sprite *sprite)\n{\n    return gMovementTypeFuncs_BerryTreeGrowth[sprite->sTypeFuncId](objectEvent, sprite);\n}",
+      "prependC": "#include \"global.h\"\n#include \"event_object_movement.h\"\n#include \"field_camera.h\"\n#include \"metatile_behavior.h\"\n#include \"sprite.h\"\n#include \"constants/event_object_movement.h\"\n#include \"constants/event_objects.h\"\n#define sTypeFuncId   data[1]\nextern bool8 (*const gMovementTypeFuncs_BerryTreeGrowth[])(struct ObjectEvent *objectEvent, struct Sprite *sprite);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/event_object_movement.c#L3083-L3086"
+    },
+    {
+      "sym": "IncrementDailyWildBattles",
+      "addr": "0x080eecc8",
+      "unit": "src/tv.c",
+      "romDigest": "78f8dac0b79f64a09c43d42f7e15157fd3f4c880583724648186953d2916e719",
+      "features": [
+        "arithmetic"
+      ],
+      "funcC": "void IncrementDailyWildBattles(void)\n{\n    VarSet(VAR_DAILY_WILDS, VarGet(VAR_DAILY_WILDS) + 1);\n}",
+      "prependC": "#include \"global.h\"\n#include \"rtc.h\"\n#include \"overworld.h\"\n#include \"random.h\"\n#include \"event_data.h\"\n#include \"fieldmap.h\"\n#include \"field_camera.h\"\n#include \"field_specials.h\"\n#include \"fldeff.h\"\n#include \"strings.h\"\n#include \"string_util.h\"\n#include \"international_string_util.h\"\n#include \"pokemon_storage_system.h\"\n#include \"field_message_box.h\"\n#include \"easy_chat.h\"\n#include \"battle.h\"\n#include \"battle_tower.h\"\n#include \"contest.h\"\n#include \"item.h\"\n#include \"link.h\"\n#include \"main.h\"\n#include \"event_scripts.h\"\n#include \"shop.h\"\n#include \"lilycove_lady.h\"\n#include \"pokedex.h\"\n#include \"event_object_movement.h\"\n#include \"text.h\"\n#include \"script_menu.h\"\n#include \"naming_screen.h\"\n#include \"malloc.h\"\n#include \"region_map.h\"\n#include \"decoration.h\"\n#include \"secret_base.h\"\n#include \"tv.h\"\n#include \"pokeball.h\"\n#include \"data.h\"\n#include \"constants/battle_frontier.h\"\n#include \"constants/contest.h\"\n#include \"constants/decorations.h\"\n#include \"constants/event_objects.h\"\n#include \"constants/items.h\"\n#include \"constants/layouts.h\"\n#include \"constants/lilycove_lady.h\"\n#include \"constants/metatile_behaviors.h\"\n#include \"constants/metatile_labels.h\"\n#include \"constants/moves.h\"\n#include \"constants/region_map_sections.h\"\n#define LAST_TVSHOW_IDX (TV_SHOWS_COUNT - 1)\n#define rbernoulli(num, den) BernoulliTrial(0xFFFF * (num) / (den))\nenum {\n    TVGROUP_NONE,\n    TVGROUP_UNUSED,\n    TVGROUP_NORMAL,\n    TVGROUP_RECORD_MIX,\n    TVGROUP_OUTBREAK,\n};\nenum {\n    SLOT_MACHINE,\n    ROULETTE,\n};",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/tv.c#L2513-L2516",
+      "proto": {
+        "IncrementDailyWildBattles": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "DoWaldaNamingScreen",
+      "addr": "0x081d99e4",
+      "unit": "src/walda_phrase.c",
+      "romDigest": "388661bf0f868093e374db3c72fb58732f9c7e2a8b2a34864baaf7cbb4472fcc",
+      "features": [
+        "multi-arg",
+        "global"
+      ],
+      "funcC": "void DoWaldaNamingScreen(void)\n{\n    StringCopy(gStringVar2, GetWaldaPhrasePtr());\n    DoNamingScreen(NAMING_SCREEN_WALDA, gStringVar2, 0, 0, 0, CB2_HandleGivenWaldaPhrase);\n}",
+      "prependC": "#include \"global.h\"\n#include \"walda_phrase.h\"\n#include \"string_util.h\"\n#include \"event_data.h\"\n#include \"naming_screen.h\"\n#include \"main.h\"\n#include \"text.h\"\n#include \"new_game.h\"\n#include \"overworld.h\"\n#include \"pokemon_storage_system.h\"\n#include \"field_screen_effect.h\"\n#define BITS_PER_LETTER 5\nstatic void CB2_HandleGivenWaldaPhrase(void);\nenum\n{\n    PHRASE_CHANGED,\n    PHRASE_NO_CHANGE,\n    PHRASE_EMPTY\n};",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/walda_phrase.c#L50-L54",
+      "proto": {
+        "DoWaldaNamingScreen": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "PrintSelectorArrowAtPos",
+      "addr": "0x081c5ab8",
+      "unit": "src/battle_pyramid_bag.c",
+      "romDigest": "0623671a504578244fbbbea5338d4afb9be5f39de9454cd1e22eaf384780f5bd",
+      "features": [
+        "multi-arg",
+        "branch",
+        "global"
+      ],
+      "funcC": "static void PrintSelectorArrowAtPos(u8 y, u8 colorId)\n{\n    if (colorId == COLORID_NONE) // If 'no color', erase arrow\n        FillWindowPixelRect(WIN_LIST, PIXEL_FILL(0), 0, y, GetMenuCursorDimensionByFont(FONT_NORMAL, 0), GetMenuCursorDimensionByFont(FONT_NORMAL, 1));\n    else\n        PyramidBagPrint(WIN_LIST, gText_SelectorArrow2, 0, y, 0, 0, 0, colorId);\n}",
+      "prependC": "#include \"global.h\"\n#include \"battle.h\"\n#include \"battle_controllers.h\"\n#include \"battle_pyramid_bag.h\"\n#include \"bg.h\"\n#include \"decompress.h\"\n#include \"event_data.h\"\n#include \"field_effect.h\"\n#include \"field_weather.h\"\n#include \"graphics.h\"\n#include \"gpu_regs.h\"\n#include \"international_string_util.h\"\n#include \"item.h\"\n#include \"item_icon.h\"\n#include \"item_menu.h\"\n#include \"item_use.h\"\n#include \"list_menu.h\"\n#include \"mail.h\"\n#include \"malloc.h\"\n#include \"menu.h\"\n#include \"menu_helpers.h\"\n#include \"overworld.h\"\n#include \"palette.h\"\n#include \"party_menu.h\"\n#include \"task.h\"\n#include \"text_window.h\"\n#include \"scanline_effect.h\"\n#include \"script.h\"\n#include \"sound.h\"\n#include \"string_util.h\"\n#include \"strings.h\"\n#include \"constants/items.h\"\n#include \"constants/rgb.h\"\n#include \"constants/songs.h\"\n#define TAG_SCROLL_ARROW  2910\n#define TAG_PYRAMID_BAG   4132\n#define TAG_ITEM_ICON     4133\n#define TAG_ITEM_ICON_ALT 4134\n#define POS_NONE ((u8)-1)\n#define tListTaskId data[0]\n#define tListPos    data[1]\n#define tQuantity   data[2]\n#define tNumToToss  data[8]\nenum {\n    WIN_LIST,\n    WIN_INFO,\n    WIN_MSG,\n    WIN_TOSS_NUM,\n};\nstatic void PyramidBagPrint(u8, const u8 *, u8, u8, u8, u8, u8, u8);\nstatic void PyramidBagPrint_Quantity(u8, const u8 *, u8, u8, u8, u8, u8, u8);\nstatic void PrintMenuActionText_MultiRow(u8, u8, u8);\nstatic void CreatePyramidBagYesNo(u8, const struct YesNoFuncTable *);\nenum {\n    ACTION_USE_FIELD,\n    ACTION_TOSS,\n    ACTION_GIVE,\n    ACTION_CANCEL,\n    ACTION_USE_BATTLE,\n    ACTION_DUMMY,\n};\nenum {\n    COLORID_DARK_GRAY,\n    COLORID_LIGHT_GRAY,\n    COLORID_WHITE_BG,\n    COLORID_NONE = 0xFF\n};\nenum {\n    MENU_WIN_1x1,\n    MENU_WIN_1x2,\n    MENU_WIN_2x2,\n    MENU_WIN_2x3,\n    MENU_WIN_YESNO,\n};\nenum {\n    ANIM_BAG_STILL,\n    ANIM_BAG_SHAKE,\n};",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/battle_pyramid_bag.c#L848-L854",
+      "proto": {
+        "PrintSelectorArrowAtPos": {
+          "returnsVoid": true
         }
       }
     }

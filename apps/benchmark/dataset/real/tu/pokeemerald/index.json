@@ -208,5 +208,45 @@
     "tu": "EReader_Reset.i.gz",
     "ctx": "ctx-8be5048b00d5.i.gz",
     "m2c": "ctx-8be5048b00d5.i.gz"
+  },
+  "RtcGetDayCount": {
+    "tu": "RtcGetDayCount.i.gz",
+    "ctx": "ctx-e1a6a6f708c1.i.gz",
+    "m2c": "ctx-e1a6a6f708c1.i.gz"
+  },
+  "ShowCoinsWindow": {
+    "tu": "ShowCoinsWindow.i.gz",
+    "ctx": "ctx-b3ff56fb18f5.i.gz",
+    "m2c": "ctx-b3ff56fb18f5.i.gz"
+  },
+  "DiveFieldEffect_TryWarp": {
+    "tu": "DiveFieldEffect_TryWarp.i.gz",
+    "ctx": "ctx-ed0326ad348d.i.gz",
+    "m2c": "ctx-ed0326ad348d.i.gz"
+  },
+  "SaveOnMysteryGiftMenu": {
+    "tu": "SaveOnMysteryGiftMenu.i.gz",
+    "ctx": "ctx-f0e9d8f9c571.i.gz",
+    "m2c": "ctx-f0e9d8f9c571.i.gz"
+  },
+  "ObjectEventCB2_BerryTree": {
+    "tu": "ObjectEventCB2_BerryTree.i.gz",
+    "ctx": "ctx-92fdf8244365.i.gz",
+    "m2c": "ctx-92fdf8244365.i.gz"
+  },
+  "IncrementDailyWildBattles": {
+    "tu": "IncrementDailyWildBattles.i.gz",
+    "ctx": "ctx-d66fc957facb.i.gz",
+    "m2c": "ctx-d66fc957facb.i.gz"
+  },
+  "DoWaldaNamingScreen": {
+    "tu": "DoWaldaNamingScreen.i.gz",
+    "ctx": "ctx-d779e570af06.i.gz",
+    "m2c": "ctx-d779e570af06.i.gz"
+  },
+  "PrintSelectorArrowAtPos": {
+    "tu": "PrintSelectorArrowAtPos.i.gz",
+    "ctx": "ctx-80435fd2533d.i.gz",
+    "m2c": "ctx-80435fd2533d.i.gz"
   }
 }
