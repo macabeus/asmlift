@@ -15,7 +15,7 @@
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
 // reproduction scripts (`bench target`) get the command intact on every toolchain.
 import { type CandidateCompiler, compileFromCommand, renderCflags } from '@asmlift/cli/compile-command';
-import { loadDecompConfig, resolveTarget } from '@asmlift/cli/config';
+import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
@@ -29,6 +29,7 @@ import {
   mwccCandidateCompiler,
   mwccDir,
 } from '@asmlift/toolchains';
+import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -121,7 +122,7 @@ export function renderScoreCommand(id: ToolchainId, cflags: readonly string[]): 
 const memo = new Map<string, CandidateCompiler>();
 
 /** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
- *  path: materialize the committed decomp.yaml → loadDecompConfig → resolveTarget (asserted) →
+ *  path: materialize the committed decomp.yaml → loadDecompYaml → resolveTarget (asserted) →
  *  compileFromCommand, with `cflags` filling the command's `{{cflags}}`. The pooled (dockerized)
  *  targets' command is stripped, and their candidates compile through @asmlift/toolchains at
  *  `cflags`. One config and one working directory per toolchain: the flags reach the command
@@ -148,12 +149,12 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   writeFileSync(tmp, YAML.stringify(doc));
   renameSync(tmp, file);
 
-  const loaded = loadDecompConfig(file);
-  const res = resolveTarget(undefined, loaded);
+  const loaded = loadDecompYaml(file);
+  const toolCfg = asmliftBlock(loaded)!;
+  const res = resolveTarget(undefined, loaded, toolCfg);
   if ('error' in res || res.targetKey !== id) {
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
-  const toolCfg = loaded!.config.tools!.asmlift!;
   const compile = pooled !== undefined ? pooled(cflags) : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags });
   memo.set(memoKey, compile);
   return compile;

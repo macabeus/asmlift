@@ -45,8 +45,8 @@ await build({
   format: 'esm',
   target: 'node18',
   // Loaded from node_modules at run time: @match-kit/scoring's objdiff-wasm fetches a sibling .wasm
-  // by file:// URL, and yaml is a plain runtime dependency.
-  external: ['@match-kit/scoring', 'yaml'],
+  // by file:// URL, and the rest are plain runtime dependencies.
+  external: ['@match-kit/decomp-yaml', '@match-kit/scoring', 'yaml', 'zod'],
   banner: { js: '#!/usr/bin/env node' },
   // No --keep-names. tsx's transform sets it (`keepNames:!0` in its esbuild options) and wraps every
   // arrow function in the shim; this bundle has never carried it, and the two loaders otherwise run

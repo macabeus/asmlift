@@ -20,8 +20,10 @@
   "dependencies": {
     "@asmlift/core": "workspace:^",
     "@gba-kit/debug-info": "^0.5.0",
+    "@match-kit/decomp-yaml": "link:../../../matchkit/packages/decomp-yaml",
     "@match-kit/scoring": "0.1.0",
-    "yaml": "^2.9.0"
+    "yaml": "^2.9.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@asmlift/toolchains": "workspace:*",

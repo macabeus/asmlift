@@ -20,6 +20,7 @@
 //
 // GATE: needs the bench-owned klonoa checkout (`pnpm bench setup --project kleod --build`) plus
 // arm-none-eabi-objcopy. Missing pieces skip GREEN, checkout-gate.ts style.
+import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ import { join } from 'node:path';
 import { beforeAll, describe, expect, test } from 'vitest';
 
 import { compileFromCommand } from '../../src/compile-command';
-import { loadDecompConfig } from '../../src/config';
+import { asmliftBlock } from '../../src/config';
 import { KLEOD_CHECKOUT as CHECKOUT, kleodCheckoutGate } from './checkout-gate';
 
 const HAVE = kleodCheckoutGate(
@@ -104,8 +105,8 @@ describe.runIf(HAVE)('the DECLARATION-PLACEMENT variation (checkout-gated)', () 
   const hex = new Map<string, string>();
 
   beforeAll(() => {
-    const cfg = loadDecompConfig(join(CHECKOUT, 'decomp.yaml'));
-    const template = cfg?.config.tools?.asmlift?.compiler;
+    const tool = asmliftBlock(loadDecompYaml(join(CHECKOUT, 'decomp.yaml')));
+    const template = tool?.compiler;
     if (!template) {
       throw new Error('klonoa decomp.yaml lost its tools.asmlift.compiler key');
     }
