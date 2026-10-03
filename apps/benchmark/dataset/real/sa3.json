@@ -29,45 +29,48 @@
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/math.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/math.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/math.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/math.s -"
       }
     },
     "src/malloc_ewram.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/malloc_ewram.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/malloc_ewram.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/malloc_ewram.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/malloc_ewram.s -"
       }
     },
     "src/sprite.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/sprite.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/sprite.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/sprite.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/sprite.s -"
       }
     },
     "src/lib/agb_flash/agb_flash.c": {
@@ -78,175 +81,186 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/lib/agb_flash/agb_flash.i | tools/agbcc/bin/agbcc  -O1 -mthumb-interwork -Werror -o build/gba/sa3/src/lib/agb_flash/agb_flash.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/lib/agb_flash/agb_flash.i gba \"\" | tools/agbcc/bin/agbcc  -O1 -mthumb-interwork -Werror -o build/gba/sa3/src/lib/agb_flash/agb_flash.s -"
       }
     },
     "src/code_0_0.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/code_0_0.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/code_0_0.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/code_0_0.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/code_0_0.s -"
       }
     },
     "src/malloc_vram.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/malloc_vram.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/malloc_vram.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/malloc_vram.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/malloc_vram.s -"
       }
     },
     "src/core.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/core.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/core.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/core.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/core.s -"
       }
     },
     "src/bg_triangles.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/bg_triangles.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/bg_triangles.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/bg_triangles.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/bg_triangles.s -"
       }
     },
-    "src/game/interactables/platform_shared.c": {
+    "src/game/sa3/interactables/platform_shared.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/interactables/platform_shared.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/interactables/platform_shared.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/sa3/interactables/platform_shared.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/sa3/interactables/platform_shared.s -"
       }
     },
     "src/sio32_multi_load.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/sio32_multi_load.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/sio32_multi_load.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/sio32_multi_load.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/sio32_multi_load.s -"
       }
     },
-    "src/game/interactables/spring.c": {
+    "src/game/sa3/interactables/spring.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/interactables/spring.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/interactables/spring.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/sa3/interactables/spring.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/sa3/interactables/spring.s -"
       }
     },
-    "src/game/enemies/hariisen.c": {
+    "src/game/sa3/enemies/hariisen.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/enemies/hariisen.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/enemies/hariisen.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/sa3/enemies/hariisen.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/sa3/enemies/hariisen.s -"
       }
     },
-    "src/game/interactables/maze.c": {
+    "src/game/sa3/interactables/maze.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/interactables/maze.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/interactables/maze.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/sa3/interactables/maze.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/sa3/interactables/maze.s -"
       }
     },
-    "src/game/interactables/ramp.c": {
+    "src/game/sa3/interactables/ramp.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/interactables/ramp.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/interactables/ramp.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/sa3/interactables/ramp.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/sa3/interactables/ramp.s -"
       }
     },
-    "src/game/stage/player.c": {
+    "src/game/sa3/stage/player.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-fhex-asm",
+        "-fshort-enums",
         "-mthumb-interwork",
         "-O2"
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "a069e81bb4c7128e12bfb182bdcc49141ec5f7fb",
+        "commit": "487246d1fa0389ab4fd0dd997ed9ace729779311",
         "file": "Makefile",
-        "sha256": "7018e47569549f33ae7fee18c6d12c0c8ff43c9a30690991383989beeed1e417",
-        "command": "tools/preproc/preproc build/gba/sa3/src/game/stage/player.i | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -mthumb-interwork -O2 -o build/gba/sa3/src/game/stage/player.s -"
+        "sha256": "f810992f147cfe5d87ec1bccbdb03e7bafea2aebabc9acbe82c663cef9e1aab0",
+        "command": "tools/preproc/preproc build/gba/sa3/src/game/sa3/stage/player.i gba \"\" | tools/agbcc/bin/agbcc  -Wimplicit -Wparentheses -Werror -fhex-asm -fshort-enums -mthumb-interwork -O2 -o build/gba/sa3/src/game/sa3/stage/player.s -"
       }
     }
   },
@@ -405,7 +419,7 @@
         "pointer",
         "branch"
       ],
-      "funcC": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + 3) / 4;\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * 4 + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
+      "funcC": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + (sizeof(uintptr_t) - 1)) / sizeof(uintptr_t);\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * sizeof(uintptr_t) + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L14-L61"
     },
@@ -775,15 +789,15 @@
     {
       "sym": "sub_804DC38",
       "addr": "0x0804dc38",
-      "unit": "src/game/interactables/platform_shared.c",
+      "unit": "src/game/sa3/interactables/platform_shared.c",
       "romDigest": "b7712d7d54171e20fda82d8f1c4b5b91d7c9ceb60c92f9ee04f9b630128ec97d",
       "features": [
         "struct",
         "field"
       ],
       "funcC": "u16 sub_804DC38(u8 kind, s32 worldX, s32 worldY, MapEntity *me)\n{\n    s32 r0;\n    s32 r1;\n    s32 r2_32;\n    s16 r2;\n    bool32 r6;\n    u16 i;\n\n    // TODO(Jace): This was likely not written this way, and might actually be a bug?\n    //             I don't think MapEntity structs are always aligned in memory.\n    u32 data = *((u32 *)&me->d.uData[1]);\n    if (data & 0x00FFFF00) {\n        if (me->d.uData[3] < me->d.uData[2]) {\n            r2_32 = (me->d.uData[2] * (TILE_WIDTH / 2));\n            r1 = worldX;\n            r0 = worldX + (me->d.sData[0] * TILE_WIDTH);\n            r6 = FALSE;\n        } else {\n            r2_32 = (me->d.uData[3] * (TILE_WIDTH / 2));\n            r1 = worldY;\n            r0 = worldY + (me->d.sData[1] * TILE_WIDTH);\n            r6 = TRUE;\n        }\n\n        r2 = ((r1 - (r0 + r2_32)) << 14) / r2_32;\n        if (r2 >= 0) {\n            for (i = 0; (i < Q(1)) && (r2 > SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return Q(2) - i;\n                } break;\n\n                case 1: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(2) - i;\n                    }\n                } break;\n\n                default: {\n                    return i;\n                }\n            }\n\n        } else {\n            for (i = Q(2); (i < Q(3)) && (r2 < SIN(i));) {\n                i += 4;\n            }\n\n            switch (kind) {\n                case 0: {\n                    return i;\n                } break;\n\n                case 1: {\n                    if (!r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 2: {\n                    if (r6) {\n                        return i;\n                    } else {\n                        return Q(6) - i;\n                    }\n                } break;\n\n                case 3: {\n                    return Q(6) - i;\n                } break;\n            }\n        }\n    }\n\n    return 0;\n}",
-      "prependC": "#include \"global.h\"\n#include \"trig.h\"\n#include \"game/interactables/platform_shared.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"",
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/platform_shared.c#L8-L99",
+      "prependC": "#include \"global.h\"\n#include \"trig.h\"\n#include \"game/interactables/platform_shared.h\"\n#include \"game/shared/stage/camera.h\"\n#include \"game/shared/stage/entity.h\"\n#include \"game/stage.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/game/sa3/interactables/platform_shared.c#L8-L99",
       "m2cCtx": true
     },
     {
@@ -802,7 +816,7 @@
     {
       "sym": "sub_802DFC8",
       "addr": "0x0802dfc8",
-      "unit": "src/game/interactables/spring.c",
+      "unit": "src/game/sa3/interactables/spring.c",
       "romDigest": "88b4367f5cb96bfa5422e255d9f028a742cff79092f03552938e7bf1b9a367c8",
       "features": [
         "value-home",
@@ -811,9 +825,9 @@
         "struct",
         "field"
       ],
-      "funcC": "void sub_802DFC8(s16 direction, Sprite *s)\n{\n    s32 mask = 0;\n    s32 variant;\n\n    if (direction & 0x8) {\n        variant = 6;\n\n        mask = (direction & 1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n    } else if (direction & 0x4) {\n        variant = 4;\n\n        if (direction & 0x2) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n\n        if (direction & 0x1) {\n            mask |= SPRITE_FLAG(Y_FLIP, 1);\n        }\n    } else if (direction & 0x2) {\n        variant = 2;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n    } else {\n        variant = 0;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(Y_FLIP, 1);\n        }\n    }\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if ((gStageData.act >= ACT_1) && (gStageData.act <= ACT_BONUS_CAPSULE)) {\n            if (gStageData.zone == ZONE_6) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_6);\n                s->anim = ANIM_SPRING_6;\n            } else if (gStageData.zone == ZONE_4) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_4);\n                s->anim = ANIM_SPRING_4;\n            } else {\n                s->tiles = ALLOC_TILES(ANIM_SPRING);\n                s->anim = ANIM_SPRING;\n            }\n        } else {\n            s->tiles = ALLOC_TILES(ANIM_SPRING);\n            s->anim = ANIM_SPRING;\n        }\n    } else {\n        s->tiles = ALLOC_TILES(ANIM_SPRING);\n        s->anim = ANIM_SPRING;\n        mask |= SPRITE_FLAG_MASK_MOSAIC;\n    }\n\n    s->variant = variant;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = mask | SPRITE_FLAG(PRIORITY, 1);\n}",
-      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/spring.c#L174-L238",
+      "funcC": "void sub_802DFC8(s16 direction, Sprite *s)\n{\n    s32 mask = 0;\n    s32 variant;\n\n    if (direction & 0x8) {\n        variant = 6;\n\n        mask = (direction & 1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n    } else if (direction & 0x4) {\n        variant = 4;\n\n        if (direction & 0x2) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n\n        if (direction & 0x1) {\n            mask |= SPRITE_FLAG(Y_FLIP, 1);\n        }\n    } else if (direction & 0x2) {\n        variant = 2;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(X_FLIP, 1);\n        }\n    } else {\n        variant = 0;\n\n        if (direction & 0x1) {\n            mask = SPRITE_FLAG(Y_FLIP, 1);\n        }\n    }\n\n    if (CURRENT_GAME_MODE != GAME_MODE_MP_SINGLE_PACK) {\n        if ((gStageData.act >= ACT_1) && (gStageData.act <= ACT_BONUS_CAPSULE)) {\n            if (gStageData.zone == ZONE_6) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_6);\n                s->anim = ANIM_SPRING_6;\n            } else if (gStageData.zone == ZONE_4) {\n                s->tiles = ALLOC_TILES(ANIM_SPRING_4);\n                s->anim = ANIM_SPRING_4;\n            } else {\n                s->tiles = ALLOC_TILES(ANIM_SPRING);\n                s->anim = ANIM_SPRING;\n            }\n        } else {\n            s->tiles = ALLOC_TILES(ANIM_SPRING);\n            s->anim = ANIM_SPRING;\n        }\n    } else {\n        s->tiles = ALLOC_TILES(ANIM_SPRING);\n        s->anim = ANIM_SPRING;\n        mask |= SPRITE_FLAG_MASK_MOSAIC;\n    }\n\n    s->variant = variant;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = mask | SPRITE_FLAG(PRIORITY, 1);\n}",
+      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"game/shared/stage/camera.h\"\n#include \"game/shared/stage/entity.h\"\n#include \"game/shared/stage/player.h\"\n#include \"game/shared/stage/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/game/sa3/interactables/spring.c#L173-L237",
       "proto": {
         "sub_802DFC8": {
           "returnsVoid": true
@@ -825,7 +839,7 @@
     {
       "sym": "sub_806132C",
       "addr": "0x0806132c",
-      "unit": "src/game/enemies/hariisen.c",
+      "unit": "src/game/sa3/enemies/hariisen.c",
       "romDigest": "b7bf4d629de0579efcae9e9fd916e1da0ef34616825d98df0b8ae7743b81356c",
       "features": [
         "struct",
@@ -833,8 +847,8 @@
         "global"
       ],
       "funcC": "void sub_806132C(Hariisen *enemy)\n{\n    u8 *vram = VramMalloc(18);\n    Sprite2 *s = &enemy->s;\n\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[0].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[0].anim;\n    s->variant = gUnknown_080D2044[0].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x480;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s2;\n    s->tiles = vram;\n    vram += (gUnknown_080D2044[3].numTiles * TILE_SIZE_4BPP);\n    s->anim = gUnknown_080D2044[3].anim;\n    s->variant = gUnknown_080D2044[3].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n\n    s = &enemy->s3;\n    s->tiles = vram;\n    s->anim = gUnknown_080D2044[4].anim;\n    s->variant = gUnknown_080D2044[4].variant;\n    s->prevVariant = -1;\n    s->x = TO_WORLD_POS_RAW(I(enemy->qPos.x), enemy->region[0]) - gCamera.x;\n    s->y = TO_WORLD_POS_RAW(I(enemy->qPos.y), enemy->region[1]) - gCamera.y;\n    s->oamFlags = 0x4C0;\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->animSpeed = 0x10;\n    s->palId = 0;\n    s->frameFlags = 0x1000;\n    s->hitboxes[0].index = -1;\n    UpdateSpriteAnimation((Sprite *)s);\n}",
-      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"code_z_1.h\"\n#include \"game/camera.h\"\n#include \"game/enemies/hariisen.h\"\n#include \"game/enemy_unknown.h\"\n#include \"game/entity.h\"\n#include \"game/stage.h\"\n#include \"module_unclear.h\"",
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/enemies/hariisen.c#L55-L108",
+      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"code_z_1.h\"\n#include \"game/shared/stage/camera.h\"\n#include \"game/enemies/hariisen.h\"\n#include \"game/enemy_unknown.h\"\n#include \"game/shared/stage/entity.h\"\n#include \"game/stage.h\"\n#include \"module_unclear.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/game/sa3/enemies/hariisen.c#L54-L107",
       "proto": {
         "sub_806132C": {
           "returnsVoid": true
@@ -845,7 +859,7 @@
     {
       "sym": "sub_804D360",
       "addr": "0x0804d360",
-      "unit": "src/game/interactables/maze.c",
+      "unit": "src/game/sa3/interactables/maze.c",
       "romDigest": "32f3a9a3ae5f616cd419bd4718ef7979300eace5967002d19085a4cff3d921f9",
       "features": [
         "struct",
@@ -853,8 +867,8 @@
         "branch"
       ],
       "funcC": "void sub_804D360(Sprite *s, s16 i, s16 param2)\n{\n    u32 flags = 0;\n\n    switch (i) {\n        case 0: {\n            flags |= SPRITE_FLAG(X_FLIP, 1);\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 1: {\n            if (param2 == 2) {\n                flags |= SPRITE_FLAG(Y_FLIP, 1);\n            }\n        } break;\n\n        case 2: {\n            flags |= SPRITE_FLAG(Y_FLIP, 1);\n\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n\n        case 3: {\n            if (param2 == 0) {\n                flags |= SPRITE_FLAG(X_FLIP, 1);\n            }\n        } break;\n    }\n\n    s->tiles = ALLOC_TILES_VARIANT(ANIM_MAZE, 6);\n    s->anim = ANIM_MAZE;\n    s->variant = 6;\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = 0;\n    s->qAnimDelay = 0;\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = -1;\n    s->frameFlags = flags | SPRITE_FLAG(PRIORITY, 1);\n    UpdateSpriteAnimation(s);\n}",
-      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"malloc_vram.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"",
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/maze.c#L344-L390",
+      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"malloc_vram.h\"\n#include \"game/shared/stage/camera.h\"\n#include \"game/shared/stage/entity.h\"\n#include \"game/shared/stage/player.h\"\n#include \"game/shared/stage/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/game/sa3/interactables/maze.c#L343-L389",
       "proto": {
         "sub_804D360": {
           "returnsVoid": true
@@ -884,7 +898,7 @@
     {
       "sym": "sub_803213C",
       "addr": "0x0803213c",
-      "unit": "src/game/interactables/ramp.c",
+      "unit": "src/game/sa3/interactables/ramp.c",
       "romDigest": "b68e5927b1f4a63f6a86b2c62d3ce1d4530a4915e4b3e6c703867f25f6d3bb24",
       "features": [
         "value-home",
@@ -893,9 +907,9 @@
         "struct",
         "field"
       ],
-      "funcC": "void sub_803213C(u8 unk38, u8 unk39, Sprite *s)\n{\n    u32 mask = (unk39 & 0x1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n\n    if (gStageData.gameMode != GAME_MODE_MP_SINGLE_PACK) {\n        if (unk38 != 0) {\n            s->tiles = ALLOC_TILES(ANIM_RAMP);\n            s->anim = ANIM_RAMP;\n            s->variant = 0;\n        } else {\n            s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n            s->anim = ANIM_RAMP;\n            s->variant = 1;\n        }\n    } else {\n        s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n        s->anim = ANIM_RAMP;\n        s->variant = 1;\n        mask |= SPRITE_FLAG(MOSAIC, 1);\n    }\n\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = SPRITE_FLAG(PRIORITY, 1) | mask;\n}",
-      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/camera.h\"\n#include \"game/entity.h\"\n#include \"game/player.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/game/interactables/ramp.c#L340-L369",
+      "funcC": "void sub_803213C(u8 unk38, u8 unk39, Sprite *s)\n{\n    u32 mask = (unk39 & 0x1) ? SPRITE_FLAG(X_FLIP, 1) : 0;\n\n    if (CURRENT_GAME_MODE != GAME_MODE_MP_SINGLE_PACK) {\n        if (unk38 != 0) {\n            s->tiles = ALLOC_TILES(ANIM_RAMP);\n            s->anim = ANIM_RAMP;\n            s->variant = 0;\n        } else {\n            s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n            s->anim = ANIM_RAMP;\n            s->variant = 1;\n        }\n    } else {\n        s->tiles = ALLOC_TILES_VARIANT(ANIM_RAMP, 1);\n        s->anim = ANIM_RAMP;\n        s->variant = 1;\n        mask |= SPRITE_FLAG(MOSAIC, 1);\n    }\n\n    s->oamFlags = SPRITE_OAM_ORDER(24);\n    s->animCursor = 0;\n    s->qAnimDelay = Q(0);\n    s->prevVariant = -1;\n    s->animSpeed = SPRITE_ANIM_SPEED(1.0);\n    s->palId = 0;\n    s->hitboxes[0].index = HITBOX_STATE_INACTIVE;\n    s->frameFlags = SPRITE_FLAG(PRIORITY, 1) | mask;\n}",
+      "prependC": "#include \"global.h\"\n#include \"module_unclear.h\"\n#include \"core.h\"\n#include \"sprite.h\"\n#include \"trig.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/shared/stage/camera.h\"\n#include \"game/shared/stage/entity.h\"\n#include \"game/shared/stage/player.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/shared/stage/player_callbacks.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_sizes.h\"\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/zones.h\"",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/game/sa3/interactables/ramp.c#L339-L368",
       "proto": {
         "sub_803213C": {
           "returnsVoid": true
@@ -907,7 +921,7 @@
     {
       "sym": "Player_800D978",
       "addr": "0x0800d978",
-      "unit": "src/game/stage/player.c",
+      "unit": "src/game/sa3/stage/player.c",
       "romDigest": "6007e4c30076f06cca22575543bb04e866c57733ba691c9b463d3314daa47d95",
       "features": [
         "bitfield",
@@ -917,9 +931,9 @@
         "mask"
       ],
       "note": "A WRITE to a declared bitfield member (`u8 unk2D_0 : 4`). asmlift can only spell a bitfield as a READ of a named global carrying map-declared bitfield facts, so the read-modify-write comes out as a byte-width mask where agbcc masks at int width.",
-      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"module_unclear.h\"\n#include \"code_z_1.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/camera.h\"\n#include \"game/interactables/ice_launcher.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/player.h\"\n#include \"game/player_callbacks.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_commands.h\" // for ANIM_CMD__PALETTE\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/vram_hardcoded.h\"\n#include \"constants/zones.h\"",
-      "funcC": "void Player_800D978(Player *p)\n{\n    p->moveState &= 0xFFFDFFFF;\n    p->layer = PLAYER_LAYER_BACK;\n    Player_StopSong(p, SE_GRINDING);\n\n    p->charFlags.unk2D_0 = 0;\n    Player_8005380(p);\n}",
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/a069e81bb4c7128e12bfb182bdcc49141ec5f7fb/src/game/stage/player.c#L7695-L7703",
+      "prependC": "#include \"global.h\"\n#include \"core.h\"\n#include \"flags.h\"\n#include \"trig.h\"\n#include \"module_unclear.h\"\n#include \"code_z_1.h\"\n#include \"malloc_ewram.h\"\n#include \"malloc_vram.h\"\n#include \"lib/m4a/m4a.h\"\n#include \"game/shared/stage/camera.h\"\n#include \"game/interactables/ice_launcher.h\"\n#include \"game/shared/stage/player.h\"\n#include \"game/interactables/ramp.h\"\n#include \"game/shared/stage/player_callbacks.h\"\n#include \"game/save.h\"\n#include \"game/stage.h\"\n#include \"constants/animations.h\"\n#include \"constants/anim_commands.h\" // for ANIM_CMD__PALETTE\n#include \"constants/move_states.h\"\n#include \"constants/songs.h\"\n#include \"constants/vram_hardcoded.h\"\n#include \"constants/zones.h\"",
+      "funcC": "void Player_800D978(Player *p)\n{\n    p->moveState &= ~MOVESTATE_GRINDING;\n    p->layer = PLAYER_LAYER_BACK;\n    Player_StopSong(p, SE_GRINDING);\n\n    p->charFlags.unk2D_0 = 0;\n    Player_8005380(p);\n}",
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/game/sa3/stage/player.c#L7700-L7708",
       "m2cCtx": true,
       "proto": {
         "Player_StopSong": {
