@@ -5,7 +5,7 @@ import { describe, expect, test } from 'vitest';
 import { type CallLowering, callDeclarations } from '../src/frontend/call-plan';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
 import type { Prototypes } from '../src/proto';
-import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 const EVERY: CallLowering = { pairs: true, memoryReturn: true, stackArgs: true };
 const fail = (message: string): never => {
@@ -159,5 +159,82 @@ describe('callDeclarations.plan', () => {
       /^target 'mips': a lowering that builds pairs needs the return register to be the first argument register, and v0 is not a0$/,
     );
     expect(() => callDeclarations('f', MIPS_IDO, {}, { ...EVERY, pairs: false }, fail)).not.toThrow();
+  });
+});
+
+describe('callDeclarations.plan for a lowering with no pair, no memory return and no stack argument', () => {
+  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false };
+  const ppcCalls = (prototypes: Prototypes) => callDeclarations('f', PPC_MWCC, prototypes, NONE, fail);
+  // twelve bytes, which mwcc returns through memory
+  const S12 = { kind: 'struct' as const, members: ['a', 'b', 'c'].map((name) => ({ name, type: 's32' })) };
+
+  test('refuses a struct returned through memory before anything else is asked', () => {
+    const calls = ppcCalls({ mk: { params: ['long long'], returns: 'struct S12', returnLayout: S12 } });
+    expect(() => calls.plan('mk')).toThrow(
+      "cannot lift 'f': 'mk' is declared to return struct S12 by value — a struct returned through a hidden pointer, " +
+        'or one nothing here can size, is not modelled',
+    );
+  });
+
+  test('refuses a struct return nothing here can size', () => {
+    const calls = ppcCalls({ mk: { params: ['s32'], returns: 'struct Opaque' } });
+    expect(() => calls.plan('mk')).toThrow(/^cannot lift 'f': 'mk' is declared to return struct Opaque by value — /);
+  });
+
+  test('plans a struct returned in registers as one leaving the return register holding nothing', () => {
+    const calls = ppcCalls({ mv: { params: ['s32'], returns: 'struct One', returnLayout: ONE } });
+    expect(calls.plan('mv')).toMatchObject({
+      widths: [32],
+      returns: { kind: 'register-struct' },
+      clobbers: [...calls.callClobbers, 'r3'],
+    });
+  });
+
+  test('refuses a parameter declared wider than a register', () => {
+    const calls = ppcCalls({ llsink: { params: ['s32', 'long long'] } });
+    expect(() => calls.plan('llsink')).toThrow(
+      "cannot lift 'f': one half of a 64-bit value would be handed to 'llsink' — its parameter 2 is declared wider " +
+        'than a register, and this frontend passes each argument register as its own value rather than building ' +
+        'the pair the ABI passes it in',
+    );
+  });
+
+  test('refuses more parameters than the argument registers carry', () => {
+    const calls = ppcCalls({ g9: { params: Array(9).fill('int') } });
+    expect(() => calls.plan('g9')).toThrow(
+      "cannot lift 'f': outgoing stack arguments not modelled — 'g9' is declared with 9 parameters and the " +
+        'argument registers carry 8, so the rest travel in its parameter area on the stack',
+    );
+    expect(ppcCalls({ g8: { params: Array(8).fill('int') } }).plan('g8').widths).toHaveLength(8);
+  });
+
+  test('refuses a return declared wider than a register', () => {
+    const calls = ppcCalls({ g: { params: [], returns: 'long long' } });
+    expect(() => calls.plan('g')).toThrow(
+      "cannot lift 'f': 'g' would hand back one half of a 64-bit value — its return is declared wider than a " +
+        'register, and this frontend reads the return register as the whole value rather than building the pair ' +
+        'the ABI hands back',
+    );
+  });
+
+  test('plans a 64-bit runtime helper as an undeclared call', () => {
+    const calls = ppcCalls({});
+    expect(calls.plan('__div2i')).toEqual({
+      callee: '__div2i',
+      wideHelper: null,
+      declared: null,
+      widths: null,
+      returns: { kind: 'word' },
+      clobbers: calls.callClobbers,
+    });
+  });
+
+  test("leaves a 64-bit return a project declares on a runtime helper's name to the table", () => {
+    const calls = ppcCalls({ __div2i: { params: ['s32', 's32'], returns: 'long long' } });
+    expect(calls.plan('__div2i')).toMatchObject({ widths: [32, 32], returns: { kind: 'word' } });
+  });
+
+  test('sizes an undeclared `memcpy` by the signature the C standard fixes', () => {
+    expect(ppcCalls({}).plan('memcpy').widths).toEqual([32, 32, 32]);
   });
 });

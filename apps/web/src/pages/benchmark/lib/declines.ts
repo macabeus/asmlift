@@ -54,26 +54,26 @@
 //   frontend/mips.ts         9  a relocation with an addend, an address below the symbol, an indirect
 //                               `jr`, a non-numeric immediate, and five refusals about a disassembly
 //                               the reader cannot account for
-//   frontend/ppc.ts          8  `stwu` with update, a relocation on a stack-pointer adjust, a call to
-//                               a function declared to return a struct or union by value, a branch
+//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
+//                               branch, an unparsable constant expression, and a magnitude with a
+//                               leading zero (octal to the assembler)
+//   frontend/disasm.ts       7  the objdump `...` elision family
+//   frontend/ppc.ts          7  `stwu` with update, a relocation on a stack-pointer adjust, a branch
 //                               testing a cr field a call destroyed (no compiler emits it), a return
 //                               address `mflr` copied out and the body read as a value, the same
 //                               address stored anywhere but the link register's save word, the
 //                               reaching-compare throw whose reason is interpolated (as Thumb's), and
 //                               the two-armed branch denylist, whose template is interpolation end to end
-//                               (its two 64-bit refusals are NOT here — both carry `wide-call-arg`'s
-//                               phrase, because they are that capability gap seen from the frontend
-//                               with no register pair: one for a declared wide PARAMETER and one for
-//                               a declared wide RETURN)
-//   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
-//                               branch, an unparsable constant expression, and a magnitude with a
-//                               leading zero (octal to the assembler)
-//   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/call-plan.ts    5  a call to a function declared to return a struct it cannot lower (its
+//   frontend/call-plan.ts    6  a call to a function declared to return a struct it cannot lower (its
 //                               interpolated reason), one whose parameters nothing sizes, one whose
 //                               declaration the lifted source cannot print (a type it has no spelling
-//                               for, or a bare parameter count that states none), and one declared to
-//                               return both a struct and a 64-bit value
+//                               for, or a bare parameter count that states none), one declared to
+//                               return both a struct and a 64-bit value, and one declared to return a
+//                               struct or union by value to a lowering that receives none through
+//                               memory (its two 64-bit refusals are NOT here — both carry
+//                               `wide-call-arg`'s phrase, because they are that capability gap seen
+//                               from a lowering with no register pair: one for a declared wide
+//                               PARAMETER and one for a declared wide RETURN)
 //   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
 //                               and a struct one call hands back in the return register passed on
 //                               as the next guessed call's first argument

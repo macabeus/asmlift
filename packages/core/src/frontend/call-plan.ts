@@ -54,7 +54,7 @@ export interface DeclaredCall {
 /** What one call is, decided from its callee's declaration before any instruction is read. */
 export interface CallPlan {
   readonly callee: string;
-  /** the runtime helper whose signature this is */
+  /** the runtime helper whose signature this is, where the lowering builds pairs */
   readonly wideHelper: RuntimeHelper | null;
   readonly declared: DeclaredCall | null;
   /** each argument's width, a hidden pointer first; null when nothing sizes them, so the frontend
@@ -289,12 +289,60 @@ export function callDeclarations(
       ...(returned === undefined ? {} : { returned }),
     };
   };
-  // ONE CALL, IN THE ORDER ITS QUESTIONS REFUSE: a runtime helper's signature is its compiler's, so
-  // no declaration is asked for one; the declaration's own refusals come next, then the return.
+  // ONE CALL, IN THE ORDER ITS QUESTIONS REFUSE: a struct the lowering cannot receive, then the
+  // runtime helper, whose signature is its compiler's, so no declaration is asked for one; the
+  // declaration's own refusals come next, then the return.
   const plan = (callee: string): CallPlan => {
-    const wide = wideHelper(callee);
-    const declared = wide ? null : declaredCall(callee);
-    const pair = returnsPair(callee);
+    const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
+    // One returned through memory is handed a hidden pointer in argument 0, with every argument one
+    // register up. One returned in registers takes its arguments where they are declared.
+    if (
+      !lowering.memoryReturn &&
+      declaresAggregateReturn(own) &&
+      returnsInMemory(returnedAggregate(own!), target) !== false
+    ) {
+      fail(
+        `cannot lift '${name}': '${callee}' is declared to return ${own?.returns ?? 'a struct or union'} by value — ` +
+          'a struct returned through a hidden pointer, or one nothing here can size, is not modelled',
+      );
+    }
+    const helper = wideHelper(callee);
+    // WITHOUT PAIRS A 64-BIT HELPER IS AN UNDECLARED CALL. Its table signature passes a pair, which
+    // such a lowering cannot build; guessed, the call reaches `raise/widehelpers.ts`, which gaps it
+    // by name.
+    const wide = lowering.pairs ? helper : null;
+    const declared = helper ? null : declaredCall(callee);
+    if (!lowering.pairs && declared !== null) {
+      // A PARAMETER WIDER THAN A REGISTER TRAVELS IN A PAIR. A lowering that passes every argument
+      // register as its own value would honour the declaration by handing the callee one half.
+      const wideAt = declared.widths.findIndex((w) => w > 32);
+      if (wideAt >= 0) {
+        fail(
+          `cannot lift '${name}': one half of a 64-bit value would be handed to '${callee}' — its parameter ` +
+            `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
+            'register as its own value rather than building the pair the ABI passes it in',
+        );
+      }
+    }
+    if (!lowering.stackArgs && declared !== null && wordsOf(declared.widths) > target.argRegs.length) {
+      fail(
+        `cannot lift '${name}': outgoing stack arguments not modelled — '${callee}' is declared with ` +
+          `${declared.widths.length} parameters and the argument registers carry ${target.argRegs.length}, so the rest ` +
+          `travel in its parameter area on the stack`,
+      );
+    }
+    const pair = helper !== null && !lowering.pairs ? false : returnsPair(callee);
+    // THE SAME RULE ON THE WAY BACK. The declaration reaches the candidate whether or not the
+    // lowering can act on it (`l3/symbol-refs.ts` prints `long long g(void);`), so reading the
+    // return register alone would lift `return g();` off one half under a declaration that makes
+    // it mean the whole value.
+    if (pair && !lowering.pairs) {
+      fail(
+        `cannot lift '${name}': '${callee}' would hand back one half of a 64-bit value — its return is ` +
+          'declared wider than a register, and this frontend reads the return register as the whole ' +
+          'value rather than building the pair the ABI hands back',
+      );
+    }
     // a struct returned through memory is the call's value, and argument 0 is where it lands; one
     // returned in r0 is r0's bytes, whether or not anything states the call's arity
     const returned = declared?.returned ?? (declared === null && !wide ? registerStructReturn(callee) : undefined);

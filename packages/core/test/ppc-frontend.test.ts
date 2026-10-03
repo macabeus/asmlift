@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
+import { lift } from '../src/frontend/ppc';
 import { decompile } from '../src/pipeline';
 import { PPC_MWCC } from '../src/target';
 
@@ -800,6 +801,35 @@ describe('a guessed call arity and the EABI return register', () => {
     const src = dis('t', asm);
     expect(src).toContain('a1 + a2');
     expect(src).toMatch(/return bar\(v\d\);/);
+  });
+});
+
+// A `bl` asks its callee's declaration the questions every frontend asks (frontend/call-plan.ts):
+// the project's prototype, then the compiler's runtime table, then the signatures the C standard
+// fixes.
+describe('a PowerPC call reads the shared call declarations', () => {
+  // r3..r6 all hold a value at the call
+  const callTo = (callee: string) =>
+    '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,2\n8:\tli      r5,3\nc:\tli      r6,4\n' +
+    `10:\tbl      14 <c+0x14>\n\t\t\t10: R_PPC_REL24\t${callee}\n14:\tblr\n`;
+
+  test('an undeclared `memcpy` takes the three parameters the C standard fixes', () => {
+    expect(decompile('c', callTo('memcpy'), PPC_MWCC).source).toBe('s32 c(void) {\n    return memcpy(1, 2, 3);\n}\n');
+  });
+
+  test('a 64-bit return a project declares on a runtime helper name declines at raise, naming the helper', () => {
+    const prototypes = { __div2i: { params: ['s32', 's32'], returns: 'long long' } };
+    expect(() => decompile('c', callTo('__div2i'), PPC_MWCC, { prototypes })).toThrow(
+      /no model for the runtime helper '__div2i'/,
+    );
+  });
+
+  test('a 64-bit runtime helper the project leaves undeclared lowers at the guessed arity', () => {
+    const calls = lift('c', callTo('__div2i'), PPC_MWCC)
+      .blocks.flatMap((b) => b.ops)
+      .filter((op) => op.opcode === 'call');
+    expect(calls.map((op) => [op.attrs.target, op.operands.length])).toEqual([['__div2i', 4]]);
+    expect(() => decompile('c', callTo('__div2i'), PPC_MWCC)).toThrow(/no model for the runtime helper '__div2i'/);
   });
 });
 
