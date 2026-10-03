@@ -1,6 +1,5 @@
 // The call declarations a frontend reads a callee's declaration through (`callDeclarations`), the
-// plan they make of one call and the call they lower it to. `thumb-stages.test.ts` drives the Thumb
-// call lowering that reads it.
+// plan they make of one call and the call they lower it to (`lower`), each tested here.
 import { describe, expect, test } from 'vitest';
 
 import { type CallLowering, type CallPairs, callDeclarations } from '../src/frontend/call-plan';

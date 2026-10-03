@@ -56,7 +56,9 @@ export interface SsaBuilder {
    *  hole.
    *
    *  A DECLARED arity uses `readVar`, and must: there the callee says the argument exists, so
-   *  reading a destroyed register for it is a wrong value with nothing to retract it. */
+   *  reading a destroyed register for it is a wrong value with nothing to retract it.
+   *
+   *  One of the three call verbs `CallDeclarations.lower` owns ({@link noteCall}). */
   readGuessedArg(reg: string, b: number): Value;
   /** Record that `reg` now holds `v` within block `b`. */
   writeVar(reg: string, b: number, v: Value): void;
@@ -100,21 +102,25 @@ export interface SsaBuilder {
    *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
   holdsEntryValue(reg: string, b: number): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
-   *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
-   *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
-   *  argument setup for whatever call comes next.
+   *  caller set up.
+   *
+   *  THE CALL VERBS ARE `CallDeclarations.lower`'s (frontend/call-plan.ts): a frontend lowers a
+   *  call through it, and it alone calls this, {@link recordGuessedCall} and {@link readGuessedArg},
+   *  in one order — `recordGuessedCall`, then the call's own result, then this. The result is the
+   *  CALLEE's, so it must not count as caller-side argument setup for whatever call comes next.
    *
    *  `clobbers` are the registers the callee DESTROYS and leaves holding nothing this function can
    *  name — {@link clobberedByCall} spells it, and it is the ABI's caller-saved set minus the
-   *  return register precisely because of the ordering above: the frontend has already written the
-   *  callee's own result there, so that one register does have a name. A callee that hands a
-   *  STRUCT back in that register writes no value a caller may read as a word, so the frontend
-   *  writes none and lists the register here too. Required rather than optional: a frontend that
-   *  omitted it would keep resolving a destroyed register to its pre-call value, silently. */
+   *  return register precisely because of the ordering above: the callee's own result is already
+   *  written there, so that one register does have a name. A callee that hands a STRUCT back in
+   *  that register writes no value a caller may read as a word, so none is written and the
+   *  register is listed here too. Required rather than optional: a call lowered without it would
+   *  keep resolving a destroyed register to its pre-call value, silently. */
   noteCall(b: number, clobbers: readonly string[]): void;
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
-   *  `abi` is the target's argument-register order and its return register. */
+   *  `abi` is the target's argument-register order and its return register. It snapshots what the
+   *  caller wrote, so it comes before the call's result is written ({@link noteCall}). */
   recordGuessedCall(op: Op, b: number, abi: { argRegs: string[]; returnReg: string }): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -252,9 +258,9 @@ interface StaleRead {
 }
 
 /** The registers a call leaves holding nothing the CALLER can name — what {@link SsaBuilder.noteCall}
- *  wants. The ABI's caller-saved set minus the return register: every frontend writes the callee's
- *  own result there before recording the clobber, so that one register does have a name and the
- *  rest do not.
+ *  wants. The ABI's caller-saved set minus the return register: `CallDeclarations.lower` writes the
+ *  callee's own result there before recording the clobber, so that one register does have a name
+ *  and the rest do not.
  *
  *  CHECKED rather than trusted, the way `checkedLiveInModel` checks the register partition: a
  *  register the caller passes arguments in is by construction one the callee may destroy, so
@@ -337,10 +343,11 @@ export function makeSsaBuilder(
   const callsIn = new Set<number>();
   // WHAT A CALL DESTROYED, which is a DIFFERENT question from the one above and not its complement.
   // `writtenSinceCall` asks "did the CALLER set this register up" — a MUST question, whose answer
-  // for the return register is deliberately no, because the frontend writes the callee's result
-  // there before recording the clobber. This asks "does this register still hold a value anyone can
-  // name" — a MAY question, whose answer for that same register is yes. One analysis serving both
-  // would have to be wrong about one of them, so they are two, and each names the other.
+  // for the return register is deliberately no, because `CallDeclarations.lower` writes the
+  // callee's result there before recording the clobber. This asks "does this register still hold a
+  // value anyone can name" — a MAY question, whose answer for that same register is yes. One
+  // analysis serving both would have to be wrong about one of them, so they are two, and each names
+  // the other.
   //
   // `clobberedLocal[b]`: destroyed by a call in `b` with nothing written since. `decidedLocal[b]`:
   // registers `b` has settled either way, so a register in neither inherits its fate from the
@@ -970,7 +977,7 @@ export function makeSsaBuilder(
   };
 }
 
-// ── shared frontend tail helpers ──
+// ── a guessed call arity: counted by `CallDeclarations.lower`, trimmed by `finish` ──
 
 /** Best-effort call arity when a callee has no prototype: the count of contiguous argument
  *  registers with a value reaching the call's block. Correct when the arguments are set up in
@@ -1142,7 +1149,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // (`bl __mulsf3; add r1,r4,#0; bl __addsf3` is `__addsf3(__mulsf3(a, b), c)`).
   const setsUpLater = (fresh: Set<string>): boolean => argRegs.some((r, i) => i > 0 && fresh.has(r));
   // THE RETURN REGISTER IS NOT ARGUMENT SETUP. Where the ABI aliases it onto argument 0, the
-  // frontends record a call's clobber AFTER its own result, so the result leaves the register
+  // call lowering records a call's clobber AFTER its own result, so the result leaves the register
   // UNfresh here. That disproves caller setup only where the callee's return is BOTH what the
   // register still holds and all the site has to go on: with a later register set up (above), or
   // with a value no call produced — a join of one path's return with another path's caller-computed
@@ -1246,6 +1253,8 @@ export function narrowToSetupArgs(fn: Fn): boolean {
   }
   return changed;
 }
+
+// ── shared frontend tail helpers ──
 
 /** The stack-slot key the MIPS, Thumb and PowerPC frontends use for a word-sized local in the
  *  function's own frame. Shared so they spell it identically and the frame-partition rule can
