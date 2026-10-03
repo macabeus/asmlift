@@ -232,6 +232,14 @@ export const PPC_MWCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> =
  *  and signedness. The float side travels in the FPU's registers (`$f12` in, `$f0` out), so these
  *  carry no op: a guessed call to one passes and returns nothing it can see.
  *
+ *  SO IS A 64-BIT BITFIELD: a read hands the word's address, start bit and length to
+ *  `__ll_bit_extract` (`__ull_bit_extract` unsigned), and a write of either signedness calls
+ *  `__ll_bit_insert` with the value as a fourth parameter. No op folds either.
+ *
+ *  THE NAMES ARE THE COMPILER'S OWN: these are every `__ll_*`, `__ull_*` and `__*_to_*ll` that a pass
+ *  of IDO 7.1 carries in its string table (`cfe` carries them all). Its libc defines more
+ *  (`__ll_mod`, `__ull_divremi`, `__ull_divrem_*`), which no pass names, so no compiled code calls them.
+ *
  *  ⚠ WHAT THIS TABLE DOES ON THIS TARGET IS REFUSE, as `PPC_MWCC_RUNTIME_HELPERS` does and for the
  *  same reason: `frontend/mips.ts` fuses no register pair, so a call to one of these arrives with
  *  word operands and `refuseUnmodelledHelpers` gaps it by name. */
@@ -252,6 +260,9 @@ export const IDO_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __f_to_ll: { params: [32], returns: 64 },
   __d_to_ull: { params: [64], returns: 64 },
   __f_to_ull: { params: [32], returns: 64 },
+  __ll_bit_extract: { params: [32, 32, 32], returns: 64 },
+  __ull_bit_extract: { params: [32, 32, 32], returns: 64 },
+  __ll_bit_insert: { params: [32, 32, 32, 64], returns: 64 },
 };
 
 /** GCC's libgcc for MIPS, as KMC GCC and GCC 2.7.2 call it at the N64 projects' `-mips3 -mgp32`

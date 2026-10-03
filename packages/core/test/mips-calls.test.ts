@@ -443,6 +443,29 @@ describe('a 64-bit conversion is a runtime helper, and a gap', () => {
   );
 });
 
+// A 64-BIT BITFIELD IS READ AND WRITTEN THROUGH IDO'S RUNTIME: `struct S { long long a : 40; … };
+// long long g3(struct S *s) { return s[1].a; }` hands the word's address, the start bit and the
+// length to `__ll_bit_extract`. Lifted as an ordinary call it recompiles to the same `jal`.
+describe('a 64-bit bitfield access is a runtime helper, and a gap', () => {
+  const IDO_EXTRACT = [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,20(sp)',
+    '8:\taddiu\ta0,a0,8',
+    'c:\tmove\ta1,zero',
+    '10:\tjal\t0 <f>',
+    '14:\tli\ta2,40',
+    '18:\tlw\tra,20(sp)',
+    '1c:\taddiu\tsp,sp,24',
+    '20:\tjr\tra',
+    '24:\tnop',
+  ];
+  test.each(['__ll_bit_extract', '__ull_bit_extract', '__ll_bit_insert'])('IDO: %s', (helper) => {
+    expect(lift(IDO_EXTRACT, [[0x10, 'R_MIPS_26', helper]], {}, MIPS_IDO)).toThrow(
+      new RegExp(`no model for the runtime helper '${helper}'`),
+    );
+  });
+});
+
 // `void g(int); void f(int x) { g(x + 1); }` at gcc2.7.2kmc -O2. Under a declaration that says `g`
 // is void, v0 after the call holds nothing g handed back, so `f` returns nothing.
 describe('a callee declared void hands nothing back', () => {

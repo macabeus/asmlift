@@ -136,6 +136,30 @@ describe('a 64-bit conversion declines, naming its helper', () => {
   );
 });
 
+// IDO reads a 64-bit bitfield through its runtime; KMC and gcc2.7.2 open-code it. Lifted as an
+// ordinary call it recompiles to the same `jal`.
+describe('a 64-bit bitfield read declines on IDO, naming its helper', () => {
+  const BITFIELDS = [
+    {
+      helper: '__ll_bit_extract',
+      sym: 'g3',
+      c: 'struct S { long long a : 40; long long b : 24; }; long long g3(struct S *s) { return s[1].a; }',
+    },
+    {
+      helper: '__ull_bit_extract',
+      sym: 'gu',
+      c:
+        'struct S { unsigned long long a : 40; unsigned long long b : 24; }; ' +
+        'unsigned long long gu(struct S *s) { return s[1].a; }',
+    },
+  ];
+
+  test.runIf(idoAvailable()).each(BITFIELDS)('ido7.1: $helper', ({ helper, sym, c }) => {
+    const { obj, asm } = compileMipsTarget(c, sym, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
+    expect(() => lift(sym, asm, obj, MIPS_IDO, {})).toThrow(new RegExp(`no model for the runtime helper '${helper}'`));
+  });
+});
+
 // A float that crosses a call untouched in $f0 or $f12: the caller names no FPU register, and the
 // callee's declaration is what shows the float is there.
 describe('a callee declared with a float declines, naming it', () => {
