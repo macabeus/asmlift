@@ -208,5 +208,45 @@
     "tu": "sub_8001FD4.i.gz",
     "ctx": "ctx-873a8fae2ddd.i.gz",
     "m2c": "ctx-873a8fae2ddd.i.gz"
+  },
+  "sub_800F0E8": {
+    "tu": "sub_800F0E8.i.gz",
+    "ctx": "ctx-b06199f13c63.i.gz",
+    "m2c": "ctx-b06199f13c63.i.gz"
+  },
+  "sub_80322D8": {
+    "tu": "sub_80322D8.i.gz",
+    "ctx": "ctx-771226ca477e.i.gz",
+    "m2c": "ctx-771226ca477e.i.gz"
+  },
+  "sub_8060940": {
+    "tu": "sub_8060940.i.gz",
+    "ctx": "ctx-41652644153e.i.gz",
+    "m2c": "ctx-41652644153e.i.gz"
+  },
+  "sub_806FAFC": {
+    "tu": "sub_806FAFC.i.gz",
+    "ctx": "ctx-ba21b2698ada.i.gz",
+    "m2c": "ctx-ba21b2698ada.i.gz"
+  },
+  "sub_8068908": {
+    "tu": "sub_8068908.i.gz",
+    "ctx": "ctx-c4b7de4b8bbb.i.gz",
+    "m2c": "ctx-c4b7de4b8bbb.i.gz"
+  },
+  "sub_8071720": {
+    "tu": "sub_8071720.i.gz",
+    "ctx": "ctx-474d66ea715f.i.gz",
+    "m2c": "ctx-474d66ea715f.i.gz"
+  },
+  "sub_801DB70": {
+    "tu": "sub_801DB70.i.gz",
+    "ctx": "ctx-694be033b27e.i.gz",
+    "m2c": "ctx-694be033b27e.i.gz"
+  },
+  "sub_800E764": {
+    "tu": "sub_800E764.i.gz",
+    "ctx": "ctx-e66f5f2455aa.i.gz",
+    "m2c": "ctx-e66f5f2455aa.i.gz"
   }
 }

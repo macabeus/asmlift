@@ -109,14 +109,14 @@ from the manifests by `test/authored-facts.test.ts`, so none of them can go stal
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
-| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  116 |
+| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  119 |
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
-| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |  102 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |  106 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
 | no context at all — its C++ unit's own is not C, so m2c infers the signature from the asm, as asmlift does                                                                 |   42 |
-| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  132 |
+| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  133 |
 
-What those 110 declarations SAY — a bare name, or the full signature — is residual 12.
+What those 113 declarations SAY — a bare name, or the full signature — is residual 12.
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
@@ -198,12 +198,12 @@ _Favouring m2c, on Mario Party 4 (`"tu": "unit"`)._
 
 _Favouring m2c, across the tier._
 
-12. **The row's own signature, where its project declares it.** On 74 of the 110 rows whose context
+12. **The row's own signature, where its project declares it.** On 77 of the 113 rows whose context
     already declares the function, that declaration carries a PARAMETER LIST — the full signature,
     return type and parameter types (`u32 BoardRandMod(u32 value);`,
     `static s32 GetDigit(s32 value, s32 place);`) — while asmlift's `proto` states void-ness and,
     on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 13, ac-decomp 12,
-    sa3 8, pokeemerald 7, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
+    sa3 11, pokeemerald 7, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
     `u32 BoardRandMod(u32 value);` from the context and re-running m2c: it then emits
     `s32 BoardRandMod(u32 arg0)`, same body. Not closed for the reason residual 4 is not: the
     declaration is the project's own header text, and removing it re-vendors the blob asmlift's
