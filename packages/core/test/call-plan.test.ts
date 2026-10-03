@@ -1,9 +1,12 @@
-// The call declarations a frontend reads a callee's declaration through (`callDeclarations`), and
-// the plan they make of one call. `thumb-stages.test.ts` drives the Thumb call lowering that reads it.
+// The call declarations a frontend reads a callee's declaration through (`callDeclarations`), the
+// plan they make of one call and the call they lower it to. `thumb-stages.test.ts` drives the Thumb
+// call lowering that reads it.
 import { describe, expect, test } from 'vitest';
 
 import { type CallLowering, callDeclarations } from '../src/frontend/call-plan';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
+import { makeSsaBuilder } from '../src/frontend/ssa';
+import type { Value } from '../src/ir/core';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -218,6 +221,43 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
 
   test('sizes an undeclared `memcpy` by the signature the C standard fixes', () => {
     expect(ppcCalls({}).plan('memcpy').widths).toEqual([32, 32, 32]);
+  });
+});
+
+describe('callDeclarations.lower', () => {
+  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
+  /** a call to `callee` made in a one-block function */
+  const site = (callee: string) => {
+    const ssa = makeSsaBuilder('f', 1, [[]]);
+    return {
+      callee,
+      ssa,
+      bi: 0,
+      read: (r: string) => ssa.readVar(r, 0),
+      write: (r: string, v: Value) => ssa.writeVar(r, 0, v),
+      stackWord: (k: number) => ssa.readVar(`stack${k}`, 0),
+    };
+  };
+  const miswired = (target: string) =>
+    `target '${target}': a call site's pairs and stack words must be what its lowering states`;
+
+  test('lowers a call whose site is wired as its lowering states', () => {
+    const { stackWord: _, ...s } = site('g');
+    callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower(s);
+    expect(s.ssa.irBlocks[0].ops.map((op) => [op.opcode, op.attrs.target, op.operands.length])).toEqual([
+      ['call', 'g', 1],
+    ]);
+  });
+
+  test('refuses a site that places stack words for a lowering that reads none', () => {
+    const lower = () => callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower(site('g'));
+    // a frontend wired against its own lowering is a bug in the frontend, not a function it declines
+    expect(lower).toThrow(miswired('ppc'));
+    expect(lower).not.toThrow(FrontendUnsupportedError);
+  });
+
+  test('refuses a site that builds no pair for a lowering that builds them', () => {
+    expect(() => thumbCalls({ g: { params: ['s32'] } }).lower(site('g'))).toThrow(miswired('armv4t'));
   });
 });
 
