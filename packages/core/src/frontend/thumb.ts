@@ -3617,11 +3617,10 @@ interface PairHalf {
   at: Instr;
 }
 
-/** The 64-bit pairs a lift builds and reads back: the halves it projected, the callee that
- *  returned each pair, and the returns judged once every block is filled. */
+/** The 64-bit pairs a lift builds and reads back: the halves it projected and the returns judged
+ *  once every block is filled. */
 interface ThumbPairs {
   readonly halfOf: ReadonlyMap<Value, PairHalf>;
-  readonly pairCallee: Map<Value, string>;
   readonly wordReturns: { bi: number; lo: Value; widerEpilogue: boolean }[];
   projectHalf(irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value;
   fuseHalves(irb: Block, lo: Value, hi: Value): Value;
@@ -3648,8 +3647,6 @@ function thumbPairs({
   // nothing above it would recognise; the instruction is what `wideReturn` walks forward from,
   // since half of the question it asks is about the machine rather than about the value graph.
   const halfOf = new Map<Value, PairHalf>();
-  /** The callee that handed back each pair a call returned, by the pair's value. */
-  const pairCallee = new Map<Value, string>();
   const projectHalf = (irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value => {
     const v = mkValue(T.unk(32));
     irb.ops.push(mkOp(half === 'lo' ? 'lo32' : 'hi32', { operands: [whole], results: [v] }));
@@ -3743,7 +3740,7 @@ function thumbPairs({
       }
     }
   };
-  return { halfOf, pairCallee, wordReturns, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
+  return { halfOf, wordReturns, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
 }
 
 /** Whether, from instruction `from` of block `bi` to its end, nothing puts into the pair's high
@@ -4870,7 +4867,6 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),
       halfOf: pairs.halfOf,
-      pairCallee: pairs.pairCallee,
     },
   });
 }

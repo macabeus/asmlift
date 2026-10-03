@@ -131,8 +131,6 @@ export interface CallPairs {
   project(whole: Value, half: 'lo' | 'hi'): Value;
   /** the pair each projected half was split from */
   readonly halfOf: ReadonlyMap<Value, { readonly whole: Value; readonly half: 'lo' | 'hi' }>;
-  /** the callee that handed back each pair a call returned */
-  readonly pairCallee: Map<Value, string>;
 }
 
 export function callDeclarations(
@@ -165,6 +163,8 @@ export function callDeclarations(
     const h = lookupHelper(target.runtimeHelpers, callee);
     return h !== undefined && isFloatHelper(h);
   };
+  /** the callee that handed back each pair a call returned, by the pair's value */
+  const pairCallee = new Map<Value, string>();
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
@@ -497,7 +497,7 @@ export function callDeclarations(
         // reader to the wrong declaration: a double leaves a soft-float helper only into
         // another one, the return, or a parameter declared `double` (`raise/floathelpers.ts`),
         // and a pair built here for a callee declared to take a `long long` is refused there.
-        const producer = half && pairs.pairCallee.get(half.whole);
+        const producer = half && pairCallee.get(half.whole);
         if (half && producer && isFloatHelperName(producer)) {
           fail(
             `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
@@ -550,7 +550,7 @@ export function callDeclarations(
       // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
       site.write(target.returnReg, pairs!.project(res, 'lo'));
       site.write(target.argRegs[1], pairs!.project(res, 'hi'));
-      pairs!.pairCallee.set(res, callee);
+      pairCallee.set(res, callee);
     } else if (returns.kind === 'word') {
       site.write(target.returnReg, res); // the callee defines the return register …
     }
