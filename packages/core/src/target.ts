@@ -917,9 +917,9 @@ export const MIPS_IDO: TargetDescription = {
   compiler: 'ido',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
-  // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. DECLARED and not yet exercised —
-  // `frontend/mips.ts` refuses a call outright, so nothing on this target reaches the read past one.
-  // Stated anyway, because the field is what makes the refusal unforgettable rather than optional.
+  // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. `frontend/mips.ts` reads the rest, and
+  // `ra`, as the registers a frame store SAVES; it refuses a call outright, so nothing on this target
+  // reaches the read past one.
   callerSaved: [
     'at',
     'v0',
@@ -987,8 +987,7 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
-  // The same O32 convention MIPS_IDO carries, and declared for the same reason: the frontend
-  // refuses a call, so it is the field's presence rather than its use that matters here.
+  // The same O32 convention MIPS_IDO carries, read the same way.
   callerSaved: [
     'at',
     'v0',

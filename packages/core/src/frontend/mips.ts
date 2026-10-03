@@ -787,6 +787,29 @@ export function lift(
       SUBWORD_MEM.has(ins.mnemonic) && ins.ops.length > 0 && isStackPtr(parseMem(ins.ops[ins.ops.length - 1]).base),
   );
 
+  // THE FRAME'S SAVES. A word store of `ra`, or of a register O32 does not let a callee destroy,
+  // made while the register still holds what the caller left in it, is a SAVE: the word holds the
+  // caller's value, which no C value names, so the store mints no parameter. The reload into the
+  // same register is the restore, and what it writes refuses any use, as a `%hi` half does: a read
+  // at once, a use reached through a merge once the function is built. A reload into another
+  // register refuses. Every other word store is a VALUE slot, and a slot is one kind for the whole
+  // function. Keyed by the raw `sp` offset, as every slot here is, so a prologue save matches an
+  // epilogue restore in any block.
+  const saveSlots = new Map<number, string>();
+  const valueSlots = new Set<number>();
+  const restores = new Map<Value, { reg: string; addr: number }>();
+  // A `$`-spelt operand is an FPU register or a bare number, and the target's list names neither.
+  const savedByCallee = (r: string) =>
+    r === 'ra' || (!r.startsWith('$') && !target.callerSaved.includes(r) && !['zero', 'sp', 'gp'].includes(r));
+  const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
+    if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': local stack frames not supported — '${mem}' at 0x${ins.addr.toString(16)} ` +
+          `is a word this function both saves a register in and stores a value to`,
+      );
+    }
+  };
+
   // Hardware divide state (capabilities.hwDivide). MIPS `div`/`divu rs,rt` set the hi/lo pair
   // implicitly; a later `mflo`/`mfhi` reads the quotient/remainder. FUNCTION-scoped: GCC schedules
   // the `mflo` into a SEPARATE block after the trap-check branch (`bnez rt; break 7`), so a
@@ -830,7 +853,15 @@ export function lift(
       }
       // A register holding the high half of an address is NOT a value. The legitimate consumers
       // (`addiu %lo`, a `%lo` load/store base) reach the half through `foldLoHalf` instead.
-      return highHalves.guardRead(name, r, readVar(r, bi));
+      const v = readVar(r, bi);
+      const restore = restores.get(v);
+      if (restore) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${r} is read after the 'lw' at 0x${restore.addr.toString(16)} restores the ` +
+            `caller's ${restore.reg} into it — no C value names it`,
+        );
+      }
+      return highHalves.guardRead(name, r, v);
     };
     // `slt`-family results, so a following `beqz`/`bnez` can fold into one compare.
     //
@@ -1283,6 +1314,19 @@ export function lift(
       // spurious pointer parameter). Compiler spills/reloads are always word-width; sub-word `sp`
       // access is not spill output, so it stays on the memory path.
       if (spSlotSafe && isStackPtr(base) && width === 4) {
+        const saved = saveSlots.get(off);
+        if (saved !== undefined) {
+          if (saved !== d) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': reload of '${mem}' into ${d}, a slot ${saved} was saved into — the ` +
+                `word holds the caller's ${saved}, which no C value names`,
+            );
+          }
+          const caller = mkValue(T.unk(32));
+          restores.set(caller, { reg: d, addr: ins.addr });
+          write(d, caller);
+          return;
+        }
         // SOUNDNESS GUARD (mirrors PPC frameLoad): only route through the slot SSA var if that slot was
         // actually STORED (has a reaching def). A word `lw` from an sp offset that was NEVER spilled is an
         // incoming STACK-PASSED argument (5th+ param, O32) or an uninitialised local — neither modelled.
@@ -1319,6 +1363,13 @@ export function lift(
       // slot's value in SSA, do NOT emit a `store` through `sp`. A never-reloaded spill (the ABI
       // home-slot store) then has no uses and simply drops. See isStackPtr / spSlotSafe.
       if (spSlotSafe && isStackPtr(base) && width === 4) {
+        if (savedByCallee(srcReg) && ssa.holdsEntryValue(srcReg, bi)) {
+          refuseMixedSlot(ins, mem, off, 'save');
+          saveSlots.set(off, srcReg);
+          return;
+        }
+        refuseMixedSlot(ins, mem, off, 'value');
+        valueSlots.add(off);
         writeVar(stackSlot(off), bi, read(srcReg));
         return;
       }
@@ -1417,6 +1468,19 @@ export function lift(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
+  for (const blk of irBlocks) {
+    const used = [
+      ...blk.params,
+      ...blk.ops.flatMap((op) => [...op.operands, ...op.results, ...op.successors.flatMap((s) => s.args)]),
+    ];
+    const restore = used.map((v) => restores.get(v)).find((r) => r !== undefined);
+    if (restore) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': the caller's ${restore.reg}, which the 'lw' at 0x${restore.addr.toString(16)} ` +
+          `restores, reaches a value this function computes with — no C value names it`,
+      );
+    }
+  }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;

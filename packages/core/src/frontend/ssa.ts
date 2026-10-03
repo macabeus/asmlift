@@ -92,6 +92,10 @@ export interface SsaBuilder {
    *  prototype-less call. `undefined` where "still the entry value" is not shown: a definition or a
    *  call reaches from some path, or a block on the way is not filled yet. */
   entryValue(reg: string, b: number): Value | undefined;
+  /** Whether `reg` still holds its entry value at this point of block `b`, in {@link entryValue}'s
+   *  sense, answered without the entry parameter that one hands back. A callee-saved register stored
+   *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
+  holdsEntryValue(reg: string, b: number): boolean;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up. Call it AFTER `recordGuessedCall` for the same instruction, and after writing
    *  the call's own result — the result is the CALLEE's, so it must not count as caller-side
@@ -704,7 +708,7 @@ export function makeSsaBuilder(
     return walk(b, new Set<number>());
   };
 
-  const entryValue = (reg: string, b: number): Value | undefined => {
+  const holdsEntryValue = (reg: string, b: number): boolean => {
     // A predecessor is known only once filled, and `b` itself only up to here — so a path that comes
     // back round to `b` carries writes this walk has not seen.
     const untouched = (at: number, seen: Set<number>): boolean => {
@@ -725,7 +729,10 @@ export function makeSsaBuilder(
       const ps = distinctPreds(at);
       return ps.length === 0 ? at === 0 : ps.every((p) => untouched(p, seen));
     };
-    if (!clean(b, new Set())) {
+    return clean(b, new Set());
+  };
+  const entryValue = (reg: string, b: number): Value | undefined => {
+    if (!holdsEntryValue(reg, b)) {
       return undefined;
     }
     ensureParam(reg, 0);
@@ -813,6 +820,7 @@ export function makeSsaBuilder(
     ensureParam,
     hasReachingDef,
     entryValue,
+    holdsEntryValue,
     noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see

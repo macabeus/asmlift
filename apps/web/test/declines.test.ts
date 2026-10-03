@@ -1183,7 +1183,7 @@ describe('the classifier is measured against the messages core can throw, not on
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 29],
     ['structure/structure.ts', 20],
-    ['frontend/mips.ts', 9],
+    ['frontend/mips.ts', 11],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/ppc.ts', 7],
@@ -1192,7 +1192,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 90;
+  const RESIDUE_TOTAL = 92;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
