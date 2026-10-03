@@ -1,7 +1,7 @@
 {
   "project": "pokeemerald",
-  "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+  "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
   "dirty": false,
-  "cpp": "cpp-14 (Homebrew GCC 14.2.0_1) 14.2.0",
-  "generatedAt": "2026-09-17T03:22:39.160Z"
+  "cpp": "cpp-14 (Homebrew GCC 14.4.0) 14.4.0",
+  "generatedAt": "2026-10-03T23:13:12.416Z"
 }

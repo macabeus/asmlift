@@ -33,10 +33,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/math_util.c | tools/preproc/preproc -i src/math_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/math_util.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/math_util.c | tools/preproc/preproc -i -g build/assets src/math_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/math_util.o -"
       }
     },
     "src/util.c": {
@@ -49,10 +49,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/util.c | tools/preproc/preproc -i src/util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/util.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/util.c | tools/preproc/preproc -i -g build/assets src/util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/util.o -"
       }
     },
     "src/random.c": {
@@ -65,10 +65,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/random.c | tools/preproc/preproc -i src/random.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/random.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/random.c | tools/preproc/preproc -i -g build/assets src/random.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/random.o -"
       }
     },
     "src/string_util.c": {
@@ -81,10 +81,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/string_util.c | tools/preproc/preproc -i src/string_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/string_util.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/string_util.c | tools/preproc/preproc -i -g build/assets src/string_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/string_util.o -"
       }
     },
     "src/pokemon.c": {
@@ -97,10 +97,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/pokemon.c | tools/preproc/preproc -i src/pokemon.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/pokemon.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/pokemon.c | tools/preproc/preproc -i -g build/assets src/pokemon.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/pokemon.o -"
       }
     },
     "src/trig.c": {
@@ -113,10 +113,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/trig.c | tools/preproc/preproc -i src/trig.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/trig.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/trig.c | tools/preproc/preproc -i -g build/assets src/trig.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/trig.o -"
       }
     },
     "src/malloc.c": {
@@ -129,10 +129,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/malloc.c | tools/preproc/preproc -i src/malloc.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/malloc.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/malloc.c | tools/preproc/preproc -i -g build/assets src/malloc.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/malloc.o -"
       }
     },
     "src/script.c": {
@@ -145,10 +145,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/script.c | tools/preproc/preproc -i src/script.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/script.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/script.c | tools/preproc/preproc -i -g build/assets src/script.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/script.o -"
       }
     },
     "src/pokemon_size_record.c": {
@@ -161,10 +161,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/pokemon_size_record.c | tools/preproc/preproc -i src/pokemon_size_record.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/pokemon_size_record.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/pokemon_size_record.c | tools/preproc/preproc -i -g build/assets src/pokemon_size_record.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/pokemon_size_record.o -"
       }
     },
     "src/wild_encounter.c": {
@@ -177,10 +177,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/wild_encounter.c | tools/preproc/preproc -i src/wild_encounter.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/wild_encounter.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/wild_encounter.c | tools/preproc/preproc -i -g build/assets src/wild_encounter.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/wild_encounter.o -"
       }
     },
     "src/berry_powder.c": {
@@ -193,10 +193,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/berry_powder.c | tools/preproc/preproc -i src/berry_powder.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/berry_powder.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/berry_powder.c | tools/preproc/preproc -i -g build/assets src/berry_powder.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/berry_powder.o -"
       }
     },
     "src/battle_util.c": {
@@ -209,10 +209,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_util.c | tools/preproc/preproc -i src/battle_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_util.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_util.c | tools/preproc/preproc -i -g build/assets src/battle_util.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_util.o -"
       }
     },
     "src/mauville_old_man.c": {
@@ -225,10 +225,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/mauville_old_man.c | tools/preproc/preproc -i src/mauville_old_man.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/mauville_old_man.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/mauville_old_man.c | tools/preproc/preproc -i -g build/assets src/mauville_old_man.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/mauville_old_man.o -"
       }
     },
     "src/bike.c": {
@@ -241,10 +241,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/bike.c | tools/preproc/preproc -i src/bike.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/bike.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/bike.c | tools/preproc/preproc -i -g build/assets src/bike.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/bike.o -"
       }
     },
     "src/field_player_avatar.c": {
@@ -257,10 +257,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/field_player_avatar.c | tools/preproc/preproc -i src/field_player_avatar.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/field_player_avatar.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/field_player_avatar.c | tools/preproc/preproc -i -g build/assets src/field_player_avatar.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/field_player_avatar.o -"
       }
     },
     "src/battle_script_commands.c": {
@@ -273,10 +273,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_script_commands.c | tools/preproc/preproc -i src/battle_script_commands.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_script_commands.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_script_commands.c | tools/preproc/preproc -i -g build/assets src/battle_script_commands.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_script_commands.o -"
       }
     },
     "src/battle_anim_throw.c": {
@@ -289,10 +289,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_anim_throw.c | tools/preproc/preproc -i src/battle_anim_throw.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_anim_throw.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/battle_anim_throw.c | tools/preproc/preproc -i -g build/assets src/battle_anim_throw.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/battle_anim_throw.o -"
       }
     },
     "src/time_events.c": {
@@ -305,10 +305,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/time_events.c | tools/preproc/preproc -i src/time_events.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/time_events.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/time_events.c | tools/preproc/preproc -i -g build/assets src/time_events.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/time_events.o -"
       }
     },
     "src/sprite.c": {
@@ -321,10 +321,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/sprite.c | tools/preproc/preproc -i src/sprite.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/sprite.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/sprite.c | tools/preproc/preproc -i -g build/assets src/sprite.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/sprite.o -"
       }
     },
     "src/ereader_screen.c": {
@@ -337,10 +337,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "9d96fe4bd358bb7f8e70dc58702d5c4cb545b761",
+        "commit": "a3c9fb02ce32eb573750f8dd3b95b22df8390689",
         "file": "Makefile",
-        "sha256": "59d460920570d89c32bba23400efac55892646fcafb7c354e2bd18297cab65e5",
-        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/ereader_screen.c | tools/preproc/preproc -i src/ereader_screen.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/ereader_screen.o -"
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/ereader_screen.c | tools/preproc/preproc -i -g build/assets src/ereader_screen.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/ereader_screen.o -"
       }
     }
   },
@@ -978,7 +978,7 @@
       "note": "Signed arithmetic shifts and an unsigned divide meet in one expression — the per-site signedness a whole-function lever cannot spell. Closed: asmlift now emits `(u32)(coord * a1) / a0` beside the signed shifts and matches.",
       "funcC": "static s32 GetAnchorCoord(s32 a0, s32 a1, s32 coord)\n{\n    s32 subResult, var1;\n\n    subResult = a1 - a0;\n    if (subResult < 0)\n        var1 = -(subResult) >> 9;\n    else\n        var1 = -(subResult >> 9);\n    return coord - ((u32)(coord * a1) / (u32)(a0) + var1);\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/9d96fe4bd358bb7f8e70dc58702d5c4cb545b761/src/sprite.c#L1213-L1223",
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/sprite.c#L1213-L1223",
       "proto": {
         "GetAnchorCoord": {
           "returnsVoid": false,
@@ -1002,7 +1002,7 @@
       "note": "A `volatile u16` VALUE local held across three calls — the one C spelling that forces agbcc to give a value a stack home instead of a callee-saved register. Closed: asmlift’s value-local `volatile` spelling reaches the home and the row matches.",
       "prependC": "#include \"global.h\"\n#include \"malloc.h\"\n#include \"decompress.h\"\n#include \"ereader_helpers.h\"\n#include \"link.h\"\n#include \"main.h\"\n#include \"mystery_gift_menu.h\"\n#include \"mystery_gift_client.h\"\n#include \"save.h\"\n#include \"sound.h\"\n#include \"sprite.h\"\n#include \"task.h\"\n#include \"strings.h\"\n#include \"util.h\"\n#include \"constants/songs.h\"\nextern const u8 gMultiBootProgram_EReader_Start[];\nextern const u8 gMultiBootProgram_EReader_End[];",
       "funcC": "static void EReader_Reset(struct EReaderData *eReader)\n{\n    volatile u16 backupIME = REG_IME;\n    REG_IME = 0;\n    EReaderHelper_ClearSendRecvMgr();\n    EReaderHelper_RestoreRegsState();\n    RestoreSerialTimer3IntrHandlers();\n    REG_IME = backupIME;\n}",
-      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/9d96fe4bd358bb7f8e70dc58702d5c4cb545b761/src/ereader_screen.c#L66-L74",
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/ereader_screen.c#L66-L74",
       "m2cCtx": true,
       "proto": {
         "EReaderHelper_RestoreRegsState": {
