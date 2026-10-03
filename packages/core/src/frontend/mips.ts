@@ -799,7 +799,8 @@ export function lift(
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
   // in a function that has one refuses: which floating-point registers a callee reads, returns in
-  // and destroys is not modelled.
+  // and destroys is not modelled. A float that crosses the call untouched in $f12 or $f0 names no
+  // register here, so only the callee's declaration shows it (`plan`).
   const fpuInstr = instrs.find(
     (ins) => /^(cfc1|ctc1)$/i.test(ins.mnemonic) || ins.ops.some((o) => MIPS_FP_REG.test(o)),
   );

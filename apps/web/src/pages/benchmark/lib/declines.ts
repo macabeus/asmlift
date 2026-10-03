@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 179 distinct decline messages (the texts reached by
+// `packages/core/src` throws 181 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `fail` callback a frontend hands `frontend/call-plan.ts`,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -317,10 +317,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // populations with the command that recomputes them, and the share this class takes is gated
     // in `declines.test.ts`: it claims the 57 rows whose own message names an FPU instruction.
     //
-    // The same file's ABI refusals are this class too (`frontend/fpu.ts`, and PowerPC's float-plus-
-    // call refusal): the single-precision arithmetic lifts through the float homes, and what still
-    // refuses there is the rest of the floating-point ABI — a float argument the homes cannot
-    // place, a call whose floating-point registers are unmodelled, a function computing in both
+    // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
+    // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision
+    // arithmetic lifts through the float homes, and what still refuses there is the rest of the
+    // floating-point ABI — a float argument the homes cannot place, a call whose floating-point
+    // registers are unmodelled, a function computing in both
     // precisions (`fmuls` feeding an `fadd`: the rounding between them is unmodelled).
     pattern:
       /unmodelled floating-point instruction|floating-point argument|the floating-point registers a call|both single and double precision/,

@@ -17,6 +17,7 @@ import {
   declaresAggregateReturn,
   declaresParams,
   declaresVoidReturn,
+  isFloatingSpelling,
   spellableProto,
   wordsOf,
 } from '../proto';
@@ -295,9 +296,9 @@ export function callDeclarations(
       ...(returned === undefined ? {} : { returned }),
     };
   };
-  // ONE CALL, IN THE ORDER ITS QUESTIONS REFUSE: a struct the lowering cannot receive, then the
-  // runtime helper, whose signature is its compiler's, so no declaration is asked for one; the
-  // declaration's own refusals come next, then the return.
+  // ONE CALL, IN THE ORDER ITS QUESTIONS REFUSE: a struct the lowering cannot receive and a float,
+  // then the runtime helper, whose signature is its compiler's, so no declaration is asked for one;
+  // the declaration's own refusals come next, then the return.
   const plan = (callee: string): CallPlan => {
     const own = Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
     // One returned through memory is handed a hidden pointer in argument 0, with every argument one
@@ -311,6 +312,25 @@ export function callDeclarations(
         `cannot lift '${name}': '${callee}' is declared to return ${own?.returns ?? 'a struct or union'} by value — ` +
           'a struct returned through a hidden pointer, or one nothing here can size, is not modelled',
       );
+    }
+    // A FLOAT CROSSES A CALL IN THE FPU'S REGISTERS where the target has one (`TargetDescription.fpu`),
+    // and a call here passes and reads general registers alone.
+    if (target.fpu !== undefined && own !== undefined) {
+      if (typeof own.returns === 'string' && isFloatingSpelling(own.returns)) {
+        fail(
+          `cannot lift '${name}': '${callee}' is declared to return ${own.returns}, which comes back in ` +
+            `${target.fpu.returnReg} — the floating-point registers a call passes and returns in are not modelled`,
+        );
+      }
+      const params = Array.isArray(own.params) ? own.params : [];
+      const at = params.findIndex(isFloatingSpelling);
+      if (at >= 0) {
+        fail(
+          `cannot lift '${name}': '${callee}' is declared to take ${params[at]} as its ` +
+            `parameter ${at + 1}, which travels in the FPU's registers — the floating-point registers a call ` +
+            'passes and returns in are not modelled',
+        );
+      }
     }
     const helper = wideHelper(callee);
     // WITHOUT PAIRS A 64-BIT HELPER IS AN UNDECLARED CALL. Its table signature passes a pair, which

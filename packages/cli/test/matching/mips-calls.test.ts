@@ -135,3 +135,45 @@ describe('a 64-bit conversion declines, naming its helper', () => {
     60_000,
   );
 });
+
+// A float that crosses a call untouched in $f0 or $f12: the caller names no FPU register, and the
+// callee's declaration is what shows the float is there.
+describe('a callee declared with a float declines, naming it', () => {
+  const FLOATS = [
+    {
+      name: 'a float return',
+      c: 'float g(int); float f(int a) { return g(a + 1); }',
+      prototypes: { g: { params: ['s32'], returns: 'float' } },
+      message: /'g' is declared to return float/,
+    },
+    {
+      name: 'a float parameter',
+      c: 'void g(float); void f(float x) { g(x); }',
+      prototypes: { g: { params: ['float'], returnsVoid: true } },
+      message: /'g' is declared to take float as its parameter 1/,
+    },
+  ];
+
+  test.runIf(idoAvailable()).each(FLOATS)('ido7.1: $name', ({ c, prototypes, message }) => {
+    const { obj, asm } = compileMipsTarget(c, 'f', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
+    expect(() => lift('f', asm, obj, MIPS_IDO, prototypes)).toThrow(message);
+  });
+
+  test.runIf(dockerGate('mips-calls-kmc')).each(FLOATS)(
+    'gcc2.7.2kmc: $name',
+    ({ c, prototypes, message }) => {
+      const { obj, asm } = compileMipsGccTarget(c, 'f', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
+      expect(() => lift('f', asm, obj, MIPS_GCC, prototypes)).toThrow(message);
+    },
+    60_000,
+  );
+
+  test.runIf(gcc272Available()).each(FLOATS)(
+    'gcc2.7.2: $name',
+    ({ c, prototypes, message }) => {
+      const { obj, asm } = compileMipsGcc272Target(c, 'f', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags);
+      expect(() => lift('f', asm, obj, MIPS_GCC, prototypes)).toThrow(message);
+    },
+    60_000,
+  );
+});

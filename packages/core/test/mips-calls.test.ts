@@ -272,6 +272,18 @@ describe('what this lowering cannot carry out refuses', () => {
     );
   });
 
+  // `float g(int); float f(int a) { return g(a + 1); }` and `void g(float); void f(float x) { g(x); }`:
+  // the float stays in $f0 or $f12 across the call, and the caller names no FPU register.
+  test.each([
+    ['return a float', { params: ['s32'], returns: 'float' }, /'g' is declared to return float/],
+    ['return a double', { params: ['s32'], returns: 'const double' }, /'g' is declared to return const double/],
+    ['take a float', { params: ['float'], returnsVoid: true }, /'g' is declared to take float as its parameter 1/],
+    ['take a double second', { params: ['s32', 'double'] }, /'g' is declared to take double as its parameter 2/],
+  ])('a callee declared to %s', (_what, g, message) => {
+    expect(lift(DELAY_ARG, [[8, 'R_MIPS_26', 'g']], { g }, MIPS_IDO)).toThrow(message);
+    expect(lift(DELAY_ARG, [[8, 'R_MIPS_26', 'g']], { g }, MIPS_GCC)).toThrow(message);
+  });
+
   test('a callee declared to return a struct', () => {
     expect(
       lift(DELAY_ARG, [[8, 'R_MIPS_26', 'g']], {

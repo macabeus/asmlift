@@ -218,6 +218,15 @@ export function declaredCallArgs(
 /** Whether a declared type is `double`, qualifiers aside. */
 const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
 
+/** Whether a declared type is a floating type, qualifiers aside. */
+export const isFloatingSpelling = (t: ParamType): boolean =>
+  /^(?:float|double|long double)$/.test(
+    t
+      .replace(/\b(?:const|volatile)\b/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' '),
+  );
+
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
  *  prototype is a lower bound assembled from whatever a header extraction could read, and omits
  *  what it could not. The standard omits nothing, so the RETURN is spelled here and is required —

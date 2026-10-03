@@ -268,3 +268,28 @@ describe('callDeclarations.plan for a callee declared void', () => {
     expect(calls.plan('__ll_div').returns).toEqual({ kind: 'word' });
   });
 });
+
+describe('callDeclarations.plan for a callee declared with a float', () => {
+  test('refuses one where the target passes floats in its FPU', () => {
+    const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
+    const calls = callDeclarations(
+      'f',
+      PPC_MWCC,
+      { r: { params: ['s32'], returns: 'float' }, p: { params: ['s32', 'volatile double'] } },
+      NONE,
+      fail,
+    );
+    expect(() => calls.plan('r')).toThrow(
+      "cannot lift 'f': 'r' is declared to return float, which comes back in f1 — the floating-point registers a " +
+        'call passes and returns in are not modelled',
+    );
+    expect(() => calls.plan('p')).toThrow(
+      "cannot lift 'f': 'p' is declared to take volatile double as its parameter 2, which travels in the FPU's " +
+        'registers — the floating-point registers a call passes and returns in are not modelled',
+    );
+  });
+
+  test('plans one where the target passes floats in general registers', () => {
+    expect(thumbCalls({ g: { params: ['float'], returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
+  });
+});
