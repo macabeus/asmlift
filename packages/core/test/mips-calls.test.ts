@@ -381,3 +381,52 @@ describe("a compiler's own runtime helper is a gap, not a call", () => {
     );
   });
 });
+
+// A CONVERSION BETWEEN A 64-BIT INTEGER AND A FLOAT IS A HELPER CALL ON BOTH COMPILERS, and its
+// value travels in registers a guessed call cannot see: `double tod(long long a) { return a; }`
+// leaves the pair in a0:a1 (GCC) or homes it (IDO), and the double comes back in $f0. Lifted as an
+// ordinary call it is `return __floatdidf();`, which recompiles to the same `jal`.
+describe('a 64-bit conversion is a runtime helper, and a gap', () => {
+  const GCC_TOD = [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,16(sp)',
+    '8:\tjal\t0 <f>',
+    'c:\tnop',
+    '10:\tlw\tra,16(sp)',
+    '14:\tjr\tra',
+    '18:\taddiu\tsp,sp,24',
+  ];
+  const IDO_TOD = [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,20(sp)',
+    '8:\tsw\ta0,24(sp)',
+    'c:\tjal\t0 <f>',
+    '10:\tsw\ta1,28(sp)',
+    '14:\tlw\tra,20(sp)',
+    '18:\taddiu\tsp,sp,24',
+    '1c:\tjr\tra',
+    '20:\tnop',
+  ];
+  test.each([
+    '__ll_to_d',
+    '__ll_to_f',
+    '__ull_to_d',
+    '__ull_to_f',
+    '__d_to_ll',
+    '__f_to_ll',
+    '__d_to_ull',
+    '__f_to_ull',
+  ])('IDO: %s', (helper) => {
+    expect(lift(IDO_TOD, [[0xc, 'R_MIPS_26', helper]], {}, MIPS_IDO)).toThrow(
+      new RegExp(`no model for the runtime helper '${helper}'`),
+    );
+  });
+  test.each(['__floatdidf', '__floatdisf', '__fixdfdi', '__fixsfdi', '__fixunsdfdi', '__fixunssfdi', '__cmpdi2'])(
+    'GCC: %s',
+    (helper) => {
+      expect(lift(GCC_TOD, [[8, 'R_MIPS_26', helper]], {}, MIPS_GCC)).toThrow(
+        new RegExp(`no model for the runtime helper '${helper}'`),
+      );
+    },
+  );
+});

@@ -204,7 +204,12 @@ describe('the op each MIPS runtime helper computes', () => {
       'smod',
       'umod',
     ]);
-    expect(Object.keys(MIPS_GCC.runtimeHelpers ?? {})).toEqual(['__divdi3', '__udivdi3', '__moddi3', '__umoddi3']);
+    expect(Object.values(MIPS_GCC.runtimeHelpers ?? {}).flatMap((h) => (h.op === undefined ? [] : [h.op]))).toEqual([
+      'sdiv',
+      'udiv',
+      'smod',
+      'umod',
+    ]);
   });
 
   test('an IDO shift count is a 64-bit parameter: the caller builds it as a pair', () => {

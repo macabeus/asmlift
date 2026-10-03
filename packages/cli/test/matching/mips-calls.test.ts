@@ -99,3 +99,34 @@ describe('a MIPS call recompiles byte-exact', () => {
     60_000,
   );
 });
+
+// A conversion between a 64-bit integer and a double is a runtime call on all three toolchains, and
+// the double comes back in $f0. Lifted as an ordinary call it recompiles to the same `jal`.
+describe('a 64-bit conversion declines, naming its helper', () => {
+  const C = 'double tod(long long a) { return a; }';
+  const declines = (asm: string, obj: string, target: TargetDescription, helper: string) =>
+    expect(() => lift('tod', asm, obj, target, {})).toThrow(new RegExp(`no model for the runtime helper '${helper}'`));
+
+  test.runIf(idoAvailable())('ido7.1: __ll_to_d', () => {
+    const { obj, asm } = compileMipsTarget(C, 'tod', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
+    declines(asm, obj, MIPS_IDO, '__ll_to_d');
+  });
+
+  test.runIf(dockerGate('mips-calls-kmc'))(
+    'gcc2.7.2kmc: __floatdidf',
+    () => {
+      const { obj, asm } = compileMipsGccTarget(C, 'tod', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
+      declines(asm, obj, MIPS_GCC, '__floatdidf');
+    },
+    60_000,
+  );
+
+  test.runIf(gcc272Available())(
+    'gcc2.7.2: __floatdidf',
+    () => {
+      const { obj, asm } = compileMipsGcc272Target(C, 'tod', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags);
+      declines(asm, obj, MIPS_GCC, '__floatdidf');
+    },
+    60_000,
+  );
+});

@@ -667,7 +667,8 @@ byte-identical and the operator is simply not recoverable for an unsigned operan
 
 **What is NOT built**, said here so the tables above are not read as more than they are: no
 frontend but Thumb pairs registers, so on PowerPC and both MIPS targets the helper table's effect is
-the refusal alone (IDO's runtime is `__ll_*`/`__ull_*`, GCC's on MIPS the four divisions).
+the refusal alone (IDO's runtime is `__ll_*`/`__ull_*`, GCC's on MIPS the four divisions; on both,
+the conversions between a 64-bit integer and a float too).
 
 ## A union, and why it is a type kind
 
