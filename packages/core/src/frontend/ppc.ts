@@ -61,7 +61,7 @@ import { makeHighHalves } from './high-half';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, fallbackArgc, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1018,83 +1018,59 @@ export function lift(
         // --- call + frame/link-register bookkeeping ---
         // `bl <sym>`: read the argument registers (r3..), produce the return value in r3. The
         // callee symbol comes from the relocation (ins.reloc), and the caller-saved set is recorded
-        // as destroyed (`ssa.noteCall`, below) — a read of one past here names bytes the callee
-        // overwrote, and it has a reaching definition all the same.
+        // as destroyed (`calls.lower`) — a read of one past here names bytes the callee overwrote,
+        // and it has a reaching definition all the same.
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const sym = ins.reloc?.sym ?? 'func';
-          // WHAT THE CALL IS comes from its callee's declaration, read where every frontend reads
-          // one (`calls.plan`). A SPELLING NOTHING CAN SIZE STATES NO LAYOUT, so `widths` is null
-          // and this falls to `fallbackArgc` — the guess a callee with no declaration gets, which
-          // reads each argument register through `readGuessedArg` so `finish()` can retract the
-          // ones a call destroyed. A declaration is not an excuse to ASSERT registers whose count
-          // came out of the same guess.
-          const plan = calls.plan(sym);
-          // every width is one register: this lowering builds no pair (`CallLowering.pairs`)
-          const declared = plan.widths?.length;
-          // a pending `@ha` half is not an argument, and a gap refuses (`fallbackArgc`)
-          const argc =
-            declared ??
-            fallbackArgc(ssa, ARG_REGS, bi, {
-              accept: (v) => !highHalves.has(v),
-              gap: { name, at: ins.addr, fail },
-            });
-          // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
-          // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the
-          // back chain and the LR save word), and a value stored there that reaches the call is that
-          // argument or a local the compiler put in the same words. Reading the word back, before or
-          // after the call, does not decide it, so the end-of-lift check for a store nothing reloads
-          // is not enough here. Without a prototype this refuses; a declared arity says which.
-          //
-          // A guess of seven is the same question for one shape. A 64-bit argument takes an aligned
-          // register pair, so one that follows seven words skips r10 and fills the first two words
-          // of the parameter area (mwcc 2.3.3 builds `g(1, 2, 3, 4, 5, 6, 7, x)` with `long long x`
-          // that way). A single word there cannot be an argument after seven: the eighth word would
-          // have gone in r10.
-          if (declared === undefined && argc >= ARG_REGS.length - 1) {
-            const depth = r1At.get(ins);
-            const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
-            const inParamArea = (off: number) => typeof depth !== 'number' || (off >= depth + 8 && off < 0);
-            const word = [...valueSlots.keys()].find((off) => inParamArea(off) && reaching(off));
-            const passed =
-              argc === ARG_REGS.length || typeof depth !== 'number'
-                ? word
-                : reaching(depth + 8) && reaching(depth + 12)
-                  ? depth + 8
-                  : undefined;
-            if (passed !== undefined) {
-              const slot = valueSlots.get(passed)!;
-              throw new PpcUnsupportedError(
-                `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${sym}' at ` +
-                  `0x${ins.addr.toString(16)} fills ${argc} argument registers, and the value ` +
-                  `stored to '${slot.mem}' at 0x${slot.addr.toString(16)} reaches it in the callee's ` +
-                  `parameter area, where an argument past the registers travels`,
-              );
-            }
-          }
-          const args: Value[] = [];
-          // A GUESSED arity ASKS whether the caller set a register up and `finish()` answers by
-          // dropping the ones a call has been through; a DECLARED one asserts it, so a destroyed
-          // register read for it is a wrong value nothing retracts. See SsaBuilder.readGuessedArg.
-          for (let k = 0; k < argc; k++) {
-            const r = ARG_REGS[k];
-            args.push(declared === undefined ? highHalves.guardRead(name, r, ssa.readGuessedArg(r, bi)) : read(r));
-          }
-          // Pushed with `tmp` rather than `emit` so the result register is written separately from
-          // the op — r3.. are volatile under the EABI, so a GUESSED arity that counted a register
-          // set up before an intervening call passes an argument the caller never set up
-          // (`finish()` cuts those back — frontend/ssa.ts), and the call's OWN result is the
-          // CALLEE's write, so `noteCall` records the clobber after it rather than before.
-          const res = kit.tmp('call', args, { target: sym });
-          if (declared === undefined) {
-            ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
-          }
-          // a struct handed back in registers is their bytes, which nothing here reads as a struct:
-          // the call destroys them, so a read of one past it refuses
-          if (plan.returns.kind !== 'register-struct') {
-            write(RET, res);
-          }
-          ssa.noteCall(bi, plan.clobbers);
+          calls.lower({
+            callee: sym,
+            ssa,
+            bi,
+            read,
+            write,
+            // a pending `@ha` half is not an argument, and a gap refuses (`fallbackArgc`)
+            highHalves,
+            guess: {
+              at: ins.addr,
+              // A GUESS THAT FILLS EVERY ARGUMENT REGISTER CANNOT SAY WHERE THE LIST ENDS. The ninth
+              // argument travels in the callee's parameter area, 8 bytes above the pushed r1 (past the
+              // back chain and the LR save word), and a value stored there that reaches the call is that
+              // argument or a local the compiler put in the same words. Reading the word back, before or
+              // after the call, does not decide it, so the end-of-lift check for a store nothing reloads
+              // is not enough here. Without a prototype this refuses; a declared arity says which.
+              //
+              // A guess of seven is the same question for one shape. A 64-bit argument takes an aligned
+              // register pair, so one that follows seven words skips r10 and fills the first two words
+              // of the parameter area (mwcc 2.3.3 builds `g(1, 2, 3, 4, 5, 6, 7, x)` with `long long x`
+              // that way). A single word there cannot be an argument after seven: the eighth word would
+              // have gone in r10.
+              refuse: (argc) => {
+                if (argc < ARG_REGS.length - 1) {
+                  return;
+                }
+                const depth = r1At.get(ins);
+                const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
+                const inParamArea = (off: number) => typeof depth !== 'number' || (off >= depth + 8 && off < 0);
+                const word = [...valueSlots.keys()].find((off) => inParamArea(off) && reaching(off));
+                const passed =
+                  argc === ARG_REGS.length || typeof depth !== 'number'
+                    ? word
+                    : reaching(depth + 8) && reaching(depth + 12)
+                      ? depth + 8
+                      : undefined;
+                if (passed !== undefined) {
+                  const slot = valueSlots.get(passed)!;
+                  throw new PpcUnsupportedError(
+                    `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${sym}' at ` +
+                      `0x${ins.addr.toString(16)} fills ${argc} argument registers, and the value ` +
+                      `stored to '${slot.mem}' at 0x${slot.addr.toString(16)} reaches it in the callee's ` +
+                      `parameter area, where an argument past the registers travels`,
+                  );
+                }
+              },
+            },
+          });
           for (const cr of CR_VOLATILE) {
             cmpDef.set(
               cr,
