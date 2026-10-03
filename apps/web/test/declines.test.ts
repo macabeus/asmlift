@@ -1062,6 +1062,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['outgoing-stack-args', 'outgoing stack-argument', 'packages/core/src/frontend/stackargs.ts'],
     ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/ppc.ts'],
     ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/call-plan.ts'],
+    ['outgoing-stack-args', 'outgoing stack arguments not modelled', 'packages/core/src/frontend/mips.ts'],
+    ['outgoing-stack-args', 'outgoing stack argument ', 'packages/core/src/frontend/mips.ts'],
     ['unstored-slot', 'never stores it', 'packages/core/src/frontend/ssa.ts'],
     ['unstored-slot', 'was never stored', 'packages/core/src/frontend/mips.ts'],
     ['stack-frames', 'local stack frames not supported', 'packages/core/src/frontend/mips.ts'],
@@ -1090,6 +1092,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['store-class', 'unmodelled store-class', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'unmodelled floating-point instruction', 'packages/core/src/frontend/opaque.ts'],
     ['float', 'both single and double precision', 'packages/core/src/frontend/fpu.ts'],
+    ['float', 'the floating-point registers a call', 'packages/core/src/frontend/mips.ts'],
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/thumb.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/call-plan.ts'],
@@ -1183,7 +1186,7 @@ describe('the classifier is measured against the messages core can throw, not on
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 29],
     ['structure/structure.ts', 20],
-    ['frontend/mips.ts', 11],
+    ['frontend/mips.ts', 16],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/ppc.ts', 7],
@@ -1192,7 +1195,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 92;
+  const RESIDUE_TOTAL = 97;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

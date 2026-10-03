@@ -7,9 +7,9 @@
 // EXCEPT that a conditional branch reads its comparison operands as of the branch, so those
 // SSA values are captured BEFORE the delay slot runs, then the delay slot executes, then the
 // `cond_br` is emitted. A `jr ra` return's delay slot (which computes the return value) runs
-// first, then the value is read. Branch-likely ops (`beql`/`bnel`…, which annul the delay slot
-// when not taken) and calls (`jal`) are out of scope — both loud-fail (the control-transfer
-// pre-scan in `lift`).
+// first, then the value is read. A call's (`jal`) delay slot runs before the call, so it can set
+// an argument up. A branch-likely (`beql`/`bnel`…) annuls its slot when not taken, so the slot is
+// a block of its own on the taken edge (`toBlocks`).
 //
 // Comparison model: MIPS fuses compare-and-branch, so a branch lowers directly to an icmp
 // (the branch mnemonics are signed/equality only). `bltz/bgez/blez/bgtz` compare against zero; `beq/bne`
@@ -24,6 +24,7 @@ import { T } from '../ir/types';
 import type { Prototypes } from '../proto';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
+import { callDeclarations } from './call-plan';
 import {
   type DisasmInstr,
   parseImm,
@@ -40,7 +41,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { abiSortEntryParams, fallbackArgc, mintArgSlotHoles, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -103,6 +104,10 @@ const isZero = (r: string) => r === 'zero' || r === '$0';
 // The stack pointer (`$29`). A `sw/lw` through it is not a store/load through a data pointer — it
 // is a spill/reload of a stack SLOT (an argument home slot or a local). See emitStore/emitLoad.
 const isStackPtr = (r: string) => r === 'sp' || r === '$sp' || r === '$29';
+// Where O32 puts a call's argument k ≥ 4: the caller's outgoing area keeps `[0,16)` as the home of
+// a0..a3, and argument k is the word at `16 + 4(k − 4)` above the `sp` the call is made at.
+// Compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2: `g(a, b, 1, 2, 3)` stores the 3 to `16(sp)`.
+const STACK_ARGS_AT = 16;
 // SSA-variable name for the stack slot at a constant `sp`-offset. Distinct namespace from the
 // register names (which are alphabetic / `$N`), so it never collides with a real register var.
 const stackSlot = stackSlotKey; // shared spelling: frontend/ssa.ts
@@ -161,6 +166,10 @@ const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { zer
 // A recovered JUMP TABLE's dispatch is untouched: Regime B reads the table through `asmdata.ts` and
 // prunes the dispatch block, so its `lui %hi(.rodata)` never reaches `decode`.
 //
+// `R_MIPS_26` is a `jal`'s callee, and a `j`'s target where the jump stays in this section. objdump
+// prints the field, which in a relocatable object is the addend and not the address, so the callee
+// is read off this record alone.
+//
 // `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` are PIC/small-data access, already refused by the
 // `gp`-as-data guard; widening this carrier to them would trade those messages for worse ones
 // without recovering an address.
@@ -171,7 +180,7 @@ const parseDisasm = (disasm: string): Instr[] => parseSharedDisasm(disasm, { zer
 function attachMipsRelocs(name: string, instrs: Instr[], ad: AsmData): void {
   const byAddr = new Map(instrs.map((ins) => [ins.addr, ins]));
   for (const r of ad.relocs) {
-    if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16')) {
+    if (r.section !== '.text' || (r.type !== 'R_MIPS_HI16' && r.type !== 'R_MIPS_LO16' && r.type !== 'R_MIPS_26')) {
       continue;
     }
     const ins = byAddr.get(r.offset);
@@ -608,13 +617,13 @@ function toBlocks(
   return { blocks: blocks.filter((b) => reachable.has(b)), succAddrs };
 }
 
-/** Lift disassembled MIPS text → an L1 Fn with block-argument SSA. `prototypes` reserved for
- *  call arity (calls are a later milestone). */
+/** Lift disassembled MIPS text → an L1 Fn with block-argument SSA. `prototypes` declares each
+ *  callee's arity (`frontend/call-plan.ts`). */
 export function lift(
   name: string,
   asm: string,
   target: TargetDescription,
-  _prototypes: Prototypes = {},
+  prototypes: Prototypes = {},
   asmData?: AsmData,
 ): Fn {
   // Two input dialects reach this frontend: `objdump -d` text (IDO/KMC — no compiler-emitted asm),
@@ -681,14 +690,22 @@ export function lift(
     attachMipsRelocs(name, instrs, asmData);
   }
   // TRUSTWORTHINESS: fail LOUD on a control transfer this frontend cannot model — the `opaque`
-  // path cannot catch these (implicit or no register destination). `jal`/`jalr` clobber `v0`
-  // implicitly, so dropping a call fabricates `v0` from a stale value; a `jr` to anything but `ra`
-  // (jump table / computed goto) is not a plain return. Calls are a later milestone; until then
-  // they are a catchable "out of scope" signal, mirroring the PPC frontend.
+  // path cannot catch these (implicit or no register destination). A `jalr` clobbers `v0`
+  // implicitly, so dropping it fabricates `v0` from a stale value, and the callee it reaches is a
+  // register's value; a `jr` to anything but `ra` (jump table / computed goto) is not a plain
+  // return. `jal` is lowered where its block is filled (`lowerJal`).
   for (const ins of instrs) {
-    if (ins.mnemonic === 'jal' || ins.mnemonic === 'jalr') {
+    if (ins.mnemonic === 'jalr') {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': function call '${ins.mnemonic}' at 0x${ins.addr.toString(16)} — MIPS calls not yet modelled`,
+      );
+    }
+    // A `j` relocated against a symbol leaves this section's code for another function's, which is
+    // a tail call; the target objdump prints is the field, not the address.
+    if (ins.mnemonic === 'j' && ins.reloc !== undefined && !ins.reloc.sym.startsWith('.')) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': 'j' at 0x${ins.addr.toString(16)} jumps to '${ins.reloc.sym}' — a tail call into ` +
+          'another function is not modelled',
       );
     }
     if (ins.mnemonic === 'jr' && ins.ops[0] !== 'ra' && !recoveredJr.has(ins.addr)) {
@@ -766,14 +783,26 @@ export function lift(
   // the question; frontend/ppc.ts folds the same one). FUNCTION-scoped, because a value is: a pair
   // split across blocks folds when SSA says the half reaches, and refuses when what arrives is the
   // block parameter standing for a merge.
-  const highHalves = makeHighHalves({
-    hi: '%hi',
-    hiArticle: 'a',
-    lo: '%lo',
-    fail: (message) => {
-      throw new FrontendUnsupportedError(message);
-    },
-  });
+  /** This frontend's refusal, for the shared code that refuses on its behalf. */
+  const fail = (message: string): never => {
+    throw new FrontendUnsupportedError(message);
+  };
+  const highHalves = makeHighHalves({ hi: '%hi', hiArticle: 'a', lo: '%lo', fail });
+  // O32 passes the words past a0..a3 on the stack and returns a word in v0. This lowering builds no
+  // register pair and receives no struct through a hidden pointer, so the plan refuses both.
+  const calls = callDeclarations(
+    name,
+    target,
+    prototypes,
+    { pairs: false, memoryReturn: false, stackArgs: true },
+    fail,
+  );
+  // The first instruction naming the FPU's file, a data register or the control register. A call
+  // in a function that has one refuses: which floating-point registers a callee reads, returns in
+  // and destroys is not modelled.
+  const fpuInstr = instrs.find(
+    (ins) => /^(cfc1|ctc1)$/i.test(ins.mnemonic) || ins.ops.some((o) => MIPS_FP_REG.test(o)),
+  );
 
   // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
   // sp-relative access in the function is word-width. If a SUB-WORD sp access aliases a word slot
@@ -786,6 +815,19 @@ export function lift(
     (ins) =>
       SUBWORD_MEM.has(ins.mnemonic) && ins.ops.length > 0 && isStackPtr(parseMem(ins.ops[ins.ops.length - 1]).base),
   );
+
+  // THE FRAME A CALL'S STACK ARGUMENTS ARE STAGED IN: the bytes one `addiu sp,sp,-N` pushed. Its
+  // outgoing area is `[16, N)`; a word at or above N is this function's own incoming home area, which
+  // IDO stores a0..a3 to, so it is never an argument of a call made here. Undefined where the
+  // function pushes no frame or more than one.
+  const pushes = instrs.filter(
+    (ins) =>
+      (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') &&
+      isStackPtr(ins.ops[0]) &&
+      isStackPtr(ins.ops[1] ?? '') &&
+      parseImm(ins.ops[2] ?? '') < 0,
+  );
+  const frameSize = pushes.length === 1 ? -parseImm(pushes[0].ops[2]) : undefined;
 
   // THE FRAME'S SAVES. A word store of `ra`, or of a register O32 does not let a callee destroy,
   // made while the register still holds what the caller left in it, is a SAVE: the word holds the
@@ -1157,6 +1199,10 @@ export function lift(
         case 'sb':
           emitStore(ins, d, s, 1);
           break;
+        // A call reaches here only from a delay slot (the fill loop lowers every other one), and a
+        // transfer in a delay slot is one the ISA leaves undefined.
+        case 'jal':
+          throw new FrontendUnsupportedError(`${site(ins)} sits in the delay slot of a transfer`);
         case 'add.s':
         case 'sub.s':
         case 'mul.s':
@@ -1376,8 +1422,109 @@ export function lift(
       ops.push(mkOp('store', { operands: [read(base), read(srcReg)], attrs: { off, width } }));
     };
 
-    for (const ins of b.body) {
-      decode(ins);
+    // A CALL, WITH ITS DELAY SLOT RUN FIRST: the word at `jal + 4` executes before the callee is
+    // entered, so it can set an argument up (KMC stores argument 5 there). The plan answers what
+    // the callee's declaration says (`frontend/call-plan.ts`); what is O32's alone is here: where
+    // argument k ≥ 4 lives, and the guess that cannot see past a3.
+    const lowerJal = (ins: Instr) => {
+      const at = `0x${ins.addr.toString(16)}`;
+      const callee = splat ? ins.ops[0] : ins.reloc?.type === 'R_MIPS_26' ? ins.reloc.sym : undefined;
+      if (callee?.startsWith('.')) {
+        throw new FrontendUnsupportedError(
+          `${site(ins)} is relocated against the section '${callee}' — a callee known only by its offset ` +
+            'in a section has no name to call it by',
+        );
+      }
+      if (callee === undefined || !/^[A-Za-z_]\w*$/.test(callee)) {
+        throw new FrontendUnsupportedError(
+          `${site(ins)} has no callee symbol — no R_MIPS_26 relocation names it, and its operand ` +
+            `'${ins.ops[0] ?? ''}' is not a name`,
+        );
+      }
+      if (fpuInstr !== undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': '${fpuInstr.mnemonic}' at 0x${fpuInstr.addr.toString(16)} uses the FPU and ` +
+            `'jal' at ${at} makes a call — the floating-point registers a call reads, returns in and destroys ` +
+            'are not modelled',
+        );
+      }
+      if (frameSize === undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the call at ${at} is made in a frame that is not one 'addiu sp,sp,-N', so ` +
+            'where its outgoing stack arguments end is not known',
+        );
+      }
+      const plan = calls.plan(callee);
+      // every width is one word: this lowering builds no pair (`CallLowering.pairs`)
+      const declared = plan.widths?.length;
+      // a pending `%hi` half is not an argument, and a gap refuses (`fallbackArgc`)
+      const argc =
+        declared ??
+        fallbackArgc(ssa, ARG_REGS, bi, { accept: (v) => !highHalves.has(v), gap: { name, at: ins.addr, fail } });
+      // A GUESS THAT FILLS a0..a3 CANNOT SAY WHERE THE LIST ENDS: a word of the outgoing area that
+      // reaches the call is argument 5 onward, or a local the compiler put there.
+      if (declared === undefined && argc === ARG_REGS.length) {
+        const passed = [...valueSlots]
+          .filter((off) => off >= STACK_ARGS_AT && off < frameSize && ssa.hasReachingDef(stackSlot(off), bi))
+          .sort((x, y) => x - y)[0];
+        if (passed !== undefined) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${callee}' ` +
+              `at ${at} fills a0..a3, and the word stored to ${passed}(sp) reaches it where an argument past ` +
+              'the registers travels',
+          );
+        }
+      }
+      const args: Value[] = [];
+      for (let k = 0; k < argc; k++) {
+        if (k < ARG_REGS.length) {
+          // A GUESSED arity asks whether the caller set a register up, and `finish()` answers by
+          // dropping the ones a call destroyed; a DECLARED one asserts it (SsaBuilder.readGuessedArg).
+          const r = ARG_REGS[k];
+          args.push(declared === undefined ? highHalves.guardRead(name, r, ssa.readGuessedArg(r, bi)) : read(r));
+          continue;
+        }
+        const off = STACK_ARGS_AT + 4 * (k - ARG_REGS.length);
+        if (off >= frameSize) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': outgoing stack argument ${k + 1} of '${callee}' at ${at} travels in ` +
+              `${off}(sp), past the ${frameSize}-byte frame this function pushed`,
+          );
+        }
+        if (!valueSlots.has(off) || !ssa.hasReachingDef(stackSlot(off), bi)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': outgoing stack argument ${k + 1} of '${callee}' at ${at} travels in ` +
+              `${off}(sp), and no value stored there reaches the call`,
+          );
+        }
+        args.push(readVar(stackSlot(off), bi));
+      }
+      const res = kit.tmp('call', args, { target: callee });
+      if (declared === undefined) {
+        ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
+      }
+      write(RET, res);
+      ssa.noteCall(bi, plan.clobbers);
+      // hi and lo are the callee's to overwrite
+      divState = null;
+      mulState = null;
+    };
+    for (let i = 0; i < b.body.length; i++) {
+      const ins = b.body[i];
+      if (ins.mnemonic !== 'jal') {
+        decode(ins);
+        continue;
+      }
+      const slot = b.body[i + 1];
+      if (slot?.addr !== ins.addr + 4) {
+        throw new FrontendUnsupportedError(
+          `${site(ins)} — its delay slot at 0x${(ins.addr + 4).toString(16)} is not the next instruction of ` +
+            'its block (a branch target, a control transfer, or missing), so it does not run before this call alone',
+        );
+      }
+      decode(slot);
+      i++;
+      lowerJal(ins);
     }
 
     // Terminator. For a conditional branch, capture the comparison operands from the register

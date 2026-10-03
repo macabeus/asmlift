@@ -53,8 +53,7 @@ export interface SsaBuilder {
    *  pass argument 0 in the return register (r0/r0, r3/r3), so on them the exemption is the whole
    *  of the gap. MIPS returns in `v0` and passes in `a0`, so `clobberedByCall` lists `a0` for both
    *  MIPS targets and there is no exemption to reason about — which is the sound direction, not a
-   *  hole. What bounds the path today is earlier still: `frontend/mips.ts` refuses on the `jal`
-   *  before any argument is read, so neither MIPS target reaches this at all.
+   *  hole.
    *
    *  A DECLARED arity uses `readVar`, and must: there the callee says the argument exists, so
    *  reading a destroyed register for it is a wrong value with nothing to retract it. */

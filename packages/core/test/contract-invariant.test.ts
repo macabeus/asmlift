@@ -155,10 +155,11 @@ const PROBES: Record<string, Probe> = {
       ['an FPU store', '0:\tswc1\t$f0,0(a1)\n4:\tjr\tra\n8:\tnop\n'],
       ['the control register', '0:\tcfc1\tv0,$31\n4:\tjr\tra\n8:\tnop\n'],
     ],
-    // A call's return register is an IMPLICIT destination the operand guard cannot see; an
-    // indirect `jr` is not a plain return. All must fail loud, not vanish.
+    // A call's return register is an IMPLICIT destination the operand guard cannot see: a `jal` no
+    // R_MIPS_26 record names has no callee to lower it to, and a `jalr`'s callee is a register's
+    // value. An indirect `jr` is not a plain return. All must fail loud, not vanish.
     mustFailLoud: [
-      ['jal (call return reg dropped)', '0:\tjal\t100 <foo>\n4:\tnop\n8:\taddiu\tv0,v0,1\nc:\tjr\tra\n10:\tnop\n'],
+      ['jal with no callee symbol', '0:\tjal\t100 <foo>\n4:\tnop\n8:\taddiu\tv0,v0,1\nc:\tjr\tra\n10:\tnop\n'],
       ['jalr (indirect call)', '0:\tjalr\tt9\n4:\tnop\n8:\taddiu\tv0,v0,1\nc:\tjr\tra\n10:\tnop\n'],
       ['jr <non-ra> (indirect jump / jump table)', '0:\tlw\tt9,0(a0)\n4:\tjr\tt9\n8:\tnop\n'],
     ],

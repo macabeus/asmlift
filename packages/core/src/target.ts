@@ -918,8 +918,7 @@ export const MIPS_IDO: TargetDescription = {
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
   // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. `frontend/mips.ts` reads the rest, and
-  // `ra`, as the registers a frame store SAVES; it refuses a call outright, so nothing on this target
-  // reaches the read past one.
+  // `ra`, as the registers a frame store SAVES.
   callerSaved: [
     'at',
     'v0',
@@ -966,8 +965,7 @@ export const MIPS_IDO: TargetDescription = {
     // reversed-declaration twin, with this compiler's objects beside them — and a test reads the
     // correspondence off it: 16 of 16 spills, and rank → offset unchanged when the declaration
     // list is reversed, which is what separates declaration rank from the order of the
-    // assignments. No ido7.1 benchmark row lifts with two or more spilled user locals — the only
-    // spilling shape in the corpus carries a call, and this frontend declines a call — so no row
+    // assignments. No ido7.1 benchmark row lifts with two or more spilled user locals, so no row
     // can tell a wrong value from a right one here.
     //
     // FLIP CONDITION, and it has TWO parts because the second is easy to miss. (1) The first

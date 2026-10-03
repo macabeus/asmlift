@@ -68,7 +68,7 @@ describe('what a call clobbers', () => {
   // THE ALIASING `readGuessedArg` RESTS ON IS PER-TARGET, and two of the four do not have it.
   // ARM and PowerPC pass argument 0 in the return register, so `clobberedByCall` cannot list it;
   // MIPS o32 returns in `v0` and passes in `a0`, so it does and there is no exemption to reason
-  // about. `frontend/mips.ts` refuses on the `jal` before either MIPS target reaches any of this.
+  // about.
   test('argument 0 is exempt from the clobber set exactly where the ABI aliases it', () => {
     for (const t of [ARMV4T_AGBCC, PPC_MWCC]) {
       expect(t.returnReg).toBe(t.argRegs[0]);

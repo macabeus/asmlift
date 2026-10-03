@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 169 distinct decline messages (the texts reached by
+// `packages/core/src` throws 179 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `fail` callback a frontend hands `frontend/call-plan.ts`,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 92 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 97 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -51,10 +51,13 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        11  a relocation with an addend, an address below the symbol, an indirect
+//   frontend/mips.ts        16  a relocation with an addend, an address below the symbol, an indirect
 //                               `jr`, a non-numeric immediate, the caller's value a restore writes
-//                               read as a value (at the read, or through a merge), and five refusals
-//                               about a disassembly the reader cannot account for
+//                               read as a value (at the read, or through a merge), five refusals
+//                               about a disassembly the reader cannot account for, a `jal` no
+//                               relocation names, one relocated against a section, one in a delay
+//                               slot, one whose own slot is not the next word of its block, and a
+//                               `j` to another function (a tail call)
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
@@ -249,7 +252,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     key: 'mips-calls',
-    label: 'MIPS calls (jal/jalr)',
+    label: 'MIPS calls through a register (jalr)',
     pattern: /MIPS calls not yet modelled/,
   },
   {

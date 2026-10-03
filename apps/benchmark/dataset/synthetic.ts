@@ -2200,11 +2200,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // agbcc alone, by `llhi`'s rule and for both of its halves. On big-endian PPC the high half IS
   // r3, so mwcc's whole body is `bl llsrc` and a frame: asmlift matches it with `return llsrc();`
   // — the LOW half, the opposite projection — and the object is identical either way, so that
-  // cell scores the right answer and a wrong one alike. Both MIPS builds decline before they
-  // reach the boundary at all, on `function call 'jal' — MIPS calls not yet modelled`, so they
-  // referee a different capability. agbcc is the one that pays an instruction for the
-  // projection, `add r0,r1,#0`, so it is the only cell where naming the high register is the
-  // difference between the answer and a decline.
+  // cell scores the right answer and a wrong one alike. All three MIPS builds refuse the declared
+  // return in the frontend (`'llsrc' would hand back one half of a 64-bit value`: O32 hands the pair
+  // back in v0:v1, and no MIPS lowering builds one), so they referee a different capability. agbcc
+  // is the one that pays an instruction for the projection, `add r0,r1,#0`, so it is the only cell
+  // where naming the high register is the difference between the answer and a decline.
   //
   // THE DECLARATION IS IN ALL THREE CHANNELS, and each one is a different compiler's input. `src`
   // builds the TARGET and must carry it: without it `llsrc` is implicitly `int` and the target
@@ -3434,12 +3434,12 @@ export const SYNTHETIC: SynthSpec[] = [
   // slots are `v3@[sp] v4@[sp,#4] s@[sp,#8]`, the same order. So it is NOT a spill-slot-order
   // inhabitant (`spillorder`, in the uninit-local block, is), and its residual belongs to the
   // register half of value-home.
-  // agbcc only, by measurement: ido7.1 and gcc2.7.2kmc decline it at the call (`function call
-  // 'jal' … MIPS calls not yet modelled`, a blocker of 6 ido / 32 kmc declined rows), and on
-  // mwcc_242_81 asmlift declines it at the PPC frontend's frame gate before any candidate is
-  // compiled (`stack pointer r1 used as data (address-taken local / frame arithmetic) — not
-  // supported`; smoked once with the row widened to that lane, 0.7 s, m2c declined too), so those
-  // lanes would pin another family's blocker. Its `value-home` tag is the judgement that
+  // agbcc only, by measurement: ido7.1, gcc2.7.2kmc and gcc2.7.2 lift it, but the false alarm it
+  // pins is Thumb's outgoing-block licence, which no MIPS lift reaches, and on mwcc_242_81 asmlift
+  // declines it at the PPC frontend's frame gate before any candidate is compiled (`stack pointer
+  // r1 used as data (address-taken local / frame arithmetic) — not supported`; smoked once with the
+  // row widened to that lane, 0.7 s, m2c declined too), so those lanes would measure another
+  // capability. Its `value-home` tag is the judgement that
   // the diff, once it lifts, is WHERE the ten locals live; it cannot carry `stack-addr`, whose
   // floor is a unary `&` the source does not contain.
   // m2c NONCOMPILES it on the identical `ctx` (``unksp8' undeclared (first use in this function)`):

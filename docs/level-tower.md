@@ -666,8 +666,8 @@ wrote `+`; the absence of a division bias does not mean `>>`, because `u64 / 256
 byte-identical and the operator is simply not recoverable for an unsigned operand.
 
 **What is NOT built**, said here so the tables above are not read as more than they are: no
-frontend but Thumb pairs registers, so on PowerPC the helper table's effect is the refusal alone,
-and both MIPS targets have no table at all and refuse the `jal` before the question arises.
+frontend but Thumb pairs registers, so on PowerPC and both MIPS targets the helper table's effect is
+the refusal alone (IDO's runtime is `__ll_*`/`__ull_*`, GCC's on MIPS the four divisions).
 
 ## A union, and why it is a type kind
 
@@ -767,7 +767,7 @@ two constants read high word first, may be read as a double.
 | frontend | every FPU instruction but the arithmetic and its copies, in either precision (register-file refusal)                                                                                                                                                  | a conversion, a move to memory or the integer file, a compare: each would let a float reach something that is not another float op or the return, which is what makes the return rule below sound                                                  |
 | frontend | an FPU register read before any write that is not a float argument home                                                                                                                                                                               | it would mint a parameter no caller passes — including a return path that never writes `$f0`, since a function returns a float on every path or on none                                                                                            |
 | frontend | an integer argument register in a slot a float shadows (o32)                                                                                                                                                                                          | `'leading'` gives a float argument its integer slots too, so `a0` beside `$f12` is not a layout the ABI produces                                                                                                                                   |
-| frontend | PowerPC: a function that computes on a float and makes a call; a record form (`fadds.` sets `cr1`)                                                                                                                                                    | which FPRs a callee reads, returns in and destroys is unmodelled (`a * g2()` would read g2's return as `a`); MIPS refuses every call already                                                                                                       |
+| frontend | PowerPC: a function that computes on a float and makes a call, and MIPS: one that names an FPU register and makes a call; a record form (`fadds.` sets `cr1`)                                                                                         | which FPRs a callee reads, returns in and destroys is unmodelled (`a * g2()` would read g2's return as `a`)                                                                                                                                        |
 | frontend | a function computing in both precisions                                                                                                                                                                                                               | the SSA builder types an FPU register once per function (`fpPrecision`), and the rounding between precisions (a conversion, `frsp`) is not modelled                                                                                                |
 | verify   | a float operand of any op but a float op, `ret` or a call argument declared `double`; a float op over a non-float; a float edge into a non-float parameter; an `fconst` that is not a double                                                          | the two silent wrongs a new kind invites, stated where they happen                                                                                                                                                                                 |
 | raise    | agbcc: a double helper operand, or an argument a callee declares `double`, that is not a pair of argument slots moved whole, another double helper's result or a finite literal; a helper result that reaches anything but one of those uses or `ret` | the pair's word order is the reverse of a long long's, so a load, a half read, a store or a phi would name the wrong double; a helper is gapped as an unmodelled runtime helper, and a declared `double` has no fallback, so the function declines |
@@ -827,16 +827,17 @@ inside the project's headers drops that block.
 | frontend    | a memory return whose parameters nothing sizes                                                                        | a guessed arity reads from argument 0, which holds the pointer       |
 | frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
 | frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
-| frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
+| frontend    | PowerPC and MIPS: a memory return                                                                                     | only the register return is lowered there                            |
 | frame audit | a read, a write or any other use of the return temp                                                                   | a member of a returned struct is not modelled                        |
 | frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
 
 **What is NOT built.** Member reads of a returned struct: most of them decline in the Thumb slot
 model (`stack pointer used as data`) before the frame audit is asked, so building them in
 frame-objects.ts alone reaches few of the shapes. A struct returned straight into a global. MIPS,
-which models no call. A symbol map states a signless return of a word or less as nothing, since it
-is an enum as often as a struct; and a context return spelled by a typedef the reader never saw
-keeps its parameters.
+which returns every struct through a hidden pointer and refuses the call, because the pointer is an
+address in its frame (`addiu a0,sp,N`) and MIPS models no frame object. A symbol map states a
+signless return of a word or less as nothing, since it is an enum as often as a struct; and a
+context return spelled by a typedef the reader never saw keeps its parameters.
 
 ## The contracts are the point
 
