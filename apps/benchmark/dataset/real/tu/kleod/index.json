@@ -208,5 +208,45 @@
     "tu": "DeleteAllSaveData.i.gz",
     "ctx": "ctx-f2ae500d4fd2.i.gz",
     "m2c": "ctx-f2ae500d4fd2.i.gz"
+  },
+  "sub_0804CAC8": {
+    "tu": "sub_0804CAC8.i.gz",
+    "ctx": "ctx-add10a0eb1c8.i.gz",
+    "m2c": "ctx-add10a0eb1c8.i.gz"
+  },
+  "sub_0804C60C": {
+    "tu": "sub_0804C60C.i.gz",
+    "ctx": "ctx-9fff82f7f724.i.gz",
+    "m2c": "ctx-9fff82f7f724.i.gz"
+  },
+  "sub_0800BEF0": {
+    "tu": "sub_0800BEF0.i.gz",
+    "ctx": "ctx-e5607651aa8c.i.gz",
+    "m2c": "ctx-e5607651aa8c.i.gz"
+  },
+  "sub_08046A64": {
+    "tu": "sub_08046A64.i.gz",
+    "ctx": "ctx-39c85b700688.i.gz",
+    "m2c": "ctx-39c85b700688.i.gz"
+  },
+  "sub_0804C8F4": {
+    "tu": "sub_0804C8F4.i.gz",
+    "ctx": "ctx-d866de449f14.i.gz",
+    "m2c": "ctx-d866de449f14.i.gz"
+  },
+  "sub_0804C1FC": {
+    "tu": "sub_0804C1FC.i.gz",
+    "ctx": "ctx-c872d6ca6069.i.gz",
+    "m2c": "ctx-c872d6ca6069.i.gz"
+  },
+  "sub_0804EFDC": {
+    "tu": "sub_0804EFDC.i.gz",
+    "ctx": "ctx-d866de449f14.i.gz",
+    "m2c": "ctx-d866de449f14.i.gz"
+  },
+  "VCountIntr_DeathScreen": {
+    "tu": "VCountIntr_DeathScreen.i.gz",
+    "ctx": "ctx-9c33bc47bcb3.i.gz",
+    "m2c": "ctx-9c33bc47bcb3.i.gz"
   }
 }

@@ -1076,6 +1076,172 @@
       "prependC": "extern const u16 sEmptyEepromData[4];\nextern const u8 sSaveFileString[9]; // \"K_KLONOA\"",
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/save.c#L290-L329"
+    },
+    {
+      "sym": "sub_0804CAC8",
+      "addr": "0x0804cac8",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "a76b3ec65a403d6d95800cdeccb2570ee50aebbad95dcd0059ac6a496ade5bef",
+      "features": [
+        "stack-addr",
+        "struct",
+        "field",
+        "bitfield",
+        "variable-index",
+        "global",
+        "array"
+      ],
+      "funcC": "s32 sub_0804CAC8(s32 arg0)\n{\n    struct Unk_0804CA6C subroutine_arg0 = {\n        .unk0 = 0,\n        .unk2 = 0\n    };\n\n    if (sub_0804CA6C(&gUnk_030052A4[arg0], &subroutine_arg0) != 0)\n    {\n        return 0;\n    }\n\n    switch (gUnk_030052A4[arg0].unk0_3)\n    {\n        case 0:\n            gBgInfo[gUnk_030052A4[arg0].unk1_3].hOfs += subroutine_arg0.unk0;\n            gBgInfo[gUnk_030052A4[arg0].unk1_3].vOfs += subroutine_arg0.unk2;\n            break;\n\n        case 2:\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].xPosBg2 += subroutine_arg0.unk0;\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].yPosBg2 += subroutine_arg0.unk2;\n\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].xPosScreen = gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].xPosBg2 >> 4;\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].yPosScreen = gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].yPosBg2 >> 4;\n            break;\n\n        case 4:\n            if (gUnk_030052A4[arg0].unk1_3 & 2)\n            {\n                gUnk_030034A0->winX1Y1[gUnk_030052A4[arg0].unk1_3 & 1][WIN_H] += subroutine_arg0.unk0;\n                gUnk_030034A0->winX1Y1[gUnk_030052A4[arg0].unk1_3 & 1][WIN_V] += subroutine_arg0.unk2;\n            }\n            else\n            {\n                gUnk_030034A0->winX2Y2[gUnk_030052A4[arg0].unk1_3 & 1][WIN_H] += subroutine_arg0.unk0;\n                gUnk_030034A0->winX2Y2[gUnk_030052A4[arg0].unk1_3 & 1][WIN_V] += subroutine_arg0.unk0;\n            }\n\n            sub_0804B2EC();\n            break;\n    }\n\n    gUnk_030052A4[arg0].unk14 -= 1;\n    return 1;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};\nvoid sub_0804B2EC(void);\ns32 sub_0804CA6C(struct Unk_030052A4 *arg0, struct Unk_0804CA6C *arg1);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L1068-L1113"
+    },
+    {
+      "sym": "sub_0804C60C",
+      "addr": "0x0804c60c",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "296f1404beec95b9f47596208c4f6c5352d5804aab7867ac7ea31e346ebb0294",
+      "features": [
+        "struct",
+        "field",
+        "array",
+        "variable-index",
+        "global",
+        "pointer"
+      ],
+      "funcC": "void sub_0804C60C(void)\n{\n    u32 temp_r1;\n\n    DmaFill32(3, sub_0804B270(gUnk_03004D84 + 3), gBgInfo[gUnk_03004D84[2]].pTiles + 0x40, 0x20);\n\n    temp_r1 = 0xF002;\n    switch (gUnk_03004D84[2])\n    {\n        case 0:\n        case 1:\n            DmaFill16(3, temp_r1, gBgTilemapBufs[gUnk_03004D84[2]], 0x800);\n            break;\n\n        case 2:\n        case 3:\n            DmaFill16(3, temp_r1, gBgInfo[gUnk_03004D84[2]].pTilemap, 0x800);\n            break;\n    }\n\n    gUnk_03004D84 += 7;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nu32 sub_0804B270(void *arg0);",
+      "proto": {
+        "sub_0804C60C": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L823-L844"
+    },
+    {
+      "sym": "sub_0800BEF0",
+      "addr": "0x0800bef0",
+      "unit": "src/code_080070A0.c",
+      "romDigest": "56a1603233dd6a84d4379d0453f68d04112f38f59dac3ae4c004e4e5c8837938",
+      "features": [
+        "struct-return",
+        "struct",
+        "field",
+        "global",
+        "branch",
+        "narrow",
+        "signed"
+      ],
+      "funcC": "struct Unk_0800BEF0_2 sub_0800BEF0(struct Unk_0800BEF0 arg0)\n{\n    u32 temp_r0;\n    struct Unk_0800BEF0_2 var_r4;\n    s8 var_r2;\n    s8 var_r3;\n    s8 var_r5;\n    s8 var_r7;\n\n    var_r3 = (arg0.unk4 - arg0.unk0) >> 3;\n    var_r5 = (arg0.unk6 - arg0.unk2) >> 3;\n    var_r4.unk0 = arg0.unk0;\n    var_r4.unk2 = arg0.unk2;\n\n    if (var_r3 < 0)\n    {\n        temp_r0 = arg0.unk8;\n        var_r7 = -temp_r0;\n        var_r3 = -var_r3;\n    }\n    else\n    {\n        var_r7 = arg0.unk8;\n    }\n\n    if (var_r5 < 0)\n    {\n        temp_r0 = arg0.unk8;\n        var_r2 = -temp_r0;\n        var_r5 = -var_r5;\n    }\n    else\n    {\n        var_r2 = arg0.unk8;\n    }\n\n    if (var_r3 >= var_r5)\n    {\n        var_r4.unk0 += var_r7;\n        gUnk_030034DC += var_r5;\n        if (gUnk_030034DC >= var_r3)\n        {\n            var_r4.unk2 += var_r2;\n            gUnk_030034DC -= var_r3;\n        }\n    }\n    else\n    {\n        var_r4.unk2 += var_r2;\n        gUnk_030034DC += var_r3;\n        if (gUnk_030034DC >= var_r5)\n        {\n            var_r4.unk0 += var_r7;\n            gUnk_030034DC -= var_r5;\n        }\n    }\n\n    return var_r4;\n}",
+      "prependC": "struct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern struct Unk_0300466C gUnk_08078FC8[0xD];\nextern const union Unk_03000820 gUnk_080E2A7C;\nextern const u8 gUnk_080E2A84[0x6][0x8];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern u8 gUnk_08061FC8[0x80];\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_08063368[0x80];\nextern u8 gUnk_080635E8[0x80];\nextern u8 gUnk_08063FE8[0x80];\nextern u8 gUnk_08064868[0x200];\nextern u8 gUnk_08064A68[0x200];\nextern u8 gUnk_080B8F68[0x80];\nextern u8 gUnk_080B9068[0x80];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nextern u8 gUnk_080B9268[0x80];\nextern u8 gUnk_080B92E8[0x80];\nextern u8 gUnk_080B9468[0x200];\nextern u8 gUnk_080B9668[0x200];\nextern void sub_0801C82C(u32); // should be u8 param",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_080070A0.c#L2345-L2403"
+    },
+    {
+      "sym": "sub_08046A64",
+      "addr": "0x08046a64",
+      "unit": "src/code_08043BA4.c",
+      "romDigest": "a4f399423333434428e175cae9c5375dc661cde0f0c62af0bfcd07853037d713",
+      "features": [
+        "struct-copy",
+        "stack-addr",
+        "struct",
+        "field",
+        "pointer",
+        "global",
+        "narrow-counter",
+        "div-const"
+      ],
+      "funcC": "void sub_08046A64(u8 arg0)\n{\n    // Seems to switch around entities\n    struct EntityInfo *var_sl;\n    u8 var_r4;\n    u8 var_r1;\n    u8 var_r3;\n    struct EntityInfo subroutine_arg0;\n\n    var_sl = &gEntityInfo[0xD + gVisionSelectInfo.unk0_1];\n\n    var_r4 = 1;\n    while (var_r4 < (arg0 / 9))\n    {\n        var_r4 = (var_r4 * 3) + 1;\n    }\n\n    while (var_r4 != 0)\n    {\n        for (var_r1 = var_r4; var_r1 < arg0; var_r1++)\n        {\n            for (var_r3 = var_r1; var_r3 >= var_r4 && ((((*(var_sl + var_r3 - var_r4)).yPosScreen < (*(var_sl + var_r3)).yPosScreen))); var_r3 -= var_r4)\n            {\n                subroutine_arg0 = *(var_sl + var_r3);\n                *(var_sl + var_r3) = *(var_sl + var_r3 - var_r4);\n                *(var_sl + var_r3 - var_r4) = subroutine_arg0;\n            }\n        }\n\n        var_r4 /= 3;\n    }\n}",
+      "prependC": "extern u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_080657C8[0x400];\nextern u8 gUnk_08065BC8[0x400];\nextern u8 gUnk_08065FC8[0x400];\nextern u8 gUnk_080663C8[0x80];\nextern u8 gUnk_08066448[0x40];\nextern u8 gUnk_08066488[0x80];\nextern u8 gUnk_08066508[0x80];\nextern u8 gUnk_08066588[0x80];\nextern u8 gUnk_08066608[0x80];\nextern u8 gUnk_08066688[0x80];\nextern u8 gUnk_08066708[0x80];\nextern u8 gUnk_08066788[0x80];\nextern u8 gUnk_08066808[0x80];\nextern u8 gUnk_08066888[0x80];\nextern u8 gUnk_08066908[0x80];\nextern u8 gUnk_08066988[0x80];\nextern u8 gUnk_08066A08[0x80];\nextern u8 gUnk_08066A88[0x80];\nextern u8 gUnk_08078A88[0x20];\nextern u8 gUnk_08078AA8[0x20];\nextern u8 gUnk_08078AC8[0x20];\nextern u8 gUnk_08078AE8[0x20];\nextern struct Unk_0300466C gUnk_0807D248[];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nstruct Unk_080D48C8 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4_0:2;\n    u8 unk4_2:6;\n    u8 pad5[0x8 - 0x5];\n};\nextern struct Unk_080D48C8 gUnk_080D48C8[6][7][0x15];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nstruct Unk_08116464 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 pad9[0xC - 0x9];\n};\nextern struct Unk_08116464 gUnk_08116464[];\nextern const u8 gUnk_08117120[0xA];\nextern const u8 gUnk_0811712A[0x10];\nextern const u16 gUnk_0811713A[0x20];\nextern const u8 gUnk_0811717C[6][40][5];\nextern const u8 gUnk_0811762C[6][8];\nextern const u8 gUnk_0811765C[6][7];",
+      "proto": {
+        "sub_08046A64": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08043BA4.c#L1672-L1703"
+    },
+    {
+      "sym": "sub_0804C8F4",
+      "addr": "0x0804c8f4",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "470379e80450a6501ab61de43d8b0d9fabc33ed37e4acd1d8d7f01e55c18c972",
+      "features": [
+        "fnptr",
+        "struct",
+        "field",
+        "bitfield",
+        "array",
+        "variable-index",
+        "pointer",
+        "global"
+      ],
+      "funcC": "s32 sub_0804C8F4(struct Unk_030052A4 *arg0)\n{\n    s32 var_r5;\n    s32 var_r8;\n\n    var_r8 = 0;\n\n    for (var_r5 = 0; var_r5 < 0x10; var_r5++)\n    {\n        if (arg0[var_r5].unk0_0 != 0)\n        {\n            if (gUnk_030034A0->unk0_6 != 0)\n            {\n                arg0[var_r5].unk0_0 |= 4;\n            }\n\n            arg0[var_r5].unk0_0 = arg0[var_r5].unk20(var_r5);\n            if (arg0[var_r5].unk0_0 != 0)\n            {\n                var_r8 += 1;\n            }\n        }\n    }\n\n    for (var_r5 = 0x10; var_r5 < 0x20; var_r5++)\n    {\n        if (arg0[var_r5].unk0_0 != 0)\n        {\n            arg0[var_r5].unk0_0 = arg0[var_r5].unk20(var_r5);\n        }\n    }\n\n    return (gUnk_030034A0->unk0_6 != 0) ? var_r8 : 0;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L944-L977"
+    },
+    {
+      "sym": "sub_0804C1FC",
+      "addr": "0x0804c1fc",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "b00b0ca552dde1fea831e9168587872834b4a2fe7211f972643dc0f311927410",
+      "features": [
+        "global",
+        "pointer",
+        "array"
+      ],
+      "funcC": "void sub_0804C1FC(void)\n{\n    u32 temp_r0;\n    u32 temp_r1;\n\n    temp_r0 = gUnk_03004D84[2];\n    temp_r1 = gUnk_03004D84[3];\n    gUnk_03004D84 += 4;\n    sub_0804C1C0(temp_r0, temp_r1);\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nvoid sub_0804C1C0(s32 arg0, s32 arg1);",
+      "proto": {
+        "sub_0804C1FC": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L723-L732"
+    },
+    {
+      "sym": "sub_0804EFDC",
+      "addr": "0x0804efdc",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "7e856d136a33112c48baede6b4a07f75e006367cf0deaacf8898e0de1b0b9626",
+      "features": [
+        "fnptr",
+        "struct",
+        "field",
+        "pointer",
+        "global"
+      ],
+      "funcC": "void sub_0804EFDC(void)\n{\n    gUnk_0300081C->unk24();\n    gUnk_0300081C->unk1A = gUnk_0300081C->unk18;\n    gUnk_03004D84 += 2;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */",
+      "proto": {
+        "sub_0804EFDC": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L2379-L2384"
+    },
+    {
+      "sym": "VCountIntr_DeathScreen",
+      "addr": "0x0800111c",
+      "unit": "src/interrupts.c",
+      "romDigest": "1481b3b17c2b433d9639f454a38df607d1bcd5678a13f9e63d8a12b9b9fc7495",
+      "features": [
+        "mask",
+        "branch"
+      ],
+      "funcC": "void VCountIntr_DeathScreen(void)\n{\n    // VCount, called when losing a life\n    while (!(REG_DISPSTAT & DISPSTAT_HBLANK));\n    REG_BLDY = 0;\n}",
+      "proto": {
+        "VCountIntr_DeathScreen": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/interrupts.c#L242-L247"
     }
   ]
 }

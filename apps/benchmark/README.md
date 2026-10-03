@@ -109,12 +109,12 @@ from the manifests by `test/authored-facts.test.ts`, so none of them can go stal
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
-| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  109 |
+| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  112 |
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
-| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   98 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |  101 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
 | no context at all — its C++ unit's own is not C, so m2c infers the signature from the asm, as asmlift does                                                                 |   42 |
-| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  127 |
+| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  129 |
 
 What those 110 declarations SAY — a bare name, or the full signature — is residual 12.
 
