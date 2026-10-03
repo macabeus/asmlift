@@ -41,7 +41,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import { abiSortEntryParams, fallbackArgc, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1455,59 +1455,52 @@ export function lift(
             'where its outgoing stack arguments end is not known',
         );
       }
-      const plan = calls.plan(callee);
-      // every width is one word: this lowering builds no pair (`CallLowering.pairs`)
-      const declared = plan.widths?.length;
-      // a pending `%hi` half is not an argument, and a gap refuses (`fallbackArgc`)
-      const argc =
-        declared ??
-        fallbackArgc(ssa, ARG_REGS, bi, { accept: (v) => !highHalves.has(v), gap: { name, at: ins.addr, fail } });
-      // A GUESS THAT FILLS a0..a3 CANNOT SAY WHERE THE LIST ENDS: a word of the outgoing area that
-      // reaches the call is argument 5 onward, or a local the compiler put there.
-      if (declared === undefined && argc === ARG_REGS.length) {
-        const passed = [...valueSlots]
-          .filter((off) => off >= STACK_ARGS_AT && off < frameSize && ssa.hasReachingDef(stackSlot(off), bi))
-          .sort((x, y) => x - y)[0];
-        if (passed !== undefined) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${callee}' ` +
-              `at ${at} fills a0..a3, and the word stored to ${passed}(sp) reaches it where an argument past ` +
-              'the registers travels',
-          );
-        }
-      }
-      const args: Value[] = [];
-      for (let k = 0; k < argc; k++) {
-        if (k < ARG_REGS.length) {
-          // A GUESSED arity asks whether the caller set a register up, and `finish()` answers by
-          // dropping the ones a call destroyed; a DECLARED one asserts it (SsaBuilder.readGuessedArg).
-          const r = ARG_REGS[k];
-          args.push(declared === undefined ? highHalves.guardRead(name, r, ssa.readGuessedArg(r, bi)) : read(r));
-          continue;
-        }
-        const off = STACK_ARGS_AT + 4 * (k - ARG_REGS.length);
-        if (off >= frameSize) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': outgoing stack argument ${k + 1} of '${callee}' at ${at} travels in ` +
-              `${off}(sp), past the ${frameSize}-byte frame this function pushed`,
-          );
-        }
-        if (!valueSlots.has(off) || !ssa.hasReachingDef(stackSlot(off), bi)) {
-          throw new FrontendUnsupportedError(
-            `cannot lift '${name}': outgoing stack argument ${k + 1} of '${callee}' at ${at} travels in ` +
-              `${off}(sp), and no value stored there reaches the call`,
-          );
-        }
-        args.push(readVar(stackSlot(off), bi));
-      }
-      const res = kit.tmp('call', args, { target: callee });
-      if (declared === undefined) {
-        ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
-      }
-      if (plan.returns.kind === 'word') {
-        write(RET, res);
-      }
-      ssa.noteCall(bi, plan.clobbers);
+      calls.lower({
+        callee,
+        ssa,
+        bi,
+        read,
+        write,
+        // ARGUMENT WORD k ≥ 4 travels in `16+4(k-4)(sp)`, inside the one frame this function pushed
+        stackWord: (k) => {
+          const off = STACK_ARGS_AT + 4 * (k - ARG_REGS.length);
+          if (off >= frameSize) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': outgoing stack argument ${k + 1} of '${callee}' at ${at} travels in ` +
+                `${off}(sp), past the ${frameSize}-byte frame this function pushed`,
+            );
+          }
+          if (!valueSlots.has(off) || !ssa.hasReachingDef(stackSlot(off), bi)) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': outgoing stack argument ${k + 1} of '${callee}' at ${at} travels in ` +
+                `${off}(sp), and no value stored there reaches the call`,
+            );
+          }
+          return readVar(stackSlot(off), bi);
+        },
+        // a pending `%hi` half is not an argument, and a gap refuses (`fallbackArgc`)
+        highHalves,
+        guess: {
+          at: ins.addr,
+          // A GUESS THAT FILLS a0..a3 CANNOT SAY WHERE THE LIST ENDS: a word of the outgoing area that
+          // reaches the call is argument 5 onward, or a local the compiler put there.
+          refuse: (argc) => {
+            if (argc < ARG_REGS.length) {
+              return;
+            }
+            const passed = [...valueSlots]
+              .filter((off) => off >= STACK_ARGS_AT && off < frameSize && ssa.hasReachingDef(stackSlot(off), bi))
+              .sort((x, y) => x - y)[0];
+            if (passed !== undefined) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${callee}' ` +
+                  `at ${at} fills a0..a3, and the word stored to ${passed}(sp) reaches it where an argument past ` +
+                  'the registers travels',
+              );
+            }
+          },
+        },
+      });
       // hi and lo are the callee's to overwrite
       divState = null;
       mulState = null;
