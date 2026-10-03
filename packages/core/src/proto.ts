@@ -218,14 +218,15 @@ export function declaredCallArgs(
 /** Whether a declared type is `double`, qualifiers aside. */
 const isDoubleSpelling = (t: ParamType): boolean => t.replace(/\b(?:const|volatile)\b/g, ' ').trim() === 'double';
 
-/** Whether a declared type is a floating type, qualifiers aside. */
-export const isFloatingSpelling = (t: ParamType): boolean =>
-  /^(?:float|double|long double)$/.test(
-    t
-      .replace(/\b(?:const|volatile)\b/g, ' ')
-      .trim()
-      .replace(/\s+/g, ' '),
-  );
+/** Whether a declared type is a floating type, qualifiers aside: a C keyword, or a typedef of one
+ *  every project declares (`FLOAT_TYPEDEFS`). */
+export const isFloatingSpelling = (t: ParamType): boolean => {
+  const bare = t
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return /^(?:float|double|long double)$/.test(FLOAT_TYPEDEFS.get(bare) ?? bare);
+};
 
 /** A signature the C standard fixes is a COMPLETE one, which an `FnProto` is not: a project
  *  prototype is a lower bound assembled from whatever a header extraction could read, and omits
@@ -407,6 +408,15 @@ export const PRELUDE_TYPEDEFS: ReadonlyMap<string, string> = new Map([
   ['s32', 'int'],
   ['s64', 'long long'],
   ['u64', 'unsigned long long'],
+]);
+
+/** The floating typedefs a decomp project declares (`f32`, `f64`), and the C keyword each stands for.
+ *  A candidate's prelude does not declare them: a candidate spells a float with the keyword
+ *  (backend/cfamily.ts), so a project context that typedefs them cannot collide with it. They are
+ *  read to tell that a declared spelling is floating. */
+const FLOAT_TYPEDEFS: ReadonlyMap<string, string> = new Map([
+  ['f32', 'float'],
+  ['f64', 'double'],
 ]);
 
 /** The C89 integer bases, which need no declaration anywhere. `signed`/`unsigned` is stripped

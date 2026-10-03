@@ -289,6 +289,23 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
     );
   });
 
+  test('refuses one declared through the floating typedefs every project declares', () => {
+    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+    const calls = callDeclarations(
+      'f',
+      MIPS_IDO,
+      { r: { params: ['s32'], returns: 'f32' }, p: { params: ['const f64'], returnsVoid: true } },
+      O32,
+      fail,
+    );
+    expect(() => calls.plan('r')).toThrow(
+      /^cannot lift 'f': 'r' is declared to return f32, which comes back in \$f0 — /,
+    );
+    expect(() => calls.plan('p')).toThrow(
+      /^cannot lift 'f': 'p' is declared to take const f64 as its parameter 1, which travels in the FPU's registers — /,
+    );
+  });
+
   test('plans one where the target passes floats in general registers', () => {
     expect(thumbCalls({ g: { params: ['float'], returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
   });

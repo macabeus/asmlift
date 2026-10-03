@@ -5,6 +5,7 @@
 // back, so a function that ends on its call returns nothing. Each lift recompiles byte-exact.
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
+import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, type TargetDescription } from '@asmlift/core/target';
 import {
   compileMipsGcc272Target,
@@ -175,6 +176,24 @@ describe('a callee declared with a float declines, naming it', () => {
       c: 'void g(float); void f(float x) { g(x); }',
       prototypes: { g: { params: ['float'], returnsVoid: true } },
       message: /'g' is declared to take float as its parameter 1/,
+    },
+    {
+      name: 'an f32 return',
+      c: 'float g(int); float f(int a) { return g(a + 1); }',
+      prototypes: { g: { params: ['s32'], returns: 'f32' } },
+      message: /'g' is declared to return f32/,
+    },
+    {
+      name: 'an f32 parameter',
+      c: 'void g(float); void f(float x) { g(x); }',
+      prototypes: { g: { params: ['f32'], returnsVoid: true } },
+      message: /'g' is declared to take f32 as its parameter 1/,
+    },
+    {
+      name: 'a float return its context declares',
+      c: 'float g(int); float f(int a) { return g(a + 1); }',
+      prototypes: prototypesFromContext('typedef float f32; f32 g(int);', 'c'),
+      message: /'g' is declared to return float/,
     },
   ];
 

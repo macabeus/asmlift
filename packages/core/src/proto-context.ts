@@ -22,6 +22,7 @@ import {
   declaredCallArgs,
   declaredWidth,
   declaresAggregateReturn,
+  isFloatingSpelling,
   statesNoReturn,
   symbolPrototype,
   validatePrototypes,
@@ -657,9 +658,12 @@ function readSignature(
   // A spelling that names one and reads as no type (`struct Blob64 EWRAM_FN`, a macro this never
   // expands) still returns one, and says nothing else about it.
   //
+  // A floating return is kept as its keyword: where the FPU carries it, it is what refuses a call
+  // that reads the general return register (frontend/call-plan.ts).
+  //
   // A spelling that reads as no type and names no aggregate states nothing, and the parameters are
-  // kept: in a vendored context that is a float, a double or an enum typedef, whose arguments sit
-  // where they are declared. KNOWN GAP: a typedef this never saw (`Blob64T`, defined behind an
+  // kept: in a vendored context that is an enum typedef, whose arguments sit where they are
+  // declared. KNOWN GAP: a typedef this never saw (`Blob64T`, defined behind an
   // `#include` that the lexer skips) may be a struct returned through memory, whose hidden pointer
   // is then read as argument 0; a symbol map that sizes the return closes it
   // (`prototypesFromSymbols`).
@@ -667,7 +671,7 @@ function readSignature(
   const keyword = resolved.type.kind === 'tag' ? resolved.type.keyword : undefined;
   if (r === 'void') {
     proto.returnsVoid = true;
-  } else if (declaredWidth(r) !== undefined) {
+  } else if (declaredWidth(r) !== undefined || isFloatingSpelling(r)) {
     proto.returns = r;
   } else if (layout !== undefined) {
     proto.returns = r;

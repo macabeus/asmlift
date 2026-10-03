@@ -197,6 +197,13 @@ describe('prototypes from a declaration context', () => {
     expect(declaredCallArgs(p.sq, PPC_MWCC)?.widths).toBeUndefined();
   });
 
+  test('a floating return is kept as its keyword, through a typedef too', () => {
+    const p = prototypesFromContext('typedef float f32; float g(int); f32 k(void); double d(void);', 'c');
+    expect(p.g).toEqual({ returns: 'float', params: ['int'] });
+    expect(p.k).toEqual({ returns: 'float', params: [] });
+    expect(p.d).toEqual({ returns: 'double', params: [] });
+  });
+
   test('skips members, namespaces, templates, operators and variadics; drops an overloaded name', () => {
     const p = prototypesFromContext(
       `class Card { public: int probe(int chan); };
