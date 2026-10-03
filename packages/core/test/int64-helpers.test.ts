@@ -210,10 +210,15 @@ describe('what refuses', () => {
   });
 
   // THE CALL BOUNDARY IS WHERE THE PAIR STOPS WHEN NOTHING STATES A WIDTH. Handing a half to such
-  // a callee is the wrong answer that recompiles to the right bytes, so it declines.
+  // a callee is the wrong answer that recompiles to the right bytes, so it declines. `__muldi3`'s
+  // pair is a long long, so the hint is the long long's prototype; a double's names the helper that
+  // returned it (`soft-double.test.ts`).
   test('a half handed to an ordinary callee declines, and names the half', () => {
     expect(() => decompile('lokeep', handWritten(['\tbl\tsink']), ARMV4T_AGBCC)).toThrow(
-      /argument 1 of the call to 'sink' is the low half of a 64-bit value/,
+      "cannot lift 'lokeep': argument 1 of the call to 'sink' is the low half of a 64-bit value, and nothing " +
+        "states how wide 'sink's parameters are, so a pair cannot be told from two ordinary arguments. A typed " +
+        'prototype states it (`{"sink": {"params": ["long long", …]}}`); a count, or a list holding a spelling ' +
+        'asmlift cannot size, does not',
     );
   });
 
