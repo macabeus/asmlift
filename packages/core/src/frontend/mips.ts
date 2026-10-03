@@ -34,7 +34,7 @@ import {
   symbolStart,
 } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
-import { FrontendUnsupportedError } from './errors';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
@@ -784,7 +784,7 @@ export function lift(
   // split across blocks folds when SSA says the half reaches, and refuses when what arrives is the
   // block parameter standing for a merge.
   /** This frontend's refusal, for the shared code that refuses on its behalf. */
-  const fail = (message: string): never => {
+  const fail: FrontendRefusal = (message) => {
     throw new FrontendUnsupportedError(message);
   };
   const highHalves = makeHighHalves({ hi: '%hi', hiArticle: 'a', lo: '%lo', fail });

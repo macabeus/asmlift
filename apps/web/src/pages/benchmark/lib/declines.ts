@@ -26,9 +26,9 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 181 distinct decline messages (the texts reached by
+// `packages/core/src` throws 185 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
-// subclass and `StructureError`, or by the `fail` callback a frontend hands `frontend/call-plan.ts`,
+// subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
 // separate NAME to that harvest, so it is listed separately here too). 97 of them classify as "other". Some belong
@@ -543,7 +543,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // which is why neither the key nor the label names one of them.
     key: 'reloc-halves',
     label: 'Relocated address halves (%hi / %lo, @l / @ha)',
-    pattern: /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half/,
+    pattern:
+      /high half|not a modelled consumer of it|carries a data relocation|carries the '@(?:l|ha)' half|the address is never completed/,
   },
   {
     key: 'no-prototype-args',

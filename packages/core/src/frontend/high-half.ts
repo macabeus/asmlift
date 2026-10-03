@@ -23,6 +23,7 @@
 // Either way `addend` is "the part of the address this producer contributed", and the consumer adds
 // its own.
 import type { Block, Value } from '../ir/core';
+import type { FrontendRefusal } from './errors';
 
 /** A pending high half: what it names, what it contributed, and the instruction that produced it,
  *  so a refusal can point a reader at it. Whether it has been consumed is deliberately NOT here: it
@@ -45,7 +46,7 @@ export interface HighHalfDialect {
   /** The low-half marker: `@l` (PowerPC), `%lo` (MIPS). */
   lo: string;
   /** The frontend's designed loud-failure signal (`PpcUnsupportedError`, `FrontendUnsupportedError`). */
-  fail(message: string): never;
+  fail: FrontendRefusal;
 }
 
 export interface HighHalves {

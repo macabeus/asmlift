@@ -52,7 +52,7 @@ import {
   sliceSymbol,
 } from './disasm';
 import { mkEmitKit, pushSwitchBr } from './emit';
-import { FrontendUnsupportedError } from './errors';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
@@ -589,7 +589,7 @@ export function lift(
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   /** This frontend's refusal, for the shared code that refuses on its behalf. */
-  const fail = (message: string): never => {
+  const fail: FrontendRefusal = (message) => {
     throw new PpcUnsupportedError(message);
   };
   const calls = callDeclarations(

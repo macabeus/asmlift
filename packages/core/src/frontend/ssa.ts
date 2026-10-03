@@ -29,7 +29,7 @@ import {
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
-import { FrontendUnsupportedError } from './errors';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 
 export interface SsaBuilder {
   fn: Fn;
@@ -1001,7 +1001,7 @@ export function fallbackArgc(
   opts: {
     accept?: (v: Value) => boolean;
     /** the call's function and address, and the frontend's own refusal */
-    gap?: { name: string; at: number; fail: (message: string) => never };
+    gap?: { name: string; at: number; fail: FrontendRefusal };
   } = {},
 ): number {
   const holdsValue = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);

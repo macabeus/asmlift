@@ -44,9 +44,10 @@ const DECLINE_CTORS = new Set([
   'StructureError',
 ]);
 
-const FAILS_THROUGH_CALLBACK = /\bfail: \(message: string\) => never\b/;
+/** The type a frontend hands its refusal to shared code as (frontend/errors.ts). */
+const SHARED_REFUSAL = /\bFrontendRefusal\b/;
 
-const coreDeclineTemplates = (): { file: string; line: number; text: string }[] => {
+const coreSources = (): { file: string; src: string }[] => {
   const files: string[] = [];
   (function walk(d: string) {
     for (const e of readdirSync(d)) {
@@ -58,12 +59,15 @@ const coreDeclineTemplates = (): { file: string; line: number; text: string }[] 
       }
     }
   })(CORE_SRC);
+  return files.sort().map((f) => ({ file: f.slice(CORE_SRC.length + 1), src: readFileSync(f, 'utf8') }));
+};
+
+const declineTemplates = (sources: readonly { file: string; src: string }[]) => {
   const out: { file: string; line: number; text: string }[] = [];
-  for (const f of files.sort()) {
-    const src = readFileSync(f, 'utf8');
-    // A FILE HANDED ITS CALLER'S CONSTRUCTOR as `fail: (message: string) => never` throws through
-    // it, so each `fail(` call there is a site too.
-    const re = FAILS_THROUGH_CALLBACK.test(src) ? /throw new (\w+)\(|(?<![\w.])(fail)\(/g : /throw new (\w+)\(/g;
+  for (const { file, src } of sources) {
+    // A FILE THAT HOLDS A `FrontendRefusal` throws through it, so each call of one there, `fail(`
+    // or a dialect's `d.fail(`, is a site too.
+    const re = SHARED_REFUSAL.test(src) ? /throw new (\w+)\(|(?<!\w)(?:\w+\.)?(fail)\(/g : /throw new (\w+)\(/g;
     let m: RegExpExecArray | null;
     while ((m = re.exec(src))) {
       if (m[2] === undefined && !DECLINE_CTORS.has(m[1])) {
@@ -93,14 +97,15 @@ const coreDeclineTemplates = (): { file: string; line: number; text: string }[] 
         .replace(/\s+/g, ' ')
         .trim();
       if (text) {
-        out.push({ file: f.slice(CORE_SRC.length + 1), line: src.slice(0, m.index).split('\n').length, text });
+        out.push({ file, line: src.slice(0, m.index).split('\n').length, text });
       }
     }
   }
   return out;
 };
 
-const CORE_TEMPLATES = coreDeclineTemplates();
+const CORE_SOURCES = coreSources();
+const CORE_TEMPLATES = declineTemplates(CORE_SOURCES);
 const classOfText = (t: string) => DECLINE_CLASSES.find((c) => c.pattern.test(t))?.key ?? OTHER_CLASS.key;
 
 /** a declined row carrying exactly these markers */
@@ -519,6 +524,16 @@ describe('a relocation refuses over the NAME or over the HALF, and they are diff
     ],
   ])('%s -> %s', (marker, want) => {
     expect(classOf(marker)).toBe(want);
+  });
+
+  // `frontend/high-half.ts` throws this through the MIPS frontend's refusal (mips-reloc-globals.test.ts)
+  test('a high half no low half completes -> reloc-halves', () => {
+    expect(
+      classOf(
+        "lift: cannot lift 'two': 'lui' at 0x0 carries the '%hi' half of 'gDropped' and no modelled instruction " +
+          "consumes its '%lo' half — the address is never completed",
+      ),
+    ).toBe('reloc-halves');
   });
 
   // `pool-word-shape` used to have its published marker here, `sa3:OamMalloc`'s
@@ -1178,6 +1193,21 @@ describe('the classifier is measured against the messages core can throw, not on
     // Without this, deleting the walk would make every gate below vacuously pass.
     expect(CORE_TEMPLATES.length).toBeGreaterThan(100);
     expect(new Set(CORE_TEMPLATES.map((t) => t.file)).size).toBeGreaterThan(8);
+  });
+
+  // A REFUSAL IS A SITE HOWEVER IT IS SPELT: through the frontend's own constructor, or through the
+  // `FrontendRefusal` a frontend holds, which is how one refuses beside the code it shares.
+  test.each([
+    ['fail(`cannot lift a: an injected refusal`);', 'cannot lift a: an injected refusal'],
+    ['highHalves.fail(`cannot lift b: an injected refusal`);', 'cannot lift b: an injected refusal'],
+    ['throw new FrontendUnsupportedError(`cannot lift c: an injected refusal`);', 'cannot lift c: an injected refusal'],
+  ])('an injected `%s` in frontend/mips.ts is one more site', (line, text) => {
+    const injected = CORE_SOURCES.map((s) =>
+      s.file === 'frontend/mips.ts' ? { ...s, src: `${s.src}\n${line}\n` } : s,
+    );
+    const harvested = declineTemplates(injected);
+    expect(harvested).toHaveLength(CORE_TEMPLATES.length + 1);
+    expect(harvested.filter((t) => t.file === 'frontend/mips.ts' && t.text === text)).toHaveLength(1);
   });
 
   // The count the header paragraph publishes. It is a RESIDUE and not a defect — some of these are

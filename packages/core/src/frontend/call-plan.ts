@@ -26,6 +26,7 @@ import {
 } from '../proto';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
+import type { FrontendRefusal } from './errors';
 import { clobberedByCall } from './ssa';
 
 /** What the frontend's own call lowering can carry out. */
@@ -98,7 +99,7 @@ export function callDeclarations(
   target: TargetDescription,
   prototypes: Prototypes,
   lowering: CallLowering,
-  fail: (message: string) => never,
+  fail: FrontendRefusal,
 ): CallDeclarations {
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
@@ -400,7 +401,7 @@ function structReturnOf(
   target: TargetDescription,
   callee: string,
   own: FnProto,
-  fail: (message: string) => never,
+  fail: FrontendRefusal,
 ): StructReturn | 'register' {
   const refuse = (why: string): never =>
     fail(

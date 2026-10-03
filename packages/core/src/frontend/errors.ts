@@ -6,6 +6,11 @@
 // runtime crash (TypeError/RangeError): this is a catchable, intentional "out of scope" boundary
 // signal. `PpcUnsupportedError` subclasses it (annotate-mode classification and the loud-error
 // tests use `instanceof` against this base).
+/** A frontend's own refusal, handed to code it shares with other frontends: it throws the
+ *  frontend's error class with the message as given, so a refusal the shared code makes classifies
+ *  as the frontend's own. */
+export type FrontendRefusal = (message: string) => never;
+
 export class FrontendUnsupportedError extends Error {
   constructor(message: string) {
     super(message);
