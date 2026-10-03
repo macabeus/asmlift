@@ -66,7 +66,7 @@ export interface DeclaredCall {
 
 /** What one call is, decided from its callee's declaration before any instruction is read. */
 export interface CallPlan {
-  /** each argument's width, a hidden pointer first; null when nothing sizes them, so the frontend
+  /** each argument's width, a hidden pointer first; null when nothing sizes them, so `lower`
    *  guesses */
   readonly widths: readonly number[] | null;
   /** the indices into `widths` its declaration types `double` */
@@ -83,8 +83,8 @@ export interface CallPlan {
 
 /** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
  *  name. A declaration is the project's prototype or the compiler's runtime table, and a frontend
- *  reads either only here: its outgoing-argument analysis, its call lowering (`plan`, `lower`) and
- *  the frame-object audit (`FrameObjectAudit.returnsWithoutHiddenPointer`) ask these questions. */
+ *  reads either only here: its outgoing-argument analysis, its call lowering (`lower`) and the
+ *  frame-object audit (`FrameObjectAudit.returnsWithoutHiddenPointer`) ask these questions. */
 export interface CallDeclarations {
   /** what any call leaves holding nothing this function can name (`clobberedByCall`) */
   readonly callClobbers: readonly string[];
@@ -94,6 +94,8 @@ export interface CallDeclarations {
   /** the callee's declared argument widths, for a frontend that places them before it lowers the
    *  call; null where no declaration sizes them */
   declaredCall(callee: string): DeclaredCall | null;
+  /** `lower`'s first half, the call decided from the declaration alone: a value its tests compare
+   *  whole, where `lower` leaves IR */
   plan(callee: string): CallPlan;
   /** the call `site` makes, planned and lowered: its `call` op, its result and its clobbers */
   lower(site: CallSite): void;
@@ -143,9 +145,9 @@ export function callDeclarations(
   // What a call leaves holding nothing this function can name — checked against `argRegs` there.
   const callClobbers = clobberedByCall(target);
   // …and what a call to a PAIR-RETURNING helper leaves: the same set minus the high half, because
-  // the low half is the return register (already excluded) and the frontend writes the high one
-  // itself from the callee's own result. The two arms of one rule: where the callee
-  // hands a register back, the frontend names it; where it does not, nobody can.
+  // the low half is the return register (already excluded) and `lower` writes the high one itself
+  // from the callee's own result. The two arms of one rule: where the callee hands a register back,
+  // the lowering names it; where it does not, nobody can.
   //
   // `argRegs[1]` IS THE PAIR'S HIGH REGISTER ONLY WHERE THE ABI ALIASES THE FIRST ARGUMENT ONTO
   // THE RETURN REGISTER, which makes the returned pair occupy the first two argument registers.
