@@ -18,11 +18,11 @@ const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) =
 const ONE = { kind: 'struct' as const, members: [{ name: 'a', type: 's32' }] };
 
 describe('callDeclarations', () => {
-  test('places a `long long` in two argument words, the second one staged', () => {
+  test('sizes a `long long` as one 64-bit argument', () => {
     const { declaredCall } = thumbCalls({
       g: { params: ['s32', 's32', 's32', 'long long'] },
     });
-    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], doubles: new Set(), block: [0], params: 4 });
+    expect(declaredCall('g')).toEqual({ widths: [32, 32, 32, 64], doubles: new Set(), params: 4 });
   });
 
   test('puts the hidden pointer of a struct returned through memory first', () => {
@@ -30,43 +30,12 @@ describe('callDeclarations', () => {
       mk4: { params: ['s32'], returns: 'struct S4', returnLayout: S4 },
     });
     const declared = declaredCall('mk4');
-    expect(declared).toMatchObject({ widths: [32, 32], block: null, params: 1 });
+    expect(declared).toMatchObject({ widths: [32, 32], params: 1 });
     expect(declared?.returned).toMatchObject({ type: { kind: 'struct' } });
   });
 
-  test('answers a struct returned in r0 with no arity stated', () => {
-    const calls = thumbCalls({ mv: { returns: 'struct One', returnLayout: ONE } });
-    expect(calls.declaredCall('mv')).toBeNull();
-    expect(calls.registerStructReturn('mv')).toBe('register');
-  });
-
   test('declares nothing for a callee no table names', () => {
-    const calls = thumbCalls({});
-    expect(calls.declaredCall('g')).toBeNull();
-    expect(calls.returnsPair('g')).toBe(false);
-  });
-
-  test("lets a project's re-declaration of a runtime helper disable its pair", () => {
-    const declared = thumbCalls({});
-    expect(declared.wideHelper('__muldi3')).not.toBeNull();
-    expect(declared.returnsPair('__muldi3')).toBe(true);
-    const redeclared = thumbCalls({
-      __muldi3: { params: ['s64', 's64'], returns: 's64' },
-    });
-    expect(redeclared.wideHelper('__muldi3')).toBeNull();
-    expect(redeclared.returnsPair('__muldi3')).toBe(false);
-  });
-
-  test("answers a project callee's pair return from its declared return width", () => {
-    const calls = thumbCalls({
-      g: { params: ['s32'], returns: 'long long' },
-      h: { params: ['s32'], returns: 's32' },
-      __divsi3: { params: ['s32', 's32'], returns: 'long long' },
-    });
-    expect(calls.returnsPair('g')).toBe(true);
-    expect(calls.returnsPair('h')).toBe(false);
-    // a name the runtime table carries is answered by the table alone
-    expect(calls.returnsPair('__divsi3')).toBe(false);
+    expect(thumbCalls({}).declaredCall('g')).toBeNull();
   });
 
   test("names the runtime's soft-float helpers, and nothing else, as float helpers", () => {
@@ -88,24 +57,48 @@ describe('callDeclarations', () => {
     // a signature the C standard fixes
     expect(calls.returnsWithoutHiddenPointer('memcpy')).toBe(true);
   });
-
-  test("leaves a pair-returning call's high register out of what it clobbers", () => {
-    const { callClobbers, pairReturnClobbers } = thumbCalls({});
-    expect(callClobbers).toContain('r1');
-    expect(pairReturnClobbers).toEqual(callClobbers.filter((r) => r !== 'r1'));
-  });
 });
 
 describe('callDeclarations.plan', () => {
+  // what a call that hands back a pair leaves: everything else it clobbers, the high half aside
+  const pairClobbers = (calls: { callClobbers: readonly string[] }) => calls.callClobbers.filter((r) => r !== 'r1');
+
   test("answers a runtime helper's call from its table, before any declaration is asked", () => {
     const calls = thumbCalls({ __muldi3: { returns: 'struct S4', returnLayout: S4 } });
     expect(() => calls.declaredCall('__muldi3')).toThrow(/through a hidden pointer in r0/);
-    expect(calls.plan('__muldi3')).toMatchObject({
-      wideHelper: { params: [64, 64], returns: 64 },
-      declared: null,
+    expect(calls.plan('__muldi3')).toEqual({
       widths: [64, 64],
+      doubles: new Set(),
       returns: { kind: 'pair' },
-      clobbers: calls.pairReturnClobbers,
+      clobbers: pairClobbers(calls),
+    });
+  });
+
+  test("lets a project's re-declaration of a runtime helper disable its pair", () => {
+    const calls = thumbCalls({ __muldi3: { params: ['s64', 's64'], returns: 's64' } });
+    expect(calls.plan('__muldi3')).toMatchObject({
+      widths: [64, 64],
+      returns: { kind: 'word' },
+      clobbers: calls.callClobbers,
+    });
+  });
+
+  test("answers a project callee's pair return from its declared return width", () => {
+    const calls = thumbCalls({
+      g: { params: ['s32'], returns: 'long long' },
+      h: { params: ['s32'], returns: 's32' },
+      __divsi3: { params: ['s32', 's32'], returns: 'long long' },
+    });
+    expect(calls.plan('g').returns).toEqual({ kind: 'pair' });
+    expect(calls.plan('h').returns).toEqual({ kind: 'word' });
+    // a name the runtime table carries is answered by the table alone
+    expect(calls.plan('__divsi3').returns).toEqual({ kind: 'word' });
+  });
+
+  test('plans the doubles its declaration types', () => {
+    expect(thumbCalls({ g: { params: ['s32', 'double'] } }).plan('g')).toMatchObject({
+      widths: [32, 64],
+      doubles: new Set([1]),
     });
   });
 
@@ -119,11 +112,10 @@ describe('callDeclarations.plan', () => {
 
   test('plans a struct returned in r0 with no arity stated, leaving r0 holding nothing', () => {
     const calls = thumbCalls({ mv: { returns: 'struct One', returnLayout: ONE } });
+    expect(calls.declaredCall('mv')).toBeNull();
     expect(calls.plan('mv')).toEqual({
-      callee: 'mv',
-      wideHelper: null,
-      declared: null,
       widths: null,
+      doubles: new Set(),
       returns: { kind: 'register-struct' },
       clobbers: [...calls.callClobbers, 'r0'],
     });
@@ -134,7 +126,7 @@ describe('callDeclarations.plan', () => {
     expect(calls.plan('g')).toMatchObject({
       widths: [32],
       returns: { kind: 'pair' },
-      clobbers: calls.pairReturnClobbers,
+      clobbers: pairClobbers(calls),
     });
     expect(calls.plan('h')).toMatchObject({ widths: null, returns: { kind: 'word' }, clobbers: calls.callClobbers });
   });
@@ -220,10 +212,8 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
   test('plans a 64-bit runtime helper as an undeclared call', () => {
     const calls = ppcCalls({});
     expect(calls.plan('__div2i')).toEqual({
-      callee: '__div2i',
-      wideHelper: null,
-      declared: null,
       widths: null,
+      doubles: new Set(),
       returns: { kind: 'word' },
       clobbers: calls.callClobbers,
     });

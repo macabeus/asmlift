@@ -4,8 +4,11 @@
 // standard fixes, and every frontend asks the same questions of it: how wide each argument is,
 // whether argument 0 is a hidden struct-return pointer, whether the result comes back as a pair,
 // and which registers the call leaves holding nothing the caller can name. The frontend states what
-// its own lowering can carry out (`CallLowering`) and refuses in its own error class (`fail`); the
-// answers are the same for every ISA, read through the generic `TargetDescription` surface.
+// its own lowering can carry out (`CallLowering`) and refuses in its own error class (`fail`).
+// Every answer is read through the generic `TargetDescription` surface. WHERE each argument word
+// travels is the frontend's own placement (Thumb's outgoing block, O32's `16(sp)`): a width list
+// here counts words as `wordsOf` does, which is agbcc's placement, and a lowering that builds no
+// pair (`CallLowering.pairs`) refuses a 64-bit width before any count is taken.
 import { aggregateType, returnedAggregate, returnsInMemory, returnsWithoutHiddenPointer } from '../aggregate';
 import { type IrType, typeToString } from '../ir/types';
 import {
@@ -21,7 +24,7 @@ import {
   spellableProto,
   wordsOf,
 } from '../proto';
-import { type RuntimeHelper, helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { clobberedByCall } from './ssa';
 
@@ -40,7 +43,7 @@ export interface CallLowering {
 }
 
 /** A call's struct return through memory: the declared struct, laid out on this target. */
-export interface StructReturn {
+interface StructReturn {
   type: IrType;
 }
 
@@ -50,8 +53,6 @@ export interface DeclaredCall {
   readonly widths: readonly number[];
   /** the indices into `widths` that are a `double` */
   readonly doubles: ReadonlySet<number>;
-  /** the frame offset of each word of the call's outgoing block, or null where it stages none */
-  readonly block: readonly number[] | null;
   /** the declared parameter count, a hidden pointer aside */
   readonly params: number;
   readonly returned?: StructReturn | 'register';
@@ -59,13 +60,11 @@ export interface DeclaredCall {
 
 /** What one call is, decided from its callee's declaration before any instruction is read. */
 export interface CallPlan {
-  readonly callee: string;
-  /** the runtime helper whose signature this is, where the lowering builds pairs */
-  readonly wideHelper: RuntimeHelper | null;
-  readonly declared: DeclaredCall | null;
   /** each argument's width, a hidden pointer first; null when nothing sizes them, so the frontend
    *  guesses */
   readonly widths: readonly number[] | null;
+  /** the indices into `widths` its declaration types `double` */
+  readonly doubles: ReadonlySet<number>;
   readonly returns:
     | { readonly kind: 'word' }
     | { readonly kind: 'void' }
@@ -81,16 +80,15 @@ export interface CallPlan {
  *  reads either only here: its outgoing-argument analysis, its call lowering (`plan`) and the
  *  frame-object audit (`FrameObjectAudit.returnsWithoutHiddenPointer`) ask these questions. */
 export interface CallDeclarations {
+  /** what any call leaves holding nothing this function can name (`clobberedByCall`) */
   readonly callClobbers: readonly string[];
-  readonly pairReturnClobbers: readonly string[];
-  wideHelper(callee: string): RuntimeHelper | null;
   /** whether the runtime table names the callee one of its soft-float helpers */
   isFloatHelper(callee: string): boolean;
-  returnsPair(callee: string): boolean;
-  registerStructReturn(callee: string | undefined): 'register' | undefined;
   /** whether a declaration rules out a struct returned through a hidden pointer at argument 0
    *  (`returnsWithoutHiddenPointer`, aggregate.ts) */
   returnsWithoutHiddenPointer(callee: string): boolean;
+  /** the callee's declared argument widths, for a frontend that places them before it lowers the
+   *  call; null where no declaration sizes them */
   declaredCall(callee: string): DeclaredCall | null;
   plan(callee: string): CallPlan;
 }
@@ -125,7 +123,7 @@ export function callDeclarations(
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
   const helperProtos = helperPrototypes(target.runtimeHelpers);
-  const wideHelper = (callee: string): RuntimeHelper | null => {
+  const wideHelper = (callee: string) => {
     // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
     // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
     // `isWideHelper` to read. The `prototypes` read below needs no such guard because
@@ -135,9 +133,8 @@ export function callDeclarations(
     if (!h || !isWideHelper(h)) {
       return null;
     }
-    // A PROJECT RE-DECLARATION DISABLES THE CAPABILITY, it does not redirect it, and the comment
-    // that said the header "wins" oversold both arms. A runtime helper's signature is its
-    // COMPILER's — `proto.ts` holds the signatures the C standard fixes, which this is precisely
+    // A PROJECT RE-DECLARATION DISABLES THE CAPABILITY, it does not redirect it. A runtime helper's
+    // signature is its COMPILER's — `proto.ts` holds the signatures the C standard fixes, which this is precisely
     // not — so a header declaring `__muldi3` is not a better source for the same fact; it is a
     // claim that the name is the project's own function. Neither reading can be honoured: as the
     // table's helper it would contradict the header, and as an ordinary call it becomes the
@@ -151,15 +148,13 @@ export function callDeclarations(
   /** Whether the target's own runtime table claims this name — asked of the TABLE, not of what
    *  `wideHelper` made of it.
    *
-   *  A PROJECT'S `returns` NEVER BUILDS A PAIR FOR A RUNTIME HELPER'S NAME, and that is the #244
-   *  decision above holding for both sources rather than for the one it was written against.
-   *  `wideHelper` answers null for a re-declared helper, which stops the ARGUMENT pair; the
-   *  RESULT pair is built from a separate source, and `raise/widehelpers.ts` folds on the result
-   *  alone (`arrivesAsDeclared` needs `results[0]` 64 bits wide). Measured before this line:
-   *  `--proto '{"__muldi3":{"params":["s64","s64"]}}'` throws `no model for the runtime helper
-   *  '__muldi3'`, and adding `"returns":"s64"` printed `return a0 * a1;` — the compiler's own
-   *  multiply re-emitted as the project's arithmetic, at exit 0, for a name the project says is
-   *  its own function.
+   *  A PROJECT'S `returns` NEVER BUILDS A PAIR FOR A RUNTIME HELPER'S NAME: a re-declaration
+   *  disables the capability for the result as it does for the arguments. `wideHelper` answers
+   *  null for a re-declared helper, which stops the ARGUMENT pair; the RESULT pair comes from a
+   *  separate source, and `raise/widehelpers.ts` folds on the result alone (`arrivesAsDeclared`
+   *  needs `results[0]` 64 bits wide). A pair built from the project's `returns` would fold the
+   *  call into the compiler's own operation — `__muldi3` printed as `a0 * a1` — for a name the
+   *  project says is its own function.
    *
    *  A NON-WIDE ENTRY IS COVERED TOO, and deliberately: a `returns` on `__divsi3` states a width
    *  about a function whose signature is its compiler's, and `refuseUnmodelledHelpers` is going to
@@ -184,38 +179,31 @@ export function callDeclarations(
           : declaredReturnWidth(prototypes[callee], target)) === 64
     );
   };
-  // A callee the project declares to return a struct in r0, asked where `declaredCall` has no
-  // arity to answer with: the return is the declaration's, and needs none.
+  // A callee the project declares to return a struct in registers, asked where `declaredCall` has
+  // no arity to answer with: the return is the declaration's, and needs none.
   const registerStructReturn = (callee: string | undefined): 'register' | undefined => {
     const own = callee !== undefined && Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined;
     return declaresAggregateReturn(own) && structReturnOf(name, target, callee!, own!, fail) === 'register'
       ? 'register'
       : undefined;
   };
-  // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. The outgoing-argument
-  // analysis and the call lowering both come through here, so the arity that LICENSED a block and
+  // WHAT ONE CALLEE'S DECLARATION SAYS — the ONE place that reads it. A frontend's outgoing-argument
+  // analysis and its call lowering both come through here, so the arity that LICENSED a block and
   // the arity that CONSUMES it cannot drift apart; a disagreement between two spellings of this
-  // lookup would read `r4` as argument 5 or throw a slot-model error naming the wrong thing.
+  // lookup would read an argument register's neighbour as argument 5 or throw a slot-model error
+  // naming the wrong thing.
   //
-  // WHERE THE BLOCK IS is `compilerBehaviors.stagesOutgoingArgsInFrame`, not an assumption: the
-  // area sits at the bottom of the frame this function reserved because agbcc's thumb.h defines
-  // ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing here, and every
-  // call keeps the refusal it had before the licence existed.
-  //
-  // THE BLOCK IS WORDS AND SO ARE THE WIDTHS SUMMED HERE, which is why they are what is asked for:
-  // the area holds arguments |argRegs|..n at [sp,#0] upward, one WORD each, and the lowering maps
-  // word k to slot k - |argRegs|. A C PARAMETER COUNT would be the wrong number the moment one
-  // parameter is wider than a word — a `long long` adds a word AND moves every later argument's
-  // home, in the block and in the registers alike — so `proto.ts` converts the declaration into
-  // words once and both readers of it take the same answer.
+  // THE WIDTHS ARE WHAT IS ASKED FOR, not a C parameter count, which would be the wrong number the
+  // moment one parameter is wider than a word: a `long long` adds a word AND moves every later
+  // argument's home, in the registers and on the stack alike. `proto.ts` converts the declaration
+  // once and every reader of it takes the same answer.
   //
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
-  // spell — including `long long`, which is why a pair no longer needs guessing at — and
-  // `undefined` for a project typedef, a by-value struct or a floating type. `declaredCallArgs`
-  // sizes a `double` from the target (`TargetDescription.doubleArgWords`); one other such spelling
-  // and it states no layout at all, because the question here is not how wide that
-  // parameter is but whether it occupies one argument register or two, and the choice moves every
-  // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
+  // spell, `long long` included, and `undefined` for a project typedef, a by-value struct or a
+  // floating type. `declaredCallArgs` sizes a `double` from the target
+  // (`TargetDescription.doubleArgWords`); one other such spelling and it states no layout at all,
+  // because the question here is not how wide that parameter is but whether it occupies one
+  // argument register or two, and the choice moves every later argument's home. So the declaration licenses no outgoing block and this returns `null`:
   // the call is lifted at the arg-register guess, exactly as a callee the project never declared
   // is, and the guess retracts the registers a call destroyed where a stated width would assert
   // them.
@@ -226,14 +214,14 @@ export function callDeclarations(
   // side upholds the premise at its source: `prototypesFromSymbols` drops a whole entry rather
   // than spell a parameter that is not 1, 2 or 4 bytes (test/proto.test.ts).
   //
-  // `block` is null for the case that licenses nothing: an arity that fits in registers, where
-  // there IS no outgoing block. This runs over every call while the outgoing-argument analysis is
-  // being built, so a refusal thrown here reaches the caller ahead of every other slot-model
-  // refusal, which is right because it is the most specific thing that was seen.
+  // A frontend that places the widths before it lowers the call runs this over every call, so a
+  // refusal thrown here reaches the caller ahead of every other slot-model refusal, which is right
+  // because it is the most specific thing that was seen.
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
-    // last two wins — it may be building against its own re-declaration.
+    // last two is read at its own declaration: it may be building against it. On a runtime
+    // helper's name that disables the helper rather than redirecting it (`wideHelper`).
     //
     // THE TIER QUESTION IS WHETHER THE PROJECT DECLARED THE CALLEE, not whether the declaration
     // could be sized. A header that spells `memcpy`'s third parameter through a project typedef
@@ -249,10 +237,10 @@ export function callDeclarations(
     const declared = declaredCallArgs(proto, target);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
-      // a guessed arity reads argument registers from r0, which holds the hidden pointer
+      // a guessed arity reads argument registers from the first, which holds the hidden pointer
       fail(
         `cannot lift '${name}': \`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden ` +
-          'pointer in r0, and its parameters are not all sized, so which registers carry its arguments is not known',
+          `pointer in ${target.argRegs[0]}, and its parameters are not all sized, so which registers carry its arguments is not known`,
       );
     }
     if (params === undefined) {
@@ -264,7 +252,7 @@ export function callDeclarations(
     // that does not compile. Asked of the printer's own predicate, so the two cannot disagree; a
     // headers world, which would declare the callee itself, loses the lift with it.
     if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
-      const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in r0`;
+      const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in ${target.argRegs[0]}`;
       if (typeof own!.params === 'number') {
         fail(
           `cannot lift '${name}': ${via}, and its declaration states only a count of parameters, no type the lifted source can declare it with`,
@@ -277,21 +265,9 @@ export function callDeclarations(
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const widths = hidden === 0 ? params : [32, ...params];
     const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
-    // A 64-BIT PARAMETER TAKES THE NEXT TWO ARGUMENT WORDS WHEREVER THEY FALL, with no even
-    // alignment: two registers, r3 and [sp,#0], or two words of the outgoing block. That is agbcc's
-    // placement for a `long long` and a `double` alike — FUNCTION_ARG places by word offset
-    // (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack (:636),
-    // FUNCTION_ARG_ADVANCE rounds to a word (:647); `test/corpus/agbcc-double-args.s` compiles all
-    // three. The walk below reads each word where it falls, so the block counts both of a pair's
-    // stack words.
-    const words = wordsOf(widths) - target.argRegs.length;
-    // No outgoing block exists to lay out when it all fits in registers, or when this compiler does
-    // not claim to stage arguments inside the caller's own frame at all.
-    const staged = words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true;
     return {
       widths,
       doubles,
-      block: staged ? Array.from({ length: words }, (_, i) => 4 * i) : null,
       params: params.length,
       ...(returned === undefined ? {} : { returned }),
     };
@@ -370,7 +346,7 @@ export function callDeclarations(
       );
     }
     // a struct returned through memory is the call's value, and argument 0 is where it lands; one
-    // returned in r0 is r0's bytes, whether or not anything states the call's arity
+    // returned in registers is their bytes, whether or not anything states the call's arity
     const returned = declared?.returned ?? (declared === null && !wide ? registerStructReturn(callee) : undefined);
     // two answers to which registers hold the result, and to whether argument 0 is a hidden pointer
     if (pair && returned !== undefined) {
@@ -379,10 +355,8 @@ export function callDeclarations(
     // a runtime helper's return is its table's, whatever a project declares on its name
     const voided = lowering.voidReturn && !isRuntimeHelperName(callee) && declaresVoidReturn(own);
     return {
-      callee,
-      wideHelper: wide,
-      declared,
       widths: wide?.params ?? declared?.widths ?? null,
+      doubles: declared?.doubles ?? new Set(),
       returns: voided
         ? { kind: 'void' }
         : pair
@@ -403,14 +377,10 @@ export function callDeclarations(
   };
   return {
     callClobbers,
-    pairReturnClobbers,
-    wideHelper,
     isFloatHelper: (callee) => {
       const h = lookupHelper(target.runtimeHelpers, callee);
       return h !== undefined && isFloatHelper(h);
     },
-    returnsPair,
-    registerStructReturn,
     returnsWithoutHiddenPointer: (callee) => returnsWithoutHiddenPointer(callee, prototypes, target),
     declaredCall,
     plan,
@@ -418,12 +388,13 @@ export function callDeclarations(
 }
 
 // A CALLEE DECLARED TO RETURN A STRUCT OR UNION BY VALUE, where the target returns it through
-// memory: the caller hands it the storage in r0 and every declared argument one register up
-// (agbcc thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in r0
-// is not a value the caller reads (calls.c: the struct is the memory at the address). One the
-// target returns in r0 takes its arguments where they are declared, and its r0 is the struct's
-// bytes, which nothing here reads as a struct: the call is `'register'` and a read of r0 after it
-// refuses. Every other struct-returning call refuses, naming why.
+// memory: the caller hands it the storage in argument 0 and every declared argument one register
+// up (on agbcc, thumb.h:644-645, 672), so the call's first word is that pointer. What it returns in
+// the return register is not a value the caller reads (calls.c: the struct is the memory at the
+// address). One the target returns in registers takes its arguments where they are declared, and
+// its registers hold the struct's bytes, which nothing here reads as a struct: the call is
+// `'register'` and a read of the return register after it refuses. Every other struct-returning
+// call refuses, naming why.
 function structReturnOf(
   name: string,
   target: TargetDescription,

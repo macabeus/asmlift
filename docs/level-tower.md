@@ -751,7 +751,7 @@ result split back into r0:r1 — and `raise/floathelpers.ts` folds the call to t
 prototype declares to take a `double` enters the same way, on a target whose double takes two
 general words (`TargetDescription.doubleArgWords`, which states that and their order): the frontend
 lays that parameter out where it lays out any 64-bit argument, the next two argument words wherever
-they fall (`frontend/thumb.ts` `declaredCall` — two registers, r3 and [sp,#0], or two outgoing stack
+they fall (`frontend/thumb.ts` `outgoingBlock` — two registers, r3 and [sp,#0], or two outgoing stack
 words), lists it in the call's `doubles`, and the same pass hands it a double. That pass is the only
 producer of an `f64` from integer words, and it is not an op: verify holds that a `concat` builds an
 integer, so a double may come only from a pair of this function's argument slots, fused into one

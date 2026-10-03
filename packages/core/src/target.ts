@@ -202,8 +202,9 @@ export interface TargetDescription {
    *
    *  o32 MIPS has an FPU and a double after an integer argument still takes two general words,
    *  high first, at an even word as its `long long` does (IDO 7.1). The MIPS targets do not state it
-   *  because no MIPS frontend lays out a declared call. PowerPC EABI passes a double in a float
-   *  register that takes no general word (`fpu.slots: 'separate'`), so it has none to state. */
+   *  because their frontend lays out no 64-bit argument (`CallLowering.pairs`). PowerPC EABI passes
+   *  a double in a float register that takes no general word (`fpu.slots: 'separate'`), so it has
+   *  none to state. */
   doubleArgWords?: 'high-first';
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND

@@ -133,11 +133,9 @@ export type Prototypes = Record<string, FnProto>;
  *
  *  AN ABI THAT DOES ALIGN HAS NO READER HERE YET, which is why the rule is flat rather than a
  *  knob on `TargetDescription` beside `argRegs` and `stagesOutgoingArgsInFrame`. MIPS o32 aligns a
- *  64-bit argument to an even register pair and is the target that will want one — and
- *  `frontend/mips.ts` takes `_prototypes` and reads none of them, so the knob would be a
- *  per-target setting with zero consumers and nothing measuring it. The round that teaches MIPS to
- *  read a prototype is the round that owes the rule a home; adding it now would be a second ABI
- *  fact nobody could be wrong about. */
+ *  64-bit argument to an even register pair and is the target that will want one, and
+ *  `frontend/mips.ts` refuses a declared 64-bit parameter (`CallLowering.pairs`), so every list it
+ *  counts is one word per parameter. The lowering that builds an o32 pair owes the rule a home. */
 export function wordsOf(params: readonly number[]): number {
   return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
 }

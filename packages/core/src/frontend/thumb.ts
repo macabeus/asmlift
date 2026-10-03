@@ -2752,6 +2752,29 @@ interface ThumbFrame {
   isOwnFrameWordSlot(base: string, off: number, regOff: string | undefined, width: number): boolean;
 }
 
+/** The frame offset of each word of a declared call's outgoing block, or null where it stages none.
+ *
+ *  WHERE THE BLOCK IS is `compilerBehaviors.stagesOutgoingArgsInFrame`, not an assumption: the area
+ *  sits at the bottom of the frame this function reserved because agbcc's thumb.h defines
+ *  ACCUMULATE_OUTGOING_ARGS. A compiler that does not claim it stages nothing, and a call past the
+ *  registers keeps its refusal.
+ *
+ *  THE BLOCK IS WORDS: the area holds arguments |argRegs|..n at [sp,#0] upward, one WORD each, and
+ *  the lowering maps word k to slot k - |argRegs|. A 64-BIT PARAMETER TAKES THE NEXT TWO ARGUMENT
+ *  WORDS WHEREVER THEY FALL, with no even alignment: two registers, r3 and [sp,#0], or two words of
+ *  the block. That is agbcc's placement for a `long long` and a `double` alike — FUNCTION_ARG places
+ *  by word offset (thumb.h:632), FUNCTION_ARG_PARTIAL_NREGS splits a pair across r3 and the stack
+ *  (:636), FUNCTION_ARG_ADVANCE rounds to a word (:647); `test/corpus/agbcc-double-args.s` compiles
+ *  all three. `wordsOf` counts the same way, and `lowerCall` reads each word where it falls.
+ *
+ *  Null for an arity that fits in registers, where there IS no outgoing block. */
+function outgoingBlock(widths: readonly number[], target: TargetDescription): number[] | null {
+  const words = wordsOf(widths) - target.argRegs.length;
+  return words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true
+    ? Array.from({ length: words }, (_, i) => 4 * i)
+    : null;
+}
+
 function measureThumbFrame({
   target,
   cfg: { asmBlocks, preds, entryReachable },
@@ -3019,7 +3042,15 @@ function measureThumbFrame({
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
           const declared = calls.declaredCall(callee);
-          return [{ kind: 'call', call: ins, callee, declared: declared?.block ?? null, params: declared?.params }];
+          return [
+            {
+              kind: 'call',
+              call: ins,
+              callee,
+              declared: declared === null ? null : outgoingBlock(declared.widths, target),
+              params: declared?.params,
+            },
+          ];
         }
         return [];
       }),
@@ -4864,7 +4895,7 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       // A 64-BIT PARAMETER IS TWO ARGUMENT WORDS AND ONE VALUE, so the pair is built here
       // rather than recovered from two 32-bit arguments later — `contracts.ts` would fire on
       // the second reading anyway, since the structurer materialises an effectful call once
-      // per result. Its words are wherever `declaredCall` placed them.
+      // per result. Its words are wherever `outgoingBlock` placed them.
       args.push(pairs.fuseHalves(irb, word(k), word(k + 1)));
     } else {
       args.push(k < target.argRegs.length ? readArg(`r${k}`, bi) : word(k));
@@ -4927,7 +4958,7 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // sign and exponent (`TargetDescription.doubleArgWords`), so the pair read as an integer
   // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
   // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
-  const doubles = plan.declared?.doubles.size ? [...plan.declared.doubles] : undefined;
+  const doubles = plan.doubles.size ? [...plan.doubles] : undefined;
   const callOp = mkOp('call', {
     operands: args,
     results: [res],
