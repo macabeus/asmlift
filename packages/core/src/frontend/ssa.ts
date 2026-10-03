@@ -1004,15 +1004,16 @@ export function fallbackArgc(
     gap?: { name: string; at: number; fail: FrontendRefusal };
   } = {},
 ): number {
-  const holdsValue = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
+  // whether the caller set argument register k up: a definition reaches it, through a call too
+  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
   let n = 0;
-  while (n < argRegs.length && holdsValue(n)) {
+  while (n < argRegs.length && setUp(n)) {
     n++;
   }
   if (opts.gap !== undefined) {
     const { name, at, fail } = opts.gap;
     for (let k = n + 1; k < argRegs.length; k++) {
-      if (holdsValue(k)) {
+      if (setUp(k)) {
         fail(
           `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${argRegs[k]} holds a ` +
             `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
