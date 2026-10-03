@@ -64,7 +64,13 @@
 import { type CodegenProfile, type FlagFamily, dialectOf, parseFlags } from './codegen-flags';
 import type { Op } from './ir/core';
 import { PRELUDE_TYPEDEFS, type ParamType, type Prototypes, declaredWidth, spellableType } from './proto';
-import { AGBCC_RUNTIME_HELPERS, PPC_MWCC_RUNTIME_HELPERS, type RuntimeHelper } from './runtime-helpers';
+import {
+  AGBCC_RUNTIME_HELPERS,
+  IDO_RUNTIME_HELPERS,
+  MIPS_GCC_RUNTIME_HELPERS,
+  PPC_MWCC_RUNTIME_HELPERS,
+  type RuntimeHelper,
+} from './runtime-helpers';
 import type { StaticLayout } from './structure/local-statics';
 import type { StructureOptions } from './structure/structure';
 import type { SwitchBoundCase } from './structure/switch-recover';
@@ -246,13 +252,7 @@ export interface TargetDescription {
    *  (`raise/widehelpers.ts` states this at the refusal it exists to make). Absence is still the
    *  right default, because a name outside the table cannot be told from a project's own
    *  `__`-prefixed function by spelling — but it buys nothing on a target whose runtime has simply
-   *  not been enumerated.
-   *
-   *  BOTH MIPS TARGETS SIT THERE TODAY, and IDO's runtime is a family of its own (`__ll_mul`,
-   *  `__ll_div`, `__ull_div`), so a scan for either of the other two spellings reports zero on it.
-   *  What that costs today is nothing, and the gate bounding it is not here: `frontend/mips.ts`
-   *  refuses on the `jal` before any call is modelled at all. The moment it does not, enumerating
-   *  those names is owed with it. */
+   *  not been enumerated. */
   runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
@@ -940,6 +940,7 @@ export const MIPS_IDO: TargetDescription = {
     't9',
     'ra',
   ],
+  runtimeHelpers: IDO_RUNTIME_HELPERS,
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
   // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
   fpu: O32_FPU,
@@ -1008,6 +1009,7 @@ export const MIPS_GCC: TargetDescription = {
     't9',
     'ra',
   ],
+  runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,
   // and the row it comes from matches only with the parameters as the loop's homes. The other

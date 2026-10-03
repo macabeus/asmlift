@@ -219,3 +219,36 @@ export const PPC_MWCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> =
   __shr2i: { op: 'shr_s', params: [64, 32], returns: 64 },
   __shr2u: { op: 'shr_u', params: [64, 32], returns: 64 },
 };
+
+/** IDO 7.1's runtime for the 64-bit operations MIPS II has no instruction for, a family of its own
+ *  (`__ll_*` for signed, `__ull_*` for unsigned): a scan for `__*di3` reports zero on it.
+ *
+ *  Compiled at `-mips2 -O2 -32 -non_shared -G 0` (compiled evidence only): `a * b` calls `__ll_mul`
+ *  for both signednesses, the divisions and remainders split, and a left shift is one helper while
+ *  the right shift splits. A SHIFT'S COUNT TRAVELS AS A PAIR: `a << n` with `int n` builds
+ *  `a2 = n >> 31, a3 = n` before `jal __ll_lshift`, so both parameters are 64 bits wide.
+ *
+ *  ⚠ WHAT THIS TABLE DOES ON THIS TARGET IS REFUSE, as `PPC_MWCC_RUNTIME_HELPERS` does and for the
+ *  same reason: `frontend/mips.ts` fuses no register pair, so a call to one of these arrives with
+ *  word operands and `refuseUnmodelledHelpers` gaps it by name. */
+export const IDO_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
+  __ll_mul: { op: 'mul', params: [64, 64], returns: 64 },
+  __ll_div: { op: 'sdiv', params: [64, 64], returns: 64 },
+  __ull_div: { op: 'udiv', params: [64, 64], returns: 64 },
+  __ll_rem: { op: 'smod', params: [64, 64], returns: 64 },
+  __ull_rem: { op: 'umod', params: [64, 64], returns: 64 },
+  __ll_lshift: { op: 'shl', params: [64, 64], returns: 64 },
+  __ll_rshift: { op: 'shr_s', params: [64, 64], returns: 64 },
+  __ull_rshift: { op: 'shr_u', params: [64, 64], returns: 64 },
+};
+
+/** GCC's libgcc for MIPS, as KMC GCC and GCC 2.7.2 call it at the N64 projects' `-mips3 -mgp32`
+ *  (compiled evidence only, both toolchains agreeing): the four divisions are calls, while a
+ *  64-bit multiply is `mult`/`multu` and a shift is open-coded, so neither has an entry. It refuses
+ *  on this target for the reason `IDO_RUNTIME_HELPERS` gives. */
+export const MIPS_GCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
+  __divdi3: { op: 'sdiv', params: [64, 64], returns: 64 },
+  __udivdi3: { op: 'udiv', params: [64, 64], returns: 64 },
+  __moddi3: { op: 'smod', params: [64, 64], returns: 64 },
+  __umoddi3: { op: 'umod', params: [64, 64], returns: 64 },
+};

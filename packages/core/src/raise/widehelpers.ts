@@ -71,7 +71,7 @@ export function recognizeWideHelpers(fn: Fn, target: TargetDescription): boolean
  *  which is right, because a project's own `__`-prefixed function is not this compiler's runtime
  *  and asmlift cannot tell them apart by spelling. A target with NO table therefore refuses
  *  nothing and spells every helper call it makes, which is the configuration this refusal exists
- *  to remove; `target.ts` says at the field which targets are still in it and what bounds them.
+ *  to remove (`TargetDescription.runtimeHelpers`).
  *
  *  An `opaque` rather than a throw, so the gap behaves like every other one: strict mode declines
  *  naming it, annotate mode marks it and leaves the rest of the function standing. */
