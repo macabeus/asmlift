@@ -253,7 +253,9 @@ describe('lowerCall', () => {
     expect(call.operands).toEqual([concat.results[0]]);
     expect(concat.operands.map((v) => fill.ssa.paramReg.get(v))).toEqual(['r0', 'r1']);
     expect(call.results[0].type).toEqual(T.unk(64));
-    expect(fill.pairs.pairCallee.get(call.results[0])).toBe('g');
+    const [, , lo, hi] = cur.irb.ops;
+    expect([lo.operands, hi.operands]).toEqual([call.results, call.results]);
+    expect([fill.ssa.readVar('r0', 0), fill.ssa.readVar('r1', 0)]).toEqual([lo.results[0], hi.results[0]]);
   });
 
   // `validatePrototypes` refuses this table; `decompile` takes a table it never checked

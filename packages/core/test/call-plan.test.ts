@@ -1,9 +1,12 @@
-// The call declarations a frontend reads a callee's declaration through (`callDeclarations`), and
-// the plan they make of one call. `thumb-stages.test.ts` drives the Thumb call lowering that reads it.
+// The call declarations a frontend reads a callee's declaration through (`callDeclarations`), the
+// plan they make of one call and the call they lower it to (`lower`), each tested here.
 import { describe, expect, test } from 'vitest';
 
-import { type CallLowering, callDeclarations } from '../src/frontend/call-plan';
+import { type CallLowering, type CallPairs, callDeclarations } from '../src/frontend/call-plan';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
+import { type SsaBuilder, makeSsaBuilder } from '../src/frontend/ssa';
+import { type Value, mkOp, mkValue } from '../src/ir/core';
+import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
@@ -36,14 +39,6 @@ describe('callDeclarations', () => {
 
   test('declares nothing for a callee no table names', () => {
     expect(thumbCalls({}).declaredCall('g')).toBeNull();
-  });
-
-  test("names the runtime's soft-float helpers, and nothing else, as float helpers", () => {
-    const calls = thumbCalls({});
-    expect(calls.isFloatHelper('__adddf3')).toBe(true);
-    expect(calls.isFloatHelper('__muldi3')).toBe(false);
-    expect(calls.isFloatHelper('g')).toBe(false);
-    expect(calls.isFloatHelper('toString')).toBe(false);
   });
 
   test("answers whether a callee's declaration rules out a hidden return pointer", () => {
@@ -226,6 +221,75 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
 
   test('sizes an undeclared `memcpy` by the signature the C standard fixes', () => {
     expect(ppcCalls({}).plan('memcpy').widths).toEqual([32, 32, 32]);
+  });
+});
+
+describe('callDeclarations.lower', () => {
+  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
+  /** a call to `callee` made in a one-block function */
+  const site = (callee: string) => {
+    const ssa = makeSsaBuilder('f', 1, [[]]);
+    return {
+      callee,
+      ssa,
+      bi: 0,
+      read: (r: string) => ssa.readVar(r, 0),
+      write: (r: string, v: Value) => ssa.writeVar(r, 0, v),
+      stackWord: (k: number) => ssa.readVar(`stack${k}`, 0),
+    };
+  };
+  const miswired = (target: string) =>
+    `target '${target}': a call site's pairs and stack words must be what its lowering states`;
+  /** pairs built and split in block 0, as Thumb builds them */
+  const pairsIn = (ssa: SsaBuilder): CallPairs => {
+    const halfOf = new Map<Value, { whole: Value; half: 'lo' | 'hi' }>();
+    const emit = (opcode: 'concat' | 'lo32' | 'hi32', operands: Value[], bits: number) => {
+      const v = mkValue(T.unk(bits));
+      ssa.irBlocks[0].ops.push(mkOp(opcode, { operands, results: [v] }));
+      return v;
+    };
+    return {
+      fuse: (lo, hi) => emit('concat', [lo, hi], 64),
+      project: (whole, half) => {
+        const v = emit(half === 'lo' ? 'lo32' : 'hi32', [whole], 32);
+        halfOf.set(v, { whole, half });
+        return v;
+      },
+      halfOf,
+    };
+  };
+
+  test('lowers a call whose site is wired as its lowering states', () => {
+    const { stackWord: _, ...s } = site('g');
+    callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower(s);
+    expect(s.ssa.irBlocks[0].ops.map((op) => [op.opcode, op.attrs.target, op.operands.length])).toEqual([
+      ['call', 'g', 1],
+    ]);
+  });
+
+  test('refuses a site that places stack words for a lowering that reads none', () => {
+    const lower = () => callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower(site('g'));
+    // a frontend wired against its own lowering is a bug in the frontend, not a function it declines
+    expect(lower).toThrow(miswired('ppc'));
+    expect(lower).not.toThrow(FrontendUnsupportedError);
+  });
+
+  test('refuses a site that builds no pair for a lowering that builds them', () => {
+    expect(() => thumbCalls({ g: { params: ['s32'] } }).lower(site('g'))).toThrow(miswired('armv4t'));
+  });
+
+  test('refuses a site that places no stack word for a lowering that reads them', () => {
+    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+    const { stackWord: _, ...s } = site('g');
+    const calls = callDeclarations('f', MIPS_IDO, { g: { params: Array(5).fill('int') } }, O32, fail);
+    expect(() => calls.lower(s)).toThrow(miswired('mips'));
+  });
+
+  test('refuses a site that builds pairs for a lowering that builds none', () => {
+    const { stackWord: _, ...s } = site('g');
+    const lower = () =>
+      callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower({ ...s, pairs: pairsIn(s.ssa) });
+    expect(lower).toThrow(miswired('ppc'));
   });
 });
 
