@@ -430,3 +430,54 @@ describe('a 64-bit conversion is a runtime helper, and a gap', () => {
     },
   );
 });
+
+// `void g(int); void f(int x) { g(x + 1); }` at gcc2.7.2kmc -O2. Under a declaration that says `g`
+// is void, v0 after the call holds nothing g handed back, so `f` returns nothing.
+describe('a callee declared void hands nothing back', () => {
+  const VOID_TAIL = [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,16(sp)',
+    '8:\tjal\t0 <f>',
+    'c:\taddiu\ta0,a0,1',
+    '10:\tlw\tra,16(sp)',
+    '14:\tjr\tra',
+    '18:\taddiu\tsp,sp,24',
+  ];
+
+  test.each([
+    ['returnsVoid', { params: ['s32'], returnsVoid: true }],
+    ['returns: "void"', { params: ['s32'], returns: 'void' }],
+  ])('a function ending on its call returns nothing (%s)', (_how, g) => {
+    expect(src(VOID_TAIL, [[8, 'R_MIPS_26', 'g']], { g })).toBe('void f(s32 a0) {\n    g(a0 + 1);\n}\n');
+  });
+
+  test('a value v0 held before the call is not returned after it', () => {
+    const body = [
+      '0:\taddiu\tsp,sp,-24',
+      '4:\tsw\tra,16(sp)',
+      '8:\tli\tv0,5',
+      'c:\tlui\tat,0x0',
+      '10:\tsw\tv0,0(at)',
+      '14:\tjal\t0 <f>',
+      '18:\tnop',
+      '1c:\tlw\tra,16(sp)',
+      '20:\tjr\tra',
+      '24:\taddiu\tsp,sp,24',
+    ];
+    const rs: [number, string, string][] = [
+      [0xc, 'R_MIPS_HI16', 'gv'],
+      [0x10, 'R_MIPS_LO16', 'gv'],
+      [0x14, 'R_MIPS_26', 'g'],
+    ];
+    expect(src(body, rs, { g: { params: [], returnsVoid: true } })).toMatch(
+      /^void f\(void\) \{\n {4}gv = 5;\n {4}g\(\);\n\}/,
+    );
+  });
+
+  test('a read of v0 past the call refuses', () => {
+    const body = [...DELAY_ARG];
+    expect(lift(body, [[8, 'R_MIPS_26', 'g']], { g: { params: ['s32'], returnsVoid: true } })).toThrow(
+      /v0 is read on a path where a call has destroyed it/,
+    );
+  });
+});

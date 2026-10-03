@@ -596,7 +596,7 @@ export function lift(
     name,
     target,
     prototypes,
-    { pairs: false, memoryReturn: false, stackArgs: false },
+    { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false },
     fail,
   );
 

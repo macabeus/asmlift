@@ -483,10 +483,10 @@ export function spellableType(t: ParamType): boolean {
  *    how a parameterless callee is stated and it already prints `(void)`.
  *
  *    `void` AS THE RETURN, which is `returnsVoid` under the other spelling ({@link
- *    declaresVoidReturn} is where the two are one fact). The frontend models no void CALL — it
- *    reads the return register whatever the callee is — so `void DoThing(void);` printed beside a
- *    candidate that USES the result is "void value not ignored as it ought to be", exit 1 on the
- *    same compiler. It is also what the paragraph below already decided: `returnsVoid` is not a
+ *    declaresVoidReturn} is where the two are one fact). The Thumb and PowerPC lowerings read the
+ *    return register whatever the callee is (`CallLowering.voidReturn`), so `void DoThing(void);`
+ *    printed beside a candidate that USES the result is "void value not ignored as it ought to be",
+ *    exit 1 on the same compiler. It is also what the paragraph below already decided: `returnsVoid` is not a
  *    source for the printed prototype, and one fact cannot be barred under one spelling and
  *    admitted under the other. So what this prints is always a VALUE-returning prototype, which is
  *    what makes {@link declaredReturnWidth} total on its output.

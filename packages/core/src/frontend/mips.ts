@@ -794,7 +794,7 @@ export function lift(
     name,
     target,
     prototypes,
-    { pairs: false, memoryReturn: false, stackArgs: true },
+    { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true },
     fail,
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
@@ -1503,7 +1503,9 @@ export function lift(
       if (declared === undefined) {
         ssa.recordGuessedCall(ops[ops.length - 1], bi, { argRegs: ARG_REGS, returnReg: RET });
       }
-      write(RET, res);
+      if (plan.returns.kind === 'word') {
+        write(RET, res);
+      }
       ssa.noteCall(bi, plan.clobbers);
       // hi and lo are the callee's to overwrite
       divState = null;
@@ -1584,6 +1586,9 @@ export function lift(
       // loud, but for a merge that never happened. Rejecting it gives the honest void return.
       // PowerPC reads its return register through the guard, so the refusal it would get is already
       // the right one; it passes this same predicate to its call-arity count.
+      //
+      // NOR IS WHAT A VOID CALLEE LEFT IN v0. The call writes no v0 and destroys it, and `holdsValue`
+      // ends a path there, so a function that ends on that call returns nothing.
       if (!br) {
         // A nullified slot's block leaves by its branch's TARGET, which need not be the next
         // address, so `fallthrough` is claimed only where control really does fall through.
@@ -1596,7 +1601,7 @@ export function lift(
       // then `v0` is scratch like any other integer register.
       const retOps = floatReturn
         ? [read(fpu!.returnReg)]
-        : ssa.hasReachingDef(RET, bi, (v) => !highHalves.has(v))
+        : ssa.holdsValue(RET, bi, (v) => !highHalves.has(v))
           ? [readVar(RET, bi)]
           : [];
       ops.push(mkOp('ret', { operands: retOps }));

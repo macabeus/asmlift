@@ -1,10 +1,8 @@
 // MIPS calls, compiled and recompiled on all three MIPS toolchains (frontend/mips.ts `lowerJal`):
 // the callee comes off the object's R_MIPS_26 record, the delay slot runs before the call, argument
 // 5 is the word at `16(sp)`, and a value kept in a callee-saved register across the call is the
-// value, while the register's save and restore mint nothing. Each lift recompiles byte-exact.
-//
-// The void case reads nothing after its call: the lift writes the call's value to v0 whatever the
-// callee's declaration says, so a function that ends on a void call returns it and does not compile.
+// value, while the register's save and restore mint nothing. A callee declared void hands nothing
+// back, so a function that ends on its call returns nothing. Each lift recompiles byte-exact.
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
 import { MIPS_GCC, MIPS_IDO, TOOLCHAIN_TARGETS, type TargetDescription } from '@asmlift/core/target';
@@ -60,6 +58,13 @@ const CASES: Case[] = [
     c: 'void v(int); int after(int a) { v(a); return a + 1; }',
     prototypes: { v: { params: ['s32'], returnsVoid: true } },
     spelled: /v\(a0\);\s+return a0 \+ 1;/,
+  },
+  {
+    name: 'a function ending on a void call',
+    sym: 'tail',
+    c: 'void v(int); void tail(int x) { v(x + 1); }',
+    prototypes: { v: { params: ['s32'], returnsVoid: true } },
+    spelled: /^void tail\(s32 a0\) \{\n {4}v\(a0 \+ 1\);\n\}/,
   },
 ];
 

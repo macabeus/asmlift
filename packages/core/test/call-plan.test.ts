@@ -7,7 +7,7 @@ import { FrontendUnsupportedError } from '../src/frontend/errors';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
-const EVERY: CallLowering = { pairs: true, memoryReturn: true, stackArgs: true };
+const EVERY: CallLowering = { pairs: true, memoryReturn: true, stackArgs: true, voidReturn: true };
 const fail = (message: string): never => {
   throw new FrontendUnsupportedError(message);
 };
@@ -163,7 +163,7 @@ describe('callDeclarations.plan', () => {
 });
 
 describe('callDeclarations.plan for a lowering with no pair, no memory return and no stack argument', () => {
-  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false };
+  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
   const ppcCalls = (prototypes: Prototypes) => callDeclarations('f', PPC_MWCC, prototypes, NONE, fail);
   // twelve bytes, which mwcc returns through memory
   const S12 = { kind: 'struct' as const, members: ['a', 'b', 'c'].map((name) => ({ name, type: 's32' })) };
@@ -236,5 +236,35 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
 
   test('sizes an undeclared `memcpy` by the signature the C standard fixes', () => {
     expect(ppcCalls({}).plan('memcpy').widths).toEqual([32, 32, 32]);
+  });
+});
+
+describe('callDeclarations.plan for a callee declared void', () => {
+  const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+  const mipsCalls = (prototypes: Prototypes, lowering = O32) =>
+    callDeclarations('f', MIPS_IDO, prototypes, lowering, fail);
+
+  test('plans no value, and the return register among what the call destroys', () => {
+    for (const g of [
+      { params: ['s32'], returnsVoid: true },
+      { params: ['s32'], returns: 'void' },
+    ]) {
+      const calls = mipsCalls({ g });
+      expect(calls.plan('g')).toMatchObject({
+        widths: [32],
+        returns: { kind: 'void' },
+        clobbers: [...calls.callClobbers, 'v0'],
+      });
+    }
+  });
+
+  test('plans a word where the lowering writes the return register for every call', () => {
+    const calls = mipsCalls({ g: { params: ['s32'], returnsVoid: true } }, { ...O32, voidReturn: false });
+    expect(calls.plan('g')).toMatchObject({ returns: { kind: 'word' }, clobbers: calls.callClobbers });
+  });
+
+  test("leaves a runtime helper's return to its table", () => {
+    const calls = mipsCalls({ __ll_div: { params: ['s32'], returnsVoid: true } });
+    expect(calls.plan('__ll_div').returns).toEqual({ kind: 'word' });
   });
 });

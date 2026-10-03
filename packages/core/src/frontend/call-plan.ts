@@ -16,6 +16,7 @@ import {
   declaredReturnWidth,
   declaresAggregateReturn,
   declaresParams,
+  declaresVoidReturn,
   spellableProto,
   wordsOf,
 } from '../proto';
@@ -31,6 +32,10 @@ export interface CallLowering {
   readonly memoryReturn: boolean;
   /** reads argument words past the registers off its own frame */
   readonly stackArgs: boolean;
+  /** writes no value for a callee declared void, and its own return reads the return register only
+   *  where a value reaches it (`SsaBuilder.holdsValue`), so the register the call destroyed is no
+   *  return value */
+  readonly voidReturn: boolean;
 }
 
 /** A call's struct return through memory: the declared struct, laid out on this target. */
@@ -62,6 +67,7 @@ export interface CallPlan {
   readonly widths: readonly number[] | null;
   readonly returns:
     | { readonly kind: 'word' }
+    | { readonly kind: 'void' }
     | { readonly kind: 'pair' }
     | { readonly kind: 'register-struct' }
     | { readonly kind: 'memory-struct'; readonly type: IrType };
@@ -350,20 +356,29 @@ export function callDeclarations(
     if (pair && returned !== undefined) {
       fail(`cannot lift '${name}': \`${callee}\` is declared to return both a struct or union and a 64-bit value`);
     }
+    // a runtime helper's return is its table's, whatever a project declares on its name
+    const voided = lowering.voidReturn && !isRuntimeHelperName(callee) && declaresVoidReturn(own);
     return {
       callee,
       wideHelper: wide,
       declared,
       widths: wide?.params ?? declared?.widths ?? null,
-      returns: pair
-        ? { kind: 'pair' }
-        : returned === undefined
-          ? { kind: 'word' }
-          : returned === 'register'
-            ? { kind: 'register-struct' }
-            : { kind: 'memory-struct', type: returned.type },
-      // a struct leaves the return register holding nothing the caller may read as a value
-      clobbers: pair ? pairReturnClobbers : returned === undefined ? callClobbers : [...callClobbers, target.returnReg],
+      returns: voided
+        ? { kind: 'void' }
+        : pair
+          ? { kind: 'pair' }
+          : returned === undefined
+            ? { kind: 'word' }
+            : returned === 'register'
+              ? { kind: 'register-struct' }
+              : { kind: 'memory-struct', type: returned.type },
+      // a struct leaves the return register holding nothing the caller may read as a value, and a
+      // void callee leaves it holding whatever the callee did
+      clobbers: pair
+        ? pairReturnClobbers
+        : returned === undefined && !voided
+          ? callClobbers
+          : [...callClobbers, target.returnReg],
     };
   };
   return {

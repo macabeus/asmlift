@@ -85,6 +85,10 @@ export interface SsaBuilder {
    *  "a def reaches here" and "a value reaches here" are the same question only when every def is
    *  a value. */
   hasReachingDef(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
+  /** {@link hasReachingDef}, with a path ending where a call destroyed `reg` (`noteCall`): whether a
+   *  value this function named reaches it here on some path. A path that brings the destroyed bytes
+   *  and one that brings a value still answer yes, and the read that follows refuses at `finish`. */
+  holdsValue(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
   /** The entry parameter `reg` still holds at this point of block `b`, taken WITHOUT a read. A read
    *  leaves a definition behind, and `hasReachingDef` counts it as argument setup, so a frontend that
    *  only moves the argument somewhere (a frame store) would raise the guessed arity of every later
@@ -690,8 +694,11 @@ export function makeSsaBuilder(
     obligedParams[b].set(key, p);
   };
 
-  const hasReachingDef = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean => {
+  const reaches = (reg: string, b: number, accept: (v: Value) => boolean, throughCalls: boolean): boolean => {
     const walk = (at: number, seen: Set<number>): boolean => {
+      if (!throughCalls && clobberedLocal[at].has(reg)) {
+        return false;
+      }
       const own = defs[at].get(reg);
       // A def `accept` rejects does not fall through to the predecessors: it is still a def, and
       // nothing older than it reaches past it.
@@ -706,6 +713,10 @@ export function makeSsaBuilder(
     };
     return walk(b, new Set<number>());
   };
+  const hasReachingDef = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean =>
+    reaches(reg, b, accept, true);
+  const holdsValue = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean =>
+    reaches(reg, b, accept, false);
 
   const holdsEntryValue = (reg: string, b: number): boolean => {
     // A predecessor is known only once filled, and `b` itself only up to here — so a path that comes
@@ -818,6 +829,7 @@ export function makeSsaBuilder(
     paramReg,
     ensureParam,
     hasReachingDef,
+    holdsValue,
     entryValue,
     holdsEntryValue,
     noteCall: (b: number, clobbers: readonly string[]) => {
