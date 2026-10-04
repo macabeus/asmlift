@@ -73,6 +73,22 @@ const passed = (sfn: SFn, arg: Expr): SFn => ({
 });
 /** the tree with `st` ahead of its body */
 const beforeIt = (sfn: SFn, st: SFn['body'][number]): SFn => ({ ...sfn, body: [st, ...sfn.body] });
+/** the tree with `st` right after `v0`'s one write */
+const afterTheWrite = (sfn: SFn, st: SFn['body'][number]): SFn => ({
+  ...sfn,
+  body: sfn.body.flatMap((s) => (s.k === 'assign' && s.name === 'v0' ? [s, st] : [s])),
+});
+/** where a second write goes: ahead of the call's write, or after it */
+const SIDES = [
+  ['ahead of', beforeIt],
+  ['after', afterTheWrite],
+] as const;
+/** writes that are neither an `int` nor a call */
+const NOT_INT = [
+  ['a pointer', { k: 'var', name: 'a0' }],
+  ['a float', { k: 'fconst', bits: '3ff8000000000000' }],
+  ['of no known type', { k: 'addr', name: 'gX' }],
+] satisfies [string, Expr][];
 /** the tree with `v0`'s one write storing `value` */
 const writing = (sfn: SFn, value: Expr): SFn => ({
   ...sfn,
@@ -275,21 +291,27 @@ describe('narrowReadDeclarations', () => {
     expect(local(narrowReadDeclarations(wide)!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
   });
 
-  it('takes a local written twice, each of whose values every read narrows', () => {
-    const sfn = narrowReadDeclarations(
-      beforeIt(structured(READ), { k: 'assign', name: 'v0', value: { k: 'const', value: 200 } }),
-    )!;
-    expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
-    expect(cBackend.emit(sfn)).toContain('v0 = 200;');
-  });
+  it.each(SIDES)(
+    'takes a local written twice, the second write %s the call, each value narrowed by every read',
+    (_, at) => {
+      const sfn = narrowReadDeclarations(
+        at(structured(READ), { k: 'assign', name: 'v0', value: { k: 'const', value: 200 } }),
+      )!;
+      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+      expect(cBackend.emit(sfn)).toContain('v0 = 200;');
+    },
+  );
 
-  it('does not narrow a local one of whose writes is a constant that fits no type of the narrow width', () => {
-    const twice = beforeIt(structured(READ), { k: 'assign', name: 'v0', value: { k: 'const', value: 300 } });
-    expect(narrowReadDeclarations(twice)).toBeNull();
-  });
+  it.each(SIDES)(
+    'does not narrow a local whose write %s the call is a constant that fits no type of the narrow width',
+    (_, at) => {
+      const twice = at(structured(READ), { k: 'assign', name: 'v0', value: { k: 'const', value: 300 } });
+      expect(narrowReadDeclarations(twice)).toBeNull();
+    },
+  );
 
-  it('does not narrow a local one of whose writes is a `for` loop step', () => {
-    const looped = beforeIt(structured(READ), {
+  it.each(SIDES)('does not narrow a local whose write %s the call is a `for` loop step', (_, at) => {
+    const looped = at(structured(READ), {
       k: 'for',
       init: { k: 'break' },
       cond: { k: 'var', name: 'a0' },
@@ -316,13 +338,16 @@ describe('narrowReadDeclarations', () => {
     expect(narrowReadDeclarations(writing(structured(READ), { k: 'const', value: 300 }))).toBeNull();
   });
 
-  it.each([
-    ['a pointer', { k: 'var', name: 'a0' }],
-    ['a float', { k: 'fconst', bits: '3ff8000000000000' }],
-    ['of no known type', { k: 'addr', name: 'gX' }],
-  ] satisfies [string, Expr][])('does not narrow a local whose write is %s', (_, value) => {
+  it.each(NOT_INT)('does not narrow a local whose write is %s', (_, value) => {
     expect(narrowReadDeclarations(writing(structured(READ), value))).toBeNull();
   });
+
+  it.each(SIDES.flatMap(([side, at]) => NOT_INT.map(([what, value]) => [side, what, at, value] as const)))(
+    'does not narrow a local whose write %s the call is %s',
+    (_, __, at, value) => {
+      expect(narrowReadDeclarations(at(structured(READ), { k: 'assign', name: 'v0', value }))).toBeNull();
+    },
+  );
 });
 
 describe('/narrow-decl and /narrow-read stacked', () => {
