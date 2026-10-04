@@ -23,9 +23,11 @@ import {
   type SlotHomes,
   Value,
   type WriteOrder,
+  callArgs,
   defOpMap,
   mkOp,
   mkValue,
+  truncateCallArgs,
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
@@ -1036,7 +1038,7 @@ export function fallbackArgc(
  *  of its own block up to that instruction. */
 export interface GuessedCallSite {
   block: number;
-  /** the `call` op — its operands are the guessed arguments, in argument-register order */
+  /** the `call` op — its arguments (`callArgs`) are the guessed ones, in argument-register order */
   op: Op;
   /** argument registers written between the last call in this block (or the block's start) and here */
   freshBefore: Set<string>;
@@ -1183,7 +1185,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       return runOfFresh(fresh, 0);
     }
     const op = s.op;
-    if (setsUpLater(fresh) || !calleeResults.has(op.operands[0])) {
+    if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0])) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
     return 0;
@@ -1191,8 +1193,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   for (const s of sites) {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
     const n = argcAt(s, fresh);
-    if (n < s.op.operands.length) {
-      s.op.operands.length = n;
+    if (n < callArgs(s.op).length) {
+      truncateCallArgs(s.op, n);
     }
     // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the
     // run over what THIS BLOCK wrote, dropping the registers that are fresh only because no call
@@ -1201,8 +1203,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // place here — but `setsUpLater` still does: a register this block set up two instructions
     // before the call is not something the narrower reading may call dead.
     const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
-    const local = Math.min(runOfFresh(localFresh, 0), s.op.operands.length);
-    if (local < s.op.operands.length) {
+    const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
+    if (local < callArgs(s.op).length) {
       setupArgc.set(s.op, local);
     }
   }
@@ -1239,8 +1241,8 @@ export function narrowToSetupArgs(fn: Fn): boolean {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       const setup = setupArgc.get(op);
-      if (setup !== undefined && setup < op.operands.length) {
-        op.operands.length = setup;
+      if (setup !== undefined && setup < callArgs(op).length) {
+        truncateCallArgs(op, setup);
         changed = true;
       }
     }

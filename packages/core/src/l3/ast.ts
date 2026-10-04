@@ -63,7 +63,11 @@ export type Expr =
   // hidden pointer the frontend read from the first argument register — the address of the struct
   // the call fills — and the rest are the declared arguments. The only C spelling is a statement,
   // `dest = fn(rest)`, so such a call stands alone.
-  | { k: 'call'; fn: string; args: Expr[]; wide64?: true; sret?: IrType }
+  //
+  // `fn` is the callee's NAME, or for an indirect call the EXPRESSION whose value is the address
+  // called (ir/core.ts `calleeValue`) — a child of the node like its arguments, evaluated before
+  // them in `exprChildren` order.
+  | { k: 'call'; fn: string | Expr; args: Expr[]; wide64?: true; sret?: IrType }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`
   // and `(&gSym)[i]` as `gSym[i]` (a global name decays to a pointer). Only a genuinely
@@ -547,7 +551,7 @@ export function exprEquals(a: Expr, b: Expr): boolean {
       // test/int64-repr.test.ts, over two nodes built by hand — which is the honest bar, because
       // the claim being made is about `exprEquals` and not about a path through the pipeline.
       return (
-        a.fn === bb.fn &&
+        (typeof a.fn === 'string' || typeof bb.fn === 'string' ? a.fn === bb.fn : exprEquals(a.fn, bb.fn)) &&
         (a.wide64 ?? false) === (bb.wide64 ?? false) &&
         (a.sret === undefined ? bb.sret === undefined : bb.sret !== undefined && typeEquals(a.sret, bb.sret)) &&
         a.args.length === bb.args.length &&
@@ -664,7 +668,7 @@ export function exprChildren(e: Expr): Expr[] {
     case 'cast':
       return [e.e];
     case 'call':
-      return e.args;
+      return typeof e.fn === 'string' ? e.args : [e.fn, ...e.args];
     case 'index':
       return [e.base, ...(e.lead ?? []), e.idx];
     case 'field':
@@ -689,7 +693,7 @@ export function mapExprChildren(e: Expr, f: (c: Expr) => Expr): Expr {
     case 'cast':
       return { ...e, e: f(e.e) };
     case 'call':
-      return { ...e, args: e.args.map(f) };
+      return { ...e, ...(typeof e.fn === 'string' ? {} : { fn: f(e.fn) }), args: e.args.map(f) };
     case 'index':
       return { ...e, base: f(e.base), ...(e.lead ? { lead: e.lead.map(f) } : {}), idx: f(e.idx) };
     case 'field':
@@ -820,6 +824,11 @@ export function rematerializableAddress(e: Expr): boolean {
  *  a bare `v` is a read — keeps its own arms; this answers the name, not what is done to it. */
 export function mentionedName(e: Expr): string | undefined {
   return e.k === 'var' || e.k === 'addr' || e.k === 'postincr' ? e.name : undefined;
+}
+
+/** The callee a call names, or undefined for an indirect one. */
+export function calleeOf(e: Extract<Expr, { k: 'call' }>): string | undefined {
+  return typeof e.fn === 'string' ? e.fn : undefined;
 }
 
 /** Whether the tree contains a node with an EFFECT no re-ordering may move: a call, a marker

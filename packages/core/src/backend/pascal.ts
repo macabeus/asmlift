@@ -91,6 +91,9 @@ function makePrinter(vt: VarTypes) {
       case 'fconst':
         throw new Error('pascal backend: a double literal has no IDO Pascal spelling yet');
       case 'call':
+        if (typeof e.fn !== 'string') {
+          throw new Error('pascal backend: a call through a pointer has no IDO Pascal spelling yet');
+        }
         if (e.sret !== undefined) {
           throw new Error(
             `pascal backend: the call to '${e.fn}' returns a struct through memory, which has no spelling here`,

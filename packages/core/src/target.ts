@@ -48,7 +48,8 @@
 //     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
-//     (frontend/thumb.ts, which reads the epilogue), `roundTripsDoubleLiterals`
+//     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
+//     lowers a `bl` to one as a call through its register), `roundTripsDoubleLiterals`
 //     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
 //     raise/declared-volatile.ts through liftStamped and the offset-name pass). The
 //     field names are a SUPERSET of
@@ -512,6 +513,14 @@ export interface TargetDescription {
     // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
     // which the post-lift audit settles per call rather than by size.
     oneWordFrameIsTheCapturedObject?: boolean;
+    // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
+    // branches to the address in <reg> with every register as the caller left it, so the call is
+    // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
+    // thunks whose register can hold an address a source computed; a `<prefix>` callee outside them
+    // declines.
+    //
+    // ABSENT ⇒ a `bl` names a function on this target, whatever it is called.
+    callThunks?: { readonly prefix: string; readonly regs: readonly string[] };
     // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
     // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's
     // dispatch lands a case body on: `'taken'` for its BRANCH only, `'either'` for both sides
@@ -901,6 +910,14 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
+    // agbcc's `*call_indirect` and `*call_value_indirect` emit `bl _call_via_%0` (gcc/thumb.md:997-1021),
+    // and libgcc defines `_call_via_<reg>` as `bx <reg>` for r0-r9, sl, fp, ip, sp and lr
+    // (libgcc/lib1thumb.asm:595-633). Neither `sp` (the frame) nor `lr` (which the `bl` itself
+    // overwrites) holds a function's address.
+    callThunks: {
+      prefix: '_call_via_',
+      regs: ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'sl', 'fp', 'ip'],
+    },
   },
 };
 

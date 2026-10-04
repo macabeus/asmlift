@@ -29,7 +29,7 @@ export function takenNames(sfn: SFn): Set<string> {
     if (n !== undefined) {
       taken.add(n);
     }
-    if (e.k === 'call') {
+    if (e.k === 'call' && typeof e.fn === 'string') {
       taken.add(e.fn);
     }
     for (const c of exprChildren(e)) {

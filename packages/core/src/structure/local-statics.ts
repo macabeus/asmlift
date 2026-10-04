@@ -335,7 +335,7 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   const bound = new Set([...sfn.params, ...sfn.locals].map((x) => x.name));
   const callees = new Set<string>([sfn.name]);
   for (const e of walkExprs(sfn.body)) {
-    if (e.k === 'call') {
+    if (e.k === 'call' && typeof e.fn === 'string') {
       callees.add(e.fn);
     }
   }

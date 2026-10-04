@@ -104,7 +104,8 @@ export interface CallDeclarations {
 /** WHAT ONE ISA ALONE KNOWS ABOUT A CALL: everything `CallDeclarations.lower` asks a frontend. The
  *  argument and return registers are the target's. */
 export interface CallSite {
-  readonly callee: string;
+  /** the callee's name, or the address of the function a call through a register calls */
+  readonly callee: string | IndirectCallee;
   readonly ssa: SsaBuilder;
   /** the block the call is made in */
   readonly bi: number;
@@ -125,6 +126,14 @@ export interface CallSite {
     /** refuses a guess of `argc` words this ABI's outgoing area could extend */
     refuse(argc: number): void;
   };
+}
+
+/** A call through a register. It names no callee, so no declaration plans it: its arity is guessed,
+ *  and an argument register holding the address is no argument, so neither is any after it. */
+export interface IndirectCallee {
+  readonly address: Value;
+  /** the register the address is in */
+  readonly reg: string;
 }
 
 /** How a frontend builds a 64-bit value out of two words and splits one. */
@@ -423,14 +432,23 @@ export function callDeclarations(
           : [...callClobbers, target.returnReg],
     };
   };
+  const argRegsBelow = (reg: string | undefined): readonly string[] =>
+    reg !== undefined && target.argRegs.includes(reg)
+      ? target.argRegs.slice(0, target.argRegs.indexOf(reg))
+      : target.argRegs;
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
-    const { callee, ssa, bi, pairs, guess, highHalves } = site;
+    const { ssa, bi, pairs, guess, highHalves } = site;
     if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
-    const p = plan(callee);
+    const indirect = typeof site.callee === 'string' ? undefined : site.callee;
+    const callee = typeof site.callee === 'string' ? site.callee : 'a function pointer';
+    const p: CallPlan =
+      indirect === undefined
+        ? plan(callee)
+        : { widths: null, doubles: new Set(), returns: { kind: 'word' }, clobbers: callClobbers };
     // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
     // runtime table or the project's headers. Both answer the same question, so the walk that
     // reads argument registers off the answer is written once; two walks would be two chances
@@ -442,7 +460,7 @@ export function callDeclarations(
     const { widths, returns } = p;
     const argc =
       widths === null
-        ? fallbackArgc(ssa, target.argRegs, bi, {
+        ? fallbackArgc(ssa, argRegsBelow(indirect?.reg), bi, {
             accept: (v) => !highHalves?.has(v),
             gap: guess && { name, at: guess.at, fail },
           })
@@ -531,10 +549,10 @@ export function callDeclarations(
     // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
     const doubles = p.doubles.size ? [...p.doubles] : undefined;
     const call = mkOp('call', {
-      operands: args,
+      operands: indirect === undefined ? args : [...args, indirect.address],
       results: [res],
       attrs: {
-        target: callee,
+        ...(indirect === undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
         ...(doubles === undefined ? {} : { doubles }),
       },

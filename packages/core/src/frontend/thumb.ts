@@ -2774,6 +2774,18 @@ function outgoingBlock(widths: readonly number[], target: TargetDescription): nu
     : null;
 }
 
+/** The register a `bl` to one of the compiler's call thunks calls through (`callThunks`), or null
+ *  for a call that names its callee. */
+function thunkRegister(ins: Instr, target: TargetDescription): string | null {
+  const thunks = target.compilerBehaviors.callThunks;
+  const callee = ins.mnemonic === 'bl' ? ins.ops[0] : undefined;
+  if (thunks === undefined || callee === undefined || !callee.startsWith(thunks.prefix)) {
+    return null;
+  }
+  const r = callee.slice(thunks.prefix.length);
+  return thunks.regs.includes(r) ? r : null;
+}
+
 function measureThumbFrame({
   target,
   cfg: { asmBlocks, preds, entryReachable },
@@ -2799,8 +2811,8 @@ function measureThumbFrame({
       return false;
     }
     // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3` branches
-    // THROUGH the frame base, it does not pass it.
-    const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : null;
+    // THROUGH the frame base, it does not pass it. So does a call thunk's register.
+    const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : thunkRegister(ins, target);
     return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
   });
 
@@ -3040,7 +3052,7 @@ function measureThumbFrame({
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
-          const declared = calls.declaredCall(callee);
+          const declared = thunkRegister(ins, target) === null ? calls.declaredCall(callee) : null;
           return [
             {
               kind: 'call',
@@ -4832,7 +4844,7 @@ function lowerStore(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
 function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const { name, target, text, calls, frame, ssa, pairs } = fill;
   const { usedSlotOffsets } = fill.frameUses;
-  const { spAsDataError, writeData } = fill.operands;
+  const { spAsDataError, readData, writeData } = fill.operands;
   const { bi, irb } = cur;
   const [callee] = ins.ops;
   // A BRANCH TO A DATA LABEL THIS ASM DEFINES IS NOT A CALL. Lifting it emits `sTab()` —
@@ -4845,8 +4857,17 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to '${callee}', which this asm defines as a data label — not modelled`,
     );
   }
+  // A CALL THUNK IS A CALL THROUGH ITS REGISTER (`callThunks`), which holds the address and no
+  // argument. One whose register cannot hold an address is not a call a source wrote.
+  const through = thunkRegister(ins, target);
+  const thunks = target.compilerBehaviors.callThunks;
+  if (through === null && thunks !== undefined && callee?.startsWith(thunks.prefix)) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${ins.mnemonic} ${callee}' calls through a register that holds no function's address — not modelled`,
+    );
+  }
   calls.lower({
-    callee,
+    callee: through === null ? callee : { address: readData(through, bi), reg: through },
     ssa,
     bi,
     read: (r) => ssa.readVar(r, bi),

@@ -4,12 +4,12 @@
 // A pass that regresses fails AT its boundary with a diagnostic, not three stages later as
 // wrong C.
 import { constAddressOf, globalBaseOf } from './ir/alias';
-import { type Fn, type Op, type Value, reachableBlocks } from './ir/core';
+import { type Fn, type Op, type Value, calleeName, reachableBlocks } from './ir/core';
 import { placedAt } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
-import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
+import { type BinOp, type Expr, type SFn, type Stmt, calleeOf } from './l3/ast';
 import {
   exprChildren,
   fieldSpellsDot,
@@ -75,9 +75,13 @@ export function assertResolved(sfn: SFn): void {
   // `map.get(d)!` / `attrs.x as string` and prints straight into the source. `carriesName` is asked
   // separately because an ABSENT name is the case being caught: keying off `nameOf` alone refuses nothing.
   const carriesName = (e: Expr): boolean =>
-    e.k === 'var' || e.k === 'addr' || e.k === 'field' || e.k === 'call' || e.k === 'postincr';
+    e.k === 'var' ||
+    e.k === 'addr' ||
+    e.k === 'field' ||
+    (e.k === 'call' && typeof e.fn === 'string') ||
+    e.k === 'postincr';
   const nameOf = (e: Expr): string | undefined =>
-    e.k === 'call' ? e.fn : e.k === 'marker' ? undefined : (e as { name?: string }).name;
+    e.k === 'call' ? calleeOf(e) : e.k === 'marker' ? undefined : (e as { name?: string }).name;
   const badExpr = (e: Expr): boolean => (carriesName(e) && badName(nameOf(e))) || exprChildren(e).some(badExpr);
   // An `assign`'s DESTINATION is a bare string field, so the expression walk never reaches it.
   const badStmt = (s: Stmt): boolean =>
@@ -162,6 +166,8 @@ function combine(a: EffectCounts, b: EffectCounts, f: (x: number, y: number) => 
 const DECLARED = 'declared:';
 const STRIPPED = 'stripped:';
 const STRIPPED_WRITE = 'stripped-write:';
+/** The one callee key every indirect call is counted under: no identifier can spell it. */
+const INDIRECT_CALL = '(*pointer)';
 type Direction = 'r' | 'w';
 const deviceKey = (dir: Direction, addr: number | null): string =>
   `device:${dir}:${addr === null ? '?' : `0x${addr.toString(16)}`}`;
@@ -228,7 +234,7 @@ function effectsInExpr(
   const ofDeclared = object !== null && !target && ctx.declared.has(object);
   const writesDeclared = object !== null && target && ctx.written.has(object);
   if (e.k === 'call') {
-    bump(`call:${e.fn}`);
+    bump(`call:${calleeOf(e) ?? INDIRECT_CALL}`);
   } else if (!selected && qualifiedAccessChain(e)) {
     if (!writesDeclared) {
       bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(target ? 'w' : 'r', cellAddress(e)));
@@ -398,9 +404,7 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
       const placement = placedAt(op);
       switch (placement) {
         case 'call':
-          if (typeof op.attrs.target === 'string') {
-            bump(irCalls, op.attrs.target);
-          }
+          bump(irCalls, calleeName(op) ?? INDIRECT_CALL);
           break;
         case 'helper':
           // Placed, not counted: the value it computes is pure.
