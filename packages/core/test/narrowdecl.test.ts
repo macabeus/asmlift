@@ -1,14 +1,15 @@
 // The `/narrow-decl` variation (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is spelled
-// `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from. Each refusal edits one
-// fact of an accepted tree: the structured fixture below, or a hand-built one where the fact (a
-// pointer operand, a `for` init) is not a lift's to produce.
+// `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from, and `s32 v; v = f();
+// … (u8)v …` is spelled `u8 v; v = f(); … v …`, the one `pokeemerald:RtcGetDayCount` was. Each
+// refusal edits one fact of an accepted tree: a structured fixture below, or a hand-built one
+// where the fact (a pointer operand, a `for` init) is not a lift's to produce.
 import { describe, expect, it } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import type { SFn } from '../src/l3/ast';
+import type { Expr, SFn } from '../src/l3/ast';
 import { narrowDeclarations } from '../src/l3/narrowdecl';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
@@ -34,6 +35,21 @@ const NAMED = `fn named {
 }
 `;
 
+// RtcGetDayCount's shape: the first call's result named, because the second call's argument load
+// must not move ahead of it, then zero-extended where it is passed on
+const READ = `fn read {
+^bb0(%0: u8*):
+  %1: s32 = load %0 {off=0, signed=false, width=1}
+  %2: s32 = call %1 {target="cv"}
+  %3: s32 = load %0 {off=1, signed=false, width=1}
+  %4: s32 = call %3 {target="cv"}
+  %5: unk32 = zext %2 {width=8}
+  %6: unk32 = zext %4 {width=8}
+  %7: s32 = call %5, %6 {target="dc"}
+  ret %7
+}
+`;
+
 const structured = (ir: string): SFn => {
   const fn = parse(ir);
   verify(fn);
@@ -42,6 +58,23 @@ const structured = (ir: string): SFn => {
 };
 
 const local = (sfn: SFn, name: string) => sfn.locals.find((l) => l.name === name);
+
+const v0 = { k: 'var' as const, name: 'v0' };
+const cast = (width: number, signed: boolean, e: Expr): Expr => ({
+  k: 'cast',
+  to: { kind: 'int', width, signed },
+  e,
+});
+/** the tree with `g(arg);` appended */
+const passed = (sfn: SFn, arg: Expr): SFn => ({
+  ...sfn,
+  body: [...sfn.body, { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [arg] } }],
+});
+/** the tree with `v0`'s one write storing `value` */
+const writing = (sfn: SFn, value: Expr): SFn => ({
+  ...sfn,
+  body: sfn.body.map((st) => (st.k === 'assign' && st.name === 'v0' ? { ...st, value } : st)),
+});
 
 describe('narrowDeclarations', () => {
   it('declares a once-written s32 local at the width of the cast that writes it, and drops the cast', () => {
@@ -179,5 +212,51 @@ describe('narrowDeclarations', () => {
     const narrow = narrowDeclarations(wide)!;
     expect(local(narrow, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
     expect(() => pascalBackend.emit(narrow)).toThrow(/no spelling for a narrow local \(8 bits\)/);
+  });
+
+  describe('a narrowing at every read', () => {
+    it('declares an s32 local read only through one narrowing cast at that width, and drops the casts', () => {
+      const before = structured(READ);
+      expect(cBackend.emit(before)).toContain('return dc((u8)v0, (u8)cv(a0[1]));');
+      const src = cBackend.emit(narrowDeclarations(before)!);
+      expect(src).toContain('u8 v0;');
+      expect(src).toContain('v0 = cv(*a0);');
+      expect(src).toContain('return dc(v0, (u8)cv(a0[1]));');
+    });
+
+    it('keeps a signed narrowing signed', () => {
+      const sfn = narrowDeclarations(structured(READ.replaceAll('zext', 'sext').replaceAll('width=8', 'width=16')))!;
+      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 16, signed: true });
+    });
+
+    it('takes a read narrowed the way the others are', () => {
+      const sfn = narrowDeclarations(passed(structured(READ), cast(8, false, v0)))!;
+      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+    });
+
+    it('does not narrow a local one of whose reads is bare', () => {
+      expect(narrowDeclarations(passed(structured(READ), v0))).toBeNull();
+    });
+
+    it('does not narrow a local whose reads are cast to two widths', () => {
+      expect(narrowDeclarations(passed(structured(READ), cast(16, false, v0)))).toBeNull();
+    });
+
+    it('does not narrow a local whose reads are cast to two signednesses', () => {
+      expect(narrowDeclarations(passed(structured(READ), cast(8, true, v0)))).toBeNull();
+    });
+
+    it('takes a write that is an integer', () => {
+      const sfn = narrowDeclarations(writing(structured(READ), { k: 'const', value: 300 }))!;
+      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+    });
+
+    it.each([
+      ['a pointer', { k: 'var', name: 'a0' }],
+      ['a float', { k: 'fconst', value: 1.5 }],
+      ['of no known type', { k: 'addr', name: 'gX' }],
+    ] as [string, Expr][])('does not narrow a local whose write is %s', (_, value) => {
+      expect(narrowDeclarations(writing(structured(READ), value))).toBeNull();
+    });
   });
 });

@@ -1,5 +1,8 @@
-// L3 stacked variation `/narrow-decl`: a named narrow value declared at its width. `s32 v; v = (u8)(x - 1);`
-// becomes `u8 v; v = x - 1;`.
+// L3 stacked variation `/narrow-decl`: a named narrow value declared at its width. The narrowing
+// sits at the local's one write or at every one of its reads:
+//
+//   s32 v; v = (u8)(x - 1); … v …        becomes   u8 v; v = x - 1; … v …
+//   s32 v; v = f(); … (u8)v … (u8)v …    becomes   u8 v; v = f(); … v … v …
 //
 // The two spellings compute the same C value at every read. The declaration truncates where the
 // cast did, and a `u8`, `s8`, `u16` or `s16` read is promoted to `int`, which is what an `s32` read
@@ -24,6 +27,12 @@
 // source declared is not in the asm, so the differ referees, and the candidate it is derived onto
 // stays in the fan.
 //
+// At the reads, `(u8)(s32)e` and `(u8)e` keep the same low byte of any integer `e`, so dropping
+// each read's cast keeps its value. The pair compiles differently by where the extension lands: a
+// `u8` local holding a call's result is zero-extended as it is stored, right after the `bl`, where
+// `(u8)v` extends at the read, after whatever ran in between (`pokeemerald:RtcGetDayCount`, three
+// results passed on as `u8`s).
+//
 // A STACKED variation (rank-variations.ts), derived onto every other candidate's tree: the width
 // of a declaration is orthogonal to every other respell variation, and the row that needs it needs
 // it on top of `/offmember`.
@@ -33,14 +42,27 @@
 //     compares, divisions and shifts into signed ones;
 //   • a local written more than once, or by `v++`, where a later write could store a value the
 //     narrow declaration would truncate;
-//   • a local whose one write is not an integer narrowed to a narrower integer, or is a `for`
-//     loop's init. A call's operand is not known to be an integer (its callee may return a
-//     pointer), so `(u8)f()` is refused too;
+//   • a local whose one write is a `for` loop's init;
+//   • at the write, one that is not an integer narrowed to a narrower integer. A call's operand
+//     is not known to be an integer (its callee may return a pointer), so `(u8)f()` is refused too;
+//   • at the reads, a read that is not a narrowing cast (a bare `v`, an index base), reads cast to
+//     two widths or two signednesses, and a write whose value is a pointer, a float or of no
+//     known type. A call is admitted: its value already converts implicitly to the `s32`, and
+//     narrowing changes only the width of that conversion, never whether C performs one;
 //   • a local whose address is taken, or that is volatile, a frame object, uninitialized, or homed
 //     in a stack slot. Each of those is an object in memory, whose width is its access width.
 import type { IrType } from '../ir/types';
-import { type Expr, type SFn, type Stmt, mapStmtLists } from './ast';
-import { localMentions } from './mentions';
+import {
+  type Expr,
+  type SFn,
+  type Stmt,
+  mapExprChildren,
+  mapStmtExprs,
+  mapStmtLists,
+  stmtLists,
+  walkExprs,
+} from './ast';
+import { localMentions, readsOf } from './mentions';
 import { declaredTypes, exprCType } from './typing';
 
 type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'int' }> };
@@ -49,6 +71,52 @@ type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'i
  *  neither to an integer by assignment alone. */
 const isNarrowing = (e: Expr, env: ReturnType<typeof declaredTypes>): e is Narrowing =>
   e.k === 'cast' && !e.volatile && e.to.kind === 'int' && e.to.width < 32 && exprCType(e.e, env)?.kind === 'int';
+
+/** `(T)v`, the read of `name` narrowed to the narrower integer T. */
+const isReadNarrowing = (e: Expr, name: string): e is Narrowing =>
+  e.k === 'cast' && !e.volatile && e.to.kind === 'int' && e.to.width < 32 && e.e.k === 'var' && e.e.name === name;
+
+/** The one type every read of `name` is narrowed to, or undefined when a read is not narrowed
+ *  or two reads are narrowed differently. `reads` counts every read however spelled, so a read
+ *  this walk does not see as a narrowing is a shortfall rather than a miss. */
+function readNarrowing(body: Stmt[], name: string, reads: number): Narrowing['to'] | undefined {
+  let to: Narrowing['to'] | undefined;
+  let narrowed = 0;
+  for (const e of walkExprs(body)) {
+    if (!isReadNarrowing(e, name)) {
+      continue;
+    }
+    if (to !== undefined && (to.width !== e.to.width || to.signed !== e.to.signed)) {
+      return undefined;
+    }
+    to = e.to;
+    narrowed++;
+  }
+  return narrowed === reads ? to : undefined;
+}
+
+/** The value of `name`'s one assignment statement, found the way the write-side rewrite finds it:
+ *  through statement lists, so a `for` init is not one. */
+function writtenValue(body: Stmt[], name: string): Expr | undefined {
+  for (const s of body) {
+    if (s.k === 'assign' && s.name === name) {
+      return s.value;
+    }
+    for (const list of stmtLists(s)) {
+      const v = writtenValue(list, name);
+      if (v !== undefined) {
+        return v;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** `body` with every `(T)name` read spelled `name`. */
+const dropReadCasts = (body: Stmt[], name: string): Stmt[] => {
+  const expr = (e: Expr): Expr => (isReadNarrowing(e, name) ? e.e : mapExprChildren(e, expr));
+  return body.map((s) => mapStmtExprs(s, expr));
+};
 
 /** The tree with every local the header admits declared at its narrowing's width, or null when
  *  none is. */
@@ -87,6 +155,17 @@ export function narrowDeclarations(sfn: SFn): SFn | null {
     if (to !== undefined) {
       body = next;
       narrowed.set(l.name, to);
+      continue;
+    }
+    const written = writtenValue(body, l.name);
+    const writtenType = written === undefined ? undefined : exprCType(written, env);
+    if (written === undefined || (written.k !== 'call' && writtenType?.kind !== 'int')) {
+      continue;
+    }
+    const read = readNarrowing(body, l.name, readsOf(m));
+    if (read !== undefined) {
+      body = dropReadCasts(body, l.name);
+      narrowed.set(l.name, read);
     }
   }
   if (narrowed.size === 0) {
