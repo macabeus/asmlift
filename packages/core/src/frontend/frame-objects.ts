@@ -1751,8 +1751,8 @@ function objectShapes({
  *
  *  FOUR CLAUSES BOUND THIS PATH — a second object, an object that does not start at the bottom of
  *  the declared area, an address that reaches memory rather than a callee, and the callee's
- *  declared return — and each has a test that fails without it, save the precautionary one, which
- *  is marked where it sits.
+ *  declared return — and each has a test that fails without it. A fifth return, the precautionary
+ *  one marked where it sits, has none.
  *
  *  The last two are about an ESCAPE, and they are asked only of an object that escapes or that
  *  nothing in this function addresses. An object this function indexes and never lets go of is
@@ -1777,7 +1777,7 @@ function notTheWholeArea(
     return 'another address-taken object shares the frame, so the reservation is not this one alone';
   }
   if (off !== declared.from || declared.to <= declared.from) {
-    return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
+    return 'the object does not start at the bottom of the declared area, so something below it is unaccounted for';
   }
   // PRECAUTIONARY for an object nothing indexes: an address that neither accesses nor escapes
   // already declines where the audit classifies its uses ("flows into `ret`"), so it never arrives

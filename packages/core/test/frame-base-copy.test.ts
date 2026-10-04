@@ -528,7 +528,7 @@ describe('the audit judges each frame object on its own bytes', () => {
     test('an object that does not start at the bottom of the area is not the whole area', () => {
       // `add rD, sp, #k` names an object at [sp,#k), so the bytes below it are something else
       expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
-        /the object does not start at the bottom of the reserved area/,
+        /the object does not start at the bottom of the declared area/,
       );
     });
 
@@ -558,7 +558,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
       test('an object above the bottom of the declared range is not the whole of it', () => {
         expect(() => liftWith(fill())).not.toThrow();
-        expect(() => liftWith(fill('0x14'))).toThrow(/the object does not start at the bottom of the reserved area/);
+        expect(() => liftWith(fill('0x14'))).toThrow(/the object does not start at the bottom of the declared area/);
       });
 
       test('a slot inside the declared range is not this object`s', () => {
