@@ -586,6 +586,28 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(src).not.toContain('(u8 *)gIdx');
   });
 
+  test('assigned to a temp, the value is cast to the temp type', () => {
+    // v0 = gPtr held across a call. The project's `struct S *` is not `u8 *`, and assigning one
+    // to the other is the incompatible-pointer warning a -Werror build stops on.
+    const body =
+      '\tpush\t{r4, lr}\n\tldr\tr0, .L1\n\tldr\tr4, [r0]\n\tbl\tg\n\tldr\tr1, .L2\n\tadds\tr0, r4, r1\n\tldrb\tr0, [r0]\n' +
+      '\tldrb\tr1, [r4, #8]\n\tadds\tr0, r0, r1\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\tgPtr\n.L2:\n\t.word\t0x7fb3\n';
+    expect(run('f', body)).toContain('v0 = (u8 *)gPtr;');
+  });
+
+  test('a cast-then-add sum assigned to a wider pointer temp is cast to the temp type', () => {
+    // each arm leaves gPtr + K in one register and the join stores a halfword through it: the
+    // temp is `u16 *`, and the arms' `(u8 *)gPtr + K` is a `u8 *` chosen for the address alone
+    const body =
+      '\tldr\tr3, .L1\n\tldr\tr1, [r3]\n\tldrb\tr0, [r1, #1]\n\tcmp\tr0, #0\n\tbeq\t.La\n\tldr\tr2, .L2\n\tadds\tr1, r1, r2\n' +
+      '\tb\t.Lj\n.La:\n\tldr\tr2, .L3\n\tadds\tr1, r1, r2\n.Lj:\n\tstrh\tr0, [r1]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\tgPtr\n.L2:\n\t.word\t0xdd8\n.L3:\n\t.word\t0xdda\n';
+    const src = run('f', body);
+    expect(src).toContain('v1 = (u16 *)((u8 *)gPtr + 3544);');
+    expect(src).toContain('v1 = (u16 *)((u8 *)gPtr + 3546);');
+  });
+
   test('KNOWN GAP: a runtime index is added to a value the IR never types a pointer', () => {
     // `gPtr + a0` is a base plus an index, and raise/recover.ts propagatePointers does not decide
     // which operand of two non-constant ones is the base. Nothing here says gPtr is the pointer,

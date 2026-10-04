@@ -2492,6 +2492,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const isUndeclaredPtrValue = (x: Expr): boolean =>
     x.k === 'var' && pointerLoadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
 
+  /** A `+`/`-` chain holding a global's pointer value cast to `u8 *` for the add: the arithmetic
+   *  rule's CAST-THEN-ADD spelling, whose result is a byte pointer whatever the value points at. */
+  const castThenAddSum = (x: Expr): boolean =>
+    x.k === 'bin' &&
+    (x.op === '+' || x.op === '-') &&
+    [x.l, x.r].some(
+      (o) =>
+        (o.k === 'cast' && typeEquals(o.to, T.ptr(T.u(8))) && (isPtrValue(o.e) || isUndeclaredPtrValue(o.e))) ||
+        castThenAddSum(o),
+    );
+
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
    *  32-bit integer math on the address, so that is what gets spelled. */
@@ -2817,7 +2828,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // map-declared cells below it can be named exactly rather than defused through `void *`. That
     // holds for an INTEGER temp too, and there the diagnostic is the mirror one, `assignment makes
     // integer from pointer without a cast` — same site, same argument, same `(T)` answer.
-    if (isPtrValue(value)) {
+    //
+    // A global's value no declaration reaches (isUndeclaredPtrValue) is the same case with the
+    // project's header as the only owner of its type. So is a sum the arithmetic rule spelled
+    // cast-then-add: its `u8 *` was chosen for the address alone, and `v2 = (u8 *)gPtr + 3544`
+    // into a `u16 *` temp is the incompatible-pointer assignment the add-then-cast spelling it
+    // replaced did not have.
+    if (isPtrValue(value) || isUndeclaredPtrValue(value) || (castThenAddSum(value) && !typeEquals(t, T.ptr(T.u(8))))) {
       return { k: 'cast', to: t, e: value };
     }
     if (t.kind !== 'ptr' || value.k !== 'addr') {
