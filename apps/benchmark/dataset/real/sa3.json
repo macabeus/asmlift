@@ -469,7 +469,7 @@
       ],
       "funcC": "void *EwramMalloc(u32 req)\n{\n    struct EwramNode *node;\n    s32 requestedSpace = req;\n\n    requestedSpace = (req + (sizeof(uintptr_t) - 1)) / sizeof(uintptr_t);\n    if (requestedSpace != 0) {\n        requestedSpace = requestedSpace * sizeof(uintptr_t) + sizeof(struct EwramNode);\n        node = (struct EwramNode *)gEwramHeap;\n        while (1) {\n            if (requestedSpace <= (u32)node->state) {\n                if (requestedSpace == node->state) {\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n\n                if (requestedSpace + (s32)sizeof(struct EwramNode) <= node->state) {\n                    struct EwramNode *addr = (void *)node + requestedSpace;\n\n                    addr->next = node->next;\n                    ++node;\n                    --node;\n                    addr->state = node->state - requestedSpace;\n                    node->next = addr;\n                    node->state = -requestedSpace;\n                    return node->space;\n                }\n            }\n            ++requestedSpace;\n            --requestedSpace;\n            if (!node->next)\n                return ewram_end;\n            node = node->next;\n        }\n    }\n    return ewram_end;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/sa3/blob/b0321cdc57ef829b24d4179ed625cb3403e26633/src/malloc_ewram.c#L14-L61"
+      "sourceUrl": "https://github.com/macabeus/sa3/blob/487246d1fa0389ab4fd0dd997ed9ace729779311/src/malloc_ewram.c#L21-L76"
     },
     {
       "sym": "EwramFree",
