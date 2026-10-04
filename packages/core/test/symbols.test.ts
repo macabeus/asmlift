@@ -506,11 +506,93 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     const src = run('f', body, PTR_MAP);
     expect(src).toContain('(u32)gPtr');
   });
+});
 
-  test('INERT without the shape fact: a plain data symbol keeps the raw add', () => {
-    const plain = mapOf([[0x03001234, { name: 'gPtr', kind: 'data' }]]);
-    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]'), plain);
-    expect(src).not.toContain('(u8 *)gPtr +'); // nothing to legalize — gPtr is not a pointer cell
+describe('a global the IR uses as a pointer, with no declared shape, is spelled CAST-THEN-ADD', () => {
+  // The project still declares the global, as `static struct UsePokeblockMenu *sMenu` in
+  // pokeemerald's use_pokeblock.c, even when no declaration reaches the lift: the map holds the name
+  // with no shape (symtab-only, or several file statics of that name that disagree), lacks it, or
+  // there is no map. Spelled `*(u8 *)(sMenu + 32691)`, C scales 32691 by sizeof(struct
+  // UsePokeblockMenu) = 32876 inside that file, and agbcc's pool word is 0x400f5f84 where the asm
+  // has 0x7fb3. `(u8 *)sMenu + 32691` is the same address under any object-pointer declaration
+  // and under any integer one.
+  // r1 = gPtr (the cell's value); r1 += 0x7fb3, a pool constant, so the add is an op; byte read
+  const bigOffset = (word: string) =>
+    `\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tldr\tr2, .L2\n\tadds\tr1, r1, r2\n\tldrb\tr0, [r1]\n\tbx\tlr\n` +
+    `.L1:\n\t.word\t${word}\n.L2:\n\t.word\t0x7fb3\n`;
+  const CAST_THEN_ADD = 'return *((u8 *)gPtr + 32691);';
+
+  test('with no map, the pool names the global and its value is cast before the add', () => {
+    const src = run('f', bigOffset('gPtr'));
+    expect(src).toContain(CAST_THEN_ADD);
+    expect(src).not.toContain('(gPtr +');
+  });
+
+  test('a map entry with no shape (a symtab-only name) is spelled the same way', () => {
+    expect(run('f', bigOffset('0x03001234'), mapOf([[0x03001234, { name: 'gPtr', kind: 'data' }]]))).toContain(
+      CAST_THEN_ADD,
+    );
+  });
+
+  test('two map entries that disagree leave the bare name, and it is spelled the same way', () => {
+    // symbolsByName drops a name whose entries disagree to the name alone, so the pointer entry's
+    // shape is gone by the time the structurer asks
+    const conflicted: SymbolMap = new Map([
+      [0x03001234, [{ name: 'gPtr', kind: 'data', shape: 'pointer' }]],
+      [0x03005678, [{ name: 'gPtr', kind: 'data', shape: 'scalar', size: 4 }]],
+    ]);
+    expect(run('f', bigOffset('0x03001234'), conflicted)).toContain(CAST_THEN_ADD);
+  });
+
+  test('a global the map lacks, named by the pool, is spelled the same way', () => {
+    expect(run('f', bigOffset('gPtr'), mapOf([[0x03009999, { name: 'gOther', kind: 'data' }]]))).toContain(
+      CAST_THEN_ADD,
+    );
+  });
+
+  test('a call argument takes the cast too, once the function uses the value as a pointer', () => {
+    // g(gPtr + 0x7c58); return gPtr[4]. The argument's own load is typed an integer (nothing
+    // dereferences it in this function), but the second load of the same cell is a pointer, and the
+    // callee receives the same scaled address a deref would read.
+    const body =
+      '\tpush\t{r4, lr}\n\tldr\tr4, .L1\n\tldr\tr0, [r4]\n\tldr\tr1, .L2\n\tadds\tr0, r0, r1\n\tbl\tg\n' +
+      '\tldr\tr0, [r4]\n\tldrb\tr0, [r0, #4]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\tgPtr\n.L2:\n\t.word\t0x7c58\n';
+    expect(run('f', body)).toContain('g((u8 *)gPtr + 31832');
+  });
+
+  test('a map shape:scalar is a declaration, and its integer add stays as it is', () => {
+    const scalar = mapOf([[0x03001234, { name: 'gPtr', kind: 'data', shape: 'scalar', size: 4, signed: false }]]);
+    expect(run('f', bigOffset('0x03001234'), scalar)).toContain('*(u8 *)(gPtr + 32691)');
+  });
+
+  test('an integer counter is not cast', () => {
+    // gCount = gCount + 1: no load of the cell is used as an address
+    const body = '\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadds\tr0, #1\n\tstr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgCount\n';
+    const src = run('f', body);
+    expect(src).toContain('gCount = v0 + 1;');
+    expect(src).not.toContain('(u8 *)');
+  });
+
+  test('of an index and a pointer, only the side the IR uses as a pointer is cast', () => {
+    // gItems[gIdx] with gItems the base of a byte read elsewhere: casting the u8 index instead
+    // gives `(u8 *)gIdx + gItems`, a pointer plus a pointer, which agbcc rejects
+    const body =
+      '\tldr\tr0, .L1\n\tldrb\tr0, [r0]\n\tldr\tr2, .L2\n\tldr\tr1, [r2]\n\tadds\tr0, r0, r1\n\tldrb\tr0, [r0]\n' +
+      '\tldr\tr1, [r2]\n\tldrb\tr1, [r1, #1]\n\tadds\tr0, r0, r1\n\tbx\tlr\n' +
+      '.L1:\n\t.word\tgIdx\n.L2:\n\t.word\tgItems\n';
+    const src = run('f', body);
+    expect(src).toContain('gIdx + (u8 *)gItems');
+    expect(src).not.toContain('(u8 *)gIdx');
+  });
+
+  test('KNOWN GAP: a runtime index is added to a value the IR never types a pointer', () => {
+    // `gPtr + a0` is a base plus an index, and raise/recover.ts propagatePointers does not decide
+    // which operand of two non-constant ones is the base. Nothing here says gPtr is the pointer,
+    // so the add is left as the asm has it, scaled in a tree that declares gPtr `struct S *`.
+    const body =
+      '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadds\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L1:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('((u8 *)(gPtr + a0))[16]');
   });
 });
 

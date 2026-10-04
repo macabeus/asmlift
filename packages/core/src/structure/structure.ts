@@ -2358,10 +2358,15 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   })();
 
   const scalarGlobals = new Set<string>();
+  /** The scalar GLOBALS (never a frame object) the IR loads as a pointer at least once: one load
+   *  typed a pointer is the value used as an address somewhere in the function, while its other
+   *  loads may type an integer only because they reach a call argument or a compare. */
+  const pointerLoadedGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
     const widths = new Map<string, Set<number>>();
     const loadSigns = new Map<string, Set<boolean>>();
+    const loadsPointer = new Map<string, boolean>();
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -2389,6 +2394,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
+              if (defs.get(op.operands[0])?.opcode === 'gaddr') {
+                loadsPointer.set(s, loadsPointer.get(s) === true || op.results[0].type.kind === 'ptr');
+              }
             }
           }
         } else if (op.opcode === 'add' || op.opcode === 'sub') {
@@ -2414,6 +2422,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     for (const [sym, offs] of offsets) {
       if (offs.size === 1 && offs.has(0) && widths.get(sym)?.size === 1 && (loadSigns.get(sym)?.size ?? 1) === 1) {
         scalarGlobals.add(sym);
+      }
+    }
+    for (const [sym, ptr] of loadsPointer) {
+      if (ptr && scalarGlobals.has(sym)) {
+        pointerLoadedGlobals.add(sym);
       }
     }
     // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
@@ -2468,6 +2481,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  both spellings render `undefined` there. */
   const isPtrValue = (x: Expr): boolean =>
     (x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer') || ptrMemberDecl(x, symCtx) !== null;
+
+  /** A global's VALUE that the IR uses as a pointer while no declaration this pass can read says
+   *  what it points at: no map, a name the map holds without a shape (symtab-only, or entries that
+   *  disagree and were dropped to the bare name), or a name the map lacks. The project's own header
+   *  still declares it, typically `struct S *`, so arithmetic on it is the same hazard isPtrValue
+   *  names and takes the same cast-then-add. A map `shape:'scalar'` is a declaration and is
+   *  excluded; so is a global the IR never loads as a pointer (`gCount + 1`, or the `u8` index in
+   *  `gIdx + gItems`), where casting would make a pointer of an integer the source added as one. */
+  const isUndeclaredPtrValue = (x: Expr): boolean =>
+    x.k === 'var' && pointerLoadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
@@ -4025,11 +4048,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
         // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
-        const bothPtr = isPtrValue(l) && isPtrValue(r);
-        if (isPtrValue(l)) {
+        const ptrValue = (x: Expr): boolean => isPtrValue(x) || isUndeclaredPtrValue(x);
+        const bothPtr = ptrValue(l) && ptrValue(r);
+        if (ptrValue(l)) {
           l = bytePtr(l);
         }
-        if (isPtrValue(r)) {
+        if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
         }
       } else if (op !== '&&' && op !== '||') {
