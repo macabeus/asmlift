@@ -24,7 +24,7 @@ import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/prot
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
-import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
+import { findDecompYaml, loadDecompYaml } from '@match-kit/decomp-yaml/files';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -494,7 +494,7 @@ export async function runCli(
   let targetTrace = '';
   try {
     const startDir = input === '-' ? undefined : dirname(resolve(input));
-    const loaded = loadDecompYaml(flags.get('config') as string | undefined, startDir);
+    const loaded = loadDecompYaml((flags.get('config') as string | undefined) ?? findDecompYaml(startDir));
     toolCfg = asmliftBlock(loaded);
     configPath = loaded?.path;
     configDir = loaded?.dir;

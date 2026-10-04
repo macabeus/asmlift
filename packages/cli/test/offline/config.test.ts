@@ -14,10 +14,10 @@ import { runCli } from '../../src/main';
 const tmp = () => mkdtempSync(join(tmpdir(), 'asmlift-cfg-'));
 
 /** `text` as a project's decomp.yaml, loaded. */
-function load(text: string): LoadedConfig | null {
-  const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), text);
-  return loadDecompYaml(undefined, root);
+function load(text: string): LoadedConfig {
+  const path = join(tmp(), 'decomp.yaml');
+  writeFileSync(path, text);
+  return loadDecompYaml(path);
 }
 
 const resolveIn = (text: string, flag?: string) => {

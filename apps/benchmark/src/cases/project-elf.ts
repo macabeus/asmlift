@@ -13,7 +13,7 @@
 // below, and `gmake` where there is one.
 import { asmliftBlock } from '@asmlift/cli/config';
 import { moduleElfPath, placeModuleSections } from '@asmlift/cli/module-elf';
-import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
+import { findDecompYaml, loadDecompYaml } from '@match-kit/decomp-yaml/files';
 import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -88,12 +88,12 @@ export function placedModuleElves(project: string, root: string): (module: strin
 /** The ELF `tools.asmlift.elf` names; if it is not built and the Makefile has an `asmlift-elf`
  *  target, run it (logged). */
 function resolveDeclaredElf(project: string, root: string): ElfResolution {
-  const loaded = loadDecompYaml(undefined, root);
+  const loaded = loadDecompYaml(findDecompYaml(root));
   const elfRel = asmliftBlock(loaded)?.elf;
-  if (!elfRel) {
+  if (!loaded || !elfRel) {
     return { elf: null, elfRel: null, reason: 'decomp.yaml declares no tools.asmlift.elf' };
   }
-  const elfPath = resolve(loaded!.dir, elfRel);
+  const elfPath = resolve(loaded.dir, elfRel);
   const setupCmd = `pnpm bench setup --project ${project} --build`;
   if (!existsSync(elfPath) && makefileHasAsmliftElf(root)) {
     // The derived ELF's prerequisite is the project's own linked ELF. Where decomp.yaml declares
@@ -101,8 +101,8 @@ function resolveDeclaredElf(project: string, root: string): ElfResolution {
     // project rather than graft a sidecar — refuse, and name the command that builds it the
     // project's own way. Where it is undeclared the precondition cannot be checked and the
     // target still runs, exactly as before.
-    const baseRel = loaded!.config.versions?.[0]?.paths?.elf;
-    if (baseRel && !existsSync(resolve(loaded!.dir, baseRel))) {
+    const baseRel = loaded.config.versions[0]?.paths.elf;
+    if (baseRel && !existsSync(resolve(loaded.dir, baseRel))) {
       return {
         elf: null,
         elfRel,
