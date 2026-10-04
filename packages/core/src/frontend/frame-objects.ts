@@ -224,12 +224,11 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // construction — `notTheWholeArea` accepts nothing else — and every word below the declared
   // area is the licensed outgoing block, whose argument words the slot model keys. The object and
   // those slots together account for every word this walk asks about, so no input makes the rule
-  // fire on that path — and that rests on the slot term above as much as on the object: drop the
-  // slots from `accountedWords` and an untyped object over four staged argument words declines
-  // here on `[sp,#0]`. What bounds THAT path is `notTheWholeArea`'s own live clauses — a second
-  // object, an object that does not start at the bottom of the declared area, an address that
-  // reaches memory rather than a callee, and the callee's declared return — and `overSlot`, which
-  // refuses a slot keyed inside the declared area.
+  // fire on that path; `accountedWords` needs its slot term for that as much as its object term.
+  // What bounds THAT path is `notTheWholeArea`'s own live clauses — a second object, an object
+  // that does not start at the bottom of the declared area, an address that reaches memory rather
+  // than a callee, and the callee's declared return — and `overSlot`, which refuses a slot keyed
+  // inside the declared area.
   {
     id: 'reaches-an-unaccounted-word',
     why: 'an escape reaching a frame word no declaration covers reaches past what the recompile allocates',
@@ -1739,10 +1738,9 @@ function objectShapes({
  *  the one object's size.
  *
  *  THE DECLARED RANGE, NOT THE OWNED ONE. Below `declared.from` lies the outgoing stack-argument
- *  block `analyzeOutgoingArgs` licensed — words the declaration and this function's own stores
- *  agree are arguments 5+ of its calls, which a C function stages and never declares — so they
- *  are no candidate for this object's bytes, and the slots keyed there are those arguments. The
- *  escape stage reads the frame the same way: `reaches-a-slot` looks no lower than
+ *  block `analyzeOutgoingArgs` licensed — arguments 5+ of this function's calls, which C stages
+ *  and never declares — so those bytes are not this object's, and the slots keyed there are those
+ *  arguments. The escape gates read the frame the same way: `reaches-a-slot` looks no lower than
  *  `declared.from`, and `reaches-an-unaccounted-word` counts the argument words as accounted.
  *  agbcc lays its locals out like this (ACCUMULATE_OUTGOING_ARGS 1, STARTING_FRAME_OFFSET 0,
  *  thumb.h): `struct S t; f(&t, b, c, d, e, g, h, i)` with an 8-byte `S` reserves 0x18, stages
