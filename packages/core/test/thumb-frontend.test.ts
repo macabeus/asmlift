@@ -1887,7 +1887,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // matches the opening phrase, and the word saying which gap this is comes next. What must never
   // be true is a marker whose deciding word is cut off, so the bound is on where that word ENDS,
   // with 20 characters of margin, rather than on a total length no caller controls.
-  const LONGEST_AGBCC_SYMBOL = 'AnimTask_FlashHealthboxOnLevelUp_Step';
+  const LONGEST_AGBCC_SYMBOL = 'VisionSelectUpdateRotationAndEntities';
 
   test('the runtime-index refusal survives the slice the artifact applies', () => {
     const [arm, capture] = ['runtime index', '\tadd\tr0, sp, r1\n'];
