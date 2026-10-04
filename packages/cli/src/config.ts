@@ -84,23 +84,23 @@ export function resolveTarget(
   if (flag) {
     return { targetKey: flag, trace: '--target flag' };
   }
+  if (!loaded) {
+    return { error: 'no --target, and no decomp.yaml was found' };
+  }
   if (tool?.target) {
-    return { targetKey: tool.target, trace: `tools.asmlift.target in ${loaded!.path}` };
+    return { targetKey: tool.target, trace: `tools.asmlift.target in ${loaded.path}` };
   }
-  const platform = loaded?.config.platform;
-  if (!platform) {
-    return { error: 'no --target, and no decomp.yaml with a platform/tools.asmlift.target was found' };
-  }
+  const { platform } = loaded.config;
   const candidates = PLATFORM_TARGETS[platform];
   if (!candidates) {
     return {
-      error: `platform '${platform}' (${loaded!.path}) has no asmlift target mapping — pass --target or set tools.asmlift.target`,
+      error: `platform '${platform}' (${loaded.path}) has no asmlift target mapping — pass --target or set tools.asmlift.target`,
     };
   }
   if (candidates.length > 1) {
     return {
-      error: `platform '${platform}' is ambiguous (${candidates.join(' or ')}) — set tools.asmlift.target in ${loaded!.path}`,
+      error: `platform '${platform}' is ambiguous (${candidates.join(' or ')}) — set tools.asmlift.target in ${loaded.path}`,
     };
   }
-  return { targetKey: candidates[0], trace: `platform '${platform}' in ${loaded!.path}` };
+  return { targetKey: candidates[0], trace: `platform '${platform}' in ${loaded.path}` };
 }
