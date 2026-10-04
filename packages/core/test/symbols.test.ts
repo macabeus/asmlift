@@ -662,6 +662,17 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
       '\tneg\tr0, r0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n';
     expect(run('f', neg)).toContain('-(s32)gPtr');
   });
+
+  test('under a signed compare, the cast-then-add sum is compared as an s32', () => {
+    // agbcc -O2 of `extern struct Big *gBig; s32 cmpS(s32 x) { u8 a = gBig->pad[0]; if
+    // ((s32)&gBig->pad[0x200] < x) return a; return 0; }`: the asm branches `blt`, and the bare
+    // `(u8 *)gBig + 512` against an `int` compiles `bcs`
+    const body =
+      '\tpush\t{lr}\n\tldr\tr1, .L5\n\tldr\tr1, [r1]\n\tldrb\tr2, [r1]\n\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x2\n' +
+      '\tadd\tr1, r1, r3\n\tcmp\tr1, r0\n\tblt\t.L3\n\tmov\tr0, #0x0\n\tb\t.L4\n.L5:\n\t.word\tgBig\n' +
+      '.L3:\n\tadd\tr0, r2, #0\n.L4:\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(run('f', body)).toContain('(s32)((u8 *)gBig + (128 << 2))');
+  });
 });
 
 describe('a POINTER global with a known POINTEE spells the interior as gPtr->member', () => {

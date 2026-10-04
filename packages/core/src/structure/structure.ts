@@ -3877,14 +3877,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       //
       // `undefined` takes the cast exactly as a definite `false` does (see
       // renderedIntSignedness): a call's signedness is the project header's, not this function's.
-      // A POINTER-rendered side is the one operand left alone, and not out of caution — `p < q`
-      // is already the unsigned compare C gives two addresses, where `(s32)p < (s32)q` would
-      // compare them signed.
+      // A POINTER-rendered side takes it too. C compares an address unsigned (`p < q` is agbcc
+      // `bcc`, IDO `sltu`), so a signed opcode over one is a source that compared the address as
+      // an integer, and the byte arithmetic's `(u8 *)g + K` left bare against an `int` compiles
+      // `bcs` where the asm says `blt`.
       if (/^icmp_s/.test(d.opcode)) {
         const pinSigned = (x: Expr): Expr =>
-          renderedIntSignedness(x, vtEnv) === true || ptrSide(x)
-            ? x
-            : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
+          renderedIntSignedness(x, vtEnv) === true ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
         l = pinSigned(l);
         r = pinSigned(r);
       }
@@ -4099,10 +4098,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
       // Which token a language spells each with, and what cast pins the choice, is a BACKEND
       // decision; see l3/ast.ts BinOp and backend/cfamily.ts's C_SPELLING.)
-      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
-      // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
-      // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
-      // today, so closing it would churn spellings for a signedness case no row exercises.
+      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer value under a
+      // COMPARISON (`gPtr < K`, `(u8 *)gPtr + K < a0`) needs nothing here: an icmp_s* pins every
+      // operand that does not provably render signed, a pointer included (pinSigned above).
       //
       // A `+`/`|` over two IR `const`s that both RENDER as literals is the literal it is. After
       // pre-recovery there is only one way such an op still exists: `raise/const.ts` refuses to fold

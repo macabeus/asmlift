@@ -12,7 +12,7 @@
 //
 // The SIGNED direction is not the variation and is pinned at the end of this file: there the opcode
 // names the compare, so every operand short of a proof that it already renders signed takes a
-// cast — a pointer-rendered side excepted, where the cast would compare two addresses signed.
+// cast — a pointer-rendered side included.
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
@@ -319,11 +319,10 @@ test('a signed compare against a constant too big for `int` casts the constant',
   expect(emit(SIGNEDCMP_INTMIN, false)).toContain('(s32)-2147483648');
 });
 
-// A POINTER-rendered side is left alone, and that is the pin's one SEMANTIC guard rather than a
-// cosmetic one: `p < end` is already the unsigned compare C gives two addresses, where
-// `(s32)p < (s32)end` compares them signed and inverts on any pair straddling 0x80000000. The
-// operands have to render as POINTERS, not merely stand on one — `*(u16 *)a0` over a `u32`-typed
-// operand renders `u32`, and there the pin fires and should.
+// A POINTER-rendered side takes the pin too. C compares two addresses unsigned — compiled, agbcc
+// spells `p < q` over `int *` as `bcc` and `(int)p < (int)q` as `blt`, IDO as `sltu` and `slt` —
+// so an `icmp_slt` over pointers is a source that compared them as integers, and the bare
+// `v0 < a1` would compile the unsigned branch.
 const PTRWALK = `fn ptrwalk {
 ^bb0(%0: s32*, %1: s32*):
   %9: s32 = const {value=0}
@@ -342,8 +341,6 @@ const PTRWALK = `fn ptrwalk {
 }
 `;
 
-test('a signed compare between pointer-rendered operands takes no cast', () => {
-  const src = emit(PTRWALK, false);
-  expect(src).toMatch(/while \(v0 < a1\)/);
-  expect(src).not.toContain('(s32)');
+test('a signed compare between pointer-rendered operands casts both to s32', () => {
+  expect(emit(PTRWALK, false)).toMatch(/while \(\(s32\)v0 < \(s32\)a1\)/);
 });
