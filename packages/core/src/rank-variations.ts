@@ -27,7 +27,7 @@ import {
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
-import { narrowDeclarations } from './l3/narrowdecl';
+import { narrowDeclarations, narrowReadDeclarations } from './l3/narrowdecl';
 import { pollGuards, pollReads } from './l3/pollguard';
 import { unmergeJoins } from './l3/unmerge';
 // TYPE-ONLY, and deliberately: the structure-variation table types its `options` as
@@ -386,6 +386,7 @@ export const STACKED_VARIATIONS: { name: VariationName; apply: (sfn: SFn) => SFn
   { name: 'pollguard', apply: pollGuards },
   { name: 'pollread', apply: pollReads },
   { name: 'narrow-decl', apply: narrowDeclarations },
+  { name: 'narrow-read', apply: narrowReadDeclarations },
 ];
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree

@@ -1,7 +1,7 @@
-// The `/narrow-decl` variation (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is spelled
-// `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from, and `s32 v; v = f();
-// … (u8)v …` is spelled `u8 v; v = f(); … v …`, the one `pokeemerald:RtcGetDayCount` was. Each
-// refusal edits one fact of an accepted tree: a structured fixture below, or a hand-built one
+// The `/narrow-decl` and `/narrow-read` variations (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is
+// spelled `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from, and `s32 v;
+// v = f(); … (u8)v …` is spelled `u8 v; v = f(); … v …`, the one `pokeemerald:RtcGetDayCount` was.
+// Each refusal edits one fact of an accepted tree: a structured fixture below, or a hand-built one
 // where the fact (a pointer operand, a `for` init) is not a lift's to produce.
 import { describe, expect, it } from 'vitest';
 
@@ -10,8 +10,9 @@ import { pascalBackend } from '../src/backend/pascal';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import type { Expr, SFn } from '../src/l3/ast';
-import { narrowDeclarations } from '../src/l3/narrowdecl';
+import { narrowDeclarations, narrowReadDeclarations } from '../src/l3/narrowdecl';
 import { recoverTypes } from '../src/raise/recover';
+import { STACKED_VARIATIONS, applyStacked } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
 
 // sub_0803E8CC's shape: a byte read, less one, zero-extended once and read twice around a call
@@ -36,16 +37,16 @@ const NAMED = `fn named {
 `;
 
 // RtcGetDayCount's shape: the first call's result named, because the second call's argument load
-// must not move ahead of it, then zero-extended where it is passed on
+// must not move ahead of it, and zero-extended right after the call, as a `u8` local stores it
 const READ = `fn read {
 ^bb0(%0: u8*):
   %1: s32 = load %0 {off=0, signed=false, width=1}
   %2: s32 = call %1 {target="cv"}
-  %3: s32 = load %0 {off=1, signed=false, width=1}
-  %4: s32 = call %3 {target="cv"}
-  %5: unk32 = zext %2 {width=8}
-  %6: unk32 = zext %4 {width=8}
-  %7: s32 = call %5, %6 {target="dc"}
+  %3: unk32 = zext %2 {width=8}
+  %4: s32 = load %0 {off=1, signed=false, width=1}
+  %5: s32 = call %4 {target="cv"}
+  %6: unk32 = zext %5 {width=8}
+  %7: s32 = call %3, %6 {target="dc"}
   ret %7
 }
 `;
@@ -214,49 +215,113 @@ describe('narrowDeclarations', () => {
     expect(() => pascalBackend.emit(narrow)).toThrow(/no spelling for a narrow local \(8 bits\)/);
   });
 
-  describe('a narrowing at every read', () => {
-    it('declares an s32 local read only through one narrowing cast at that width, and drops the casts', () => {
-      const before = structured(READ);
-      expect(cBackend.emit(before)).toContain('return dc((u8)v0, (u8)cv(a0[1]));');
-      const src = cBackend.emit(narrowDeclarations(before)!);
-      expect(src).toContain('u8 v0;');
-      expect(src).toContain('v0 = cv(*a0);');
-      expect(src).toContain('return dc(v0, (u8)cv(a0[1]));');
+  it('does not narrow a constant write that fits no type of the narrow width', () => {
+    const wide = (value: number): SFn => ({
+      name: 'f',
+      params: [],
+      locals: [{ name: 'v0', type: { kind: 'int', width: 32, signed: true } }],
+      retType: { kind: 'int', width: 32, signed: true },
+      body: [
+        { k: 'assign', name: 'v0', value: cast(8, false, { k: 'const', value }) },
+        { k: 'return', value: { k: 'bin', op: '+', l: v0, r: v0 } },
+      ],
     });
+    expect(narrowDeclarations(wide(300))).toBeNull();
+    expect(narrowDeclarations(wide(-129))).toBeNull();
+    expect(local(narrowDeclarations(wide(-1))!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+  });
 
-    it('keeps a signed narrowing signed', () => {
-      const sfn = narrowDeclarations(structured(READ.replaceAll('zext', 'sext').replaceAll('width=8', 'width=16')))!;
-      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 16, signed: true });
-    });
+  it('leaves a local narrowed at its reads to /narrow-read', () => {
+    expect(narrowDeclarations(structured(READ))).toBeNull();
+  });
+});
 
-    it('takes a read narrowed the way the others are', () => {
-      const sfn = narrowDeclarations(passed(structured(READ), cast(8, false, v0)))!;
-      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
-    });
+describe('narrowReadDeclarations', () => {
+  it('declares an s32 local read only through one narrowing cast at that width, and drops the casts', () => {
+    const before = structured(READ);
+    expect(cBackend.emit(before)).toContain('return dc((u8)v0, (u8)cv(a0[1]));');
+    const src = cBackend.emit(narrowReadDeclarations(before)!);
+    expect(src).toContain('u8 v0;');
+    expect(src).toContain('v0 = cv(*a0);');
+    expect(src).toContain('return dc(v0, (u8)cv(a0[1]));');
+  });
 
-    it('does not narrow a local one of whose reads is bare', () => {
-      expect(narrowDeclarations(passed(structured(READ), v0))).toBeNull();
-    });
+  it('keeps a signed narrowing signed', () => {
+    const sfn = narrowReadDeclarations(structured(READ.replaceAll('zext', 'sext').replaceAll('width=8', 'width=16')))!;
+    expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 16, signed: true });
+  });
 
-    it('does not narrow a local whose reads are cast to two widths', () => {
-      expect(narrowDeclarations(passed(structured(READ), cast(16, false, v0)))).toBeNull();
-    });
+  it('takes a read narrowed the way the others are', () => {
+    const sfn = narrowReadDeclarations(passed(structured(READ), cast(8, false, v0)))!;
+    expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+  });
 
-    it('does not narrow a local whose reads are cast to two signednesses', () => {
-      expect(narrowDeclarations(passed(structured(READ), cast(8, true, v0)))).toBeNull();
-    });
+  it('leaves a local narrowed at its write to /narrow-decl', () => {
+    expect(narrowReadDeclarations(structured(NAMED))).toBeNull();
+  });
 
-    it('takes a write that is an integer', () => {
-      const sfn = narrowDeclarations(writing(structured(READ), { k: 'const', value: 300 }))!;
-      expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
-    });
+  it('does not narrow a local one of whose reads is bare', () => {
+    expect(narrowReadDeclarations(passed(structured(READ), v0))).toBeNull();
+  });
 
-    it.each([
-      ['a pointer', { k: 'var', name: 'a0' }],
-      ['a float', { k: 'fconst', value: 1.5 }],
-      ['of no known type', { k: 'addr', name: 'gX' }],
-    ] as [string, Expr][])('does not narrow a local whose write is %s', (_, value) => {
-      expect(narrowDeclarations(writing(structured(READ), value))).toBeNull();
-    });
+  it('does not narrow a local whose reads are cast to two widths', () => {
+    expect(narrowReadDeclarations(passed(structured(READ), cast(16, false, v0)))).toBeNull();
+  });
+
+  it('does not narrow a local whose reads are cast to two signednesses', () => {
+    expect(narrowReadDeclarations(passed(structured(READ), cast(8, true, v0)))).toBeNull();
+  });
+
+  it('takes a constant write that fits the narrow width', () => {
+    const sfn = narrowReadDeclarations(writing(structured(READ), { k: 'const', value: 200 }))!;
+    expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+  });
+
+  it('does not narrow a constant write that fits no type of the narrow width', () => {
+    expect(narrowReadDeclarations(writing(structured(READ), { k: 'const', value: 300 }))).toBeNull();
+  });
+
+  it.each([
+    ['a pointer', { k: 'var', name: 'a0' }],
+    ['a float', { k: 'fconst', bits: '3ff8000000000000' }],
+    ['of no known type', { k: 'addr', name: 'gX' }],
+  ] satisfies [string, Expr][])('does not narrow a local whose write is %s', (_, value) => {
+    expect(narrowReadDeclarations(writing(structured(READ), value))).toBeNull();
+  });
+});
+
+describe('/narrow-decl and /narrow-read stacked', () => {
+  // v0's one read is the narrowing cast that is v1's whole write: `s32 v0; s16 v1; v1 = v0;` and
+  // `s16 v0; s32 v1; v1 = v0;` are both offered, and together the write is taken first
+  const chained = (): SFn => ({
+    name: 'f',
+    params: [{ name: 'a0', type: { kind: 'int', width: 32, signed: true } }],
+    locals: [
+      { name: 'v0', type: { kind: 'int', width: 32, signed: true } },
+      { name: 'v1', type: { kind: 'int', width: 32, signed: true } },
+    ],
+    retType: { kind: 'int', width: 32, signed: true },
+    body: [
+      { k: 'assign', name: 'v0', value: { k: 'call', fn: 'g', args: [{ k: 'var', name: 'a0' }] } },
+      { k: 'assign', name: 'v1', value: cast(16, true, v0) },
+      { k: 'return', value: { k: 'bin', op: '+', l: { k: 'var', name: 'v1' }, r: { k: 'var', name: 'v1' } } },
+    ],
+  });
+  const widths = (sfn: SFn) => sfn.locals.map((l) => (l.type.kind === 'int' ? l.type.width : undefined));
+  const stacked = (...names: string[]) =>
+    applyStacked(
+      STACKED_VARIATIONS.filter((x) => names.includes(x.name)),
+      chained(),
+    )!;
+
+  it('offers each side alone', () => {
+    expect(widths(stacked('narrow-decl').out)).toEqual([32, 16]);
+    expect(widths(stacked('narrow-read').out)).toEqual([16, 32]);
+  });
+
+  it('takes the write first when both are applied', () => {
+    const both = stacked('narrow-decl', 'narrow-read');
+    expect(both.variations).toEqual(['narrow-decl']);
+    expect(widths(both.out)).toEqual([32, 16]);
   });
 });
