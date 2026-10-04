@@ -10,7 +10,13 @@ import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
 import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
-const EVERY: CallLowering = { pairs: true, memoryReturn: true, stackArgs: true, voidReturn: true };
+const EVERY: CallLowering = {
+  pairs: true,
+  memoryReturn: true,
+  stackArgs: true,
+  voidReturn: true,
+  argRegisterBoundsArity: true,
+};
 const fail = (message: string): never => {
   throw new FrontendUnsupportedError(message);
 };
@@ -152,7 +158,13 @@ describe('callDeclarations.plan', () => {
 });
 
 describe('callDeclarations.plan for a lowering with no pair, no memory return and no stack argument', () => {
-  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
+  const NONE: CallLowering = {
+    pairs: false,
+    memoryReturn: false,
+    stackArgs: false,
+    voidReturn: false,
+    argRegisterBoundsArity: false,
+  };
   const ppcCalls = (prototypes: Prototypes) => callDeclarations('f', PPC_MWCC, prototypes, NONE, fail);
   // twelve bytes, which mwcc returns through memory
   const S12 = { kind: 'struct' as const, members: ['a', 'b', 'c'].map((name) => ({ name, type: 's32' })) };
@@ -228,7 +240,13 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
 });
 
 describe('callDeclarations.lower', () => {
-  const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
+  const NONE: CallLowering = {
+    pairs: false,
+    memoryReturn: false,
+    stackArgs: false,
+    voidReturn: false,
+    argRegisterBoundsArity: false,
+  };
   /** a call to `callee` made in a one-block function */
   const site = (callee: string) => {
     const ssa = makeSsaBuilder('f', 1, [[]]);
@@ -270,13 +288,35 @@ describe('callDeclarations.lower', () => {
     ]);
   });
 
-  test('passes a call through argument register N the N registers below it, on any ISA', () => {
-    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
-    const s = site('g');
-    const address = s.ssa.readVar('a2', 0);
-    callDeclarations('f', MIPS_IDO, {}, O32, fail).lower({ ...s, callee: { address, reg: 'a2' } });
+  test('passes a call through argument register N the N registers below it where the lowering states it', () => {
+    const { stackWord: _, ...s } = site('g');
+    const address = s.ssa.readVar('r2', 0);
+    callDeclarations('f', ARMV4T_AGBCC, {}, { ...NONE, argRegisterBoundsArity: true }, fail).lower({
+      ...s,
+      callee: { address, reg: 'r2' },
+    });
     const [call] = s.ssa.irBlocks[0].ops;
     expect([call.attrs.indirect, call.operands.length, call.operands.at(-1)]).toEqual([true, 3, address]);
+  });
+
+  test('guesses the arity of a call through an argument register where the lowering does not bound it', () => {
+    // o32 calls `g(1.5f, 3)` through a0 with the float in $f12 and the int in a1: a0 bounds nothing
+    const O32: CallLowering = {
+      pairs: false,
+      memoryReturn: false,
+      stackArgs: true,
+      voidReturn: true,
+      argRegisterBoundsArity: false,
+    };
+    const s = site('g');
+    const address = s.ssa.readVar('a0', 0);
+    const three = mkValue(T.unk(32));
+    s.ssa.writeVar('a1', 0, three);
+    let guessed: number | undefined;
+    const guess = { at: 0, refuse: (argc: number) => void (guessed = argc) };
+    callDeclarations('f', MIPS_IDO, {}, O32, fail).lower({ ...s, guess, callee: { address, reg: 'a0' } });
+    const [call] = s.ssa.irBlocks[0].ops;
+    expect([guessed, call.operands.includes(three)]).toEqual([2, true]);
   });
 
   test('refuses a site that places stack words for a lowering that reads none', () => {
@@ -291,7 +331,13 @@ describe('callDeclarations.lower', () => {
   });
 
   test('refuses a site that places no stack word for a lowering that reads them', () => {
-    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+    const O32: CallLowering = {
+      pairs: false,
+      memoryReturn: false,
+      stackArgs: true,
+      voidReturn: true,
+      argRegisterBoundsArity: false,
+    };
     const { stackWord: _, ...s } = site('g');
     const calls = callDeclarations('f', MIPS_IDO, { g: { params: Array(5).fill('int') } }, O32, fail);
     expect(() => calls.lower(s)).toThrow(miswired('mips'));
@@ -306,7 +352,13 @@ describe('callDeclarations.lower', () => {
 });
 
 describe('callDeclarations.plan for a callee declared void', () => {
-  const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+  const O32: CallLowering = {
+    pairs: false,
+    memoryReturn: false,
+    stackArgs: true,
+    voidReturn: true,
+    argRegisterBoundsArity: false,
+  };
   const mipsCalls = (prototypes: Prototypes, lowering = O32) =>
     callDeclarations('f', MIPS_IDO, prototypes, lowering, fail);
 
@@ -343,7 +395,13 @@ describe('callDeclarations.plan for a callee declared void', () => {
 
 describe('callDeclarations.plan for a callee declared with a float', () => {
   test('refuses one where the target passes floats in its FPU', () => {
-    const NONE: CallLowering = { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false };
+    const NONE: CallLowering = {
+      pairs: false,
+      memoryReturn: false,
+      stackArgs: false,
+      voidReturn: false,
+      argRegisterBoundsArity: false,
+    };
     const calls = callDeclarations(
       'f',
       PPC_MWCC,
@@ -362,7 +420,13 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
   });
 
   test('refuses one declared through the floating typedefs every project declares', () => {
-    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+    const O32: CallLowering = {
+      pairs: false,
+      memoryReturn: false,
+      stackArgs: true,
+      voidReturn: true,
+      argRegisterBoundsArity: false,
+    };
     const calls = callDeclarations(
       'f',
       MIPS_IDO,

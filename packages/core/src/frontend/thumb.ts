@@ -2732,8 +2732,14 @@ function assertScratchRegsPartitioned(target: TargetDescription): ReadonlySet<st
 }
 
 /** A `bl` passes a pair in two argument words, a struct-return pointer in r0, and the words past r3
- *  in the outgoing block `analyzeOutgoingArgs` licensed. */
-const THUMB_CALL_LOWERING: CallLowering = { pairs: true, memoryReturn: true, stackArgs: true, voidReturn: false };
+ *  in the outgoing block `analyzeOutgoingArgs` licensed; a call through rN passes r0..r(N-1). */
+const THUMB_CALL_LOWERING: CallLowering = {
+  pairs: true,
+  memoryReturn: true,
+  stackArgs: true,
+  voidReturn: false,
+  argRegisterBoundsArity: true,
+};
 
 /** Every fact about the frame the lift reads before it fills a block, measured off the text. */
 interface ThumbFrame {

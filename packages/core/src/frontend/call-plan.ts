@@ -46,6 +46,12 @@ export interface CallLowering {
    *  where a value reaches it (`SsaBuilder.holdsValue`), so the register the call destroyed is no
    *  return value */
   readonly voidReturn: boolean;
+  /** a call through argument register rN passes r0..r(N-1). The compiler's arguments fill the
+   *  registers from r0 up and the address cannot share one, which holds for agbcc: soft-float, no
+   *  pair alignment. o32 refutes it twice — a leading float takes slot a0 and leaves the register
+   *  free (`jalr a0` passing $f12 and a1), and a 64-bit argument's even pair leaves a1 empty
+   *  (`jalr a1` passing a0, a2 and a3) — so a lowering that does not state it guesses. */
+  readonly argRegisterBoundsArity: boolean;
 }
 
 /** A call's struct return through memory: the declared struct, laid out on this target. */
@@ -132,7 +138,8 @@ export interface CallSite {
 }
 
 /** A call through a register. It names no callee, so no declaration plans it: an argument
- *  register holding the address bounds its arity (`lower`), and through any other it is guessed. */
+ *  register holding the address bounds its arity where the lowering states it
+ *  (`CallLowering.argRegisterBoundsArity`), and otherwise it is guessed. */
 export interface IndirectCallee {
   readonly address: Value;
   /** the register the address is in */
@@ -448,18 +455,19 @@ export function callDeclarations(
     }
     const indirect = typeof site.callee === 'string' ? undefined : site.callee;
     const callee = typeof site.callee === 'string' ? site.callee : undefined;
-    // A CALL THROUGH ARGUMENT REGISTER rN PASSES r0..r(N-1): the arguments fill the registers from
-    // r0 up and the address cannot share one, so N bounds the arity, and reading every register
-    // below it passes what the machine passes. An untouched one is this function's own argument
-    // passed on; one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`).
-    // Through any other register the arity is guessed.
+    // A CALL THROUGH ARGUMENT REGISTER rN PASSES r0..r(N-1) where the lowering states it
+    // (`CallLowering.argRegisterBoundsArity`): N bounds the arity, and reading every register below
+    // it passes what the machine passes. An untouched one is this function's own argument passed
+    // on; one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`). Through
+    // any other register, or on a lowering that does not state it, the arity is guessed.
     //
     // KNOWN GAP: N is only a bound. agbcc's address lands above r(argc) when an argument register
     // still holds a live temp, and a pointer that arrived as an argument stays where it arrived
     // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
     // the registers in between read as arguments the source never passed. Only the pointer's
     // declared type decides the arity, and nothing reads one.
-    const bound = indirect === undefined ? -1 : target.argRegs.indexOf(indirect.reg);
+    const bound =
+      indirect === undefined || !lowering.argRegisterBoundsArity ? -1 : target.argRegs.indexOf(indirect.reg);
     const p: CallPlan =
       indirect === undefined
         ? plan(callee!)

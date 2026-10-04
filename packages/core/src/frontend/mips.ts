@@ -789,12 +789,13 @@ export function lift(
   };
   const highHalves = makeHighHalves({ hi: '%hi', hiArticle: 'a', lo: '%lo', fail });
   // O32 passes the words past a0..a3 on the stack and returns a word in v0. This lowering builds no
-  // register pair and receives no struct through a hidden pointer, so the plan refuses both.
+  // register pair and receives no struct through a hidden pointer, so the plan refuses both. A call
+  // through an argument register bounds no arity here: a leading float leaves a0 free.
   const calls = callDeclarations(
     name,
     target,
     prototypes,
-    { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true },
+    { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true, argRegisterBoundsArity: false },
     fail,
   );
   // The first instruction naming the FPU's file, a data register or the control register. A call
