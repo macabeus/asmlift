@@ -2508,6 +2508,30 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const isUndeclaredGlobalValue = (x: Expr): boolean =>
     x.k === 'var' && wordLoadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
 
+  /** A byte sum the pointer-value arithmetic rule below made of a global's value (`(u8 *)g + K`),
+   *  and the same sum as the integer it also is (`(u32)g + K`): the two spellings share every
+   *  byte, and the integer one is what an integer consumer, or an integer added in front of it,
+   *  takes. */
+  const castGlobal = (x: Expr, undeclared = false): x is Extract<Expr, { k: 'cast' }> =>
+    x.k === 'cast' &&
+    typeEquals(x.to, T.ptr(T.u(8))) &&
+    x.e.k === 'var' &&
+    (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
+    (!undeclared || symCtx?.info(x.e.name)?.shape === undefined);
+  const isByteGlobalSum = (x: Expr, undeclared = false): boolean =>
+    x.k === 'bin' &&
+    (x.op === '+' || x.op === '-') &&
+    (castGlobal(x.l, undeclared) ||
+      castGlobal(x.r, undeclared) ||
+      isByteGlobalSum(x.l, undeclared) ||
+      isByteGlobalSum(x.r, undeclared));
+  const byteSumAsInt = (x: Expr): Expr =>
+    castGlobal(x)
+      ? { k: 'cast', to: T.u(32), e: x.e }
+      : x.k === 'bin' && isByteGlobalSum(x)
+        ? { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
+        : x;
+
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
    *  32-bit integer math on the address, so that is what gets spelled. */
@@ -3906,7 +3930,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
       // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
       // LIST order), both operand VALUES un-named (see below), no pointer side (load-bearing for
-      // the stride rules below), and no effect moves (call, marker).
+      // the stride rules below), and no effect moves (call, marker). A global's value that the
+      // pointer-value rule below spells as a base is a pointer side too, though `ctype` types no
+      // global: that rule keeps the add's operand order, so the swap would be the one it keeps.
+      const ptrGlobalSide = (x: Expr): boolean =>
+        x.k === 'var' &&
+        symCtx?.info(x.name)?.shape === undefined &&
+        (pointerLoadedGlobals.has(x.name) || (d.results[0]?.type.kind === 'ptr' && wordLoadedGlobals.has(x.name)));
       if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
         const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
         if (
@@ -3929,6 +3959,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           activeSub?.has(d.operands[1]) !== true &&
           ctype(l)?.kind !== 'ptr' &&
           ctype(r)?.kind !== 'ptr' &&
+          !ptrGlobalSide(l) &&
+          !ptrGlobalSide(r) &&
           !exprHasEffect(l) &&
           !exprHasEffect(r) &&
           opBlock.get(da) === opBlock.get(db) &&
@@ -4075,10 +4107,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // A global's value no declaration types, added to an integer, is a pointer value too
         // when the IR types the SUM a pointer: `(u8 *)g + x` is the asm's address under every
         // declaration of `g` once `x` renders an integer, whichever operand the source held as
-        // the pointer. An integer side holding an address (`(u32)&gArr + gIdx`) says the address
-        // is the base and the global its index, so that sum stays as it is.
-        const mentionsAddr = (x: Expr): boolean => x.k === 'addr' || exprChildren(x).some(mentionsAddr);
-        const intSide = (x: Expr): boolean => ctype(x)?.kind === 'int' && !mentionsAddr(x);
+        // the pointer. An integer side that IS an address (`(u32)&gArr + gIdx`) says the address
+        // is the base and the global its index, so that sum stays as it is. An address under a
+        // load (`((u16 *)&gTbl)[a0]`) is a loaded value, and that side is an integer. A global
+        // that is no pointer value renders an integer too, though `ctype` types no global.
+        const isAddr = (x: Expr): boolean =>
+          x.k === 'addr' ||
+          (x.k === 'cast' && isAddr(x.e)) ||
+          (x.k === 'bin' && (x.op === '+' || x.op === '-') && (isAddr(x.l) || isAddr(x.r)));
+        const intSide = (x: Expr): boolean =>
+          !isAddr(x) && (ctype(x)?.kind === 'int' || (x.k === 'var' && ctype(x) === undefined && !isPtrValue(x)));
         const sumBase =
           d.results[0]?.type.kind === 'ptr' && !isPtrValue(l) && !isPtrValue(r)
             ? isUndeclaredGlobalValue(l) && intSide(r)
@@ -4088,12 +4126,32 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
                 : undefined
             : undefined;
         const ptrValue = (x: Expr): boolean => isPtrValue(x) || x === sumBase;
+        // The base's partner, when it is another global no declaration types, is added as an
+        // integer, which it is under an integer declaration and a pointer one alike.
+        if (sumBase !== undefined) {
+          l = l !== sumBase && isUndeclaredGlobalValue(l) ? intifyPtrValue(l) : l;
+          r = r !== sumBase && isUndeclaredGlobalValue(r) ? intifyPtrValue(r) : r;
+        }
         const rendersPtr = (x: Expr): boolean => ptrValue(x) || ctype(x)?.kind === 'ptr';
         const bothPtr = rendersPtr(l) && rendersPtr(r);
         if (ptrValue(l)) {
           l = op === '+' && bothPtr && !ptrValue(r) ? intifyPtrValue(l) : bytePtr(l);
         }
-        if (ptrValue(r)) {
+        // `x + (u8 *)g` is pointer arithmetic, and gcc makes the pointer the first operand of the
+        // add, which swaps the asm's. So under an integer left side, the value of a global no
+        // declaration types, or a byte sum this rule made of one, is added as an integer in the
+        // asm's order, and the cast keeps the sum the byte pointer it would have been. A declared
+        // pointer keeps `x + (u8 *)p`, the operand the element and field spellings read.
+        const undeclaredPtr = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === undefined;
+        if (
+          op === '+' &&
+          !bothPtr &&
+          !restoreTo &&
+          ((ptrValue(r) && undeclaredPtr(r)) || (ctype(r)?.kind === 'ptr' && isByteGlobalSum(r, true)))
+        ) {
+          r = ptrValue(r) ? intifyPtrValue(r) : byteSumAsInt(r);
+          restoreTo = T.ptr(T.u(8));
+        } else if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
         }
       } else if (op !== '&&' && op !== '||') {
