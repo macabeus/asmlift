@@ -633,6 +633,15 @@ describe('byte offsets on a rendered pointer', () => {
     expect(src).not.toContain('(u8 *)(a0 + 62)');
   });
 
+  test('assigned back to the walked pointer, the inexact sum is cast to its type', () => {
+    // agbcc -O2 of `s32 b2(s32 *p, s32 c) { s32 x = *p; if (c) p = (s32 *)((u8 *)p + 2); return
+    // *(u16 *)p + x; }`: the bare `(u8 *)a0 + 2` into the `s32 *` is an incompatible assignment
+    const reassigned =
+      'f:\n\tpush\t{lr}\n\tldr\tr2, [r0]\n\tcmp\tr1, #0\n\tbeq\t.L3\n\tadd\tr0, r0, #0x2\n' +
+      '.L3:\n\tldrh\tr0, [r0]\n\tadd\tr0, r0, r2\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('f', reassigned, ARMV4T_AGBCC).source).toContain('a0 = (s32 *)((u8 *)a0 + 2);');
+  });
+
   test('a SIGNED sub-word access keeps its signed cast over the byte-pointer base', () => {
     // The byte cast makes a 1-byte deref correctly STRIDED, and stride is all the legalization used
     // to ask — so the reinterpret cast, which was the only carrier of the access's signedness,

@@ -608,6 +608,28 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(src).toContain('v1 = (u16 *)((u8 *)gPtr + 3546);');
   });
 
+  test('stored back into its own cell, the sum is assigned through void *', () => {
+    // agbcc -O2 of `extern struct S *gPtr; u8 st(void) { u8 r = *(u8 *)gPtr; gPtr = (struct S *)((u8
+    // *)gPtr + 4); return r; }`
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tldrb\tr0, [r2]\n\tadd\tr2, r2, #0x4\n\tstr\tr2, [r1]\n\tbx\tlr\n' +
+      '.L3:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('gPtr = (void *)((u8 *)gPtr + 4);');
+  });
+
+  test('under a non-additive or unary operator, the value is an integer', () => {
+    // agbcc -O2 of `u32 an(void) { u8 r = *(u8 *)gPtr; return r + ((u32)gPtr & 3); }` and of
+    // `s32 ng(void) { sink(*(u8 *)gPtr); return -(s32)gPtr; }`, over `extern struct S *gPtr`
+    const and =
+      '\tldr\tr0, .L3\n\tldr\tr1, [r0]\n\tmov\tr0, #0x3\n\tand\tr0, r0, r1\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n' +
+      '\tbx\tlr\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', and)).toContain('3 & (u32)gPtr');
+    const neg =
+      '\tpush\t{r4, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tldrb\tr0, [r0]\n\tbl\tsink\n\tldr\tr0, [r4]\n' +
+      '\tneg\tr0, r0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', neg)).toContain('-(s32)gPtr');
+  });
+
   test('KNOWN GAP: a runtime index is added to a value the IR never types a pointer', () => {
     // `gPtr + a0` is a base plus an index, and raise/recover.ts propagatePointers does not decide
     // which operand of two non-constant ones is the base. Nothing here says gPtr is the pointer,
