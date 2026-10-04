@@ -43,15 +43,13 @@
 // all-together candidate `/narrow-decl` runs first and takes that cast as the write.
 //
 // KNOWN GAP, and it is the price of deciding at L3 rather than where the value is named: which
-// spelling a call's result had is decided per VALUE, by whether its extension lands right after
-// its `bl` or after whatever runs before the read, and this pass sees neither position. So two
-// read-side locals the source declared differently (`s32 y` cast at its read beside `u8 m`) have
-// no candidate, since each entry narrows both or neither. Nor has `s32 v = (u8)f()` once another
-// such value is held across its call, where it can compile like neither `u8 v` nor a cast at the
-// read: the cast is never at the write, because structure/analysis.ts names the call and inlines
-// its extension into the read. Held alone, its extension lands right after the `bl` and it
-// compiles like `u8 v`, which /narrow-read reaches. Both are a naming decision there, made per
-// local by construction; reaching the first here would take 2^k candidates over k read-side locals.
+// spelling a call's result had shows only in where its extension lands, right after its `bl` or
+// just before its read, and structure/analysis.ts settles that per local when it names the call and
+// inlines the extension into the read. So two read-side locals declared differently (`s32 y` cast
+// at its read beside `u8 m`) have no candidate, as each entry narrows both or neither; here that
+// would take 2^k candidates over k such locals. Nor has `s32 v = (u8)f()` once another such value
+// is held across its call, which then compiles like neither spelling; held alone it compiles like
+// `u8 v`, which /narrow-read reaches.
 //
 // REFUSED, each because the two spellings would stop computing the same value or would not build:
 //   • a local that is not a 32-bit integer;
@@ -100,7 +98,7 @@ const isReadNarrowing = (e: Expr, name: string): e is Narrowing =>
 
 /** The one type every read of `name` is narrowed to, or undefined when a read is not narrowed
  *  or two reads are narrowed differently. `reads` counts every read however spelled, so a read
- *  this walk does not see as a narrowing is a shortfall rather than a miss. */
+ *  that is not a narrowing leaves the count short. */
 function readNarrowing(body: Stmt[], name: string, reads: number): Narrowing['to'] | undefined {
   let to: Narrowing['to'] | undefined;
   let narrowed = 0;

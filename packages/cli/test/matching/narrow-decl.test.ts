@@ -1,8 +1,8 @@
 // The `/narrow-decl` and `/narrow-read` variations (core l3/narrowdecl.ts) against the REAL agbcc
-// toolchain, in both directions. `u8 v; v = x - 1;` and `s32 v; v = (u8)(x - 1);` compute the same value and compile to
-// two different objects, and so do `u8 v; v = f(); … v` and `s32 v; v = f(); … (u8)v`, so neither
-// spelling may replace the other: each source must be recovered byte-exact, by the candidate whose
-// declaration it used.
+// toolchain, in both directions. `u8 v; v = x - 1;` and `s32 v; v = (u8)(x - 1);` compute the same
+// value and compile to two different objects, and so do `u8 v; v = f(); … v` and `s32 v; v = f();
+// … (u8)v`, so neither spelling may replace the other: each source must be recovered byte-exact, by
+// the candidate whose declaration it used.
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/decompileRanked use real agbcc).
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
