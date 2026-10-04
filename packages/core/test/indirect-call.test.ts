@@ -97,6 +97,21 @@ const PASSTHRU = [
   '',
 ].join('\n');
 
+// `void nested(void) { void (*p)(int) = getfn(); p(g()); }`, and `g(); p();` with `p` taking
+// nothing compiles to the same bytes.
+const NESTED = [
+  'nested:',
+  '\tpush\t{r4, lr}',
+  '\tbl\tgetfn',
+  '\tadd\tr4, r0, #0',
+  '\tbl\tg',
+  '\tbl\t_call_via_r4',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '',
+].join('\n');
+
 // `extern long long mkll(int); void w2(void (*g)(long long)) { g(mkll(3)); }`
 const PAIR_ARG = [
   'w2:',
@@ -186,6 +201,21 @@ describe('a call through argument register rN takes r0..r(N-1)', () => {
       'f:\n\tpush\t{lr}\n\tbl\th\n\tldr\tr2, .L3\n\tldr\tr2, [r2]\n\tbl\t_call_via_r2\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\ttbl\n';
     expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: PROTOS })).toThrow(
       /r[01] is read on a path where a call has destroyed it/,
+    );
+  });
+});
+
+describe("a callee's result in r0 at a call through a register", () => {
+  test('is passed to it: nothing checks the arity of a call through a cast, so a drop would never be refused', () => {
+    expect(decompile('nested', NESTED, ARMV4T_AGBCC).source).toBe(
+      'void nested(void) {\n    s32 v0;\n    v0 = getfn();\n    ((s32 (*)())v0)(g());\n}\n',
+    );
+  });
+
+  test('a callee declared void leaves nothing in r0 to pass', () => {
+    const prototypes: Prototypes = { getfn: { params: [] }, g: { params: [], returnsVoid: true } };
+    expect(decompile('nested', NESTED, ARMV4T_AGBCC, { prototypes }).source).toBe(
+      'void nested(void) {\n    s32 v0;\n    v0 = getfn();\n    g();\n    ((s32 (*)())v0)();\n}\n',
     );
   });
 });

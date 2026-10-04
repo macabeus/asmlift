@@ -180,6 +180,8 @@ export function callDeclarations(
   };
   /** the callee that handed back each pair a call returned, by the pair's value */
   const pairCallee = new Map<Value, string>();
+  /** the value each call to a callee declared void left in the return register */
+  const voidResults = new Set<Value>();
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
@@ -576,8 +578,21 @@ export function callDeclarations(
     // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
     // known whether every path to here passes through another call, which would have clobbered
     // the argument registers this guess just read.
+    //
+    // A CALL THROUGH A REGISTER IS PASSED AN EARLIER CALLEE'S RESULT its guess reads, which the trim
+    // drops from a named call (`trimClobberedCallArgs`): no declaration checks a call through a cast
+    // to an unprototyped type, so a dropped argument would never be refused, and `p(g())` would lift
+    // as `g(); p();` to the same bytes. Kept, `g(); p();` reads as `p(g())`, which passes what the
+    // machine passes — unless `g` is declared void, and its result names nothing.
     if (widths === null) {
-      ssa.recordGuessedCall(call, bi, target);
+      ssa.recordGuessedCall(call, bi, target, indirect !== undefined && args.length > 0 && !voidResults.has(args[0]));
+    }
+    if (
+      callee !== undefined &&
+      !isRuntimeHelperName(callee) &&
+      declaresVoidReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
+    ) {
+      voidResults.add(res);
     }
     if (returns.kind === 'pair') {
       // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are

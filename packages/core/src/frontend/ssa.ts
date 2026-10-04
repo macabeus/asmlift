@@ -122,8 +122,14 @@ export interface SsaBuilder {
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
-   *  caller wrote, so it comes before the call's result is written ({@link noteCall}). */
-  recordGuessedCall(op: Op, b: number, abi: { argRegs: string[]; returnReg: string }): void;
+   *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
+   *  `passesCalleeResult`: see {@link GuessedCallSite}. */
+  recordGuessedCall(
+    op: Op,
+    b: number,
+    abi: { argRegs: string[]; returnReg: string },
+    passesCalleeResult?: boolean,
+  ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -851,11 +857,17 @@ export function makeSsaBuilder(
         decidedLocal[b].add(r);
       }
     },
-    recordGuessedCall: (op: Op, b: number, abi: { argRegs: string[]; returnReg: string }) => {
+    recordGuessedCall: (
+      op: Op,
+      b: number,
+      abi: { argRegs: string[]; returnReg: string },
+      passesCalleeResult = false,
+    ) => {
       abiSeen = abi;
       guessedCalls.push({
         block: b,
         op,
+        passesCalleeResult,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -1048,6 +1060,9 @@ export interface GuessedCallSite {
    *  nothing (`destroyed`), the block wrote it since (`written`), or neither, so the predecessors
    *  decide (`inherited`) */
   returnRegBefore: 'destroyed' | 'written' | 'inherited';
+  /** an earlier callee's result in the return register is an argument here, not a leftover: the
+   *  site's lowering says so ({@link SsaBuilder.recordGuessedCall}) */
+  passesCalleeResult: boolean;
 }
 
 export interface CallArgTrim {
@@ -1164,6 +1179,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // outright when it does not. A declared prototype never reaches here, and stays the way `g(f())`
   // is recovered.
   //
+  // A SITE THAT PASSES THE RESULT ON keeps it (`GuessedCallSite.passesCalleeResult`).
+  //
   // THE EXEMPTION NEEDS A RESULT IN THE REGISTER. A call that hands a struct back in it (`struct W1
   // mkw(s32)`) writes no value there — its bytes are a struct, not a word — so the register still
   // names what it held BEFORE that call, and neither clause above can tell: that value is no callee
@@ -1185,7 +1202,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       return runOfFresh(fresh, 0);
     }
     const op = s.op;
-    if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0])) {
+    if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0]) || s.passesCalleeResult) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
     return 0;
@@ -1202,7 +1219,10 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // is recorded rather than applied. A survivor is what it drops, so the join clause above has no
     // place here — but `setsUpLater` still does: a register this block set up two instructions
     // before the call is not something the narrower reading may call dead.
-    const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
+    const localFresh =
+      setsUpLater(s.freshBefore) || (n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0]))
+        ? new Set([argRegs[0], ...s.freshBefore])
+        : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
     if (local < callArgs(s.op).length) {
       setupArgc.set(s.op, local);
