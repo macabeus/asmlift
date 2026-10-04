@@ -126,7 +126,7 @@ moves no asmlift row.
 _Favouring m2c._
 
 1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
-   bulk (2184 of 41022 entries; af 26 of 61860, sa3 9, kleod 7 of 894, marioparty3 7, snowboardkids2 5).
+   bulk (2179 of 41016 entries; af 26 of 61860, sa3 9, kleod 7 of 894, marioparty3 7, snowboardkids2 5).
    The three dtk projects carry none, having no DWARF to vendor it from (residuals 6 and 10).
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
@@ -171,7 +171,7 @@ _Favouring m2c._
    is the same shape (29,158 entries, names and sizes; its matching build carries no DWARF either),
    and so is Mario Party 4's (residual 10), so 126 of the 402 real rows are on that footing — and
    pikmin's rows are given no m2c context at all, so there the asymmetry runs the other way. The
-   other six projects carry the shape family (`declared`: pokeemerald 24,544, marioparty3 902,
+   other six projects carry the shape family (`declared`: pokeemerald 24,538, marioparty3 902,
    kleod 332, sa3 153, af 89, snowboardkids2 27).
 
 _Favouring asmlift._
