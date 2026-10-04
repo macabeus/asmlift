@@ -199,6 +199,56 @@ const BIG_CONSTANT = [
   '',
 ].join('\n');
 
+// `void (*gq1)(int); void looped(int x) { int (*p)(int) = (int (*)(int))gq1; int v = g(); while (x != 0)
+// x--; p(v); }`: g()'s result crosses the loop untouched in r0, and `g(); …; p();` compiles to the same
+// bytes.
+const LOOPED = [
+  'looped:',
+  '\tpush\t{r4, r5, lr}',
+  '\tadd\tr4, r0, #0',
+  '\tldr\tr0, .L7',
+  '\tldr\tr5, [r0]',
+  '\tbl\tg',
+  '\tcmp\tr4, #0',
+  '\tbeq\t.L4',
+  '.L5:',
+  '\tsub\tr4, r4, #0x1',
+  '\tcmp\tr4, #0',
+  '\tbne\t.L5',
+  '.L4:',
+  '\tbl\t_call_via_r5',
+  '\tpop\t{r4, r5}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '.L7:',
+  '\t.word\tgq1',
+  '',
+].join('\n');
+
+// `void (*gq1)(int); void joined(int x) { void (*p)(int) = gq1; int v; if (x) v = g(); else v = g2(x);
+// p(v); }`: each path leaves a different callee's result in r0.
+const JOINED = [
+  'joined:',
+  '\tpush\t{r4, lr}',
+  '\tldr\tr1, .L5',
+  '\tldr\tr4, [r1]',
+  '\tcmp\tr0, #0',
+  '\tbeq\t.L3',
+  '\tbl\tg',
+  '\tb\t.L4',
+  '.L3:',
+  '\tmov\tr0, #0x0',
+  '\tbl\tg2',
+  '.L4:',
+  '\tbl\t_call_via_r4',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '.L5:',
+  '\t.word\tgq1',
+  '',
+].join('\n');
+
 // `extern long long mkll(int); void w2(void (*g)(long long)) { g(mkll(3)); }`
 const PAIR_ARG = [
   'w2:',
@@ -349,6 +399,24 @@ describe('the `/setup-args` reading of a passed callee result, per site', () => 
     const c = narrowed('big', BIG_CONSTANT);
     expect(c?.source).toContain('== 250 << 2) ((s32 (*)())v0)();');
     expect(c?.discardsPassedResult).toBe(true);
+  });
+});
+
+describe("a callee's result that reaches a call through a register by a join", () => {
+  const passes = (sym: string, asm: string, prototypes?: Prototypes) =>
+    enumerateCandidates(sym, asm, ARMV4T_AGBCC, { prototypes }).map((c) => c.source.includes('v0)()'));
+
+  test('is passed in every reading where r0 carries it across a loop', () => {
+    expect(passes('looped', LOOPED)).not.toContain(true);
+  });
+
+  test('is passed in every reading where each path brings a different one', () => {
+    expect(passes('joined', JOINED)).not.toContain(true);
+  });
+
+  test('a callee declared void leaves nothing there to pass, across a loop too', () => {
+    const prototypes: Prototypes = { g: { params: [], returnsVoid: true } };
+    expect(passes('looped', LOOPED, prototypes)).toContain(true);
   });
 });
 

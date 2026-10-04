@@ -129,7 +129,7 @@ export interface SsaBuilder {
     op: Op,
     b: number,
     abi: { argRegs: string[]; returnReg: string },
-    passesCalleeResult?: boolean,
+    passesCalleeResult?: (result: Value) => boolean,
   ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -862,7 +862,7 @@ export function makeSsaBuilder(
       op: Op,
       b: number,
       abi: { argRegs: string[]; returnReg: string },
-      passesCalleeResult = false,
+      passesCalleeResult?: (result: Value) => boolean,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
@@ -1062,9 +1062,9 @@ export interface GuessedCallSite {
    *  nothing (`destroyed`), the block wrote it since (`written`), or neither, so the predecessors
    *  decide (`inherited`) */
   returnRegBefore: 'destroyed' | 'written' | 'inherited';
-  /** an earlier callee's result in the return register is an argument here, not a leftover: the
-   *  site's lowering says so ({@link SsaBuilder.recordGuessedCall}) */
-  passesCalleeResult: boolean;
+  /** which earlier callee's result in the return register is an argument here, not a leftover:
+   *  the site's lowering says so ({@link SsaBuilder.recordGuessedCall}). Absent where none is. */
+  passesCalleeResult?: (result: Value) => boolean;
 }
 
 export interface CallArgTrim {
@@ -1197,7 +1197,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // WHETHER AN EDGE PROVES `v` CONSTANT EVERYWHERE `b` IS REACHED: up the chain of blocks with one
   // predecessor, a conditional branch on `v == K` arriving by its true edge, or on `v != K` by its
   // false one. K is any value arithmetic builds out of literals: agbcc compares with 1000 as
-  // `mov r1,#250; lsl r1,#2; cmp r0,r1`.
+  // `mov r1,#250; lsl r1,#2; cmp r0,r1`. `v` holds every name the value goes by: compared past a join
+  // the trivial-phi pass has yet to fold, a callee's result is that join's parameter.
   let defs: Map<Value, Op> | undefined;
   const defOf = (v: Value): Op | undefined => {
     defs ??= new Map(blocks.flatMap((blk) => blk.ops.flatMap((op) => op.results.map((r) => [r, op] as const))));
@@ -1210,7 +1211,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       (d !== undefined && LITERAL_ARITHMETIC.has(d.opcode) && d.operands.length > 0 && d.operands.every(isLiteral))
     );
   };
-  const provenConstant = (v: Value, b: number): boolean => {
+  const provenConstant = (v: ReadonlySet<Value>, b: number): boolean => {
     for (let at = b, seen = new Set<number>(); !seen.has(at);) {
       seen.add(at);
       const ps = [...new Set(preds[at] ?? [])];
@@ -1224,14 +1225,69 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       if (
         equalEdge >= 0 &&
         arrives[equalEdge] &&
-        cmp!.operands.includes(v) &&
-        cmp!.operands.some((o) => o !== v && isLiteral(o))
+        cmp!.operands.some((o) => v.has(o)) &&
+        cmp!.operands.some((o) => !v.has(o) && isLiteral(o))
       ) {
         return true;
       }
       at = ps[0];
     }
     return false;
+  };
+  // THE RESULT A SITE PASSES ON is looked for through the joins the trivial-phi pass has yet to
+  // fold: this trim runs before it, so a result r0 carries untouched across a loop reaches the call
+  // as the loop header's parameter, not as the callee's own value. The site passes one where every
+  // path brings it an earlier callee's result it passes (`GuessedCallSite.passesCalleeResult`) —
+  // that value, or the join itself where the paths bring different ones (`v = x ? g() : h(); p(v);`).
+  let joinArgs: Map<Value, Value[]> | undefined;
+  const joinedInto = (v: Value): Value[] | undefined => {
+    if (joinArgs === undefined) {
+      joinArgs = new Map();
+      for (const blk of blocks) {
+        for (const op of blk.ops) {
+          for (const e of op.successors) {
+            // the entry block's parameters are the function's own, whatever a back edge brings
+            if (e.block === blocks[0]) {
+              continue;
+            }
+            e.block.params.forEach((param, i) => {
+              const into = joinArgs!.get(param);
+              if (into) {
+                into.push(e.args[i]);
+              } else {
+                joinArgs!.set(param, [e.args[i]]);
+              }
+            });
+          }
+        }
+      }
+    }
+    return joinArgs.get(v);
+  };
+  const passedResult = (s: GuessedCallSite): Value | undefined => {
+    const arg = callArgs(s.op)[0];
+    const passes = s.passesCalleeResult;
+    if (arg === undefined || passes === undefined) {
+      return undefined;
+    }
+    const results = new Set<Value>();
+    const seen = new Set<Value>();
+    for (const work = [arg]; work.length > 0;) {
+      const v = work.pop()!;
+      if (seen.has(v)) {
+        continue;
+      }
+      seen.add(v);
+      const into = joinedInto(v);
+      if (into !== undefined) {
+        work.push(...into);
+      } else if (calleeResults.has(v) && passes(v)) {
+        results.add(v);
+      } else {
+        return undefined;
+      }
+    }
+    return results.size === 0 ? undefined : results.size === 1 ? [...results][0] : arg;
   };
   const argcAt = (s: GuessedCallSite, fresh: Set<string>): number => {
     const destroyed =
@@ -1247,7 +1303,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       return runOfFresh(fresh, 0);
     }
     const op = s.op;
-    if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0]) || s.passesCalleeResult) {
+    if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0]) || passedResult(s) !== undefined) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
     return 0;
@@ -1270,8 +1326,9 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // that passed it there makes the compiler load the constant it proved (`mov r0,#0`), so an asm
     // with no such load passed nothing. Per site, because this reading cuts every site at once, and a
     // drop that one site needs would otherwise drop a value another site passes.
-    const passed = n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0]);
-    const dropsPassed = passed && provenConstant(callArgs(s.op)[0], s.block);
+    const result = n > 0 ? passedResult(s) : undefined;
+    const passed = result !== undefined;
+    const dropsPassed = passed && provenConstant(new Set([result, callArgs(s.op)[0]]), s.block);
     const localFresh =
       setsUpLater(s.freshBefore) || (passed && !dropsPassed) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);

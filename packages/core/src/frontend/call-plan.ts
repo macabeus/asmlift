@@ -603,7 +603,7 @@ export function callDeclarations(
     // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
     // the machine passes — unless `g` is declared void, and its result names nothing.
     if (widths === null) {
-      ssa.recordGuessedCall(call, bi, target, indirect !== undefined && args.length > 0 && !voidResults.has(args[0]));
+      ssa.recordGuessedCall(call, bi, target, indirect === undefined ? undefined : (r) => !voidResults.has(r));
     }
     if (p.declaredVoid) {
       voidResults.add(res);

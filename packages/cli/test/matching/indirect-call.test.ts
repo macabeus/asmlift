@@ -51,7 +51,7 @@ describe('a call through a function pointer recompiles to its own thunk', () => 
 
 describe("an earlier callee's result in r0 at a call through a register", () => {
   const ctx =
-    'extern void (*gq)(void);\nextern void (*gq1)(int);\nextern void (*gq0)();\nextern int g(void);\nextern int gw;\n';
+    'extern void (*gq)(void);\nextern void (*gq1)(int);\nextern void (*gq0)();\nextern int g(void);\nextern int g2(int);\nextern int gw;\n';
   /** The winner over the whole fan of `sym` out of `body` compiled with agbcc. */
   const winner = (sym: string, body: string) => {
     const asm = compileTargetAsm(ctx + body, FLAGS);
@@ -67,6 +67,7 @@ describe("an earlier callee's result in r0 at a call through a register", () => 
     ['y4', 'void y4(void) { void (*p)(void) = gq; if (g() != 7) return; p(); }'],
     ['x5', 'void x5(void) { void (*p)(void) = gq; while (g()) gw++; p(); }'],
     ['big', 'void big(void) { void (*p)(void) = gq; if (g() == 1000) p(); }'],
+    ['loopguard', 'void loopguard(int x) { void (*p)(void) = gq; int v = g(); while (x != 0) x--; if (v == 0) p(); }'],
   ])('is dropped where only the narrower reading matches (%s)', (sym, body) => {
     const w = winner(sym, body);
     expect(w.score.match).toBe(true);
@@ -84,6 +85,20 @@ describe("an earlier callee's result in r0 at a call through a register", () => 
     const w = winner(sym, body);
     expect(w.score.match).toBe(true);
     expect(w.source).toContain(')(g());');
+  });
+
+  // `g(); …; p();` compiles to the same bytes, and ties: the reading that passes it must not drop it.
+  test.each([
+    ['looped', 'void looped(int x) { int (*p)(int) = (int (*)(int))gq1; int v = g(); while (x != 0) x--; p(v); }'],
+    [
+      'loopret',
+      'int loopret(int x) { int (*p)(int) = (int (*)(int))gq1; int v = g(); while (x != 0) x--; return p(v); }',
+    ],
+    ['joined', 'void joined(int x) { void (*p)(int) = gq1; int v; if (x) v = g(); else v = g2(x); p(v); }'],
+  ])('is kept where it reaches the call by a join (%s)', (sym, body) => {
+    const w = winner(sym, body);
+    expect(w.score.match).toBe(true);
+    expect(w.source).toMatch(/v0\)\(v\d\)/);
   });
 
   test('is kept where the path to the call proves it only unequal to a constant', () => {
