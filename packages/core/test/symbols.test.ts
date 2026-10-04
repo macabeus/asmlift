@@ -608,6 +608,39 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(src).toContain('v1 = (u16 *)((u8 *)gPtr + 3546);');
   });
 
+  test('a runtime index added to the value is cast-then-add when the IR types the sum a pointer', () => {
+    // agbcc -O2 of `extern struct Big *gPtr; u8 b1(s32 x) { return *((u8 *)gPtr + x + 0x10); }`.
+    // Neither load is typed a pointer, but the sum is, and with `x` an integer `(u8 *)gPtr + x` is
+    // the asm's address whichever operand the source held as the pointer.
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tadd\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('((u8 *)gPtr + a0)[16]');
+  });
+
+  test('a global added to an address is the index, and is not cast', () => {
+    // agbcc -O2 of `extern u8 gIdx; extern u8 gArr[]; u8 ix(void) { return gArr[gIdx]; }`. The sum
+    // is a pointer, but `&gArr` is its base: `[(u8 *)gIdx]` is a pointer subscript agbcc rejects.
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr0, .L3+0x4\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n' +
+      '.L3:\n\t.word\tgArr\n\t.word\tgIdx\n';
+    const src = run('f', body);
+    expect(src).toContain('[gIdx]');
+    expect(src).not.toContain('(u8 *)gIdx');
+  });
+
+  test('added to a pointer temp, the value is added as an integer', () => {
+    // agbcc -O2 of `extern u8 *gA; extern u16 *gArr; void sink(u32); s32 pp(void) { u8 x = *gA;
+    // u16 *q = gArr; sink(q[1]); sink(q[2]); return *(u8 *)((u32)q + (u32)gA) + x; }`: a second
+    // `(u8 *)` would make the sum a pointer plus a pointer
+    const body =
+      '\tpush\t{r4, r5, r6, lr}\n\tldr\tr5, .L3\n\tldr\tr0, [r5]\n\tldrb\tr6, [r0]\n\tldr\tr0, .L3+0x4\n\tldr\tr4, [r0]\n' +
+      '\tldrh\tr0, [r4, #0x2]\n\tbl\tsink\n\tldrh\tr0, [r4, #0x4]\n\tbl\tsink\n\tldr\tr0, [r5]\n\tadd\tr4, r4, r0\n' +
+      '\tldrb\tr0, [r4]\n\tadd\tr0, r0, r6\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgA\n\t.word\tgArr\n';
+    const src = run('f', body);
+    expect(src).toContain('(u8 *)v1 + (u32)gA');
+    expect(src).not.toContain('(u8 *)gA)');
+  });
+
   test('stored back into its own cell, the sum is assigned through void *', () => {
     // agbcc -O2 of `extern struct S *gPtr; u8 st(void) { u8 r = *(u8 *)gPtr; gPtr = (struct S *)((u8
     // *)gPtr + 4); return r; }`
@@ -628,15 +661,6 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
       '\tpush\t{r4, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tldrb\tr0, [r0]\n\tbl\tsink\n\tldr\tr0, [r4]\n' +
       '\tneg\tr0, r0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n';
     expect(run('f', neg)).toContain('-(s32)gPtr');
-  });
-
-  test('KNOWN GAP: a runtime index is added to a value the IR never types a pointer', () => {
-    // `gPtr + a0` is a base plus an index, and raise/recover.ts propagatePointers does not decide
-    // which operand of two non-constant ones is the base. Nothing here says gPtr is the pointer,
-    // so the add is left as the asm has it, scaled in a tree that declares gPtr `struct S *`.
-    const body =
-      '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadds\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L1:\n\t.word\tgPtr\n';
-    expect(run('f', body)).toContain('((u8 *)(gPtr + a0))[16]');
   });
 });
 

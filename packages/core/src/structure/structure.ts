@@ -2362,6 +2362,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  typed a pointer is the value used as an address somewhere in the function, while its other
    *  loads may type an integer only because they reach a call argument or a compare. */
   const pointerLoadedGlobals = new Set<string>();
+  /** Every scalar GLOBAL (never a frame object) whose value the function loads. */
+  const loadedGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
     const widths = new Map<string, Set<number>>();
@@ -2425,8 +2427,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     }
     for (const [sym, ptr] of loadsPointer) {
-      if (ptr && scalarGlobals.has(sym)) {
-        pointerLoadedGlobals.add(sym);
+      if (scalarGlobals.has(sym)) {
+        loadedGlobals.add(sym);
+        if (ptr) {
+          pointerLoadedGlobals.add(sym);
+        }
       }
     }
     // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
@@ -2494,6 +2499,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const shape = symCtx?.info(x.name)?.shape;
     return shape === 'pointer' || (shape === undefined && pointerLoadedGlobals.has(x.name));
   };
+
+  /** A global's VALUE that no declaration this pass can read types, whatever the IR loaded it as. */
+  const isUndeclaredGlobalValue = (x: Expr): boolean =>
+    x.k === 'var' && loadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
@@ -4054,12 +4063,32 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const intifyPtrValue = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
-        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
-        const bothPtr = isPtrValue(l) && isPtrValue(r);
-        if (isPtrValue(l)) {
-          l = bytePtr(l);
+        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer. The
+        // other side is a pointer when it is a pointer value too or when it already renders one
+        // (a pointer temp, the walk's `(u8 *)v1`), and then the global's value is that integer.
+        //
+        // A global's value no declaration types, added to an integer, is a pointer value too
+        // when the IR types the SUM a pointer: `(u8 *)g + x` is the asm's address under every
+        // declaration of `g` once `x` renders an integer, whichever operand the source held as
+        // the pointer. An integer side holding an address (`(u32)&gArr + gIdx`) says the address
+        // is the base and the global its index, so that sum stays as it is.
+        const mentionsAddr = (x: Expr): boolean => x.k === 'addr' || exprChildren(x).some(mentionsAddr);
+        const intSide = (x: Expr): boolean => ctype(x)?.kind === 'int' && !mentionsAddr(x);
+        const sumBase =
+          d.results[0]?.type.kind === 'ptr' && !isPtrValue(l) && !isPtrValue(r)
+            ? isUndeclaredGlobalValue(l) && intSide(r)
+              ? l
+              : op === '+' && isUndeclaredGlobalValue(r) && intSide(l)
+                ? r
+                : undefined
+            : undefined;
+        const ptrValue = (x: Expr): boolean => isPtrValue(x) || x === sumBase;
+        const rendersPtr = (x: Expr): boolean => ptrValue(x) || ctype(x)?.kind === 'ptr';
+        const bothPtr = rendersPtr(l) && rendersPtr(r);
+        if (ptrValue(l)) {
+          l = op === '+' && bothPtr && !ptrValue(r) ? intifyPtrValue(l) : bytePtr(l);
         }
-        if (isPtrValue(r)) {
+        if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
         }
       } else if (op !== '&&' && op !== '||') {
