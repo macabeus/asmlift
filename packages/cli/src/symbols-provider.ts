@@ -28,7 +28,7 @@ import { addressCastMacrosFrom } from '@asmlift/core/macros';
 import type { SymbolInfo, SymbolMap, SymbolStructField } from '@asmlift/core/symbols';
 import { readFileSync } from 'node:fs';
 
-import { assertPlaced, globalSymbolKeys, placeModuleSections, symbolKey } from './module-elf';
+import { assertPlaced, globalSymbolKeys, placeModuleSections, symbolKey, unbackedSymbolKeys } from './module-elf';
 
 /** `variableShape` result — declared structurally so this package does not depend on
  *  @gba-kit/debug-info's exported types. The cv-qualifier flags are OPTIONAL at this boundary
@@ -304,6 +304,7 @@ async function symbolMapFromElf(
   // EI_DATA (ELF header byte 5): 1 = little-endian. Gates the bitfield facts — see layoutOf.
   const littleEndian = bytes[5] === 1;
   const di = DebugInfo.fromElf(bytes);
+  const unbacked = unbackedSymbolKeys(bytes);
   const types = di.types as unknown as ShapeCapable;
   const shapeOf =
     di.hasTypeInfo && typeof types.variableShape === 'function'
@@ -327,6 +328,9 @@ async function symbolMapFromElf(
     }
     if (keep && !keep(s.name, s.address)) {
       continue;
+    }
+    if (unbacked.has(symbolKey(s.name, s.address))) {
+      continue; // a size-report object no instruction addresses (unbackedSymbolKeys)
     }
     const kind: SymbolInfo['kind'] = s.type === STT_FUNC ? 'code' : 'data';
     const info: SymbolInfo = { name: s.name, kind };

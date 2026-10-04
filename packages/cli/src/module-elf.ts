@@ -10,8 +10,9 @@
 // let the ordinary reader run unchanged.
 //
 // This file works on bytes rather than through @gba-kit/debug-info because neither fact it needs is
-// in that package's surface: a symbol's SECTION (which base its value belongs to) and its BINDING
-// (which of a base ELF's symbols a module may be unioned with).
+// in that package's surface: a symbol's SECTION (which base its value belongs to, and whether that
+// section holds anything the program can read) and its BINDING (which of a base ELF's symbols a
+// module may be unioned with).
 import { basename, dirname, extname, join } from 'node:path';
 
 const ELF_MAGIC = 0x7f454c46;
@@ -19,7 +20,9 @@ const ELFCLASS32 = 1;
 const ET_REL = 1;
 const SHT_SYMTAB = 2;
 const SHT_RELA = 4;
+const SHT_NOBITS = 8;
 const SHT_REL = 9;
+const SHF_WRITE = 0x1;
 const SHF_ALLOC = 0x2;
 const STB_GLOBAL = 1;
 const STT_FUNC = 2;
@@ -323,6 +326,48 @@ export function globalSymbolKeys(bytes: Uint8Array): Set<string> {
       if (info >> 4 !== STB_GLOBAL) {
         continue;
       }
+      const value = u32(at + 4);
+      const nameAt = strings + u32(at);
+      const end = buf.indexOf(0, nameAt);
+      const name = buf.toString('latin1', nameAt, end === -1 ? buf.length : end);
+      if (name !== '') {
+        keys.add(symbolKey(name, (info & 0xf) === STT_FUNC ? value & ~1 : value));
+      }
+    }
+  }
+  return keys;
+}
+
+/** The {@link symbolKey}s of the symbols an ELF defines in an allocated section that holds no bytes
+ *  and that the program cannot write (`SHT_NOBITS` without `SHF_WRITE`). Nothing the program reads
+ *  can be there: the image supplies no bytes and no store may put any. A compiler emits `NOBITS`
+ *  only for writable zero-initialised data, so such a section comes from a linker script that
+ *  declares `(NOLOAD)` over `const` objects to measure them. pokeemerald's `memory.txt` does that
+ *  for its save-sector budgets: six `.pseudo.*` regions all at address 0, whose `_hallOfFame` and
+ *  `_saveBlock1` are sized, typed objects that no instruction addresses. In a symbol map they are
+ *  silent wrong answers, because a small constant then reads as an address inside one of them. */
+export function unbackedSymbolKeys(bytes: Uint8Array): Set<string> {
+  const elf = readElf32(bytes);
+  const keys = new Set<string>();
+  if (!elf) {
+    return keys;
+  }
+  const { buf, littleEndian } = elf;
+  const u32 = (o: number) => (littleEndian ? buf.readUInt32LE(o) : buf.readUInt32BE(o));
+  const u16 = (o: number) => (littleEndian ? buf.readUInt16LE(o) : buf.readUInt16BE(o));
+  const unbacked = (s: Section | undefined): boolean =>
+    s !== undefined && s.type === SHT_NOBITS && (s.flags & SHF_ALLOC) !== 0 && (s.flags & SHF_WRITE) === 0;
+  for (const s of elf.sections) {
+    if (s.type !== SHT_SYMTAB) {
+      continue;
+    }
+    const strings = elf.sections[s.link]?.offset ?? 0;
+    for (let at = s.offset; at + SYMENT <= s.offset + s.size; at += SYMENT) {
+      const shndx = u16(at + 14);
+      if (shndx === SHN_UNDEF || shndx >= SHN_LORESERVE || !unbacked(elf.sections[shndx])) {
+        continue;
+      }
+      const info = buf[at + 12];
       const value = u32(at + 4);
       const nameAt = strings + u32(at);
       const end = buf.indexOf(0, nameAt);
