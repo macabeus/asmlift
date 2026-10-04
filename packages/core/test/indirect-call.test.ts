@@ -2,7 +2,8 @@
 // thunk that is `bx <reg>` (gcc/thumb.md:997-1021, libgcc/lib1thumb.asm:595-633), so the callee
 // is the VALUE in <reg> and the thunk is no function the source names. Toolchain-free: the asm
 // below is agbcc's own output at the canonical flags, compiled from the reference C each test
-// names; packages/cli/test/matching/indirect-call.test.ts recompiles the lifts.
+// names, except where a test calls its asm hand-written; packages/cli/test/matching/indirect-call.test.ts
+// recompiles the lifts.
 import { describe, expect, test } from 'vitest';
 
 import { callArgs, calleeName, calleeValue, mkOp, mkValue, truncateCallArgs } from '../src/ir/core';
@@ -96,6 +97,20 @@ const PASSTHRU = [
   '',
 ].join('\n');
 
+// `extern long long mkll(int); void w2(void (*g)(long long)) { g(mkll(3)); }`
+const PAIR_ARG = [
+  'w2:',
+  '\tpush\t{r4, lr}',
+  '\tadd\tr4, r0, #0',
+  '\tmov\tr0, #0x3',
+  '\tbl\tmkll',
+  '\tbl\t_call_via_r4',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '',
+].join('\n');
+
 describe('a call names its callee or calls a value, never both', () => {
   const fnOf = (attrs: Record<string, string | boolean>, operands = 1) => {
     const vs = Array.from({ length: operands }, () => mkValue(T.unk(32)));
@@ -165,10 +180,48 @@ describe('a call through argument register rN takes r0..r(N-1)', () => {
   });
 
   test('one a call destroyed names no value, and the lift declines', () => {
+    // Hand-written: agbcc puts a pointer computed after a call in r0 (`h(); getP()();`), so no
+    // source reaches this shape, and the refusal is pinned for asm it did not write.
     const asm =
       'f:\n\tpush\t{lr}\n\tbl\th\n\tldr\tr2, .L3\n\tldr\tr2, [r2]\n\tbl\t_call_via_r2\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\ttbl\n';
     expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: PROTOS })).toThrow(
       /r[01] is read on a path where a call has destroyed it/,
     );
+  });
+});
+
+describe('`blx rN` is a call through rN too', () => {
+  // Hand-written: agbcc never emits `blx`, and the playground takes asm it did not write.
+  const through = (call: string) =>
+    `f:\n\tpush\t{lr}\n\tldr\tr3, .L3\n\tldr\tr3, [r3]\n\t${call}\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\tgCb\n`;
+
+  test('it lifts as the thunk through the same register does', () => {
+    const viaThunk = decompile('f', through('bl\t_call_via_r3'), ARMV4T_AGBCC).source;
+    expect(decompile('f', through('blx\tr3'), ARMV4T_AGBCC).source).toBe(viaThunk);
+    expect(viaThunk).toBe('void f(s32 a0, s32 a1, s32 a2) {\n    ((s32 (*)())gCb)(a0, a1, a2);\n}\n');
+  });
+
+  test('one through sp or lr declines', () => {
+    for (const r of ['sp', 'lr']) {
+      expect(() => decompile('f', `f:\n\tpush\t{lr}\n\tblx\t${r}\n\tpop\t{r0}\n\tbx\tr0\n`, ARMV4T_AGBCC)).toThrow(
+        `'blx ${r}' calls through a register that holds no function's address`,
+      );
+    }
+  });
+});
+
+describe('a pair argument to a call through a register', () => {
+  test('declines without naming a prototype, which no call through a register is keyed by', () => {
+    const prototypes: Prototypes = { mkll: { params: ['s32'], returns: 'long long' } };
+    const thrown = (() => {
+      try {
+        decompile('w2', PAIR_ARG, ARMV4T_AGBCC, { prototypes });
+      } catch (e) {
+        return (e as Error).message;
+      }
+      return '';
+    })();
+    expect(thrown).toContain('argument 1 of the call through r4 is the low half of a 64-bit value');
+    expect(thrown).not.toContain('prototype');
   });
 });

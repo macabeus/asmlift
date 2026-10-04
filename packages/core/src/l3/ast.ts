@@ -65,8 +65,9 @@ export type Expr =
   // `dest = fn(rest)`, so such a call stands alone.
   //
   // `fn` is the callee's NAME, or for an indirect call the EXPRESSION whose value is the address
-  // called (ir/core.ts `calleeValue`) — a child of the node like its arguments, evaluated before
-  // them in `exprChildren` order.
+  // called (ir/core.ts `calleeValue`) — a child of the node like its arguments, listed first in
+  // `exprChildren`. That is no evaluation order: C leaves it unspecified, and agbcc loads the callee
+  // after the arguments.
   | { k: 'call'; fn: string | Expr; args: Expr[]; wide64?: true; sret?: IrType }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`

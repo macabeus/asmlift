@@ -2774,16 +2774,21 @@ function outgoingBlock(widths: readonly number[], target: TargetDescription): nu
     : null;
 }
 
-/** The register a `bl` to one of the compiler's call thunks calls through (`callThunks`), or null
- *  for a call that names its callee. */
-function thunkRegister(ins: Instr, target: TargetDescription): string | null {
+/** The register a call goes through, or null for one that names its callee: `blx rN` calls the
+ *  address in rN, and so does a `bl` to one of the compiler's call thunks (`callThunks`). Undefined
+ *  for a call through a register that holds no function's address: `sp`, `lr`, `pc`, or a thunk the
+ *  target does not list. */
+function calleeRegister(ins: Instr, target: TargetDescription): string | null | undefined {
+  const [op] = ins.ops;
+  if (ins.mnemonic === 'blx' && op !== undefined && REG_SPELLINGS.test(op)) {
+    return /^r[0-7]$/.test(op) || HIGH_REGS.has(op) ? op : undefined;
+  }
   const thunks = target.compilerBehaviors.callThunks;
-  const callee = ins.mnemonic === 'bl' ? ins.ops[0] : undefined;
-  if (thunks === undefined || callee === undefined || !callee.startsWith(thunks.prefix)) {
+  if (ins.mnemonic !== 'bl' || thunks === undefined || op === undefined || !op.startsWith(thunks.prefix)) {
     return null;
   }
-  const r = callee.slice(thunks.prefix.length);
-  return thunks.regs.includes(r) ? r : null;
+  const r = op.slice(thunks.prefix.length);
+  return thunks.regs.includes(r) ? r : undefined;
 }
 
 function measureThumbFrame({
@@ -2810,9 +2815,9 @@ function measureThumbFrame({
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
     }
-    // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3` branches
-    // THROUGH the frame base, it does not pass it. So does a call thunk's register.
-    const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : thunkRegister(ins, target);
+    // A call through a register is no argument of it: `mov r3, sp; blx r3` branches THROUGH the
+    // frame base, it does not pass it.
+    const targetReg = calleeRegister(ins, target);
     return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
   });
 
@@ -3052,7 +3057,7 @@ function measureThumbFrame({
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
-          const declared = thunkRegister(ins, target) === null ? calls.declaredCall(callee) : null;
+          const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
           return [
             {
               kind: 'call',
@@ -4857,21 +4862,24 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to '${callee}', which this asm defines as a data label — not modelled`,
     );
   }
-  // A CALL THUNK IS A CALL THROUGH ITS REGISTER (`callThunks`), which holds the address and no
-  // argument. One whose register cannot hold an address is not a call a source wrote.
-  const through = thunkRegister(ins, target);
-  const thunks = target.compilerBehaviors.callThunks;
-  if (through === null && thunks !== undefined && callee?.startsWith(thunks.prefix)) {
+  // A CALL THROUGH A REGISTER calls the address in it, which is no argument. One through a register
+  // that cannot hold an address is not a call a source wrote.
+  const through = calleeRegister(ins, target);
+  if (through === undefined) {
     throw new FrontendUnsupportedError(
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' calls through a register that holds no function's address — not modelled`,
     );
   }
-  // AND ONE THROUGH AN ARGUMENT REGISTER rN TAKES r0..r(N-1). agbcc computes the pointer last and
-  // allocates it the lowest register the arguments left free (`*call_indirect`'s "l*r", thumb.md:999);
-  // compiled at the canonical flags, the register is the argument count for 0, 1 and 2 arguments,
-  // so the arity decides the thunk and the bytes. Passing every register below it is what the
-  // machine passes whatever the source's arity, and an untouched one is this function's own
-  // argument passed on; one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`).
+  // AND ONE THROUGH ARGUMENT REGISTER rN PASSES r0..r(N-1): the arguments fill the registers from
+  // r0 up and the address cannot share one, so N bounds the arity, and reading every register below
+  // it passes what the machine passes. An untouched one is this function's own argument passed on;
+  // one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`).
+  //
+  // KNOWN GAP: N is only a bound. agbcc's address lands above r(argc) when an argument register
+  // still holds a live temp, and a pointer that arrived as an argument stays where it arrived
+  // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
+  // the registers in between read as arguments the source never passed. Only the pointer's
+  // declared type decides the arity, and nothing reads one.
   const argc = through === null ? -1 : target.argRegs.indexOf(through);
   calls.lower({
     callee: through === null ? callee : { address: readData(through, bi), reg: through, ...(argc < 0 ? {} : { argc }) },

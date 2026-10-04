@@ -128,14 +128,15 @@ export interface CallSite {
   };
 }
 
-/** A call through a register. It names no callee, so no declaration plans it: the site states its
+/** A call through a register. It names no callee, so no declaration plans it: the site bounds its
  *  arity, or it is guessed, and an argument register holding the address is no argument, so
  *  neither is any after it. */
 export interface IndirectCallee {
   readonly address: Value;
   /** the register the address is in */
   readonly reg: string;
-  /** the argument words the site states, each read like a declared one */
+  /** the argument words the site reads, each like a declared one: a bound the asm sets, which may
+   *  count registers the source passed nothing in */
   readonly argc?: number;
 }
 
@@ -447,10 +448,10 @@ export function callDeclarations(
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
     const indirect = typeof site.callee === 'string' ? undefined : site.callee;
-    const callee = typeof site.callee === 'string' ? site.callee : 'a function pointer';
+    const callee = typeof site.callee === 'string' ? site.callee : undefined;
     const p: CallPlan =
       indirect === undefined
-        ? plan(callee)
+        ? plan(callee!)
         : {
             widths: indirect.argc === undefined ? null : Array.from({ length: indirect.argc }, () => 32),
             doubles: new Set(),
@@ -519,6 +520,9 @@ export function callDeclarations(
     // registers rather than widths. Both leave `widths` null with a `--proto` on the command
     // line, and blaming an absent prototype would be false about its own input.
     if (widths === null && pairs !== undefined) {
+      // no prototype keys a call through a register, so the hint names one only for a named callee
+      const theCall = indirect === undefined ? `the call to '${callee}'` : `the call through ${indirect.reg}`;
+      const itsParams = indirect === undefined ? `'${callee}'s parameters` : "the function pointer's parameters";
       for (const [j, v] of args.entries()) {
         const half = pairs.halfOf.get(v);
         // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
@@ -528,23 +532,26 @@ export function callDeclarations(
         const producer = half && pairCallee.get(half.whole);
         if (half && producer && isFloatHelperName(producer)) {
           fail(
-            `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
+            `cannot lift '${name}': argument ${j + 1} of ${theCall} is the ` +
               `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
-              `returned, and nothing states how wide '${callee}'s parameters are. A double is ` +
+              `returned, and nothing states how wide ${itsParams} are. A double is ` +
               "modelled into the runtime's arithmetic helpers, the return and a parameter a prototype " +
-              'declares `double`, so a runtime compare or conversion declines; a callee that takes a ' +
-              'double, or fewer arguments than its registers suggest, lifts once a prototype states ' +
-              `them (\`{"${callee}": {"params": [...]}}\`)`,
+              'declares `double`, so a runtime compare or conversion declines' +
+              (indirect === undefined
+                ? '; a callee that takes a double, or fewer arguments than its registers suggest, lifts ' +
+                  `once a prototype states them (\`{"${callee}": {"params": [...]}}\`)`
+                : ''),
           );
         }
         if (half) {
           fail(
-            `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
+            `cannot lift '${name}': argument ${j + 1} of ${theCall} is the ` +
               `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and nothing states ` +
-              `how wide '${callee}'s parameters are, so a pair cannot be told from two ` +
-              `ordinary arguments. A typed prototype states it (\`{"${callee}": {"params": ` +
-              '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, ' +
-              'does not',
+              `how wide ${itsParams} are, so a pair cannot be told from two ordinary arguments` +
+              (indirect === undefined
+                ? `. A typed prototype states it (\`{"${callee}": {"params": ` +
+                  '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, does not'
+                : ' — not modelled'),
           );
         }
       }
@@ -560,7 +567,7 @@ export function callDeclarations(
       operands: indirect === undefined ? args : [...args, indirect.address],
       results: [res],
       attrs: {
-        ...(indirect === undefined ? { target: callee } : { indirect: true }),
+        ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
         ...(doubles === undefined ? {} : { doubles }),
       },
@@ -578,7 +585,9 @@ export function callDeclarations(
       // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
       site.write(target.returnReg, pairs!.project(res, 'lo'));
       site.write(target.argRegs[1], pairs!.project(res, 'hi'));
-      pairCallee.set(res, callee);
+      if (callee !== undefined) {
+        pairCallee.set(res, callee);
+      }
     } else if (returns.kind === 'word') {
       site.write(target.returnReg, res); // the callee defines the return register …
     }
