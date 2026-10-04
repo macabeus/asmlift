@@ -283,7 +283,8 @@ hand-roll a poll: `docs/bench-cost.md` records what happens when waiter shells m
    first. Handle each one to the standard above **before reading the next** — a pass that reads six
    messages and then acts on four has no way to know which two it dropped.
 2. **Advance the merge queue** (Phase 3).
-3. **Fill a lane**, if the open-PR rule allows one. Choose from the pending list on two counts: least
+3. **Fill a lane**, if the open-PR rule allows one. A fix lane for a held PR (Phase 3) goes first.
+   Otherwise choose from the pending list on two counts: least
    expected file-surface overlap with what the running rounds have claimed, and least likely to
    want the bench at the same moment. If every pending target collides badly, **hold** — write the
    target's row in `LANES.md` with `state: held` and the reason. A held target is still pending; it
@@ -325,6 +326,39 @@ open with nobody sequencing them. One row per open PR: number, branch, position,
 condition that releases it, written as something a reader can run.** "Waiting on the 64-bit PR" is
 a note; "release when `git grep <symbol> packages/core/src` hits on `main`" is a condition the
 blocked round can check without asking, and that you cannot forget the meaning of.
+
+### A slot that carries a silent wrong is held, and its fix becomes a lane
+
+A merge slot that lists an open silent wrong — a CONFIRMED-OPEN finding of severity `silent-wrong`,
+or a decline→wrong, on a bench row or on a function outside the bench — is **held, and it is not a
+question for the user.** Merging it trades a loud failure for a silent wrong answer, which
+[`/match-function`](./match-function.md) never does. The slot's reply file is `answered: held`, and
+the PR's `MERGE-QUEUE.md` row is held until the fix merges.
+
+**The fix is a lane of its own, opened in the same pass, before any pending target.** It is a
+`match-round` run like any other, branched from `origin/main` and never from the held PR:
+
+- its `target` is a function that shows the defect without the held PR — the slot usually names one
+  (a function `main` already gets wrong); measured outside the harness when it is not a row, which
+  [`/match-function`](./match-function.md) Phase 0 provides for;
+- its `note` carries the finding **verbatim**, the held PR's number, and the reproduction the held
+  PR newly reaches, so the fix is measured on both;
+- the held PR's row gets the release condition `gh pr view <fix pr> --json state -q .state` prints
+  `MERGED`, and so does every held target whose own condition names the held PR.
+
+The fix lane counts against the running-round cap; the held PR does not count against the open-PR
+cap. When the fix lane cannot fix the defect — its brief refuted with no fix, a measured null, or a
+dead round — the hold goes to the user as an escalation, in the round's words.
+
+**When the fix merges, the held work resumes where it stopped.** The held PR returns to its old
+position in the queue. Its merge agent rebases it onto the fix, re-gates, regenerates when
+`scripts/check-artifact-provenance.sh` says the artifact is owed, and re-runs the slot's
+decline→wrong reproduction, which must now give correct C or decline. If it still gives wrong C,
+the PR stays held and goes to the user. Every held target released by the same merge is filled in
+the order it was held.
+
+A silent wrong the PR's own commits introduce is not this case: that round's work is not finished,
+and its branch goes back to a lane of its own instead of to a fix lane.
 
 **Delegate each merge to a fresh subagent.** Give it the PR number, `MERGE-QUEUE.md`, and the list
 of other open branches; it returns a verdict and merges on green. This is not ceremony: the agent
