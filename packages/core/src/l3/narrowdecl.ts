@@ -36,10 +36,20 @@
 //
 // Two STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the width
 // of a declaration is orthogonal to every other respell variation, and the row that needs it needs
-// it on top of `/offmember`. Two, not one, because which locals the source declared narrow is per
-// local: a function holding a local of each kind may need either one narrowed alone. Each rewrites
-// every local it admits; in the all-together candidate `/narrow-decl` runs first, so a cast that is
-// both one local's write and another's read is taken as the write.
+// it on top of `/offmember`. Two, not one, because a function holding a local narrowed at its write
+// and a local narrowed at its reads may need either one narrowed alone. Each rewrites every local it
+// admits; in the all-together candidate `/narrow-decl` runs first, so a cast that is both one
+// local's write and another's read is taken as the write.
+//
+// KNOWN GAP, and it is the price of deciding at L3 rather than where the value is named: which
+// spelling a call's result had is decided per VALUE, by whether its extension lands right after
+// its `bl` or after whatever runs before the read, and this pass sees neither position. So two
+// read-side locals the source declared differently (`s32 y` cast at its read beside `u8 m`) have
+// no candidate, since each entry narrows both or neither. Nor has `s32 v = (u8)f()`, which compiles
+// like neither `u8 v` nor a cast at the read: the cast is never at the write, because
+// structure/analysis.ts names the call and inlines its extension into the read. Both are a naming
+// decision there, made per local by construction; reaching the first here would take 2^k
+// candidates over k read-side locals.
 //
 // REFUSED, each because the two spellings would stop computing the same value or would not build:
 //   • a local that is not `s32`. A `u32` read is unsigned, and narrowing it would turn its
