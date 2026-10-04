@@ -433,12 +433,15 @@ export function makeSsaBuilder(
     // separately declared SCALARS; intra-aggregate offsets are fixed by the aggregate's layout at
     // expand time.
     //
-    // A FORM OF THAT RECOVERY EXISTS, and what keeps the condition unmet is a guard in another
-    // file. The frame-object audit declares an untyped frame object as `u8 name[N]` from
-    // the reservation (`notTheWholeArea`, frontend/frame-objects.ts), but only where the slot model keys
-    // NOTHING in the reserved area — so no reload spill can share a frame with one of those
-    // arrays and nothing here is ever asked to order the two. Widening that arm to a frame
-    // carrying slots is what meets the condition, and it has to bring `l3/slotorder.ts` with it.
+    // A FORM OF THAT RECOVERY EXISTS, and what keeps the condition unmet is two guards, this
+    // function's and one in another file. The frame-object audit declares an untyped frame object
+    // as `u8 name[N]` over the DECLARED range (`notTheWholeArea`, frontend/frame-objects.ts) and
+    // refuses it where the slot model keys any byte of that range (`overSlot`, refused by
+    // `failIfSlotKeysIt`). The slots it does share a frame with lie below `declaredLocals` — the
+    // licensed outgoing argument words — and the `declaredLocals` test above stamps none of them.
+    // So no slot home sits beside one of those arrays and nothing here is ever asked to order the
+    // two. Letting a keyed slot into the declared range beside the array is what meets the
+    // condition, and it has to bring `l3/slotorder.ts` with it.
     //
     // UNION, not a choice (ir/core.ts `SlotHomes`): whether the earlier declaration rank is the
     // lower or the higher offset is a per-COMPILER fact, and this builder is handed a name, a

@@ -220,11 +220,16 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // all — the second access that would reach it is a `[+4]` the `scalar()` guard refuses — so no
   // widening of the frame licence admits a shape this rule would then have to judge.
   //
-  // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
-  // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
-  // walk then asks about, and no input makes the rule fire on that path. What bounds THAT path
-  // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
-  // that reaches memory rather than a callee, and the callee's declared return.
+  // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole DECLARED area by
+  // construction — `notTheWholeArea` accepts nothing else — and every word below the declared
+  // area is the licensed outgoing block, whose argument words the slot model keys. The object and
+  // those slots together account for every word this walk asks about, so no input makes the rule
+  // fire on that path — and that rests on the slot term above as much as on the object: drop the
+  // slots from `accountedWords` and an untyped object over four staged argument words declines
+  // here on `[sp,#0]`. What bounds THAT path is `notTheWholeArea`'s own live clauses — a second
+  // object, an object that does not start at the bottom of the declared area, an address that
+  // reaches memory rather than a callee, and the callee's declared return — and `overSlot`, which
+  // refuses a slot keyed inside the declared area.
   {
     id: 'reaches-an-unaccounted-word',
     why: 'an escape reaching a frame word no declaration covers reaches past what the recompile allocates',
@@ -1674,7 +1679,7 @@ function objectShapes({
     if (byIndex.length > 0) {
       model.shapeRefused(
         `a runtime index into the object at [sp,#${off}), which an access of its own types as one ` +
-          'scalar — only the untyped storage of the whole reserved area is indexed',
+          'scalar — only the untyped storage of the whole declared area is indexed',
       );
     }
     const widths = new Set(acc.map((a) => a.width));

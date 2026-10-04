@@ -570,6 +570,17 @@ describe('the audit judges each frame object on its own bytes', () => {
         );
       });
 
+      test('a runtime index into an object a scalar access types names the declared area', () => {
+        const indexed = copy(
+          `${STAGED}\tadd\tr4, sp, #0x10\n\tmov\tr0, r4\n\tmov\tr1, #0x0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x0\n` +
+            '\tbl\tg\n\tldrb\tr0, [r4]\n\tldrb\tr1, [r4, r0]\n\tmov\tr0, r1\n\tbl\th\n',
+          '0x18',
+        );
+        expect(() => liftWith(indexed)).toThrow(
+          /a runtime index into the object at \[sp,#16\), which an access of its own types as one scalar — only the untyped storage of the whole declared area is indexed/,
+        );
+      });
+
       test('a second object above the block means the reservation is not this one`s', () => {
         expect(() => liftWith(fill())).not.toThrow();
         const two = fill().replace('\tadd\tr0, sp, #0x10\n\tbl\th\n', '\tadd\tr0, sp, #0x14\n\tbl\th\n');
