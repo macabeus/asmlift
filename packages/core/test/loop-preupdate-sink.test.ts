@@ -202,7 +202,7 @@ test('the same edit under a fused guard sinks too, and the guard edge supplies t
   // The seed is the GUARD edge's own value (`&head`), not the loop's expression: a zero-trip run
   // never computed `v0 + a0`. Only the in-loop copy carries the arithmetic.
   expect(emit(TRAILING_PTR_EXPR)).toBe(
-    emit(TRAILING_PTR).replace('        v1 = v0;\n', '        v1 = v0 + (s32)a0;\n'),
+    emit(TRAILING_PTR).replace('        v1 = v0;\n', '        v1 = (s32 *)((u8 *)v0 + (s32)a0);\n'),
   );
 });
 

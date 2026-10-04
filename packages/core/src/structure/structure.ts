@@ -3988,10 +3988,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // by 4 twice. Both sides go byte pointers, `(u8 *)v0 - (u8 *)a0`, the byte count in every
       // world — unless both already are.
       //
-      // KNOWN GAP: `ptr + ptr` becomes `l + (s32)r` in the intify rules below, which C scales. It
-      // wants the same cast-then-add, but which side is the base, and so which type the sum is cast
-      // back to, is not knowable from the op.
-      //
       // The inexact-CONSTANT branch above casts its base and does not cast the sum back: a deref
       // supplies its own cast, and a temp of another pointer type takes the sum through
       // intoDeclaredTemp's cast.
@@ -4033,7 +4029,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         l = intify(l);
         r = intify(r);
       } else if (op === '+' && ctype(l)?.kind === 'ptr' && ctype(r)?.kind === 'ptr') {
-        r = intify(r); // ptr + ptr is not C; ptr + (s32)ptr is, with the same bytes
+        // ptr + ptr is not C; ptr + (s32)ptr is, and C scales it by the left pointee. So the left
+        // side is the base, and the sum goes back to its type as the walk's does.
+        r = intify(r);
+        if (!restoreTo) {
+          restoreTo = walkVar(l);
+          l = restoreTo ? bytePtr(l) : l;
+        }
       } else if (op === '-' && ctype(l)?.kind !== 'ptr' && ctype(r)?.kind === 'ptr') {
         r = intify(r); // int - ptr is not C
       }

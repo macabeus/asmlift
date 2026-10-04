@@ -586,6 +586,19 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(src).not.toContain('(u8 *)gIdx');
   });
 
+  test('a pointer plus a byte sum casts the left pointer, not the sum alone', () => {
+    // agbcc -O2 of `extern struct Big *gBig; extern s32 *gArr; u32 e2(s32 x) { s32 *q = gArr;
+    // sink(q[1]); sink(q[2]); sink(gBig->pad[3]); return *(u8 *)((u32)q + ((u32)gBig + x)); }`.
+    // `v0 + (s32)((u8 *)gBig + a0)` scales the sum by sizeof(s32).
+    const body =
+      '\tpush\t{r4, r5, r6, lr}\n\tadd\tr6, r0, #0\n\tldr\tr0, .L6\n\tldr\tr4, [r0]\n\tldr\tr0, [r4, #0x4]\n\tbl\tsink\n' +
+      '\tldr\tr0, [r4, #0x8]\n\tbl\tsink\n\tldr\tr5, .L6+0x4\n\tldr\tr0, [r5]\n\tldrb\tr0, [r0, #0x3]\n\tbl\tsink\n' +
+      '\tldr\tr0, [r5]\n\tadd\tr0, r0, r6\n\tadd\tr4, r4, r0\n\tldrb\tr0, [r4]\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L6:\n\t.word\tgArr\n\t.word\tgBig\n';
+    const src = run('f', body);
+    expect(src).toContain('(u8 *)v0 + (s32)((u8 *)gBig + a0)');
+  });
+
   test('assigned to a temp, the value is cast to the temp type', () => {
     // v0 = gPtr held across a call. The project's `struct S *` is not `u8 *`, and assigning one
     // to the other is the incompatible-pointer warning a -Werror build stops on.
