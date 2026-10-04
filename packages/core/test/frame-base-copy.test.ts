@@ -460,7 +460,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
     test('a slot in the reserved area is not this object`s, and refuses', () => {
       expect(() => lift(copy(`\tstr\tr0, [sp, #0xc]\n${FILL}\tldr\tr0, [sp, #0xc]\n`))).toThrow(
-        /the slot model keys \[sp,#12\], so part of the reserved area is not this object/,
+        /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#12\] — one byte, two models/,
       );
     });
 
@@ -566,7 +566,7 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => liftWith(fill())).not.toThrow();
         const kept = `${STAGED}\tstr\tr4, [sp, #0x14]\n`;
         expect(() => liftWith(fill('0x10', kept).replace('\tbl\th\n', '\tbl\th\n\tldr\tr0, [sp, #0x14]\n'))).toThrow(
-          /the slot model keys \[sp,#20\], so part of the reserved area is not this object/,
+          /the object at \[sp,#16\) overlaps the SSA slot at \[sp,#20\] — one byte, two models/,
         );
       });
 
@@ -586,10 +586,10 @@ describe('the audit judges each frame object on its own bytes', () => {
       });
     });
 
-    // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
-    // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
-    // the shape — these assert that the earlier refusal is the one that fires, so a change that
-    // relaxes one of them shows up here as a message that moved.
+    // THE CLAUSE NOTHING REACHES, pinned as unreachable rather than left unstated: the precaution
+    // in `notTheWholeArea` is unreachable because an EARLIER refusal owns the shape — this asserts
+    // that the earlier refusal is the one that fires, so a change that relaxes it shows up here as
+    // a message that moved.
     test('a capture that neither accesses nor escapes declines where its uses are classified', () => {
       expect(() => lift(copy('\tmov\tr0, sp\n'))).toThrow(
         /the captured address flows into `ret` — not an access, an escape, or a phi/,

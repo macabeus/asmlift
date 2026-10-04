@@ -299,12 +299,11 @@ describe('objectShapes', () => {
     expect(shapes.extent.get(0x10)).toEqual({ width: 1, count: 8 });
   });
 
-  test('refuses a buffer above the outgoing block over a slot in the declared range', () => {
+  test('sets a buffer above the outgoing block over a slot in the declared range aside for the last refusal', () => {
     const a = laddr(0x10);
     const blk: Block = { params: [], ops: [a, call('g', a.results[0]), ret()] };
-    expect(() => shape([blk], [0, 4, 8, 0xc, 0x14], { from: 0, to: 0x18 }, { from: 0x10, to: 0x18 })).toThrow(
-      'the slot model keys [sp,#20], so part of the reserved area is not this object',
-    );
+    const { shapes } = shape([blk], [0, 4, 8, 0xc, 0x14], { from: 0, to: 0x18 }, { from: 0x10, to: 0x18 });
+    expect(shapes.overSlot).toEqual([[0x10, 8]]);
   });
 
   test('sets an object over a slot aside for the last refusal', () => {
