@@ -19,6 +19,8 @@
 # the reproduction scripts run it as written.)
 name: asmlift benchmark (gcc2.7.2kmc)
 platform: n64
+# Each version of your target and its paths go here; the benchmark builds none, so it lists none.
+versions: []
 tools:
   asmlift:
     target: gcc2.7.2kmc

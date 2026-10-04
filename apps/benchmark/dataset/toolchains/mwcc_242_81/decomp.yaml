@@ -21,6 +21,8 @@
 # the reproduction scripts run it as written.)
 name: asmlift benchmark (mwcc_242_81)
 platform: gc
+# Each version of your target and its paths go here; the benchmark builds none, so it lists none.
+versions: []
 tools:
   asmlift:
     target: mwcc_242_81

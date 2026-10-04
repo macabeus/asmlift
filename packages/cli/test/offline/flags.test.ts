@@ -440,7 +440,10 @@ const CLAMP0 =
 describe('at the CLI surface', () => {
   const project = (compiler: string) => {
     const root = mkdtempSync(join(tmpdir(), 'asmlift-flags-'));
-    writeFileSync(join(root, 'decomp.yaml'), YAML.stringify({ platform: 'gba', tools: { asmlift: { compiler } } }));
+    writeFileSync(
+      join(root, 'decomp.yaml'),
+      YAML.stringify({ name: 'test', platform: 'gba', versions: [], tools: { asmlift: { compiler } } }),
+    );
     const file = join(root, 'clamp0.s');
     writeFileSync(file, CLAMP0);
     const target = join(root, 't.o');
@@ -477,7 +480,10 @@ describe('at the CLI surface', () => {
 
   test('--score-against with no compiler command is its message, with no usage block', async () => {
     const { file, target, root } = project('placeholder');
-    writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n');
+    writeFileSync(
+      join(root, 'decomp.yaml'),
+      'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n',
+    );
     const r = await runCli([file, '--score-against', target]);
     expect(r.code).toBe(64);
     expect(r.stderr).toMatch(/^asmlift: --score-against needs tools.asmlift.compiler in decomp.yaml/);
