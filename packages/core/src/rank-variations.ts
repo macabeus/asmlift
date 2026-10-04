@@ -27,7 +27,7 @@ import {
 import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { initFirstGuards } from './l3/initfirst';
-import { narrowDeclarations } from './l3/narrowdecl';
+import { narrowDeclarations, narrowReadDeclarations } from './l3/narrowdecl';
 import { pollGuards, pollReads } from './l3/pollguard';
 import { unmergeJoins } from './l3/unmerge';
 // TYPE-ONLY, and deliberately: the structure-variation table types its `options` as
@@ -374,8 +374,10 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
 ];
 
 /** The STACKED variations (sanctioned in the POLICY note at rank.ts's respell site): each entry is
- *  a statement-order/shape or declaration-width respell variation orthogonal to every other respell
- *  variation, derived onto every source. Each fires alone, plus
+ *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
+ *  variation outside this table, derived onto every source. Two members need not commute
+ *  (`/narrow-decl` and `/narrow-read` compete for one cast), and table order then decides which one
+ *  takes it in the all-together candidate. Each fires alone, plus
  *  all of them together in table order — not the full subset lattice; the pairs question is
  *  settled by applyStacked' skip-on-decline below, and a row demanding a true EXCLUSION pair —
  *  every member fires, the match needs a strict subset of them — is what would earn the lattice.
@@ -386,6 +388,7 @@ export const STACKED_VARIATIONS: { name: VariationName; apply: (sfn: SFn) => SFn
   { name: 'pollguard', apply: pollGuards },
   { name: 'pollread', apply: pollReads },
   { name: 'narrow-decl', apply: narrowDeclarations },
+  { name: 'narrow-read', apply: narrowReadDeclarations },
 ];
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree
