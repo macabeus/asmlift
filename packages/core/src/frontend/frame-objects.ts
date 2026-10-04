@@ -1625,7 +1625,6 @@ function objectShapes({
         objects,
         uses,
         usedSlotOffsets,
-        owned,
         declared,
         returnsWithoutHiddenPointer,
       });
@@ -1726,20 +1725,30 @@ function objectShapes({
   return { extent, aggregateAt, overSlot };
 }
 
-/** THE FRAME RESERVATION IS AN EXTENT, when the reserved area is provably one object's alone.
+/** THE FRAME RESERVATION IS AN EXTENT, when the declared local area is provably one object's alone.
  *  `add sp, sp, #-0x10` reserves sixteen bytes; if exactly one address-taken object sits at the
- *  bottom of them, the slot model keys none of them, and no outgoing argument block is staged
- *  in them, then there is nothing else those bytes can be — a compiler does not reserve frame
- *  for nothing. That is the frame-accounting equation the escape rules (`FRAME_ESCAPE_GATES`)
- *  already solve word by word, asked in the other direction: they check that the objects and
- *  slots TILE the reserved area, this reads the area off as the one object's size.
+ *  bottom of the DECLARED part of them and the slot model keys none of that part, then there is
+ *  nothing else those bytes can be — a compiler does not reserve frame for nothing. That is the
+ *  frame-accounting equation the escape rules (`FRAME_ESCAPE_GATES`) already solve word by word,
+ *  asked in the other direction: they check that the objects and slots TILE the reserved area,
+ *  this reads the declared range off as the one object's size.
+ *
+ *  THE DECLARED RANGE, NOT THE OWNED ONE. Below `declared.from` lies the outgoing stack-argument
+ *  block `analyzeOutgoingArgs` licensed — words the declaration and this function's own stores
+ *  agree are arguments 5+ of its calls, which a C function stages and never declares — so they
+ *  are no candidate for this object's bytes, and the slots keyed there are those arguments. The
+ *  escape stage reads the frame the same way: `reaches-a-slot` looks no lower than
+ *  `declared.from`, and `reaches-an-unaccounted-word` counts the argument words as accounted.
+ *  agbcc lays its locals out like this (ACCUMULATE_OUTGOING_ARGS 1, STARTING_FRAME_OFFSET 0,
+ *  thumb.h): `struct S t; f(&t, b, c, d, e, g, h, i)` with an 8-byte `S` reserves 0x18, stages
+ *  the four argument words at [sp,#0..#0xc] and puts `t` at [sp,#0x10].
  *
  *  Returns why it does not apply, or null. Every clause refuses in its own words: the reason an
  *  acceptance did not fire is as much an attribution as the reason a lift declined, and one
  *  sentence covering all of them is how several gaps come to look like one.
  *
- *  FIVE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an object that does
- *  not start at the bottom of it, an address that reaches memory rather than a callee, and the
+ *  FIVE CLAUSES BOUND THIS PATH — a second object, a slot inside the declared area, an object that
+ *  does not start at the bottom of it, an address that reaches memory rather than a callee, and the
  *  callee's declared return — and each has a test that fails without it. The precautionary
  *  ones are marked where they sit.
  *
@@ -1754,14 +1763,12 @@ function notTheWholeArea(
     objects,
     uses,
     usedSlotOffsets,
-    owned,
     declared,
     returnsWithoutHiddenPointer,
   }: {
     objects: ReadonlyMap<number, readonly Op[]>;
     uses: FrameUses;
     usedSlotOffsets: ReadonlySet<number>;
-    owned: FrameRange;
     declared: FrameRange;
     returnsWithoutHiddenPointer: (callee: string) => boolean;
   },
@@ -1769,26 +1776,23 @@ function notTheWholeArea(
   if (objects.size !== 1) {
     return 'another address-taken object shares the frame, so the reservation is not this one alone';
   }
-  if (usedSlotOffsets.size > 0) {
-    const lowest = [...usedSlotOffsets].sort((a, b) => a - b)[0];
-    return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
+  const keyedHere = [...usedSlotOffsets]
+    .filter((slot) => overlaps(declared.from, declared.to - declared.from, slot, 4))
+    .sort((a, b) => a - b);
+  if (keyedHere.length > 0) {
+    return `the slot model keys [sp,#${keyedHere[0]}], so part of the reserved area is not this object`;
   }
-  // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not read
-  // two dead lines as live rules, and knows what would wake each one. They are kept
-  // because every one of them guards a SILENT wrong answer: storage declared over bytes the
-  // object does not own is a frame the recompile lays out differently, with no diagnostic.
-  //   • An outgoing block is staged at the BOTTOM of the reserved area, exactly where this
-  //     object claims to start, and neither way in reaches: a block stored on every path keys
-  //     its offsets as slots at the call, so the slot clause above fires first, and a block
-  //     NOT stored on every path is `analyzeOutgoingArgs`'s own blocker, which turns the slot
-  //     model OFF — and no untyped object survives that, because every `laddr` mint is behind
-  //     `slotsOk`. The second half is also why nothing here asks whether the analysis LICENSED
-  //     the block: an `laddr` exists only in a function where it did, by construction.
+  // PRECAUTIONARY, and it names why nothing reaches it — so the next reader does not read a dead
+  // line as a live rule, and knows what would wake it. It is kept because it guards a SILENT wrong
+  // answer: storage declared over bytes the object does not own is a frame the recompile lays out
+  // differently, with no diagnostic.
   //   • An address that neither accesses nor escapes already declines where the audit
   //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
-  if (declared.from > owned.from) {
-    return `[sp,#${owned.from}) to [sp,#${declared.from}) stages outgoing stack arguments, which belong to the callee`;
-  }
+  //
+  // The block below `declared.from` is LICENSED by construction: one not stored on every path is
+  // `analyzeOutgoingArgs`'s own blocker, which turns the slot model OFF and reports an area of 0,
+  // and every `laddr` mint is behind `slotsOk` — so an `laddr` exists only in a function whose
+  // block was licensed.
   if (off !== declared.from || declared.to <= declared.from) {
     return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
   }
