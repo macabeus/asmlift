@@ -4866,8 +4866,15 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' calls through a register that holds no function's address — not modelled`,
     );
   }
+  // AND ONE THROUGH AN ARGUMENT REGISTER rN TAKES r0..r(N-1). agbcc computes the pointer last and
+  // allocates it the lowest register the arguments left free (`*call_indirect`'s "l*r", thumb.md:999);
+  // compiled at the canonical flags, the register is the argument count for 0, 1 and 2 arguments,
+  // so the arity decides the thunk and the bytes. Passing every register below it is what the
+  // machine passes whatever the source's arity, and an untouched one is this function's own
+  // argument passed on; one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`).
+  const argc = through === null ? -1 : target.argRegs.indexOf(through);
   calls.lower({
-    callee: through === null ? callee : { address: readData(through, bi), reg: through },
+    callee: through === null ? callee : { address: readData(through, bi), reg: through, ...(argc < 0 ? {} : { argc }) },
     ssa,
     bi,
     read: (r) => ssa.readVar(r, bi),

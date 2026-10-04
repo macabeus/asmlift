@@ -74,6 +74,28 @@ const THROUGH_R8 = [
   '',
 ].join('\n');
 
+// pokeemerald `ObjectEventCB2_BerryTree`, `return tbl[b->d1](a, b);`: both arguments pass through
+// untouched, so nothing sets r0 or r1 up, and the pointer lands in r2.
+const PASSTHRU = [
+  'passthru:',
+  '\tpush\t{r4, lr}',
+  '\tldr\tr3, .L3',
+  '\tmov\tr4, #0x30',
+  '\tldrsh\tr2, [r1, r4]',
+  '\tlsl\tr2, r2, #0x2',
+  '\tadd\tr2, r2, r3',
+  '\tldr\tr2, [r2]',
+  '\tbl\t_call_via_r2',
+  '\tlsl\tr0, r0, #0x18',
+  '\tlsr\tr0, r0, #0x18',
+  '\tpop\t{r4}',
+  '\tpop\t{r1}',
+  '\tbx\tr1',
+  '.L3:',
+  '\t.word\ttbl',
+  '',
+].join('\n');
+
 describe('a call names its callee or calls a value, never both', () => {
   const fnOf = (attrs: Record<string, string | boolean>, operands = 1) => {
     const vs = Array.from({ length: operands }, () => mkValue(T.unk(32)));
@@ -132,5 +154,21 @@ describe('Thumb lowers `bl _call_via_<reg>` as a call through <reg>', () => {
         decompile('f', `f:\n\tpush\t{lr}\n\tbl\t_call_via_${r}\n\tpop\t{r0}\n\tbx\tr0\n`, ARMV4T_AGBCC),
       ).toThrow(`'bl _call_via_${r}' calls through a register that holds no function's address`);
     }
+  });
+});
+
+describe('a call through argument register rN takes r0..r(N-1)', () => {
+  test("an argument register nothing wrote is the function's own argument, passed on", () => {
+    expect(decompile('passthru', PASSTHRU, ARMV4T_AGBCC).source).toBe(
+      's32 passthru(s32 a0, s16 *a1) {\n    return (u8)((s32 (*)())tbl[*(a1 + 24)])(a0, a1);\n}\n',
+    );
+  });
+
+  test('one a call destroyed names no value, and the lift declines', () => {
+    const asm =
+      'f:\n\tpush\t{lr}\n\tbl\th\n\tldr\tr2, .L3\n\tldr\tr2, [r2]\n\tbl\t_call_via_r2\n\tpop\t{r0}\n\tbx\tr0\n.L3:\n\t.word\ttbl\n';
+    expect(() => decompile('f', asm, ARMV4T_AGBCC, { prototypes: PROTOS })).toThrow(
+      /r[01] is read on a path where a call has destroyed it/,
+    );
   });
 });

@@ -128,12 +128,15 @@ export interface CallSite {
   };
 }
 
-/** A call through a register. It names no callee, so no declaration plans it: its arity is guessed,
- *  and an argument register holding the address is no argument, so neither is any after it. */
+/** A call through a register. It names no callee, so no declaration plans it: the site states its
+ *  arity, or it is guessed, and an argument register holding the address is no argument, so
+ *  neither is any after it. */
 export interface IndirectCallee {
   readonly address: Value;
   /** the register the address is in */
   readonly reg: string;
+  /** the argument words the site states, each read like a declared one */
+  readonly argc?: number;
 }
 
 /** How a frontend builds a 64-bit value out of two words and splits one. */
@@ -448,7 +451,12 @@ export function callDeclarations(
     const p: CallPlan =
       indirect === undefined
         ? plan(callee)
-        : { widths: null, doubles: new Set(), returns: { kind: 'word' }, clobbers: callClobbers };
+        : {
+            widths: indirect.argc === undefined ? null : Array.from({ length: indirect.argc }, () => 32),
+            doubles: new Set(),
+            returns: { kind: 'word' },
+            clobbers: callClobbers,
+          };
     // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
     // runtime table or the project's headers. Both answer the same question, so the walk that
     // reads argument registers off the answer is written once; two walks would be two chances

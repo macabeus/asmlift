@@ -27,6 +27,8 @@ function roundTrip(sym: string, body: string) {
 describe('a call through a function pointer recompiles to its own thunk', () => {
   test.each([
     ['fresh', 'u8 fresh(void *a, s16 *b) { return tbl[b[24]](&g1, &g2); }', '_call_via_r2'],
+    ['passthru', 'u8 passthru(void *a, s16 *b) { return ((u8 (*)(void *, s16 *))tbl[b[24]])(a, b); }', '_call_via_r2'],
+    ['unary', 'u8 unary(void *a, s16 *b) { return ((u8 (*)())tbl[b[24]])(a); }', '_call_via_r1'],
     ['nullary', 'u8 nullary(void *a, s16 *b) { return ((u8 (*)())tbl[b[24]])(); }', '_call_via_r0'],
     ['afterCall', 'u8 afterCall(void *a, s16 *b) { h(); return ((u8 (*)())tbl[b[24]])(a, b); }', '_call_via_r2'],
     ['kept', 'u8 kept(void *a, s16 *b) { u8 (*p)() = tbl[b[24]]; h(); return p(a, b); }', '_call_via_r4'],
