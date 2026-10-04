@@ -125,8 +125,9 @@ export function assertResolved(sfn: SFn): void {
 //     `return` ends its path) against the IR's static count. What follows a statement every path
 //     leaves is on no path, so it is refused rather than left uncounted: it is code the asm never
 //     ran, and a region duplicated there would pass the count unseen.
-//   • Names the IR does not have are ignored, and only calls carrying a target symbol are counted
-//     (every frontend that emits `call` today stamps one).
+//   • Names the IR does not have are ignored. A call through a register names no callee, so every
+//     one is counted under the single key `call:(*pointer)`: the count holds for indirect calls as
+//     a whole, and a pass that makes one of them call what another calls goes unseen.
 //   • A pinned access is keyed by whether it reads or writes, and by the constant address both sides
 //     can read off it — the IR's base and offset, the tree's `cellAddress` — or `?` where a side
 //     cannot. A read never stands for a write. A `?` render may stand for any pinned access and a
@@ -149,9 +150,9 @@ export function assertResolved(sfn: SFn): void {
 //   • A declared store is not counted: it renders at its own position, once. One spelled through a
 //     cast with no `volatile` is a plain store the compiler may delete or sink, and is refused, as
 //     the read is. Objects the asm also writes unstamped are skipped, as for reads.
-/** Executions per key: `call:<target>`; `device:r:<0xaddress>` for a pinned read and
- *  `device:w:<0xaddress>` for a pinned write, with `?` for the address where the counting side cannot
- *  read one; or `declared:<object>`. */
+/** Executions per key: `call:<target>`, or `call:(*pointer)` for every call through a register;
+ *  `device:r:<0xaddress>` for a pinned read and `device:w:<0xaddress>` for a pinned write, with `?`
+ *  for the address where the counting side cannot read one; or `declared:<object>`. */
 type EffectCounts = Map<string, number>;
 
 /** per-key combine of two count maps (`sum` for sequence, `max` for exclusive alternatives) */

@@ -1110,7 +1110,8 @@ export interface CallArgTrim {
  *  real argument CAN go with them: a fresh register above a hole stops the run (a 64-bit return
  *  occupies two registers and the frontend cannot express one, so the caller's r2 goes with the
  *  unfillable r1), and a callee's return read as the callee's own drops an argument a `g(f())`
- *  source did pass. A declared prototype is what closes either.
+ *  source did pass. A declared prototype is what closes either for a named callee; a call through a
+ *  register has none, so it keeps that return instead (`GuessedCallSite.passesCalleeResult`).
  *
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
