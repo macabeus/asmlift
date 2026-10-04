@@ -970,10 +970,11 @@ export function enumerateCandidates(
     // numeric-address pointer local — the joint spelling is reachable from neither variation
     // alone, each composition narrows /volatile to that variation's own locals (volatilePtrLocals'
     // `only`), and each needed a row to demand it. The STACKED variations (STACKED_VARIATIONS) are
-    // derived onto EVERY source: statement order/shape, and the width a once-written narrow local
-    // is declared at, are each orthogonal to what any other respell variation changes — the same
+    // derived onto EVERY source: statement order/shape, and the width a narrow local is declared
+    // at, are each orthogonal to what any respell variation outside that table changes — the same
     // kind of independent dimension as signedness —
-    // so they are crossed with every source rather than paired; a third blanket composition needs
+    // so they are crossed with every source rather than paired (two members of the table may
+    // compete for one node, and its order decides; rank-variations.ts); a third blanket composition needs
     // the same argument, not just a row. And a specific PAIRING is admitted on one of two
     // grounds, never on "it might help". FIRST, a row demands the joint spelling AND that
     // spelling is reachable from neither variation alone: /livebase × /indexed, × /sinkinit,
@@ -1044,7 +1045,8 @@ export function enumerateCandidates(
         sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape or declaration-width fact
-        // orthogonal to the other respell variations; subsets compose in the fixed order below. A stacked variation that
+        // orthogonal to the respell variations outside the table; subsets compose in the fixed
+        // table order, which decides between two members that compete for one node. A stacked variation that
         // never fires declines and costs nothing.
         if (!alreadyShaped) {
           // A shape may REORDER statements, and it is derived after a variation has placed its defs —

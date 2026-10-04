@@ -374,8 +374,10 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
 ];
 
 /** The STACKED variations (sanctioned in the POLICY note at rank.ts's respell site): each entry is
- *  a statement-order/shape or declaration-width respell variation orthogonal to every other respell
- *  variation, derived onto every source. Each fires alone, plus
+ *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
+ *  variation outside this table, derived onto every source. Two members need not commute
+ *  (`/narrow-decl` and `/narrow-read` compete for one cast), and table order then decides which one
+ *  takes it in the all-together candidate. Each fires alone, plus
  *  all of them together in table order — not the full subset lattice; the pairs question is
  *  settled by applyStacked' skip-on-decline below, and a row demanding a true EXCLUSION pair —
  *  every member fires, the match needs a strict subset of them — is what would earn the lattice.

@@ -71,6 +71,8 @@ const passed = (sfn: SFn, arg: Expr): SFn => ({
   ...sfn,
   body: [...sfn.body, { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [arg] } }],
 });
+/** the tree with `st` ahead of its body */
+const beforeIt = (sfn: SFn, st: SFn['body'][number]): SFn => ({ ...sfn, body: [st, ...sfn.body] });
 /** the tree with `v0`'s one write storing `value` */
 const writing = (sfn: SFn, value: Expr): SFn => ({
   ...sfn,
@@ -262,6 +264,39 @@ describe('narrowReadDeclarations', () => {
 
   it('does not narrow a local one of whose reads is bare', () => {
     expect(narrowReadDeclarations(passed(structured(READ), v0))).toBeNull();
+  });
+
+  it('takes a u32 local, whose reads narrow it the way an s32 one is narrowed', () => {
+    const sfn = structured(READ);
+    const wide = {
+      ...sfn,
+      locals: sfn.locals.map((l) => ({ ...l, type: { kind: 'int' as const, width: 32, signed: false } })),
+    };
+    expect(local(narrowReadDeclarations(wide)!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+  });
+
+  it('takes a local written twice, each of whose values every read narrows', () => {
+    const sfn = narrowReadDeclarations(
+      beforeIt(structured(READ), { k: 'assign', name: 'v0', value: { k: 'const', value: 200 } }),
+    )!;
+    expect(local(sfn, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+    expect(cBackend.emit(sfn)).toContain('v0 = 200;');
+  });
+
+  it('does not narrow a local one of whose writes is a constant that fits no type of the narrow width', () => {
+    const twice = beforeIt(structured(READ), { k: 'assign', name: 'v0', value: { k: 'const', value: 300 } });
+    expect(narrowReadDeclarations(twice)).toBeNull();
+  });
+
+  it('does not narrow a local one of whose writes is a `for` loop step', () => {
+    const looped = beforeIt(structured(READ), {
+      k: 'for',
+      init: { k: 'break' },
+      cond: { k: 'var', name: 'a0' },
+      inc: { k: 'assign', name: 'v0', value: { k: 'const', value: 0 } },
+      body: [],
+    });
+    expect(narrowReadDeclarations(looped)).toBeNull();
   });
 
   it('does not narrow a local whose reads are cast to two widths', () => {
