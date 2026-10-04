@@ -21,6 +21,7 @@ import {
   placeModuleSections,
   placedSectionAddress,
   symbolKey,
+  unbackedSymbolKeys,
 } from '../../src/module-elf';
 import { loadModuleSymbolMap, loadSymbolMap } from '../../src/symbols-provider';
 
@@ -28,6 +29,7 @@ const ET_REL = 1;
 const ET_EXEC = 2;
 const SHT_PROGBITS = 1;
 const SHT_NOBITS = 8;
+const SHF_WRITE = 0x1;
 const SHF_ALLOC = 0x2;
 const STB_LOCAL = 0;
 const STB_GLOBAL = 1;
@@ -159,7 +161,7 @@ const modulePlf = () =>
     [
       { name: '.text', size: 0x100 },
       { name: '.data', size: 0x20 },
-      { name: '.bss', type: SHT_NOBITS, size: 0x10 },
+      { name: '.bss', type: SHT_NOBITS, flags: SHF_ALLOC | SHF_WRITE, size: 0x10 },
     ],
     [
       { name: 'ObjectSetup', value: 0x0, shndx: 1 },
@@ -392,6 +394,38 @@ describe('globalSymbolKeys — which of the base ELF a module may inherit', () =
     // drop both together (Mario Party 4's `seqSpeed` is a global function and a local object)
     expect(keys.has(symbolKey('seqSpeed', 0x8000_3200))).toBe(true);
     expect(keys.has(symbolKey('seqSpeed', 0x8030_0040))).toBe(false);
+  });
+});
+
+/** A pokeemerald-shaped link: a `const` object in a `(NOLOAD)` size-report region at 0, beside the
+ *  writable NOLOAD RAM and the ROM the program actually addresses. */
+const sizeReportElf = () =>
+  elf32(
+    ET_EXEC,
+    [
+      { name: '.pseudo.hall_of_fame', type: SHT_NOBITS, flags: SHF_ALLOC, addr: 0, size: 0x1770 },
+      { name: 'ewram', type: SHT_NOBITS, flags: SHF_ALLOC | SHF_WRITE, addr: 0x0200_0000, size: 0x100 },
+      { name: '.text', addr: 0x0800_0000, size: 0x100 },
+    ],
+    [
+      { name: '_hallOfFame', value: 0, shndx: 1, type: STT_OBJECT, size: 0x1770 },
+      { name: 'gSaveBlock1Ptr', value: 0x0200_0010, shndx: 2, type: STT_OBJECT },
+      { name: 'CalcCRC16', value: 0x0800_0040, shndx: 3 },
+    ],
+  );
+
+describe('unbackedSymbolKeys — objects in a section the program can never read', () => {
+  test('names a symbol of a read-only NOBITS section, and no writable or file-backed one', () => {
+    const keys = unbackedSymbolKeys(sizeReportElf());
+    expect([...keys]).toEqual([symbolKey('_hallOfFame', 0)]);
+  });
+
+  test('the map leaves the size-report object out and keeps RAM and ROM', async () => {
+    const map = await loadSymbolMap(write('pokeemerald-syms.elf', sizeReportElf()));
+    const names = [...map.values()].flat().map((i) => i.name);
+    expect(names).toEqual(expect.arrayContaining(['gSaveBlock1Ptr', 'CalcCRC16']));
+    expect(names).not.toContain('_hallOfFame');
+    expect(map.has(0), 'nothing is left at address 0 for a small constant to read as').toBe(false);
   });
 });
 

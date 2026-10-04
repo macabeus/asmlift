@@ -901,14 +901,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // this class can be inhabited without the ISA changing, and saying otherwise would invite the
   // refusals to be treated as dead code.
   //
-  // `pool-word-shape` is a FOURTH reason and the only one of the four that is an achievement. It
-  // is the catch-all tail of the pool-word reader, it held exactly one row —
-  // `pokeemerald:UpdateShoalTideFlag:agbcc`, on a pool word spelled `tide.3` — and the message it
-  // held that row with was false about its own input: `tide.3` IS a symbol, a function-scope
-  // static, rejected only because a C identifier carries no dot. Naming that shape emptied the
-  // catch-all. Its emptiness is the weak kind: an agbcc pool word that is a
-  // `.L` code label or an unreadable expression would inhabit it tomorrow.
-  //
   // The count in the test's name is DERIVED from this list. A literal there is prose wearing a
   // test's clothing: it is checked by nothing, so a list of five under a name saying four stays
   // green. Two branches edited this line from opposite directions in one night; do not write a
@@ -933,16 +925,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
   // row's own context declares, and that declaration now reaches the lift. A call no declaration
   // covers still declines there.
-  //
-  // `outgoing-stack-args` joins because its one row, `stkwide`, declares the `double` its staged
-  // words hold, and lifts. The licence's refusals stand, pinned by `stack-args.test.ts`.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'no-prototype-args',
-    'outgoing-stack-args',
-    'pool-word-shape',
     'store-class',
     'structs',
     'tu-scoped-name',
@@ -1012,11 +999,14 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // measurable half of core naming the register file: `unmodelled floating-point instruction` is
   // matched by no other class, so the ordering is no longer load-bearing for any of them. The two
   // transfer pairs are the control-transfer capabilities sitting above `branch-form`, and
-  // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
+  // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames, and
+  // Thumb's refusal of a never-reloaded `[sp,#0]` store says it may be an outgoing stack argument
+  // after saying the stack pointer is used as data.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > stack-frames', 4],
     ['ctr-transfer > branch-form', 4],
+    ['outgoing-stack-args > stack-frames', 2],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {

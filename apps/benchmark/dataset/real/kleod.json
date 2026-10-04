@@ -16,12 +16,12 @@
   ],
   "headers": [
     "global.h",
-    "code_08001158.h",
+    "vision.h",
     "code_08003D58.h",
     "wait_for_next_frame.h",
     "code_08014184.h",
     "transitions.h",
-    "code_08025B78.h",
+    "anim.h",
     "code_0802688C.h",
     "code_08039D8C.h",
     "code_08043BA4.h",
@@ -55,9 +55,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/math.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/math.s"
       }
     },
@@ -72,9 +72,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/main.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/main.s"
       }
     },
@@ -89,9 +89,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/interrupts.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/interrupts.s"
       }
     },
@@ -106,9 +106,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_0804B254.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_0804B254.s"
       }
     },
@@ -123,9 +123,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_08039D8C.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08039D8C.s"
       }
     },
@@ -140,9 +140,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_08043BA4.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08043BA4.s"
       }
     },
@@ -157,9 +157,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/decompress.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/decompress.s"
       }
     },
@@ -174,9 +174,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_08014184.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08014184.s"
       }
     },
@@ -191,13 +191,13 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_080070A0.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_080070A0.s"
       }
     },
-    "src/code_08025B78.c": {
+    "src/anim.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-mthumb-interwork",
@@ -208,13 +208,13 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
-        "command": "tools/preproc/preproc build/kleod/src/code_08025B78.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08025B78.s"
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
+        "command": "tools/preproc/preproc build/kleod/src/anim.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/anim.s"
       }
     },
-    "src/code_08001158.c": {
+    "src/vision.c": {
       "toolchain": "agbcc",
       "cflags": [
         "-mthumb-interwork",
@@ -225,10 +225,10 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
-        "command": "tools/preproc/preproc build/kleod/src/code_08001158.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_08001158.s"
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
+        "command": "tools/preproc/preproc build/kleod/src/vision.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/vision.s"
       }
     },
     "src/code_080472B0.c": {
@@ -242,9 +242,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_080472B0.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_080472B0.s"
       }
     },
@@ -259,9 +259,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/code_0802688C.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/code_0802688C.s"
       }
     },
@@ -276,9 +276,9 @@
       ],
       "flagsFrom": {
         "from": "makefile",
-        "commit": "6f149e33517cecae33d57fe888a60f2b20a2008d",
+        "commit": "3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d",
         "file": "Makefile",
-        "sha256": "bf2ebe2ff9e83938c69b9c3eabce4368282fb2c1de5fc1d04f119c3981de2104",
+        "sha256": "80b29630d5e1a6a69698a459789b61e3ec77b7a8bc9c6dc6cbec0479100a4511",
         "command": "tools/preproc/preproc build/kleod/src/save.i charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -fprologue-bugfix -o build/kleod/src/save.s"
       }
     }
@@ -294,9 +294,9 @@
         "fixed-point",
         "branch"
       ],
-      "funcC": "s16 MultiplyQ8(s16 num1, s16 num2)\n{\n    s32 product;\n    s32 rounded;\n\n    product = num1 * num2;\n    rounded = product;\n    if (rounded < 0)\n    {\n        rounded += 0xFF;\n    }\n    product = rounded >> 8;\n    return product;\n}",
+      "funcC": "s16 MultiplyQ8(s16 num1, s16 num2)\n{\n    s32 result;\n\n    result = num1 * num2;\n    result /= 0x100;\n    return result;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/math.c#L4-L17"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/math.c#L4-L11"
     },
     {
       "sym": "DivideQ8",
@@ -306,9 +306,9 @@
       "features": [
         "arithmetic"
       ],
-      "funcC": "s16 DivideQ8(s16 num1, s16 num2)\n{\n    return (num1 << 8) / num2;\n}",
+      "funcC": "s16 DivideQ8(s16 num1, s16 num2)\n{\n    s32 result;\n\n    result = num1 * 0x100;\n    result /= num2;\n    return result;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/math.c#L20-L23"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/math.c#L14-L21"
     },
     {
       "sym": "ReciprocalQ8",
@@ -318,9 +318,9 @@
       "features": [
         "arithmetic"
       ],
-      "funcC": "s16 ReciprocalQ8(s16 num1)\n{\n    s32 numerator = 0x10000;\n    return (numerator / num1);\n}",
+      "funcC": "s16 ReciprocalQ8(s16 num1)\n{\n    s32 result;\n\n    result = 0x10000;\n    result /= num1;\n    return result;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/math.c#L26-L30"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/math.c#L24-L31"
     },
     {
       "sym": "InputHandler_Normal",
@@ -339,7 +339,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/main.c#L117-L138"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/main.c#L117-L138"
     },
     {
       "sym": "VBlankIntr_CutsceneTransition",
@@ -356,7 +356,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/interrupts.c#L27-L33"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/interrupts.c#L27-L33"
     },
     {
       "sym": "sub_0804B270",
@@ -369,7 +369,7 @@
       "funcC": "u32 sub_0804B270(void *arg0)\n{\n    return ((u8*)arg0)[0] + (((u8*)arg0)[1] << 8) + (((u8*)arg0)[2] << 0x10) + (((u8*)arg0)[3] << 0x18);\n}",
       "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern u8 gUnk_081177E4[0x10];\nextern s8 gUnk_081177F4[4][0x8];\nextern s8 gUnk_08117834[0x10];\nextern u8 gUnk_08117844[0x10];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L102-L105"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L95-L98"
     },
     {
       "sym": "sub_0803D140",
@@ -392,7 +392,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L2034-L2038"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L2033-L2037"
     },
     {
       "sym": "WorldMapScreenDrawUnlockedWorlds",
@@ -410,26 +410,29 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L811-L823"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L810-L822"
     },
     {
-      "sym": "sub_08045734",
+      "sym": "VisionSelectHandler",
       "addr": "0x08045734",
       "unit": "src/code_08043BA4.c",
       "romDigest": "5eb1cfae9d02540a797bbaf198a713970549b6b6f1091154f726b955c19686b0",
+      "aliases": [
+        "sub_08045734"
+      ],
       "features": [
         "branch",
         "global"
       ],
-      "funcC": "void sub_08045734(void)\n{\n    // vision select screen updater\n    if (gUnk_030034E4 == 0)\n    {\n        sub_080468B0();\n        sub_08045874();\n        sub_08045F68();\n        sub_08046288();\n    }\n    UpdateEntityAnimationInfoEntries();\n}",
+      "funcC": "void VisionSelectHandler(void)\n{\n    // vision select screen updater\n    if (gTransitioning == FALSE)\n    {\n        VisionSelectUpdateUnlockVisionSequence();\n        VisionSelectInputAndMovement();\n        VisionSelectUpdateRotationAndEntities();\n        VisionSelectDrawVisionInfo();\n    }\n    UpdateEntityAnimationInfoEntries();\n}",
       "prependC": "extern u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_080657C8[0x400];\nextern u8 gUnk_08065BC8[0x400];\nextern u8 gUnk_08065FC8[0x400];\nextern u8 gUnk_080663C8[0x80];\nextern u8 gUnk_08066448[0x40];\nextern u8 gUnk_08066488[0x80];\nextern u8 gUnk_08066508[0x80];\nextern u8 gUnk_08066588[0x80];\nextern u8 gUnk_08066608[0x80];\nextern u8 gUnk_08066688[0x80];\nextern u8 gUnk_08066708[0x80];\nextern u8 gUnk_08066788[0x80];\nextern u8 gUnk_08066808[0x80];\nextern u8 gUnk_08066888[0x80];\nextern u8 gUnk_08066908[0x80];\nextern u8 gUnk_08066988[0x80];\nextern u8 gUnk_08066A08[0x80];\nextern u8 gUnk_08066A88[0x80];\nextern u8 gUnk_08078A88[0x20];\nextern u8 gUnk_08078AA8[0x20];\nextern u8 gUnk_08078AC8[0x20];\nextern u8 gUnk_08078AE8[0x20];\nextern struct Unk_0300466C gUnk_0807D248[];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nstruct Unk_080D48C8 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4_0:2;\n    u8 unk4_2:6;\n    u8 pad5[0x8 - 0x5];\n};\nextern struct Unk_080D48C8 gUnk_080D48C8[6][7][0x15];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nstruct Unk_08116464 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 pad9[0xC - 0x9];\n};\nextern struct Unk_08116464 gUnk_08116464[];\nextern const u8 gUnk_08117120[0xA];\nextern const u8 gUnk_0811712A[0x10];\nextern const u16 gUnk_0811713A[0x20];\nextern const u8 gUnk_0811717C[6][40][5];\nextern const u8 gUnk_0811762C[6][8];\nextern const u8 gUnk_0811765C[6][7];",
       "proto": {
-        "sub_08045734": {
+        "VisionSelectHandler": {
           "returnsVoid": true
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08043BA4.c#L1009-L1020"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08043BA4.c#L1008-L1019"
     },
     {
       "sym": "Decompress",
@@ -448,7 +451,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/decompress.c#L6-L21"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/decompress.c#L6-L21"
     },
     {
       "sym": "DecompressDma",
@@ -466,7 +469,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/decompress.c#L24-L32"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/decompress.c#L24-L32"
     },
     {
       "sym": "sub_08014184",
@@ -483,7 +486,7 @@
       "funcC": "struct Unk_08014184 sub_08014184(u16 arg1, u16 arg2, u8 arg3)\n{\n    u32 var_r3;\n    struct Unk_08014184 var_r4;\n\n    for (var_r3 = gUnk_03004D80->unk2; var_r3 < gUnk_03004D80->unk0; var_r3++)\n    {\n        if ((arg2 >= gUnk_03004D80->unk4[var_r3].unk2) && (gUnk_03004D80->unk4[var_r3].unk6 >= (arg2 - arg3)) && (arg1 < (gUnk_03004D80->unk4[var_r3].unk0 + 3)) && ((gUnk_03004D80->unk4[var_r3].unk0 - 3) < arg1))\n        {\n            var_r4.unk0 = gUnk_03004D80->unk4[var_r3].unk0 - 3;\n            var_r4.unk2 = gUnk_03004D80->unk4[var_r3].unk8;\n            return var_r4;\n        }\n    }\n\n    var_r4.unk0 = -1;\n    return var_r4;\n}",
       "prependC": "extern const s8 gUnk_080E2AB4[7][6];\nextern const u8 gUnk_080E2ADE[][2];\nextern const u8 gUnk_080E2AF2[3];\nextern const s8 gUnk_080E2AF5[][6];\nextern const u8 gUnk_080E2B49[3];\nextern const s8 gUnk_080E2B4C[][2];\nextern const u8 gUnk_080E2B52[];\nextern const u8 gUnk_080E2B5E[3];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern u8 gUnk_080D8E10[3];\nstruct Unk_080D90D0 {\n    u8 unk0;\n    s8 unk1_0:4;\n    s8 unk1_4:4;\n    u8 pad2[0x4 - 0x2];\n};\nextern struct Unk_080D90D0 gUnk_080D90D0[];\nextern const s8 gUnk_081168AC[][4];\nextern const s8 gUnk_081168C4[][4];\nextern const u8 gUnk_08116A26[][4];\nextern const u8 gUnk_08116A36[][4];\nextern const s8 gUnk_0818B8D0[8][2];\nextern void *gUnk_0818B7DC[];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern u8 gUnk_08061FC8[0x80];\nextern u8 gUnk_08062148[0x100];\nextern u8 gUnk_080635E8[0x80];\nextern u8 gUnk_08063368[0x80];\nextern u8 gUnk_08063FE8[0x80];\nextern u8 gUnk_08064A68[0x200];\nextern u8 gUnk_08078328[0x20];\nextern u8 gUnk_08078648[0x20];\nextern u8 gUnk_08078968[0x20];\nextern u8 gUnk_08078988[0x20];\nextern u8 gUnk_080B8F68[0x80];\nextern u8 gUnk_080B8FE8[0x80];\nextern u8 gUnk_080B9068[0x80];\nextern u8 gUnk_080B9268[0x80];\nextern u8 gUnk_080B92E8[0x80];\nextern u8 gUnk_080B9368[0x100];\nextern u8 gUnk_080B9668[0x200];\nextern s32 gUnk_030034D0;\nextern s32 gUnk_03003628;\nextern s32 gUnk_03004D88;\nextern s32 gUnk_03000004; // TODO: should be static variable inside sub_08021194 (?)",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08014184.c#L82-L99"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08014184.c#L82-L99"
     },
     {
       "sym": "sub_0804DC64",
@@ -501,7 +504,7 @@
       "funcC": "s32 sub_0804DC64(s32 arg0)\n{\n    REG_IE |= INTR_FLAG_HBLANK;\n    REG_DISPSTAT |= DISPSTAT_HBLANK_INTR;\n\n    if (gUnk_030052A4[arg0].unk3_7 != 0)\n    {\n        return 1;\n    }\n\n    gUnk_030052A4[arg0].unk14 -= 1;\n    if (gUnk_030052A4[arg0].unk14 < 0)\n    {\n        REG_IE &= ~INTR_FLAG_HBLANK;\n        REG_DISPSTAT &= ~DISPSTAT_HBLANK_INTR;\n        return 0;\n    }\n\n    return 1;\n}",
       "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern u8 gUnk_081177E4[0x10];\nextern s8 gUnk_081177F4[4][0x8];\nextern s8 gUnk_08117834[0x10];\nextern u8 gUnk_08117844[0x10];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L1537-L1556"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L1581-L1600"
     },
     {
       "sym": "DecompressAlloc",
@@ -515,7 +518,7 @@
       ],
       "funcC": "void *DecompressAlloc(void *src)\n{\n    void *heapPtr;\n\n    heapPtr = thunk_HeapAlloc(((u32*)src)[0] & 0x7FFFFFFF, 0);\n    Decompress(heapPtr, src);\n    return heapPtr;\n}",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/decompress.c#L35-L42"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/decompress.c#L35-L42"
     },
     {
       "sym": "sub_0804C844",
@@ -534,7 +537,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L909-L913"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L900-L904"
     },
     {
       "sym": "sub_0804B254",
@@ -547,7 +550,7 @@
       "funcC": "u16 sub_0804B254(void *arg0)\n{\n    return ((u8*)arg0)[0] + (((u8*)arg0)[1] << 8);\n}",
       "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern u8 gUnk_081177E4[0x10];\nextern s8 gUnk_081177F4[4][0x8];\nextern s8 gUnk_08117834[0x10];\nextern u8 gUnk_08117844[0x10];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L92-L95"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L85-L88"
     },
     {
       "sym": "sub_080008DC",
@@ -569,7 +572,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/main.c#L209-L229"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/main.c#L209-L229"
     },
     {
       "sym": "sub_0804C1C0",
@@ -591,7 +594,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L727-L730"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L718-L721"
     },
     {
       "sym": "sub_0804E708",
@@ -610,7 +613,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L1928-L1933"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L1972-L1977"
     },
     {
       "sym": "sub_0803E8CC",
@@ -631,33 +634,36 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L2908-L2914"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L2907-L2913"
     },
     {
-      "sym": "sub_0800A5B8",
+      "sym": "EntityUpdateScreenPositionAffine",
       "addr": "0x0800a5b8",
       "unit": "src/code_080070A0.c",
       "romDigest": "bb2b78c4c595f35a4b7d8dc51d58c217b842f9db919e88a2d35f3a04476aa75a",
+      "aliases": [
+        "sub_0800A5B8"
+      ],
       "features": [
         "global",
         "struct",
         "array",
         "arithmetic"
       ],
-      "funcC": "void sub_0800A5B8(u8 arg0, s8 arg1, s8 arg2)\n{\n    s32 temp_r0;\n    s32 temp_r0_2;\n    s16 temp_r1;\n    s16 temp_r2;\n    s32 var_r2;\n    s32 var_r4;\n    struct Unk_0300466C_4 *var_r0;\n\n    arg1++,arg1--; //fake\n    gEntityInfo[arg0].xPosScreen = gEntityInfo[arg0].xPosBg2 - arg1 - gBgInfo[2].hOfs;\n    gEntityInfo[arg0].yPosScreen = gEntityInfo[arg0].yPosBg2 - arg2 - gBgInfo[2].vOfs;\n\n    temp_r1 = gBgInfo[2].hOfs - gEntityInfo[arg0].xPosScreen;\n    temp_r2 = gBgInfo[2].vOfs - gEntityInfo[arg0].yPosScreen;\n\n    temp_r0 = temp_r1 * gBg2XMag;\n    if (temp_r0 < 0)\n    {\n        temp_r0 += 0xFF;\n    }\n    var_r4 = temp_r0 >> 8;\n\n    temp_r0_2 = temp_r2 * gBg2YMag;\n    if (temp_r0_2 < 0)\n    {\n        temp_r0_2 += 0xFF;\n    }\n    var_r2 = temp_r0_2 >> 8;\n\n    var_r4 = gBgInfo[2].hOfs - var_r4;\n    if (arg0 > 0xC)\n    {\n        var_r0 = (void*)gUnk_030051DC[arg0 - 0xD].unk4;\n    }\n    else\n    {\n        var_r0 = gUnk_08078FC8[arg0].unk4;\n    }\n\n    switch (var_r0->shape_size & 0xF)\n    {\n        case 3:\n        case 11:\n            var_r2 = gBgInfo[2].vOfs - var_r2 + ((0x100 - gBg2YMag) >> 3);\n            break;\n\n        case 1:\n        case 6:\n        case 8:\n            var_r2 = gBgInfo[2].vOfs - var_r2 + ((0x100 - gBg2YMag) >> 5);\n            break;\n\n        case 0:\n        case 4:\n        case 5:\n            var_r2 = gBgInfo[2].vOfs - var_r2 + ((0x100 - gBg2YMag) >> 6);\n            break;\n\n        default:\n            var_r2 = gBgInfo[2].vOfs - var_r2 + ((0x100 - gBg2YMag) >> 4);\n            break;\n    }\n\n    gEntityInfo[arg0].xPosScreen = var_r4;\n    gEntityInfo[arg0].yPosScreen = var_r2;\n}",
+      "funcC": "void EntityUpdateScreenPositionAffine(u8 slot, s8 xOffset, s8 yOffset)\n{\n    // Update entity x/y (affine) with optional offset\n    s16 bg2XOffset;\n    s16 bg2YOffset;\n    s32 yPos;\n    s32 xPos;\n    struct Unk_0300466C_4 *var_r0;\n\n    xOffset++,xOffset--; //fake\n    gEntityInfo[slot].xPosScreen = gEntityInfo[slot].xPosBg2 - xOffset - gBgInfo[2].hOfs;\n    gEntityInfo[slot].yPosScreen = gEntityInfo[slot].yPosBg2 - yOffset - gBgInfo[2].vOfs;\n\n    bg2XOffset = gBgInfo[2].hOfs - gEntityInfo[slot].xPosScreen;\n    bg2YOffset = gBgInfo[2].vOfs - gEntityInfo[slot].yPosScreen;\n\n    xPos = (bg2XOffset * gBg2XMag) / 0x100;\n    yPos = (bg2YOffset * gBg2YMag) / 0x100;\n\n    xPos = gBgInfo[2].hOfs - xPos;\n    if (slot >= 0xD)\n    {\n        var_r0 = gUnk_030051DC[slot - 0xD].unk4;\n    }\n    else\n    {\n        var_r0 = gUnk_08078FC8[slot].unk4;\n    }\n\n    switch (var_r0->shape_size & 0xF)\n    {\n        // TODO: 3 is not a valid shape, so is this what is meant?\n        case SPRITE_SIZE_8x16 | SPRITE_SIZE_16x8:   // 3 = 0 | 3\n        case SPRITE_SIZE_32x16 | SPRITE_SIZE_16x32: // 11 = 8 | 3\n            yPos = gBgInfo[2].vOfs - yPos + ((0x100 - gBg2YMag) >> 3);\n            break;\n\n        case SPRITE_SIZE_16x8:  // 1 = 0 | 1\n        case SPRITE_SIZE_8x32:  // 6 = 4 | 2\n        case SPRITE_SIZE_32x32: // 8 = 8 | 0\n            yPos = gBgInfo[2].vOfs - yPos + ((0x100 - gBg2YMag) >> 5);\n            break;\n\n        case SPRITE_SIZE_8x8:   // 0 = 0 | 0\n        case SPRITE_SIZE_16x16: // 4 = 4 | 0\n        case SPRITE_SIZE_32x8:  // 5 = 4 | 1\n            yPos = gBgInfo[2].vOfs - yPos + ((0x100 - gBg2YMag) >> 6);\n            break;\n\n        default:\n            yPos = gBgInfo[2].vOfs - yPos + ((0x100 - gBg2YMag) >> 4);\n            break;\n    }\n\n    gEntityInfo[slot].xPosScreen = xPos;\n    gEntityInfo[slot].yPosScreen = yPos;\n}",
       "prependC": "struct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern struct Unk_0300466C gUnk_08078FC8[0xD];\nextern const union Unk_03000820 gUnk_080E2A7C;\nextern const u8 gUnk_080E2A84[0x6][0x8];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern u8 gUnk_08061FC8[0x80];\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_08063368[0x80];\nextern u8 gUnk_080635E8[0x80];\nextern u8 gUnk_08063FE8[0x80];\nextern u8 gUnk_08064868[0x200];\nextern u8 gUnk_08064A68[0x200];\nextern u8 gUnk_080B8F68[0x80];\nextern u8 gUnk_080B9068[0x80];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nextern u8 gUnk_080B9268[0x80];\nextern u8 gUnk_080B92E8[0x80];\nextern u8 gUnk_080B9468[0x200];\nextern u8 gUnk_080B9668[0x200];\nextern void sub_0801C82C(u32); // should be u8 param\nextern void sub_0801F4D0(s32); // should be u8 param\nextern void sub_08021DAC(s32); // should be u8 param",
       "proto": {
-        "sub_0800A5B8": {
+        "EntityUpdateScreenPositionAffine": {
           "returnsVoid": true
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_080070A0.c#L1424-L1491"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_080070A0.c#L1425-L1481"
     },
     {
       "sym": "DrawLevelHud_Hearts",
       "addr": "0x08025dd4",
-      "unit": "src/code_08025B78.c",
+      "unit": "src/anim.c",
       "romDigest": "f007546b6c8b7fe7b80081a27f6442dca135be97179ef24aec5547cbb7756121",
       "features": [
         "global",
@@ -672,12 +678,12 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08025B78.c#L105-L128"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/anim.c#L105-L128"
     },
     {
       "sym": "DrawLevelHud_DreamStones",
       "addr": "0x08025e68",
-      "unit": "src/code_08025B78.c",
+      "unit": "src/anim.c",
       "romDigest": "859d0d402ee463a6356ba0ee30584a1f9694a1ad5aecc11893590cd4b816cdf4",
       "features": [
         "global",
@@ -687,7 +693,7 @@
       "funcC": "s32 DrawLevelHud_DreamStones(void)\n{\n    s32 maxDreamStones;\n    s32 reachedMax;\n\n    reachedMax = 0;\n\n    if ((gUnk_03004C20.unkA == 1) || (gUnk_03004C20.level == 6))\n    {\n        // Hoverboard levels\n        maxDreamStones = 100;\n    }\n    else\n    {\n        // Normal levels\n        maxDreamStones = 30;\n    }\n\n    if (maxDreamStones == gUnk_03005220.dreamStones)\n    {\n        reachedMax = 1;\n    }\n\n    if ((gUnk_03004C20.unkA == 1) || (gUnk_03004C20.level == 6))\n    {\n        // maxDreamStones must be reused to match, here it is a boolean for max dream stones being over 99\n        // This causes tens/ones to shift left by one\n        maxDreamStones = 1;\n\n        if (gUnk_03005220.dreamStones >= 100)\n        {\n            // Hundreds digit\n            gBgTilemapBufs[0][0x252] += 0;\n            gBgTilemapBufs[0][0x252] = gBgTilemapBufs[0][0x293];\n            gBgTilemapBufs[0][0x272] += 0;\n            gBgTilemapBufs[0][0x272] = gBgTilemapBufs[0][0x2B3];\n        }\n    }\n    else\n    {\n        maxDreamStones = 0;\n    }\n\n    if (gUnk_03005220.dreamStones >= 10)\n    {\n        // Tens digit\n        gBgTilemapBufs[0][0x254 - maxDreamStones] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones / 10) + 0x292];\n        gBgTilemapBufs[0][0x274 - maxDreamStones] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones / 10) + 0x2B2];\n    }\n\n    // Ones digit\n    gBgTilemapBufs[0][0x255 - maxDreamStones] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones % 10) + 0x292];\n    gBgTilemapBufs[0][0x275 - maxDreamStones] = gBgTilemapBufs[0][(gUnk_03005220.dreamStones % 10) + 0x2B2];\n\n    return reachedMax;\n}",
       "prependC": "extern u16 gUnk_08057C70;\nextern u8 gUnk_080A5088[0x800];",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08025B78.c#L131-L186"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/anim.c#L131-L186"
     },
     {
       "sym": "WorldMapScreenIsValidPath",
@@ -699,10 +705,10 @@
         "struct",
         "branch"
       ],
-      "funcC": "u8 WorldMapScreenIsValidPath(u8 mapIndex)\n{\n    // Called on transition to world map, check if able to go to world\n    u32 world;\n    u32 level;\n    u8 nbrExStagesAllStones;\n    u8 nbrPuzzleStagesAllStones;\n    u8 nbrStagesBeaten;\n    u8 nbrActionStagesAllStones;\n\n    if (mapIndex < 4)\n    {\n        if ((gUnk_03004670->levelInfo[mapIndex][7] & LEVEL_INFO_BEATEN_FLAG) && ((gUnk_03004670->levelInfo[mapIndex + 1][0] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            return 1;\n        }\n    }\n    else if (gUnk_03004670->levelInfo[5][7] & LEVEL_INFO_BEATEN_FLAG)\n    {\n        nbrActionStagesAllStones = 0;\n        nbrPuzzleStagesAllStones = 0;\n        nbrStagesBeaten = 0;\n        nbrExStagesAllStones = 0;\n\n        for (world = 0; world < 5; world++)\n        {\n            for (level = 0; level < 7; level++)\n            {\n                if (((level == 3) || (level == 5)) && ((gUnk_03004670->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 100))\n                {\n                    nbrActionStagesAllStones += 1;\n                }\n                else if ((level != 7) && ((gUnk_03004670->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 30))\n                {\n                    nbrPuzzleStagesAllStones += 1;\n                }\n\n                if (gUnk_03004670->levelInfo[world][level] & LEVEL_INFO_BEATEN_FLAG)\n                {\n                    nbrStagesBeaten += 1;\n                }\n            }\n        }\n\n        if ((gUnk_03004670->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n        if ((gUnk_03004670->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n    \n        if ((mapIndex == 4) && ((gUnk_03004670->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK) && (nbrStagesBeaten == 35))\n        {\n            return 1;\n        }\n        if ((mapIndex == 5) && ((gUnk_03004670->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK) && ((nbrPuzzleStagesAllStones + nbrActionStagesAllStones) >= 25))\n        {\n            return 1;\n        }\n        if ((mapIndex == 6) && ((gUnk_03004670->levelInfo[5][2] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK) && ((nbrPuzzleStagesAllStones + nbrActionStagesAllStones + nbrExStagesAllStones) == 37))\n        {\n            return 1;\n        }\n    }\n\n    return 0;\n}",
+      "funcC": "u8 WorldMapScreenIsValidPath(u8 mapIndex)\n{\n    // Called on transition to world map, check if able to go to world\n    u32 world;\n    u32 level;\n    u8 nbrExStagesAllStones;\n    u8 nbrPuzzleStagesAllStones;\n    u8 nbrStagesBeaten;\n    u8 nbrActionStagesAllStones;\n\n    if (mapIndex < 4)\n    {\n        if ((gFileProgressData->levelInfo[mapIndex][7] & LEVEL_INFO_BEATEN_FLAG) && ((gFileProgressData->levelInfo[mapIndex + 1][0] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            return 1;\n        }\n    }\n    else if (gFileProgressData->levelInfo[5][7] & LEVEL_INFO_BEATEN_FLAG)\n    {\n        nbrActionStagesAllStones = 0;\n        nbrPuzzleStagesAllStones = 0;\n        nbrStagesBeaten = 0;\n        nbrExStagesAllStones = 0;\n\n        for (world = 0; world < 5; world++)\n        {\n            for (level = 0; level < 7; level++)\n            {\n                if (((level == 3) || (level == 5)) && ((gFileProgressData->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 100))\n                {\n                    nbrActionStagesAllStones += 1;\n                }\n                else if ((level != 7) && ((gFileProgressData->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 30))\n                {\n                    nbrPuzzleStagesAllStones += 1;\n                }\n\n                if (gFileProgressData->levelInfo[world][level] & LEVEL_INFO_BEATEN_FLAG)\n                {\n                    nbrStagesBeaten += 1;\n                }\n            }\n        }\n\n        if ((gFileProgressData->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n        if ((gFileProgressData->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n    \n        if ((mapIndex == 4) && ((gFileProgressData->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK) && (nbrStagesBeaten == 35))\n        {\n            return 1;\n        }\n        if ((mapIndex == 5) && ((gFileProgressData->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK) && ((nbrPuzzleStagesAllStones + nbrActionStagesAllStones) >= 25))\n        {\n            return 1;\n        }\n        if ((mapIndex == 6) && ((gFileProgressData->levelInfo[5][2] & LEVEL_INFO_DREAM_STONES_MASK) != LEVEL_INFO_DREAM_STONES_MASK) && ((nbrPuzzleStagesAllStones + nbrActionStagesAllStones + nbrExStagesAllStones) == 37))\n        {\n            return 1;\n        }\n    }\n\n    return 0;\n}",
       "prependC": "extern const u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_08064868[0x200];\nextern const u8 gUnk_08078508[0x20];\nextern u8 gUnk_08078628[0x20];\nextern u8 gUnk_08078728[0x20];\nextern u8 gUnk_08078768[0x20];\nextern u8 gUnk_080789C8[0x20];\nextern u8 gUnk_080B9468[0x200];\nextern u8 gUnk_080D8C30[6][0x40];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern const u8 gUnk_081166F8[4][4];\nextern const u8 gUnk_08116708[8][4];\nextern const u16 gUnk_08116728[8][2];\nextern const u8 gUnk_08116748[7][8];\nextern const u8 gUnk_08116780[8][0x20];\nextern const u8 gUnk_08116880[8];\nextern const s8 gUnk_08116888[6][2];\nextern const u8 gUnk_081168DC[6];\nextern const u8 gUnk_081168E2[4];\nextern struct Unk_0803D4AC gUnk_081168E8[];\nextern const u8 gUnk_081169F9[3][3];\nextern const u8 gUnk_08116A02[4][5];\nextern u8 gUnk_08116A46[4][2];\nextern u16 gUnk_08116A4E[4][4];\nextern const u8 gUnk_08116A6E[4][6];\nextern const u8 gUnk_08116A86[5][6];\nextern const u8 gUnk_08116AA4[3];\nextern const u8 gUnk_08116AA7[3];\nextern const u8 gUnk_0811710A[6];\nextern u16 gUnk_08117110[8];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern const void *gUnk_0818B9F8[];\nextern u32 gUnk_082EAF8C;\nextern u32 gUnk_082EB488;\nextern u32 gUnk_082EB5B8;\nextern u32 gUnk_082EBB20;\nextern u32 gUnk_082EBC68;\nextern u32 gUnk_082EC1A4;\nextern u32 gUnk_082EC2E4;\nextern u32 gUnk_082EC7C8;\nextern u32 gUnk_082EC8F4;\nextern u32 gUnk_082ECD74;\nextern u32 gUnk_083128F8;\nextern u32 gUnk_08312A58;\nextern u32 gUnk_08312B70;\nextern u32 gUnk_08312BD8;\nextern u32 gUnk_08313C34;\nextern u32 gUnk_08313F24;\nextern u32 gUnk_083141F0;\nextern u32 gUnk_083142EC;\nextern u32 gUnk_083155C4;\nenum PauseMenuOption {\n    PAUSE_MENU_OPTION_NONE,\n    PAUSE_MENU_OPTION_CONTINUE_GAME,\n    PAUSE_MENU_OPTION_RETRY,\n    PAUSE_MENU_OPTION_SELECT_VISION,\n    PAUSE_MENU_OPTION_BUTTON_CONFIGURATION,\n    PAUSE_MENU_OPTION_WORLD_MAP,\n    PAUSE_MENU_OPTION_RETURN_TO_TITLE_SCREEN\n};",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L662-L730"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L661-L729"
     },
     {
       "sym": "WorldMapScreenDrawPath",
@@ -723,7 +729,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L791-L808"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L790-L807"
     },
     {
       "sym": "HBlankIntr_DeleteAllSaveDataScreen",
@@ -742,7 +748,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/interrupts.c#L161-L171"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/interrupts.c#L161-L171"
     },
     {
       "sym": "sub_0804C7FC",
@@ -764,7 +770,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L902-L907"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L893-L898"
     },
     {
       "sym": "PauseMenuScreenHandler",
@@ -777,7 +783,7 @@
         "global",
         "memory"
       ],
-      "funcC": "void PauseMenuScreenHandler(void)\n{\n    // Pause menu handler\n    u8 option;\n    u32 i;\n    u8 col;\n    u8 row;\n\n    option = (gNewKeys & (START_BUTTON | B_BUTTON)) != 0;\n    if (gNewKeys & A_BUTTON)\n    {\n        option = gUnk_03004658->cursorIndex + 1;\n    }\n\n    if (gNewKeys & (DPAD_DOWN | DPAD_UP))\n    {\n        for (row = 0; row < 2; row++)\n        {\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((row + (gUnk_03004658->cursorIndex * 3)) * 0x20) + 0xA5], 0x4);\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((row + (gUnk_03004658->cursorIndex * 3)) * 0x20) + 0xB7], 0x4);\n        }\n\n        if ((gPauseMenuType == PAUSE_MENU_TYPE_NORMAL_LEVEL) || (gPauseMenuType == PAUSE_MENU_TYPE_EX_LEVEL))\n        {\n            if (gNewKeys & DPAD_DOWN)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gUnk_03004658->cursorIndex += 1;\n                if (gUnk_03004658->cursorIndex > 3)\n                {\n                    gUnk_03004658->cursorIndex = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gUnk_03004658->cursorIndex -= 1;\n                if (gUnk_03004658->cursorIndex & 0x80)\n                {\n                    gUnk_03004658->cursorIndex = 3;\n                }\n            }\n        }\n        else\n        {\n            // PAUSE_MENU_TYPE_LEVEL_SELECT or PAUSE_MENU_TYPE_BOSS\n            if (gNewKeys & DPAD_DOWN)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gUnk_03004658->cursorIndex += 1;\n                if (gUnk_03004658->cursorIndex > 2)\n                {\n                    gUnk_03004658->cursorIndex = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gUnk_03004658->cursorIndex -= 1;\n                if (gUnk_03004658->cursorIndex & 0x80)\n                {\n                    gUnk_03004658->cursorIndex = 2;\n                }\n            }\n        }\n\n        for (row = 0; row < 2; row++)\n        {\n            for (col = 0; col < 2; col++)\n            {\n                if (gUnk_030034BC == 0)\n                {\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gUnk_03004658->cursorIndex * 3)) * 0x20) + 0xA5 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0x9D + col] + gUnk_03000800;\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gUnk_03004658->cursorIndex * 3)) * 0x20) + 0xB7 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0xAF + col] + gUnk_03000800;\n                }\n                else\n                {\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gUnk_03004658->cursorIndex * 3)) * 0x20) + 0xA5 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0x9D + col];\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gUnk_03004658->cursorIndex * 3)) * 0x20) + 0xB7 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0xAF + col];\n                }\n            }\n        }\n    }\n\n    if (option >= 1)\n    {\n        option = gUnk_081166F8[gPauseMenuType][option - 1];\n    }\n\n    switch (option)\n    {\n        case PAUSE_MENU_OPTION_CONTINUE_GAME:\n            gCallbackQueue.next[0] = InputHandler_Normal; // Redundant, immediately overwritten by loop\n            for (i = 0; i < 10; i++)\n            {\n                gCallbackQueue.next[i] = gCallbackQueue.previous[i];\n            }\n            gCallbackQueue.current[gCallbackQueue.currentCount - 1] = NULL;\n            gCallbackQueue.nextCount = gCallbackQueue.previousCount;\n\n            PauseMenuScreenRestoreGfx();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            break;\n\n        case PAUSE_MENU_OPTION_RETRY:\n            PauseMenuScreenRestoreGfx();\n            gCallbackQueue.current[1] = TransitionFromDeathToLevel_FadeOut;\n            gUnk_03005220.unk4 = gUnk_03005284->unk18;\n            gUnk_03005220.lives = gUnk_03005284->unk0;\n            gUnk_03005220.hearts = gUnk_03005284->unk8_0;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            break;\n\n        case PAUSE_MENU_OPTION_SELECT_VISION:\n            gUnk_03005284->unk0 = gUnk_03005220.lives = gUnk_03005284->unk1E;\n            PauseMenuScreenRestoreGfx();\n            gBlendValue = 0;\n            if (gUnk_03004C20.world == 6 && gUnk_03004C20.level == 8)\n            {\n                gUnk_03004C20.world = 5;\n            }\n            gUnk_030034B0.unk6_4 = gUnk_03004C20.level;\n            gUnk_03004C20.level = 0;\n            gCallbackQueue.current[1] = TransitionFromVisionSelectToLevel_FadeOut;\n            break;\n\n        case PAUSE_MENU_OPTION_BUTTON_CONFIGURATION:\n            gCallbackQueue.current[1] = ButtonConfigurationScreenInit;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n\n        case PAUSE_MENU_OPTION_WORLD_MAP:\n            if (gUnk_03004C20.level != 0)\n            {\n                gUnk_03005284->unk0 = gUnk_03005220.lives = gUnk_03005284->unk1E;\n            }\n            PauseMenuScreenRestoreGfx();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            sub_080008DC();\n            gCallbackQueue.current[1] = TransitionFromVisionSelectToWorldMap_FadeOut;\n            break;\n\n        case PAUSE_MENU_OPTION_RETURN_TO_TITLE_SCREEN:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gTitleScreenStage = 0;\n            sub_0800A468();\n            gCallbackQueue.current[1] = TransitionFromVisionSelectToBootScreen_FadeOut;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n    }\n}",
+      "funcC": "void PauseMenuScreenHandler(void)\n{\n    // Pause menu handler\n    u8 option;\n    u32 i;\n    u8 col;\n    u8 row;\n\n    option = (gNewKeys & (START_BUTTON | B_BUTTON)) != 0;\n    if (gNewKeys & A_BUTTON)\n    {\n        option = gMenuInfo->cursorIndex + 1;\n    }\n\n    if (gNewKeys & (DPAD_DOWN | DPAD_UP))\n    {\n        for (row = 0; row < 2; row++)\n        {\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((row + (gMenuInfo->cursorIndex * 3)) * 0x20) + 0xA5], 0x4);\n            DmaFill16(3, 0, &gBgTilemapBufs[gUnk_030034BC][((row + (gMenuInfo->cursorIndex * 3)) * 0x20) + 0xB7], 0x4);\n        }\n\n        if ((gPauseMenuType == PAUSE_MENU_TYPE_NORMAL_LEVEL) || (gPauseMenuType == PAUSE_MENU_TYPE_EX_LEVEL))\n        {\n            if (gNewKeys & DPAD_DOWN)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gMenuInfo->cursorIndex += 1;\n                if (gMenuInfo->cursorIndex > 3)\n                {\n                    gMenuInfo->cursorIndex = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gMenuInfo->cursorIndex -= 1;\n                if (gMenuInfo->cursorIndex & 0x80)\n                {\n                    gMenuInfo->cursorIndex = 3;\n                }\n            }\n        }\n        else\n        {\n            // PAUSE_MENU_TYPE_LEVEL_SELECT or PAUSE_MENU_TYPE_BOSS\n            if (gNewKeys & DPAD_DOWN)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gMenuInfo->cursorIndex += 1;\n                if (gMenuInfo->cursorIndex > 2)\n                {\n                    gMenuInfo->cursorIndex = 0;\n                }\n            }\n\n            if (gNewKeys & DPAD_UP)\n            {\n                m4aSongNumStart(SE_CURSOR_MOVE);\n                gMenuInfo->cursorIndex -= 1;\n                if (gMenuInfo->cursorIndex & 0x80)\n                {\n                    gMenuInfo->cursorIndex = 2;\n                }\n            }\n        }\n\n        for (row = 0; row < 2; row++)\n        {\n            for (col = 0; col < 2; col++)\n            {\n                if (gUnk_030034BC == 0)\n                {\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gMenuInfo->cursorIndex * 3)) * 0x20) + 0xA5 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0x9D + col] + gUnk_03000800;\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gMenuInfo->cursorIndex * 3)) * 0x20) + 0xB7 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0xAF + col] + gUnk_03000800;\n                }\n                else\n                {\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gMenuInfo->cursorIndex * 3)) * 0x20) + 0xA5 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0x9D + col];\n                    gBgTilemapBufs[gUnk_030034BC][((row + (gMenuInfo->cursorIndex * 3)) * 0x20) + 0xB7 + col] = gBgDataPtrs.pBufBg3Tilemap[(row * 0x1E) + 0xAF + col];\n                }\n            }\n        }\n    }\n\n    if (option >= 1)\n    {\n        option = gUnk_081166F8[gPauseMenuType][option - 1];\n    }\n\n    switch (option)\n    {\n        case PAUSE_MENU_OPTION_CONTINUE_GAME:\n            gCallbackQueue.next[0] = InputHandler_Normal; // Redundant, immediately overwritten by loop\n            for (i = 0; i < 10; i++)\n            {\n                gCallbackQueue.next[i] = gCallbackQueue.previous[i];\n            }\n            gCallbackQueue.current[gCallbackQueue.currentCount - 1] = NULL;\n            gCallbackQueue.nextCount = gCallbackQueue.previousCount;\n\n            PauseMenuScreenRestoreGfx();\n            m4aSoundVSyncOn();\n            m4aMPlayAllContinue();\n            break;\n\n        case PAUSE_MENU_OPTION_RETRY:\n            PauseMenuScreenRestoreGfx();\n            gCallbackQueue.current[1] = TransitionFromDeathToLevel_FadeOut;\n            gUnk_03005220.collected1Ups = gUnk_03005284->collected1Ups;\n            gUnk_03005220.lives = gUnk_03005284->lives;\n            gUnk_03005220.hearts = gUnk_03005284->hearts;\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            break;\n\n        case PAUSE_MENU_OPTION_SELECT_VISION:\n            gUnk_03005284->lives = gUnk_03005220.lives = gUnk_03005284->prevLives;\n            PauseMenuScreenRestoreGfx();\n            gBlendValue = 0;\n            if (gUnk_03004C20.world == 6 && gUnk_03004C20.level == 8)\n            {\n                gUnk_03004C20.world = 5;\n            }\n            gVisionSelectInfo.currentVision = gUnk_03004C20.level;\n            gUnk_03004C20.level = 0;\n            gCallbackQueue.current[1] = TransitionFromVisionSelectToLevel_FadeOut;\n            break;\n\n        case PAUSE_MENU_OPTION_BUTTON_CONFIGURATION:\n            gCallbackQueue.current[1] = ButtonConfigurationScreenInit;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n\n        case PAUSE_MENU_OPTION_WORLD_MAP:\n            if (gUnk_03004C20.level != 0)\n            {\n                gUnk_03005284->lives = gUnk_03005220.lives = gUnk_03005284->prevLives;\n            }\n            PauseMenuScreenRestoreGfx();\n            REG_BLDCNT = 0;\n            gBlendValue = 0;\n            sub_080008DC();\n            gCallbackQueue.current[1] = TransitionFromVisionSelectToWorldMap_FadeOut;\n            break;\n\n        case PAUSE_MENU_OPTION_RETURN_TO_TITLE_SCREEN:\n            gBlendValue = 0;\n            gUnk_03004C20.level = 9;\n            gTitleScreenStage = 0;\n            EntityResetOamBuffer();\n            gCallbackQueue.current[1] = TransitionFromVisionSelectToBootScreen_FadeOut;\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tilemap);\n            thunk_HeapFree(gBgDataPtrs.pBufBg3Tiles);\n            break;\n    }\n}",
       "prependC": "extern const u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_08064868[0x200];\nextern const u8 gUnk_08078508[0x20];\nextern u8 gUnk_08078628[0x20];\nextern u8 gUnk_08078728[0x20];\nextern u8 gUnk_08078768[0x20];\nextern u8 gUnk_080789C8[0x20];\nextern u8 gUnk_080B9468[0x200];\nextern u8 gUnk_080D8C30[6][0x40];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern const u8 gUnk_081166F8[4][4];\nextern const u8 gUnk_08116708[8][4];\nextern const u16 gUnk_08116728[8][2];\nextern const u8 gUnk_08116748[7][8];\nextern const u8 gUnk_08116780[8][0x20];\nextern const u8 gUnk_08116880[8];\nextern const s8 gUnk_08116888[6][2];\nextern const u8 gUnk_081168DC[6];\nextern const u8 gUnk_081168E2[4];\nextern struct Unk_0803D4AC gUnk_081168E8[];\nextern const u8 gUnk_081169F9[3][3];\nextern const u8 gUnk_08116A02[4][5];\nextern u8 gUnk_08116A46[4][2];\nextern u16 gUnk_08116A4E[4][4];\nextern const u8 gUnk_08116A6E[4][6];\nextern const u8 gUnk_08116A86[5][6];\nextern const u8 gUnk_08116AA4[3];\nextern const u8 gUnk_08116AA7[3];\nextern const u8 gUnk_0811710A[6];\nextern u16 gUnk_08117110[8];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern const void *gUnk_0818B9F8[];\nextern u32 gUnk_082EAF8C;\nextern u32 gUnk_082EB488;\nextern u32 gUnk_082EB5B8;\nextern u32 gUnk_082EBB20;\nextern u32 gUnk_082EBC68;\nextern u32 gUnk_082EC1A4;\nextern u32 gUnk_082EC2E4;\nextern u32 gUnk_082EC7C8;\nextern u32 gUnk_082EC8F4;\nextern u32 gUnk_082ECD74;\nextern u32 gUnk_083128F8;\nextern u32 gUnk_08312A58;\nextern u32 gUnk_08312B70;\nextern u32 gUnk_08312BD8;\nextern u32 gUnk_08313C34;\nextern u32 gUnk_08313F24;\nextern u32 gUnk_083141F0;\nextern u32 gUnk_083142EC;\nextern u32 gUnk_083155C4;\nenum PauseMenuOption {\n    PAUSE_MENU_OPTION_NONE,\n    PAUSE_MENU_OPTION_CONTINUE_GAME,\n    PAUSE_MENU_OPTION_RETRY,\n    PAUSE_MENU_OPTION_SELECT_VISION,\n    PAUSE_MENU_OPTION_BUTTON_CONFIGURATION,\n    PAUSE_MENU_OPTION_WORLD_MAP,\n    PAUSE_MENU_OPTION_RETURN_TO_TITLE_SCREEN\n};",
       "proto": {
         "PauseMenuScreenHandler": {
@@ -785,7 +791,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L344-L502"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L343-L501"
     },
     {
       "sym": "sub_0803F68C",
@@ -807,19 +813,19 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L3436-L3533"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L3435-L3532"
     },
     {
       "sym": "AthleticChallengeScrollUpdate",
       "addr": "0x0800247c",
-      "unit": "src/code_08001158.c",
+      "unit": "src/vision.c",
       "romDigest": "c623ffa464aa46791b804648ce8950740cd5aec6ecd0414c1711dfca002d5598",
       "features": [
         "struct",
         "branch",
         "global"
       ],
-      "funcC": "void AthleticChallengeScrollUpdate(void)\n{\n    // Athletic Challenge (autoscroller level 6) scrolling\n    s32 autoScrollYVel;\n    s32 autoScrollXVel;\n    u16 var_r8;\n    struct ScrollOffset scrollOffset;\n    u8 scrollFlags;\n\n    var_r8 = 0;\n    scrollFlags = SCROLL_NONE;\n    scrollOffset.y = scrollOffset.x = 0;\n\n    // Handle horizontal scrolling when autoscroll is not horizontal\n    if (!(gAthleticChallengeScrollFlags & SCROLL_HORIZONTAL))\n    {\n        if ((s16) gEntityInfo[0].xPosBg2 > (s16) (gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER))\n        {\n            scrollFlags = SCROLL_RIGHT;\n            if ((gEntityInfo[0].xPosBg2 - (gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER)) > 5)\n            {\n                scrollOffset.x = 2;\n            }\n            else\n            {\n                scrollOffset.x = 1;\n            }\n\n            if (gHeldKeys & DPAD_LEFT)\n            {\n                scrollFlags = SCROLL_NONE;\n                scrollOffset.x = 0;\n            }\n        }\n\n        else if ((s16) gEntityInfo[0].xPosBg2 < (s16) (gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER))\n        {\n            scrollFlags = SCROLL_LEFT;\n            if (((gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER) - gEntityInfo[0].xPosBg2) > 5)\n            {\n                scrollOffset.x = -2;\n            }\n            else\n            {\n                scrollOffset.x = -1;\n            }\n\n            if (gHeldKeys & DPAD_RIGHT)\n            {\n                scrollFlags = SCROLL_NONE;\n                scrollOffset.x = 0;\n            }\n        }\n    }\n\n    // Handle vertical scrolling when autoscroll is not vertical\n    if (!(gAthleticChallengeScrollFlags & SCROLL_VERTICAL))\n    {\n        if (gEntityInfo[0].yPosScreen > DISPLAY_HEIGHT)\n        {\n            var_r8 = 0x44;\n        }\n\n        if ((u16) (var_r8 + gEntityInfo[0].yPosScreen) >= 0x64)\n        {\n            scrollFlags |= SCROLL_DOWN;\n            if ((u16) ((var_r8 + gEntityInfo[0].yPosScreen) - 0x64) > 0x1E)\n            {\n                scrollOffset.y = 3;\n            }\n            else\n            {\n                scrollOffset.y = 1;\n            }\n            \n        }\n        else if ((u16) (var_r8 + gEntityInfo[0].yPosScreen) <= 0x46)\n        {\n            scrollFlags |= SCROLL_UP;\n            if ((u16) (var_r8 - (gEntityInfo[0].yPosScreen - 0x46)) > 0x19)\n            {\n                scrollOffset.y = -3;\n            }\n            else\n            {\n                scrollOffset.y = -1;\n            }\n        }\n    }\n\n    scrollFlags |= gAthleticChallengeScrollFlags;\n\n    autoScrollXVel = gAthleticChallengeAutoScrollXVelocity + gAthleticChallengeAutoScrollBaseVelocity.x;\n    autoScrollYVel = gAthleticChallengeAutoScrollYVelocity + gAthleticChallengeAutoScrollBaseVelocity.y;\n\n    scrollOffset.x += (autoScrollXVel >> 0x10);\n    scrollOffset.y += (autoScrollYVel >> 0x10);\n\n    gAthleticChallengeAutoScrollXVelocity = autoScrollXVel & 0xFFFF;\n    gAthleticChallengeAutoScrollYVelocity = autoScrollYVel & 0xFFFF;\n\n    if (gUnk_03005220.unk46 != 0)\n    {\n        scrollFlags &= SCROLL_HORIZONTAL;\n        scrollOffset.x = 0;\n        scrollOffset.y = 0;\n    }\n\n    if (scrollFlags != SCROLL_NONE)\n    {\n        ScrollBg2LevelData(scrollFlags, scrollOffset);\n    }\n\n    gBgInfo[1].hOfs = gBgInfo[2].hOfs / 2;\n    if ((gUnk_03004C20.globalFrameCounter % 4) == 0 && (gUnk_03004660 == 0))\n    {\n        if (gBgInfo[2].vOfs >= gPreviousBg2VOfs)\n        {\n            gBgInfo[1].vOfs += ((gBgInfo[2].vOfs - gPreviousBg2VOfs) & 1);\n        }\n        else\n        {\n            gBgInfo[1].vOfs -= ((gPreviousBg2VOfs - gBgInfo[2].vOfs) & 1);\n        }\n\n        if (gBgInfo[1].vOfs & 0x8000)\n        {\n            gBgInfo[1].vOfs = 0;\n        }\n        else if (gBgInfo[1].vOfs > DISPLAY_HEIGHT_CENTER)\n        {\n            gBgInfo[1].vOfs = DISPLAY_HEIGHT_CENTER;\n        }\n    }\n\n    gPreviousBg2VOfs = gBgInfo[2].vOfs;\n    gBg2PA = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PB = MultiplyQ8(SIN(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PC = MultiplyQ8(-SIN(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2PD = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2X = ((gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER) << 8) - (gBg2PA * DISPLAY_WIDTH_CENTER) - (gBg2PB * DISPLAY_HEIGHT_CENTER);\n    gBg2Y = ((gBgInfo[2].vOfs + DISPLAY_HEIGHT_CENTER) << 8) - (gBg2PC * DISPLAY_WIDTH_CENTER) - (gBg2PD * DISPLAY_HEIGHT_CENTER);\n}",
+      "funcC": "void AthleticChallengeScrollUpdate(void)\n{\n    // Athletic Challenge (autoscroller level 6) scrolling\n    s32 autoScrollYVel;\n    s32 autoScrollXVel;\n    u16 var_r8;\n    struct ScrollOffset scrollOffset;\n    u8 scrollFlags;\n\n    var_r8 = 0;\n    scrollFlags = SCROLL_NONE;\n    scrollOffset.y = scrollOffset.x = 0;\n\n    // Handle horizontal scrolling when autoscroll is not horizontal\n    if (!(gAthleticChallengeScrollFlags & SCROLL_HORIZONTAL))\n    {\n        if ((s16) gEntityInfo[0].xPosBg2 > (s16) (gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER))\n        {\n            scrollFlags = SCROLL_RIGHT;\n            if ((gEntityInfo[0].xPosBg2 - (gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER)) > 5)\n            {\n                scrollOffset.x = 2;\n            }\n            else\n            {\n                scrollOffset.x = 1;\n            }\n\n            if (gHeldKeys & DPAD_LEFT)\n            {\n                scrollFlags = SCROLL_NONE;\n                scrollOffset.x = 0;\n            }\n        }\n\n        else if ((s16) gEntityInfo[0].xPosBg2 < (s16) (gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER))\n        {\n            scrollFlags = SCROLL_LEFT;\n            if (((gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER) - gEntityInfo[0].xPosBg2) > 5)\n            {\n                scrollOffset.x = -2;\n            }\n            else\n            {\n                scrollOffset.x = -1;\n            }\n\n            if (gHeldKeys & DPAD_RIGHT)\n            {\n                scrollFlags = SCROLL_NONE;\n                scrollOffset.x = 0;\n            }\n        }\n    }\n\n    // Handle vertical scrolling when autoscroll is not vertical\n    if (!(gAthleticChallengeScrollFlags & SCROLL_VERTICAL))\n    {\n        if (gEntityInfo[0].yPosScreen > DISPLAY_HEIGHT)\n        {\n            var_r8 = 0x44;\n        }\n\n        if ((u16) (var_r8 + gEntityInfo[0].yPosScreen) >= 0x64)\n        {\n            scrollFlags |= SCROLL_DOWN;\n            if ((u16) ((var_r8 + gEntityInfo[0].yPosScreen) - 0x64) > 0x1E)\n            {\n                scrollOffset.y = 3;\n            }\n            else\n            {\n                scrollOffset.y = 1;\n            }\n            \n        }\n        else if ((u16) (var_r8 + gEntityInfo[0].yPosScreen) <= 0x46)\n        {\n            scrollFlags |= SCROLL_UP;\n            if ((u16) (var_r8 - (gEntityInfo[0].yPosScreen - 0x46)) > 0x19)\n            {\n                scrollOffset.y = -3;\n            }\n            else\n            {\n                scrollOffset.y = -1;\n            }\n        }\n    }\n\n    scrollFlags |= gAthleticChallengeScrollFlags;\n\n    autoScrollXVel = gAthleticChallengeAutoScrollXVelocity + gAthleticChallengeAutoScrollBaseVelocity.x;\n    autoScrollYVel = gAthleticChallengeAutoScrollYVelocity + gAthleticChallengeAutoScrollBaseVelocity.y;\n\n    scrollOffset.x += (autoScrollXVel >> 0x10);\n    scrollOffset.y += (autoScrollYVel >> 0x10);\n\n    gAthleticChallengeAutoScrollXVelocity = autoScrollXVel & 0xFFFF;\n    gAthleticChallengeAutoScrollYVelocity = autoScrollYVel & 0xFFFF;\n\n    if (gUnk_03005220.unk46 != 0)\n    {\n        scrollFlags &= SCROLL_HORIZONTAL;\n        scrollOffset.x = 0;\n        scrollOffset.y = 0;\n    }\n\n    if (scrollFlags != SCROLL_NONE)\n    {\n        ScrollBg2LevelData(scrollFlags, scrollOffset);\n    }\n\n    gBgInfo[1].hOfs = gBgInfo[2].hOfs / 2;\n    if ((gUnk_03004C20.globalFrameCounter % 4) == 0 && (gEnteredCannonGoal == 0))\n    {\n        if (gBgInfo[2].vOfs >= gPreviousBg2VOfs)\n        {\n            gBgInfo[1].vOfs += ((gBgInfo[2].vOfs - gPreviousBg2VOfs) & 1);\n        }\n        else\n        {\n            gBgInfo[1].vOfs -= ((gPreviousBg2VOfs - gBgInfo[2].vOfs) & 1);\n        }\n\n        if (gBgInfo[1].vOfs & 0x8000)\n        {\n            gBgInfo[1].vOfs = 0;\n        }\n        else if (gBgInfo[1].vOfs > DISPLAY_HEIGHT_CENTER)\n        {\n            gBgInfo[1].vOfs = DISPLAY_HEIGHT_CENTER;\n        }\n    }\n\n    gPreviousBg2VOfs = gBgInfo[2].vOfs;\n    gBg2PA = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PB = MultiplyQ8(SIN(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PC = MultiplyQ8(-SIN(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2PD = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2X = ((gBgInfo[2].hOfs + DISPLAY_WIDTH_CENTER) << 8) - (gBg2PA * DISPLAY_WIDTH_CENTER) - (gBg2PB * DISPLAY_HEIGHT_CENTER);\n    gBg2Y = ((gBgInfo[2].vOfs + DISPLAY_HEIGHT_CENTER) << 8) - (gBg2PC * DISPLAY_WIDTH_CENTER) - (gBg2PD * DISPLAY_HEIGHT_CENTER);\n}",
       "prependC": "extern u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u16 gVisionBgHLength[6][9][3];\nextern u16 gVisionBgVLength[6][9][3];\nextern u16 gVisionBgNbrTiles[6][9][3];\nextern u8 gVisionBgTileSize[6][9][3];\nextern struct Unk_03004654 gUnk_080520E4[6][8];\nextern u8 gUnk_08052624[6][9];\nextern u16 gUnk_0805265A[6];\nextern u16 gUnk_08052666[6];\nextern u16 gUnk_08052672[6];\nextern u8 gUnk_0805267E[6];\nextern void gUnk_0805553C;\nextern void gUnk_080555A8;\nextern struct CurrentRoomBg2Bounds gUnk_080D2E88[6][0x7][0x14];\nstruct Unk_080D48C8 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4_0:2;\n    u8 unk4_2:6;\n    u8 pad5[0x8 - 0x5];\n};\nextern struct Unk_080D48C8 gUnk_080D48C8[6][7][0x15];\nextern u16 gUnk_080D927C[BG_PLTT_SIZE/2]; // TODO: type\nextern u16 gUnk_080D947C[0x9600/2]; // TODO: type\nextern void (*gUnk_08116620[6][9])(void); // pointers to \"load level\" functions\nextern void* gUnk_08188F5C[6][9];   // pointers to BG palettes (level)\nextern u32 *gUnk_08189034[6][9][3]; // pointers to BG tiles (level)\nextern u32 *gUnk_081892BC[6][9][3]; // pointers to BG tilemaps (level)\nextern u32 *gUnk_08189544[6]; // pointers to BG palettes (overworld)\nextern u32 *gUnk_0818955C[6]; // pointers to BG1 tiles (overworld)\nextern u32 *gUnk_08189574[6]; // pointers to BG1 tilemaps (overworld)\nextern void *gUnk_08189A24[6][9];\nextern u32 *gUnk_0818B7AC[6*2];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];",
       "proto": {
         "AthleticChallengeScrollUpdate": {
@@ -827,7 +833,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08001158.c#L671-L813"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/vision.c#L666-L808"
     },
     {
       "sym": "WorldMapScreenCheckNewWorldUnlocked",
@@ -839,7 +845,7 @@
         "branch",
         "global"
       ],
-      "funcC": "void WorldMapScreenCheckNewWorldUnlocked(void)\n{\n    // Called on transition to world map (once), checks/sets new world unlock callback\n    u8 nbrExStagesAllStones;\n    u8 nbrActionStagesAllStones;\n    u8 world;\n    u8 level;\n    u8 nbrStagesBeaten;\n    u8 nbrPuzzleStagesAllStones;\n\n    if (gUnk_03004670->levelInfo[5][7] & LEVEL_INFO_BEATEN_FLAG)\n    {\n        nbrActionStagesAllStones = 0;\n        nbrPuzzleStagesAllStones = 0;\n        nbrStagesBeaten = 0;\n        nbrExStagesAllStones = 0;\n\n        for (world = 0; world < 5; world++)\n        {\n            for (level = 0; level < 7; level++)\n            {\n                if (((level == 3) || (level == 5)) && ((gUnk_03004670->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 100))\n                {\n                    nbrActionStagesAllStones += 1;\n                }\n                else if ((level != 7) && ((gUnk_03004670->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 30))\n                {\n                    nbrPuzzleStagesAllStones += 1;\n                }\n\n                if (gUnk_03004670->levelInfo[world][level] & LEVEL_INFO_BEATEN_FLAG)\n                {\n                    nbrStagesBeaten += 1;\n                }\n            }\n        }\n\n        if ((gUnk_03004670->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n        if ((gUnk_03004670->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n\n        if (((gUnk_03004670->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK) && (nbrStagesBeaten == 35))\n        {\n            gWorldMapInfo.beatenIndex = 4;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[5][0] = LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if (((gUnk_03004670->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK) && ((nbrPuzzleStagesAllStones + nbrActionStagesAllStones) >= 25))\n        {\n            gWorldMapInfo.beatenIndex = 5;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[5][1] = LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if (((gUnk_03004670->levelInfo[5][2] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK) && ((nbrExStagesAllStones + nbrActionStagesAllStones + nbrPuzzleStagesAllStones) == 37))\n        {\n            gWorldMapInfo.beatenIndex = 6;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[5][2] = LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n    }\n    else\n    {\n        if ((gUnk_03004670->levelInfo[0][7] & LEVEL_INFO_BEATEN_FLAG) && ((gUnk_03004670->levelInfo[1][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 0;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[1][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if ((gUnk_03004670->levelInfo[1][7] & LEVEL_INFO_BEATEN_FLAG) && ((gUnk_03004670->levelInfo[2][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 1;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[2][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if ((gUnk_03004670->levelInfo[2][7] & LEVEL_INFO_BEATEN_FLAG) && ((gUnk_03004670->levelInfo[3][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 2;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[3][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if ((gUnk_03004670->levelInfo[3][7] & LEVEL_INFO_BEATEN_FLAG) && ((gUnk_03004670->levelInfo[4][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 3;\n            gWorldMapInfo.unlockTimer = 0;\n            gUnk_03004670->levelInfo[4][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n    }\n\n    gCallbackQueue.current[1] = WorldMapScreenHandler;\n}",
+      "funcC": "void WorldMapScreenCheckNewWorldUnlocked(void)\n{\n    // Called on transition to world map (once), checks/sets new world unlock callback\n    u8 nbrExStagesAllStones;\n    u8 nbrActionStagesAllStones;\n    u8 world;\n    u8 level;\n    u8 nbrStagesBeaten;\n    u8 nbrPuzzleStagesAllStones;\n\n    if (gFileProgressData->levelInfo[5][7] & LEVEL_INFO_BEATEN_FLAG)\n    {\n        nbrActionStagesAllStones = 0;\n        nbrPuzzleStagesAllStones = 0;\n        nbrStagesBeaten = 0;\n        nbrExStagesAllStones = 0;\n\n        for (world = 0; world < 5; world++)\n        {\n            for (level = 0; level < 7; level++)\n            {\n                if (((level == 3) || (level == 5)) && ((gFileProgressData->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 100))\n                {\n                    nbrActionStagesAllStones += 1;\n                }\n                else if ((level != 7) && ((gFileProgressData->levelInfo[world][level] & LEVEL_INFO_DREAM_STONES_MASK) == 30))\n                {\n                    nbrPuzzleStagesAllStones += 1;\n                }\n\n                if (gFileProgressData->levelInfo[world][level] & LEVEL_INFO_BEATEN_FLAG)\n                {\n                    nbrStagesBeaten += 1;\n                }\n            }\n        }\n\n        if ((gFileProgressData->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n        if ((gFileProgressData->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) == 30)\n        {\n            nbrExStagesAllStones += 1;\n        }\n\n        if (((gFileProgressData->levelInfo[5][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK) && (nbrStagesBeaten == 35))\n        {\n            gWorldMapInfo.beatenIndex = 4;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[5][0] = LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if (((gFileProgressData->levelInfo[5][1] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK) && ((nbrPuzzleStagesAllStones + nbrActionStagesAllStones) >= 25))\n        {\n            gWorldMapInfo.beatenIndex = 5;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[5][1] = LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if (((gFileProgressData->levelInfo[5][2] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK) && ((nbrExStagesAllStones + nbrActionStagesAllStones + nbrPuzzleStagesAllStones) == 37))\n        {\n            gWorldMapInfo.beatenIndex = 6;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[5][2] = LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n    }\n    else\n    {\n        if ((gFileProgressData->levelInfo[0][7] & LEVEL_INFO_BEATEN_FLAG) && ((gFileProgressData->levelInfo[1][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 0;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[1][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if ((gFileProgressData->levelInfo[1][7] & LEVEL_INFO_BEATEN_FLAG) && ((gFileProgressData->levelInfo[2][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 1;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[2][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if ((gFileProgressData->levelInfo[2][7] & LEVEL_INFO_BEATEN_FLAG) && ((gFileProgressData->levelInfo[3][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 2;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[3][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n        else if ((gFileProgressData->levelInfo[3][7] & LEVEL_INFO_BEATEN_FLAG) && ((gFileProgressData->levelInfo[4][0] & LEVEL_INFO_DREAM_STONES_MASK) == LEVEL_INFO_DREAM_STONES_MASK))\n        {\n            gWorldMapInfo.beatenIndex = 3;\n            gWorldMapInfo.unlockTimer = 0;\n            gFileProgressData->levelInfo[4][0] &= LEVEL_INFO_BEATEN_FLAG;\n            gCallbackQueue.current[1] = WorldMapScreenUnlockNewWorld;\n            return;\n        }\n    }\n\n    gCallbackQueue.current[1] = WorldMapScreenHandler;\n}",
       "prependC": "extern const u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_08064868[0x200];\nextern const u8 gUnk_08078508[0x20];\nextern u8 gUnk_08078628[0x20];\nextern u8 gUnk_08078728[0x20];\nextern u8 gUnk_08078768[0x20];\nextern u8 gUnk_080789C8[0x20];\nextern u8 gUnk_080B9468[0x200];\nextern u8 gUnk_080D8C30[6][0x40];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern const u8 gUnk_081166F8[4][4];\nextern const u8 gUnk_08116708[8][4];\nextern const u16 gUnk_08116728[8][2];\nextern const u8 gUnk_08116748[7][8];\nextern const u8 gUnk_08116780[8][0x20];\nextern const u8 gUnk_08116880[8];\nextern const s8 gUnk_08116888[6][2];\nextern const u8 gUnk_081168DC[6];\nextern const u8 gUnk_081168E2[4];\nextern struct Unk_0803D4AC gUnk_081168E8[];\nextern const u8 gUnk_081169F9[3][3];\nextern const u8 gUnk_08116A02[4][5];\nextern u8 gUnk_08116A46[4][2];\nextern u16 gUnk_08116A4E[4][4];\nextern const u8 gUnk_08116A6E[4][6];\nextern const u8 gUnk_08116A86[5][6];\nextern const u8 gUnk_08116AA4[3];\nextern const u8 gUnk_08116AA7[3];\nextern const u8 gUnk_0811710A[6];\nextern u16 gUnk_08117110[8];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern const void *gUnk_0818B9F8[];\nextern u32 gUnk_082EAF8C;\nextern u32 gUnk_082EB488;\nextern u32 gUnk_082EB5B8;\nextern u32 gUnk_082EBB20;\nextern u32 gUnk_082EBC68;\nextern u32 gUnk_082EC1A4;\nextern u32 gUnk_082EC2E4;\nextern u32 gUnk_082EC7C8;\nextern u32 gUnk_082EC8F4;\nextern u32 gUnk_082ECD74;\nextern u32 gUnk_083128F8;\nextern u32 gUnk_08312A58;\nextern u32 gUnk_08312B70;\nextern u32 gUnk_08312BD8;\nextern u32 gUnk_08313C34;\nextern u32 gUnk_08313F24;\nextern u32 gUnk_083141F0;\nextern u32 gUnk_083142EC;\nextern u32 gUnk_083155C4;\nenum PauseMenuOption {\n    PAUSE_MENU_OPTION_NONE,\n    PAUSE_MENU_OPTION_CONTINUE_GAME,\n    PAUSE_MENU_OPTION_RETRY,\n    PAUSE_MENU_OPTION_SELECT_VISION,\n    PAUSE_MENU_OPTION_BUTTON_CONFIGURATION,\n    PAUSE_MENU_OPTION_WORLD_MAP,\n    PAUSE_MENU_OPTION_RETURN_TO_TITLE_SCREEN\n};",
       "proto": {
         "WorldMapScreenCheckNewWorldUnlocked": {
@@ -847,7 +853,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L826-L934"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L825-L933"
     },
     {
       "sym": "WorldMapScreenUnlockNewWorld",
@@ -867,7 +873,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L937-L1035"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L936-L1034"
     },
     {
       "sym": "sub_0801F4D0",
@@ -888,7 +894,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08014184.c#L7289-L7353"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08014184.c#L7289-L7353"
     },
     {
       "sym": "ButtonConfigurationScreenInit",
@@ -908,7 +914,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08039D8C.c#L505-L573"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08039D8C.c#L504-L572"
     },
     {
       "sym": "sub_0801DE44",
@@ -929,7 +935,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08014184.c#L6460-L6501"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08014184.c#L6460-L6501"
     },
     {
       "sym": "HeldUp",
@@ -946,7 +952,7 @@
       "prependC": "extern const u8 gUnk_08078F88[0x20];\nextern const u8 gUnk_08078FA8[0x20];\nextern struct Unk_0300466C gUnk_0807D7B0[];\nstruct Unk_08116590 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 pad9[0xC - 0x9];\n};\nextern const struct Unk_08116590 gUnk_08116590[12];\nextern const u8 gUnk_0811717C[6][40][5];\nextern const u16 gUnk_0811769C[0x20][4];\nextern const u8 gUnk_0811779C[8];\nextern const u16 gUnk_081177A4[8][2];\nextern const u32 *gUnk_0818BA3C[0x20];\nextern const u32 *gUnk_0818BABC[0x20];\nextern const u32 *gUnk_0818BB3C[0x20];\nextern u32 gUnk_082ECEA8[];\nextern u32 gUnk_082ECEF8[];\nextern u32 gUnk_082ED1FC[];\nextern u32 gUnk_082F3B2C[];\nextern u32 gUnk_082F43C4[];\nextern u32 gUnk_082F47A8[];\nextern u32 gUnk_082F48BC[];\nextern u32 gUnk_082F4934[];\nextern u32 gUnk_082F49E4[];\nextern u32 gUnk_082F4B10[];\nextern u32 gUnk_082F4D3C[];\nextern u32 gUnk_082F518C[];\nextern u32 gUnk_082F5920[];\nextern u32 gUnk_082F5D0C[];\nextern u32 gUnk_082F7D64[];\nextern u32 gUnk_082F8BF8[];\nextern u32 gUnk_082FA784[];\nextern u32 gUnk_082FA8C0[];\nextern u32 gUnk_082FB0E0[];\nextern u32 gUnk_082FB280[];\nextern u32 gUnk_082FBB9C[];\nextern u32 gUnk_082FBE10[];\nextern u32 gUnk_08312A58[];\nextern u32 gUnk_08312B70[];\nextern u32 gUnk_08366214[];\nextern u32 gUnk_08367468[];",
       "m2cCtx": true,
       "note": "A single-condition 0/1 select, and the corpus inhabitant of raise/retsink.ts's one-set-arm admission (CLOSED 2026-09-11). The premise this row falsified: return-sinking was gated to short-circuit conditions on the stated grounds that a single condition byte-matches as a merge variable, which is false here — agbcc hoists a one-speculatable-SET arm above the compare (gcc/jump.c:471-502) and for the {0,1} pair folds branchlessly, so the diamond the target keeps can only have been written with early returns. What the row now pins is that admission plus its dependency on the ranked /flip-branch lever: a sunk diamond has no join left, so the unranked primary still emits the arms in the wrong sense.",
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_080472B0.c#L80-L90"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_080472B0.c#L80-L90"
     },
     {
       "sym": "LoadObjects_World2Select",
@@ -969,12 +975,12 @@
       },
       "m2cCtx": true,
       "note": "Long enough that agbcc splits it around a mid-function literal pool, which lands between a `cmp` and the conditional branch that reads it: the corpus’s only ARM inhabitant of condition flags reaching a branch across a block boundary. Past the lift it measures the DMA-wait macro, 21 near-identical regions of it — asmlift spells each busy-wait as an `if` over a `do`/`while` on one `volatile s32 *`, where the macro re-reads the control register through its own pointer.",
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0802688C.c#L321-L371"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0802688C.c#L308-L358"
     },
     {
       "sym": "UpdateEntityAnimationInfoEntries",
       "addr": "0x08025ba4",
-      "unit": "src/code_08025B78.c",
+      "unit": "src/anim.c",
       "romDigest": "21645aadb47fd1eeab07f1cfa16f500e15675f1777d82609c701c1006e69cab2",
       "features": [
         "continue",
@@ -995,26 +1001,29 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08025B78.c#L32-L102"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/anim.c#L32-L102"
     },
     {
-      "sym": "sub_08045F68",
+      "sym": "VisionSelectUpdateRotationAndEntities",
       "addr": "0x08045f68",
       "unit": "src/code_08043BA4.c",
       "romDigest": "46d44f90de6df259354fc35b5dfbb2a2bce19017a51556d29766c5d394cfa8cd",
+      "aliases": [
+        "sub_08045F68"
+      ],
       "features": [
         "matrix",
         "fixed-point"
       ],
-      "funcC": "void sub_08045F68(void)\n{\n    s16 pd;\n    s16 pc;\n    s16 pa;\n    s16 pb;\n    u32 i;\n    u8 temp_r1;\n\n    gEntityInfo[0].affineEnable = 1;\n    gEntityInfo[0].affineHFlip_matrixNum = 0;\n\n    pa = MultiplyQ8(COS(0), ReciprocalQ8(0xA0));\n    pb = MultiplyQ8(SIN(0), ReciprocalQ8(0));\n    pc = MultiplyQ8(-SIN(0), ReciprocalQ8(0));\n    pd = MultiplyQ8(COS(0), ReciprocalQ8(0xA0));\n\n    if (gEntityInfo[0].unkC_2 == 0)\n    {\n        gOamAffineBuffer->pa = pa;\n    }\n    else\n    {\n        gOamAffineBuffer->pa = -pa;\n    }\n    gOamAffineBuffer->pb = pb;\n    gOamAffineBuffer->pc = pc;\n    gOamAffineBuffer->pd = pd;\n\n    gBg2PA = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PB = MultiplyQ8(SIN(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PC = MultiplyQ8(-SIN(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2PD = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n\n    gBg2X = (0x7800 - (gBg2PA * 0x78)) - (gBg2PB * 0x78);\n    gBg2Y = (0x7800 - (gBg2PC * 0x78)) - (gBg2PD * 0x78);\n\n    gEntityInfo[0].xPosScreen = ((COS(gUnk_030034B0.unk1) * (s8) gUnk_030034B0.unk2) >> 8) + 0x78;\n    gEntityInfo[0].yPosScreen = (((SIN(gUnk_030034B0.unk1) * (s8) gUnk_030034B0.unk2) >> 8) / 3) + 0x6E;\n    gEntityInfo[0].priority = 1;\n\n    for (i = gUnk_030034B0.unk0_1 + 0xD; i < gUnk_03005428; i++)\n    {\n        temp_r1 = gBg2Alpha + 0x40 + gEntityInfo[i].yPosBg2;\n        gEntityInfo[i].xPosScreen = ((COS(temp_r1) * gEntityInfo[i].xPosBg2) >> 8) + 0x78;\n        gEntityInfo[i].yPosScreen = (((SIN(temp_r1) * gEntityInfo[i].xPosBg2) >> 8) / 3) + 0x66;\n    }\n\n    sub_08046A64(gUnk_03005428 - (gUnk_030034B0.unk0_1 + 0xD));\n\n    for (i = gUnk_030034B0.unk0_1 + 0xD; i < gUnk_03005428; i++)\n    {\n        if ((gEntityInfo[i].id <= 0x50) || (gEntityInfo[i].id >= 0x54))\n        {\n            gEntityInfo[i].visible = 0;\n        }\n        else if ((gUnk_030034B0.unk0_0 != 0) && (gEntityInfo[i].id == 0x53))\n        {\n            gEntityInfo[i].visible = 0;\n        }\n        else\n        {\n            gEntityInfo[i].visible = 1;\n            gEntityInfo[i].yPosScreen -= gEntityInfo[i].unk8.split.unk8;\n        }\n    }\n\n    gEntityInfo[0].yPosScreen -= 0xA;\n}",
+      "funcC": "void VisionSelectUpdateRotationAndEntities(void)\n{\n    s16 pd;\n    s16 pc;\n    s16 pa;\n    s16 pb;\n    u32 i;\n    u8 alpha;\n\n    gEntityInfo[0].affineEnable = 1;\n    gEntityInfo[0].affineHFlip_matrixNum = 0;\n\n    pa = MultiplyQ8(COS(0), ReciprocalQ8(0xA0));\n    pb = MultiplyQ8(SIN(0), ReciprocalQ8(0));\n    pc = MultiplyQ8(-SIN(0), ReciprocalQ8(0));\n    pd = MultiplyQ8(COS(0), ReciprocalQ8(0xA0));\n\n    if (gEntityInfo[0].unkC_2 == 0)\n    {\n        gOamAffineBuffer->pa = pa;\n    }\n    else\n    {\n        gOamAffineBuffer->pa = -pa;\n    }\n    gOamAffineBuffer->pb = pb;\n    gOamAffineBuffer->pc = pc;\n    gOamAffineBuffer->pd = pd;\n\n    gBg2PA = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PB = MultiplyQ8(SIN(gBg2Alpha), ReciprocalQ8(gBg2XMag));\n    gBg2PC = MultiplyQ8(-SIN(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n    gBg2PD = MultiplyQ8(COS(gBg2Alpha), ReciprocalQ8(gBg2YMag));\n\n    gBg2X = (0x7800 - (gBg2PA * 0x78)) - (gBg2PB * 0x78);\n    gBg2Y = (0x7800 - (gBg2PC * 0x78)) - (gBg2PD * 0x78);\n\n    gEntityInfo[0].xPosScreen = ((COS(gVisionSelectInfo.alpha) * gVisionSelectInfo.unk2) >> 8) + 0x78;\n    gEntityInfo[0].yPosScreen = (((SIN(gVisionSelectInfo.alpha) * gVisionSelectInfo.unk2) >> 8) / 3) + 0x6E;\n    gEntityInfo[0].priority = 1;\n\n    for (i = gVisionSelectInfo.unk0_1 + 0xD; i < gUnk_03005428; i++)\n    {\n        alpha = gBg2Alpha + 0x40 + gEntityInfo[i].yPosBg2;\n        gEntityInfo[i].xPosScreen = ((COS(alpha) * gEntityInfo[i].xPosBg2) >> 8) + 0x78;\n        gEntityInfo[i].yPosScreen = (((SIN(alpha) * gEntityInfo[i].xPosBg2) >> 8) / 3) + 0x66;\n    }\n\n    sub_08046A64(gUnk_03005428 - (gVisionSelectInfo.unk0_1 + 0xD));\n\n    for (i = gVisionSelectInfo.unk0_1 + 0xD; i < gUnk_03005428; i++)\n    {\n        if ((gEntityInfo[i].id <= 0x50) || (gEntityInfo[i].id >= 0x54))\n        {\n            gEntityInfo[i].visible = 0;\n        }\n        else if ((gVisionSelectInfo.unk0_0 != 0) && (gEntityInfo[i].id == 0x53))\n        {\n            gEntityInfo[i].visible = 0;\n        }\n        else\n        {\n            gEntityInfo[i].visible = 1;\n            gEntityInfo[i].yPosScreen -= gEntityInfo[i].unk8.split.unk8;\n        }\n    }\n\n    gEntityInfo[0].yPosScreen -= 0xA;\n}",
       "prependC": "extern u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_080657C8[0x400];\nextern u8 gUnk_08065BC8[0x400];\nextern u8 gUnk_08065FC8[0x400];\nextern u8 gUnk_080663C8[0x80];\nextern u8 gUnk_08066448[0x40];\nextern u8 gUnk_08066488[0x80];\nextern u8 gUnk_08066508[0x80];\nextern u8 gUnk_08066588[0x80];\nextern u8 gUnk_08066608[0x80];\nextern u8 gUnk_08066688[0x80];\nextern u8 gUnk_08066708[0x80];\nextern u8 gUnk_08066788[0x80];\nextern u8 gUnk_08066808[0x80];\nextern u8 gUnk_08066888[0x80];\nextern u8 gUnk_08066908[0x80];\nextern u8 gUnk_08066988[0x80];\nextern u8 gUnk_08066A08[0x80];\nextern u8 gUnk_08066A88[0x80];\nextern u8 gUnk_08078A88[0x20];\nextern u8 gUnk_08078AA8[0x20];\nextern u8 gUnk_08078AC8[0x20];\nextern u8 gUnk_08078AE8[0x20];\nextern struct Unk_0300466C gUnk_0807D248[];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nstruct Unk_080D48C8 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4_0:2;\n    u8 unk4_2:6;\n    u8 pad5[0x8 - 0x5];\n};\nextern struct Unk_080D48C8 gUnk_080D48C8[6][7][0x15];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nstruct Unk_08116464 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 pad9[0xC - 0x9];\n};\nextern struct Unk_08116464 gUnk_08116464[];\nextern const u8 gUnk_08117120[0xA];\nextern const u8 gUnk_0811712A[0x10];\nextern const u16 gUnk_0811713A[0x20];\nextern const u8 gUnk_0811717C[6][40][5];\nextern const u8 gUnk_0811762C[6][8];\nextern const u8 gUnk_0811765C[6][7];",
       "proto": {
-        "sub_08045F68": {
+        "VisionSelectUpdateRotationAndEntities": {
           "returnsVoid": true
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_08043BA4.c#L1336-L1404"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08043BA4.c#L1339-L1407"
     },
     {
       "sym": "sub_0804C898",
@@ -1022,9 +1031,9 @@
       "unit": "src/code_0804B254.c",
       "romDigest": "67546a4ebc0ee5287a6de5c248fe7eefa8d9c8ba154795a511b34483de00eb55",
       "features": [
-        "stack-addr"
+        "array"
       ],
-      "funcC": "void sub_0804C898(void)\n{\n    u8 subroutine_arg0[0x10];\n\n    memcpy(&subroutine_arg0, &gUnk_081177E4, 0x10); // TODO: actually initialize memory\n\n    if (gUnk_0300081C->unk17_1 != 0)\n    {\n        gEntityInfo[0xD].visible = (gUnk_03004C20.globalFrameCounter / 0x20) % 2;\n    }\n    else\n    {\n        gEntityInfo[0xD].visible = 0;\n    }\n}",
+      "funcC": "void sub_0804C898(void)\n{\n    // 0x1177e4\n    u8 subroutine_arg0[0x10] = {\n        [0] = 0,\n        [1] = 1,\n        [2] = 2,\n        [3] = 4,\n        [4] = 6,\n        [5] = 4,\n        [6] = 2,\n        [7] = 1,\n        [8] = 0,\n        [9] = -1,\n        [10] = -2,\n        [11] = -4,\n        [12] = -6,\n        [13] = -4,\n        [14] = -2,\n        [15] = -1\n    };\n\n    if (gUnk_0300081C->unk17_1 != 0)\n    {\n        gEntityInfo[0xD].visible = (gUnk_03004C20.globalFrameCounter / 0x20) % 2;\n    }\n    else\n    {\n        gEntityInfo[0xD].visible = 0;\n    }\n}",
       "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern u8 gUnk_081177E4[0x10];\nextern s8 gUnk_081177F4[4][0x8];\nextern s8 gUnk_08117834[0x10];\nextern u8 gUnk_08117844[0x10];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};",
       "proto": {
         "sub_0804C898": {
@@ -1032,7 +1041,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L921-L935"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L912-L942"
     },
     {
       "sym": "sub_0804C300",
@@ -1044,7 +1053,7 @@
         "table",
         "variable-index"
       ],
-      "funcC": "void sub_0804C300(void)\n{\n    s32 var_r8;\n    u16 var_sb;\n\n    var_sb = sub_0804B254(gUnk_03004D84 + 2);\n    for (var_r8 = 0; gUnk_08189F04[var_sb][var_r8].unk0 != 0xFFFF; var_r8++)\n    {\n        sub_08003DC0(gUnk_03005428++, gUnk_08189F04[var_sb][var_r8].unk7, gUnk_08189F04[var_sb][var_r8].unk0, gUnk_08189F04[var_sb][var_r8].unk2, gUnk_08189F04[var_sb][var_r8].unk4, gUnk_08189F04[var_sb][var_r8].unk9, gUnk_08189F04[var_sb][var_r8].unk5, gUnk_08189F04[var_sb][var_r8].unk6, gUnk_08189F04[var_sb][var_r8].unk8);\n    }\n    gUnk_03004D84 += 4;\n}",
+      "funcC": "void sub_0804C300(void)\n{\n    s32 var_r8;\n    u16 var_sb;\n\n    var_sb = sub_0804B254(gUnk_03004D84 + 2);\n    for (var_r8 = 0; gUnk_08189F04[var_sb][var_r8].unk0 != 0xFFFF; var_r8++)\n    {\n        EntityCreate(gUnk_03005428++, gUnk_08189F04[var_sb][var_r8].unk7, gUnk_08189F04[var_sb][var_r8].unk0, gUnk_08189F04[var_sb][var_r8].unk2, gUnk_08189F04[var_sb][var_r8].unk4, gUnk_08189F04[var_sb][var_r8].unk9, gUnk_08189F04[var_sb][var_r8].unk5, gUnk_08189F04[var_sb][var_r8].unk6, gUnk_08189F04[var_sb][var_r8].unk8);\n    }\n    gUnk_03004D84 += 4;\n}",
       "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern u8 gUnk_081177E4[0x10];\nextern s8 gUnk_081177F4[4][0x8];\nextern s8 gUnk_08117834[0x10];\nextern u8 gUnk_08117844[0x10];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};\nu16 sub_0804B254(void *arg0);",
       "proto": {
         "sub_0804C300": {
@@ -1052,7 +1061,7 @@
         }
       },
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/code_0804B254.c#L768-L779"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L759-L770"
     },
     {
       "sym": "DeleteAllSaveData",
@@ -1066,7 +1075,173 @@
       "funcC": "u16 DeleteAllSaveData(void)\n{\n    // Called when deleting all save data\n    u16 retval;\n    u32 j;\n    u32 i;\n\n    i = 0;\n\n    gDma0CntHBackup = REG_DMA0CNT_H;\n    gDma1CntHBackup = REG_DMA1CNT_H;\n    gDma2CntHBackup = REG_DMA2CNT_H;\n    gDma3CntHBackup = REG_DMA3CNT_H;\n\n    REG_DMA0CNT_H &= ~DMA_ENABLE;\n    REG_DMA1CNT_H &= ~DMA_ENABLE;\n    REG_DMA2CNT_H &= ~DMA_ENABLE;\n    REG_DMA3CNT_H &= ~DMA_ENABLE;\n\n    loop_1:\n    // Delete all data in EEPROM\n    for (j = 0; j < 0x40; j++)\n    {\n        retval = ProgramEepromDwordEx(j, (u16 *) sEmptyEepromData);\n    }\n\n    if (retval != 0)\n    {\n        if (i++ < 10)\n        {\n            goto loop_1;\n        }\n    }\n\n    REG_DMA0CNT_H = gDma0CntHBackup;\n    REG_DMA1CNT_H = gDma1CntHBackup;\n    REG_DMA2CNT_H = gDma2CntHBackup;\n    REG_DMA3CNT_H = gDma3CntHBackup;\n    return retval;\n}",
       "prependC": "extern const u16 sEmptyEepromData[4];\nextern const u8 sSaveFileString[9]; // \"K_KLONOA\"",
       "m2cCtx": true,
-      "sourceUrl": "https://github.com/macabeus/kleod/blob/6f149e33517cecae33d57fe888a60f2b20a2008d/src/save.c#L290-L329"
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/save.c#L290-L329"
+    },
+    {
+      "sym": "sub_0804CAC8",
+      "addr": "0x0804cac8",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "a76b3ec65a403d6d95800cdeccb2570ee50aebbad95dcd0059ac6a496ade5bef",
+      "features": [
+        "stack-addr",
+        "struct",
+        "field",
+        "bitfield",
+        "variable-index",
+        "global",
+        "array"
+      ],
+      "funcC": "s32 sub_0804CAC8(s32 arg0)\n{\n    struct Unk_0804CA6C subroutine_arg0 = {\n        .unk0 = 0,\n        .unk2 = 0\n    };\n\n    if (sub_0804CA6C(&gUnk_030052A4[arg0], &subroutine_arg0) != 0)\n    {\n        return 0;\n    }\n\n    switch (gUnk_030052A4[arg0].unk0_3)\n    {\n        case 0:\n            gBgInfo[gUnk_030052A4[arg0].unk1_3].hOfs += subroutine_arg0.unk0;\n            gBgInfo[gUnk_030052A4[arg0].unk1_3].vOfs += subroutine_arg0.unk2;\n            break;\n\n        case 2:\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].xPosBg2 += subroutine_arg0.unk0;\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].yPosBg2 += subroutine_arg0.unk2;\n\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].xPosScreen = gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].xPosBg2 >> 4;\n            gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].yPosScreen = gEntityInfo[gUnk_030052A4[arg0].unk1_7 + 0xD].yPosBg2 >> 4;\n            break;\n\n        case 4:\n            if (gUnk_030052A4[arg0].unk1_3 & 2)\n            {\n                gUnk_030034A0->winX1Y1[gUnk_030052A4[arg0].unk1_3 & 1][WIN_H] += subroutine_arg0.unk0;\n                gUnk_030034A0->winX1Y1[gUnk_030052A4[arg0].unk1_3 & 1][WIN_V] += subroutine_arg0.unk2;\n            }\n            else\n            {\n                gUnk_030034A0->winX2Y2[gUnk_030052A4[arg0].unk1_3 & 1][WIN_H] += subroutine_arg0.unk0;\n                gUnk_030034A0->winX2Y2[gUnk_030052A4[arg0].unk1_3 & 1][WIN_V] += subroutine_arg0.unk0;\n            }\n\n            sub_0804B2EC();\n            break;\n    }\n\n    gUnk_030052A4[arg0].unk14 -= 1;\n    return 1;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nstruct Unk_0804C9A8 {\n    u16 unk0;\n    u16 unk2;\n};\nstruct Unk_0804CA6C {\n    u16 unk0;\n    u16 unk2;\n};\nvoid sub_0804B2EC(void);\ns32 sub_0804CA6C(struct Unk_030052A4 *arg0, struct Unk_0804CA6C *arg1);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L1068-L1113"
+    },
+    {
+      "sym": "sub_0804C60C",
+      "addr": "0x0804c60c",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "296f1404beec95b9f47596208c4f6c5352d5804aab7867ac7ea31e346ebb0294",
+      "features": [
+        "struct",
+        "field",
+        "array",
+        "variable-index",
+        "global",
+        "pointer"
+      ],
+      "funcC": "void sub_0804C60C(void)\n{\n    u32 temp_r1;\n\n    DmaFill32(3, sub_0804B270(gUnk_03004D84 + 3), gBgInfo[gUnk_03004D84[2]].pTiles + 0x40, 0x20);\n\n    temp_r1 = 0xF002;\n    switch (gUnk_03004D84[2])\n    {\n        case 0:\n        case 1:\n            DmaFill16(3, temp_r1, gBgTilemapBufs[gUnk_03004D84[2]], 0x800);\n            break;\n\n        case 2:\n        case 3:\n            DmaFill16(3, temp_r1, gBgInfo[gUnk_03004D84[2]].pTilemap, 0x800);\n            break;\n    }\n\n    gUnk_03004D84 += 7;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nu32 sub_0804B270(void *arg0);",
+      "proto": {
+        "sub_0804C60C": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L823-L844"
+    },
+    {
+      "sym": "sub_0800BEF0",
+      "addr": "0x0800bef0",
+      "unit": "src/code_080070A0.c",
+      "romDigest": "56a1603233dd6a84d4379d0453f68d04112f38f59dac3ae4c004e4e5c8837938",
+      "features": [
+        "struct-return",
+        "struct",
+        "field",
+        "global",
+        "branch",
+        "narrow",
+        "signed"
+      ],
+      "funcC": "struct Unk_0800BEF0_2 sub_0800BEF0(struct Unk_0800BEF0 arg0)\n{\n    u32 temp_r0;\n    struct Unk_0800BEF0_2 var_r4;\n    s8 var_r2;\n    s8 var_r3;\n    s8 var_r5;\n    s8 var_r7;\n\n    var_r3 = (arg0.unk4 - arg0.unk0) >> 3;\n    var_r5 = (arg0.unk6 - arg0.unk2) >> 3;\n    var_r4.unk0 = arg0.unk0;\n    var_r4.unk2 = arg0.unk2;\n\n    if (var_r3 < 0)\n    {\n        temp_r0 = arg0.unk8;\n        var_r7 = -temp_r0;\n        var_r3 = -var_r3;\n    }\n    else\n    {\n        var_r7 = arg0.unk8;\n    }\n\n    if (var_r5 < 0)\n    {\n        temp_r0 = arg0.unk8;\n        var_r2 = -temp_r0;\n        var_r5 = -var_r5;\n    }\n    else\n    {\n        var_r2 = arg0.unk8;\n    }\n\n    if (var_r3 >= var_r5)\n    {\n        var_r4.unk0 += var_r7;\n        gUnk_030034DC += var_r5;\n        if (gUnk_030034DC >= var_r3)\n        {\n            var_r4.unk2 += var_r2;\n            gUnk_030034DC -= var_r3;\n        }\n    }\n    else\n    {\n        var_r4.unk2 += var_r2;\n        gUnk_030034DC += var_r3;\n        if (gUnk_030034DC >= var_r5)\n        {\n            var_r4.unk0 += var_r7;\n            gUnk_030034DC -= var_r5;\n        }\n    }\n\n    return var_r4;\n}",
+      "prependC": "struct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nextern struct Unk_0300466C gUnk_08078FC8[0xD];\nextern const union Unk_03000820 gUnk_080E2A7C;\nextern const u8 gUnk_080E2A84[0x6][0x8];\nextern struct Unk_0300466C *gUnk_0818B8E0[6][9];\nextern u8 gUnk_08061FC8[0x80];\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_08063368[0x80];\nextern u8 gUnk_080635E8[0x80];\nextern u8 gUnk_08063FE8[0x80];\nextern u8 gUnk_08064868[0x200];\nextern u8 gUnk_08064A68[0x200];\nextern u8 gUnk_080B8F68[0x80];\nextern u8 gUnk_080B9068[0x80];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nextern u8 gUnk_080B9268[0x80];\nextern u8 gUnk_080B92E8[0x80];\nextern u8 gUnk_080B9468[0x200];\nextern u8 gUnk_080B9668[0x200];\nextern void sub_0801C82C(u32); // should be u8 param",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_080070A0.c#L2345-L2403"
+    },
+    {
+      "sym": "sub_08046A64",
+      "addr": "0x08046a64",
+      "unit": "src/code_08043BA4.c",
+      "romDigest": "a4f399423333434428e175cae9c5375dc661cde0f0c62af0bfcd07853037d713",
+      "features": [
+        "struct-copy",
+        "stack-addr",
+        "struct",
+        "field",
+        "pointer",
+        "global",
+        "narrow-counter",
+        "div-const"
+      ],
+      "funcC": "void sub_08046A64(u8 arg0)\n{\n    // Seems to switch around entities\n    struct EntityInfo *var_sl;\n    u8 var_r4;\n    u8 var_r1;\n    u8 var_r3;\n    struct EntityInfo subroutine_arg0;\n\n    var_sl = &gEntityInfo[0xD + gVisionSelectInfo.unk0_1];\n\n    var_r4 = 1;\n    while (var_r4 < (arg0 / 9))\n    {\n        var_r4 = (var_r4 * 3) + 1;\n    }\n\n    while (var_r4 != 0)\n    {\n        for (var_r1 = var_r4; var_r1 < arg0; var_r1++)\n        {\n            for (var_r3 = var_r1; var_r3 >= var_r4 && ((((*(var_sl + var_r3 - var_r4)).yPosScreen < (*(var_sl + var_r3)).yPosScreen))); var_r3 -= var_r4)\n            {\n                subroutine_arg0 = *(var_sl + var_r3);\n                *(var_sl + var_r3) = *(var_sl + var_r3 - var_r4);\n                *(var_sl + var_r3 - var_r4) = subroutine_arg0;\n            }\n        }\n\n        var_r4 /= 3;\n    }\n}",
+      "prependC": "extern u8 gVisionBgColorMode[6][9][3]; // BG bpp (0 = 16 color mode, 0x80 = 256 color mode)\nextern u8 gUnk_080627C8[0x80];\nextern u8 gUnk_080657C8[0x400];\nextern u8 gUnk_08065BC8[0x400];\nextern u8 gUnk_08065FC8[0x400];\nextern u8 gUnk_080663C8[0x80];\nextern u8 gUnk_08066448[0x40];\nextern u8 gUnk_08066488[0x80];\nextern u8 gUnk_08066508[0x80];\nextern u8 gUnk_08066588[0x80];\nextern u8 gUnk_08066608[0x80];\nextern u8 gUnk_08066688[0x80];\nextern u8 gUnk_08066708[0x80];\nextern u8 gUnk_08066788[0x80];\nextern u8 gUnk_08066808[0x80];\nextern u8 gUnk_08066888[0x80];\nextern u8 gUnk_08066908[0x80];\nextern u8 gUnk_08066988[0x80];\nextern u8 gUnk_08066A08[0x80];\nextern u8 gUnk_08066A88[0x80];\nextern u8 gUnk_08078A88[0x20];\nextern u8 gUnk_08078AA8[0x20];\nextern u8 gUnk_08078AC8[0x20];\nextern u8 gUnk_08078AE8[0x20];\nextern struct Unk_0300466C gUnk_0807D248[];\nextern u8 gUnk_080B90E8[0x80];\nextern u8 gUnk_080B9168[0x80];\nextern u8 gUnk_080B91E8[0x80];\nstruct Unk_080D48C8 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4_0:2;\n    u8 unk4_2:6;\n    u8 pad5[0x8 - 0x5];\n};\nextern struct Unk_080D48C8 gUnk_080D48C8[6][7][0x15];\nstruct Unk_080E2B64_0 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u16 unk6;\n};\nstruct Unk_080E2B64 {\n    struct Unk_080E2B64_0 unk0[5];\n    u8 unk28;\n    u8 unk29;\n    u8 pad2A[0x2C - 0x2A];\n};\nextern struct Unk_080E2B64 gUnk_080E2B64[6][8][0x64];\nstruct Unk_08116464 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 pad9[0xC - 0x9];\n};\nextern struct Unk_08116464 gUnk_08116464[];\nextern const u8 gUnk_08117120[0xA];\nextern const u8 gUnk_0811712A[0x10];\nextern const u16 gUnk_0811713A[0x20];\nextern const u8 gUnk_0811717C[6][40][5];\nextern const u8 gUnk_0811762C[6][8];\nextern const u8 gUnk_0811765C[6][7];",
+      "proto": {
+        "sub_08046A64": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_08043BA4.c#L1672-L1703"
+    },
+    {
+      "sym": "sub_0804C8F4",
+      "addr": "0x0804c8f4",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "470379e80450a6501ab61de43d8b0d9fabc33ed37e4acd1d8d7f01e55c18c972",
+      "features": [
+        "fnptr",
+        "struct",
+        "field",
+        "bitfield",
+        "array",
+        "variable-index",
+        "pointer",
+        "global"
+      ],
+      "funcC": "s32 sub_0804C8F4(struct Unk_030052A4 *arg0)\n{\n    s32 var_r5;\n    s32 var_r8;\n\n    var_r8 = 0;\n\n    for (var_r5 = 0; var_r5 < 0x10; var_r5++)\n    {\n        if (arg0[var_r5].unk0_0 != 0)\n        {\n            if (gUnk_030034A0->unk0_6 != 0)\n            {\n                arg0[var_r5].unk0_0 |= 4;\n            }\n\n            arg0[var_r5].unk0_0 = arg0[var_r5].unk20(var_r5);\n            if (arg0[var_r5].unk0_0 != 0)\n            {\n                var_r8 += 1;\n            }\n        }\n    }\n\n    for (var_r5 = 0x10; var_r5 < 0x20; var_r5++)\n    {\n        if (arg0[var_r5].unk0_0 != 0)\n        {\n            arg0[var_r5].unk0_0 = arg0[var_r5].unk20(var_r5);\n        }\n    }\n\n    return (gUnk_030034A0->unk0_6 != 0) ? var_r8 : 0;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L944-L977"
+    },
+    {
+      "sym": "sub_0804C1FC",
+      "addr": "0x0804c1fc",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "b00b0ca552dde1fea831e9168587872834b4a2fe7211f972643dc0f311927410",
+      "features": [
+        "global",
+        "pointer",
+        "array"
+      ],
+      "funcC": "void sub_0804C1FC(void)\n{\n    u32 temp_r0;\n    u32 temp_r1;\n\n    temp_r0 = gUnk_03004D84[2];\n    temp_r1 = gUnk_03004D84[3];\n    gUnk_03004D84 += 4;\n    sub_0804C1C0(temp_r0, temp_r1);\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */\nvoid sub_0804C1C0(s32 arg0, s32 arg1);",
+      "proto": {
+        "sub_0804C1FC": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L723-L732"
+    },
+    {
+      "sym": "sub_0804EFDC",
+      "addr": "0x0804efdc",
+      "unit": "src/code_0804B254.c",
+      "romDigest": "7e856d136a33112c48baede6b4a07f75e006367cf0deaacf8898e0de1b0b9626",
+      "features": [
+        "fnptr",
+        "struct",
+        "field",
+        "pointer",
+        "global"
+      ],
+      "funcC": "void sub_0804EFDC(void)\n{\n    gUnk_0300081C->unk24();\n    gUnk_0300081C->unk1A = gUnk_0300081C->unk18;\n    gUnk_03004D84 += 2;\n}",
+      "prependC": "extern const u8 gUnk_0805769C[];\nextern u8 gUnk_080576B4[0x20];\nextern const u8 gUnk_080576D4[0x20][2];\nextern const u16 gUnk_08057714[0x20][2];\nextern const u16 gUnk_08057794[0x20][2];\nextern const u16 gUnk_08057814[0x20][2];\nextern const u8 gUnk_08057894[0x20][2];\nextern const u8 gUnk_080578D4[0x20][2];\nextern const u8 gUnk_08057914[0x20][2];\nstruct Unk_08057954 {\n    void *unk0;\n    u16 unk4;\n    u16 unk6;\n};\nextern const struct Unk_08057954 gUnk_08057954[];\nextern const u8 gUnk_08057ACC[][2][2];\nextern const u16 gUnk_08057B4C[];\nextern const u16 gUnk_081177C4[];\nextern const void (*gUnk_08117854[0xA])(void);\nextern const void (*gUnk_0811787C[0xF])(void);\nextern const void (*gUnk_081178B8[0x8])(void);\nextern const void (*gUnk_081178D8[0xD])(void);\nextern const void (*gUnk_0811790C[0xE])(void);\nextern const void (*gUnk_081179B4[0xC])(void);\nextern const u32 *gUnk_08189AFC[];\nextern const u32 *gUnk_08189B4C[];\nextern const u32 *gUnk_08189BCC[][2];\nextern const u32 *gUnk_08189CCC[][2];\nextern const void *gUnk_08189DCC[];\nextern const void *gUnk_08189E84[];\nstruct Unk_08189F04 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 unk9;\n    u8 padA[0xC - 0xA];\n};\nextern const struct Unk_08189F04 gUnk_08189F04[][0x10];\nextern u32 gUnk_082EA584[];\nextern u32 gUnk_082EA730[];\nextern u32 gUnk_082EA7F0[];\nextern const u32 gUnk_082EA854[];\nextern void sub_0804BFD0();                                   /* extern */\nextern void sub_0804C0D4();                                   /* extern */\nextern void sub_0804EB64();                                   /* extern */\nextern void sub_0804ED68(u32 arg0, void (*arg1)(), u8 arg2, u8 arg3);                                   /* extern */\nextern void sub_0804EE14();                                   /* extern */\nextern void sub_0804EF50();                                   /* extern */\nextern s32 sub_0804F248(u8);                               /* extern */",
+      "proto": {
+        "sub_0804EFDC": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_0804B254.c#L2379-L2384"
+    },
+    {
+      "sym": "VCountIntr_DeathScreen",
+      "addr": "0x0800111c",
+      "unit": "src/interrupts.c",
+      "romDigest": "1481b3b17c2b433d9639f454a38df607d1bcd5678a13f9e63d8a12b9b9fc7495",
+      "features": [
+        "mask",
+        "branch"
+      ],
+      "funcC": "void VCountIntr_DeathScreen(void)\n{\n    // VCount, called when losing a life\n    while (!(REG_DISPSTAT & DISPSTAT_HBLANK));\n    REG_BLDY = 0;\n}",
+      "proto": {
+        "VCountIntr_DeathScreen": {
+          "returnsVoid": true
+        }
+      },
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/interrupts.c#L242-L247"
     }
   ]
 }

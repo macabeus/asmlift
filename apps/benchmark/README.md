@@ -33,7 +33,7 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 335 of the 378 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
+context**: 359 of the 402 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
 vendored project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry
 a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
 `test/authored-facts.test.ts`; one row does — a C++ unit, whose vendored context is not C and so
@@ -104,19 +104,19 @@ nine it is name, kind and size alone: residual 6 measures it.
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
 transfer"), and it now applies to both halves — with residuals 4 and 5 as the measured exceptions.
-How m2c learns the row's own declaration, over the 378 real rows. Every count here is re-derived
+How m2c learns the row's own declaration, over the 402 real rows. Every count here is re-derived
 from the manifests by `test/authored-facts.test.ts`, so none of them can go stale:
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
-| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  109 |
+| the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  119 |
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
-| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |   98 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |  106 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
 | no context at all — its C++ unit's own is not C, so m2c infers the signature from the asm, as asmlift does                                                                 |   42 |
-| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  127 |
+| nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  133 |
 
-What those 110 declarations SAY — a bare name, or the full signature — is residual 12.
+What those 120 declarations SAY — a bare name, or the full signature — is residual 12.
 
 It is **not exact parity**, and pretending otherwise would be the same defect with the sign
 flipped. The residuals run in both directions; none is closed here, because closing any of them
@@ -126,7 +126,7 @@ moves no asmlift row.
 _Favouring m2c._
 
 1. **Struct field tables.** `layout` is a vendoring product and only pokeemerald carries it in
-   bulk (2179 of 41016 entries; af 26 of 61860, kleod 7 of 676, sa3 8, marioparty3 7, snowboardkids2 5).
+   bulk (2179 of 41016 entries; af 26 of 61860, sa3 9, kleod 7 of 894, marioparty3 7, snowboardkids2 5).
    The three dtk projects carry none, having no DWARF to vendor it from (residuals 6 and 10).
    Where m2c's context declares a record the map only sizes, m2c has field names asmlift must
    invent — `sa3:gSio32MultiLoadArea` is `{kind: data, size: 24}` in the map and
@@ -169,10 +169,10 @@ _Favouring m2c._
    66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
    gets that row's ~650 KB preprocessed context with every struct and every prototype. pikmin's map
    is the same shape (29,158 entries, names and sizes; its matching build carries no DWARF either),
-   and so is Mario Party 4's (residual 10), so 126 of the 378 real rows are on that footing — and
+   and so is Mario Party 4's (residual 10), so 126 of the 402 real rows are on that footing — and
    pikmin's rows are given no m2c context at all, so there the asymmetry runs the other way. The
-   other six projects carry the shape family (`declared`: pokeemerald 24,539, marioparty3 902,
-   sa3 148, kleod 113, af 89, snowboardkids2 27).
+   other six projects carry the shape family (`declared`: pokeemerald 24,538, marioparty3 902,
+   kleod 332, sa3 153, af 89, snowboardkids2 27).
 
 _Favouring asmlift._
 
@@ -198,12 +198,12 @@ _Favouring m2c, on Mario Party 4 (`"tu": "unit"`)._
 
 _Favouring m2c, across the tier._
 
-12. **The row's own signature, where its project declares it.** On 74 of the 110 rows whose context
+12. **The row's own signature, where its project declares it.** On 81 of the 120 rows whose context
     already declares the function, that declaration carries a PARAMETER LIST — the full signature,
     return type and parameter types (`u32 BoardRandMod(u32 value);`,
     `static s32 GetDigit(s32 value, s32 place);`) — while asmlift's `proto` states void-ness and,
-    on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 13, ac-decomp 12,
-    sa3 8, pokeemerald 7, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
+    on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 15, ac-decomp 12,
+    sa3 11, pokeemerald 9, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
     `u32 BoardRandMod(u32 value);` from the context and re-running m2c: it then emits
     `s32 BoardRandMod(u32 arg0)`, same body. Not closed for the reason residual 4 is not: the
     declaration is the project's own header text, and removing it re-vendors the blob asmlift's
@@ -225,7 +225,7 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
   control), each run on its assigned toolchains: 323 distinct functions, authored as 330 specs — a few carry a
   different source per toolchain — → 822 cases.
 - **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from nine decomp projects (ac-decomp, af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
-  with asmlift's canonical toolchain flags using each project's headers as context: 378 cases
+  with asmlift's canonical toolchain flags using each project's headers as context: 402 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting.
 
 Reference objects — the byte-exact goal each case is scored against — are built by compiling the reference C with asmlift's toolchain (not the shipped ROM object)
@@ -542,11 +542,11 @@ the round that first ran it.
   rows are still the game's function, 12 no longer compile at all — the unit's earlier definitions are
   what a row inlines — and 7 compile to other bytes, among them `HuMemHeapDump` and `HuDvdErrorWatch`,
   which CodeWarrior GC/2.6 at `-O0,p` gives other branch-prediction bits.
-- **Pins.** A fork branch is the upstream commit plus one integration commit. kleod's is
-  `macabeus/kleod@6f149e3` on upstream `testyourmine/kleod@64a83ad`; the upstream sha is otherwise
+- **Pins.** A fork branch is the upstream commit plus the fork's own integration commits. kleod's is
+  `macabeus/kleod@3569ccc` on upstream `testyourmine/kleod@b8f8b8d`; the upstream sha is otherwise
   only in the fork's README.
 - **Vendoring preprocesses with the host `cpp-14`** (Homebrew GCC on the machine that vendored kleod),
-  not the project's toolchain. Checked on kleod's 42 TUs and 13 contexts: 0 `__APPLE__`/`__DATA,`
+  not the project's toolchain. Checked on kleod's 50 TUs and 18 contexts: 0 `__APPLE__`/`__DATA,`
   hits. A future row whose TU defines `EWRAM_DATA`/`INCBIN` data can pick those up; grep the blobs
   after vendoring.
 
