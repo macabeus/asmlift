@@ -134,6 +134,70 @@ const GUARDED = [
   '',
 ].join('\n');
 
+// `void (*gq0)(); void two(void) { void (*q)() = gq0; if (g() == 0) q(); q(g()); }`: the first call
+// is reached only where g() returned 0, the second passes g()'s result.
+const TWO_SITES = [
+  'two:',
+  '\tpush\t{r4, lr}',
+  '\tldr\tr0, .L4',
+  '\tldr\tr4, [r0]',
+  '\tbl\tg',
+  '\tcmp\tr0, #0',
+  '\tbne\t.L3',
+  '\tbl\t_call_via_r4',
+  '.L3:',
+  '\tbl\tg',
+  '\tbl\t_call_via_r4',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '.L4:',
+  '\t.word\tgq0',
+  '',
+].join('\n');
+
+// `void (*gq1)(int); void other(int x) { void (*p)(int) = gq1; if (x == 0) hh(); p(g()); }`: only
+// hh's site needs the narrower reading; nothing proves g()'s result at p's.
+const OTHER_SITE = [
+  'other:',
+  '\tpush\t{r4, lr}',
+  '\tldr\tr1, .L4',
+  '\tldr\tr4, [r1]',
+  '\tcmp\tr0, #0',
+  '\tbne\t.L3',
+  '\tbl\thh',
+  '.L3:',
+  '\tbl\tg',
+  '\tbl\t_call_via_r4',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '.L4:',
+  '\t.word\tgq1',
+  '',
+].join('\n');
+
+// `void big(void) { void (*p)(void) = gq; if (g() == 1000) p(); }`: agbcc builds 1000 in r1
+const BIG_CONSTANT = [
+  'big:',
+  '\tpush\t{r4, lr}',
+  '\tldr\tr0, .L4',
+  '\tldr\tr4, [r0]',
+  '\tbl\tg',
+  '\tmov\tr1, #0xfa',
+  '\tlsl\tr1, r1, #0x2',
+  '\tcmp\tr0, r1',
+  '\tbne\t.L3',
+  '\tbl\t_call_via_r4',
+  '.L3:',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '.L4:',
+  '\t.word\tgq',
+  '',
+].join('\n');
+
 // `extern long long mkll(int); void w2(void (*g)(long long)) { g(mkll(3)); }`
 const PAIR_ARG = [
   'w2:',
@@ -259,6 +323,31 @@ describe('the `/setup-args` reading that drops a passed callee result', () => {
     // the dropping reading is the shorter one, so every readability term below the score favours it
     expect(compareScored(scored(dropped, 0, 1), scored(kept, 0, 0))).toBeGreaterThan(0);
     expect(compareScored(scored(dropped, 0, 0), scored(kept, 4, 1))).toBeLessThan(0);
+  });
+});
+
+describe('the `/setup-args` reading of a passed callee result, per site', () => {
+  const narrowed = (sym: string, asm: string) =>
+    enumerateCandidates(sym, asm, ARMV4T_AGBCC).find((c) => c.variations.includes('setup-args'));
+
+  test('drops it only at the site an edge proves it constant at', () => {
+    const c = narrowed('two', TWO_SITES);
+    expect(c?.source).toContain('== 0) ((s32 (*)())v0)();');
+    expect(c?.source).toContain('((s32 (*)())v0)(g());');
+    expect(c?.discardsPassedResult).toBe(true);
+  });
+
+  test('keeps it where another site is what needs the narrower reading', () => {
+    const c = narrowed('other', OTHER_SITE);
+    expect(c?.source).toContain('if (a0 == 0) hh();');
+    expect(c?.source).toContain('((s32 (*)())v0)(g());');
+    expect(c?.discardsPassedResult).toBeUndefined();
+  });
+
+  test('reads a constant the compiler built in two instructions as proven', () => {
+    const c = narrowed('big', BIG_CONSTANT);
+    expect(c?.source).toContain('== 250 << 2) ((s32 (*)())v0)();');
+    expect(c?.discardsPassedResult).toBe(true);
   });
 });
 

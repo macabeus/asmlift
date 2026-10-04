@@ -50,7 +50,8 @@ describe('a call through a function pointer recompiles to its own thunk', () => 
 });
 
 describe("an earlier callee's result in r0 at a call through a register", () => {
-  const ctx = 'extern void (*gq)(void);\nextern void (*gq1)(int);\nextern int g(void);\nextern int gw;\n';
+  const ctx =
+    'extern void (*gq)(void);\nextern void (*gq1)(int);\nextern void (*gq0)();\nextern int g(void);\nextern int gw;\n';
   /** The winner over the whole fan of `sym` out of `body` compiled with agbcc. */
   const winner = (sym: string, body: string) => {
     const asm = compileTargetAsm(ctx + body, FLAGS);
@@ -65,13 +66,27 @@ describe("an earlier callee's result in r0 at a call through a register", () => 
     ['x7', 'void x7(void) { void (*p)(void) = gq; if (g()) return; p(); }'],
     ['y4', 'void y4(void) { void (*p)(void) = gq; if (g() != 7) return; p(); }'],
     ['x5', 'void x5(void) { void (*p)(void) = gq; while (g()) gw++; p(); }'],
+    ['big', 'void big(void) { void (*p)(void) = gq; if (g() == 1000) p(); }'],
   ])('is dropped where only the narrower reading matches (%s)', (sym, body) => {
     const w = winner(sym, body);
     expect(w.score.match).toBe(true);
     expect(w.variations).toContain('setup-args');
   });
 
-  test('is kept on a tie, where both readings compile alike', () => {
+  // The narrower reading cuts every site at once, so a site that passes the result keeps it there
+  // too while another site is the one that needs that reading.
+  test.each([
+    ['c1', 'void c1(int x) { void (*p)(int) = gq1; if (x == 0) hh(); p(g()); }'],
+    ['c2', 'void c2(int x) { void (*p)(int) = gq1; if (x == 0) hh(); gw = 1; p(g()); }'],
+    ['d1', 'void d1(void) { void (*p)(void) = gq; void (*q)(int) = gq1; q(g()); if (g()) return; p(); }'],
+    ['e3', 'void e3(void) { void (*q)() = gq0; q(g()); if (g() == 3) q(); }'],
+  ])('is kept where another site needs the narrower reading (%s)', (sym, body) => {
+    const w = winner(sym, body);
+    expect(w.score.match).toBe(true);
+    expect(w.source).toContain(')(g());');
+  });
+
+  test('is kept where the path to the call proves it only unequal to a constant', () => {
     const w = winner('w2', 'void w2(void) { void (*p)(int) = gq1; int v = g(); if (v == 0) return; p(v); }');
     expect(w.score.match).toBe(true);
     expect(w.variations).not.toContain('setup-args');

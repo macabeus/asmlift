@@ -250,8 +250,8 @@ export interface Candidate {
   matchOnly?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
    *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
-   *  tie (compareScored): where the two readings compile alike the asm passes the value, and a
-   *  shorter spelling must not win by dropping it. */
+   *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
+   *  dropping a value the callee may read. */
   discardsPassedResult?: true;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
@@ -2401,8 +2401,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  that separates these two candidates did not change the bytes — so everything below only chooses what
  *  the READER sees, and can never cost a match.
  *
- *  A DISCARDED PASSED RESULT next (`Candidate.discardsPassedResult`): at equal bytes the machine
- *  passed the value, so the reading that drops it wins only where it scores strictly better.
+ *  A DISCARDED PASSED RESULT next (`Candidate.discardsPassedResult`): equal bytes refute neither
+ *  reading, so the one that drops a value the callee may read wins only where it scores strictly
+ *  better.
  *
  *  PREFERENCE next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *

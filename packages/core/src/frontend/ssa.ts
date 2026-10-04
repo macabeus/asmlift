@@ -27,6 +27,7 @@ import {
   defOpMap,
   mkOp,
   mkValue,
+  terminator,
   truncateCallArgs,
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
@@ -902,6 +903,7 @@ export function makeSsaBuilder(
           calleeResults,
           destroyedIn: destroyedOnEntry(),
           preds,
+          blocks: irBlocks,
           freshAtEnd: writtenSinceCall,
           callsIn,
           sites: guessedCalls,
@@ -1081,6 +1083,8 @@ export interface CallArgTrim {
   destroyedIn: ReadonlyArray<ReadonlySet<string>>;
   /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
   preds: number[][];
+  /** the blocks `preds` indexes, terminators included — the edges a guard proves a value on */
+  blocks: readonly Block[];
   /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
    *  block, and it holds every key the builder saw, not only argument registers. */
   freshAtEnd: Array<Set<string>>;
@@ -1116,7 +1120,7 @@ export interface CallArgTrim {
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
 export function trimClobberedCallArgs(inp: CallArgTrim): void {
-  const { argRegs, returnReg, calleeResults, destroyedIn, preds, freshAtEnd, callsIn, sites } = inp;
+  const { argRegs, returnReg, calleeResults, destroyedIn, preds, blocks, freshAtEnd, callsIn, sites } = inp;
   const blockCount = freshAtEnd.length;
   const all = () => new Set(argRegs);
   const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
@@ -1189,6 +1193,46 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // that path, so the register is an ordinary unfresh one there, and the run stops below it —
   // unless a later register is set up, which puts argument 0 below a proven one: that argument is
   // then the struct itself (`other(mv(a), b)`), a value no register here names, and it declines.
+  //
+  // WHETHER AN EDGE PROVES `v` CONSTANT EVERYWHERE `b` IS REACHED: up the chain of blocks with one
+  // predecessor, a conditional branch on `v == K` arriving by its true edge, or on `v != K` by its
+  // false one. K is any value arithmetic builds out of literals: agbcc compares with 1000 as
+  // `mov r1,#250; lsl r1,#2; cmp r0,r1`.
+  let defs: Map<Value, Op> | undefined;
+  const defOf = (v: Value): Op | undefined => {
+    defs ??= new Map(blocks.flatMap((blk) => blk.ops.flatMap((op) => op.results.map((r) => [r, op] as const))));
+    return defs.get(v);
+  };
+  const isLiteral = (v: Value): boolean => {
+    const d = defOf(v);
+    return (
+      d?.opcode === 'const' ||
+      (d !== undefined && LITERAL_ARITHMETIC.has(d.opcode) && d.operands.length > 0 && d.operands.every(isLiteral))
+    );
+  };
+  const provenConstant = (v: Value, b: number): boolean => {
+    for (let at = b, seen = new Set<number>(); !seen.has(at);) {
+      seen.add(at);
+      const ps = [...new Set(preds[at] ?? [])];
+      if (ps.length !== 1) {
+        return false;
+      }
+      const term = terminator(blocks[ps[0]]);
+      const arrives = term?.successors.map((e) => e.block === blocks[at]) ?? [];
+      const cmp = term?.opcode === 'cond_br' && arrives[0] !== arrives[1] ? defOf(term.operands[0]) : undefined;
+      const equalEdge = cmp?.opcode === 'icmp_eq' ? 0 : cmp?.opcode === 'icmp_ne' ? 1 : -1;
+      if (
+        equalEdge >= 0 &&
+        arrives[equalEdge] &&
+        cmp!.operands.includes(v) &&
+        cmp!.operands.some((o) => o !== v && isLiteral(o))
+      ) {
+        return true;
+      }
+      at = ps[0];
+    }
+    return false;
+  };
   const argcAt = (s: GuessedCallSite, fresh: Set<string>): number => {
     const destroyed =
       s.returnRegBefore === 'destroyed' || (s.returnRegBefore === 'inherited' && destroyedIn[s.block].has(returnReg));
@@ -1220,16 +1264,40 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // is recorded rather than applied. A survivor is what it drops, so the join clause above has no
     // place here — but `setsUpLater` still does: a register this block set up two instructions
     // before the call is not something the narrower reading may call dead.
-    const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
+    //
+    // A SITE THAT PASSES AN EARLIER CALLEE'S RESULT ON keeps it in this reading too, except where an
+    // edge proves that result equal to a constant on the way here (`if (g() == 0) p();`): passed
+    // there, the compiler loads the constant it proved (`mov r0,#0`), so no `mov` in the asm says
+    // the source passed nothing. Per site, because this reading cuts every site at once, and a
+    // drop that one site needs would otherwise drop a value another site passes.
+    const passed = n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0]);
+    const dropsPassed = passed && provenConstant(callArgs(s.op)[0], s.block);
+    const localFresh =
+      setsUpLater(s.freshBefore) || (passed && !dropsPassed) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
     if (local < callArgs(s.op).length) {
       setupArgc.set(s.op, local);
-      if (local === 0 && n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0])) {
+      if (local === 0 && dropsPassed) {
         discardsPassedResult.add(s.op);
       }
     }
   }
 }
+
+/** The opcodes whose result is a literal when every operand is one ({@link trimClobberedCallArgs}). */
+const LITERAL_ARITHMETIC: ReadonlySet<string> = new Set([
+  'add',
+  'sub',
+  'mul',
+  'and',
+  'or',
+  'xor',
+  'shl',
+  'shr_u',
+  'shr_s',
+  'not',
+  'neg',
+]);
 
 /** The narrower arity {@link narrowToSetupArgs} would cut each guessed call to. A SIDE table and
  *  not an attr: this is a fact about one LIFT, not part of the IR the rest of the pipeline compares
@@ -1238,10 +1306,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
 const setupArgc = new WeakMap<Op, number>();
 
 /** The calls whose narrower arity drops an earlier callee's result that the site passes on
- *  (`GuessedCallSite.passesCalleeResult`). Under an equality guard the compiler would have loaded the
- *  constant it proved instead (`if (g() == 0) p(0)` opens the arm with `mov r0,#0`), so only the
- *  narrower reading can match there; elsewhere both readings compile alike and only the wider one
- *  passes what the machine passes. Read by {@link setupArgsDiscardsPassedResult}. */
+ *  (`GuessedCallSite.passesCalleeResult`): only where an edge proves that result constant on the way
+ *  to the call ({@link trimClobberedCallArgs}). Read by {@link setupArgsDiscardsPassedResult}. */
 const discardsPassedResult = new WeakSet<Op>();
 
 /** Whether {@link narrowToSetupArgs} drops, somewhere in `fn`, an earlier callee's result that a
