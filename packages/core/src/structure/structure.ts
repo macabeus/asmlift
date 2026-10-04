@@ -2362,8 +2362,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  typed a pointer is the value used as an address somewhere in the function, while its other
    *  loads may type an integer only because they reach a call argument or a compare. */
   const pointerLoadedGlobals = new Set<string>();
-  /** Every scalar GLOBAL (never a frame object) whose value the function loads. */
-  const loadedGlobals = new Set<string>();
+  /** Every scalar GLOBAL (never a frame object) whose value the function loads as a word, the
+   *  only width a pointer has: a `u8`/`u16` global is an integer whatever it is added to. */
+  const wordLoadedGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
     const widths = new Map<string, Set<number>>();
@@ -2428,7 +2429,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     for (const [sym, ptr] of loadsPointer) {
       if (scalarGlobals.has(sym)) {
-        loadedGlobals.add(sym);
+        if (widths.get(sym)?.has(4)) {
+          wordLoadedGlobals.add(sym);
+        }
         if (ptr) {
           pointerLoadedGlobals.add(sym);
         }
@@ -2500,9 +2503,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     return shape === 'pointer' || (shape === undefined && pointerLoadedGlobals.has(x.name));
   };
 
-  /** A global's VALUE that no declaration this pass can read types, whatever the IR loaded it as. */
+  /** A global's word VALUE that no declaration this pass can read types, whatever the IR loaded it
+   *  as. */
   const isUndeclaredGlobalValue = (x: Expr): boolean =>
-    x.k === 'var' && loadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
+    x.k === 'var' && wordLoadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did

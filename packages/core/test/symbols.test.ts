@@ -617,6 +617,14 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(run('f', body)).toContain('((u8 *)gPtr + a0)[16]');
   });
 
+  test('a byte global added to a runtime integer is the index, and is not cast', () => {
+    // agbcc -O2 of `extern u8 gIdx; u8 bi(u8 *p) { return p[gIdx + 0x10]; }`. A pointer is a word, so
+    // `(u8 *)gIdx` would be the cast from a narrower integer agbcc warns about
+    const body =
+      '\tldr\tr1, .L3\n\tldrb\tr1, [r1]\n\tadd\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgIdx\n';
+    expect(run('f', body)).toContain('((u8 *)(gIdx + a0))[16]');
+  });
+
   test('a global added to an address is the index, and is not cast', () => {
     // agbcc -O2 of `extern u8 gIdx; extern u8 gArr[]; u8 ix(void) { return gArr[gIdx]; }`. The sum
     // is a pointer, but `&gArr` is its base: `[(u8 *)gIdx]` is a pointer subscript agbcc rejects.
