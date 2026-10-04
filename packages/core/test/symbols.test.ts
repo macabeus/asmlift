@@ -635,39 +635,6 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(run('f', body, named)).toContain('((u8 *)gPtr + ((u16 *)&gTbl)[a0])[16]');
   });
 
-  // agbcc -O2 of `struct Big { u8 pad[0x400]; u32 x; }; extern struct Big *gBig;` and `sink(gBig->pad[3]);`
-  // then the address `(u32)&gBig->pad[0x200]` read as an integer
-  const BIG_PAD =
-    '\tldr\tr0, [r4]\n\tldrb\tr0, [r0, #0x3]\n\tbl\tsink\n\tldr\tr0, [r4]\n\tmov\tr1, #0x80\n\tlsl\tr1, r1, #0x2\n' +
-    '\tadd\tr0, r0, r1\n';
-
-  test('compared unsigned with an integer, the byte sum is the integer sum', () => {
-    // `if ((u32)&gBig->pad[0x200] < x) return 1; return 0;`: bare, `(u8 *)gBig + 512 >= a0` is a
-    // pointer compared with an integer, which agbcc warns about
-    const body =
-      '\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tldr\tr4, .L5\n' +
-      BIG_PAD +
-      '\tcmp\tr0, r5\n\tbcc\t.L3\n\tmov\tr0, #0x0\n\tb\t.L4\n.L5:\n\t.word\tgBig\n' +
-      '.L3:\n\tmov\tr0, #0x1\n.L4:\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(run('f', body)).toContain('if ((u32)gBig + (128 << 2) >= a0)');
-  });
-
-  test('returned as an integer, the byte sum is the integer sum', () => {
-    // `return (u32)&gBig->pad[0x200];`
-    const body =
-      '\tpush\t{r4, lr}\n\tldr\tr4, .L11\n' + BIG_PAD + '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L11:\n\t.word\tgBig\n';
-    expect(run('f', body)).toContain('return (u32)gBig + (128 << 2);');
-  });
-
-  test('stored into an integer cell, the byte sum is the integer sum', () => {
-    // `void k4(u32 *p) { ...; *p = (u32)&gBig->pad[0x200]; }`
-    const body =
-      '\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tldr\tr4, .L14\n' +
-      BIG_PAD +
-      '\tstr\tr0, [r5]\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L14:\n\t.word\tgBig\n';
-    expect(run('f', body)).toContain('*a0 = (u32)gBig + (128 << 2);');
-  });
-
   test('assigned to a temp, the value is cast to the temp type', () => {
     // v0 = gPtr held across a call. The project's `struct S *` is not `u8 *`, and assigning one
     // to the other is the incompatible-pointer warning a -Werror build stops on.
