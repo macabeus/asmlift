@@ -297,6 +297,37 @@ export function mkOp(opcode: Opcode, o: Partial<Op> = {}): Op {
   };
 }
 
+// ── a call's callee: a NAME (`attrs.target`) or, for a call through a register, a VALUE ─────────
+//
+// An INDIRECT call carries `indirect: true` and no `target`, and calls the function whose address
+// is its LAST operand. The arguments come first on both forms, so `operands[k]` is argument k on
+// either and a reader that indexes an argument needs no case; a reader that takes the WHOLE operand
+// list as the arguments must go through `callArgs`.
+
+/** The function an indirect call calls, or undefined for a call that names its callee. */
+export function calleeValue(op: Op): Value | undefined {
+  return op.opcode === 'call' && op.attrs.indirect === true ? op.operands[op.operands.length - 1] : undefined;
+}
+
+/** The callee a call names, or undefined for an indirect one. */
+export function calleeName(op: Op): string | undefined {
+  return op.opcode === 'call' && typeof op.attrs.target === 'string' ? op.attrs.target : undefined;
+}
+
+/** A call's arguments, the callee value of an indirect call aside. */
+export function callArgs(op: Op): Value[] {
+  return calleeValue(op) === undefined ? op.operands : op.operands.slice(0, -1);
+}
+
+/** Cut a call down to its first `n` arguments, keeping an indirect call's callee. */
+export function truncateCallArgs(op: Op, n: number): void {
+  const callee = calleeValue(op);
+  op.operands.length = n;
+  if (callee !== undefined) {
+    op.operands.push(callee);
+  }
+}
+
 /** A block's last op — its terminator on well-formed IR, `undefined` on a block with no ops.
  *
  *  `ir/verify.ts` rejects an empty block and every entry path verifies before raising, so the

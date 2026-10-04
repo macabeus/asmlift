@@ -330,6 +330,12 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return parentPrec < 2 ? `(${g})` : g;
     }
     case 'call': {
+      if (typeof e.fn !== 'string') {
+        // An unprototyped pointer to a function returning the call's own rank: C passes each
+        // argument as its promoted self, which is what a call with no declaration passes.
+        const ret = cType(T.int(e.wide64 ? 64 : 32, true));
+        return `((${ret} (*)())${rec(e.fn, 2)})(${e.args.map((a) => printConverted(a, vt, leaf)).join(', ')})`;
+      }
       if (e.sret !== undefined) {
         throw new Error(`the call to '${e.fn}' returns a struct through memory and is spelled only as a statement`);
       }

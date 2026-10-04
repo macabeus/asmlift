@@ -4,12 +4,12 @@
 // A pass that regresses fails AT its boundary with a diagnostic, not three stages later as
 // wrong C.
 import { constAddressOf, globalBaseOf } from './ir/alias';
-import { type Fn, type Op, type Value, reachableBlocks } from './ir/core';
+import { type Fn, type Op, type Value, calleeName, reachableBlocks } from './ir/core';
 import { placedAt } from './ir/discipline';
 import { MEM_BASE_OPS } from './ir/opcodes';
 import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
-import type { BinOp, Expr, SFn, Stmt } from './l3/ast';
+import { type BinOp, type Expr, type SFn, type Stmt, calleeOf } from './l3/ast';
 import {
   exprChildren,
   fieldSpellsDot,
@@ -75,9 +75,13 @@ export function assertResolved(sfn: SFn): void {
   // `map.get(d)!` / `attrs.x as string` and prints straight into the source. `carriesName` is asked
   // separately because an ABSENT name is the case being caught: keying off `nameOf` alone refuses nothing.
   const carriesName = (e: Expr): boolean =>
-    e.k === 'var' || e.k === 'addr' || e.k === 'field' || e.k === 'call' || e.k === 'postincr';
+    e.k === 'var' ||
+    e.k === 'addr' ||
+    e.k === 'field' ||
+    (e.k === 'call' && typeof e.fn === 'string') ||
+    e.k === 'postincr';
   const nameOf = (e: Expr): string | undefined =>
-    e.k === 'call' ? e.fn : e.k === 'marker' ? undefined : (e as { name?: string }).name;
+    e.k === 'call' ? calleeOf(e) : e.k === 'marker' ? undefined : (e as { name?: string }).name;
   const badExpr = (e: Expr): boolean => (carriesName(e) && badName(nameOf(e))) || exprChildren(e).some(badExpr);
   // An `assign`'s DESTINATION is a bare string field, so the expression walk never reaches it.
   const badStmt = (s: Stmt): boolean =>
@@ -121,8 +125,9 @@ export function assertResolved(sfn: SFn): void {
 //     `return` ends its path) against the IR's static count. What follows a statement every path
 //     leaves is on no path, so it is refused rather than left uncounted: it is code the asm never
 //     ran, and a region duplicated there would pass the count unseen.
-//   • Names the IR does not have are ignored, and only calls carrying a target symbol are counted
-//     (every frontend that emits `call` today stamps one).
+//   • Names the IR does not have are ignored. A call through a register names no callee, so every
+//     one is counted under the single key `call:(*pointer)`: the count holds for indirect calls as
+//     a whole, and a pass that makes one of them call what another calls goes unseen.
 //   • A pinned access is keyed by whether it reads or writes, and by the constant address both sides
 //     can read off it — the IR's base and offset, the tree's `cellAddress` — or `?` where a side
 //     cannot. A read never stands for a write. A `?` render may stand for any pinned access and a
@@ -145,9 +150,9 @@ export function assertResolved(sfn: SFn): void {
 //   • A declared store is not counted: it renders at its own position, once. One spelled through a
 //     cast with no `volatile` is a plain store the compiler may delete or sink, and is refused, as
 //     the read is. Objects the asm also writes unstamped are skipped, as for reads.
-/** Executions per key: `call:<target>`; `device:r:<0xaddress>` for a pinned read and
- *  `device:w:<0xaddress>` for a pinned write, with `?` for the address where the counting side cannot
- *  read one; or `declared:<object>`. */
+/** Executions per key: `call:<target>`, or `call:(*pointer)` for every call through a register;
+ *  `device:r:<0xaddress>` for a pinned read and `device:w:<0xaddress>` for a pinned write, with `?`
+ *  for the address where the counting side cannot read one; or `declared:<object>`. */
 type EffectCounts = Map<string, number>;
 
 /** per-key combine of two count maps (`sum` for sequence, `max` for exclusive alternatives) */
@@ -162,6 +167,8 @@ function combine(a: EffectCounts, b: EffectCounts, f: (x: number, y: number) => 
 const DECLARED = 'declared:';
 const STRIPPED = 'stripped:';
 const STRIPPED_WRITE = 'stripped-write:';
+/** The one callee key every indirect call is counted under: no identifier can spell it. */
+const INDIRECT_CALL = '(*pointer)';
 type Direction = 'r' | 'w';
 const deviceKey = (dir: Direction, addr: number | null): string =>
   `device:${dir}:${addr === null ? '?' : `0x${addr.toString(16)}`}`;
@@ -228,7 +235,7 @@ function effectsInExpr(
   const ofDeclared = object !== null && !target && ctx.declared.has(object);
   const writesDeclared = object !== null && target && ctx.written.has(object);
   if (e.k === 'call') {
-    bump(`call:${e.fn}`);
+    bump(`call:${calleeOf(e) ?? INDIRECT_CALL}`);
   } else if (!selected && qualifiedAccessChain(e)) {
     if (!writesDeclared) {
       bump(ofDeclared ? `${DECLARED}${object}` : deviceKey(target ? 'w' : 'r', cellAddress(e)));
@@ -398,9 +405,7 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
       const placement = placedAt(op);
       switch (placement) {
         case 'call':
-          if (typeof op.attrs.target === 'string') {
-            bump(irCalls, op.attrs.target);
-          }
+          bump(irCalls, calleeName(op) ?? INDIRECT_CALL);
           break;
         case 'helper':
           // Placed, not counted: the value it computes is pure.

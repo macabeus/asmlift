@@ -28,7 +28,7 @@ import {
   assertResolved,
 } from './contracts';
 import type { AsmData } from './frontend/asmdata';
-import { hasSetupArgsNarrowing, narrowToSetupArgs } from './frontend/ssa';
+import { hasSetupArgsNarrowing, narrowToSetupArgs, setupArgsDiscardsPassedResult } from './frontend/ssa';
 import { Fn, Value, defOpMap } from './ir/core';
 import { T } from './ir/types';
 import { verify } from './ir/verify';
@@ -248,6 +248,11 @@ export interface Candidate {
    *  best-effort answer. Both ranking drivers ask `withheldReason`, so neither can publish what the
    *  other would not. */
   matchOnly?: true;
+  /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
+   *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
+   *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
+   *  dropping a value the callee may read. */
+  discardsPassedResult?: true;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -1881,6 +1886,7 @@ export function enumerateCandidates(
       );
       for (const liftSetting of liftSettings) {
         let fn: Fn;
+        let discardsPassedResult = false;
         let inferredSymbols = new Map<string, SymbolInfo>();
         let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
@@ -1893,6 +1899,7 @@ export function enumerateCandidates(
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the default lift's own candidates already cover it
           }
+          discardsPassedResult = liftSetting.narrow && setupArgsDiscardsPassedResult(fn);
           verify(fn);
           // This lift's OWN array-shape evidence, off its own lifted fn (a symbol map promotes
           // numeric pool words to `gaddr`, so the `/raw-globals` setting genuinely answers differently).
@@ -2231,6 +2238,9 @@ export function enumerateCandidates(
                 if (sp.matchOnly === undefined) {
                   delete dup.matchOnly;
                 }
+                if (!discardsPassedResult) {
+                  delete dup.discardsPassedResult;
+                }
                 continue;
               }
               const variations: readonly Variation[] = [
@@ -2253,6 +2263,7 @@ export function enumerateCandidates(
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
                 ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
+                ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
               };
               seen.set(source, made);
               out.push(made);
@@ -2381,7 +2392,7 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
   );
 }
 
-/** THE candidate ordering — score, then preference, then readability, then enumeration
+/** THE candidate ordering — score, then semantics, then preference, then readability, then enumeration
  *  order. Exported because it is asked outside `rankBy` too — the benchmark's sweep driver and
  *  fan runner order what they read back — and a second copy would let the same input produce two
  *  different winners.
@@ -2389,6 +2400,10 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  SCORE dominates absolutely: the differ is the fitness function, and a tie means the variation
  *  that separates these two candidates did not change the bytes — so everything below only chooses what
  *  the READER sees, and can never cost a match.
+ *
+ *  A DISCARDED PASSED RESULT next (`Candidate.discardsPassedResult`): equal bytes refute neither
+ *  reading, so the one that drops a value the callee may read wins only where it scores strictly
+ *  better.
  *
  *  PREFERENCE next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
@@ -2440,6 +2455,7 @@ export function compareScored<S extends { score: number }>(
 ): number {
   return (
     a.score.score - b.score.score ||
+    (a.discardsPassedResult ? 1 : 0) - (b.discardsPassedResult ? 1 : 0) ||
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||

@@ -43,7 +43,20 @@
 // and arms that do not linearize into one chain — two arms falling into the same sibling, or a fall
 // into the `default:` — refuse in `chainArms`, which answers null.
 import { constAddressOf, globalBaseOf } from '../ir/alias';
-import { Block, Fn, Op, Successor, Value, defOpMap, dominators, mergeClasses, successorsOf } from '../ir/core';
+import {
+  Block,
+  Fn,
+  Op,
+  Successor,
+  Value,
+  callArgs,
+  calleeName,
+  calleeValue,
+  defOpMap,
+  dominators,
+  mergeClasses,
+  successorsOf,
+} from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { CAST_WIDTHS, opSig } from '../ir/opcodes';
 import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
@@ -2305,10 +2318,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       for (const op of b.ops) {
         if (op.opcode === 'gaddr') {
           taken.add(op.attrs.sym as string);
-        } else if (op.opcode === 'call') {
+        } else if (calleeName(op) !== undefined) {
           // a CALLEE's name is in this namespace too: a function really named sp0 would be
           // shadowed by the minted local, and `sp0()` on a u16 object is a compile error
-          taken.add(op.attrs.target as string);
+          taken.add(calleeName(op)!);
         }
       }
     }
@@ -4232,10 +4245,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // local where it used to admit it. That is what its own reason asks for — a 64-bit value
       // assigned to a 32-bit one truncates — but it is a pass this branch did not set out to move.
       const wide64 = d.results[0] !== undefined && intWidth(d.results[0].type) === 64;
+      const through = calleeValue(d);
       return {
         k: 'call',
-        fn: d.attrs.target as string,
-        args: d.operands.map(e),
+        fn: through === undefined ? (d.attrs.target as string) : e(through),
+        args: callArgs(d).map(e),
         ...(wide64 ? { wide64: true as const } : {}),
         ...(d.attrs.sret === true ? { sret: d.results[0].type } : {}),
       };
@@ -6833,7 +6847,7 @@ function calledArgs(
 ): { declaredArgs?: NonNullable<StructureOptions['declaredArgs']> } {
   const called: Record<string, readonly (string | undefined)[]> = {};
   for (const e of walkExprs(body)) {
-    if (e.k === 'call' && Object.hasOwn(declared, e.fn)) {
+    if (e.k === 'call' && typeof e.fn === 'string' && Object.hasOwn(declared, e.fn)) {
       called[e.fn] = declared[e.fn];
     }
   }

@@ -46,6 +46,12 @@ export interface CallLowering {
    *  where a value reaches it (`SsaBuilder.holdsValue`), so the register the call destroyed is no
    *  return value */
   readonly voidReturn: boolean;
+  /** a call through argument register rN passes r0..r(N-1). The compiler's arguments fill the
+   *  registers from r0 up and the address cannot share one, which holds for agbcc: soft-float, no
+   *  pair alignment. o32 refutes it twice — a leading float takes slot a0 and leaves the register
+   *  free (`jalr a0` passing $f12 and a1), and a 64-bit argument's even pair leaves a1 empty
+   *  (`jalr a1` passing a0, a2 and a3) — so a lowering that does not state it guesses. */
+  readonly argRegisterBoundsArity: boolean;
 }
 
 /** A call's struct return through memory: the declared struct, laid out on this target. */
@@ -79,6 +85,9 @@ export interface CallPlan {
     | { readonly kind: 'memory-struct'; readonly type: IrType };
   /** what the call leaves holding nothing this function can name, for `SsaBuilder.noteCall` */
   readonly clobbers: readonly string[];
+  /** the callee is declared void, whether or not this lowering writes no value for it (`returns`
+   *  is `void` only where `CallLowering.voidReturn` says so) */
+  readonly declaredVoid: boolean;
 }
 
 /** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
@@ -104,7 +113,8 @@ export interface CallDeclarations {
 /** WHAT ONE ISA ALONE KNOWS ABOUT A CALL: everything `CallDeclarations.lower` asks a frontend. The
  *  argument and return registers are the target's. */
 export interface CallSite {
-  readonly callee: string;
+  /** the callee's name, or the address of the function a call through a register calls */
+  readonly callee: string | IndirectCallee;
   readonly ssa: SsaBuilder;
   /** the block the call is made in */
   readonly bi: number;
@@ -125,6 +135,15 @@ export interface CallSite {
     /** refuses a guess of `argc` words this ABI's outgoing area could extend */
     refuse(argc: number): void;
   };
+}
+
+/** A call through a register. It names no callee, so no declaration plans it: an argument
+ *  register holding the address bounds its arity where the lowering states it
+ *  (`CallLowering.argRegisterBoundsArity`), and otherwise it is guessed. */
+export interface IndirectCallee {
+  readonly address: Value;
+  /** the register the address is in */
+  readonly reg: string;
 }
 
 /** How a frontend builds a 64-bit value out of two words and splits one. */
@@ -167,6 +186,8 @@ export function callDeclarations(
   };
   /** the callee that handed back each pair a call returned, by the pair's value */
   const pairCallee = new Map<Value, string>();
+  /** the value each call to a callee declared void left in the return register */
+  const voidResults = new Set<Value>();
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
@@ -401,7 +422,8 @@ export function callDeclarations(
       fail(`cannot lift '${name}': \`${callee}\` is declared to return both a struct or union and a 64-bit value`);
     }
     // a runtime helper's return is its table's, whatever a project declares on its name
-    const voided = lowering.voidReturn && !isRuntimeHelperName(callee) && declaresVoidReturn(own);
+    const declaredVoid = !isRuntimeHelperName(callee) && declaresVoidReturn(own);
+    const voided = lowering.voidReturn && declaredVoid;
     return {
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
@@ -421,16 +443,41 @@ export function callDeclarations(
         : returned === undefined && !voided
           ? callClobbers
           : [...callClobbers, target.returnReg],
+      declaredVoid,
     };
   };
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
-    const { callee, ssa, bi, pairs, guess, highHalves } = site;
+    const { ssa, bi, pairs, guess, highHalves } = site;
     if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
-    const p = plan(callee);
+    const indirect = typeof site.callee === 'string' ? undefined : site.callee;
+    const callee = typeof site.callee === 'string' ? site.callee : undefined;
+    // A CALL THROUGH ARGUMENT REGISTER rN PASSES r0..r(N-1) where the lowering states it
+    // (`CallLowering.argRegisterBoundsArity`): N bounds the arity, and reading every register below
+    // it passes what the machine passes. An untouched one is this function's own argument passed
+    // on; one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`). Through
+    // any other register, or on a lowering that does not state it, the arity is guessed.
+    //
+    // KNOWN GAP: N is only a bound. agbcc's address lands above r(argc) when an argument register
+    // still holds a live temp, and a pointer that arrived as an argument stays where it arrived
+    // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
+    // the registers in between read as arguments the source never passed. Only the pointer's
+    // declared type decides the arity, and nothing reads one.
+    const bound =
+      indirect === undefined || !lowering.argRegisterBoundsArity ? -1 : target.argRegs.indexOf(indirect.reg);
+    const p: CallPlan =
+      indirect === undefined
+        ? plan(callee!)
+        : {
+            widths: bound < 0 ? null : Array.from({ length: bound }, () => 32),
+            doubles: new Set(),
+            returns: { kind: 'word' },
+            clobbers: callClobbers,
+            declaredVoid: false,
+          };
     // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
     // runtime table or the project's headers. Both answer the same question, so the walk that
     // reads argument registers off the answer is written once; two walks would be two chances
@@ -493,6 +540,9 @@ export function callDeclarations(
     // registers rather than widths. Both leave `widths` null with a `--proto` on the command
     // line, and blaming an absent prototype would be false about its own input.
     if (widths === null && pairs !== undefined) {
+      // no prototype keys a call through a register, so the hint names one only for a named callee
+      const theCall = indirect === undefined ? `the call to '${callee}'` : `the call through ${indirect.reg}`;
+      const itsParams = indirect === undefined ? `'${callee}'s parameters` : "the function pointer's parameters";
       for (const [j, v] of args.entries()) {
         const half = pairs.halfOf.get(v);
         // A DOUBLE THE RUNTIME RETURNED IS NO long long, so the hint below would send the
@@ -502,23 +552,26 @@ export function callDeclarations(
         const producer = half && pairCallee.get(half.whole);
         if (half && producer && isFloatHelperName(producer)) {
           fail(
-            `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
+            `cannot lift '${name}': argument ${j + 1} of ${theCall} is the ` +
               `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, the double '${producer}' ` +
-              `returned, and nothing states how wide '${callee}'s parameters are. A double is ` +
+              `returned, and nothing states how wide ${itsParams} are. A double is ` +
               "modelled into the runtime's arithmetic helpers, the return and a parameter a prototype " +
-              'declares `double`, so a runtime compare or conversion declines; a callee that takes a ' +
-              'double, or fewer arguments than its registers suggest, lifts once a prototype states ' +
-              `them (\`{"${callee}": {"params": [...]}}\`)`,
+              'declares `double`, so a runtime compare or conversion declines' +
+              (indirect === undefined
+                ? '; a callee that takes a double, or fewer arguments than its registers suggest, lifts ' +
+                  `once a prototype states them (\`{"${callee}": {"params": [...]}}\`)`
+                : ''),
           );
         }
         if (half) {
           fail(
-            `cannot lift '${name}': argument ${j + 1} of the call to '${callee}' is the ` +
+            `cannot lift '${name}': argument ${j + 1} of ${theCall} is the ` +
               `${half.half === 'lo' ? 'low' : 'high'} half of a 64-bit value, and nothing states ` +
-              `how wide '${callee}'s parameters are, so a pair cannot be told from two ` +
-              `ordinary arguments. A typed prototype states it (\`{"${callee}": {"params": ` +
-              '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, ' +
-              'does not',
+              `how wide ${itsParams} are, so a pair cannot be told from two ordinary arguments` +
+              (indirect === undefined
+                ? `. A typed prototype states it (\`{"${callee}": {"params": ` +
+                  '["long long", …]}}`); a count, or a list holding a spelling asmlift cannot size, does not'
+                : ' — not modelled'),
           );
         }
       }
@@ -531,10 +584,10 @@ export function callDeclarations(
     // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
     const doubles = p.doubles.size ? [...p.doubles] : undefined;
     const call = mkOp('call', {
-      operands: args,
+      operands: indirect === undefined ? args : [...args, indirect.address],
       results: [res],
       attrs: {
-        target: callee,
+        ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
         ...(doubles === undefined ? {} : { doubles }),
       },
@@ -543,8 +596,17 @@ export function callDeclarations(
     // A GUESSED arity is revisited in `finish()`: only once the whole function is lifted is it
     // known whether every path to here passes through another call, which would have clobbered
     // the argument registers this guess just read.
+    //
+    // A CALL THROUGH A REGISTER IS PASSED AN EARLIER CALLEE'S RESULT its guess reads, which the trim
+    // drops from a named call (`trimClobberedCallArgs`): no declaration checks a call through a cast
+    // to an unprototyped type, so a dropped argument would never be refused, and `p(g())` would lift
+    // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
+    // the machine passes — unless `g` is declared void, and its result names nothing.
     if (widths === null) {
-      ssa.recordGuessedCall(call, bi, target);
+      ssa.recordGuessedCall(call, bi, target, indirect === undefined ? undefined : (r) => !voidResults.has(r));
+    }
+    if (p.declaredVoid) {
+      voidResults.add(res);
     }
     if (returns.kind === 'pair') {
       // A PAIR RETURN IS ONE VALUE, SPLIT. The callee defines BOTH registers, so both are
@@ -552,7 +614,9 @@ export function callDeclarations(
       // very rule whose refusal arm `frontend/ssa.ts` applies to every other register.
       site.write(target.returnReg, pairs!.project(res, 'lo'));
       site.write(target.argRegs[1], pairs!.project(res, 'hi'));
-      pairCallee.set(res, callee);
+      if (callee !== undefined) {
+        pairCallee.set(res, callee);
+      }
     } else if (returns.kind === 'word') {
       site.write(target.returnReg, res); // the callee defines the return register …
     }

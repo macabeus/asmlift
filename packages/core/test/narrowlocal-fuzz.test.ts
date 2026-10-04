@@ -231,8 +231,9 @@ function run(sfn: SFn, seed: number): Event[] {
         }
       }
       case 'call': {
+        const fn = typeof e.fn === 'string' ? e.fn : `*${String(evalExpr(e.fn))}`;
         const args = e.args.map(evalExpr);
-        trace.push({ fn: e.fn, args });
+        trace.push({ fn, args });
         calls++;
         return args.some((a) => a === UNDEF) ? UNDEF : args.reduce((x: number, y) => x + (y as number), calls) | 0;
       }

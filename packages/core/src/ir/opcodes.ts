@@ -161,8 +161,10 @@ export const OPCODES = {
   aload: { operands: 2, results: 1, requiredAttrs: ['elemSize', 'signed'], reads: true }, // aload base, index
   astore: { operands: 3, results: 0, requiredAttrs: ['elemSize'], effects: true }, // astore base, index, value
   // --- call: operands are the argument values (r0..), result is the return value (r0),
-  //     `target` attr is the callee symbol. Caller-saved clobbering is implicit. ---
-  call: { operands: 'variadic', results: 1, requiredAttrs: ['target'], effects: true },
+  //     `target` attr is the callee symbol — or, with `indirect: true` and no `target`, the
+  //     callee is the address in the LAST operand (ir/core.ts `calleeValue`). Exactly one of the
+  //     two, which `ir/verify.ts` checks. Caller-saved clobbering is implicit. ---
+  call: { operands: 'variadic', results: 1, effects: true },
   // The ADDRESS of a named global (agbcc `ldr rD, .Lpool` where the pool word is `.word gSym`).
   // Pure, 0 operands. Globals come from the project headers, so they are referenced by name, never
   // declared as locals. The structurer lowers it three ways (see scalarGlobals in structure.ts):

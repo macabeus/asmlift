@@ -237,6 +237,16 @@ export function verify(fn: Fn): void {
               throw new VerifyError(`'${op.opcode}' missing required attr '${k}'`);
             }
           }
+          if (op.opcode === 'call') {
+            const named = typeof op.attrs.target === 'string';
+            const indirect = op.attrs.indirect === true;
+            if (named === indirect || 'target' in op.attrs !== named || (indirect && op.operands.length === 0)) {
+              throw new VerifyError(
+                "'call' names its callee in a string 'target' or calls the value in its last operand under " +
+                  "'indirect', and does exactly one of the two",
+              );
+            }
+          }
           for (const u of op.operands) {
             if (!defined.has(u)) {
               throw new VerifyError(`use of undefined value in '${op.opcode}'`);

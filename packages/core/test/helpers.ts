@@ -316,8 +316,9 @@ export function traceOf(sfn: SFn, seed: number): Event[] {
         }
       }
       case 'call': {
+        const fn = typeof e.fn === 'string' ? e.fn : `*${String(evalExpr(e.fn))}`;
         const args = e.args.map(evalExpr);
-        trace.push({ fn: e.fn, args });
+        trace.push({ fn, args });
         // a DETERMINISTIC result that depends on the arguments, so a wrong argument propagates
         // into everything downstream instead of being absorbed
         calls++;

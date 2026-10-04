@@ -23,9 +23,12 @@ import {
   type SlotHomes,
   Value,
   type WriteOrder,
+  callArgs,
   defOpMap,
   mkOp,
   mkValue,
+  terminator,
+  truncateCallArgs,
 } from '../ir/core';
 import { pruneDeadParams, simplifyTrivialPhis } from '../ir/simplify';
 import { type IrType, T } from '../ir/types';
@@ -120,8 +123,14 @@ export interface SsaBuilder {
   /** Register a `call` op whose arity was GUESSED (no prototype), so `finish` can cut it back to the
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
-   *  caller wrote, so it comes before the call's result is written ({@link noteCall}). */
-  recordGuessedCall(op: Op, b: number, abi: { argRegs: string[]; returnReg: string }): void;
+   *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
+   *  `passesCalleeResult`: see {@link GuessedCallSite}. */
+  recordGuessedCall(
+    op: Op,
+    b: number,
+    abi: { argRegs: string[]; returnReg: string },
+    passesCalleeResult?: (result: Value) => boolean,
+  ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -849,11 +858,17 @@ export function makeSsaBuilder(
         decidedLocal[b].add(r);
       }
     },
-    recordGuessedCall: (op: Op, b: number, abi: { argRegs: string[]; returnReg: string }) => {
+    recordGuessedCall: (
+      op: Op,
+      b: number,
+      abi: { argRegs: string[]; returnReg: string },
+      passesCalleeResult?: (result: Value) => boolean,
+    ) => {
       abiSeen = abi;
       guessedCalls.push({
         block: b,
         op,
+        passesCalleeResult,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -888,6 +903,7 @@ export function makeSsaBuilder(
           calleeResults,
           destroyedIn: destroyedOnEntry(),
           preds,
+          blocks: irBlocks,
           freshAtEnd: writtenSinceCall,
           callsIn,
           sites: guessedCalls,
@@ -1036,7 +1052,7 @@ export function fallbackArgc(
  *  of its own block up to that instruction. */
 export interface GuessedCallSite {
   block: number;
-  /** the `call` op — its operands are the guessed arguments, in argument-register order */
+  /** the `call` op — its arguments (`callArgs`) are the guessed ones, in argument-register order */
   op: Op;
   /** argument registers written between the last call in this block (or the block's start) and here */
   freshBefore: Set<string>;
@@ -1046,6 +1062,9 @@ export interface GuessedCallSite {
    *  nothing (`destroyed`), the block wrote it since (`written`), or neither, so the predecessors
    *  decide (`inherited`) */
   returnRegBefore: 'destroyed' | 'written' | 'inherited';
+  /** which earlier callee's result in the return register is an argument here, not a leftover:
+   *  the site's lowering says so ({@link SsaBuilder.recordGuessedCall}). Absent where none is. */
+  passesCalleeResult?: (result: Value) => boolean;
 }
 
 export interface CallArgTrim {
@@ -1064,6 +1083,8 @@ export interface CallArgTrim {
   destroyedIn: ReadonlyArray<ReadonlySet<string>>;
   /** one entry per CFG edge, as passed to {@link makeSsaBuilder} */
   preds: number[][];
+  /** the blocks `preds` indexes, terminators included — the edges a guard proves a value on */
+  blocks: readonly Block[];
   /** per block: the keys written since its LAST call (since its start if it makes none). Indexed by
    *  block, and it holds every key the builder saw, not only argument registers. */
   freshAtEnd: Array<Set<string>>;
@@ -1093,12 +1114,13 @@ export interface CallArgTrim {
  *  real argument CAN go with them: a fresh register above a hole stops the run (a 64-bit return
  *  occupies two registers and the frontend cannot express one, so the caller's r2 goes with the
  *  unfillable r1), and a callee's return read as the callee's own drops an argument a `g(f())`
- *  source did pass. A declared prototype is what closes either.
+ *  source did pass. A declared prototype is what closes either for a named callee; a call through a
+ *  register has none, so it keeps that return instead (`GuessedCallSite.passesCalleeResult`).
  *
  *  Frontend-agnostic: the caller supplies what its own lifting scan observed, so nothing here
  *  re-derives which instruction writes which register. */
 export function trimClobberedCallArgs(inp: CallArgTrim): void {
-  const { argRegs, returnReg, calleeResults, destroyedIn, preds, freshAtEnd, callsIn, sites } = inp;
+  const { argRegs, returnReg, calleeResults, destroyedIn, preds, blocks, freshAtEnd, callsIn, sites } = inp;
   const blockCount = freshAtEnd.length;
   const all = () => new Set(argRegs);
   const localEnd = (b: number) => freshAtEnd[b] ?? new Set<string>();
@@ -1162,6 +1184,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // outright when it does not. A declared prototype never reaches here, and stays the way `g(f())`
   // is recovered.
   //
+  // A SITE THAT PASSES THE RESULT ON keeps it (`GuessedCallSite.passesCalleeResult`).
+  //
   // THE EXEMPTION NEEDS A RESULT IN THE REGISTER. A call that hands a struct back in it (`struct W1
   // mkw(s32)`) writes no value there — its bytes are a struct, not a word — so the register still
   // names what it held BEFORE that call, and neither clause above can tell: that value is no callee
@@ -1169,6 +1193,102 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   // that path, so the register is an ordinary unfresh one there, and the run stops below it —
   // unless a later register is set up, which puts argument 0 below a proven one: that argument is
   // then the struct itself (`other(mv(a), b)`), a value no register here names, and it declines.
+  //
+  // WHETHER AN EDGE PROVES `v` CONSTANT EVERYWHERE `b` IS REACHED: up the chain of blocks with one
+  // predecessor, a conditional branch on `v == K` arriving by its true edge, or on `v != K` by its
+  // false one. K is any value arithmetic builds out of literals: agbcc compares with 1000 as
+  // `mov r1,#250; lsl r1,#2; cmp r0,r1`. `v` holds every name the value goes by: compared past a join
+  // the trivial-phi pass has yet to fold, a callee's result is that join's parameter.
+  let defs: Map<Value, Op> | undefined;
+  const defOf = (v: Value): Op | undefined => {
+    defs ??= new Map(blocks.flatMap((blk) => blk.ops.flatMap((op) => op.results.map((r) => [r, op] as const))));
+    return defs.get(v);
+  };
+  const isLiteral = (v: Value): boolean => {
+    const d = defOf(v);
+    return (
+      d?.opcode === 'const' ||
+      (d !== undefined && LITERAL_ARITHMETIC.has(d.opcode) && d.operands.length > 0 && d.operands.every(isLiteral))
+    );
+  };
+  const provenConstant = (v: ReadonlySet<Value>, b: number): boolean => {
+    for (let at = b, seen = new Set<number>(); !seen.has(at);) {
+      seen.add(at);
+      const ps = [...new Set(preds[at] ?? [])];
+      if (ps.length !== 1) {
+        return false;
+      }
+      const term = terminator(blocks[ps[0]]);
+      const arrives = term?.successors.map((e) => e.block === blocks[at]) ?? [];
+      const cmp = term?.opcode === 'cond_br' && arrives[0] !== arrives[1] ? defOf(term.operands[0]) : undefined;
+      const equalEdge = cmp?.opcode === 'icmp_eq' ? 0 : cmp?.opcode === 'icmp_ne' ? 1 : -1;
+      if (
+        equalEdge >= 0 &&
+        arrives[equalEdge] &&
+        cmp!.operands.some((o) => v.has(o)) &&
+        cmp!.operands.some((o) => !v.has(o) && isLiteral(o))
+      ) {
+        return true;
+      }
+      at = ps[0];
+    }
+    return false;
+  };
+  // THE RESULT A SITE PASSES ON is looked for through the joins the trivial-phi pass has yet to
+  // fold: this trim runs before it, so a result r0 carries untouched across a loop reaches the call
+  // as the loop header's parameter, not as the callee's own value. The site passes one where every
+  // path brings it an earlier callee's result it passes (`GuessedCallSite.passesCalleeResult`) —
+  // that value, or the join itself where the paths bring different ones (`v = x ? g() : h(); p(v);`).
+  let joinArgs: Map<Value, Value[]> | undefined;
+  const joinedInto = (v: Value): Value[] | undefined => {
+    if (joinArgs === undefined) {
+      joinArgs = new Map();
+      for (const blk of blocks) {
+        for (const op of blk.ops) {
+          for (const e of op.successors) {
+            // the entry block's parameters are the function's own, whatever a back edge brings
+            if (e.block === blocks[0]) {
+              continue;
+            }
+            e.block.params.forEach((param, i) => {
+              const into = joinArgs!.get(param);
+              if (into) {
+                into.push(e.args[i]);
+              } else {
+                joinArgs!.set(param, [e.args[i]]);
+              }
+            });
+          }
+        }
+      }
+    }
+    return joinArgs.get(v);
+  };
+  const passedResult = (s: GuessedCallSite): Value | undefined => {
+    const arg = callArgs(s.op)[0];
+    const passes = s.passesCalleeResult;
+    if (arg === undefined || passes === undefined) {
+      return undefined;
+    }
+    const results = new Set<Value>();
+    const seen = new Set<Value>();
+    for (const work = [arg]; work.length > 0;) {
+      const v = work.pop()!;
+      if (seen.has(v)) {
+        continue;
+      }
+      seen.add(v);
+      const into = joinedInto(v);
+      if (into !== undefined) {
+        work.push(...into);
+      } else if (calleeResults.has(v) && passes(v)) {
+        results.add(v);
+      } else {
+        return undefined;
+      }
+    }
+    return results.size === 0 ? undefined : results.size === 1 ? [...results][0] : arg;
+  };
   const argcAt = (s: GuessedCallSite, fresh: Set<string>): number => {
     const destroyed =
       s.returnRegBefore === 'destroyed' || (s.returnRegBefore === 'inherited' && destroyedIn[s.block].has(returnReg));
@@ -1183,7 +1303,7 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
       return runOfFresh(fresh, 0);
     }
     const op = s.op;
-    if (setsUpLater(fresh) || !calleeResults.has(op.operands[0])) {
+    if (setsUpLater(fresh) || !calleeResults.has(callArgs(op)[0]) || passedResult(s) !== undefined) {
       return runOfFresh(new Set([argRegs[0], ...fresh]), 0);
     }
     return 0;
@@ -1191,8 +1311,8 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
   for (const s of sites) {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
     const n = argcAt(s, fresh);
-    if (n < s.op.operands.length) {
-      s.op.operands.length = n;
+    if (n < callArgs(s.op).length) {
+      truncateCallArgs(s.op, n);
     }
     // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the
     // run over what THIS BLOCK wrote, dropping the registers that are fresh only because no call
@@ -1200,19 +1320,59 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // is recorded rather than applied. A survivor is what it drops, so the join clause above has no
     // place here — but `setsUpLater` still does: a register this block set up two instructions
     // before the call is not something the narrower reading may call dead.
-    const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
-    const local = Math.min(runOfFresh(localFresh, 0), s.op.operands.length);
-    if (local < s.op.operands.length) {
+    //
+    // A SITE THAT PASSES AN EARLIER CALLEE'S RESULT ON keeps it in this reading too, except where an
+    // edge proves that result equal to a constant on the way here (`if (g() == 0) p();`): a source
+    // that passed it there makes the compiler load the constant it proved (`mov r0,#0`), so an asm
+    // with no such load passed nothing. Per site, because this reading cuts every site at once, and a
+    // drop that one site needs would otherwise drop a value another site passes.
+    const result = n > 0 ? passedResult(s) : undefined;
+    const passed = result !== undefined;
+    const dropsPassed = passed && provenConstant(new Set([result, callArgs(s.op)[0]]), s.block);
+    const localFresh =
+      setsUpLater(s.freshBefore) || (passed && !dropsPassed) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
+    const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
+    if (local < callArgs(s.op).length) {
       setupArgc.set(s.op, local);
+      if (local === 0 && dropsPassed) {
+        discardsPassedResult.add(s.op);
+      }
     }
   }
 }
+
+/** The opcodes whose result is a literal when every operand is one ({@link trimClobberedCallArgs}). */
+const LITERAL_ARITHMETIC: ReadonlySet<string> = new Set([
+  'add',
+  'sub',
+  'mul',
+  'and',
+  'or',
+  'xor',
+  'shl',
+  'shr_u',
+  'shr_s',
+  'not',
+  'neg',
+]);
 
 /** The narrower arity {@link narrowToSetupArgs} would cut each guessed call to. A SIDE table and
  *  not an attr: this is a fact about one LIFT, not part of the IR the rest of the pipeline compares
  *  and prints — `structure/hazards.ts` decides two ops equal by comparing their attrs verbatim, so
  *  an attr only one of an otherwise-matching pair carries would cost a recovery. */
 const setupArgc = new WeakMap<Op, number>();
+
+/** The calls whose narrower arity drops an earlier callee's result that the site passes on
+ *  (`GuessedCallSite.passesCalleeResult`): only where an edge proves that result constant on the way
+ *  to the call ({@link trimClobberedCallArgs}). Read by {@link setupArgsDiscardsPassedResult}. */
+const discardsPassedResult = new WeakSet<Op>();
+
+/** Whether {@link narrowToSetupArgs} drops, somewhere in `fn`, an earlier callee's result that a
+ *  call through a register is passed — the fact that makes the narrowed lift's candidates lose a
+ *  score tie (`Candidate.discardsPassedResult`). */
+export function setupArgsDiscardsPassedResult(fn: Fn): boolean {
+  return fn.blocks.some((b) => b.ops.some((op) => discardsPassedResult.has(op)));
+}
 
 /** Whether anything in `fn` HAS the narrower reading — the variation's gate, so the ~99% of functions
  *  with no narrowable call cost no re-lift. Read it off the lift itself: a later pipeline stage may
@@ -1239,8 +1399,8 @@ export function narrowToSetupArgs(fn: Fn): boolean {
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       const setup = setupArgc.get(op);
-      if (setup !== undefined && setup < op.operands.length) {
-        op.operands.length = setup;
+      if (setup !== undefined && setup < callArgs(op).length) {
+        truncateCallArgs(op, setup);
         changed = true;
       }
     }

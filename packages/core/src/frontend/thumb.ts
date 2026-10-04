@@ -2732,8 +2732,14 @@ function assertScratchRegsPartitioned(target: TargetDescription): ReadonlySet<st
 }
 
 /** A `bl` passes a pair in two argument words, a struct-return pointer in r0, and the words past r3
- *  in the outgoing block `analyzeOutgoingArgs` licensed. */
-const THUMB_CALL_LOWERING: CallLowering = { pairs: true, memoryReturn: true, stackArgs: true, voidReturn: false };
+ *  in the outgoing block `analyzeOutgoingArgs` licensed; a call through rN passes r0..r(N-1). */
+const THUMB_CALL_LOWERING: CallLowering = {
+  pairs: true,
+  memoryReturn: true,
+  stackArgs: true,
+  voidReturn: false,
+  argRegisterBoundsArity: true,
+};
 
 /** Every fact about the frame the lift reads before it fills a block, measured off the text. */
 interface ThumbFrame {
@@ -2774,6 +2780,23 @@ function outgoingBlock(widths: readonly number[], target: TargetDescription): nu
     : null;
 }
 
+/** The register a call goes through, or null for one that names its callee: `blx rN` calls the
+ *  address in rN, and so does a `bl` to one of the compiler's call thunks (`callThunks`). Undefined
+ *  for a call through a register that holds no function's address: `sp`, `lr`, `pc`, or a thunk the
+ *  target does not list. */
+function calleeRegister(ins: Instr, target: TargetDescription): string | null | undefined {
+  const [op] = ins.ops;
+  if (ins.mnemonic === 'blx' && op !== undefined && REG_SPELLINGS.test(op)) {
+    return /^r[0-7]$/.test(op) || HIGH_REGS.has(op) ? op : undefined;
+  }
+  const thunks = target.compilerBehaviors.callThunks;
+  if (ins.mnemonic !== 'bl' || thunks === undefined || op === undefined || !op.startsWith(thunks.prefix)) {
+    return null;
+  }
+  const r = op.slice(thunks.prefix.length);
+  return thunks.regs.includes(r) ? r : undefined;
+}
+
 function measureThumbFrame({
   target,
   cfg: { asmBlocks, preds, entryReachable },
@@ -2798,9 +2821,9 @@ function measureThumbFrame({
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
     }
-    // `blx rN` names its TARGET in the operand slot, so exclude it: `mov r3, sp; blx r3` branches
-    // THROUGH the frame base, it does not pass it.
-    const targetReg = ins.mnemonic === 'blx' ? reg(ins.ops[0] ?? '') : null;
+    // A call through a register is no argument of it: `mov r3, sp; blx r3` branches THROUGH the
+    // frame base, it does not pass it.
+    const targetReg = calleeRegister(ins, target);
     return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
   });
 
@@ -3040,7 +3063,7 @@ function measureThumbFrame({
         }
         if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
           const callee = ins.ops[0] ?? '?';
-          const declared = calls.declaredCall(callee);
+          const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
           return [
             {
               kind: 'call',
@@ -4832,7 +4855,7 @@ function lowerStore(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
 function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const { name, target, text, calls, frame, ssa, pairs } = fill;
   const { usedSlotOffsets } = fill.frameUses;
-  const { spAsDataError, writeData } = fill.operands;
+  const { spAsDataError, readData, writeData } = fill.operands;
   const { bi, irb } = cur;
   const [callee] = ins.ops;
   // A BRANCH TO A DATA LABEL THIS ASM DEFINES IS NOT A CALL. Lifting it emits `sTab()` —
@@ -4845,8 +4868,16 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to '${callee}', which this asm defines as a data label — not modelled`,
     );
   }
+  // A CALL THROUGH A REGISTER calls the address in it, which is no argument (`IndirectCallee`). One
+  // through a register that cannot hold an address is not a call a source wrote.
+  const through = calleeRegister(ins, target);
+  if (through === undefined) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${ins.mnemonic} ${callee}' calls through a register that holds no function's address — not modelled`,
+    );
+  }
   calls.lower({
-    callee,
+    callee: through === null ? callee : { address: readData(through, bi), reg: through },
     ssa,
     bi,
     read: (r) => ssa.readVar(r, bi),

@@ -873,7 +873,8 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   in has to fail here rather than compile into whichever answer the compiler picked.
 - **`assertEffectsPreserved`** (also after structuring): every execution the asm makes is emitted,
   and none is emitted more times than the asm makes it on any one path. It counts by key:
-  `call:<target>` for a call; `device:r:0x<address>` and `device:w:0x<address>` for a read and a
+  `call:<target>` for a call, and one `call:(*pointer)` for every call through a register, so
+  the count cannot tell one indirect callee from another; `device:r:0x<address>` and `device:w:0x<address>` for a read and a
   write the lift pinned `volatile`, with `?` for the address where a side cannot read one off, a `?`
   on either side standing for any address and each render for one access; and `declared:<object>`
   for a read of an object the symbol map declares volatile. A pinned access through a named global

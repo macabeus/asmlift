@@ -102,7 +102,7 @@ export function collectSymbolRefs(
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
-    if (e.k === 'call') {
+    if (e.k === 'call' && typeof e.fn === 'string') {
       called.add(e.fn);
       if (e.sret?.kind === 'struct') {
         returned.set(e.fn, e.sret);
