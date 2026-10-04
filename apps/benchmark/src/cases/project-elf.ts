@@ -13,7 +13,7 @@
 // below, and `gmake` where there is one.
 import { asmliftBlock } from '@asmlift/cli/config';
 import { moduleElfPath, placeModuleSections } from '@asmlift/cli/module-elf';
-import { findDecompYaml, loadDecompYaml } from '@match-kit/decomp-yaml/files';
+import { searchDecompYaml } from '@match-kit/decomp-yaml/files';
 import { execSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -88,7 +88,7 @@ export function placedModuleElves(project: string, root: string): (module: strin
 /** The ELF `tools.asmlift.elf` names; if it is not built and the Makefile has an `asmlift-elf`
  *  target, run it (logged). */
 function resolveDeclaredElf(project: string, root: string): ElfResolution {
-  const loaded = loadDecompYaml(findDecompYaml(root));
+  const loaded = searchDecompYaml(root);
   const elfRel = asmliftBlock(loaded)?.elf;
   if (!loaded || !elfRel) {
     return { elf: null, elfRel: null, reason: 'decomp.yaml declares no tools.asmlift.elf' };
