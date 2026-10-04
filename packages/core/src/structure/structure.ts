@@ -2532,6 +2532,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         ? { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
         : x;
 
+  /** A global's byte sum where an integer is read: a return or a store whose declared type is an
+   *  integer. A call argument is not one: no parameter type reaches this pass, so `(u8 *)g + K`
+   *  passed to an integer parameter still warns. */
+  const intoInt = (x: Expr): Expr => (ctype(x)?.kind === 'ptr' && isByteGlobalSum(x) ? byteSumAsInt(x) : x);
+
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
    *  32-bit integer math on the address, so that is what gets spelled. */
@@ -3853,6 +3858,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const intifyAddrCmp = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: t, e: x } : x);
       let l = intifyAddrCmp(e(d.operands[0]));
       let r = intifyAddrCmp(e(d.operands[1]));
+      // A global's byte sum (`(u8 *)g + K`) against a side that renders no pointer is a pointer
+      // compared with an integer, which agbcc warns about. The integer sum compares the same
+      // bytes, unsigned as a pointer compare is; a signed opcode's pin below casts it either way.
+      if (!/^icmp_s/.test(d.opcode)) {
+        if (isByteGlobalSum(l) && ctype(l)?.kind === 'ptr' && ctype(r)?.kind !== 'ptr') {
+          l = byteSumAsInt(l);
+        } else if (isByteGlobalSum(r) && ctype(r)?.kind === 'ptr' && ctype(l)?.kind !== 'ptr') {
+          r = byteSumAsInt(r);
+        }
+      }
       // The same signedness hole for ORDINARY operands: an icmp_u* whose operands both render
       // as signed-promoting C (an s32-declared var carrying a u32 value — declarations take the
       // FIRST claimant's type; an inline `16 << t`, whose C type is the left operand's `int`)
@@ -4153,6 +4168,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           restoreTo = T.ptr(T.u(8));
         } else if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
+        }
+        if (op === '-' && ctype(l)?.kind === 'ptr' && ctype(r)?.kind === 'ptr') {
+          restoreTo = undefined; // a byte pointer less a byte pointer is the byte count, an integer
         }
       } else if (op !== '&&' && op !== '||') {
         // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
@@ -4824,10 +4842,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *
    *  KNOWN GAP: a cell no declaration types may still be declared an INTEGER (the self-declared
    *  `extern u32 gSym;`), where `(void *)` warns `assignment makes integer from pointer without a
-   *  cast`. No spelling is assignment-compatible with both an integer and a pointer cell. */
+   *  cast`. `*(u32 *)&gSym = (u32)gSym + K` is clean under both declarations and compiles to the
+   *  same bytes; it is not spelled here, because it reads as a type pun and the load the IR types a
+   *  pointer is the evidence that the project declares one. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
     if (!isPtrValue(lval)) {
-      return value;
+      return ctype(lval)?.kind === 'int' ? intoInt(value) : value;
     }
     const vt = ctype(value);
     // BOTH ways a pointer value reaches here. `ctype` types params and locals, so it sees the
@@ -5277,7 +5297,12 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     const term = b.ops[b.ops.length - 1];
     if (term.opcode === 'ret') {
       // A void function's `bx lr` leaves whatever in r0; suppress that phantom return value.
-      const value = returnsVoid || !term.operands.length ? undefined : expr(term.operands[0]);
+      const value =
+        returnsVoid || !term.operands.length
+          ? undefined
+          : returnType(fn).kind === 'int'
+            ? intoInt(expr(term.operands[0]))
+            : expr(term.operands[0]);
       // The `value === undefined` half is a GUARD: `l3/tailret.ts` re-checks it before deleting
       // anything, so marking a value-carrying return would change no output. The mark claims the asm
       // shows no `return;` STATEMENT here, which is a claim about a VOID return only.
