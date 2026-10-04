@@ -600,8 +600,8 @@ export function callDeclarations(
     // A CALL THROUGH A REGISTER IS PASSED AN EARLIER CALLEE'S RESULT its guess reads, which the trim
     // drops from a named call (`trimClobberedCallArgs`): no declaration checks a call through a cast
     // to an unprototyped type, so a dropped argument would never be refused, and `p(g())` would lift
-    // as `g(); p();` to the same bytes. Kept, `g(); p();` reads as `p(g())`, which passes what the
-    // machine passes — unless `g` is declared void, and its result names nothing.
+    // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
+    // the machine passes — unless `g` is declared void, and its result names nothing.
     if (widths === null) {
       ssa.recordGuessedCall(call, bi, target, indirect !== undefined && args.length > 0 && !voidResults.has(args[0]));
     }

@@ -1,7 +1,7 @@
 // A CALL THROUGH A FUNCTION POINTER, end to end through the real agbcc: reference C → `bl
 // _call_via_<reg>` → lift → the candidate calls the pointer → recompiled → objdiff. Which thunk
-// register agbcc picks depends on where the pointer was computed, so each shape below puts it in a
-// different one.
+// register agbcc picks depends on the argument count and on whether the pointer lives across a
+// call, so the shapes below reach r0, r1, r2, r4 and r8.
 import { decompile } from '@asmlift/core/pipeline';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { enumerateCandidates, rankBy } from '@asmlift/core/rank';

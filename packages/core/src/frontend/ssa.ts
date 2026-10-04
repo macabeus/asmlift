@@ -1266,9 +1266,9 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // before the call is not something the narrower reading may call dead.
     //
     // A SITE THAT PASSES AN EARLIER CALLEE'S RESULT ON keeps it in this reading too, except where an
-    // edge proves that result equal to a constant on the way here (`if (g() == 0) p();`): passed
-    // there, the compiler loads the constant it proved (`mov r0,#0`), so no `mov` in the asm says
-    // the source passed nothing. Per site, because this reading cuts every site at once, and a
+    // edge proves that result equal to a constant on the way here (`if (g() == 0) p();`): a source
+    // that passed it there makes the compiler load the constant it proved (`mov r0,#0`), so an asm
+    // with no such load passed nothing. Per site, because this reading cuts every site at once, and a
     // drop that one site needs would otherwise drop a value another site passes.
     const passed = n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0]);
     const dropsPassed = passed && provenConstant(callArgs(s.op)[0], s.block);

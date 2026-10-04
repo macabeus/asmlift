@@ -76,8 +76,9 @@ const THROUGH_R8 = [
   '',
 ].join('\n');
 
-// pokeemerald `ObjectEventCB2_BerryTree`, `return tbl[b->d1](a, b);`: both arguments pass through
-// untouched, so nothing sets r0 or r1 up, and the pointer lands in r2.
+// pokeemerald `ObjectEventCB2_BerryTree`'s shape: both arguments pass through untouched, so
+// nothing sets r0 or r1 up, and the pointer lands in r2.
+// `u8 passthru(void *a, s16 *b) { return ((u8 (*)(void *, s16 *))tbl[b[24]])(a, b); }`
 const PASSTHRU = [
   'passthru:',
   '\tpush\t{r4, lr}',
@@ -253,7 +254,7 @@ describe('Thumb lowers `bl _call_via_<reg>` as a call through <reg>', () => {
   test('the pointer is the callee, and no register at or above it is an argument', () => {
     const r = decompile('fresh', FRESH, ARMV4T_AGBCC);
     expect(r.ir.raw).toMatch(/= call %\d+, %\d+, %\d+ \{indirect=true\}/);
-    // the 48 the `ldrsh` offset left in r3 used to be a fourth argument
+    // r3 still holds the `ldrsh` offset 48, and is no argument: it is above the pointer's r2
     expect(r.source).toBe('s32 fresh(s32 a0, s16 *a1) {\n    return (u8)((s32 (*)())tbl[*(a1 + 24)])(&g1, &g2);\n}\n');
   });
 

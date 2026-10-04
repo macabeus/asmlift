@@ -39,7 +39,7 @@
 //                               input does not determine, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
-//                               `bl` whose target this asm defines as a data label, a call thunk
+//                               `bl` whose target this asm defines as a data label, a call
 //                               through `sp` or `lr`, a struct a call
 //                               returns into anything but a local, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
