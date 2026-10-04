@@ -66,6 +66,7 @@ describe('callDeclarations.plan', () => {
       doubles: new Set(),
       returns: { kind: 'pair' },
       clobbers: pairClobbers(calls),
+      declaredVoid: false,
     });
   });
 
@@ -113,6 +114,7 @@ describe('callDeclarations.plan', () => {
       doubles: new Set(),
       returns: { kind: 'register-struct' },
       clobbers: [...calls.callClobbers, 'r0'],
+      declaredVoid: false,
     });
   });
 
@@ -211,6 +213,7 @@ describe('callDeclarations.plan for a lowering with no pair, no memory return an
       doubles: new Set(),
       returns: { kind: 'word' },
       clobbers: calls.callClobbers,
+      declaredVoid: false,
     });
   });
 
@@ -267,6 +270,15 @@ describe('callDeclarations.lower', () => {
     ]);
   });
 
+  test('passes a call through argument register N the N registers below it, on any ISA', () => {
+    const O32: CallLowering = { pairs: false, memoryReturn: false, stackArgs: true, voidReturn: true };
+    const s = site('g');
+    const address = s.ssa.readVar('a2', 0);
+    callDeclarations('f', MIPS_IDO, {}, O32, fail).lower({ ...s, callee: { address, reg: 'a2' } });
+    const [call] = s.ssa.irBlocks[0].ops;
+    expect([call.attrs.indirect, call.operands.length, call.operands.at(-1)]).toEqual([true, 3, address]);
+  });
+
   test('refuses a site that places stack words for a lowering that reads none', () => {
     const lower = () => callDeclarations('f', PPC_MWCC, { g: { params: ['s32'] } }, NONE, fail).lower(site('g'));
     // a frontend wired against its own lowering is a bug in the frontend, not a function it declines
@@ -308,18 +320,24 @@ describe('callDeclarations.plan for a callee declared void', () => {
         widths: [32],
         returns: { kind: 'void' },
         clobbers: [...calls.callClobbers, 'v0'],
+        declaredVoid: true,
       });
     }
   });
 
   test('plans a word where the lowering writes the return register for every call', () => {
     const calls = mipsCalls({ g: { params: ['s32'], returnsVoid: true } }, { ...O32, voidReturn: false });
-    expect(calls.plan('g')).toMatchObject({ returns: { kind: 'word' }, clobbers: calls.callClobbers });
+    // …and still says it is declared void, which the lowering's own value does not
+    expect(calls.plan('g')).toMatchObject({
+      returns: { kind: 'word' },
+      clobbers: calls.callClobbers,
+      declaredVoid: true,
+    });
   });
 
   test("leaves a runtime helper's return to its table", () => {
     const calls = mipsCalls({ __ll_div: { params: ['s32'], returnsVoid: true } });
-    expect(calls.plan('__ll_div').returns).toEqual({ kind: 'word' });
+    expect(calls.plan('__ll_div')).toMatchObject({ returns: { kind: 'word' }, declaredVoid: false });
   });
 });
 

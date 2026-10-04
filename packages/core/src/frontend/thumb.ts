@@ -4862,27 +4862,16 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' branches to '${callee}', which this asm defines as a data label — not modelled`,
     );
   }
-  // A CALL THROUGH A REGISTER calls the address in it, which is no argument. One through a register
-  // that cannot hold an address is not a call a source wrote.
+  // A CALL THROUGH A REGISTER calls the address in it, which is no argument (`IndirectCallee`). One
+  // through a register that cannot hold an address is not a call a source wrote.
   const through = calleeRegister(ins, target);
   if (through === undefined) {
     throw new FrontendUnsupportedError(
       `cannot lift '${name}': '${ins.mnemonic} ${callee}' calls through a register that holds no function's address — not modelled`,
     );
   }
-  // AND ONE THROUGH ARGUMENT REGISTER rN PASSES r0..r(N-1): the arguments fill the registers from
-  // r0 up and the address cannot share one, so N bounds the arity, and reading every register below
-  // it passes what the machine passes. An untouched one is this function's own argument passed on;
-  // one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`).
-  //
-  // KNOWN GAP: N is only a bound. agbcc's address lands above r(argc) when an argument register
-  // still holds a live temp, and a pointer that arrived as an argument stays where it arrived
-  // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
-  // the registers in between read as arguments the source never passed. Only the pointer's
-  // declared type decides the arity, and nothing reads one.
-  const argc = through === null ? -1 : target.argRegs.indexOf(through);
   calls.lower({
-    callee: through === null ? callee : { address: readData(through, bi), reg: through, ...(argc < 0 ? {} : { argc }) },
+    callee: through === null ? callee : { address: readData(through, bi), reg: through },
     ssa,
     bi,
     read: (r) => ssa.readVar(r, bi),

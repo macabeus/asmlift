@@ -79,6 +79,9 @@ export interface CallPlan {
     | { readonly kind: 'memory-struct'; readonly type: IrType };
   /** what the call leaves holding nothing this function can name, for `SsaBuilder.noteCall` */
   readonly clobbers: readonly string[];
+  /** the callee is declared void, whether or not this lowering writes no value for it (`returns`
+   *  is `void` only where `CallLowering.voidReturn` says so) */
+  readonly declaredVoid: boolean;
 }
 
 /** WHAT EACH CALLEE'S DECLARATION SAYS, and what a call leaves holding nothing this function can
@@ -128,16 +131,12 @@ export interface CallSite {
   };
 }
 
-/** A call through a register. It names no callee, so no declaration plans it: the site bounds its
- *  arity, or it is guessed, and an argument register holding the address is no argument, so
- *  neither is any after it. */
+/** A call through a register. It names no callee, so no declaration plans it: an argument
+ *  register holding the address bounds its arity (`lower`), and through any other it is guessed. */
 export interface IndirectCallee {
   readonly address: Value;
   /** the register the address is in */
   readonly reg: string;
-  /** the argument words the site reads, each like a declared one: a bound the asm sets, which may
-   *  count registers the source passed nothing in */
-  readonly argc?: number;
 }
 
 /** How a frontend builds a 64-bit value out of two words and splits one. */
@@ -416,7 +415,8 @@ export function callDeclarations(
       fail(`cannot lift '${name}': \`${callee}\` is declared to return both a struct or union and a 64-bit value`);
     }
     // a runtime helper's return is its table's, whatever a project declares on its name
-    const voided = lowering.voidReturn && !isRuntimeHelperName(callee) && declaresVoidReturn(own);
+    const declaredVoid = !isRuntimeHelperName(callee) && declaresVoidReturn(own);
+    const voided = lowering.voidReturn && declaredVoid;
     return {
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
@@ -436,12 +436,9 @@ export function callDeclarations(
         : returned === undefined && !voided
           ? callClobbers
           : [...callClobbers, target.returnReg],
+      declaredVoid,
     };
   };
-  const argRegsBelow = (reg: string | undefined): readonly string[] =>
-    reg !== undefined && target.argRegs.includes(reg)
-      ? target.argRegs.slice(0, target.argRegs.indexOf(reg))
-      : target.argRegs;
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
@@ -451,14 +448,27 @@ export function callDeclarations(
     }
     const indirect = typeof site.callee === 'string' ? undefined : site.callee;
     const callee = typeof site.callee === 'string' ? site.callee : undefined;
+    // A CALL THROUGH ARGUMENT REGISTER rN PASSES r0..r(N-1): the arguments fill the registers from
+    // r0 up and the address cannot share one, so N bounds the arity, and reading every register
+    // below it passes what the machine passes. An untouched one is this function's own argument
+    // passed on; one a call destroyed names nothing, and its read refuses (`SsaBuilder.finish`).
+    // Through any other register the arity is guessed.
+    //
+    // KNOWN GAP: N is only a bound. agbcc's address lands above r(argc) when an argument register
+    // still holds a live temp, and a pointer that arrived as an argument stays where it arrived
+    // (`void f(int x, void (*g)(void)) { g(); }` calls through r1, the bytes `g(x)` compiles to), so
+    // the registers in between read as arguments the source never passed. Only the pointer's
+    // declared type decides the arity, and nothing reads one.
+    const bound = indirect === undefined ? -1 : target.argRegs.indexOf(indirect.reg);
     const p: CallPlan =
       indirect === undefined
         ? plan(callee!)
         : {
-            widths: indirect.argc === undefined ? null : Array.from({ length: indirect.argc }, () => 32),
+            widths: bound < 0 ? null : Array.from({ length: bound }, () => 32),
             doubles: new Set(),
             returns: { kind: 'word' },
             clobbers: callClobbers,
+            declaredVoid: false,
           };
     // ONE LIST OF PARAMETER WIDTHS, FROM WHICHEVER SOURCE STATES THEM — the compiler's own
     // runtime table or the project's headers. Both answer the same question, so the walk that
@@ -471,7 +481,7 @@ export function callDeclarations(
     const { widths, returns } = p;
     const argc =
       widths === null
-        ? fallbackArgc(ssa, argRegsBelow(indirect?.reg), bi, {
+        ? fallbackArgc(ssa, target.argRegs, bi, {
             accept: (v) => !highHalves?.has(v),
             gap: guess && { name, at: guess.at, fail },
           })
@@ -587,11 +597,7 @@ export function callDeclarations(
     if (widths === null) {
       ssa.recordGuessedCall(call, bi, target, indirect !== undefined && args.length > 0 && !voidResults.has(args[0]));
     }
-    if (
-      callee !== undefined &&
-      !isRuntimeHelperName(callee) &&
-      declaresVoidReturn(Object.hasOwn(prototypes, callee) ? prototypes[callee] : undefined)
-    ) {
+    if (p.declaredVoid) {
       voidResults.add(res);
     }
     if (returns.kind === 'pair') {
