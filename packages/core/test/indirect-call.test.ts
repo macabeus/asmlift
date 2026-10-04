@@ -11,6 +11,7 @@ import { T } from '../src/ir/types';
 import { VerifyError, verify } from '../src/ir/verify';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
+import { compareScored, enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const PROTOS: Prototypes = {
@@ -109,6 +110,27 @@ const NESTED = [
   '\tpop\t{r4}',
   '\tpop\t{r0}',
   '\tbx\tr0',
+  '',
+].join('\n');
+
+// `void guarded(void) { void (*p)(void) = gq; if (g()) return; p(); }`: on the path to the call r0
+// is known to be 0, so `p(0)` would load it (`mov r0,#0`), and only the reading that passes nothing
+// recompiles.
+const GUARDED = [
+  'guarded:',
+  '\tpush\t{r4, lr}',
+  '\tldr\tr0, .L4',
+  '\tldr\tr4, [r0]',
+  '\tbl\tg',
+  '\tcmp\tr0, #0',
+  '\tbne\t.L2',
+  '\tbl\t_call_via_r4',
+  '.L2:',
+  '\tpop\t{r4}',
+  '\tpop\t{r0}',
+  '\tbx\tr0',
+  '.L4:',
+  '\t.word\tgq',
   '',
 ].join('\n');
 
@@ -217,6 +239,26 @@ describe("a callee's result in r0 at a call through a register", () => {
     expect(decompile('nested', NESTED, ARMV4T_AGBCC, { prototypes }).source).toBe(
       'void nested(void) {\n    s32 v0;\n    v0 = getfn();\n    g();\n    ((s32 (*)())v0)();\n}\n',
     );
+  });
+});
+
+describe('the `/setup-args` reading that drops a passed callee result', () => {
+  const cands = enumerateCandidates('guarded', GUARDED, ARMV4T_AGBCC);
+  const kept = cands.find((c) => c.source.includes('v0)(v1)'));
+  const dropped = cands.find((c) => c.source.includes('v0)()'));
+
+  test('is offered beside the default, and marked', () => {
+    expect(kept?.variations).not.toContain('setup-args');
+    expect(kept?.discardsPassedResult).toBeUndefined();
+    expect(dropped?.variations).toContain('setup-args');
+    expect(dropped?.discardsPassedResult).toBe(true);
+  });
+
+  test('wins only on a strictly better score, never on a tie', () => {
+    const scored = (c: typeof kept, score: number, order: number) => ({ ...c!, score: { score }, order });
+    // the dropping reading is the shorter one, so every readability term below the score favours it
+    expect(compareScored(scored(dropped, 0, 1), scored(kept, 0, 0))).toBeGreaterThan(0);
+    expect(compareScored(scored(dropped, 0, 0), scored(kept, 4, 1))).toBeLessThan(0);
   });
 });
 

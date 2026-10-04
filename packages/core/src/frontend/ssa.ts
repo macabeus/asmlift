@@ -1219,13 +1219,13 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     // is recorded rather than applied. A survivor is what it drops, so the join clause above has no
     // place here — but `setsUpLater` still does: a register this block set up two instructions
     // before the call is not something the narrower reading may call dead.
-    const localFresh =
-      setsUpLater(s.freshBefore) || (n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0]))
-        ? new Set([argRegs[0], ...s.freshBefore])
-        : s.freshBefore;
+    const localFresh = setsUpLater(s.freshBefore) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
     if (local < callArgs(s.op).length) {
       setupArgc.set(s.op, local);
+      if (local === 0 && n > 0 && s.passesCalleeResult && calleeResults.has(callArgs(s.op)[0])) {
+        discardsPassedResult.add(s.op);
+      }
     }
   }
 }
@@ -1235,6 +1235,20 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
  *  and prints — `structure/hazards.ts` decides two ops equal by comparing their attrs verbatim, so
  *  an attr only one of an otherwise-matching pair carries would cost a recovery. */
 const setupArgc = new WeakMap<Op, number>();
+
+/** The calls whose narrower arity drops an earlier callee's result that the site passes on
+ *  (`GuessedCallSite.passesCalleeResult`). Under an equality guard the compiler would have loaded the
+ *  constant it proved instead (`if (g() == 0) p(0)` opens the arm with `mov r0,#0`), so only the
+ *  narrower reading can match there; elsewhere both readings compile alike and only the wider one
+ *  passes what the machine passes. Read by {@link setupArgsDiscardsPassedResult}. */
+const discardsPassedResult = new WeakSet<Op>();
+
+/** Whether {@link narrowToSetupArgs} drops, somewhere in `fn`, an earlier callee's result that a
+ *  call through a register is passed — the fact that makes the narrowed lift's candidates lose a
+ *  score tie (`Candidate.discardsPassedResult`). */
+export function setupArgsDiscardsPassedResult(fn: Fn): boolean {
+  return fn.blocks.some((b) => b.ops.some((op) => discardsPassedResult.has(op)));
+}
 
 /** Whether anything in `fn` HAS the narrower reading — the variation's gate, so the ~99% of functions
  *  with no narrowable call cost no re-lift. Read it off the lift itself: a later pipeline stage may

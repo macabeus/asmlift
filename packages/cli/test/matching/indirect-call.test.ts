@@ -4,6 +4,7 @@
 // different one.
 import { decompile } from '@asmlift/core/pipeline';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
+import { enumerateCandidates, rankBy } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -45,5 +46,35 @@ describe('a call through a function pointer recompiles to its own thunk', () => 
       console.log(`${sym}:\n${source}`, JSON.stringify(score));
     }
     expect(score.match).toBe(true);
+  });
+});
+
+describe("an earlier callee's result in r0 at a call through a register", () => {
+  const ctx = 'extern void (*gq)(void);\nextern void (*gq1)(int);\nextern int g(void);\nextern int gw;\n';
+  /** The winner over the whole fan of `sym` out of `body` compiled with agbcc. */
+  const winner = (sym: string, body: string) => {
+    const asm = compileTargetAsm(ctx + body, FLAGS);
+    const obj = assembleTarget(asm);
+    const cands = enumerateCandidates(sym, asm, ARMV4T_AGBCC, { prototypes: prototypesFromContext(ctx, 'c') });
+    return rankBy(cands, sym, (src) => scoreC(ctx + src, sym, obj, FLAGS)).winner;
+  };
+
+  // Under an equality guard agbcc knows r0's value, so a source that passed it would load the
+  // constant (`mov r0,#0`) before the thunk: only the narrower reading recompiles.
+  test.each([
+    ['x7', 'void x7(void) { void (*p)(void) = gq; if (g()) return; p(); }'],
+    ['y4', 'void y4(void) { void (*p)(void) = gq; if (g() != 7) return; p(); }'],
+    ['x5', 'void x5(void) { void (*p)(void) = gq; while (g()) gw++; p(); }'],
+  ])('is dropped where only the narrower reading matches (%s)', (sym, body) => {
+    const w = winner(sym, body);
+    expect(w.score.match).toBe(true);
+    expect(w.variations).toContain('setup-args');
+  });
+
+  test('is kept on a tie, where both readings compile alike', () => {
+    const w = winner('w2', 'void w2(void) { void (*p)(int) = gq1; int v = g(); if (v == 0) return; p(v); }');
+    expect(w.score.match).toBe(true);
+    expect(w.variations).not.toContain('setup-args');
+    expect(w.source).toContain('v0)(v1)');
   });
 });
