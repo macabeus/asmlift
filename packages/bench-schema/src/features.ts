@@ -618,11 +618,16 @@ export const FEATURES: readonly FeatureDef[] = [
       'fixed by how the source spelled it — which operand comes first, which pair is added first, ' +
       'which side is the pointer — so spellings with the same value compile to different ' +
       'instructions. agbcc rebuilds an integer added to a pointer pointer-first, on whichever side ' +
-      'it was written (gcc/c-typeck.c:1993-1998, :2712), while a sum of two integers keeps the ' +
-      'order it was written in and folds a constant term into the operand it is grouped with. ' +
-      'So `&g->arr[i]`, `(u8 *)g + i * 8 + 0x169c` and `(u32)g + i * 8 + 0x169c` are one address ' +
-      'and two codegens. The tag marks rows where compiling both spellings showed the recovery ' +
-      'has to choose the order the assembly shows. No machine-checked floor: every sum has an ' +
+      'it was written (gcc/c-typeck.c:1993-1998, :2712), while a sum of integers is folded by the ' +
+      'integer rules instead, which can move a constant to another operand than the one it was ' +
+      'written with. ' +
+      'So `&g->arr[i]` and `(u8 *)g + (i * 8 + 0x169c)` compile alike, adding the index and the ' +
+      'constant first; `(u8 *)g + i * 8 + 0x169c` and `(u32)g + i * 8 + 0x169c` compile alike to ' +
+      'each other and not to the subscript, adding the constant after the pointer; and ' +
+      '`(u32)g + (i * 8 + 0x169c)` is a third codegen. One address, three codegens: the grouping ' +
+      'decides the bytes, and so does whether the base is a pointer or an integer. The tag marks ' +
+      'rows where compiling both spellings showed the recovery has to choose the order the ' +
+      'assembly shows. No machine-checked floor: every sum has an ' +
       'order, and only compiling the alternatives tells whether it decides the bytes.',
     example: {
       c: 'struct BerryTree *GetBerryTreeInfo(u8 id) { return &gSaveBlock1Ptr->berryTrees[id]; }',

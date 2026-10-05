@@ -284,11 +284,6 @@
     "ctx": "ctx-5d814d9758de.i.gz",
     "m2c": "ctx-5d814d9758de.i.gz"
   },
-  "GetBoxedMonPtr": {
-    "tu": "GetBoxedMonPtr.i.gz",
-    "ctx": "ctx-927dfbe4d254.i.gz",
-    "m2c": "ctx-927dfbe4d254.i.gz"
-  },
   "DecorationItemsMenuAction_AttemptToss": {
     "tu": "DecorationItemsMenuAction_AttemptToss.i.gz",
     "ctx": "ctx-3600a0252298.i.gz",
