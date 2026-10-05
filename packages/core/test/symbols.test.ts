@@ -20,7 +20,7 @@ import {
   lookupSymbol,
   symbolsByName,
 } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
@@ -645,7 +645,7 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
       '\tldr\tr0, [r5]\n\tadd\tr0, r0, r6\n\tadd\tr4, r4, r0\n\tldrb\tr0, [r4]\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L6:\n\t.word\tgArr\n\t.word\tgBig\n';
     const src = run('f', body);
-    expect(src).toContain('(u8 *)v0 + (s32)((u8 *)gBig + a0)');
+    expect(src).toContain('(u8 *)v0 + ((u32)gBig + a0)');
   });
 
   test('added to another global no declaration types, the partner is added as an integer', () => {
@@ -655,7 +655,7 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     const body =
       '\tldr\tr0, .L6\n\tldr\tr0, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x10]\n' +
       '\tbx\tlr\n.L6:\n\t.word\tgPtr\n\t.word\tgK\n';
-    expect(run('f', body)).toContain('((u8 *)gPtr + (u32)(u8 *)gK)[16]');
+    expect(run('f', body)).toContain('((u8 *)((u32)(u8 *)gPtr + (u32)(u8 *)gK))[16]');
   });
 
   test('a global left of the integer sum is added as an integer, through a byte pointer', () => {
@@ -675,7 +675,7 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
       '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0]\n\tldr\tr0, .L3+0x4\n\tldr\tr0, [r0]\n' +
       '\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgTbl\n\t.word\tgPtr\n';
     const named = mapOf([[0x03001000, { name: 'gTbl', kind: 'data' }]]);
-    expect(run('f', body, named)).toContain('((u8 *)gPtr + ((u16 *)&gTbl)[a0])[16]');
+    expect(run('f', body, named)).toContain('((u8 *)((u32)(u8 *)gPtr + ((u16 *)&gTbl)[a0]))[16]');
   });
 
   test('assigned to a temp, the value is cast to the temp type', () => {
@@ -702,11 +702,53 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
 
   test('a runtime index added to the value is cast-then-add when the IR types the sum a pointer', () => {
     // agbcc -O2 of `extern struct Big *gPtr; u8 b1(s32 x) { return *((u8 *)gPtr + x + 0x10); }`.
-    // Neither load is typed a pointer, but the sum is, and with `x` an integer `(u8 *)gPtr + x` is
+    // Neither load is typed a pointer, but the sum is, and with `x` an integer the integer sum is
     // the asm's address whichever operand the source held as the pointer.
     const body =
       '\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tadd\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgPtr\n';
-    expect(run('f', body)).toContain('((u8 *)gPtr + a0)[16]');
+    expect(run('f', body)).toContain('((u8 *)((u32)(u8 *)gPtr + a0))[16]');
+  });
+
+  test('a global inside the runtime offset is added as an integer too', () => {
+    // agbcc -O2 of `extern struct S *gPtr; extern u16 *gW; u8 n1(int a) { sink(gPtr->a); return
+    // *(u8 *)((u32)gPtr + (a + (u32)gW)); }`. `(u32)gPtr + (a0 + gW)` is pointer arithmetic on gW
+    // in the project's file, and scales a0 by sizeof(u16).
+    const body =
+      '\tpush\t{r4, r5, lr}\n\tadd\tr4, r0, #0\n\tldr\tr5, .L3\n\tldr\tr0, [r5]\n\tldr\tr0, [r0]\n\tbl\tsink\n' +
+      '\tldr\tr1, [r5]\n\tldr\tr0, .L3+0x4\n\tldr\tr0, [r0]\n\tadd\tr4, r4, r0\n\tadd\tr1, r1, r4\n\tldrb\tr0, [r1]\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n\t.word\tgW\n';
+    expect(run('f', body)).toContain('*(u8 *)((u32)gPtr + (a0 + (u32)(u8 *)gW))');
+  });
+
+  test('a runtime offset right of the value is added as an integer, in the order the asm adds', () => {
+    // mwcc_242_81 -O4 of `extern struct S *gPtr; extern u32 gU; u8 i3(void) { sink(gPtr->a); return
+    // *(u8 *)((u32)gPtr + gU); }`: `lbzx r3, r3, r0` adds gPtr first. CodeWarrior compiles
+    // `(u8 *)gPtr + gU` index first, under every declaration of gPtr.
+    const i3 =
+      '00000000 <i3>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n' +
+      '   c:\tlwz     r3,0(0)\n\t\t\tc: R_PPC_EMB_SDA21\tgPtr\n  10:\tlwz     r3,0(r3)\n' +
+      '  14:\tbl      14 <i3+0x14>\n\t\t\t14: R_PPC_REL24\tsink\n  18:\tlwz     r3,0(0)\n\t\t\t18: R_PPC_EMB_SDA21\tgPtr\n' +
+      '  1c:\tlwz     r0,0(0)\n\t\t\t1c: R_PPC_EMB_SDA21\tgU\n  20:\tlbzx    r3,r3,r0\n  24:\tlwz     r0,20(r1)\n' +
+      '  28:\tmtlr    r0\n  2c:\taddi    r1,r1,16\n  30:\tblr\n';
+    const src = decompile('i3', i3, PPC_MWCC).source;
+    expect(src).toContain('*(u8 *)((u32)gPtr + (u32)(u8 *)gU)');
+    expect(src).not.toContain('*((u8 *)gPtr +');
+  });
+
+  test('the /reread-globals candidate adds a runtime offset as an integer too', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase; extern enum E gE; u32 a4(int n) { u32 s = *(gBase + gE);
+    // gE = (enum E)n; gC = gB2; return s + *(gBase + gE); }`: both `lbzx` add gBase first.
+    const a4 =
+      '00000000 <a4>:\n   0:\tlwz     r5,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tlwz     r4,0(0)\n' +
+      '\t\t\t4: R_PPC_EMB_SDA21\tgE\n   8:\tlwz     r0,0(0)\n\t\t\t8: R_PPC_EMB_SDA21\tgB2\n   c:\tlbzx    r4,r5,r4\n' +
+      '  10:\tstw     r3,0(0)\n\t\t\t10: R_PPC_EMB_SDA21\tgE\n  14:\tstw     r0,0(0)\n\t\t\t14: R_PPC_EMB_SDA21\tgC\n' +
+      '  18:\tlbzx    r0,r5,r3\n  1c:\tadd     r3,r4,r0\n  20:\tblr\n';
+    const reread = enumerateCandidates('a4', a4, PPC_MWCC).filter((c) => hasVariation(c.variations, 'reread-globals'));
+    expect(reread.length).toBeGreaterThan(0);
+    for (const c of reread) {
+      expect(c.source).toContain('*(u8 *)((u32)(u8 *)gBase + a0)');
+      expect(c.source).not.toContain('*((u8 *)gBase +');
+    }
   });
 
   test('a byte global added to a runtime integer is the index, and is not cast', () => {

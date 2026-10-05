@@ -2538,6 +2538,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         : x,
   });
 
+  /** An integer operand with every undeclared global it adds or subtracts made a word as well:
+   *  bare, `a0 + g` is pointer arithmetic under a pointer declaration of g. Other operators reject
+   *  a pointer operand, and a load or a cast types its own value. */
+  const intWords = (x: Expr): Expr =>
+    isUndeclaredGlobalValue(x)
+      ? globalWord(x)
+      : x.k === 'bin' && (x.op === '+' || x.op === '-')
+        ? { ...x, l: intWords(x.l), r: intWords(x.r) }
+        : x;
+
   /** A byte sum the pointer-value arithmetic rule below made of a global's value (`(u8 *)g + K`),
    *  and the same sum as the integer it also is (`(u32)g + K`), which an integer added in front of
    *  it takes. KNOWN GAP: an integer READER of the byte sum converts a pointer to an integer. The
@@ -2552,19 +2562,39 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     x.e.k === 'var' &&
     (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
     (!undeclared || mapUndeclared(x.e.name));
-  const isByteGlobalSum = (x: Expr, undeclared = false): boolean =>
+  /** The integer sum the rule spells in the asm's order instead (`(u32)g + x`), cast back to the
+   *  byte pointer it stands for: `(u8 *)((u32)g + x)`. */
+  const intGlobalWord = (x: Expr, undeclared: boolean): boolean =>
+    x.k === 'cast' &&
+    typeEquals(x.to, T.u(32)) &&
+    (castGlobal(x.e, undeclared) ||
+      (x.e.k === 'var' &&
+        (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
+        (!undeclared || mapUndeclared(x.e.name))));
+  const isIntGlobalSum = (x: Expr, undeclared: boolean): boolean =>
     x.k === 'bin' &&
     (x.op === '+' || x.op === '-') &&
-    (castGlobal(x.l, undeclared) ||
-      castGlobal(x.r, undeclared) ||
-      isByteGlobalSum(x.l, undeclared) ||
-      isByteGlobalSum(x.r, undeclared));
+    (intGlobalWord(x.l, undeclared) ||
+      intGlobalWord(x.r, undeclared) ||
+      isIntGlobalSum(x.l, undeclared) ||
+      isIntGlobalSum(x.r, undeclared));
+  const restoredIntSum = (x: Expr, undeclared: boolean): Expr | undefined =>
+    x.k === 'cast' && typeEquals(x.to, T.ptr(T.u(8))) && isIntGlobalSum(x.e, undeclared) ? x.e : undefined;
+  const isByteGlobalSum = (x: Expr, undeclared = false): boolean =>
+    restoredIntSum(x, undeclared) !== undefined ||
+    (x.k === 'bin' &&
+      (x.op === '+' || x.op === '-') &&
+      (castGlobal(x.l, undeclared) ||
+        castGlobal(x.r, undeclared) ||
+        isByteGlobalSum(x.l, undeclared) ||
+        isByteGlobalSum(x.r, undeclared)));
   const byteSumAsInt = (x: Expr): Expr =>
-    castGlobal(x)
+    restoredIntSum(x, false) ??
+    (castGlobal(x)
       ? globalWord(x.e)
       : x.k === 'bin' && isByteGlobalSum(x)
         ? { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
-        : x;
+        : x);
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
@@ -4109,7 +4139,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // DEFINITELY-pointer rendering is cast (same conservative direction as memAccess); the
       // additive ops keep C's legal pointer arithmetic untouched.
       const op = ARITH_TO_BIN[d.opcode];
-      const intify = (x: Expr): Expr => (ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x);
+      const intify = (x: Expr): Expr =>
+        restoredIntSum(x, false) ?? (ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x);
       if (!['+', '-', '&&', '||'].includes(op)) {
         l = intify(l);
         r = intify(r);
@@ -4180,24 +4211,46 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
                 : undefined
             : undefined;
         const ptrValue = (x: Expr): boolean => isPtrValue(x) || x === sumBase;
-        // The base's partner, when it is another global no declaration types, is added as an
-        // integer, which it is under an integer declaration and a pointer one alike.
+        // A global no declaration types in the base's partner is added as an integer, which it is
+        // under an integer declaration and a pointer one alike.
         if (sumBase !== undefined) {
-          l = l !== sumBase && isUndeclaredGlobalValue(l) ? intifyPtrValue(l) : l;
-          r = r !== sumBase && isUndeclaredGlobalValue(r) ? intifyPtrValue(r) : r;
+          l = l !== sumBase ? intWords(l) : l;
+          r = r !== sumBase ? intWords(r) : r;
         }
         const rendersPtr = (x: Expr): boolean => ptrValue(x) || ctype(x)?.kind === 'ptr';
         const bothPtr = rendersPtr(l) && rendersPtr(r);
-        if (ptrValue(l)) {
-          l = op === '+' && bothPtr && !ptrValue(r) ? intifyPtrValue(l) : bytePtr(l);
-        }
         // `x + (u8 *)g` is pointer arithmetic, and gcc makes the pointer the first operand of the
         // add, which swaps the asm's. So under an integer left side, the value of a global no
         // declaration types, or a byte sum this rule made of one, is added as an integer in the
         // asm's order, and the cast keeps the sum the byte pointer it would have been. A declared
         // pointer keeps `x + (u8 *)p`, the operand the element and field spellings read.
         const undeclaredPtr = (x: Expr): boolean => x.k === 'var' && mapUndeclared(x.name);
-        if (
+        // The same global LEFT of a runtime offset is added as an integer too: CodeWarrior at -O4
+        // puts the index first in every pointer sum, where an integer sum keeps the source's
+        // order, so `(u8 *)g + x` is the asm's order on agbcc, KMC gcc and IDO only. The partner
+        // goes integer with it, or a pointer partner would scale the sum. A constant offset folds
+        // into the access and keeps `(u8 *)g + K`.
+        const constValued = (x: Expr): boolean =>
+          x.k === 'const' ||
+          (x.k === 'cast' && constValued(x.e)) ||
+          (x.k === 'bin' && constValued(x.l) && constValued(x.r));
+        const intSum = op === '+' && !constValued(r) && ptrValue(l) && undeclaredPtr(l);
+        if (intSum) {
+          l = intifyPtrValue(l);
+          r = ptrValue(r)
+            ? intifyPtrValue(r)
+            : ctype(r)?.kind === 'ptr'
+              ? isByteGlobalSum(r)
+                ? byteSumAsInt(r)
+                : { k: 'cast', to: T.u(32), e: r }
+              : intWords(r);
+          restoreTo ??= T.ptr(T.u(8));
+        } else if (ptrValue(l)) {
+          l = op === '+' && bothPtr && !ptrValue(r) ? intifyPtrValue(l) : bytePtr(l);
+        }
+        if (intSum) {
+          // both operands are integers now
+        } else if (
           op === '+' &&
           !bothPtr &&
           !restoreTo &&
@@ -4206,7 +4259,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           r = ptrValue(r) ? intifyPtrValue(r) : byteSumAsInt(r);
           // A left global no declaration types may be a pointer in the project's header, which
           // would scale the integer sum; as an integer it is the asm's word under any declaration.
-          l = isUndeclaredGlobalValue(l) ? intifyPtrValue(l) : l;
+          l = intWords(l);
           restoreTo = T.ptr(T.u(8));
         } else if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
