@@ -566,7 +566,7 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
 
   test('a call argument takes the cast too, once the function uses the value as a pointer', () => {
     // g(gPtr + 0x7c58); return gPtr[4]. The argument's own load is typed an integer (nothing
-    // dereferences it in this function), but the second load of the same cell is a pointer, and the
+    // dereferences that load), but the second load of the same cell is a pointer, and the
     // callee receives the same scaled address a deref would read.
     const body =
       '\tpush\t{r4, lr}\n\tldr\tr4, .L1\n\tldr\tr0, [r4]\n\tldr\tr1, .L2\n\tadds\tr0, r0, r1\n\tbl\tg\n' +
