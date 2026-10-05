@@ -198,12 +198,12 @@ _Favouring m2c, on Mario Party 4 (`"tu": "unit"`)._
 
 _Favouring m2c, across the tier._
 
-12. **The row's own signature, where its project declares it.** On 85 of the 125 rows whose context
+12. **The row's own signature, where its project declares it.** On 84 of the 125 rows whose context
     already declares the function, that declaration carries a PARAMETER LIST — the full signature,
     return type and parameter types (`u32 BoardRandMod(u32 value);`,
     `static s32 GetDigit(s32 value, s32 place);`) — while asmlift's `proto` states void-ness and,
     on 3 rows, a parameter list (residual 9). Per project: marioparty4 23, kleod 15, ac-decomp 12,
-    sa3 11, pokeemerald 13, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
+    pokeemerald 12, sa3 11, marioparty3 6, snowboardkids2 5, af 0. Measured on `BoardRandMod` by deleting
     `u32 BoardRandMod(u32 value);` from the context and re-running m2c: it then emits
     `s32 BoardRandMod(u32 arg0)`, same body. Not closed for the reason residual 4 is not: the
     declaration is the project's own header text, and removing it re-vendors the blob asmlift's
