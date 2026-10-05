@@ -619,10 +619,11 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
 
   test('added after an integer, the value is added as an integer, in the order the asm adds', () => {
     // agbcc -O2 of `extern u32 gOff; u8 m1(s32 x) { return *(u8 *)(x + gOff); }`: `add r0, r0, r1`.
-    // `a0 + (u8 *)gOff` is pointer arithmetic, which agbcc compiles `add r1, r1, r0`.
+    // `a0 + (u8 *)gOff` is pointer arithmetic, which agbcc compiles `add r1, r1, r0`. The function
+    // never loads through gOff, so a float declaration is possible, and `(u32)gOff` would convert it.
     const body =
       '\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L3:\n\t.word\tgOff\n';
-    expect(run('f', body)).toContain('*(u8 *)(a0 + (u32)gOff)');
+    expect(run('f', body)).toContain('*(u8 *)(a0 + (u32)(u8 *)gOff)');
   });
 
   test('a byte sum added after an integer is added as an integer too', () => {
@@ -649,11 +650,22 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
 
   test('added to another global no declaration types, the partner is added as an integer', () => {
     // agbcc -O2 of `extern struct S *gPtr; extern u32 gK; u8 b2(void) { return *((u8 *)gPtr + gK +
-    // 16); }`. Bare, `gPtr + gK` scales gK by sizeof(struct S) in the project's file.
+    // 16); }`. Bare, `gPtr + gK` scales gK by sizeof(struct S) in the project's file. Under a
+    // `float gK`, `(u32)gK` converts the value where `(u32)(u8 *)gK` does not compile.
     const body =
       '\tldr\tr0, .L6\n\tldr\tr0, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x10]\n' +
       '\tbx\tlr\n.L6:\n\t.word\tgPtr\n\t.word\tgK\n';
-    expect(run('f', body)).toContain('((u8 *)gPtr + (u32)gK)[16]');
+    expect(run('f', body)).toContain('((u8 *)gPtr + (u32)(u8 *)gK)[16]');
+  });
+
+  test('a global left of the integer sum is added as an integer, through a byte pointer', () => {
+    // agbcc -O2 of `extern struct S *gPtr; extern u16 *gOther; u8 x1(void) { return *(u8 *)((u32)gOther +
+    // (u32)gPtr); }`. Bare, `gOther + (u32)gPtr` scales gPtr's value by sizeof(u16) in the project's
+    // file, and `(u32)gOther` converts a `float gOther`.
+    const body =
+      '\tldr\tr0, .L3\n\tldr\tr0, [r0]\n\tldr\tr1, .L3+0x4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n' +
+      '\tldr\tr1, .L3+0x4\n\tldr\tr1, [r1]\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L3:\n\t.word\tgOther\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('*(u8 *)((u32)(u8 *)gOther + (u32)gPtr)');
   });
 
   test('added to a value loaded through an address, the value is the base', () => {

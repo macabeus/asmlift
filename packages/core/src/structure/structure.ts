@@ -2525,6 +2525,19 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   const isUndeclaredGlobalValue = (x: Expr): boolean =>
     x.k === 'var' && wordLoadedGlobals.has(x.name) && declaredShape(x.name) === undefined;
 
+  /** A pointer value or a global's word as the integer the asm added. A global no declaration
+   *  types and the IR never loads through may be declared a float, whose value `(u32)g` converts,
+   *  so it goes through `(u8 *)` first: `(u32)(u8 *)g` is `(u32)g`'s bytes under every integer and
+   *  pointer declaration, and no C under a float one. */
+  const globalWord = (x: Expr): Expr => ({
+    k: 'cast',
+    to: T.u(32),
+    e:
+      x.k === 'var' && declaredShape(x.name) === undefined && !pointerLoadedGlobals.has(x.name)
+        ? { k: 'cast', to: T.ptr(T.u(8)), e: x }
+        : x,
+  });
+
   /** A byte sum the pointer-value arithmetic rule below made of a global's value (`(u8 *)g + K`),
    *  and the same sum as the integer it also is (`(u32)g + K`), which an integer added in front of
    *  it takes. KNOWN GAP: an integer READER of the byte sum converts a pointer to an integer. The
@@ -2548,7 +2561,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       isByteGlobalSum(x.r, undeclared));
   const byteSumAsInt = (x: Expr): Expr =>
     castGlobal(x)
-      ? { k: 'cast', to: T.u(32), e: x.e }
+      ? globalWord(x.e)
       : x.k === 'bin' && isByteGlobalSum(x)
         ? { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
         : x;
@@ -4137,7 +4150,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // ACCESS width, a different address whenever that width is not 1.
       // Under the non-additive operators C rejects a pointer outright, so there the honest
       // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
-      const intifyPtrValue = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      const intifyPtrValue = globalWord;
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
         // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer. The
@@ -4191,6 +4204,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           ((ptrValue(r) && undeclaredPtr(r)) || (ctype(r)?.kind === 'ptr' && isByteGlobalSum(r, true)))
         ) {
           r = ptrValue(r) ? intifyPtrValue(r) : byteSumAsInt(r);
+          // A left global no declaration types may be a pointer in the project's header, which
+          // would scale the integer sum; as an integer it is the asm's word under any declaration.
+          l = isUndeclaredGlobalValue(l) ? intifyPtrValue(l) : l;
           restoreTo = T.ptr(T.u(8));
         } else if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
