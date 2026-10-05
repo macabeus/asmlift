@@ -102,7 +102,7 @@ not name, is an input error too:
 | `elf`      | The project's built ELF, relative to this `decomp.yaml` — the address→symbol source. Absent ⇒ no symbol map. An unreadable ELF is a loud input error (exit `66`), never a silent map-less run. What it feeds and how to produce one: [The symbol map](#the-symbol-map-elf)                                                                               |
 
 Template placeholders: `{{inputPath}}` (candidate source path),
-`{{outputPath}}` (where the object must land), `{{symbol}}` (the function name), `{{cflags}}`
+`{{outputPath}}` (where the object must land), `{{symbol}}` or `{{functionName}}` (the function name), `{{cflags}}`
 (the flags from `--cflags` or a dtk unit, as shell words), `{{cc}}` (the dtk unit's compiler name,
 such as `mwcc_247_107`). An unknown
 `{{…}}` placeholder is a named error. Values substitute **raw** so your template owns its

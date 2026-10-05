@@ -154,6 +154,9 @@ importers:
       '@gba-kit/debug-info':
         specifier: ^0.5.0
         version: 0.5.0
+      '@match-kit/compiler':
+        specifier: link:../../../matchkit/packages/compiler
+        version: link:../../../matchkit/packages/compiler
       '@match-kit/decomp-yaml':
         specifier: 0.1.0
         version: 0.1.0

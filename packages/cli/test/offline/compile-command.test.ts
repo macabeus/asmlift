@@ -44,14 +44,19 @@ test('the compiler receives the flags word for word', () => {
 });
 
 test('missing {{inputPath}}/{{outputPath}} placeholders is a construction-time error', () => {
-  expect(() => compileFromCommand('cc -O2 -o out.o')).toThrow(/\{\{inputPath\}\} and \{\{outputPath\}\}/);
-  expect(() => compileFromCommand('cc {{inputPath}}')).toThrow(/\{\{inputPath\}\} and \{\{outputPath\}\}/);
+  expect(() => compileFromCommand('cc -O2 -o out.o')).toThrow(/lacks \{\{inputPath\}\} and \{\{outputPath\}\}/);
+  expect(() => compileFromCommand('cc {{inputPath}}')).toThrow(/lacks \{\{outputPath\}\}/);
 });
 
-test('an unknown {{...}} placeholder (e.g. {{functionName}}) is named loudly', () => {
-  expect(() => compileFromCommand('cc {{inputPath}} -o {{outputPath}} -f {{functionName}}')).toThrow(
-    /unknown placeholder \{\{functionName\}\}/,
+test('an unknown {{...}} placeholder is named loudly', () => {
+  expect(() => compileFromCommand('cc {{inputPath}} -o {{outputPath}} -f {{function}}')).toThrow(
+    /unknown placeholder \{\{function\}\}/,
   );
+});
+
+test('{{functionName}} is the symbol too, so a template written for Transmuter compiles here', () => {
+  const compile = compileFromCommand('echo {{functionName}} {{symbol}} > {{outputPath}} && test -f {{inputPath}}');
+  expect(readFileSync(compile('int x;', 'my_func', 'c'), 'utf8').trim()).toBe('my_func my_func');
 });
 
 test('happy path: command runs via sh, {in} carries the typedef prelude, {out} is returned', () => {
