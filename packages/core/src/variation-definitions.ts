@@ -1643,6 +1643,30 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: l3('narrowdecl'),
     seeAlso: ['narrow-decl'],
   },
+  'int-cell': {
+    title: 'Global advanced as its own arithmetic',
+    summary: 'a global stored back advanced by an offset is written `g = g + K` instead of through a byte pointer',
+    detail:
+      'A global read, advanced and stored back is written `g = (void *)((u8 *)g + K)` by default: the byte ' +
+      'the assembly addressed, under any pointer declaration of `g`. A project that declares the global an ' +
+      'integer wrote `g = g + K`, and a pointer declaration scales that offset instead, so which one is right ' +
+      'depends on a declaration the assembly does not show. Published only when the candidate matches byte ' +
+      'for byte; otherwise it is withheld.',
+    compilerBehavior:
+      'CodeWarrior rejects a pointer stored into an integer global; agbcc and KMC gcc warn and keep the value.',
+    offeredWhen: {
+      when: 'An assignment to a global of a `void *` cast of that same global plus or minus an offset.',
+      decidedBy: { symbol: 'integerCellStores', file: l3('intcell') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'extern u16 *g;\nvoid example(void) { @ }',
+      before: 'g = (void *)((u8 *)g + 4);',
+      after: 'g = g + 4;',
+      note: 'the same object under an integer declaration of `g`',
+    },
+    implementedIn: l3('intcell'),
+  },
 
   // ── symbol map ──────────────────────────────────────────────────────────────────────────────
   'raw-globals': {

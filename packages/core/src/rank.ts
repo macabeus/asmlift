@@ -42,6 +42,7 @@ import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
+import { integerCellStores } from './l3/intcell';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
@@ -1723,6 +1724,12 @@ export function enumerateCandidates(
     // Which placement the source used is not derivable from the asm, so both are emitted and the
     // differ referees.
     respell(['sinkinit'], () => sinkInitsToFirstUse(sfn));
+    // `/int-cell` — a pointer stored back into the global cell it was read from, spelled as the
+    // cell's own arithmetic, `g = g + K` (l3/intcell.ts). The default's `g = (void *)((u8 *)g + K)`
+    // is right under a pointer declaration of g and rejected by CodeWarrior under an integer one,
+    // where this is the source; which the project declared is not in the asm, so it is published
+    // only at a byte-exact score.
+    respell(['int-cell'], () => integerCellStores(sfn));
     // the register-copy variation (l3/regspell.ts): 0–3 results (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail decision is allocator-
     // ambiguous, so both are ranked).
