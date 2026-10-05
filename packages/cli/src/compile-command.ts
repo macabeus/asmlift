@@ -523,9 +523,9 @@ type Verdict =
 
 /** A match-kit outcome as asmlift reports it. The scratch directory reads `<scratch>` in every
  *  message, so a rejection replayed from the cache reads the same as a fresh one, and the ranked
- *  path's published `dropped[].error` carries no machine path. A KILLED compile (`sh` reports a
- *  SIGKILLed compiler as `exit 137`, and `docker run` exits 137 on an OOM-killed container) is
- *  transient: storing it would drop that candidate on every future run. */
+ *  path's published `dropped[].error` carries no machine path. A compile that crashed, was killed
+ *  (`docker run` exits 137 on an OOM-killed container) or did not run is transient: storing it would
+ *  drop that candidate on every future run. */
 const verdict = (o: Outcome): Verdict => {
   const failed = (err: string, output: string): Verdict => ({ ok: false, transient: !isStable(o), err, output });
   switch (o.kind) {
@@ -535,12 +535,15 @@ const verdict = (o: Outcome): Verdict => {
       return failed(`compile command failed (exit ${o.exitCode}): ${o.command}\n${o.output}`, o.output);
     case 'no-object':
       return failed(`compile command exited 0 but produced no object at {{outputPath}}: ${o.command}`, o.output);
+    case 'crashed':
+      return failed(`compile command crashed (${o.signal}): ${o.command}\n${o.output}`, o.output);
     case 'killed':
       return failed(
-        `compile command did not run to completion (${o.exitCode === null ? 'killed by a signal' : `exit ${o.exitCode} — killed by signal ${o.exitCode - 128}`}): ` +
-          `${o.command}\n${o.output}`,
+        `compile command did not run to completion (killed by ${o.signal}): ${o.command}\n${o.output}`,
         o.output,
       );
+    case 'not-run':
+      return failed(`compile command did not run (exit ${o.exitCode}): ${o.command}\n${o.output}`, o.output);
     case 'aborted':
       return failed(`compile command was aborted: ${o.command}\n${o.output}`, o.output);
     case 'spawn-failed':

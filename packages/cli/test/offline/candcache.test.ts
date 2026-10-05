@@ -392,10 +392,10 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
 
   // A compiler this machine KILLED never gave a verdict, and `sh` is what hides that on this
   // path: the template always runs through `sh -ec`, and a shell reports a killed child as exit
-  // 128+signal. A SIGKILLed compiler arrives as an ordinary `exit 137`, which the message-shape
-  // guard matched and stored FOREVER — the candidate then silently missing from every future
-  // run's fan under that namespace. Reach: candidate compiles have no timeout, an OOM-killed
-  // `docker run` exits 137, and a bench run forks 8-16 shards.
+  // 128+signal, so a SIGKILLed compiler arrives as an ordinary `exit 137`. Stored as a rejection,
+  // the candidate would be missing from every future run's fan under that namespace. Reach:
+  // candidate compiles have no timeout, an OOM-killed `docker run` exits 137, and a bench run
+  // forks 8-16 shards.
   const KILLED =
     'if grep -q KILLME "{{inputPath}}"; then sh -c \'kill -9 $$\'; fi; cat "{{inputPath}}" > "{{outputPath}}"';
   const CAND_KILL = 's32 f(s32 a0) { KILLME }\n';
@@ -415,7 +415,7 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
       },
     );
     expect(message).toContain('did not run to completion');
-    expect(message).toContain('killed by signal 9');
+    expect(message).toContain('killed by SIGKILL');
     expect(failEntries(p.store), 'a transient stored as a rejection drops the candidate forever').toEqual([]);
   });
 
