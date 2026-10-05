@@ -6,7 +6,7 @@ import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { expect, test } from 'vitest';
 
-import { compileFromCommand, compilersFromCommand, renderCc, renderCflags } from '../../src/compile-command';
+import { compileFromCommand, compilersFromCommand, renderCc } from '../../src/compile-command';
 
 test("{{cc}} is rendered as the unit's compiler name, which must be a plain word", () => {
   expect(renderCc('wibo compilers/{{cc}}/mwcceppc.exe {{inputPath}}', 'mwcc_247_107')).toBe(
@@ -21,21 +21,18 @@ test("{{cc}} is rendered as the unit's compiler name, which must be a plain word
   expect(() => renderCc('{{cc}}', 'a;b')).toThrow(/not a plain word/);
 });
 
-test('{{cflags}} is rendered as shell words, and a command and its flags must agree', () => {
-  expect(renderCflags('cc {{cflags}} -o {{outputPath}}', ['-pragma', 'cats off', '-O2'])).toBe(
-    "cc -pragma 'cats off' -O2 -o {{outputPath}}",
-  );
-  expect(() => compileFromCommand('cc {{cflags}} {{inputPath}} -o {{outputPath}}')).toThrow(
-    /takes \{\{cflags\}\}, and no flags were given/,
+test('a command and its flags must agree about {{flags}}', () => {
+  expect(() => compileFromCommand('cc {{flags}} {{inputPath}} -o {{outputPath}}')).toThrow(
+    /takes \{\{flags\}\}, and no flags were given/,
   );
   expect(() => compileFromCommand('cc {{inputPath}} -o {{outputPath}}', { cflags: ['-O2'] })).toThrow(
-    /has no \{\{cflags\}\} to take the flags given/,
+    /has no \{\{flags\}\} to take the flags given/,
   );
 });
 
 test('the compiler receives the flags word for word', async () => {
   const cflags = ['-pragma', 'cats off', "-DQ='x'", '-O4,p'];
-  const obj = await compileFromCommand(`printf '%s\\n' {{cflags}} > {{outputPath}} && test -f {{inputPath}}`, {
+  const obj = await compileFromCommand(`printf '%s\\n' {{flags}} > {{outputPath}} && test -f {{inputPath}}`, {
     cflags,
   })('s32 f(void) { return 0; }\n', 'f', 'c');
   expect(readFileSync(obj, 'utf8')).toBe(`${cflags.join('\n')}\n`);
@@ -50,11 +47,6 @@ test('an unknown {{...}} placeholder is named loudly', () => {
   expect(() => compileFromCommand('cc {{inputPath}} -o {{outputPath}} -f {{function}}')).toThrow(
     /unknown placeholder \{\{function\}\}/,
   );
-});
-
-test('{{functionName}} is the symbol too, so a template written for Transmuter compiles here', async () => {
-  const compile = compileFromCommand('echo {{functionName}} {{symbol}} > {{outputPath}} && test -f {{inputPath}}');
-  expect(readFileSync(await compile('int x;', 'my_func', 'c'), 'utf8').trim()).toBe('my_func my_func');
 });
 
 test('happy path: command runs via sh, {in} carries the typedef prelude, {out} is returned', async () => {

@@ -8,10 +8,9 @@
 //
 // This module is deliberately free of score.ts/objdiff imports so the CLI can build a compiler
 // from config without loading the objdiff wasm, and so its tests stay offline.
-import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
-import { type Outcome, type Scratch, createRunner, isStable } from '@match-kit/compiler';
+import { type Outcome, createRunner, isStable } from '@match-kit/compiler';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -77,8 +76,7 @@ const PROBE_DECLS = renderDeclarations([
 export type CandidateCompiler = (source: string, symbol: string, backendId: string, declarations?: string) => string;
 
 /** The same contract, run without blocking the event loop, so several candidates can compile at
- *  once. Each worker owns its own scratch, so one worker's object survives exactly until
- *  that worker compiles its next candidate — the caller must consume it before asking for
+ *  once. One worker's object survives exactly until that worker compiles its next candidate — the caller must consume it before asking for
  *  another (`rank.ts`'s pool scores each object the moment it lands). */
 export type AsyncCandidateCompiler = (
   source: string,
@@ -90,8 +88,8 @@ export type AsyncCandidateCompiler = (
 /** Either contract: a ranked pass awaits whichever it is given. */
 export type AnyCandidateCompiler = CandidateCompiler | AsyncCandidateCompiler;
 
-/** One compiler instance: `worker()` mints an INDEPENDENT compiler with its own scratch — call it
- *  once per pool worker. Every worker shares the one cached world probe below. */
+/** One compiler instance: `worker()` mints an INDEPENDENT compiler — call it once per pool
+ *  worker. Every worker shares the one cached world probe below. */
 export interface CommandCompilers {
   worker: () => AsyncCandidateCompiler;
   /** Which WORLD the probe found, or undefined before the first candidate compiled: `true` =
@@ -106,7 +104,7 @@ export interface CompileCommandOptions {
   /** Working directory for the command — the decomp.yaml's directory, so project-relative
    *  paths (`./tools/agbcc/bin/agbcc`) resolve regardless of where asmlift was invoked. */
   cwd?: string;
-  /** The flags the command's `{{cflags}}` stands for, required exactly when the command has one. */
+  /** The flags the command's `{{flags}}` stands for, required exactly when the command has one. */
   cflags?: readonly string[];
   /** The compiler name the command's `{{cc}}` stands for (an objdiff.json unit's `scratch.compiler`),
    *  required exactly when the command has one. */
@@ -129,19 +127,6 @@ export function renderCc(command: string, cc: string | undefined): string {
     throw new Error(`compiler name ${JSON.stringify(cc)} is not a plain word, refusing to substitute it`);
   }
   return cc === undefined ? command : command.replaceAll('{{cc}}', cc);
-}
-
-/** The command with `{{cflags}}` rendered as shell words. It is rendered before anything else reads
- *  the command, so the candidate-cache namespace hashes the flags a candidate compiles with. */
-export function renderCflags(command: string, cflags: readonly string[] | undefined): string {
-  const takesCflags = command.includes('{{cflags}}');
-  if (takesCflags && cflags === undefined) {
-    throw new Error(`compiler command takes {{cflags}}, and no flags were given — got: ${command}`);
-  }
-  if (!takesCflags && cflags !== undefined) {
-    throw new Error(`compiler command has no {{cflags}} to take the flags given — got: ${command}`);
-  }
-  return cflags === undefined ? command : command.replaceAll('{{cflags}}', shellJoinFlags(cflags));
 }
 
 /** Longest a token may be before the scan drops it. A 430-character absolute operand is an
@@ -619,7 +604,7 @@ const unwrap = (r: Verdict): string => {
 
 /** Build a CandidateCompiler from a `decomp.yaml` command template, run by @match-kit/compiler.
  *  `{{inputPath}}` and `{{outputPath}}` are REQUIRED placeholders (substituted with absolute
- *  paths); `{{symbol}}`, or `{{functionName}}` for the same value, is optional. The placeholder
+ *  paths); `{{symbol}}` and `{{flags}}` are optional. The placeholder
  *  style matches other decomp tools' `compiler` templates, so a project's tool blocks read
  *  uniformly. The command runs via `sh -ec` — EVERY step must succeed, not just the last one:
  *  gcc-2.9-family compilers exit nonzero on a hard error (an undeclared identifier, even an invalid
@@ -629,12 +614,15 @@ const unwrap = (r: Verdict): string => {
  *  with the full command + its stderr — configured means configured, there is no fallback. */
 export function compilersFromCommand(command: string, opts: CompileCommandOptions = {}): CommandCompilers {
   // An unknown {{...}} placeholder is a config mistake, named now instead of a baffling shell
-  // failure. Each compile runs in a fresh scratch directory: a container reaches it through a bind
-  // mount, and a recycled path does not survive one.
-  const runner = createRunner(renderCc(renderCflags(command, opts.cflags), opts.cc), { cwd: opts.cwd });
-  const template = runner.template;
-  const executeIn = async (scratch: Scratch, content: string, symbol: string, ext: 'c' | 'p'): Promise<Verdict> =>
-    verdict(await scratch.compile(content, { ext, symbol }));
+  // failure. Each compile runs in a fresh directory: a container reaches it through a bind mount,
+  // and a recycled path does not survive one.
+  const runner = createRunner(renderCc(command, opts.cc), { cwd: opts.cwd, flags: opts.cflags });
+  // With its flags in place, so the candidate-cache namespace hashes the flags a candidate compiles
+  // with.
+  const template = runner.command;
+  /** One compile, whose directory lives until the outcome is disposed. */
+  const execute = (content: string, symbol: string, ext: 'c' | 'p'): Promise<Outcome> =>
+    runner.compile(content, { ext, symbol });
 
   // Which WORLD candidates compile in — PROBED, never configured. Two worlds exist:
   //   • SELF-DECLARED: a bare template compiles the candidate alone, so it needs asmlift's
@@ -940,13 +928,10 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     // different means NOT_CACHEABLE, refused out loud. MEASURED: `ido7.1` writes the absolute
     // path of its input .c into the object (1108 vs 1124 bytes at two scratch paths); agbcc does
     // not.
-    // Two scratches of its own, never a worker's: compiled into the scratch a candidate has just
-    // written, the probe removes that candidate's object — measured once as 8 poisoned keys, 26
-    // moved report fields and 2 rows flipped nonmatch to noncompile, with every other gate green.
-    using s1 = runner.scratch();
-    using s2 = runner.scratch();
-    const p1 = await executeIn(s1, STAMP_PROBE, 'asmlift_candcache_stamp', 'c');
-    const p2 = await executeIn(s2, STAMP_PROBE, 'asmlift_candcache_stamp', 'c');
+    using o1 = await execute(STAMP_PROBE, 'asmlift_candcache_stamp', 'c');
+    using o2 = await execute(STAMP_PROBE, 'asmlift_candcache_stamp', 'c');
+    const p1 = verdict(o1);
+    const p2 = verdict(o2);
     if (!p1.ok || !p2.ok) {
       return NOT_CACHEABLE;
     }
@@ -1039,14 +1024,19 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   };
 
   // The cache protocol itself, once. The `??` is what keeps the compile LAZY — the right-hand side
-  // is not evaluated when the store answers, so the worker's scratch makes no directory on a hit,
-  // the whole point of not spawning.
-  const executeCached = async (scratch: Scratch, content: string, symbol: string, ext: 'c' | 'p'): Promise<Verdict> => {
+  // is not evaluated when the store answers, so a hit makes no directory, the whole point of not
+  // spawning.
+  const executeCached = async (
+    compile: (content: string, symbol: string, ext: 'c' | 'p') => Promise<Verdict>,
+    content: string,
+    symbol: string,
+    ext: 'c' | 'p',
+  ): Promise<Verdict> => {
     if (!cacheable(content)) {
-      return executeIn(scratch, content, symbol, ext);
+      return compile(content, symbol, ext);
     }
     const key = ext + ' ' + content;
-    return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, await executeIn(scratch, content, symbol, ext));
+    return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, await compile(content, symbol, ext));
   };
   /** Measure and resolve the namespace EAGERLY, before any candidate compiles. Memoized as a
    *  PROMISE, so workers starting together measure it once. */
@@ -1065,17 +1055,26 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   let probing: Promise<boolean> | undefined;
   const probeWorld = (symbol: string): Promise<boolean> =>
     (probing ??= (async () => {
-      using probe = runner.scratch();
-      if ((await executeIn(probe, C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c')).ok) {
-        return true;
+      {
+        using declared = await execute(C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c');
+        if (verdict(declared).ok) {
+          return true;
+        }
       }
-      return !(await executeIn(probe, PROBE, symbol, 'c')).ok;
+      using bare = await execute(PROBE, symbol, 'c');
+      return !verdict(bare).ok;
     })());
 
   return {
     selfDeclared: () => preludeOk,
     worker: () => {
-      const mine = runner.scratch();
+      // This worker's last outcome: its object lives until the worker's next compile.
+      let held: Outcome | undefined;
+      const compile = async (content: string, symbol: string, ext: 'c' | 'p'): Promise<Verdict> => {
+        held?.[Symbol.dispose]();
+        held = await execute(content, symbol, ext);
+        return verdict(held);
+      };
       return async (source, symbol, backendId, declarations) => {
         let prelude = '';
         if (backendId !== 'pascal') {
@@ -1083,7 +1082,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
           prelude = preludeFor(preludeOk, declarations);
         }
         await warmCache();
-        return unwrap(await executeCached(mine, prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
+        return unwrap(await executeCached(compile, prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
       };
     },
   };

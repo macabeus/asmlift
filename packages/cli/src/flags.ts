@@ -1,7 +1,7 @@
 // asmlift — the compiler flags a run is about, and where they came from.
 //
 // One resolver serves both halves of a run. The flags it finds fill the compile command's
-// `{{cflags}}` word for word, save an error limit (`-maxerrors 1`) that would cut short the
+// `{{flags}}` word for word, save an error limit (`-maxerrors 1`) that would cut short the
 // rejections a ranked run reads, and core parses the same words into the profile the run reports.
 // The first source that gives flags wins, and the `[flags]` line names it:
 //   1. --cflags "<flags>"
@@ -10,7 +10,7 @@
 //   3. the flags already written in tools.asmlift.compiler, read off the words after the compiler
 //      binary, wherever a wrapper (`docker run … wibo`) puts it
 //   4. none: a plain decompile assumes the toolchain's canonical flags and says so; a ranked run
-//      whose command takes `{{cflags}}` refuses
+//      whose command takes `{{flags}}` refuses
 // Every refusal is one message, with no usage block, because it names its own fix.
 import {
   type FlagFamily,
@@ -127,7 +127,7 @@ export interface CommandReading {
   flagWords: readonly ShellWord[];
   /** the variables among its words that the command assigns itself, so their words are unread */
   unread: readonly ShellWord[];
-  /** whether its words take `{{cflags}}` */
+  /** whether its words take `{{flags}}` */
   takesCflags: boolean;
 }
 
@@ -175,7 +175,7 @@ export function readCompilerCommand(
       binary: words[at],
       flagWords: candidates.filter((_, k) => !notFlags.has(k)),
       unread,
-      takesCflags: after.some((w) => w.value.includes('{{cflags}}')),
+      takesCflags: after.some((w) => w.value.includes('{{flags}}')),
     };
   }
   return undefined;
@@ -208,18 +208,18 @@ function withoutWords(command: string, words: readonly ShellWord[]): string {
   return out;
 }
 
-/** The command with its compiler's flag words replaced by one `{{cflags}}`. */
+/** The command with its compiler's flag words replaced by one `{{flags}}`. */
 export function withCflagsWord(command: string, reading: CommandReading): string {
   const [first, ...rest] = reading.flagWords;
   if (first === undefined) {
     const at = reading.binary.end;
-    return `${command.slice(0, at)} {{cflags}}${command.slice(at)}`;
+    return `${command.slice(0, at)} {{flags}}${command.slice(at)}`;
   }
   const out = withoutWords(
     command,
     rest.filter((w) => w.start !== first.start),
   );
-  return `${out.slice(0, first.start)}{{cflags}}${out.slice(first.end)}`;
+  return `${out.slice(0, first.start)}{{flags}}${out.slice(first.end)}`;
 }
 
 /** A `compiler:` line to paste into decomp.yaml. */
@@ -248,7 +248,7 @@ type Refusal = { ok: false; message: string };
 export type FlagsResolution =
   | {
       ok: true;
-      /** the words that fill the command's `{{cflags}}`; absent when the command spells its own */
+      /** the words that fill the command's `{{flags}}`; absent when the command spells its own */
       fill: readonly string[] | undefined;
       /** the compiler name that fills the command's `{{cc}}` */
       cc: string | undefined;
@@ -299,7 +299,7 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
   const { toolchain, command, env, ranked, dtk } = input;
   const { family } = TOOLCHAIN_TARGETS[toolchain];
   const canonicalFlags = canonicalFlagsOf(toolchain);
-  const takesCflags = command?.includes('{{cflags}}') === true;
+  const takesCflags = command?.includes('{{flags}}') === true;
   const takesCc = command?.includes('{{cc}}') === true;
   /** what the source of the flags is, said under the head */
   const notes: string[] = [];
@@ -411,7 +411,7 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
       return {
         ok: false,
         message:
-          'tools.asmlift.compiler takes its flags through {{cflags}}, and nothing gives them: ' +
+          'tools.asmlift.compiler takes its flags through {{flags}}, and nothing gives them: ' +
           'pass --cflags "<the flags your build compiles this file with>"',
       };
     }
@@ -425,7 +425,7 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
     if (ownWords.length > 0 && ownWords.join(' ') !== storedFlags(family, cflags ?? []).join(' ')) {
       advice.push(
         `note: this decompile reads the flags ${source === '--cflags' ? 'from --cflags' : `of ${source}`}, not the ` +
-          `${shellJoinFlags(ownWords)} in tools.asmlift.compiler; write {{cflags}} there before --score-against`,
+          `${shellJoinFlags(ownWords)} in tools.asmlift.compiler; write {{flags}} there before --score-against`,
       );
     }
   }
@@ -507,7 +507,7 @@ export function resolveFlags(input: FlagsInput): FlagsResolution {
 }
 
 /** The refusal when flags from `source` cannot reach the compiler through `command`: the command
- *  has no `{{cflags}}` (answered with a copy of it that has one), or spells codegen flags of its own
+ *  has no `{{flags}}` (answered with a copy of it that has one), or spells codegen flags of its own
  *  beside it. */
 function commandTakesFlags(
   command: string,
@@ -525,23 +525,23 @@ function commandTakesFlags(
       throw e;
     }
   }
-  if (!command.includes('{{cflags}}')) {
+  if (!command.includes('{{flags}}')) {
     const unset = unsetPrograms(command, env);
     const fix =
       reading !== undefined
-        ? `Write {{cflags}} where the command spells its flags:\n${compilerLine(withCflagsWord(command, reading))}`
+        ? `Write {{flags}} where the command spells its flags:\n${compilerLine(withCflagsWord(command, reading))}`
         : unset.length === 0
-          ? 'Write {{cflags}} where the command passes the compiler its flags.'
-          : `It runs ${unset.join(', ')}, which asmlift's environment does not set: set it, and write {{cflags}} ` +
+          ? 'Write {{flags}} where the command passes the compiler its flags.'
+          : `It runs ${unset.join(', ')}, which asmlift's environment does not set: set it, and write {{flags}} ` +
             'where the command passes the compiler its flags.';
-    return { ok: false, message: `${source} gives the flags, and ${where} has no {{cflags}} to take them. ${fix}` };
+    return { ok: false, message: `${source} gives the flags, and ${where} has no {{flags}} to take them. ${fix}` };
   }
   if (reading !== undefined && reading.unread.length > 0) {
     const names = reading.unread.map((w) => w.value).join(', ');
     return {
       ok: false,
       message:
-        `${where} passes ${names} beside {{cflags}}, and sets it itself, so asmlift cannot read whether it is a ` +
+        `${where} passes ${names} beside {{flags}}, and sets it itself, so asmlift cannot read whether it is a ` +
         `second source of flags: give the flags in ${source} and remove ${names} from the command:\n` +
         compilerLine(withoutWords(command, reading.unread)),
     };
@@ -550,7 +550,7 @@ function commandTakesFlags(
     return {
       ok: false,
       message:
-        `${where} spells ${shellJoinFlags(reading.flagWords.map((w) => w.value))} beside {{cflags}}, a second source ` +
+        `${where} spells ${shellJoinFlags(reading.flagWords.map((w) => w.value))} beside {{flags}}, a second source ` +
         `of flags: give them in ${source} and remove them from the command:\n` +
         compilerLine(withoutWords(command, reading.flagWords)),
     };

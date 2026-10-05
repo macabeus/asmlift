@@ -151,7 +151,7 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --name           select the function in multi-function input (default: detected;
                    required for an object whose code sections share addresses)
   --cflags         the flags your build compiles this function's file with; they
-                   fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
+                   fill {{flags}} in tools.asmlift.compiler (default: the objdiff.json
                    unit that defines the function, else the flags that command already
                    spells, else the target's canonical flags)
   --module         the dtk module the function belongs to: its unit is looked for

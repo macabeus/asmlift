@@ -1,11 +1,11 @@
 // The benchmark scores asmlift THROUGH the same decomp.yaml path a real project uses.
 // The configs themselves are COMMITTED as live documentation —
 // dataset/toolchains/<id>/decomp.yaml, one per toolchain — with machine locations as
-// $ASMLIFT_* placeholders and the codegen flags as `{{cflags}}`. Materializing a config substitutes
+// $ASMLIFT_* placeholders and the codegen flags as `{{flags}}`. Materializing a config substitutes
 // the placeholders through @asmlift/toolchains (the single source of truth for paths, itself
 // overridable via the same env names), so machine paths land only in the gitignored .cache / repro
 // dirs, never in the tree. The result is loaded with the REAL loader and its compile template,
-// with each row's flags in `{{cflags}}`, drives candidate compilation via compileFromCommand.
+// with each row's flags in `{{flags}}`, drives candidate compilation via compileFromCommand.
 //
 // Deliberate split: the NATIVE toolchains (agbcc, IDO) keep their `tools.asmlift.compiler`
 // template — the benchmark then exercises the user-command path on the majority of rows. For
@@ -14,12 +14,7 @@
 // candidate compilation goes to @asmlift/toolchains' own compiler bound at the row's flags — which
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
 // reproduction scripts (`bench target`) get the command intact on every toolchain.
-import {
-  type AnyCandidateCompiler,
-  type CandidateCompiler,
-  compileFromCommand,
-  renderCflags,
-} from '@asmlift/cli/compile-command';
+import { type AnyCandidateCompiler, type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -34,6 +29,7 @@ import {
   mwccCandidateCompiler,
   mwccDir,
 } from '@asmlift/toolchains';
+import { createRunner } from '@match-kit/compiler';
 import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -102,16 +98,16 @@ interface BenchDoc {
 }
 
 /** The committed config for one toolchain, with placeholders materialized. Its command takes the
- *  codegen flags through `{{cflags}}`, because every row compiles at its own. */
+ *  codegen flags through `{{flags}}`, because every row compiles at its own. */
 function benchDoc(id: ToolchainId, name: string): BenchDoc {
   const doc = YAML.parse(readFileSync(join(DATASET_DIR, id, 'decomp.yaml'), 'utf8')) as BenchDoc;
   if (
     doc.tools?.asmlift?.target !== id ||
     typeof doc.tools.asmlift.compiler !== 'string' ||
-    !doc.tools.asmlift.compiler.includes('{{cflags}}')
+    !doc.tools.asmlift.compiler.includes('{{flags}}')
   ) {
     throw new Error(
-      `dataset/toolchains/${id}/decomp.yaml must declare tools.asmlift.{target: ${id}, compiler} with {{cflags}}`,
+      `dataset/toolchains/${id}/decomp.yaml must declare tools.asmlift.{target: ${id}, compiler} with {{flags}}`,
     );
   }
   doc.name = name;
@@ -121,14 +117,14 @@ function benchDoc(id: ToolchainId, name: string): BenchDoc {
 
 /** The materialized candidate-compile command at `cflags` — exported for the parity test. */
 export function renderScoreCommand(id: ToolchainId, cflags: readonly string[]): string {
-  return renderCflags(benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!, cflags);
+  return createRunner(benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!, { flags: cflags }).command;
 }
 
 const memo = new Map<string, AnyCandidateCompiler>();
 
 /** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
  *  path: materialize the committed decomp.yaml → loadDecompYaml → resolveTarget (asserted) →
- *  compileFromCommand, with `cflags` filling the command's `{{cflags}}`. The pooled (dockerized)
+ *  compileFromCommand, with `cflags` filling the command's `{{flags}}`. The pooled (dockerized)
  *  targets' command is stripped, and their candidates compile through @asmlift/toolchains at
  *  `cflags`. One config and one working directory per toolchain: the flags reach the command
  *  namespace through the rendered command. */
@@ -223,10 +219,9 @@ export function writeScoreConfig(
   // the harness's own compiles and for the same reason: the reproduction writes its candidate to a
   // `.c` path, so an unstated `-lang` would read a C++ row's candidate with the C front end and
   // export an unmangled symbol the target has none of.
-  doc.tools.asmlift.compiler = renderCflags(
-    doc.tools.asmlift.compiler!,
-    TOOLCHAIN_TARGETS[id].family === 'mwcc' ? [...cflags, `-lang=${unitLanguage ?? language ?? 'c'}`] : cflags,
-  );
+  doc.tools.asmlift.compiler = createRunner(doc.tools.asmlift.compiler!, {
+    flags: TOOLCHAIN_TARGETS[id].family === 'mwcc' ? [...cflags, `-lang=${unitLanguage ?? language ?? 'c'}`] : cflags,
+  }).command;
   if (elf) {
     doc.tools.asmlift.elf = elf;
   }

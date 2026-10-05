@@ -142,9 +142,9 @@ export function decompileRanked(
  *  forks a whole toolchain while a score is a wasm call over two objects already in memory. The
  *  committed LoadBGTilemapData baseline (docs/lbg-attribution-evidence/baseline/run-summary.json)
  *  charged compile 47272s against score 619s over 225792 candidates; any run's own `[phase]` line
- *  (phase.ts) is where a current figure comes from. Each worker owns a scratch (compile-command.ts
- *  `worker()`), takes the next unclaimed candidate, and scores its object the moment it lands; the
- *  score runs on the main thread and overlaps the other workers' subprocesses.
+ *  (phase.ts) is where a current figure comes from. Each worker (compile-command.ts `worker()`)
+ *  takes the next unclaimed candidate and scores its object the moment it lands; the score runs on
+ *  the main thread and overlaps the other workers' subprocesses.
  *
  *  ONLY the compile moves. The ordering is still core's `rankBy` over the same enumeration, run
  *  afterwards against the memoized scores — so the winner, every tie-break and the `dropped` list

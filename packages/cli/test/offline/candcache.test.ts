@@ -133,7 +133,7 @@ const CAND_INCLUDE = '#include "k.h" /* USES_K */\ns32 f(s32 a0) { return a0 + K
 describe('the flags a command renders', () => {
   test('one command at two flag sets never serves one set the other’s object', async () => {
     const p = project();
-    const template = 'echo x >> runs; { printf "%s " {{cflags}}; cat "{{inputPath}}"; } > "{{outputPath}}"';
+    const template = 'echo x >> runs; { printf "%s " {{flags}}; cat "{{inputPath}}"; } > "{{outputPath}}"';
     const seen = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
       async ({ compileFromCommand }) => {

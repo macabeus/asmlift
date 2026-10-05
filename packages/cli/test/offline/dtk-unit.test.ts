@@ -196,7 +196,7 @@ describe('the flags a dtk unit gives', () => {
     const compiled = resolveFlags(
       dtkInput({
         lookup: { kind: 'found', unit: main },
-        command: 'wibo mwcceppc.exe -c {{cflags}} -o {{outputPath}} {{inputPath}}',
+        command: 'wibo mwcceppc.exe -c {{flags}} -o {{outputPath}} {{inputPath}}',
       }),
     );
     expect(compiled).toMatchObject({
@@ -215,7 +215,7 @@ describe('the flags a dtk unit gives', () => {
       ),
     });
     const dummyprobe = unit('pikmin', 'main/jaudio/dummyprobe');
-    const command = 'wibo compilers/{{cc}}/mwcceppc.exe -c {{cflags}} -o {{outputPath}} {{inputPath}}';
+    const command = 'wibo compilers/{{cc}}/mwcceppc.exe -c {{flags}} -o {{outputPath}} {{inputPath}}';
     const taken = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: dummyprobe }, command, ranked: true }));
     expect(taken).toMatchObject({ ok: true, cc: 'mwcc_233_163n' });
     expect(taken.ok && taken.fill).toEqual(
@@ -230,7 +230,7 @@ describe('the flags a dtk unit gives', () => {
     // `User break, cancelled...` — read as a verdict, it says nothing (core stillborn.ts)
     const boot = unit('ac-decomp', 'static/boot');
     expect(boot.cflags).toContain('-maxerrors 1');
-    const command = 'wibo mwcceppc.exe -c {{cflags}} -o {{outputPath}} {{inputPath}}';
+    const command = 'wibo mwcceppc.exe -c {{flags}} -o {{outputPath}} {{inputPath}}';
     const ranked = resolveFlags(dtkInput({ lookup: { kind: 'found', unit: boot }, command, ranked: true }));
     expect(ranked.ok && ranked.fill).toEqual(tokenizeFlags(boot.cflags.replace(' -maxerrors 1', '')));
     expect(ranked.ok && ranked.lines).toContain(
@@ -280,15 +280,15 @@ describe('the flags a dtk unit gives', () => {
       ok: false,
       message: expect.stringMatching(
         new RegExp(
-          `^objdiff.json unit ${REL_MAP} gives the flags, and tools.asmlift.compiler has no \\{\\{cflags\\}\\}`,
+          `^objdiff.json unit ${REL_MAP} gives the flags, and tools.asmlift.compiler has no \\{\\{flags\\}\\}`,
         ),
       ),
     });
-    const cc = 'wibo compilers/{{cc}}/mwcceppc.exe -c {{cflags}} -o {{outputPath}} {{inputPath}}';
+    const cc = 'wibo compilers/{{cc}}/mwcceppc.exe -c {{flags}} -o {{outputPath}} {{inputPath}}';
     expect(resolveFlags(dtkInput({ lookup: { kind: 'none', unbuilt: 0 }, command: cc, ranked: true }))).toEqual({
       ok: false,
       message:
-        'tools.asmlift.compiler takes its flags through {{cflags}}, and nothing gives them: pass --cflags "<the flags your build compiles this file with>"',
+        'tools.asmlift.compiler takes its flags through {{flags}}, and nothing gives them: pass --cflags "<the flags your build compiles this file with>"',
     });
     expect(
       resolveFlags({
