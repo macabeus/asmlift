@@ -355,7 +355,7 @@ command is wrong by more than an order of magnitude at both ends of the tier.
 And on an **unscored** row it is not "the rung this row stopped at" at all: only `match`/`nonmatch`
 rows have a source that pins a rung, so for anything `declined`/`noncompile`/`failed` the caller
 falls back to the **richest** rung unconditionally (`cli.ts`, `publishedAsmliftSource` → `undefined`
-→ `ladder[ladder.length - 1]`) — **165 of the 402 real rows (41%)**, and the archetypal
+→ `ladder[ladder.length - 1]`) — **172 of the 422 real rows (41%)**, and the archetypal
 `/attribute-function` target. `real.ts`'s own comment says that fallback "is wrong whenever
 escalation stopped earlier, because a richer context can REJECT what a poorer one accepts". The
 stdout line names the rung either way and never says which case you are in.
