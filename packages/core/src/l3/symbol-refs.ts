@@ -21,6 +21,7 @@ import { type AggregateLayout, type ParamType, type Prototypes, spellableProto }
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
 import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
+import { pointerCellStore } from './ptrcell';
 
 /** One recorded VALUE reference — a name the tree references plus the facts to declare it. */
 export interface SymbolRef {
@@ -62,9 +63,8 @@ export interface SymbolRef {
    *  by its tag (`name`), from the members the declaration lists (`layout`, which the lift laid out
    *  to type the call). */
   returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
-  /** The body assigns the bare name a `(void *)` value: the structurer's spelling of a pointer
-   *  stored into a pointer cell. A name-only declaration of it is a pointer, which the store needs
-   *  and an integer cell rejects on CodeWarrior. */
+  /** The body stores a pointer into the bare name (l3/ptrcell.ts). A name-only declaration of it is
+   *  a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
   pointerCell?: true;
 }
 
@@ -122,7 +122,7 @@ export function collectSymbolRefs(
     // (`gSym = x;`) references the symbol every bit as much as a read does
     if (s.k === 'assign' && symbols.has(s.name)) {
       valueRefs.add(s.name);
-      if (s.value.k === 'cast' && s.value.to.kind === 'ptr' && s.value.to.to.kind === 'void') {
+      if (pointerCellStore(s) !== undefined) {
         pointerCells.add(s.name);
       }
     }
