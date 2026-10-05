@@ -36,7 +36,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     ].join(' && ');
     writeFileSync(
       join(dir, 'decomp.yaml'),
-      `platform: gba\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(cmd)}\n`,
+      `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(cmd)}\n`,
     );
     const r = await runCli([asmPath, '--name', 'ushr', '--score-against', obj]);
     expect(r.stderr).toContain('[config] target agbcc'); // resolved from the platform
@@ -60,7 +60,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     ].join(' && ');
     writeFileSync(
       join(dir, 'decomp.yaml'),
-      `platform: gba\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(cmd)}\n`,
+      `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(cmd)}\n`,
     );
 
     // pooled: compile and score are separate awaits, so the two are charged apart
@@ -84,7 +84,7 @@ describe('CLI --score-against (agbcc, real toolchain)', () => {
     const { dir, asmPath, obj } = fixture();
     writeFileSync(
       join(dir, 'decomp.yaml'),
-      `platform: gba\ntools:\n  asmlift:\n    compiler: "echo wrong-mwcc-version >&2; false # {{inputPath}} {{outputPath}}"\n`,
+      `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: "echo wrong-mwcc-version >&2; false # {{inputPath}} {{outputPath}}"\n`,
     );
     const r = await runCli([asmPath, '--name', 'ushr', '--score-against', obj]);
     expect(r.code).toBe(1);
