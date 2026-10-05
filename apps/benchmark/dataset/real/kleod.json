@@ -1242,6 +1242,29 @@
       },
       "m2cCtx": true,
       "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/interrupts.c#L242-L247"
+    },
+    {
+      "sym": "BootScreenHandler",
+      "addr": "0x08048768",
+      "unit": "src/code_080472B0.c",
+      "romDigest": "05664403527e4304a5cedc4fb6dd9fb68073f39b13fa51fa3527df130f9dbc67",
+      "features": [
+        "global",
+        "struct",
+        "field",
+        "branch",
+        "array",
+        "div-pow2"
+      ],
+      "funcC": "void BootScreenHandler(void)\n{\n    // Boot screen\n    if (gUnk_03004C20.sceneFrameCounter == 0)\n    {\n        BootScreenInit();\n    }\n\n    if (gUnk_03004C20.sceneFrameCounter >= 0x10)\n    {\n        gBlendValue = (gUnk_03004C20.sceneFrameCounter - 0x10) / 2;\n    }\n\n    if (gBlendValue >= 0x10)\n    {\n        gUnk_03004C20.sceneFrameCounter = -1;\n        gCallbackQueue.current[1] = NamcoScreenHandler;\n    }\n\n    m4aSoundVSyncOff();\n    m4aMPlayAllStop();\n}",
+      "prependC": "#include \"global.h\"\n#include \"code_080472B0.h\"\n#include \"vision.h\"\n#include \"code_08003D58.h\"\n#include \"wait_for_next_frame.h\"\n#include \"code_08014184.h\"\n#include \"transitions.h\"\n#include \"anim.h\"\n#include \"code_08039D8C.h\"\n#include \"save.h\"\n#include \"decompress.h\"\n#include \"heap.h\"\n#include \"interrupts.h\"\n#include \"main.h\"\n#include \"rand.h\"\n#include \"constants/songs.h\"\n#include \"structs/variables.h\"\nextern const u8 gUnk_08078F88[0x20];\nextern const u8 gUnk_08078FA8[0x20];\nextern struct Unk_0300466C gUnk_0807D7B0[];\nstruct Unk_08116590 {\n    u16 unk0;\n    u16 unk2;\n    u8 unk4;\n    u8 unk5;\n    u8 unk6;\n    u8 unk7;\n    u8 unk8;\n    u8 pad9[0xC - 0x9];\n};\nextern const struct Unk_08116590 gUnk_08116590[12];\nextern const u8 gUnk_0811717C[6][40][5];\nextern const u16 gUnk_0811769C[0x20][4];\nextern const u8 gUnk_0811779C[8];\nextern const u16 gUnk_081177A4[8][2];\nextern const u32 *gUnk_0818BA3C[0x20];\nextern const u32 *gUnk_0818BABC[0x20];\nextern const u32 *gUnk_0818BB3C[0x20];\nextern u32 gUnk_082ECEA8[];\nextern u32 gUnk_082ECEF8[];\nextern u32 gUnk_082ED1FC[];\nextern u32 gUnk_082F3B2C[];\nextern u32 gUnk_082F43C4[];\nextern u32 gUnk_082F47A8[];\nextern u32 gUnk_082F48BC[];\nextern u32 gUnk_082F4934[];\nextern u32 gUnk_082F49E4[];\nextern u32 gUnk_082F4B10[];\nextern u32 gUnk_082F4D3C[];\nextern u32 gUnk_082F518C[];\nextern u32 gUnk_082F5920[];\nextern u32 gUnk_082F5D0C[];\nextern u32 gUnk_082F7D64[];\nextern u32 gUnk_082F8BF8[];\nextern u32 gUnk_082FA784[];\nextern u32 gUnk_082FA8C0[];\nextern u32 gUnk_082FB0E0[];\nextern u32 gUnk_082FB280[];\nextern u32 gUnk_082FBB9C[];\nextern u32 gUnk_082FBE10[];\nextern u32 gUnk_08312A58[];\nextern u32 gUnk_08312B70[];\nextern u32 gUnk_08366214[];\nextern u32 gUnk_08367468[];\nvoid BootScreenInit(void);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/kleod/blob/3569ccc1ad5cc79794b7fbcf6ed340d8dd00382d/src/code_080472B0.c#L999-L1020",
+      "proto": {
+        "BootScreenHandler": {
+          "returnsVoid": true
+        }
+      }
     }
   ]
 }

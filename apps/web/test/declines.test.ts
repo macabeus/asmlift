@@ -906,13 +906,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // green. Two branches edited this line from opposite directions in one night; do not write a
   // number here again.
 
-  // `tu-scoped-name` is empty because its rows named a static the function defines, and the lift
-  // defines it (frontend/local-object.ts). Four of its six lift; the other
-  // two decline on their next link — `ac-decomp:JW_JUTGamePad_read` on the 64-bit value OSGetTime
-  // returns in r3:r4, which is what inhabits `clobbered-value`, and `mAc_ActorShadowEllipse` on an
-  // anonymous pool. Its refusals stand for a static whose definition the target does not carry
-  // readably, so it is the weak kind of empty.
-  //
   // THE ASSERTION BELOW COMPARES THE SORTED SET, so a membership SWAP that kept the length would
   // fail here — but the count in the test's NAME is derived from the length alone and would not.
   // Read both when this list moves.
@@ -932,7 +925,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'no-prototype-args',
     'store-class',
     'structs',
-    'tu-scoped-name',
     'unread-data-directive',
   ];
 
@@ -1001,12 +993,15 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // transfer pairs are the control-transfer capabilities sitting above `branch-form`, and
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames, and
   // Thumb's refusal of a never-reloaded `[sp,#0]` store says it may be an outgoing stack argument
-  // after saying the stack pointer is used as data.
+  // after saying the stack pointer is used as data. Thumb's refusal of a function-scope static
+  // whose initializer holds an address is a literal-pool load of the pool word naming it, and the
+  // static is what has to be built.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > stack-frames', 4],
     ['ctr-transfer > branch-form', 4],
-    ['outgoing-stack-args > stack-frames', 2],
+    ['outgoing-stack-args > stack-frames', 3],
+    ['tu-scoped-name > pool-word-shape', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {

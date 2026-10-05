@@ -248,5 +248,90 @@
     "tu": "PrintSelectorArrowAtPos.i.gz",
     "ctx": "ctx-80435fd2533d.i.gz",
     "m2c": "ctx-80435fd2533d.i.gz"
+  },
+  "LoadInitialMonInfo": {
+    "tu": "LoadInitialMonInfo.i.gz",
+    "ctx": "ctx-8c1d26cecde1.i.gz",
+    "m2c": "ctx-8c1d26cecde1.i.gz"
+  },
+  "LoadMonInfo": {
+    "tu": "LoadMonInfo.i.gz",
+    "ctx": "ctx-8aac49294256.i.gz",
+    "m2c": "ctx-8aac49294256.i.gz"
+  },
+  "InitHofBgs": {
+    "tu": "InitHofBgs.i.gz",
+    "ctx": "ctx-7234be26c4ba.i.gz",
+    "m2c": "ctx-7234be26c4ba.i.gz"
+  },
+  "DrawKeyboardPageOnDeck": {
+    "tu": "DrawKeyboardPageOnDeck.i.gz",
+    "ctx": "ctx-6132425bf45b.i.gz",
+    "m2c": "ctx-6132425bf45b.i.gz"
+  },
+  "UpdatePokeNewsCountdown": {
+    "tu": "UpdatePokeNewsCountdown.i.gz",
+    "ctx": "ctx-4cc1468cf799.i.gz",
+    "m2c": "ctx-4cc1468cf799.i.gz"
+  },
+  "SaveMonSpriteAtPos": {
+    "tu": "SaveMonSpriteAtPos.i.gz",
+    "ctx": "ctx-13cd33b5955d.i.gz",
+    "m2c": "ctx-13cd33b5955d.i.gz"
+  },
+  "GetBerryTreeInfo": {
+    "tu": "GetBerryTreeInfo.i.gz",
+    "ctx": "ctx-5d814d9758de.i.gz",
+    "m2c": "ctx-5d814d9758de.i.gz"
+  },
+  "DecorationItemsMenuAction_AttemptToss": {
+    "tu": "DecorationItemsMenuAction_AttemptToss.i.gz",
+    "ctx": "ctx-3600a0252298.i.gz",
+    "m2c": "ctx-3600a0252298.i.gz"
+  },
+  "Cmd_endselectionscript": {
+    "tu": "Cmd_endselectionscript.i.gz",
+    "ctx": "ctx-623b7d027065.i.gz",
+    "m2c": "ctx-623b7d027065.i.gz"
+  },
+  "SelectOpponentMons_Good": {
+    "tu": "SelectOpponentMons_Good.i.gz",
+    "ctx": "ctx-be6ff75affbf.i.gz",
+    "m2c": "ctx-be6ff75affbf.i.gz"
+  },
+  "SaveApprenticeParty": {
+    "tu": "SaveApprenticeParty.i.gz",
+    "ctx": "ctx-d62e212645dd.i.gz",
+    "m2c": "ctx-d62e212645dd.i.gz"
+  },
+  "CreateBattleTowerMon": {
+    "tu": "CreateBattleTowerMon.i.gz",
+    "ctx": "ctx-51282102868d.i.gz",
+    "m2c": "ctx-51282102868d.i.gz"
+  },
+  "FrontierSquares_Init": {
+    "tu": "FrontierSquares_Init.i.gz",
+    "ctx": "ctx-10d8548d14ec.i.gz",
+    "m2c": "ctx-10d8548d14ec.i.gz"
+  },
+  "PrintMenuActionTexts": {
+    "tu": "PrintMenuActionTexts.i.gz",
+    "ctx": "ctx-c4e61eaad56b.i.gz",
+    "m2c": "ctx-c4e61eaad56b.i.gz"
+  },
+  "CB2_ContinueSavedGame": {
+    "tu": "CB2_ContinueSavedGame.i.gz",
+    "ctx": "ctx-4fdb5d707504.i.gz",
+    "m2c": "ctx-4fdb5d707504.i.gz"
+  },
+  "CreateSandstormSprites": {
+    "tu": "CreateSandstormSprites.i.gz",
+    "ctx": "ctx-7531ff205475.i.gz",
+    "m2c": "ctx-7531ff205475.i.gz"
+  },
+  "GetGroundEffectFlags_JumpLanding": {
+    "tu": "GetGroundEffectFlags_JumpLanding.i.gz",
+    "ctx": "ctx-039f29162530.i.gz",
+    "m2c": "ctx-039f29162530.i.gz"
   }
 }

@@ -248,5 +248,10 @@
     "tu": "VCountIntr_DeathScreen.i.gz",
     "ctx": "ctx-9c33bc47bcb3.i.gz",
     "m2c": "ctx-9c33bc47bcb3.i.gz"
+  },
+  "BootScreenHandler": {
+    "tu": "BootScreenHandler.i.gz",
+    "ctx": "ctx-f4b862a006a1.i.gz",
+    "m2c": "ctx-f4b862a006a1.i.gz"
   }
 }

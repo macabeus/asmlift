@@ -608,6 +608,38 @@ export const FEATURES: readonly FeatureDef[] = [
     seeAlso: ['arithmetic', 'shift', 'div-pow2'],
   },
   {
+    id: 'operand-order',
+    label: 'Operand order',
+    group: 'arithmetic',
+    evidence: 'judgement',
+    summary: 'the bytes depend on the order or grouping of an address sum the recovery has to spell',
+    detail:
+      'Addition commutes and its compiled form does not: an old compiler emits a sum in an order ' +
+      'fixed by how the source spelled it — which operand comes first, which pair is added first, ' +
+      'which side is the pointer — so spellings with the same value compile to different ' +
+      'instructions. agbcc rebuilds an integer added to a pointer pointer-first, on whichever side ' +
+      'it was written (gcc/c-typeck.c:1993-1998, :2712), while a sum of integers is folded by the ' +
+      'integer rules instead, which can move a constant to another operand than the one it was ' +
+      'written with. ' +
+      'So `&g->arr[i]` and `(u8 *)g + (i * 8 + 0x169c)` compile alike, adding the index and the ' +
+      'constant first; `(u8 *)g + i * 8 + 0x169c` and `(u32)g + i * 8 + 0x169c` compile alike to ' +
+      'each other and not to the subscript, adding the constant after the pointer; and ' +
+      '`(u32)g + (i * 8 + 0x169c)` is a third codegen. One address, three codegens: the grouping ' +
+      'decides the bytes, and so does whether the base is a pointer or an integer. The tag marks ' +
+      'rows where compiling both spellings showed the recovery has to choose the order the ' +
+      'assembly shows. No machine-checked floor: every sum has an ' +
+      'order, and only compiling the alternatives tells whether it decides the bytes.',
+    example: {
+      c: 'struct BerryTree *GetBerryTreeInfo(u8 id) { return &gSaveBlock1Ptr->berryTrees[id]; }',
+      asm:
+        '  lsl r0, r0, #0x18\n  ldr r1, .L3\n  lsr r0, r0, #0x15\n  ldr r2, .L3+0x4   @ .word 0x169c\n' +
+        '  add r0, r0, r2     @ the index and the member offset first\n  ldr r1, [r1]\n' +
+        '  add r1, r1, r0     @ the pointer added last',
+      toolchain: 'agbcc',
+    },
+    seeAlso: ['pointer', 'arithmetic', 'array', 'variable-index'],
+  },
+  {
     id: 'float-compare',
     label: 'Floating-point comparison',
     group: 'arithmetic',
