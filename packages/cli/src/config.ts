@@ -1,33 +1,30 @@
-// asmlift — `decomp.yaml` (decomp_settings) loader + target resolution.
+// asmlift — `tools.asmlift`, the block asmlift reads from a project's decomp.yaml, and target
+// resolution. @match-kit/decomp-yaml finds and reads the file.
 //
-// The config envelope is the community decomp_settings spec (github.com/ethteck/decomp_settings):
-// standard project fields (`platform`, per-version `paths`) plus asmlift's payload in a
-// spec-compliant `tools.asmlift` block. Loader shape: upward walk trying decomp.yaml AND
-// decomp.yml, an explicit path short-circuits, `null` when absent — the config is an
-// enhancement, never required. One deliberate choice: on an ambiguous platform
-// (n64 ⇒ ido7.1, gcc2.7.2kmc or gcc2.7.2; gc/gamecube/wii ⇒ one of three CodeWarrior builds)
-// asmlift DECLINES naming the candidates instead of falling back
-// to a generic default — per the cardinal rule, a guessed compiler mis-scores candidates.
+// One deliberate choice: on an ambiguous platform (n64 ⇒ ido7.1, gcc2.7.2kmc or gcc2.7.2;
+// gc/gamecube/wii ⇒ one of three CodeWarrior builds) asmlift DECLINES naming the candidates instead
+// of falling back to a generic default — per the cardinal rule, a guessed compiler mis-scores
+// candidates.
 import type { FlagFamily } from '@asmlift/core/codegen-flags';
 import { TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import YAML from 'yaml';
+import { type LoadedConfig, toolBlock } from '@match-kit/decomp-yaml';
+import * as z from 'zod';
 
-/** asmlift's payload inside `tools.asmlift` (arbitrary tool blocks are part of the spec). */
-export interface AsmliftToolConfig {
+/** asmlift's payload inside `tools.asmlift`. A key it does not name is an error, so a misspelt
+ *  setting is refused instead of silently doing nothing. */
+const ASMLIFT_TOOL = z.strictObject({
   /** the asmlift target key (agbcc | ido7.1 | gcc2.7.2kmc | gcc2.7.2 | mwcc_242_81 | mwcc_233_163n |
    *  mwcc_247_107) — disambiguates platforms that map to several compilers */
-  target?: string;
+  target: z.string().optional(),
   /** candidate-compile command template ({{inputPath}}/{{outputPath}}/{{symbol}}) — the
    *  project's own toolchain */
-  compiler?: string;
+  compiler: z.string().optional(),
   /** host objdump binary for object-file input (overrides the built-in per-target choice) */
-  objdump?: string;
+  objdump: z.string().optional(),
   /** the project's built ELF (relative to this decomp.yaml) — the address→symbol source:
    *  names from `.symtab`, declaration shapes from the linked-in DWARF types-sidecar when
-   *  present. Absent ⇒ no symbol map (today's behavior). */
-  elf?: string;
+   *  present. Absent ⇒ no symbol map. */
+  elf: z.string().optional(),
   /** a symbol map already DERIVED, as JSON (the `symbolMapToJson` shape: hex address →
    *  SymbolInfo[]), relative to this decomp.yaml. The `elf` key is the ordinary source —
    *  a project has a built ELF and asmlift derives the map from it — and this key is for the
@@ -35,84 +32,15 @@ export interface AsmliftToolConfig {
    *  synthetic rows hand-write one, and a published reproduction script has to feed the CLI the
    *  same map or it reproduces a different answer. Mutually exclusive with `elf`: two sources
    *  for one map is a silent precedence question, so declaring both is a loud input error. */
-  symbols?: string;
-}
+  symbols: z.string().optional(),
+});
 
-export interface DecompVersion {
-  name: string;
-  fullname?: string;
-  paths?: Record<string, string>;
-}
+export type AsmliftToolConfig = z.output<typeof ASMLIFT_TOOL>;
 
-export interface DecompConfig {
-  name?: string;
-  platform?: string;
-  versions?: DecompVersion[];
-  tools?: { asmlift?: AsmliftToolConfig; [tool: string]: unknown };
-}
-
-export interface LoadedConfig {
-  /** absolute path of the decomp.yaml that was read (its dir anchors relative paths) */
-  path: string;
-  config: DecompConfig;
-}
-
-/** Load the nearest decomp.yaml/decomp.yml walking UP from `startDir`; `explicitPath` skips
- *  the walk (and its absence is then an error, not a null). Malformed YAML throws loud. */
-export function loadDecompConfig(explicitPath?: string, startDir?: string): LoadedConfig | null {
-  if (explicitPath) {
-    const p = resolve(explicitPath);
-    if (!existsSync(p)) {
-      throw new Error(`config not found: ${explicitPath}`);
-    }
-    return readConfig(p);
-  }
-  let dir = resolve(startDir ?? process.cwd());
-  for (;;) {
-    for (const base of ['decomp.yaml', 'decomp.yml']) {
-      const candidate = join(dir, base);
-      if (existsSync(candidate)) {
-        return readConfig(candidate);
-      }
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      return null;
-    } // filesystem root
-    dir = parent;
-  }
-}
-
-function readConfig(path: string): LoadedConfig {
-  let parsed: unknown;
-  try {
-    parsed = YAML.parse(readFileSync(path, 'utf8'));
-  } catch (e) {
-    throw new Error(`cannot parse ${path}: ${e instanceof Error ? e.message : e}`);
-  }
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`cannot parse ${path}: expected a YAML mapping at the top level`);
-  }
-  const config = parsed as DecompConfig;
-  noteObsoleteKeys(path, config);
-  return { path, config };
-}
-
-/** `tools.asmlift.cacheInputs` was the per-project DECLARATION of every file and directory the
- *  compile command reads — the gate the cross-run candidate-object cache would not start without,
- *  because one input class (a directory named by a flag) could not be measured. It is measured
- *  now, so the key is gone. Loading a config that still carries it is NOT an
- *  error: an obsolete key is not a broken project, and what replaced it is strictly more complete
- *  than the declaration ever was. But it is said out loud, once, because silence would leave a
- *  reader believing a seatbelt is fastened that does not exist any more. */
-function noteObsoleteKeys(path: string, config: DecompConfig): void {
-  if ((config.tools?.asmlift as { cacheInputs?: unknown } | undefined)?.cacheInputs !== undefined) {
-    process.stderr.write(
-      `${path}: tools.asmlift.cacheInputs is obsolete and no longer read — the candidate-object ` +
-        `cache measures what the compile command reads (every path flag's operand, response files, ` +
-        `glob directories, CPATH) instead of being told. You can delete the key.\n`,
-    );
-  }
+/** `tools.asmlift` of `loaded`, checked; `undefined` when there is no config or no block. Throws
+ *  `DecompYamlError` naming each key of the wrong type and each key asmlift does not know. */
+export function asmliftBlock(loaded: LoadedConfig | null): AsmliftToolConfig | undefined {
+  return toolBlock(loaded, 'asmlift', ASMLIFT_TOOL);
 }
 
 /** The registry's target keys in one compiler family — so a platform's candidate list is read off
@@ -148,28 +76,31 @@ export type TargetResolution = { targetKey: string; trace: string } | { error: s
 /** Resolve the target key: `--target` flag > `tools.asmlift.target` > platform inference.
  *  Returns a trace of HOW it resolved; ambiguity or an
  *  unknown platform is an error naming the candidates, never a guess. */
-export function resolveTarget(flag: string | undefined, loaded: LoadedConfig | null): TargetResolution {
+export function resolveTarget(
+  flag: string | undefined,
+  loaded: LoadedConfig | null,
+  tool: AsmliftToolConfig | undefined,
+): TargetResolution {
   if (flag) {
     return { targetKey: flag, trace: '--target flag' };
   }
-  const tool = loaded?.config.tools?.asmlift;
+  if (!loaded) {
+    return { error: 'no --target, and no decomp.yaml was found' };
+  }
   if (tool?.target) {
-    return { targetKey: tool.target, trace: `tools.asmlift.target in ${loaded!.path}` };
+    return { targetKey: tool.target, trace: `tools.asmlift.target in ${loaded.path}` };
   }
-  const platform = loaded?.config.platform;
-  if (!platform) {
-    return { error: 'no --target, and no decomp.yaml with a platform/tools.asmlift.target was found' };
-  }
+  const { platform } = loaded.config;
   const candidates = PLATFORM_TARGETS[platform];
   if (!candidates) {
     return {
-      error: `platform '${platform}' (${loaded!.path}) has no asmlift target mapping — pass --target or set tools.asmlift.target`,
+      error: `platform '${platform}' (${loaded.path}) has no asmlift target mapping — pass --target or set tools.asmlift.target`,
     };
   }
   if (candidates.length > 1) {
     return {
-      error: `platform '${platform}' is ambiguous (${candidates.join(' or ')}) — set tools.asmlift.target in ${loaded!.path}`,
+      error: `platform '${platform}' is ambiguous (${candidates.join(' or ')}) — set tools.asmlift.target in ${loaded.path}`,
     };
   }
-  return { targetKey: candidates[0], trace: `platform '${platform}' in ${loaded!.path}` };
+  return { targetKey: candidates[0], trace: `platform '${platform}' in ${loaded.path}` };
 }

@@ -55,12 +55,21 @@ npm install -g @asmlift/cli
 npm install --save-dev @asmlift/cli
 ```
 
-**2.** Configure `decomp.yaml` by adding `platform` and, optionally, `tools.asmlift.target`, `tools.asmlift.compiler` and `tools.asmlift.elf`. Check for more examples [here](./apps/benchmark/dataset/toolchains).
+**2.** Configure `decomp.yaml`. It must meet the [decomp_settings](https://github.com/ethteck/decomp_settings) spec: `name`, `platform`, and each version with its `fullname` and its `target`, `build_dir`, `map` and `compiled_target` paths. Then add, optionally, `tools.asmlift.target`, `tools.asmlift.compiler` and `tools.asmlift.elf`. Check for more examples [here](./apps/benchmark/dataset/toolchains).
 
 ```yaml
-# example decomp.yaml snippet for a GBA project
+# example decomp.yaml for a GBA project
 
+name: My Project
 platform: gba
+versions:
+  - name: us
+    fullname: US
+    paths:
+      target: baserom.gba
+      build_dir: build
+      map: my-project.map
+      compiled_target: my-project.gba
 
 tools:
   asmlift:

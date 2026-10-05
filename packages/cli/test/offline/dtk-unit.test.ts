@@ -107,7 +107,9 @@ function project(fixture: string, defines: Record<string, readonly string[]>, co
   writeFileSync(
     join(root, 'decomp.yaml'),
     YAML.stringify({
+      name: 'test',
       platform: 'gc',
+      versions: [],
       // GameCube names three CodeWarrior builds, so the platform alone resolves no target: these
       // fixtures are about the dtk unit lookup, and they say which compiler out loud.
       tools: { asmlift: { target: 'mwcc_242_81', ...(compiler === undefined ? {} : { compiler }) } },
@@ -331,7 +333,10 @@ describe('at the CLI surface', () => {
         'asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and --cflags gives the flags without one, and tools.asmlift.elf is unset, so there is no module ELF beside it\n',
     });
     const bare = mkdtempSync(join(tmpdir(), 'asmlift-nodtk-'));
-    writeFileSync(join(bare, 'decomp.yaml'), 'platform: gc\ntools:\n  asmlift:\n    target: mwcc_242_81\n');
+    writeFileSync(
+      join(bare, 'decomp.yaml'),
+      'name: test\nplatform: gc\nversions: []\ntools:\n  asmlift:\n    target: mwcc_242_81\n',
+    );
     expect((await runCli([asm, '--config', join(bare, 'decomp.yaml'), '--module', 'm427Dll'])).stderr).toBe(
       'asmlift: --module names the module whose objdiff.json unit gives the flags and whose ELF gives the symbols, and there is no objdiff.json beside decomp.yaml, and tools.asmlift.elf is unset, so there is no module ELF beside it\n',
     );

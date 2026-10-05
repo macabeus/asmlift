@@ -24,6 +24,7 @@ import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/prot
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
+import { loadDecompYaml, searchDecompYaml } from '@match-kit/decomp-yaml/files';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -38,7 +39,7 @@ import {
   cacheStats,
 } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
-import { type AsmliftToolConfig, loadDecompConfig, resolveTarget } from './config';
+import { type AsmliftToolConfig, asmliftBlock, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
@@ -498,11 +499,12 @@ export async function runCli(
   let targetTrace = '';
   try {
     const startDir = input === '-' ? undefined : dirname(resolve(input));
-    const loaded = loadDecompConfig(flags.get('config') as string | undefined, startDir);
-    toolCfg = loaded?.config.tools?.asmlift;
+    const configFlag = flags.get('config') as string | undefined;
+    const loaded = configFlag ? loadDecompYaml(configFlag) : searchDecompYaml(startDir);
+    toolCfg = asmliftBlock(loaded);
     configPath = loaded?.path;
-    configDir = loaded ? dirname(loaded.path) : undefined;
-    const res = resolveTarget(flags.get('target') as string | undefined, loaded);
+    configDir = loaded?.dir;
+    const res = resolveTarget(flags.get('target') as string | undefined, loaded, toolCfg);
     if ('error' in res) {
       return usage(res.error);
     }

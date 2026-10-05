@@ -18,7 +18,10 @@ function checkout(withModule: boolean) {
     mkdirSync(join(root, 'build', 'GMPE01_00', 'm416Dll'));
     writeFileSync(join(root, 'build', 'GMPE01_00', 'm416Dll', 'm416Dll.plf'), '');
   }
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gc\ntools:\n  asmlift:\n    elf: build/GMPE01_00/main.elf\n');
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'name: test\nplatform: gc\nversions: []\ntools:\n  asmlift:\n    elf: build/GMPE01_00/main.elf\n',
+  );
   return root;
 }
 
@@ -54,7 +57,10 @@ describe('resolveProjectElf', () => {
 
   test('no declared ELF: no module can be resolved either', () => {
     const root = mkdtempSync(join(tmpdir(), 'asmlift-projelf-'));
-    writeFileSync(join(root, 'decomp.yaml'), 'platform: gc\ntools:\n  asmlift:\n    target: mwcc_242_81\n');
+    writeFileSync(
+      join(root, 'decomp.yaml'),
+      'name: test\nplatform: gc\nversions: []\ntools:\n  asmlift:\n    target: mwcc_242_81\n',
+    );
     expect(resolveProjectElf('marioparty4', root, 'm416Dll')).toEqual({
       elf: null,
       elfRel: null,

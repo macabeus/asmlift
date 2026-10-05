@@ -502,7 +502,7 @@ function dtkProject(plf?: Buffer) {
   );
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gc\ntools:\n  asmlift:\n    target: mwcc_242_81\n    elf: build/main.elf\n',
+    'name: test\nplatform: gc\nversions: []\ntools:\n  asmlift:\n    target: mwcc_242_81\n    elf: build/main.elf\n',
   );
   const asm = join(root, 'clamp0.asm');
   writeFileSync(asm, readFileSync(join(import.meta.dirname, '../../../core/test/corpus/ppc-clamp0.asm'), 'utf8'));
@@ -516,7 +516,7 @@ describe('--module at the CLI surface', () => {
     // the same bytes as tools.asmlift.elf: the map this gate exists to stop building
     writeFileSync(
       join(root, 'decomp.yaml'),
-      'platform: gc\ntools:\n  asmlift:\n    target: mwcc_242_81\n    elf: build/m416Dll/m416Dll.plf\n',
+      'name: test\nplatform: gc\nversions: []\ntools:\n  asmlift:\n    target: mwcc_242_81\n    elf: build/m416Dll/m416Dll.plf\n',
     );
     const direct = await runCli([asm]);
     expect(direct.code).toBe(66);

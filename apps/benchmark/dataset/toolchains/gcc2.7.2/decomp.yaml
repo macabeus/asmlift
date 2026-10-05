@@ -19,6 +19,8 @@
 # when it runs.)
 name: asmlift benchmark (gcc2.7.2)
 platform: n64
+# Each version of your target and its paths go here; the benchmark builds none, so it lists none.
+versions: []
 tools:
   asmlift:
     target: gcc2.7.2

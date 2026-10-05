@@ -85,7 +85,13 @@ other status because a store that lied invalidates the whole fan ·
 
 ## `decomp.yaml` reference
 
-All asmlift settings live in a spec-compliant `tools.asmlift` block:
+The file must meet the [decomp_settings](https://github.com/ethteck/decomp_settings) spec, as
+[@match-kit/decomp-yaml](https://www.npmjs.com/package/@match-kit/decomp-yaml) reads it: `name`,
+`platform`, and each version with its `fullname` and its `target`, `build_dir`, `map` and
+`compiled_target` paths. A file that does not is an input error (exit `66`) naming each problem.
+
+All asmlift settings live in its `tools.asmlift` block. A key of the wrong type, or one asmlift does
+not name, is an input error too:
 
 | Field      | Meaning                                                                                                                                                                                                                                                                                                                                                  |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

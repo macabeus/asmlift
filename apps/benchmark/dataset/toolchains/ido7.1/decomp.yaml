@@ -14,6 +14,8 @@
 # it in when it runs.)
 name: asmlift benchmark (ido7.1)
 platform: n64
+# Each version of your target and its paths go here; the benchmark builds none, so it lists none.
+versions: []
 tools:
   asmlift:
     target: ido7.1

@@ -807,7 +807,7 @@ describe('a reported mismatch reaches the EXIT STATUS, which is the only thing a
     const template = `cat {{inputPath}} > /dev/null && cp ${fixture('candidate-diff.o')} {{outputPath}}`;
     writeFileSync(
       join(root, 'decomp.yaml'),
-      `platform: gba\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(template)}\n`,
+      `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(template)}\n`,
     );
     const args = [
       asm,

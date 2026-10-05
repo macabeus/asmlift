@@ -1,64 +1,63 @@
-// decomp.yaml (decomp_settings) loading + target resolution — offline. Fixtures are written
-// to per-test temp dirs; nothing depends on the repo's own tree (asmlift has no decomp.yaml).
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+// tools.asmlift + target resolution — offline. Fixtures are written to per-test temp dirs; nothing
+// depends on the repo's own tree (asmlift has no decomp.yaml). Finding and parsing the file is
+// @match-kit/decomp-yaml's, and tested there.
+import { type LoadedConfig } from '@match-kit/decomp-yaml';
+import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, vi } from 'vitest';
+import { expect, test } from 'vitest';
 
-import { loadDecompConfig, resolveTarget, targetSetting } from '../../src/config';
+import { asmliftBlock, resolveTarget, targetSetting } from '../../src/config';
 import { runCli } from '../../src/main';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'asmlift-cfg-'));
 
-test('upward walk finds decomp.yaml from a nested dir; .yml is the fallback spelling', () => {
-  const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\n');
-  const nested = join(root, 'src', 'battle');
-  mkdirSync(nested, { recursive: true });
-  expect(loadDecompConfig(undefined, nested)?.config.platform).toBe('gba');
+/** `text` as a project's decomp.yaml, loaded. */
+function load(text: string): LoadedConfig {
+  const path = join(tmp(), 'decomp.yaml');
+  writeFileSync(path, text);
+  return loadDecompYaml(path);
+}
 
-  const root2 = tmp();
-  writeFileSync(join(root2, 'decomp.yml'), 'platform: gc\n');
-  expect(loadDecompConfig(undefined, root2)?.config.platform).toBe('gc');
+const resolveIn = (text: string, flag?: string) => {
+  const loaded = load(text);
+  return resolveTarget(flag, loaded, asmliftBlock(loaded));
+};
+
+test('tools.asmlift is read with every key asmlift knows', () => {
+  const loaded = load(
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    compiler: cc {{inputPath}} {{outputPath}}\n    objdump: od\n    elf: a.elf\n',
+  );
+  expect(asmliftBlock(loaded)).toEqual({
+    target: 'agbcc',
+    compiler: 'cc {{inputPath}} {{outputPath}}',
+    objdump: 'od',
+    elf: 'a.elf',
+  });
+  expect(asmliftBlock(load('name: test\nplatform: gba\nversions: []\n'))).toBeUndefined();
+  expect(asmliftBlock(null)).toBeUndefined();
 });
 
-test('no config anywhere is null; an explicit missing --config path throws', () => {
-  expect(loadDecompConfig(undefined, tmpdir())).toBeNull();
-  expect(() => loadDecompConfig(join(tmp(), 'nope.yaml'))).toThrow(/config not found/);
-});
-
-test('malformed YAML and non-mapping top levels throw loud with the file path', () => {
-  const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: [unclosed\n');
-  expect(() => loadDecompConfig(undefined, root)).toThrow(/cannot parse/);
-  const root2 = tmp();
-  writeFileSync(join(root2, 'decomp.yaml'), '- just\n- a list\n');
-  expect(() => loadDecompConfig(undefined, root2)).toThrow(/YAML mapping/);
+test('tools.asmlift refuses a key of the wrong type and a key asmlift does not know, naming each', () => {
+  const loaded = load(
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: 3\n    compilier: cc\n',
+  );
+  expect(() => asmliftBlock(loaded)).toThrow(/tools\.asmlift\.target: Invalid input: expected string, received number/);
+  expect(() => asmliftBlock(loaded)).toThrow(/tools\.asmlift: Unrecognized key: "compilier"/);
 });
 
 test('target resolution precedence: flag > tools.asmlift.target > platform', () => {
-  const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: ido7.1\n');
-  const loaded = loadDecompConfig(undefined, root);
-  expect(resolveTarget('mwcc_242_81', loaded)).toEqual({ targetKey: 'mwcc_242_81', trace: '--target flag' });
-  const viaTool = resolveTarget(undefined, loaded);
+  const both = 'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: ido7.1\n';
+  expect(resolveIn(both, 'mwcc_242_81')).toEqual({ targetKey: 'mwcc_242_81', trace: '--target flag' });
+  const viaTool = resolveIn(both);
   expect('targetKey' in viaTool && viaTool.targetKey).toBe('ido7.1');
-  const platformOnly = loadDecompConfig(
-    undefined,
-    (() => {
-      const r = tmp();
-      writeFileSync(join(r, 'decomp.yaml'), 'platform: gba\n');
-      return r;
-    })(),
-  );
-  const viaPlatform = resolveTarget(undefined, platformOnly);
+  const viaPlatform = resolveIn('name: test\nplatform: gba\nversions: []\n');
   expect('targetKey' in viaPlatform && viaPlatform.targetKey).toBe('agbcc');
 });
 
 test('ambiguous and unknown platforms DECLINE naming the candidates, never guess', () => {
-  const n64 = tmp();
-  writeFileSync(join(n64, 'decomp.yaml'), 'platform: n64\n');
-  const amb = resolveTarget(undefined, loadDecompConfig(undefined, n64));
+  const amb = resolveIn('name: test\nplatform: n64\nversions: []\n');
   expect('error' in amb && amb.error).toMatch(/ido7.1 or gcc2.7.2kmc/);
 
   // GameCube and Wii name THREE CodeWarrior builds, and they differ in codegen: Pikmin's
@@ -66,9 +65,7 @@ test('ambiguous and unknown platforms DECLINE naming the candidates, never guess
   // differs from the ROM at +0x3. A platform that used to name one compiler and now names three
   // is exactly when an inference has to stop being one.
   for (const platform of ['gc', 'gamecube', 'wii']) {
-    const gc = tmp();
-    writeFileSync(join(gc, 'decomp.yaml'), `platform: ${platform}\n`);
-    const res = resolveTarget(undefined, loadDecompConfig(undefined, gc));
+    const res = resolveIn(`name: test\nplatform: ${platform}\nversions: []\n`);
     expect('error' in res && res.error).toMatch(/mwcc_242_81 or mwcc_233_163n or mwcc_247_107/);
   }
   // …so the setting a refusal tells a CodeWarrior user to write is the one that decides the build,
@@ -76,18 +73,42 @@ test('ambiguous and unknown platforms DECLINE naming the candidates, never guess
   expect(targetSetting('mwcc_242_81')).toBe('tools.asmlift.target: mwcc_242_81');
   expect(targetSetting('agbcc')).toBe('platform: gba');
 
-  const weird = tmp();
-  writeFileSync(join(weird, 'decomp.yaml'), 'platform: dreamcast\n');
-  const unk = resolveTarget(undefined, loadDecompConfig(undefined, weird));
+  const unk = resolveIn('name: test\nplatform: dreamcast\nversions: []\n');
   expect('error' in unk && unk.error).toMatch(/no asmlift target mapping/);
 
-  const none = resolveTarget(undefined, null);
+  const none = resolveTarget(undefined, null, undefined);
   expect('error' in none && none.error).toMatch(/no --target/);
+});
+
+test('CLI: a decomp.yaml that does not meet the decomp_settings spec is exit 66 naming each field', async () => {
+  const root = tmp();
+  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\n');
+  const file = join(root, 'clamp0.s');
+  writeFileSync(file, '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tbx\tlr\n');
+  const r = await runCli([file]);
+  expect(r.code).toBe(66);
+  expect(r.stderr).toContain(`${join(root, 'decomp.yaml')}: name: Invalid input: expected string, received undefined`);
+  expect(r.stderr).toContain(
+    `${join(root, 'decomp.yaml')}: versions: Invalid input: expected array, received undefined`,
+  );
+});
+
+test('CLI: a malformed tools.asmlift is exit 66 naming the key, never a run without it', async () => {
+  const root = tmp();
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compilier: cc\n',
+  );
+  const file = join(root, 'clamp0.s');
+  writeFileSync(file, '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tbx\tlr\n');
+  const r = await runCli([file]);
+  expect(r.code).toBe(66);
+  expect(r.stderr).toContain(`${join(root, 'decomp.yaml')}: tools.asmlift: Unrecognized key: "compilier"`);
 });
 
 test('CLI: --target becomes optional inside a configured project (trace on stderr)', async () => {
   const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\n');
+  writeFileSync(join(root, 'decomp.yaml'), 'name: test\nplatform: gba\nversions: []\n');
   const asm =
     '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tcmp\tr0, #0\n\tbge\t.L4\n\tmov\tr0, #0x0\n.L4:\n\tbx\tlr\n';
   const file = join(root, 'clamp0.s');
@@ -100,7 +121,7 @@ test('CLI: --target becomes optional inside a configured project (trace on stder
 
 test('CLI: ambiguous platform without --target is a usage error naming both', async () => {
   const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: n64\n');
+  writeFileSync(join(root, 'decomp.yaml'), 'name: test\nplatform: n64\nversions: []\n');
   const file = join(root, 'f.asm');
   writeFileSync(file, '00000000 <f>:\n   0:\tjr\tra\n   4:\tnop\n');
   const r = await runCli([file]);
@@ -110,7 +131,7 @@ test('CLI: ambiguous platform without --target is a usage error naming both', as
 
 test('CLI: --score-against without tools.asmlift.compiler is a usage error, never a fallback', async () => {
   const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\n'); // no compiler command
+  writeFileSync(join(root, 'decomp.yaml'), 'name: test\nplatform: gba\nversions: []\n'); // no compiler command
   const file = join(root, 'clamp0.s');
   writeFileSync(file, '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tbx\tlr\n');
   const target = join(root, 't.o');
@@ -122,7 +143,10 @@ test('CLI: --score-against without tools.asmlift.compiler is a usage error, neve
 
 test('CLI: --score-against with a missing object is exit 66; bad compile template is usage', async () => {
   const root = tmp();
-  writeFileSync(join(root, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    compiler: gcc -c -o out.o\n');
+  writeFileSync(
+    join(root, 'decomp.yaml'),
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: gcc -c -o out.o\n',
+  );
   const file = join(root, 'clamp0.s');
   writeFileSync(file, '\t.code\t16\n\t.globl\tclamp0\n\t.thumb_func\nclamp0:\n\tbx\tlr\n');
   const missing = await runCli([file, '--score-against', join(root, 'no-such.o')]);
@@ -134,32 +158,6 @@ test('CLI: --score-against with a missing object is exit 66; bad compile templat
   const badTemplate = await runCli([file, '--score-against', target]);
   expect(badTemplate.code).toBe(64);
   expect(badTemplate.stderr).toContain('{{inputPath}} and {{outputPath}}');
-});
-
-// `tools.asmlift.cacheInputs` existed for one round: a per-project DECLARATION of everything the
-// compile command reads, and the gate the candidate-object cache would not start without. It is
-// gone — the namespace measures the command's paths instead of being told them — and a config
-// still carrying it would otherwise be silently ignored, leaving a reader believing a seatbelt is
-// fastened that no longer exists. Loading it must not FAIL (an obsolete key is not a broken
-// project, and the cache is now strictly more complete than the declaration was), but it must say
-// so once.
-test('an obsolete cacheInputs key loads, and says out loud that it does nothing', () => {
-  const root = tmp();
-  writeFileSync(
-    join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    cacheInputs:\n      - inc\n',
-  );
-  const said: string[] = [];
-  const spy = vi.spyOn(process.stderr, 'write').mockImplementation((c: string | Uint8Array) => {
-    said.push(typeof c === 'string' ? c : Buffer.from(c).toString());
-    return true;
-  });
-  try {
-    expect(loadDecompConfig(join(root, 'decomp.yaml'))?.config.tools?.asmlift?.target).toBe('agbcc');
-  } finally {
-    spy.mockRestore();
-  }
-  expect(said.join('')).toMatch(/cacheInputs.*no longer/);
 });
 
 // ── tools.asmlift.symbols — a map that is already DERIVED ─────────────────────────────────────
@@ -180,7 +178,7 @@ test('CLI: tools.asmlift.symbols loads an authored map — the output NAMES what
   writeFileSync(join(root, 'symbols.json'), MAP_JSON);
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
   );
   const file = join(root, 'f.s');
   writeFileSync(file, POOL_ASM);
@@ -191,7 +189,10 @@ test('CLI: tools.asmlift.symbols loads an authored map — the output NAMES what
   // the same run with the key removed is the control: no map, no name — so the assertion above
   // is about the map being LOADED, not about the address happening to render that way.
   const bare = tmp();
-  writeFileSync(join(bare, 'decomp.yaml'), 'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n');
+  writeFileSync(
+    join(bare, 'decomp.yaml'),
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n',
+  );
   const file2 = join(bare, 'f.s');
   writeFileSync(file2, POOL_ASM);
   const r2 = await runCli([file2]);
@@ -204,7 +205,7 @@ test('CLI: declaring BOTH elf and symbols is a usage error — two sources for o
   writeFileSync(join(root, 'symbols.json'), MAP_JSON);
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    elf: game.elf\n    symbols: symbols.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    elf: game.elf\n    symbols: symbols.json\n',
   );
   const file = join(root, 'f.s');
   writeFileSync(file, POOL_ASM);
@@ -217,7 +218,7 @@ test('CLI: an unreadable or malformed symbols map is loud, never a silent map-le
   const missing = tmp();
   writeFileSync(
     join(missing, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: nope.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: nope.json\n',
   );
   const f1 = join(missing, 'f.s');
   writeFileSync(f1, POOL_ASM);
@@ -229,7 +230,7 @@ test('CLI: an unreadable or malformed symbols map is loud, never a silent map-le
   writeFileSync(join(bad, 'symbols.json'), '{not json');
   writeFileSync(
     join(bad, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
   );
   const f2 = join(bad, 'f.s');
   writeFileSync(f2, POOL_ASM);
@@ -256,7 +257,7 @@ test('CLI: a symbols map that PARSES but declares nothing is an input error, not
     writeFileSync(join(root, 'symbols.json'), body);
     writeFileSync(
       join(root, 'decomp.yaml'),
-      'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+      'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
     );
     const f = join(root, 'f.s');
     writeFileSync(f, POOL_ASM);
@@ -280,7 +281,7 @@ test('CLI: a name reached by arithmetic is published as `[walked]`', async () =>
   );
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
   );
   const file = join(root, 'f.s');
   writeFileSync(
@@ -300,7 +301,7 @@ test('CLI: a pool-loaded name alone prints no `[walked]` line', async () => {
   writeFileSync(join(root, 'symbols.json'), MAP_JSON);
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
   );
   const file = join(root, 'f.s');
   writeFileSync(file, POOL_ASM);
@@ -316,7 +317,7 @@ test('CLI: the loud-rejection rig accepts a well-formed map (the control)', asyn
   writeFileSync(join(root, 'symbols.json'), MAP_JSON);
   writeFileSync(
     join(root, 'decomp.yaml'),
-    'platform: gba\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
+    'name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    target: agbcc\n    symbols: symbols.json\n',
   );
   const f = join(root, 'f.s');
   writeFileSync(f, POOL_ASM);

@@ -18,6 +18,8 @@
 # them in when it runs.)
 name: asmlift benchmark (agbcc)
 platform: gba
+# Each version of your target and its paths go here; the benchmark builds none, so it lists none.
+versions: []
 tools:
   asmlift:
     target: agbcc
