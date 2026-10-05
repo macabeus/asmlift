@@ -517,7 +517,8 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     // `add r0, r0, r1` with the pointer second: gcc puts a pointer first in `a0 + (u8 *)gPtr`, so
     // only the integer sum `a0 + (u32)gPtr` reproduces the order. The map candidate keeps the
     // pointer for its field spellings; the raw one has no pointee to fold, so it spells the order
-    const body = '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgPtr\n';
+    const body =
+      '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgPtr\n';
     const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols: PTR_MAP });
     const raw = cands.filter((c) => c.variations.includes('raw-globals'));
     expect(raw.length).toBeGreaterThan(0);
