@@ -1807,6 +1807,11 @@ export interface StructureOptions {
    *  A SUPERSET of `inferredSymbols`' names, and its own field for exactly that reason: a struct
    *  element is licensed here and has no shape there. */
   orderLicensedGlobals?: ReadonlySet<string>;
+  /** The globals the project map declares POINTERS, handed to a structuring that runs without the
+   *  map (rank.ts `/raw-globals`). Spelling a global raw does not make it an integer: C still scales
+   *  arithmetic on its value by the declared pointee, so the byte-arithmetic rules read this where
+   *  they would read the map's `shape:'pointer'`. Nothing else is spelled from it. */
+  pointerGlobals?: ReadonlySet<string>;
 }
 
 /** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
@@ -2104,6 +2109,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     symbols: mapSymbols,
     inferredSymbols,
     orderLicensedGlobals,
+    pointerGlobals,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -2480,6 +2486,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     : undefined;
 
+  /** The declared shape of a global as the pointer-value rules below read it: the map's, or a
+   *  pointer the map declares to a structuring that does not spell from it (`pointerGlobals`). */
+  const declaredShape = (name: string): SymbolInfo['shape'] =>
+    symCtx?.info(name)?.shape ?? (pointerGlobals?.has(name) ? 'pointer' : undefined);
+
   /** A POINTER VALUE whose type the project's header owns: a bare `gSym` naming a pointer global
    *  (the VALUE of a pointer cell), or a named MEMBER whose declaration is a pointer (`gSym.pBuf`,
    *  `gPtr->pBuf`). Load, store and compare of such a 4-byte cell are identical for any
@@ -2488,7 +2499,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  must therefore be made explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types
    *  only params/locals, so both spellings render `undefined` there.
    *
-   *  A bare global is one when the MAP says `shape:'pointer'`, or when no declaration this pass
+   *  A bare global is one when the MAP says `shape:'pointer'` (declaredShape), or when no declaration this pass
    *  can read says anything (no map, a symtab-only name, entries that disagree and were dropped to
    *  the bare name, a name the map lacks) and the IR loads it as a pointer at least once. The
    *  project still declares it, typically `struct S *`. A map `shape:'scalar'` is a declaration
@@ -2499,14 +2510,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (x.k !== 'var') {
       return ptrMemberDecl(x, symCtx) !== null;
     }
-    const shape = symCtx?.info(x.name)?.shape;
+    const shape = declaredShape(x.name);
     return shape === 'pointer' || (shape === undefined && pointerLoadedGlobals.has(x.name));
   };
 
   /** A global's word VALUE that no declaration this pass can read types, whatever the IR loaded it
    *  as. */
   const isUndeclaredGlobalValue = (x: Expr): boolean =>
-    x.k === 'var' && wordLoadedGlobals.has(x.name) && symCtx?.info(x.name)?.shape === undefined;
+    x.k === 'var' && wordLoadedGlobals.has(x.name) && declaredShape(x.name) === undefined;
 
   /** A byte sum the pointer-value arithmetic rule below made of a global's value (`(u8 *)g + K`),
    *  and the same sum as the integer it also is (`(u32)g + K`), which an integer added in front of
@@ -2519,7 +2530,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     typeEquals(x.to, T.ptr(T.u(8))) &&
     x.e.k === 'var' &&
     (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
-    (!undeclared || symCtx?.info(x.e.name)?.shape === undefined);
+    (!undeclared || declaredShape(x.e.name) === undefined);
   const isByteGlobalSum = (x: Expr, undeclared = false): boolean =>
     x.k === 'bin' &&
     (x.op === '+' || x.op === '-') &&
@@ -3937,7 +3948,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // global: that rule keeps the add's operand order, so the swap would be the one it keeps.
       const ptrGlobalSide = (x: Expr): boolean =>
         x.k === 'var' &&
-        symCtx?.info(x.name)?.shape === undefined &&
+        declaredShape(x.name) === undefined &&
         (pointerLoadedGlobals.has(x.name) || (d.results[0]?.type.kind === 'ptr' && wordLoadedGlobals.has(x.name)));
       if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
         const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
@@ -4144,7 +4155,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         // declaration types, or a byte sum this rule made of one, is added as an integer in the
         // asm's order, and the cast keeps the sum the byte pointer it would have been. A declared
         // pointer keeps `x + (u8 *)p`, the operand the element and field spellings read.
-        const undeclaredPtr = (x: Expr): boolean => x.k === 'var' && symCtx?.info(x.name)?.shape === undefined;
+        const undeclaredPtr = (x: Expr): boolean => x.k === 'var' && declaredShape(x.name) === undefined;
         if (
           op === '+' &&
           !bothPtr &&

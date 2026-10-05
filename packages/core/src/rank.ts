@@ -1764,8 +1764,13 @@ export function enumerateCandidates(
         { variations: ['raw-globals'], symbols: undefined },
       ]
     : [{ variations: [] }];
+  // The map's POINTER declarations go to the raw setting all the same: a raw name is still a
+  // pointer in the project's file, so arithmetic on its value scales unless spelled in bytes.
+  const pointerGlobals = new Set(
+    [...(baseOpts.symbols?.entries() ?? [])].filter(([, info]) => info.shape === 'pointer').map(([n]) => n),
+  );
   for (const [symbolIndex, symbolSetting] of symbolSettings.entries()) {
-    const symbolSettingOpts = symbolSetting.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
+    const symbolSettingOpts = symbolSetting.symbols ? baseOpts : { ...baseOpts, symbols: undefined, pointerGlobals };
     // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
     // symbol-map setting that structures without one: structure() normalizes `spellBitfieldMembers`
     // to false when `symbols` is absent, so both settings structure the identical tree whatever

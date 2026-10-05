@@ -499,6 +499,19 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     expect(src).not.toMatch(/\*\)\(gPtr \+/); // never the add-then-cast shape at any width
   });
 
+  test('the /raw-globals candidate keeps the byte arithmetic the map declared', () => {
+    // g(gPtr + 18), the pointer's only use: nothing in the IR types its load a pointer, so the map is
+    // the whole evidence, and the candidate that spells the name raw adds bytes all the same
+    const body =
+      '\tpush\t{lr}\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tadds\tr0, #18\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L1:\n\t.word\tgPtr\n';
+    const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols: PTR_MAP });
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      expect(c.source).toContain('g((u8 *)gPtr + 18)');
+    }
+  });
+
   test('under an operator C rejects for pointers, the cell spells integer math', () => {
     // `gPtr & 0xFF` is not C at all; the asm did 32-bit integer math on the address value
     const body =
