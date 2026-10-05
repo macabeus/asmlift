@@ -1369,7 +1369,8 @@ export function structureOptionsFor(
   const { spillSlotOrder, ...behaviors } = t.compilerBehaviors;
   return {
     returnsVoid,
-    ...(t.dialect === 'c++' ? { declaredArgs: declaredArgTypes(prototypes) } : {}),
+    declaredArgs: declaredArgTypes(prototypes),
+    ...(t.dialect === 'c++' ? { dialect: 'c++' as const } : {}),
     littleEndian: t.capabilities.endianness === 'little',
     ...(t.capabilities.deviceRegisters ? { deviceRegisters: t.capabilities.deviceRegisters } : {}),
     ...behaviors,
@@ -1387,8 +1388,9 @@ export function structureOptionsFor(
 export const C_TYPEDEFS = `${[...PRELUDE_TYPEDEFS].map(([name, base]) => `typedef ${base} ${name};`).join('')}\n`;
 
 /** Each declared callee's parameter types, where one can be PRINTED as a cast — the argument
- *  conversions C++ refuses to make implicitly (backend/cfamily.ts `argConversion`). An entry this
- *  cannot spell is `undefined`, and that argument is printed uncast. */
+ *  conversions C++ refuses to make implicitly (backend/cfamily.ts `argConversion`), and a pointer
+ *  cell's integer arguments (l3/ptrcell.ts). An entry this cannot spell is `undefined`, and that
+ *  argument is printed uncast. */
 function declaredArgTypes(prototypes: Prototypes): Record<string, readonly (ParamType | undefined)[]> {
   const out: Record<string, readonly (ParamType | undefined)[]> = {};
   for (const [name, p] of Object.entries(prototypes)) {

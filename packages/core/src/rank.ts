@@ -47,7 +47,6 @@ import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
-import { legalizePointerCells } from './l3/ptrcell';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -932,10 +931,6 @@ export function enumerateCandidates(
     target,
     refuse,
   });
-  // Every tree is printed with its pointer cells' integer uses converted (l3/ptrcell.ts), at the
-  // print rather than in the tree, so a respell variation reads the uses as the structurer spelled
-  // them and a store it removes takes the conversions with it.
-  const emit = (tree: SFn): string => backend.emit(legalizePointerCells(tree, prototypes));
   // THE RESPELL SET, as a function whose PARAMETER LIST is the invariant the tree skip below
   // rests on: every source here is a pure function of the structured tree and this call's own
   // constants, so a tree an earlier structure setting already produced can only re-emit sources
@@ -975,7 +970,7 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ variations: [], source: emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
     } catch (e) {
       reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
@@ -1073,7 +1068,7 @@ export function enumerateCandidates(
         assertLocalsWritten(alt);
         assertPostIncrUnshared(alt);
         assertNoOrphanedLocals(sfn, alt);
-        sources.push({ variations, source: emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
+        sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape or declaration-width fact
         // orthogonal to the respell variations outside the table; subsets compose in the fixed
@@ -1116,7 +1111,7 @@ export function enumerateCandidates(
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],
-                  source: emit(shaped.out),
+                  source: backend.emit(shaped.out),
                   ...refsOf(shaped.out),
                   ...volOf(shaped.out),
                   // a shape derived from a proof-gated spelling inherits the requirement

@@ -21,7 +21,6 @@ import { VerifyError, verify } from './ir/verify';
 import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
 import { eliminateDeadStores } from './l3/dce';
-import { legalizePointerCells } from './l3/ptrcell';
 import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
@@ -206,8 +205,8 @@ function runTower(
     ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });
 
-  // (5) lower + print: neutral AST → target language, a pointer cell's integer uses converted
-  const source = backend.emit(legalizePointerCells(sfn, prototypes));
+  // (5) lower + print: neutral AST → target language
+  const source = backend.emit(sfn);
 
   return {
     source,

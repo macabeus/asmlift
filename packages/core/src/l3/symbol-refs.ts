@@ -21,7 +21,7 @@ import { type AggregateLayout, type ParamType, type Prototypes, spellableProto }
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
 import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
-import { pointerCellStore } from './ptrcell';
+import { pointerCells, pointerPartners } from './ptrcell';
 
 /** One recorded VALUE reference — a name the tree references plus the facts to declare it. */
 export interface SymbolRef {
@@ -63,9 +63,10 @@ export interface SymbolRef {
    *  by its tag (`name`), from the members the declaration lists (`layout`, which the lift laid out
    *  to type the call). */
   returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
-  /** The body stores a pointer into the bare name (l3/ptrcell.ts). A name-only declaration of it is
-   *  a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
-  pointerCell?: true;
+  /** The bare name holds a pointer (l3/ptrcell.ts): the body stores one into it, or it meets such a
+   *  cell bare. A name-only declaration of it is a pointer, which the store needs and an integer
+   *  cell rejects on CodeWarrior. */
+  holdsPointer?: true;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -104,7 +105,6 @@ export function collectSymbolRefs(
   // the struct a callee returns through memory, as the lift typed it
   const returned = new Map<string, Extract<IrType, { kind: 'struct' }>>();
   const valueRefs = new Set<string>();
-  const pointerCells = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
     if (e.k === 'call' && typeof e.fn === 'string') {
@@ -122,14 +122,14 @@ export function collectSymbolRefs(
     // (`gSym = x;`) references the symbol every bit as much as a read does
     if (s.k === 'assign' && symbols.has(s.name)) {
       valueRefs.add(s.name);
-      if (pointerCellStore(s) !== undefined) {
-        pointerCells.add(s.name);
-      }
     }
     stmtExprs(s).forEach(visitExpr);
     stmtChildren(s).forEach(visitStmt);
   };
   body.forEach(visitStmt);
+  const isGlobal = (n: string): boolean => symbols.has(n);
+  const cells = pointerCells(body, isGlobal);
+  const holdsPointer = new Set([...cells, ...pointerPartners(body, isGlobal, cells)]);
   // A call target is a ref in its own right, whether or not the body also names it as a value —
   // `Object.hasOwn`, because `prototypes` is caller-supplied JSON and a callee may be named
   // `toString`. The union is sorted as one list so the rendered block stays deterministic.
@@ -172,7 +172,7 @@ export function collectSymbolRefs(
         info,
         ...(p ? { proto: p } : {}),
         ...(definition ? { returned: definition } : {}),
-        ...(pointerCells.has(n) ? { pointerCell: true as const } : {}),
+        ...(holdsPointer.has(n) ? { holdsPointer: true as const } : {}),
       };
     });
 }

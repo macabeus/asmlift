@@ -58,7 +58,8 @@ export function ptrElemBytes(to: IrType): number {
 export interface PrintEnv {
   readonly type: VarTypes;
   readonly volatilePointee: (name: string) => boolean;
-  /** a callee's declared parameter types, on a function compiled as C++ (`SFn.declaredArgs`) */
+  /** a callee's declared parameter types, on a function compiled as C++ (`SFn.declaredArgs`,
+   *  `SFn.dialect`) */
   readonly declaredArgs: (callee: string) => readonly (string | undefined)[] | undefined;
   /** a function-scope static this function defines `const` (`SFn.statics`) */
   readonly constStatic: (name: string) => boolean;
@@ -75,7 +76,9 @@ export function printEnv(fn: SFn): PrintEnv {
     type: declaredTypes(fn),
     volatilePointee: (n) => vol.has(n),
     declaredArgs: (callee) =>
-      fn.declaredArgs && Object.hasOwn(fn.declaredArgs, callee) ? fn.declaredArgs[callee] : undefined,
+      fn.dialect === 'c++' && fn.declaredArgs && Object.hasOwn(fn.declaredArgs, callee)
+        ? fn.declaredArgs[callee]
+        : undefined,
     constStatic: (n) => constStatics.has(n),
   };
 }

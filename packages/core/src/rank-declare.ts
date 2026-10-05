@@ -277,6 +277,11 @@ export function makeRefCollector(ctx: {
       // A ref no MAP accounts for is a hypothesis read out of the target asm, and it is marked
       // as one all the way to the consumer (SymbolRef.synthesized).
       const synthesized = mapSymbols?.has(r.name) ? {} : { synthesized: true as const };
+      // A global the asm reads narrower than a word holds no pointer, whatever it meets bare.
+      if (r.holdsPointer && access !== undefined && access.width !== 4) {
+        const { holdsPointer: _, ...integer } = r;
+        return [{ ...integer, access, ...synthesized }];
+      }
       return [{ ...r, ...(access ? { access } : {}), ...synthesized }];
     });
     return refs.length ? { symbolRefs: refs } : {};

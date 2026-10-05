@@ -1,11 +1,16 @@
 // A pointer cell (l3/ptrcell.ts): a global the body stores a pointer into is declared `void *` in the
 // candidate's own world, so its integer uses convert to the integer they read as, and an integer
-// stored into it converts to a pointer.
+// stored into it converts to a pointer. A global the cell meets bare holds a pointer too.
 import { describe, expect, test } from 'vitest';
 
+import { cBackend } from '../src/backend/c';
 import { renderDeclarations } from '../src/declare';
+import { T } from '../src/ir/types';
+import type { Expr, SFn, Stmt } from '../src/l3/ast';
+import { decompile } from '../src/pipeline';
 import { enumerateCandidates } from '../src/rank';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
+import { decompileTraced } from '../src/trace';
 
 // agbcc -O2 of `struct N { struct N *next; u32 v; }; extern struct N *gCur, *gOther; void use(u32);
 //   u32 r4(void) { u32 v = gCur->v + gOther->v; use(v); use((u32)gCur); gCur = gOther; return 0; }`
@@ -46,14 +51,70 @@ describe('legalizePointerCells', () => {
     expect(c.source).toContain('use(gCur);');
   });
 
-  test('compares a cell as a word and converts an integer stored into it', () => {
+  test('leaves a global the cell meets bare as spelled, and declares it a pointer', () => {
+    // converted, `gLimit` would be converted under whatever the project declares it, a float
+    // included, where bare a float compared with a pointer does not compile
     const c = defaultOf('kr1', KR1, SINK);
     expect(c.source).toContain('g = (void *)((u8 *)g + 4);');
-    expect(c.source).toMatch(/if \(\(u32\)g >= \(u32\)gLimit\)/);
-    expect(c.source).toContain('g = (void *)gBase;');
+    expect(c.source).toContain('if (g >= gLimit) g = gBase;');
+    const decls = renderDeclarations(c.symbolRefs!);
+    expect(decls).toContain('extern void *gLimit;\n');
+    expect(decls).toContain('extern void *gBase;\n');
+  });
+
+  test('prints the conversions on every path that prints the function', () => {
+    const prototypes = { use: { params: ['u32'], returnsVoid: true } };
+    const ranked = defaultOf('r4', R4, prototypes).source;
+    expect(ranked).toContain('use((u32)gCur);');
+    expect(decompile('r4', R4, ARMV4T_AGBCC, { prototypes }).source).toBe(ranked);
+    const traced = decompileTraced('r4', R4, targetFor('agbcc', TOOLCHAIN_TARGETS.agbcc.canonicalFlags), {
+      prototypes,
+    });
+    expect(traced.source).toBe(ranked);
   });
 
   test('converts a cell returned as an integer', () => {
     expect(defaultOf('kr5', KR5, SINK).source).toContain('return (u32)g;');
+  });
+});
+
+describe('the C backend', () => {
+  const v = (name: string): Expr => ({ k: 'var', name });
+  const voidp = (e: Expr): Expr => ({ k: 'cast', to: T.ptr(T.void()), e });
+  const fn = (body: Stmt[]): SFn => ({
+    name: 'f',
+    params: [],
+    locals: [],
+    retType: T.u(32),
+    body: [
+      { k: 'assign', name: 'gCur', value: voidp(v('gOther')) },
+      ...body,
+      { k: 'return', value: { k: 'const', value: 0 } },
+    ],
+    declaredArgs: { use: ['u32'] },
+  });
+
+  test('converts a byte sum on a cell passed to an integer parameter', () => {
+    const sum: Expr = {
+      k: 'bin',
+      op: '+',
+      l: { k: 'cast', to: T.ptr(T.u(8)), e: v('gCur') },
+      r: { k: 'const', value: 8 },
+    };
+    const out = cBackend.emit(fn([{ k: 'exprstmt', value: { k: 'call', fn: 'use', args: [sum] } }]));
+    expect(out).toContain('use((u32)((u8 *)gCur + 8));');
+  });
+
+  test('takes a global stored a cell for a cell, and converts nothing it meets bare', () => {
+    const out = cBackend.emit(
+      fn([
+        { k: 'assign', name: 'gPrev', value: v('gCur') },
+        { k: 'if', cond: { k: 'bin', op: '==', l: v('gCur'), r: v('gF') }, then: [], else: [] },
+        { k: 'exprstmt', value: { k: 'call', fn: 'use', args: [v('gPrev')] } },
+      ]),
+    );
+    expect(out).toContain('gPrev = gCur;');
+    expect(out).toContain('gCur == gF');
+    expect(out).toContain('use((u32)gPrev);');
   });
 });

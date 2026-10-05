@@ -20,7 +20,7 @@
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs } from './ast';
-import { pointerCellStore, pointerCells } from './ptrcell';
+import { pointerCellStore, pointerCellsOf } from './ptrcell';
 import { declaredTypes } from './typing';
 
 const isPtrTo = (t: IrType, to: 'void' | 'u8'): boolean =>
@@ -46,7 +46,7 @@ function integerValue(value: Expr, name: string): Expr {
 /** The `/int-cell` candidate: every pointer cell no declaration types, spelled as an integer. */
 export function integerCells(sfn: SFn): { sfn: SFn; needsProof: boolean } | null {
   const vt = declaredTypes(sfn);
-  const cells = new Set([...pointerCells(sfn)].filter((n) => vt(n) === undefined));
+  const cells = new Set([...pointerCellsOf(sfn)].filter((n) => vt(n) === undefined));
   if (cells.size === 0) {
     return null;
   }

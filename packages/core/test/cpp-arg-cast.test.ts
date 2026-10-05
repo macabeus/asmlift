@@ -1,4 +1,4 @@
-// A call argument on a function compiled AS C++ (`SFn.declaredArgs`): cast to its declared parameter
+// A call argument on a function compiled AS C++ (`SFn.dialect`): cast to its declared parameter
 // type exactly where C++ makes no implicit conversion — a pointer to another pointee, a non-zero
 // integer to a pointer, a pointer to an integer — and nowhere else, and never in C.
 import { describe, expect, test } from 'vitest';
@@ -12,7 +12,7 @@ const a0: Expr = { k: 'var', name: 'a0' };
 const a1: Expr = { k: 'var', name: 'a1' };
 const call = (fn: string, arg: Expr): Expr => ({ k: 'call', fn, args: [arg] });
 
-const fnWith = (arg: Expr, callee: string, declaredArgs?: SFn['declaredArgs']): SFn => ({
+const fnWith = (arg: Expr, callee: string, declaredArgs?: SFn['declaredArgs'], dialect?: SFn['dialect']): SFn => ({
   name: 'f',
   params: [
     { name: 'a0', type: T.ptr(T.s(32)) },
@@ -22,6 +22,7 @@ const fnWith = (arg: Expr, callee: string, declaredArgs?: SFn['declaredArgs']): 
   retType: T.s(32),
   body: [{ k: 'return', value: call(callee, arg) }],
   ...(declaredArgs ? { declaredArgs } : {}),
+  ...(dialect ? { dialect } : {}),
 });
 
 const DECLARED = {
@@ -35,7 +36,7 @@ const DECLARED = {
 };
 const printed = (arg: Expr, callee: keyof typeof DECLARED): string =>
   cBackend
-    .emit(fnWith(arg, callee, DECLARED))
+    .emit(fnWith(arg, callee, DECLARED, 'c++'))
     .split('\n')
     .find((l) => l.includes('return'))!
     .trim();
@@ -59,7 +60,7 @@ describe('C++ call arguments', () => {
   });
 
   test('a function compiled as C gets no casts', () => {
-    expect(cBackend.emit(fnWith(a0, 'toU32p'))).toContain('return toU32p(a0);');
+    expect(cBackend.emit(fnWith(a0, 'toU32p', DECLARED))).toContain('return toU32p(a0);');
   });
 });
 
@@ -70,11 +71,13 @@ describe('where the dialect comes from', () => {
     expect(targetFor('mwcc_242_81', ['-O4,p', '-lang=c']).target.dialect).toBeUndefined();
   });
 
-  test('only a C++ target carries declared argument types to the structurer', () => {
+  test('only a C++ target is compiled as C++, and every target carries declared argument types', () => {
     const protos = { g: { params: ['u32 *', 'struct Big'] }, h: { params: 2 } };
-    const cpp = targetFor('mwcc_233_163n', ['-O4,p', '-lang=c++']).target;
-    expect(structureOptionsFor(cpp, false, protos).declaredArgs).toEqual({ g: ['u32 *', undefined] });
-    const c = targetFor('mwcc_242_81', ['-O4,p']).target;
-    expect(structureOptionsFor(c, false, protos).declaredArgs).toBeUndefined();
+    const cpp = structureOptionsFor(targetFor('mwcc_233_163n', ['-O4,p', '-lang=c++']).target, false, protos);
+    expect(cpp.declaredArgs).toEqual({ g: ['u32 *', undefined] });
+    expect(cpp.dialect).toBe('c++');
+    const c = structureOptionsFor(targetFor('mwcc_242_81', ['-O4,p']).target, false, protos);
+    expect(c.declaredArgs).toEqual({ g: ['u32 *', undefined] });
+    expect(c.dialect).toBeUndefined();
   });
 });
