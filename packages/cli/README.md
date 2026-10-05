@@ -326,9 +326,8 @@ from your project's command template (`compileFromCommand(template, { cwd })`, t
 the CLI builds from `decomp.yaml`) or register one (`registerCandidateCompiler`). Without
 either, scoring throws `no candidate compiler for '<id>' — register one or pass a compile
 override` — including through `decompileWithReport`'s annotate mode (a missing compiler is a
-setup bug, never silently "unscored"). `compileFromCommand` builds an async compiler, which
-`decompileRanked` takes; `scoreSource` and `decompileWithReport` score synchronously, so they
-take a synchronous `compile` or a registered one. `scoreObjects(targetObj, candidateObj, symbol)` needs
+setup bug, never silently "unscored"). A `compile` function returns a promise of the object's path,
+and the scoring calls are async. `scoreObjects(targetObj, candidateObj, symbol)` needs
 no compiler at all — it diffs two objects you already have. The pure pipeline (no toolchains,
 runs in the browser) is [`@asmlift/core`](../core/README.md).
 

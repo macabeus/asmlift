@@ -42,9 +42,9 @@ test('trace: stage sequence, pattern event, and source parity with decompile()',
   expect(ev.hits).toBe(1);
   expect(ev.beforeIr).not.toBe(ev.afterIr);
   expect(ev.afterIr).toContain('sdiv');
-  // no probeScore hook ⇒ score fields stay unset (they belong to the cli's objdiff side)
-  expect(ev.scoreBefore).toBeUndefined();
-  expect(ev.scoreDelta).toBeUndefined();
+  // no probeSource hook ⇒ source fields stay unset (the cli report scores them)
+  expect(ev.sourceBefore).toBeUndefined();
+  expect(ev.sourceAfter).toBeUndefined();
 });
 
 test('trace: the report names the toolchain and the profile of the flags the function was compiled at', () => {
@@ -81,11 +81,11 @@ test('trace: the STAGE reports what it derived, the REPORT what the source rests
   expect(report.trace.find((s) => s.id === 'stage:globalshape')?.note).toContain('gBgInfo: elem 4');
 });
 
-test('trace: probeScore hook fills the per-boundary score fields', () => {
-  const probed: number[] = [7, 3];
+test('trace: probeSource hook fills the per-boundary source fields', () => {
+  const probed = ['before', 'after'];
   let i = 0;
-  const { report } = decompileTraced('half', HALF_ASM, AGBCC, { probeScore: () => probed[i++] });
-  expect(report.patternEvents[0]).toMatchObject({ scoreBefore: 7, scoreAfter: 3, scoreDelta: -4 });
+  const { report } = decompileTraced('half', HALF_ASM, AGBCC, { probeSource: () => probed[i++] });
+  expect(report.patternEvents[0]).toMatchObject({ sourceBefore: 'before', sourceAfter: 'after' });
 });
 
 test('trace: a firing pre-recovery pass traces its registered stage entry', () => {

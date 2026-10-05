@@ -648,7 +648,7 @@ export interface StopCheck {
 export async function checkStop(
   notCompiled: readonly NotCompiledCandidate[],
   candidates: readonly Candidate[],
-  score: (candidate: Candidate) => MatchScore | Promise<MatchScore>,
+  score: (candidate: Candidate) => Promise<MatchScore>,
   onProgress?: (done: number, total: number) => void,
 ): Promise<StopCheck> {
   const byName = new Map(candidates.map((c) => [joinVariations(c.variations), c]));

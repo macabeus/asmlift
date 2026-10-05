@@ -21,7 +21,7 @@ const ranked = async (decl: string, write: string) => {
   const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   return await decompileRanked('nd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
     prototypes: { nd: { returnsVoid: true }, rnd: { params: [] } },
-    compile: (source) => compileCandAgbcc(DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+    compile: async (source) => compileCandAgbcc(DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
   });
 };
 
@@ -53,7 +53,7 @@ const rankedReads = async (body: string) => {
       cv: { params: ['u8'], returns: 'u32' },
       dc: { params: ['u8', 'u8', 'u8'], returns: 'u16' },
     },
-    compile: (source) => compileCandAgbcc(CALL_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+    compile: async (source) => compileCandAgbcc(CALL_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
   });
 };
 
@@ -87,7 +87,7 @@ const rankedBoth = async (body: string) => {
       cv: { params: ['u8'], returns: 'u32' },
       dc: { params: ['u8', 'u8', 'u8'], returns: 'u16' },
     },
-    compile: (source) => compileCandAgbcc(BOTH_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+    compile: async (source) => compileCandAgbcc(BOTH_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
   });
 };
 

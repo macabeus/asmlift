@@ -4,7 +4,7 @@
 // itself stays on this thread, over the same enumeration and the same memoized scores, so the
 // winner, the tie-breaks, the dropped list and the stillborn verdict are a one-worker ranking's.
 import { absorbCacheStats, cacheSampleSeed } from '@asmlift/cli/candcache';
-import type { AsyncCandidateCompiler } from '@asmlift/cli/compile-command';
+import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { Worker } from 'node:worker_threads';
 
@@ -39,12 +39,12 @@ export class CompilePoolDied extends Error {}
  *  A thread that dies is a HARNESS failure, never a candidate's: the compiles it held reject, and
  *  `close()` throws, so the row fails its evaluation instead of ranking over candidates a crash
  *  refused. */
-export function compilePool(row: RowRef): { worker: () => AsyncCandidateCompiler; close: () => Promise<void> } {
+export function compilePool(row: RowRef): { worker: () => CandidateCompiler; close: () => Promise<void> } {
   const threads: Worker[] = [];
   let seq = 0;
   let closing = false;
   let failure: CompilePoolDied | undefined;
-  const worker = (): AsyncCandidateCompiler => {
+  const worker = (): CandidateCompiler => {
     const t = new Worker(new URL('./compile-worker.ts', import.meta.url), {
       workerData: row,
       execArgv: WORKER_EXEC_ARGV,

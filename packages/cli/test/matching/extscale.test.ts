@@ -152,7 +152,7 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
     );
     const r = await decompileRanked('entrylookup', asm, ARMV4T_AGBCC, assembleTarget(asm), {
       prototypes: { entrylookup: { returnsVoid: true } },
-      compile: (source) => compileCandAgbcc(decls + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+      compile: async (source) => compileCandAgbcc(decls + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
     });
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'orderbase')).toBe(true);

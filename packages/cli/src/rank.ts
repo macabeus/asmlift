@@ -19,7 +19,7 @@ import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornV
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
-import type { AnyCandidateCompiler, AsyncCandidateCompiler } from './compile-command';
+import type { CandidateCompiler } from './compile-command';
 import { renderDeclarations } from './declare';
 import { type PhaseClock, timed, timedAsync } from './phase';
 import { EngineFailedError, MatchScore, registeredCompiler, scoreObjects } from './score';
@@ -36,7 +36,7 @@ export interface RankOptions {
   /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
   /** a project's own toolchain — overrides the compiler registry */
-  compile?: AnyCandidateCompiler;
+  compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
    *  best score seen SO FAR — the whole `MatchScore`, not its numerator, so the line can PRINT the
    *  denominator that numerator was measured against. Ranking itself compares bare numerators and
@@ -132,7 +132,7 @@ export function decompileRanked(
   return decompileRankedParallel(name, asm, target, targetObj, {
     ...opts,
     jobs: 1,
-    worker: () => async (source, symbol, backendId, declarations) => compile(source, symbol, backendId, declarations),
+    worker: () => compile,
   });
 }
 
@@ -160,7 +160,7 @@ export async function decompileRankedParallel(
      *  enumerated, asked once and before the first `worker()` */
     jobs: number | ((fan: number) => number);
     /** mints one INDEPENDENT async compiler per worker (compile-command.ts `worker()`) */
-    worker: () => AsyncCandidateCompiler;
+    worker: () => CandidateCompiler;
   },
 ): Promise<RankedResult> {
   const backend = opts.backend ?? cBackend;
@@ -178,7 +178,7 @@ export async function decompileRankedParallel(
   // `rankBy` records every throw as a dropped candidate; a dead engine fails every later score, so
   // it ends the ranking instead.
   let engineFailure: unknown;
-  const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
+  const score = async (cand: Candidate, compile: CandidateCompiler): Promise<void> => {
     if (engineFailure) {
       return;
     }

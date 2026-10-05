@@ -65,33 +65,27 @@ const PROBE_DECLS = renderDeclarations([
   },
 ]);
 
-/** Compile one candidate translation unit into a relocatable object; returns the object path.
- *  Throws on any failure — a candidate that cannot be compiled must never score.
+/** Compile one candidate translation unit into a relocatable object; resolves to the object path.
+ *  Rejects on any failure — a candidate that cannot be compiled must never score.
  *
  *  `declarations` (optional) is the candidate's SYNTHESIZED declaration block (declare.ts —
  *  self-declaring candidates): joined to the typedef prelude in the self-declared world,
  *  dropped with it in the headers world (the probe below arbitrates). Compilers that inject
  *  their own context (the benchmark's vendored-ctx real-tier compile, @asmlift/toolchains)
  *  simply ignore the argument — their context IS the headers world. */
-export type CandidateCompiler = (source: string, symbol: string, backendId: string, declarations?: string) => string;
-
-/** The same contract, run without blocking the event loop, so several candidates can compile at
- *  once. One worker's object survives exactly until that worker compiles its next candidate — the caller must consume it before asking for
- *  another (`rank.ts`'s pool scores each object the moment it lands). */
-export type AsyncCandidateCompiler = (
+export type CandidateCompiler = (
   source: string,
   symbol: string,
   backendId: string,
   declarations?: string,
 ) => Promise<string>;
 
-/** Either contract: a ranked pass awaits whichever it is given. */
-export type AnyCandidateCompiler = CandidateCompiler | AsyncCandidateCompiler;
-
 /** One compiler instance: `worker()` mints an INDEPENDENT compiler — call it once per pool
- *  worker. Every worker shares the one cached world probe below. */
+ *  worker. A worker's object survives until that worker's next compile, so its caller consumes it
+ *  first (`rank.ts`'s pool scores each object the moment it lands). Every worker shares the one
+ *  cached world probe below. */
 export interface CommandCompilers {
-  worker: () => AsyncCandidateCompiler;
+  worker: () => CandidateCompiler;
   /** Which WORLD the probe found, or undefined before the first candidate compiled: `true` =
    *  SELF-DECLARED (this template compiles bare candidates, so asmlift's synthesized declaration
    *  block is part of every score), `false` = HEADERS (the block is dropped, the project owns the
@@ -1093,6 +1087,6 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
 
 /** One worker of `compilersFromCommand` — the shape every non-pooled caller wants. Its object
  *  survives until its next compile, so it compiles one candidate at a time. */
-export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): AsyncCandidateCompiler {
+export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): CandidateCompiler {
   return compilersFromCommand(template, opts).worker();
 }

@@ -14,7 +14,7 @@
 // candidate compilation goes to @asmlift/toolchains' own compiler bound at the row's flags — which
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
 // reproduction scripts (`bench target`) get the command intact on every toolchain.
-import { type AnyCandidateCompiler, type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
+import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -120,7 +120,7 @@ export function renderScoreCommand(id: ToolchainId, cflags: readonly string[]): 
   return createRunner(benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!, { flags: cflags }).command;
 }
 
-const memo = new Map<string, AnyCandidateCompiler>();
+const memo = new Map<string, CandidateCompiler>();
 
 /** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
  *  path: materialize the committed decomp.yaml → loadDecompYaml → resolveTarget (asserted) →
@@ -128,7 +128,7 @@ const memo = new Map<string, AnyCandidateCompiler>();
  *  targets' command is stripped, and their candidates compile through @asmlift/toolchains at
  *  `cflags`. One config and one working directory per toolchain: the flags reach the command
  *  namespace through the rendered command. */
-export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): AnyCandidateCompiler {
+export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): CandidateCompiler {
   const memoKey = `${id}\0${JSON.stringify(cflags)}`;
   const known = memo.get(memoKey);
   if (known !== undefined) {

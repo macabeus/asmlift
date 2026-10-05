@@ -51,11 +51,11 @@ test('strict: the same scoring-infrastructure failure propagates', async () => {
 // registry truly empty) or inside the full suite (matching suites register the pinned four).
 const UNREGISTERED = { ...ARMV4T_AGBCC, compiler: 'never-registered' };
 
-test('an unregistered compiler: scoreSource throws the typed setup error', () => {
-  expect(() => scoreSource('s32 f(void){return 0;}', 'f', '/never-read.o', UNREGISTERED, 'c')).toThrow(
+test('an unregistered compiler: scoreSource throws the typed setup error', async () => {
+  await expect(scoreSource('s32 f(void){return 0;}', 'f', '/never-read.o', UNREGISTERED, 'c')).rejects.toThrow(
     NoCandidateCompilerError,
   );
-  expect(() => scoreSource('s32 f(void){return 0;}', 'f', '/never-read.o', UNREGISTERED, 'c')).toThrow(
+  await expect(scoreSource('s32 f(void){return 0;}', 'f', '/never-read.o', UNREGISTERED, 'c')).rejects.toThrow(
     /no candidate compiler for 'never-registered'/,
   );
 });
@@ -82,17 +82,19 @@ test('the per-pattern score probe structures with the PROJECT MAP, not only the 
   // same command line declares `const s16 gTbl[4][64]` and the headline source casts.
   //
   // The probe compiler here records what it is handed and throws, which is exactly how it
-  // degrades on a real toolchain failure — so this asserts the SOURCE, not a score.
+  // degrades on a real toolchain failure — so this asserts the SOURCE, not a score. The read is
+  // halved (a signed divide by 2) so an idiom pattern fires and the probe runs at its boundaries.
   const asm =
     '\t.code\t16\n.text\n\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n' +
-    '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n\tbx\tlr\n' +
+    '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrh\tr0, [r0]\n' +
+    '\tlsr\tr1, r0, #31\n\tadd\tr0, r0, r1\n\tasr\tr0, r0, #1\n\tbx\tlr\n' +
     '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgTbl\n';
   const symbols = new Map([
     [0x0800_0000, [{ name: 'gTbl', kind: 'data', shape: 'array', elemSize: 2, elemSigned: true, dims: [4, 64] }]],
   ]) as SymbolMap;
 
   const seen: string[] = [];
-  const compile = (source: string): string => {
+  const compile = async (source: string): Promise<string> => {
     seen.push(source);
     throw new Error('probe: no toolchain');
   };
@@ -114,7 +116,8 @@ test('the per-pattern score probe structures with the PROJECT MAP, not only the 
   expect(headline).toContain('((u16 *)&gTbl)[a0]');
   expect(seen.length).toBeGreaterThan(0);
   for (const probed of seen) {
-    expect(probed).toBe(headline);
+    expect(probed).toContain('(u16 *)&gTbl');
+    expect(probed).not.toMatch(/[^&]gTbl\[/);
   }
 });
 
@@ -144,7 +147,7 @@ test('…and so does the candidate RANKING beside it, through decompileWithRepor
     symbols,
     targetObj: target,
     backend: cBackend,
-    compile: (source: string): string => {
+    compile: async (source: string): Promise<string> => {
       seen.push(source);
       return target;
     },

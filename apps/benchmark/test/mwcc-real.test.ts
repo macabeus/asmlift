@@ -287,14 +287,12 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('the CodeWarrior real tier', (
   // candidate and says nothing about this one; the unit is where the candidate had to compile.
   test(
     "a unit row that compiles nowhere publishes its unit's complaint",
-    () => {
+    async () => {
       const compile = makeRealCompile('mwcc_242_81', CFLAGS, 'unit', '', 'typedef struct { int a; } S;\nS g;\n', 'c');
-      let message = '';
-      try {
-        compile('int f(void) { return g.b; }', 'f');
-      } catch (e) {
-        message = (e as Error).message;
-      }
+      const message = await compile('int f(void) { return g.b; }', 'f').then(
+        () => '',
+        (e: unknown) => (e as Error).message,
+      );
       expect(message).toMatch(/'b'/);
       expect(message).not.toMatch(/undefined identifier 'g'/);
     },
@@ -404,7 +402,7 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a C++ row', () => {
 
   test(
     "falls back to plain C for a candidate the row's own dialect refuses — m2c names the receiver `this`",
-    () => {
+    async () => {
       // m2c's `ppc-mwcc-c++` target names the implicit receiver `this` on EVERY member function,
       // and `this` is a C++ keyword. Compiled in the row's own dialect that is a syntax error, and
       // m2c would go 0-for-42 on Pikmin for a spelling rather than for its code.
@@ -419,7 +417,7 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a C++ row', () => {
       // compile exports the name the candidate is WRITTEN with, which on a C++ row is the mangled
       // symbol itself. No linkage block, and the same alignment key.
       const compile = makeRealCompile('mwcc_242_81', CFLAGS, 'assembled', '', '', 'c++');
-      expect(exportedFunctions(compile(withThis, 'dot__3VecFP3Vec'))).toEqual(['dot__3VecFP3Vec']);
+      expect(exportedFunctions(await compile(withThis, 'dot__3VecFP3Vec'))).toEqual(['dot__3VecFP3Vec']);
 
       // …and the two routes are the same OBJECT for a C-shaped body, which is what makes scoring
       // one against a C++-built target honest.
@@ -433,19 +431,17 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a C++ row', () => {
 
   test(
     "publishes the row's OWN front end's complaint when nothing compiles, not the fallback's",
-    () => {
+    async () => {
       // A row that compiles nowhere publishes this text as its `errorMarkers`. The fallback dialect
       // runs last, and a C++ candidate handed to the C parser dies on the word `class` — a
       // diagnostic about the harness's ladder, which would bury the one sentence describing the
       // decompiler's output. Same defect class as cache.ts's v17.
       const broken = `${VEC}int Vec::dot(Vec * o) { return x * o->x + undeclared_thing; }\n`;
       const compile = makeRealCompile('mwcc_242_81', CFLAGS, 'assembled', '', '', 'c++');
-      let message = '';
-      try {
-        compile(broken, 'dot__3VecFP3Vec');
-      } catch (e) {
-        message = (e as Error).message;
-      }
+      const message = await compile(broken, 'dot__3VecFP3Vec').then(
+        () => '',
+        (e: unknown) => (e as Error).message,
+      );
       expect(message).toMatch(/undeclared_thing/);
       expect(message).not.toMatch(/declaration syntax error/);
     },

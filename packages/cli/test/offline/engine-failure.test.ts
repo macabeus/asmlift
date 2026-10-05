@@ -19,7 +19,7 @@ let compiles = 0;
 beforeEach(() => {
   compiles = 0;
 });
-const compile = (): string => {
+const compile = async (): Promise<string> => {
   compiles++;
   return fixture('candidate-diff.o');
 };

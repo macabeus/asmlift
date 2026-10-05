@@ -2,7 +2,7 @@
 // trail), browser-pure. Runs the SAME stage sequence as pipeline.ts and captures a TraceReport:
 // per-stage IR dumps (each post-verify) and per-pattern before/after events. Scoring lives on
 // the other side of the seam: @asmlift/cli/report enriches this into the full DecompileReport
-// (objdiff score, per-pattern score deltas via the `probeScore` hook, ranked candidates) when a
+// (objdiff score, per-pattern score deltas over the `probeSource` hook's sources, ranked candidates) when a
 // target object is available; the web playground renders the TraceReport as-is.
 import { cBackend } from './backend/c';
 import type { CodegenProfile } from './codegen-flags';
@@ -39,9 +39,9 @@ export interface PatternEvent {
   hits: number;
   beforeIr: string;
   afterIr: string;
-  scoreBefore?: number; // filled only when a probeScore hook is supplied (cli report)
-  scoreAfter?: number;
-  scoreDelta?: number; // negative = improved toward match
+  /** The source a `probeSource` hook emitted at this pattern's boundaries (the cli report scores them). */
+  sourceBefore?: string;
+  sourceAfter?: string;
 }
 
 export interface TraceReport {
@@ -93,14 +93,15 @@ export interface TraceOptions {
   asmData?: AsmData; // data-section side table (Regime-B jump tables), as in decompile()
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
-  /** Score probe at pattern boundaries (cli report's objdiff hook). One call per boundary:
-   *  pattern N's after-score is pattern N+1's before-score. Absent ⇒ score fields stay unset.
+  /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
+   *  scores. One call per boundary: pattern N's after-source is pattern N+1's before-source. Absent ⇒
+   *  the source fields stay unset.
    *
    *  THE DERIVED ARRAY SHAPES TRAVEL WITH THE CLONE: they are read once off the lift
    *  (`stage:globalshape`) and change the default spelling of every indexed global, so a probe
    *  that structures without them attributes its per-pattern delta to a source the main path does
    *  not emit. */
-  probeScore?: (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) => number | undefined;
+  probeSource?: (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) => string | undefined;
 }
 
 // The report's per-pass trace stage id + title, keyed by the shared PreRecoveryPass.id. Kept HERE
@@ -232,13 +233,13 @@ function traceTower(
         : `${named.length} address${named.length === 1 ? '' : 'es'} named: ${named.join(', ')}`,
   });
 
-  // (2) idiom fold (capability-gated), with an optional probed score per pattern boundary —
+  // (2) idiom fold (capability-gated), with an optional probed source per pattern boundary —
   // the SAME default set as decompile()/decompileRanked
   const active = (opts.patterns ?? DEFAULT_IDIOM_PATTERNS).filter((p) => patternApplies(p, target));
-  // Probe economy: ONE probe per pattern boundary — pattern N's after-score IS pattern N+1's
-  // before-score (the state is identical), and each probe costs a full clone + tower + external
-  // compile + objdiff. Zero-hit patterns emit NO event (the IR is unchanged).
-  let scoreBefore = opts.probeScore?.(fn, inferredSymbols);
+  // Probe economy: ONE probe per pattern boundary — pattern N's after-source IS pattern N+1's
+  // before-source (the state is identical), and each probe costs a full clone + tower. Zero-hit
+  // patterns emit NO event (the IR is unchanged).
+  let sourceBefore = opts.probeSource?.(fn, inferredSymbols);
   for (const p of active) {
     const beforeIr = irDump(fn);
     const hits = applyPattern(fn, p, target);
@@ -248,18 +249,17 @@ function traceTower(
       continue;
     }
     const afterIr = irDump(fn);
-    const scoreAfter = opts.probeScore?.(fn, inferredSymbols);
+    const sourceAfter = opts.probeSource?.(fn, inferredSymbols);
     patternEvents.push({
       id: `pattern:${p.id}`,
       patternId: p.id,
       hits,
       beforeIr,
       afterIr,
-      scoreBefore,
-      scoreAfter,
-      scoreDelta: scoreBefore !== undefined && scoreAfter !== undefined ? scoreAfter - scoreBefore : undefined,
+      sourceBefore,
+      sourceAfter,
     });
-    scoreBefore = scoreAfter;
+    sourceBefore = sourceAfter;
   }
   if (active.length) {
     trace.push({

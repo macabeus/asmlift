@@ -71,7 +71,7 @@ test('a byte-identical target at other candidate flags is a miss, not the other 
   const inputs = { tcId: 'agbcc', sym: 'sa2__sub_808558C', asm: `\tbx lr @ ${scratch}\n`, obj } as const;
   const computed: number[] = [];
   const run = (cflags: string[], score: number) =>
-    cache.cachedM2cResult({ ...inputs, cflags }, () => (computed.push(score), scored(score)));
+    cache.cachedM2cResult({ ...inputs, cflags }, async () => (computed.push(score), scored(score)));
 
   expect((await run(CANONICAL, 16)).score).toBe(16);
   expect((await run(MATH_C, 15)).score).toBe(15);

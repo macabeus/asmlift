@@ -231,7 +231,7 @@ export interface M2cKeyInputs {
  *  target-object bytes, and — for c++ — language). */
 export async function cachedM2cResult(
   inputs: M2cKeyInputs,
-  compute: () => DecompilerResult | Promise<DecompilerResult>,
+  compute: () => Promise<DecompilerResult>,
 ): Promise<DecompilerResult> {
   const { tcId, cflags, sym, asm, ctx, obj, lang } = inputs;
   const commit = m2cCommit();

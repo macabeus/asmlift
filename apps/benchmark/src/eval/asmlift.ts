@@ -3,7 +3,7 @@
 // rather than plausible-but-wrong C — the honest counterpart to m2c's M2C_ERROR glue. Gap-free
 // output is compiled+scored exactly as the target was built.
 import type { DecompilerResult } from '@asmlift/bench-schema';
-import type { AnyCandidateCompiler, CandidateCompiler } from '@asmlift/cli/compile-command';
+import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import { type RankOptions, type RankedResult, decompileRanked, decompileRankedParallel } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
@@ -28,12 +28,7 @@ import { assessQuality } from './quality';
  *  source — the prelude already carries `C_TYPEDEFS`, so a hand-concatenated block redefines
  *  `s16`/`s32` and the compile fails for a reason that has nothing to do with the candidate.
  *  Optional: a scorer whose rows declare nothing ignores it. */
-export type Scorer = (
-  candC: string,
-  sym: string,
-  obj: string,
-  declarations?: string,
-) => MatchScore | Promise<MatchScore>;
+export type Scorer = (candC: string, sym: string, obj: string, declarations?: string) => Promise<MatchScore>;
 
 /** THE INPUTS one benchmark row hands asmlift — the asm-data side table, the row's prototypes,
  *  the candidate compiler and the vendored symbol map — as the single options object both phases
@@ -98,7 +93,7 @@ export function rowCompiler(
   tc: Pick<Toolchain, 'id'>,
   codegen: Pick<ResolvedTarget, 'cflags'>,
   contextCompile?: CandidateCompiler,
-): AnyCandidateCompiler {
+): CandidateCompiler {
   return contextCompile ?? benchCompilerFor(tc.id, codegen.cflags);
 }
 

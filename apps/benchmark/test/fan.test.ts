@@ -318,7 +318,7 @@ describe('--whole compiles the rest of a stopped fan', () => {
     { variations: ['unsigned', 'flip-join', 'unmerge'], source: '/* unsigned/flip-join/unmerge */' },
     { variations: ['unsigned', 'unmerge'], source: '/* unsigned/unmerge */' },
   ];
-  const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
+  const scoreOnly = (name: string) => async (c: { variations: readonly string[] }) => {
     if (c.variations.join('/') !== name) {
       throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
     }

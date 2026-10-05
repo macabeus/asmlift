@@ -51,7 +51,7 @@ export function registeredCompiler(target: TargetDescription): CandidateCompiler
  *  rather than compiling with the wrong one. `declarations` is the candidate's synthesized
  *  declaration block (declare.ts), forwarded to the compiler seam — compilers that inject
  *  their own headers ignore it (see CandidateCompiler). */
-export function scoreSource(
+export async function scoreSource(
   source: string,
   symbol: string,
   targetObj: string,
@@ -59,7 +59,7 @@ export function scoreSource(
   backendId: string,
   compile?: CandidateCompiler,
   declarations?: string,
-): MatchScore {
+): Promise<MatchScore> {
   const fn = compile ?? registeredCompiler(target);
-  return scoreFiles(targetObj, fn(source, symbol, backendId, declarations), symbol);
+  return scoreFiles(targetObj, await fn(source, symbol, backendId, declarations), symbol);
 }
