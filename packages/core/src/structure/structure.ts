@@ -1606,9 +1606,11 @@ export interface StructureOptions {
   // spell "no" on a public option type. The translation happens once, in `structureOptionsFor`
   // (target.ts), which is where the target-to-structurer mapping lives.
   spillSlotOrder?: 'ascending' | 'descending';
-  // C++ only: each declared callee's parameter types, carried to the backend on `SFn.declaredArgs`
-  // (see there). Built by `structureOptionsFor` from the prototype table.
+  // Each declared callee's parameter types, carried to the backend on `SFn.declaredArgs` (see
+  // there). Built by `structureOptionsFor` from the prototype table.
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
+  // The emitted C is compiled as C++ (`SFn.dialect`).
+  dialect?: 'c++';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -2085,6 +2087,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     spellSwitchFallthrough = true,
     spillSlotOrder,
     declaredArgs,
+    dialect,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -4935,11 +4938,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  `p = (u8 *)p + 4` to BYTE-IDENTICAL objects (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
    *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler.
    *
-   *  KNOWN GAP: a cell no declaration types may still be declared an INTEGER (the self-declared
-   *  `extern u32 gSym;`), where `(void *)` makes an integer from a pointer: agbcc warns, CodeWarrior
-   *  rejects it. `*(void **)&gSym = (u8 *)gSym + K` compiles under both declarations to the same
-   *  bytes on agbcc, IDO 7.1 and CodeWarrior; it is not spelled here, because it reads as a type pun
-   *  and the load the IR types a pointer is the evidence that the project declares one. */
+   *  A project may still declare a cell no map types an INTEGER (`u32 gSym;`), where `(void *)`
+   *  makes an integer from a pointer: agbcc warns, CodeWarrior rejects it. The candidate's own world
+   *  declares the cell `void *` (l3/symbol-refs.ts), and `/int-cell` (l3/intcell.ts) spells the
+   *  integer declaration's source, published only at a byte-exact score. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
     if (!isPtrValue(lval)) {
       return value;
@@ -7065,6 +7067,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
     ...(declaredArgs !== undefined ? calledArgs(declaredArgs, body) : {}),
+    ...(dialect !== undefined ? { dialect } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;
