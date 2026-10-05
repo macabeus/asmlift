@@ -58,8 +58,9 @@ const integerParam = (t: string): boolean => {
  *  leaves implicit and CodeWarrior and IDO reject: `(u32)g`, `g = (void *)gBase`. The conversion of
  *  a word is no instruction, so the bytes are the implicit one's.
  *
- *  SCOPE: a use whose context states its type. A call argument converts only where the callee's
- *  prototype reads as an integer parameter, and a store only where its slot's type is an integer;
+ *  SCOPE: a use whose context states an integer type. A call argument converts only where the
+ *  callee's prototype reads as an integer parameter, a store or a return only where its slot is an
+ *  integer, an assignment where its target is an integer or a global the tree does not type;
  *  elsewhere the use is left as the structurer spelled it. A truth test, a comparison with a
  *  pointer or with 0, and an additive operand (the structurer's own pointer-value rules) are left
  *  alone. */
@@ -118,7 +119,8 @@ export function legalizePointerCells(sfn: SFn, prototypes: Prototypes): SFn {
         if (cells.has(s.name)) {
           return { ...s, value: pointerTyped(value) ? value : { k: 'cast', to: T.ptr(T.void()), e: value } };
         }
-        return { ...s, value: vt(s.name)?.kind === 'ptr' ? value : asInt(value) };
+        const slot = vt(s.name);
+        return { ...s, value: slot === undefined || slot.kind === 'int' ? asInt(value) : value };
       }
       case 'store': {
         const value = expr(s.value);
@@ -127,7 +129,7 @@ export function legalizePointerCells(sfn: SFn, prototypes: Prototypes): SFn {
       case 'exprstmt':
         return { ...s, value: expr(s.value) };
       case 'return':
-        return s.value ? { ...s, value: sfn.retType.kind === 'ptr' ? expr(s.value) : asInt(expr(s.value)) } : s;
+        return s.value ? { ...s, value: sfn.retType.kind === 'int' ? asInt(expr(s.value)) : expr(s.value) } : s;
       case 'if':
         return { ...s, cond: expr(s.cond), then: s.then.map(stmt), else: s.else.map(stmt) };
       case 'while':
