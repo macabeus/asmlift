@@ -62,6 +62,10 @@ export interface SymbolRef {
    *  by its tag (`name`), from the members the declaration lists (`layout`, which the lift laid out
    *  to type the call). */
   returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
+  /** The body assigns the bare name a `(void *)` value: the structurer's spelling of a pointer
+   *  stored into a pointer cell. A name-only declaration of it is a pointer, which the store needs
+   *  and an integer cell rejects on CodeWarrior. */
+  pointerCell?: true;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -100,6 +104,7 @@ export function collectSymbolRefs(
   // the struct a callee returns through memory, as the lift typed it
   const returned = new Map<string, Extract<IrType, { kind: 'struct' }>>();
   const valueRefs = new Set<string>();
+  const pointerCells = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
     if (e.k === 'call' && typeof e.fn === 'string') {
@@ -117,6 +122,9 @@ export function collectSymbolRefs(
     // (`gSym = x;`) references the symbol every bit as much as a read does
     if (s.k === 'assign' && symbols.has(s.name)) {
       valueRefs.add(s.name);
+      if (s.value.k === 'cast' && s.value.to.kind === 'ptr' && s.value.to.to.kind === 'void') {
+        pointerCells.add(s.name);
+      }
     }
     stmtExprs(s).forEach(visitExpr);
     stmtChildren(s).forEach(visitStmt);
@@ -159,6 +167,12 @@ export function collectSymbolRefs(
       const r = p ? returned.get(n) : undefined;
       const layout = r?.declared !== undefined ? prototypes[n].returnLayout : undefined;
       const definition = layout?.members !== undefined ? { name: r!.name, declared: r!.declared!, layout } : undefined;
-      return { name: n, info, ...(p ? { proto: p } : {}), ...(definition ? { returned: definition } : {}) };
+      return {
+        name: n,
+        info,
+        ...(p ? { proto: p } : {}),
+        ...(definition ? { returned: definition } : {}),
+        ...(pointerCells.has(n) ? { pointerCell: true as const } : {}),
+      };
     });
 }

@@ -380,3 +380,28 @@ describe('the refusals — a name a declaration cannot claim is left undeclared,
     expect(cands[0].symbolRefs?.[0].info).toEqual({ name: 'D_800A2884', kind: 'data' });
   });
 });
+
+describe('a cell the candidate stores a pointer into is declared a pointer', () => {
+  // agbcc -O2 of `extern u32 *g; u32 kpA(u32 n) { *g = n; g++; return 0; }`. The store is spelled
+  // `g = (void *)((u8 *)g + 4)`, which an `extern u32 g;` cell takes as an integer from a pointer:
+  // agbcc warns, CodeWarrior rejects it.
+  const asm =
+    'kpA:\n\tldr\tr2, .L3\n\tldr\tr1, [r2]\n\tstr\tr0, [r1]\n\tldr\tr0, [r2]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r2]\n' +
+    '\tmov\tr0, #0x0\n\tbx\tlr\n.L3:\n\t.word\tg\n';
+
+  test('the name-only declaration is `void *`', () => {
+    const cands = enumerateCandidates('kpA', asm, ARMV4T_AGBCC);
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      expect(c.source).toContain('g = (void *)((u8 *)g + 4);');
+      expect(renderDeclarations(c.symbolRefs!)).toBe('extern void *g;\n');
+    }
+  });
+
+  test('a cell the candidate only reads keeps the integer declaration', () => {
+    const read = 'kpR:\n\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tldr\tr0, [r1]\n\tbx\tlr\n.L3:\n\t.word\tg\n';
+    for (const c of enumerateCandidates('kpR', read, ARMV4T_AGBCC)) {
+      expect(renderDeclarations(c.symbolRefs!)).toBe('extern u32 g;\n');
+    }
+  });
+});
