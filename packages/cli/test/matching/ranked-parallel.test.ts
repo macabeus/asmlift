@@ -26,7 +26,7 @@ const worker = () => async (source: string) => compileCandAgbcc(source, TOOLCHAI
 const bothWays = async (sym: string, src: string) => {
   const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
   const obj = assembleTarget(asm);
-  const serial = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
+  const serial = await decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
   const pooled = await decompileRankedParallel(sym, asm, ARMV4T_AGBCC, obj, { jobs: 4, worker });
   return { serial, pooled };
 };
@@ -82,7 +82,7 @@ describe('the pooled ranked run is the serial ranked run', () => {
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
     const obj = assembleTarget(asm);
-    const serial = decompileRanked('ifor', asm, ARMV4T_AGBCC, obj);
+    const serial = await decompileRanked('ifor', asm, ARMV4T_AGBCC, obj);
     const pooled = await decompileRankedParallel('ifor', asm, ARMV4T_AGBCC, obj, { jobs: 3, worker: slotWorker });
     expect(pooled.dropped).toEqual(serial.dropped); // a stale/absent object would land here
     expect(joinVariations(pooled.winner.variations)).toBe(joinVariations(serial.winner.variations));

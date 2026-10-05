@@ -14,7 +14,12 @@
 // candidate compilation goes to @asmlift/toolchains' own compiler bound at the row's flags — which
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
 // reproduction scripts (`bench target`) get the command intact on every toolchain.
-import { type CandidateCompiler, compileFromCommand, renderCflags } from '@asmlift/cli/compile-command';
+import {
+  type AnyCandidateCompiler,
+  type CandidateCompiler,
+  compileFromCommand,
+  renderCflags,
+} from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -119,7 +124,7 @@ export function renderScoreCommand(id: ToolchainId, cflags: readonly string[]): 
   return renderCflags(benchDoc(id, `asmlift benchmark (${id})`).tools.asmlift.compiler!, cflags);
 }
 
-const memo = new Map<string, CandidateCompiler>();
+const memo = new Map<string, AnyCandidateCompiler>();
 
 /** The candidate compiler for a benchmark toolchain at one flag set, built through the real user
  *  path: materialize the committed decomp.yaml → loadDecompYaml → resolveTarget (asserted) →
@@ -127,7 +132,7 @@ const memo = new Map<string, CandidateCompiler>();
  *  targets' command is stripped, and their candidates compile through @asmlift/toolchains at
  *  `cflags`. One config and one working directory per toolchain: the flags reach the command
  *  namespace through the rendered command. */
-export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): CandidateCompiler {
+export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): AnyCandidateCompiler {
   const memoKey = `${id}\0${JSON.stringify(cflags)}`;
   const known = memo.get(memoKey);
   if (known !== undefined) {
@@ -164,11 +169,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
 export function benchScorer(
   id: ToolchainId,
   cflags: readonly string[],
-): (candC: string, sym: string, obj: string, declarations?: string) => MatchScore {
+): (candC: string, sym: string, obj: string, declarations?: string) => Promise<MatchScore> {
   const compile = benchCompilerFor(id, cflags);
   // `declarations` reaches the compiler's own prelude slot, never the front of the source: the
   // prelude already emits C_TYPEDEFS, and a concatenated copy redefines `s16`/`s32`.
-  return (candC, sym, obj, declarations) => scoreObjects(obj, compile(candC, sym, 'c', declarations), sym);
+  return async (candC, sym, obj, declarations) => scoreObjects(obj, await compile(candC, sym, 'c', declarations), sym);
 }
 
 /** What a reproduction config carries beyond its toolchain and flags: the project's symbol-map ELF

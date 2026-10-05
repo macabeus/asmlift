@@ -11,9 +11,12 @@ import { describe, expect, test } from 'vitest';
 
 import { decompileRanked } from '../../src/rank';
 
-const run = (sym: string, src: string) => {
+const run = async (sym: string, src: string) => {
   const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-  return { r: decompile(sym, asm, ARMV4T_AGBCC), rk: decompileRanked(sym, asm, ARMV4T_AGBCC, assembleTarget(asm)) };
+  return {
+    r: decompile(sym, asm, ARMV4T_AGBCC),
+    rk: await decompileRanked(sym, asm, ARMV4T_AGBCC, assembleTarget(asm)),
+  };
 };
 
 describe('boolean-value && recovery: matches byte-exact and prints &&', () => {
@@ -24,8 +27,8 @@ describe('boolean-value && recovery: matches byte-exact and prints &&', () => {
     { sym: 'andmix', c: 'int andmix(int a, int b){ return a && b > 5; }' }, // mixed operands
   ];
   for (const { sym, c } of CASES) {
-    test(`${sym} folds to && and matches`, () => {
-      const { r, rk } = run(sym, c);
+    test(`${sym} folds to && and matches`, async () => {
+      const { r, rk } = await run(sym, c);
       expect(r.source).toContain('&&'); // the connective was recovered (single-shot already folds it)
       expect(r.source).not.toContain('v0'); // no merge variable
       expect(r.source).not.toContain('>> 31'); // branchless bool-normalize was folded away

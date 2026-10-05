@@ -15,9 +15,9 @@ import { decompileRanked } from '../../src/rank';
 const spec = SYNTHETIC.find((s) => s.sym === 'memscope')!;
 const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
 
-test('memscope publishes the byte-exact spelling WITHOUT `volatile`, over its `/volatile` twin', () => {
+test('memscope publishes the byte-exact spelling WITHOUT `volatile`, over its `/volatile` twin', async () => {
   const asm = compileTargetAsm(spec.src, FLAGS);
-  const ranked = decompileRanked(spec.sym, asm, ARMV4T_AGBCC, assembleTarget(asm), { prototypes: spec.proto });
+  const ranked = await decompileRanked(spec.sym, asm, ARMV4T_AGBCC, assembleTarget(asm), { prototypes: spec.proto });
   const exact = ranked.candidates.filter((c) => c.score.score === 0).map((c) => joinVariations(c.variations));
   const volatile = (name: string) => /(^|\/)volatile(-|\/|$)/.test(name);
   // the tie is real: a `/volatile` spelling reaches the bytes too

@@ -27,8 +27,8 @@ registerCandidateCompiler('stub-down', () => {
   throw new Error('toolchain down');
 });
 
-test('annotate: a scoring-infrastructure failure degrades to unscored, keeping source + trace', () => {
-  const { source, report } = decompileWithReport('half', HALF, STUB_DOWN, {
+test('annotate: a scoring-infrastructure failure degrades to unscored, keeping source + trace', async () => {
+  const { source, report } = await decompileWithReport('half', HALF, STUB_DOWN, {
     targetObj: '/nonexistent/never-reached.o',
     backend: cBackend,
     onGap: 'annotate',
@@ -41,10 +41,10 @@ test('annotate: a scoring-infrastructure failure degrades to unscored, keeping s
   expect(report.candidates).toBeUndefined();
 });
 
-test('strict: the same scoring-infrastructure failure propagates', () => {
-  expect(() =>
+test('strict: the same scoring-infrastructure failure propagates', async () => {
+  await expect(
     decompileWithReport('half', HALF, STUB_DOWN, { targetObj: '/nonexistent/never-reached.o', backend: cBackend }),
-  ).toThrow(/toolchain down/);
+  ).rejects.toThrow(/toolchain down/);
 });
 
 // An id nothing ever registers — the assertions hold whether this file runs alone (offline:
@@ -60,20 +60,20 @@ test('an unregistered compiler: scoreSource throws the typed setup error', () =>
   );
 });
 
-test('a missing compiler propagates EVEN in annotate mode (setup bug, not scoring flakiness)', () => {
+test('a missing compiler propagates EVEN in annotate mode (setup bug, not scoring flakiness)', async () => {
   const unregistered = { ...AGBCC, target: UNREGISTERED };
-  expect(() =>
+  await expect(
     decompileWithReport('half', HALF, unregistered, {
       targetObj: '/nonexistent/never-reached.o',
       backend: cBackend,
       onGap: 'annotate',
     }),
-  ).toThrow(NoCandidateCompilerError);
+  ).rejects.toThrow(NoCandidateCompilerError);
 });
 
 // ── the score probe structures the program the report's headline actually is ──────────────────
 
-test('the per-pattern score probe structures with the PROJECT MAP, not only the derived shapes', () => {
+test('the per-pattern score probe structures with the PROJECT MAP, not only the derived shapes', async () => {
   // `scoreDelta` is a claim about the change one pattern made to the source asmlift emits. A
   // probe structured from a different symbol dictionary than the main path measures that delta on
   // a program asmlift does not emit — and once array shapes are derived from stride evidence
@@ -98,12 +98,14 @@ test('the per-pattern score probe structures with the PROJECT MAP, not only the 
   };
   let headline = '';
   try {
-    headline = decompileWithReport('f', asm, AGBCC, {
-      symbols,
-      targetObj: '/nonexistent/never-reached.o',
-      backend: cBackend,
-      compile,
-    }).source;
+    headline = (
+      await decompileWithReport('f', asm, AGBCC, {
+        symbols,
+        targetObj: '/nonexistent/never-reached.o',
+        backend: cBackend,
+        compile,
+      })
+    ).source;
   } catch {
     headline = seen.pop() ?? ''; // the headline's own scoreSource is the LAST compile attempted
   }
@@ -116,7 +118,7 @@ test('the per-pattern score probe structures with the PROJECT MAP, not only the 
   }
 });
 
-test('…and so does the candidate RANKING beside it, through decompileWithReport itself', () => {
+test('…and so does the candidate RANKING beside it, through decompileWithReport itself', async () => {
   // The same asymmetry one call further out, and it has to be asserted THROUGH the wrapper: a
   // test that calls `decompileRanked` directly with a map passes whether or not the wrapper
   // forwards one, so only this shape pins the forwarding.
@@ -138,7 +140,7 @@ test('…and so does the candidate RANKING beside it, through decompileWithRepor
   ]) as SymbolMap;
 
   const seen: string[] = [];
-  const { report } = decompileWithReport('add_one', asm, AGBCC, {
+  const { report } = await decompileWithReport('add_one', asm, AGBCC, {
     symbols,
     targetObj: target,
     backend: cBackend,

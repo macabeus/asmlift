@@ -35,6 +35,17 @@ export function registerCandidateCompiler(compiler: string, fn: CandidateCompile
   CANDIDATE_COMPILERS.set(compiler, fn);
 }
 
+/** The compiler registered for `target`. Throws rather than compiling with the wrong one. */
+export function registeredCompiler(target: TargetDescription): CandidateCompiler {
+  const fn = CANDIDATE_COMPILERS.get(target.compiler);
+  if (!fn) {
+    throw new NoCandidateCompilerError(
+      `no candidate compiler for '${target.compiler}' — register one or pass a compile override`,
+    );
+  }
+  return fn;
+}
+
 /** Score `source` for `target`+`backendId` — the target-aware entry every scoring path must
  *  use. `compile` overrides the registry (a project's own toolchain); with neither, throws
  *  rather than compiling with the wrong one. `declarations` is the candidate's synthesized
@@ -49,11 +60,6 @@ export function scoreSource(
   compile?: CandidateCompiler,
   declarations?: string,
 ): MatchScore {
-  const fn = compile ?? CANDIDATE_COMPILERS.get(target.compiler);
-  if (!fn) {
-    throw new NoCandidateCompilerError(
-      `no candidate compiler for '${target.compiler}' — register one or pass a compile override`,
-    );
-  }
+  const fn = compile ?? registeredCompiler(target);
   return scoreFiles(targetObj, fn(source, symbol, backendId, declarations), symbol);
 }

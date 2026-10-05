@@ -76,9 +76,9 @@ describe('F-CFG return-sinking gate: simple value-selects are NOT sunk (kept as 
   // Scored through the RANKED path, because that is where this row's match lives: single-shot
   // `decompile` emits the if/else merge variable and scores 4 — it is the `/defsite` candidate
   // (`v0 = 0; if (…) v0 = 1;`) that is byte-exact, both before this gate existed and after.
-  test('lor (return a || b) keeps its match — a value-merge, not a two-armed diamond', () => {
+  test('lor (return a || b) keeps its match — a value-merge, not a two-armed diamond', async () => {
     const asm = compileTargetAsm('int lor(int a, int b){ return a || b; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    const r = decompileRanked('lor', asm, ARMV4T_AGBCC, assembleTarget(asm));
+    const r = await decompileRanked('lor', asm, ARMV4T_AGBCC, assembleTarget(asm));
     expect(r.winner.score.match).toBe(true);
     expect(r.winner.source).toContain('v0'); // still the merge variable, not sunk to returns
   });
@@ -96,13 +96,13 @@ describe('F-CFG return-sinking: a ONE-SET-ARM diamond IS sunk', () => {
     ['selc2', 'int selc2(int x){ if (x & 0x40) return 0; return 1; }'],
     ['selc3', 'int selc3(int x){ if (x > 3) return 5; return 3; }'],
     ['selc4', 'int selc4(int x){ if (x == 0) return 1; return 0; }'],
-  ])('%s matches through the ranked fan and is sunk to early returns', (sym, src) => {
+  ])('%s matches through the ranked fan and is sunk to early returns', async (sym, src) => {
     const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const obj = assembleTarget(asm);
     const unranked = decompile(sym, asm, ARMV4T_AGBCC);
     expect(unranked.source).not.toContain('v0'); // sunk: no merge variable
     expect(scoreC(unranked.source, sym, obj, TOOLCHAIN_TARGETS.agbcc.canonicalFlags).match).toBe(false); // …but the wrong sense
-    const r = decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
+    const r = await decompileRanked(sym, asm, ARMV4T_AGBCC, obj);
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(true);
   });

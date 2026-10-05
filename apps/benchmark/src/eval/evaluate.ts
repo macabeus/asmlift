@@ -4,6 +4,7 @@
 import { type DecompilerResult, type FunctionResult, type RowTier, rowTier } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import type { RankOptions } from '@asmlift/cli/rank';
+import type { MatchScore } from '@asmlift/cli/score';
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
 import type { SymbolMap } from '@asmlift/core/symbols';
@@ -68,13 +69,13 @@ const M2C_DIALECT_TYPEDEFS = 'typedef float f32;typedef double f64;\n#define NUL
  *  dialect rungs stay unreported for the original reason: they prepend typedefs,
  *  so their failure can be their own. Pinned by `m2c-rungs.test.ts`, which is why this function
  *  is exported. */
-export function scoreM2c(
+export async function scoreM2c(
   score: Scorer,
   source: string,
   sym: string,
   obj: string,
   decls: string | undefined,
-): ReturnType<Scorer> {
+): Promise<MatchScore> {
   const rungs: { src: string; decls?: string }[] = [
     { src: source },
     { src: M2C_DIALECT_TYPEDEFS + source },
@@ -88,7 +89,7 @@ export function scoreM2c(
   let report: unknown;
   for (const rung of rungs) {
     try {
-      return score(rung.src, sym, obj, rung.decls);
+      return await score(rung.src, sym, obj, rung.decls);
     } catch (e) {
       if (rung.src === source) {
         report = e; // the most informed attempt on the source m2c actually emitted
@@ -153,14 +154,14 @@ function m2cDeclarationsFor(spec: EvalSpec): string | undefined {
  *  marker-bearing output ⇒ declined (never compiled); else compile+score, keeping the DECIDING
  *  candidate's source + its own compiler error on noncompile. Exported for `m2c-deciding.test.ts`,
  *  which pins that rule. */
-export function evaluateM2c(
+export async function evaluateM2c(
   tc: Toolchain,
   spec: EvalSpec,
   obj: string,
   asm: string,
   score: Scorer,
   asmDump: string | undefined,
-): DecompilerResult {
+): Promise<DecompilerResult> {
   const { sym, ctx, language } = spec;
   const m = runM2c(tc, sym, asm, { context: ctx, asmDump, lang: language });
   if (m.failed) {
@@ -204,7 +205,7 @@ export function evaluateM2c(
   let last: { source: string; receiverRenamed?: string; failure: Error } | undefined;
   for (const cand of m2cCandidates(m.source, sym, language)) {
     try {
-      const s = scoreM2c(score, cand.source, sym, obj, m2cDeclarationsFor(spec));
+      const s = await scoreM2c(score, cand.source, sym, obj, m2cDeclarationsFor(spec));
       return {
         decompiler: 'm2c',
         outcome: s.match ? 'match' : 'nonmatch',
@@ -286,7 +287,7 @@ export async function evaluate(
   // m2c is a frozen baseline (pinned checkout): its half of the row is cached by everything it
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.
-  const m2c = cachedM2cResult(
+  const m2c = await cachedM2cResult(
     { tcId: tc.id, cflags: spec.codegen.cflags, sym: spec.sym, asm, ctx: m2cSpec.ctx, obj, lang: spec.language },
     () => evaluateM2c(tc, m2cSpec, obj, asm, score, asmDump),
   );

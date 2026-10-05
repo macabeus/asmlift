@@ -645,22 +645,22 @@ export interface StopCheck {
  *  variations, the one name a candidate has across two enumerations — through `score`, which is the
  *  ranked pass's own compile. A name the enumeration no longer holds throws: the check would
  *  otherwise pass over a candidate it never compiled. */
-export function checkStop(
+export async function checkStop(
   notCompiled: readonly NotCompiledCandidate[],
   candidates: readonly Candidate[],
-  score: (candidate: Candidate) => MatchScore,
+  score: (candidate: Candidate) => MatchScore | Promise<MatchScore>,
   onProgress?: (done: number, total: number) => void,
-): StopCheck {
+): Promise<StopCheck> {
   const byName = new Map(candidates.map((c) => [joinVariations(c.variations), c]));
   const check: StopCheck = { compiled: [], refused: 0, unchecked: [] };
-  notCompiled.forEach((n, k) => {
+  for (const [k, n] of notCompiled.entries()) {
     const name = joinVariations(n.variations);
     const candidate = byName.get(name);
     if (candidate === undefined) {
       throw new Error(`internal: the stopped fan's candidate ${name} is not in this enumeration`);
     }
     try {
-      check.compiled.push({ variations: n.variations, score: score(candidate) });
+      check.compiled.push({ variations: n.variations, score: await score(candidate) });
     } catch (e) {
       if (readableRefusal(e)) {
         check.refused++;
@@ -672,7 +672,7 @@ export function checkStop(
       }
     }
     onProgress?.(k + 1, notCompiled.length);
-  });
+  }
   return check;
 }
 
@@ -880,7 +880,7 @@ export function fanOfAsm(sym: string, asmPath: string, toolchainId: string, o: F
   return 0;
 }
 
-export function fan(rowId: string, o: FanOptions = {}): number {
+export async function fan(rowId: string, o: FanOptions = {}): Promise<number> {
   // The tree BEFORE the run, for the stamp on the `[ranked]` line. A pair of samples, as
   // provenance.ts requires: one reading is blind to any edit not standing at that instant, and a
   // parallel round editing `packages/` is the normal state of this machine.
@@ -1085,7 +1085,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
   // row's entire fan, i.e. precisely what a reader came here for.
   let ranked: RankedResult;
   try {
-    ranked = asmliftFan(c.codegen, c.sym, asm, obj, {
+    ranked = await asmliftFan(c.codegen, c.sym, asm, obj, {
       ...reportingOpts,
       onProgress: (done, total, bestSoFar) => {
         const every = Math.max(1, Math.floor(total / 10));
@@ -1109,7 +1109,7 @@ export function fan(rowId: string, o: FanOptions = {}): number {
       `asmlift: [whole] compiling the ${e.notCompiled.length} candidate(s) the stillborn stop did not compile: ` +
         `${estimatedScoreTime(e.notCompiled.length, secondsPerCandidate(c.toolchain.id, c.tier, recordedRankRates().rates))}`,
     );
-    const check = checkStop(
+    const check = await checkStop(
       e.notCompiled,
       enumerateRanked(c.sym, asm, c.codegen.target, reportingOpts),
       (cand) => scoreCandidate(cand, c.sym, c.codegen.target, obj, reportingOpts),

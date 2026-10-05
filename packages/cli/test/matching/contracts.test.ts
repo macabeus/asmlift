@@ -61,11 +61,11 @@ describe('all three entry paths run the contracts in production (no false positi
   test('decompile', () => {
     expect(() => decompile('cf', asm, MIPS_IDO)).not.toThrow();
   });
-  test('decompileRanked', () => {
-    expect(() => decompileRanked('cf', asm, MIPS_IDO, obj)).not.toThrow();
+  test('decompileRanked', async () => {
+    await expect(decompileRanked('cf', asm, MIPS_IDO, obj)).resolves.toBeDefined();
   });
-  test('decompileWithReport', () => {
+  test('decompileWithReport', async () => {
     const ido = targetFor('ido7.1', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags);
-    expect(() => decompileWithReport('cf', asm, ido, { targetObj: obj })).not.toThrow();
+    await expect(decompileWithReport('cf', asm, ido, { targetObj: obj })).resolves.toBeDefined();
   });
 });

@@ -102,7 +102,7 @@ describe.runIf(HAVE)('the ARRAY-SHAPE licence, compiled (checkout-gated)', () =>
     ['unsigned-bare', UNSIGNED_BARE],
   ] as const;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     const tool = asmliftBlock(loadDecompYaml(join(CHECKOUT, 'decomp.yaml')));
     const template = tool?.compiler;
     if (!template) {
@@ -111,7 +111,7 @@ describe.runIf(HAVE)('the ARRAY-SHAPE licence, compiled (checkout-gated)', () =>
     const compile = compileFromCommand(template, { cwd: CHECKOUT });
     const dir = mkdtempSync(join(tmpdir(), 'asmlift-arrayshape-'));
     for (const [name, src] of SOURCES) {
-      const obj = compile(src, 'f', 'c');
+      const obj = await compile(src, 'f', 'c');
       const bin = join(dir, `${name}.bin`);
       const r = spawnSync('arm-none-eabi-objcopy', ['-O', 'binary', obj, bin], { encoding: 'utf8' });
       if (r.status !== 0) {

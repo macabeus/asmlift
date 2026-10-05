@@ -113,7 +113,7 @@ describe.runIf(HAVE)('self-declared vs headers-wrapper A/B — klonoa dogfood (c
     const compile = compileFromCommand(tool.compiler, { cwd: CHECKOUT });
     for (const fn of DOGFOOD) {
       const asm = readFileSync(join(CHECKOUT, 'asm/nonmatchings/gfx', `${fn}.s`), 'utf8');
-      const ranked = decompileRanked(fn, asm, ARMV4T_AGBCC, TARGET_OBJ, { symbols, compile });
+      const ranked = await decompileRanked(fn, asm, ARMV4T_AGBCC, TARGET_OBJ, { symbols, compile });
       // candidates arrive sorted best-first, so the first ref-carrying one is the winning
       // NAMED spelling (the overall best may be a '/raw-globals' sibling — not this A/B's
       // subject: it names nothing, so both worlds are trivially the same compile).
@@ -123,7 +123,7 @@ describe.runIf(HAVE)('self-declared vs headers-wrapper A/B — klonoa dogfood (c
       }
       // World A: the exact scoring-path compile — prelude + synthesized declarations (the
       // probe put this template in the self-declared world; it has no headers of its own).
-      const selfHex = rawBytesHex(compile(named.source, fn, 'c', renderDeclarations(named.symbolRefs ?? [])));
+      const selfHex = rawBytesHex(await compile(named.source, fn, 'c', renderDeclarations(named.symbolRefs ?? [])));
       let wrapper: Row['wrapper'];
       try {
         wrapper = { ok: true, hex: rawBytesHex(wrapperCompile(named.source)) };

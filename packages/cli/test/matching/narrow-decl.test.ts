@@ -16,25 +16,25 @@ const DECLS =
   'struct SA { u8 pad[12]; u8 c; }; struct SB { u8 pad[14]; u8 d; };\n' +
   'extern struct SA gA; extern struct SB gB; s32 rnd(void);\n';
 
-const ranked = (decl: string, write: string) => {
+const ranked = async (decl: string, write: string) => {
   const c = `${DECLS}void nd(void) { ${decl} v; v = ${write}; gB.d = (1 & v) + rnd() % (5 - v) + 1; }`;
   const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-  return decompileRanked('nd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+  return await decompileRanked('nd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
     prototypes: { nd: { returnsVoid: true }, rnd: { params: [] } },
     compile: (source) => compileCandAgbcc(DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
   });
 };
 
 describe('/narrow-decl, real agbcc, both directions', () => {
-  it('recovers a narrow declaration through the variation', () => {
-    const r = ranked('u8', 'gA.c - 1');
+  it('recovers a narrow declaration through the variation', async () => {
+    const r = await ranked('u8', 'gA.c - 1');
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(true);
     expect(r.winner.source).toMatch(/\bu8 v0;/);
   });
 
-  it('keeps the s32 local assigned a cast, which the variation would lose', () => {
-    const r = ranked('s32', '(u8)(gA.c - 1)');
+  it('keeps the s32 local assigned a cast, which the variation would lose', async () => {
+    const r = await ranked('s32', '(u8)(gA.c - 1)');
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(false);
     expect(r.winner.source).toMatch(/\bs32 v0;/);
@@ -44,10 +44,10 @@ describe('/narrow-decl, real agbcc, both directions', () => {
 // pokeemerald:RtcGetDayCount's shape: three call results passed on as bytes
 const CALL_DECLS = 'u32 cv(u8); u16 dc(u8, u8, u8);\n';
 
-const rankedReads = (body: string) => {
+const rankedReads = async (body: string) => {
   const c = `${CALL_DECLS}u16 rd(u8 *p) { ${body} }`;
   const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-  return decompileRanked('rd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+  return await decompileRanked('rd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
     prototypes: {
       rd: { params: ['u8 *'], returns: 'u16' },
       cv: { params: ['u8'], returns: 'u32' },
@@ -58,15 +58,15 @@ const rankedReads = (body: string) => {
 };
 
 describe('/narrow-read, real agbcc, both directions', () => {
-  it('recovers byte locals holding call results through the variation', () => {
-    const r = rankedReads('u8 y = cv(p[0]); u8 m = cv(p[1]); u8 d = cv(p[2]); return dc(y, m, d);');
+  it('recovers byte locals holding call results through the variation', async () => {
+    const r = await rankedReads('u8 y = cv(p[0]); u8 m = cv(p[1]); u8 d = cv(p[2]); return dc(y, m, d);');
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'narrow-read')).toBe(true);
     expect(r.winner.source).toMatch(/\bu8 v0;/);
   });
 
-  it('keeps s32 locals narrowed where they are read, which the variation would lose', () => {
-    const r = rankedReads('s32 y = cv(p[0]); s32 m = cv(p[1]); return dc((u8)y, (u8)m, (u8)cv(p[2]));');
+  it('keeps s32 locals narrowed where they are read, which the variation would lose', async () => {
+    const r = await rankedReads('s32 y = cv(p[0]); s32 m = cv(p[1]); return dc((u8)y, (u8)m, (u8)cv(p[2]));');
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'narrow-read')).toBe(false);
     expect(r.winner.source).toMatch(/\bs32 v0;/);
@@ -77,10 +77,10 @@ describe('/narrow-read, real agbcc, both directions', () => {
 // must be declared narrow without the other
 const BOTH_DECLS = DECLS + CALL_DECLS;
 
-const rankedBoth = (body: string) => {
+const rankedBoth = async (body: string) => {
   const c = `${BOTH_DECLS}u16 both(u8 *p) { ${body} }`;
   const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-  return decompileRanked('both', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+  return await decompileRanked('both', asm, ARMV4T_AGBCC, assembleTarget(asm), {
     prototypes: {
       both: { params: ['u8 *'], returns: 'u16' },
       rnd: { params: [] },
@@ -94,8 +94,8 @@ const rankedBoth = (body: string) => {
 const BOTH_WRITE = 'v = gA.c - 1; gB.d = (1 & v) + rnd() % (5 - v) + 1;';
 
 describe('/narrow-decl and /narrow-read in one function, real agbcc', () => {
-  it('narrows the written local alone', () => {
-    const r = rankedBoth(
+  it('narrows the written local alone', async () => {
+    const r = await rankedBoth(
       `u8 v; s32 y; s32 m; ${BOTH_WRITE} y = cv(p[0]); m = cv(p[1]); return dc((u8)y, (u8)m, (u8)cv(p[2]));`,
     );
     expect(r.winner.score.match).toBe(true);
@@ -103,8 +103,8 @@ describe('/narrow-decl and /narrow-read in one function, real agbcc', () => {
     expect(r.winner.source).toMatch(/\bu8 v0;/);
   });
 
-  it('narrows the read locals alone', () => {
-    const r = rankedBoth(
+  it('narrows the read locals alone', async () => {
+    const r = await rankedBoth(
       `s32 v; u8 y; u8 m; ${BOTH_WRITE.replace('gA.c - 1', '(u8)(gA.c - 1)')} y = cv(p[0]); m = cv(p[1]); return dc(y, m, (u8)cv(p[2]));`,
     );
     expect(r.winner.score.match).toBe(true);

@@ -652,7 +652,7 @@ switch (command) {
       }
       process.exit(fanOfAsm(rowId, opts.asm, opts.toolchain, fanOpts));
     }
-    process.exit(fan(rowId, fanOpts));
+    process.exit(await fan(rowId, fanOpts));
     break;
   }
   case 'sweep': {
@@ -782,7 +782,7 @@ switch (command) {
     process.exit(diffGate(opts.base));
   }
   case 'smoke':
-    smoke();
+    await smoke();
     break;
   case 'vendor': {
     const { vendor } = await import('./cases/vendor');

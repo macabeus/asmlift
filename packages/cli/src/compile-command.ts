@@ -87,11 +87,12 @@ export type AsyncCandidateCompiler = (
   declarations?: string,
 ) => Promise<string>;
 
-/** One compiler instance in both flavours. `compile` is the synchronous contract every existing
- *  caller uses; `worker()` mints an INDEPENDENT async compiler with its own scratch — call
- *  it once per pool worker. Both share the one cached world probe below. */
+/** Either contract: a ranked pass awaits whichever it is given. */
+export type AnyCandidateCompiler = CandidateCompiler | AsyncCandidateCompiler;
+
+/** One compiler instance: `worker()` mints an INDEPENDENT compiler with its own scratch — call it
+ *  once per pool worker. Every worker shares the one cached world probe below. */
 export interface CommandCompilers {
-  compile: CandidateCompiler;
   worker: () => AsyncCandidateCompiler;
   /** Which WORLD the probe found, or undefined before the first candidate compiled: `true` =
    *  SELF-DECLARED (this template compiles bare candidates, so asmlift's synthesized declaration
@@ -632,11 +633,6 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   // mount, and a recycled path does not survive one.
   const runner = createRunner(renderCc(renderCflags(command, opts.cflags), opts.cc), { cwd: opts.cwd });
   const template = runner.template;
-  const mainScratch = runner.scratch();
-  /** One SYNCHRONOUS compile, in the instance's own scratch, which is where every CANDIDATE
-   *  compiled on the sync path goes. */
-  const execute = (content: string, symbol: string, ext: 'c' | 'p'): Verdict =>
-    verdict(mainScratch.compileSync(content, { ext, symbol }));
   const executeIn = async (scratch: Scratch, content: string, symbol: string, ext: 'c' | 'p'): Promise<Verdict> =>
     verdict(await scratch.compile(content, { ext, symbol }));
 
@@ -785,7 +781,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     }
     hashPath(budget, h, tok + '>' + basename(entry), entry);
   };
-  const stamp = (): string => {
+  const stamp = async (): Promise<string> => {
     const h = createHash('sha256');
     const budget = newMeasurementBudget();
     const cwd = resolve(opts.cwd ?? process.cwd());
@@ -944,14 +940,13 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     // different means NOT_CACHEABLE, refused out loud. MEASURED: `ido7.1` writes the absolute
     // path of its input .c into the object (1108 vs 1124 bytes at two scratch paths); agbcc does
     // not.
-    // Two scratches of its own, never `mainScratch`: the stamp is reached from `warm()`, and
-    // compiled into the scratch a candidate has just written, it removes that candidate's object —
-    // measured once as 8 poisoned keys, 26 moved report fields and 2 rows flipped nonmatch to
-    // noncompile, with every other gate green.
+    // Two scratches of its own, never a worker's: compiled into the scratch a candidate has just
+    // written, the probe removes that candidate's object — measured once as 8 poisoned keys, 26
+    // moved report fields and 2 rows flipped nonmatch to noncompile, with every other gate green.
     using s1 = runner.scratch();
     using s2 = runner.scratch();
-    const p1 = verdict(s1.compileSync(STAMP_PROBE, { ext: 'c', symbol: 'asmlift_candcache_stamp' }));
-    const p2 = verdict(s2.compileSync(STAMP_PROBE, { ext: 'c', symbol: 'asmlift_candcache_stamp' }));
+    const p1 = await executeIn(s1, STAMP_PROBE, 'asmlift_candcache_stamp', 'c');
+    const p2 = await executeIn(s2, STAMP_PROBE, 'asmlift_candcache_stamp', 'c');
     if (!p1.ok || !p2.ok) {
       return NOT_CACHEABLE;
     }
@@ -967,7 +962,16 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   // stale-object direction the moment the declaration is incomplete, and nothing verifies it; the
   // namespace measures those inputs instead (`stamp()`).
   //
-  const cache = candCache('command', stamp);
+  //
+  // The stamp compiles, so `warmCache` measures it once, before the first candidate, and the cache
+  // reads the measurement. A stamp that threw reaches the cache as a throw, which refuses it.
+  let stamped: string | Error = new Error('the namespace was read before it was measured');
+  const cache = candCache('command', () => {
+    if (stamped instanceof Error) {
+      throw stamped;
+    }
+    return stamped;
+  });
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
   // cache on for every other candidate. Two shapes, both in `candidateCacheRefusal` (shared with
   // the bench pipeline, because a predicate copied into two files is a predicate fixed in one):
@@ -1034,42 +1038,32 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     return r;
   };
 
-  // The cache protocol itself, once. The `??` is what keeps the compile LAZY — neither runner's
-  // right-hand side is evaluated when the store answers, which for the pooled runner means the
-  // worker's scratch makes no directory on a hit, the whole point of not spawning.
-  const executeCached = (content: string, symbol: string, ext: 'c' | 'p'): Verdict => {
-    if (!cacheable(content)) {
-      return execute(content, symbol, ext);
-    }
-    const key = ext + ' ' + content;
-    return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, execute(content, symbol, ext));
-  };
-  const executeInCached = async (
-    scratch: Scratch,
-    content: string,
-    symbol: string,
-    ext: 'c' | 'p',
-  ): Promise<Verdict> => {
+  // The cache protocol itself, once. The `??` is what keeps the compile LAZY — the right-hand side
+  // is not evaluated when the store answers, so the worker's scratch makes no directory on a hit,
+  // the whole point of not spawning.
+  const executeCached = async (scratch: Scratch, content: string, symbol: string, ext: 'c' | 'p'): Promise<Verdict> => {
     if (!cacheable(content)) {
       return executeIn(scratch, content, symbol, ext);
     }
     const key = ext + ' ' + content;
     return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, await executeIn(scratch, content, symbol, ext));
   };
-  /** Resolve the namespace EAGERLY, before any candidate compiles. */
-  const warmCache = (): void => cache.warm();
+  /** Measure and resolve the namespace EAGERLY, before any candidate compiles. Memoized as a
+   *  PROMISE, so workers starting together measure it once. */
+  let warming: Promise<void> | undefined;
+  const warmCache = (): Promise<void> =>
+    (warming ??= (async () => {
+      if (cache.mode !== 'off') {
+        stamped = await stamp().catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+      }
+      cache.warm();
+    })());
 
   let preludeOk: boolean | undefined;
-  const probePrelude = (symbol: string): boolean => {
-    if (execute(C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c').ok) {
-      return true;
-    }
-    return !execute(PROBE, symbol, 'c').ok;
-  };
-  // The async twin, memoized as a PROMISE: N workers starting together would otherwise each see
-  // an unset `preludeOk` and probe the world N times.
+  // Memoized as a PROMISE: N workers starting together would otherwise each see an unset
+  // `preludeOk` and probe the world N times.
   let probing: Promise<boolean> | undefined;
-  const probeAsync = (symbol: string): Promise<boolean> =>
+  const probeWorld = (symbol: string): Promise<boolean> =>
     (probing ??= (async () => {
       using probe = runner.scratch();
       if ((await executeIn(probe, C_TYPEDEFS + PROBE_DECLS + PROBE, symbol, 'c')).ok) {
@@ -1079,32 +1073,24 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     })());
 
   return {
-    compile: (source, symbol, backendId, declarations) => {
-      let prelude = '';
-      if (backendId !== 'pascal') {
-        preludeOk ??= probePrelude(symbol);
-        prelude = preludeFor(preludeOk, declarations);
-      }
-      warmCache();
-      return unwrap(executeCached(prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
-    },
     selfDeclared: () => preludeOk,
     worker: () => {
       const mine = runner.scratch();
       return async (source, symbol, backendId, declarations) => {
         let prelude = '';
         if (backendId !== 'pascal') {
-          preludeOk ??= await probeAsync(symbol);
+          preludeOk ??= await probeWorld(symbol);
           prelude = preludeFor(preludeOk, declarations);
         }
-        warmCache();
-        return unwrap(await executeInCached(mine, prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
+        await warmCache();
+        return unwrap(await executeCached(mine, prelude + source, symbol, backendId === 'pascal' ? 'p' : 'c'));
       };
     },
   };
 }
 
-/** The synchronous candidate compiler alone — the shape every non-pooled caller wants. */
-export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): CandidateCompiler {
-  return compilersFromCommand(template, opts).compile;
+/** One worker of `compilersFromCommand` — the shape every non-pooled caller wants. Its object
+ *  survives until its next compile, so it compiles one candidate at a time. */
+export function compileFromCommand(template: string, opts: CompileCommandOptions = {}): AsyncCandidateCompiler {
+  return compilersFromCommand(template, opts).worker();
 }

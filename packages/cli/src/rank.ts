@@ -11,7 +11,6 @@ import type { Prototypes } from '@asmlift/core/proto';
 import {
   type Candidate,
   type RankedResult as CoreRankedResult,
-  NoScorableCandidateError,
   type Scored,
   enumerateCandidates,
   rankBy,
@@ -20,10 +19,10 @@ import { type ProbeOutcome, defaultIsReadableRejection, probeIndices, stillbornV
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type TargetDescription } from '@asmlift/core/target';
 
-import type { AsyncCandidateCompiler, CandidateCompiler as SyncCompiler } from './compile-command';
+import type { AnyCandidateCompiler, AsyncCandidateCompiler } from './compile-command';
 import { renderDeclarations } from './declare';
 import { type PhaseClock, timed, timedAsync } from './phase';
-import { type CandidateCompiler, EngineFailedError, MatchScore, scoreObjects, scoreSource } from './score';
+import { EngineFailedError, MatchScore, registeredCompiler, scoreObjects } from './score';
 
 // The cli's candidate/result shapes are the core generics pinned to the objdiff MatchScore.
 export type RankedCandidate = Scored<MatchScore>;
@@ -37,16 +36,14 @@ export interface RankOptions {
   /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
   /** a project's own toolchain — overrides the compiler registry */
-  compile?: CandidateCompiler;
+  compile?: AnyCandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
    *  best score seen SO FAR — the whole `MatchScore`, not its numerator, so the line can PRINT the
    *  denominator that numerator was measured against. Ranking itself compares bare numerators and
    *  is right to: every candidate here is scored against the same target, so fewer differing rows
    *  is a better candidate whatever the alignment length. The ranking below decides the winner. */
   onProgress?: (done: number, total: number, bestSoFar: MatchScore | undefined) => void;
-  /** Where this run's phase timings accumulate (phase.ts). Absent = no timing taken. The serial
-   *  driver can only separate the compile from the score when `compile` is supplied; reached
-   *  through the registry instead, the compile is charged to `score`. */
+  /** Where this run's phase timings accumulate (phase.ts). Absent = no timing taken. */
   clock?: PhaseClock;
   /** A variation that THREW, rather than declining — core rank.ts's own channel, forwarded so the CLI
    *  can print it. Core's header states why the distinction matters ("a variation that never fires
@@ -65,14 +62,13 @@ export interface RankOptions {
 const declarationsOf = (cand: Candidate): string | undefined =>
   cand.symbolRefs?.length ? renderDeclarations(cand.symbolRefs) : undefined;
 
-// ONE enumeration for both drivers below: they must rank the same candidate set, or the pooled
-// run would be answering a different question than the serial one.
+// ONE enumeration for the ranked driver below.
 //
-// EXPORTED because there is now a third caller that must not drift from those two: `bench fan
-// --enumerate` lists a row's fan without compiling anything, and a fan listed by a second mapping
-// of `RankOptions` onto `enumerateCandidates` (forgetting `backend`, say, or `symbols`) would be a
-// different fan wearing the same name — which is the failure docs/ranked-repro.md is entirely
-// about. One function, three callers.
+// EXPORTED because a second caller must not drift from it: `bench fan --enumerate` lists a row's
+// fan without compiling anything, and a fan listed by a second mapping of `RankOptions` onto
+// `enumerateCandidates` (forgetting `backend`, say, or `symbols`) would be a different fan wearing
+// the same name — which is the failure docs/ranked-repro.md is entirely about. One function, two
+// callers.
 export const enumerateRanked = (name: string, asm: string, target: TargetDescription, opts: RankOptions): Candidate[] =>
   enumerateCandidates(name, asm, target, {
     patterns: opts.patterns,
@@ -107,77 +103,37 @@ const perSiteSenseProbe = (): { perSiteSenseBits?: number } => {
   return { perSiteSenseBits: n };
 };
 
-/** ONE candidate compiled and scored outside a ranking, with the `scoreSource` call and the
- *  declarations `decompileRanked` scores it with — `bench fan --whole` compiles a stillborn fan's
+/** ONE candidate compiled and scored outside a ranking, with the compiler and the declarations
+ *  `decompileRanked` scores it with — `bench fan --whole` compiles a stillborn fan's
  *  rest through this, and a check that compiled a candidate another way would check another text. */
-export const scoreCandidate = (
+export const scoreCandidate = async (
   cand: Candidate,
   name: string,
   target: TargetDescription,
   targetObj: string,
   opts: RankOptions,
-): MatchScore =>
-  scoreSource(cand.source, name, targetObj, target, (opts.backend ?? cBackend).id, opts.compile, declarationsOf(cand));
+): Promise<MatchScore> => {
+  const compile = opts.compile ?? registeredCompiler(target);
+  const obj = await compile(cand.source, name, (opts.backend ?? cBackend).id, declarationsOf(cand));
+  return scoreObjects(targetObj, obj, name);
+};
 
-/** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score. */
+/** Enumerate each type/branch-sense candidate, recompile + objdiff-score it, and rank by the score:
+ *  `decompileRankedParallel` with one worker, compiling through `opts.compile` or the compiler
+ *  registered for the target. */
 export function decompileRanked(
   name: string,
   asm: string,
   target: TargetDescription,
   targetObj: string,
   opts: RankOptions = {},
-): RankedResult {
-  const backend = opts.backend ?? cBackend;
-  const candidates = timed(opts.clock, 'enumerate', () => enumerateRanked(name, asm, target, opts));
-  // The compile happens INSIDE scoreSource here, so it is charged from the compiler itself and the
-  // `score` frame around the call keeps the rest. The pooled driver awaits the two separately.
-  const compile: SyncCompiler | undefined =
-    opts.clock && opts.compile
-      ? (source, symbol, backendId, declarations) =>
-          timed(opts.clock, 'compile', () => opts.compile!(source, symbol, backendId, declarations))
-      : opts.compile;
-  let done = 0;
-  let best: MatchScore | undefined;
-  // `rankBy` records every throw as a dropped candidate; a dead engine fails every later score, so
-  // it ends the ranking instead.
-  let engineFailure: unknown;
-  try {
-    const ranked = rankBy(candidates, name, (source, symbol, cand) => {
-      if (engineFailure) {
-        throw engineFailure;
-      }
-      try {
-        const s = timed(opts.clock, 'score', () =>
-          scoreSource(source, symbol, targetObj, target, backend.id, compile, declarationsOf(cand)),
-        );
-        best = best === undefined || s.score < best.score ? s : best;
-        return s;
-      } catch (e) {
-        if (e instanceof EngineFailedError) {
-          engineFailure = e;
-        }
-        throw e;
-      } finally {
-        // a candidate the scorer REFUSED still counts as processed: progress must not stall on a
-        // variation whose every candidate fails to build
-        opts.onProgress?.(++done, candidates.length, best);
-      }
-    });
-    if (engineFailure) {
-      throw engineFailure;
-    }
-    return ranked;
-  } catch (e) {
-    if (engineFailure) {
-      throw engineFailure;
-    }
-    // a stillborn fan (core stillborn.ts) ends the pass after the probes: the bar closes on what
-    // was compiled rather than stopping short of a total nothing will reach
-    if (e instanceof NoScorableCandidateError && e.notCompiled.length > 0) {
-      opts.onProgress?.(done, done, best);
-    }
-    throw e;
-  }
+): Promise<RankedResult> {
+  const compile = opts.compile ?? registeredCompiler(target);
+  return decompileRankedParallel(name, asm, target, targetObj, {
+    ...opts,
+    jobs: 1,
+    worker: () => async (source, symbol, backendId, declarations) => compile(source, symbol, backendId, declarations),
+  });
 }
 
 /** The same ranking with the candidate COMPILES run `jobs` at a time.
@@ -186,16 +142,14 @@ export function decompileRanked(
  *  forks a whole toolchain while a score is a wasm call over two objects already in memory. The
  *  committed LoadBGTilemapData baseline (docs/lbg-attribution-evidence/baseline/run-summary.json)
  *  charged compile 47272s against score 619s over 225792 candidates; any run's own `[phase]` line
- *  (phase.ts) is where a current figure comes from. `rankBy`'s driver is synchronous, so on the
- *  serial path every one of those candidates compiles one at a time on one core. Here each worker
- *  owns a scratch slot (compile-command.ts `worker()`), takes the next unclaimed candidate, and
- *  scores its object the moment it lands; the score runs on the main thread and overlaps the other
- *  workers' subprocesses.
+ *  (phase.ts) is where a current figure comes from. Each worker owns a scratch (compile-command.ts
+ *  `worker()`), takes the next unclaimed candidate, and scores its object the moment it lands; the
+ *  score runs on the main thread and overlaps the other workers' subprocesses.
  *
  *  ONLY the compile moves. The ordering is still core's `rankBy` over the same enumeration, run
  *  afterwards against the memoized scores — so the winner, every tie-break and the `dropped` list
- *  are what the serial path would have produced, and a published measurement that runs through
- *  this driver depends on no scheduler. */
+ *  are the same at any `jobs`, and a published measurement that runs through this driver depends
+ *  on no scheduler. */
 export async function decompileRankedParallel(
   name: string,
   asm: string,
@@ -221,7 +175,8 @@ export async function decompileRankedParallel(
   let done = 0;
   let best: MatchScore | undefined;
   const workers = Array.from({ length: jobs }, () => opts.worker());
-  // as in `decompileRanked`, a dead engine ends the ranking
+  // `rankBy` records every throw as a dropped candidate; a dead engine fails every later score, so
+  // it ends the ranking instead.
   let engineFailure: unknown;
   const score = async (cand: Candidate, compile: AsyncCandidateCompiler): Promise<void> => {
     if (engineFailure) {

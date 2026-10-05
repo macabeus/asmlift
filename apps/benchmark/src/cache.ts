@@ -229,11 +229,14 @@ export interface M2cKeyInputs {
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
  *  (m2c commit, objdiff-wasm version, toolchain, candidate compile flags, symbol, asm, context,
  *  target-object bytes, and — for c++ — language). */
-export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerResult): DecompilerResult {
+export async function cachedM2cResult(
+  inputs: M2cKeyInputs,
+  compute: () => DecompilerResult | Promise<DecompilerResult>,
+): Promise<DecompilerResult> {
   const { tcId, cflags, sym, asm, ctx, obj, lang } = inputs;
   const commit = m2cCommit();
   if (!enabled() || !commit) {
-    return compute();
+    return await compute();
   }
   // The objdump→GNU-as normalizer, the m2c scoring prelude, the outcome classifier and the
   // quality heuristic all run INSIDE this cached computation but are not part of the key — any
@@ -338,7 +341,7 @@ export function cachedM2cResult(inputs: M2cKeyInputs, compute: () => DecompilerR
   if (existsSync(path)) {
     return JSON.parse(readFileSync(path, 'utf8')) as DecompilerResult;
   }
-  const result = compute();
+  const result = await compute();
   // NEVER cache an EMPTY failure. `failed` covers three things (m2c.ts runM2c): a nonzero exit, a
   // failure report m2c itself wrote, and NO OUTPUT AT ALL. The first two are m2c's own behaviour
   // and are worth caching — the third never is. m2c always says something when it gives up, so an

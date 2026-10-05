@@ -139,7 +139,7 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
     });
   }
 
-  test('a struct table behind a narrow index gets its home from the licence (`/orderbase`)', () => {
+  test('a struct table behind a narrow index gets its home from the licence (`/orderbase`)', async () => {
     // kleod's `GetEntityLookupData`, renamed: both bases in pointer locals, the table's element
     // read 5 and 6 bytes in. The single-shot default leaves the element's cast base inline, which
     // costs the `ldr` its slot ahead of the `lsr`; the home is a ranked candidate, offered only
@@ -150,7 +150,7 @@ describe('the fused scale orders an array subscript — real agbcc, byte-exact',
         'const u8 *e = &t[(u32)idx * 8]; flags[0x11] = e[5]; flags[0x12] = e[6]; }',
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
-    const r = decompileRanked('entrylookup', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    const r = await decompileRanked('entrylookup', asm, ARMV4T_AGBCC, assembleTarget(asm), {
       prototypes: { entrylookup: { returnsVoid: true } },
       compile: (source) => compileCandAgbcc(decls + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
     });

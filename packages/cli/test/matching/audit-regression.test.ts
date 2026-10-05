@@ -64,10 +64,10 @@ describe('soundness regressions — short-circuit hoisting, stack-passed args, r
   // FINDING 3 (report/report.ts): the report path must apply the same raise passes as decompile()
   // or its headline source drifts. Byte-identical output required (soft-div exercises a pass that
   // drifted once).
-  test('M5 report source matches decompile() (soft-div parity)', () => {
+  test('M5 report source matches decompile() (soft-div parity)', async () => {
     const asm = compileTargetAsm('int divv(int a,int b){ return a/b; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const d = decompile('divv', asm, ARMV4T_AGBCC).source;
-    const r = decompileWithReport('divv', asm, AGBCC).source;
+    const r = (await decompileWithReport('divv', asm, AGBCC)).source;
     expect(r).toBe(d);
     expect(r).toContain('a0 / a1'); // soft-div folded, not a raw __divsi3(...) call
   });
@@ -310,7 +310,7 @@ describe('report path parity with decompile()', () => {
   // The report must share decompile()'s pattern defaults (DEFAULT_IDIOM_PATTERNS): defaulting to
   // [] diverges its headline source on any pattern-folded function while its embedded
   // decompileRanked uses the full set. Source must be byte-identical.
-  test('pattern-dependent function: report source === decompile source', () => {
+  test('pattern-dependent function: report source === decompile source', async () => {
     for (const c of [
       'int p2(int a){ return a / 2; }', // sdiv-pow2/2 pattern
       'int mm(int a){ return a * 10; }', // mul-shift pattern family
@@ -318,7 +318,7 @@ describe('report path parity with decompile()', () => {
     ]) {
       const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
       const sym = c.match(/(\w+)\(int a\)/)![1];
-      expect(decompileWithReport(sym, asm, AGBCC).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
+      expect((await decompileWithReport(sym, asm, AGBCC)).source).toBe(decompile(sym, asm, ARMV4T_AGBCC).source);
     }
   });
 
@@ -326,7 +326,7 @@ describe('report path parity with decompile()', () => {
   // the recompiling compiler (`recomputesSharedInterior`) is applied by BOTH tower entry points, so
   // a shape where it fires is the case that tells them apart: IDO recomputes a shared `shl`, so the
   // shift pair must stay written out on both paths rather than folding to `(s8)a0` on one of them.
-  test('pattern-dependent function on IDO: report source === decompile source', () => {
+  test('pattern-dependent function on IDO: report source === decompile source', async () => {
     const { asm } = compileMipsTarget(
       'int r1(int x){ int y = x << 24; return (y >> 24) + y; }',
       'r1',
@@ -334,10 +334,10 @@ describe('report path parity with decompile()', () => {
     );
     const viaPipeline = decompile('r1', asm, MIPS_IDO).source;
     expect(viaPipeline).toContain('<< 24'); // the fold really is refused on this shape
-    expect(decompileWithReport('r1', asm, IDO).source).toBe(viaPipeline);
+    expect((await decompileWithReport('r1', asm, IDO)).source).toBe(viaPipeline);
   });
 
-  test('annotate mode: a NON-localizable failure stubs identically on both paths', () => {
+  test('annotate mode: a NON-localizable failure stubs identically on both paths', async () => {
     // The sp-as-data decline is a frontend THROW (no line to mark). decompile() degrades to a
     // stub; the report path must not accept onGap yet re-throw on the same input.
     // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`), handed to a callee whose
@@ -350,19 +350,19 @@ describe('report path parity with decompile()', () => {
     const protos = { prototypes: { g: { params: 1 } } as const, onGap: 'annotate' as const };
     const viaPipeline = decompile('atl2', asm, ARMV4T_AGBCC, protos);
     expect(viaPipeline.source).toContain('could not decompile'); // really the stub path
-    const viaReport = decompileWithReport('atl2', asm, AGBCC, protos);
+    const viaReport = await decompileWithReport('atl2', asm, AGBCC, protos);
     expect(viaReport.source).toBe(viaPipeline.source);
     expect(viaReport.report.outcome).toBe('unscored');
   });
 
-  test('annotate mode: report threads onGap exactly like decompile', () => {
+  test('annotate mode: report threads onGap exactly like decompile', async () => {
     // a live unmodelled op (non-#0 rsb → loud opaque) → marker in annotate mode on BOTH paths
     const asm0 = compileTargetAsm('int rsb(int a){ return 4 - a; }', TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const asm = asm0.replace(/sub\tr0, r0, r1/, 'rsb\tr0, r1, #0x4');
     expect(asm).not.toBe(asm0); // the hostile edit really applied
     const viaPipeline = decompile('rsb', asm, ARMV4T_AGBCC, { onGap: 'annotate' });
     expect(viaPipeline.source).toContain('ASMLIFT_ERROR'); // and really produced a marker
-    const viaReport = decompileWithReport('rsb', asm, AGBCC, { onGap: 'annotate' });
+    const viaReport = await decompileWithReport('rsb', asm, AGBCC, { onGap: 'annotate' });
     expect(viaReport.source).toBe(viaPipeline.source);
   });
 });

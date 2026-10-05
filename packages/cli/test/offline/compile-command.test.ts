@@ -33,13 +33,11 @@ test('{{cflags}} is rendered as shell words, and a command and its flags must ag
   );
 });
 
-test('the compiler receives the flags word for word', () => {
+test('the compiler receives the flags word for word', async () => {
   const cflags = ['-pragma', 'cats off', "-DQ='x'", '-O4,p'];
-  const obj = compileFromCommand(`printf '%s\\n' {{cflags}} > {{outputPath}} && test -f {{inputPath}}`, { cflags })(
-    's32 f(void) { return 0; }\n',
-    'f',
-    'c',
-  );
+  const obj = await compileFromCommand(`printf '%s\\n' {{cflags}} > {{outputPath}} && test -f {{inputPath}}`, {
+    cflags,
+  })('s32 f(void) { return 0; }\n', 'f', 'c');
   expect(readFileSync(obj, 'utf8')).toBe(`${cflags.join('\n')}\n`);
 });
 
@@ -54,22 +52,22 @@ test('an unknown {{...}} placeholder is named loudly', () => {
   );
 });
 
-test('{{functionName}} is the symbol too, so a template written for Transmuter compiles here', () => {
+test('{{functionName}} is the symbol too, so a template written for Transmuter compiles here', async () => {
   const compile = compileFromCommand('echo {{functionName}} {{symbol}} > {{outputPath}} && test -f {{inputPath}}');
-  expect(readFileSync(compile('int x;', 'my_func', 'c'), 'utf8').trim()).toBe('my_func my_func');
+  expect(readFileSync(await compile('int x;', 'my_func', 'c'), 'utf8').trim()).toBe('my_func my_func');
 });
 
-test('happy path: command runs via sh, {in} carries the typedef prelude, {out} is returned', () => {
+test('happy path: command runs via sh, {in} carries the typedef prelude, {out} is returned', async () => {
   const compile = compileFromCommand('cp {{inputPath}} {{outputPath}}');
-  const obj = compile('s32 f(s32 a0) { return a0; }\n', 'f', 'c');
+  const obj = await compile('s32 f(s32 a0) { return a0; }\n', 'f', 'c');
   const written = readFileSync(obj, 'utf8');
   expect(written.startsWith(C_TYPEDEFS)).toBe(true);
   expect(written).toContain('s32 f(s32 a0)');
 });
 
-test('the pascal backend writes the raw source (no C prelude, no probe)', () => {
+test('the pascal backend writes the raw source (no C prelude, no probe)', async () => {
   const raw = 'function f(a0: Integer): Integer;\n';
-  const pascal = compileFromCommand('cp {{inputPath}} {{outputPath}}')(raw, 'f', 'pascal');
+  const pascal = await compileFromCommand('cp {{inputPath}} {{outputPath}}')(raw, 'f', 'pascal');
   expect(readFileSync(pascal, 'utf8')).toBe(raw);
 });
 
@@ -77,15 +75,15 @@ test('the pascal backend writes the raw source (no C prelude, no probe)', () => 
 // headers already own u8/u16/… rejects the typedef probe, and the prelude is dropped for every
 // candidate — the C89-collision behavior gcc-2.9 projects exhibit, simulated here by a template
 // that fails on any input containing `typedef`.
-test('a typedef-rejecting template (header-injecting project) drops the prelude automatically', () => {
+test('a typedef-rejecting template (header-injecting project) drops the prelude automatically', async () => {
   const compile = compileFromCommand('! grep -q typedef {{inputPath}} && cp {{inputPath}} {{outputPath}}');
-  const obj = compile('u8 f(void) { return gState.timer; }\n', 'f', 'c');
+  const obj = await compile('u8 f(void) { return gState.timer; }\n', 'f', 'c');
   const written = readFileSync(obj, 'utf8');
   expect(written).not.toContain('typedef'); // prelude dropped — headers own the types
   expect(written).toContain('gState.timer');
 });
 
-test('a prelude-tolerant template keeps the prelude (probe verdict cached across candidates)', () => {
+test('a prelude-tolerant template keeps the prelude (probe verdict cached across candidates)', async () => {
   // the counter file records every template execution: 1 probe + 2 candidates = 3, not 4 —
   // the verdict is cached per compiler instance
   // pid-keyed and APPENDED to: pids are reused, so a file left by an earlier run under the same
@@ -93,79 +91,79 @@ test('a prelude-tolerant template keeps the prelude (probe verdict cached across
   const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-count-${process.pid}`;
   rmSync(counter, { force: true });
   const compile = compileFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
-  const first = compile('s32 f(void) { return 1; }\n', 'f', 'c');
+  const first = await compile('s32 f(void) { return 1; }\n', 'f', 'c');
   expect(readFileSync(first, 'utf8').startsWith(C_TYPEDEFS)).toBe(true);
-  compile('s32 g(void) { return 2; }\n', 'g', 'c');
+  await compile('s32 g(void) { return 2; }\n', 'g', 'c');
   expect(readFileSync(counter, 'utf8').trim().split('\n')).toHaveLength(3);
 });
 
-test('a broken template keeps the prelude and fails loudly on the real candidate', () => {
+test('a broken template keeps the prelude and fails loudly on the real candidate', async () => {
   // both probe forms fail ⇒ the template itself is broken; the candidate compile must throw
   // the template's own error, never a silent prelude decision
   const compile = compileFromCommand('test -f {{inputPath}} && false && cp {{inputPath}} {{outputPath}}');
-  expect(() => compile('s32 f(void) { return 1; }\n', 'f', 'c')).toThrow(/compile command failed/);
+  await expect(compile('s32 f(void) { return 1; }\n', 'f', 'c')).rejects.toThrow(/compile command failed/);
 });
 
-test('{symbol} substitutes raw; a shell-unsafe symbol REFUSES (injection guard)', () => {
+test('{symbol} substitutes raw; a shell-unsafe symbol REFUSES (injection guard)', async () => {
   const compile = compileFromCommand('echo {{symbol}} > {{outputPath}} && test -f {{inputPath}}');
-  const obj = compile('int x;', 'my_func', 'c');
+  const obj = await compile('int x;', 'my_func', 'c');
   expect(readFileSync(obj, 'utf8').trim()).toBe('my_func');
   // detectName-derived labels are unvalidated — a hostile one must never reach sh
-  expect(() => compile('int x;', 'pwn; rm -rf /', 'c')).toThrow(/shell-unsafe/);
-  expect(() => compile('int x;', 'a$(reboot)', 'c')).toThrow(/shell-unsafe/);
+  await expect(compile('int x;', 'pwn; rm -rf /', 'c')).rejects.toThrow(/shell-unsafe/);
+  await expect(compile('int x;', 'a$(reboot)', 'c')).rejects.toThrow(/shell-unsafe/);
 });
 
-test('the template owns quoting: placeholders inside quotes and word-concatenations work', () => {
+test('the template owns quoting: placeholders inside quotes and word-concatenations work', async () => {
   // the kleod-style template shape: {{outputPath}} embedded in a larger double-quoted word
   const compile = compileFromCommand('P="{{outputPath}}.tmp" && cp {{inputPath}} "$P" && mv "$P" {{outputPath}}');
-  const obj = compile('int x;', 'f', 'c');
+  const obj = await compile('int x;', 'f', 'c');
   expect(readFileSync(obj, 'utf8')).toContain('int x;');
 });
 
-test('non-zero exit throws LOUD with the command and its stderr', () => {
+test('non-zero exit throws LOUD with the command and its stderr', async () => {
   const compile = compileFromCommand("echo 'version 2.4.2 required' >&2; false # {{inputPath}} {{outputPath}}");
-  expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
+  await expect(compile('int x;', 'f', 'c')).rejects.toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
 });
 
-test('exit 0 without producing {out} throws (a compiler that lies about success)', () => {
+test('exit 0 without producing {out} throws (a compiler that lies about success)', async () => {
   const compile = compileFromCommand('true # {{inputPath}} {{outputPath}}');
-  expect(() => compile('int x;', 'f', 'c')).toThrow(/produced no object/);
+  await expect(compile('int x;', 'f', 'c')).rejects.toThrow(/produced no object/);
 });
 
-test('a FAILING middle step aborts even when the last step would succeed (sh -e)', () => {
+test('a FAILING middle step aborts even when the last step would succeed (sh -e)', async () => {
   // The gcc-2.9 partial-output hazard: cc1 exits nonzero on a hard error yet still writes a
   // truncated .s, and the assemble step then "succeeds" — scoring a truncated object is the one
   // forbidden outcome, so any failing step must abort the template, not just the last one.
   const compile = compileFromCommand(
     "sh -c 'echo partial > {{outputPath}}.s; echo undeclared >&2; exit 1' ; cp {{outputPath}}.s {{outputPath}}\ntrue # {{inputPath}}",
   );
-  expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*undeclared/);
+  await expect(compile('int x;', 'f', 'c')).rejects.toThrow(/exit 1[\s\S]*undeclared/);
 });
 
 // ── self-declaring candidates: the generalized world probe (declarations ride the prelude) ──
 
-test('self-declared world: the synthesized declaration block joins the typedef prelude', () => {
+test('self-declared world: the synthesized declaration block joins the typedef prelude', async () => {
   const compile = compileFromCommand('cp {{inputPath}} {{outputPath}}');
   const decls = 'extern volatile u16 gMmio;\nvoid DoThing(void);\n';
-  const obj = compile('u16 f(void) { return gMmio; }\n', 'f', 'c', decls);
+  const obj = await compile('u16 f(void) { return gMmio; }\n', 'f', 'c', decls);
   const written = readFileSync(obj, 'utf8');
   expect(written.startsWith(C_TYPEDEFS)).toBe(true);
   expect(written.indexOf(decls)).toBe(C_TYPEDEFS.length); // prelude first, then the decls
   expect(written).toContain('return gMmio;');
 });
 
-test('headers world: the declaration block drops WITH the prelude (headers own everything)', () => {
+test('headers world: the declaration block drops WITH the prelude (headers own everything)', async () => {
   // the typedef-rejecting template simulates a header-injecting project (C89 duplicate-typedef
   // collision); the synthesized decls would equally collide (duplicate struct/extern), so both go
   const compile = compileFromCommand('! grep -q typedef {{inputPath}} && cp {{inputPath}} {{outputPath}}');
-  const obj = compile('u16 f(void) { return gMmio; }\n', 'f', 'c', 'extern volatile u16 gMmio;\n');
+  const obj = await compile('u16 f(void) { return gMmio; }\n', 'f', 'c', 'extern volatile u16 gMmio;\n');
   const written = readFileSync(obj, 'utf8');
   expect(written).not.toContain('typedef');
   expect(written).not.toContain('extern volatile u16 gMmio;');
   expect(written).toContain('return gMmio;');
 });
 
-test('the probed WORLD is reported, so the caller can say what a score rested on', () => {
+test('the probed WORLD is reported, so the caller can say what a score rested on', async () => {
   // A ranked run publishes declarations it SYNTHESIZED (a name-only global whose width came out
   // of the target asm) — but only in the self-declared world; in the headers world the block is
   // dropped and the project's own declarations did the work. Only the probe knows which, and
@@ -173,15 +171,15 @@ test('the probed WORLD is reported, so the caller can say what a score rested on
   // run, and guessing a world would be the same claim the probe exists to stop.
   const self = compilersFromCommand('cp {{inputPath}} {{outputPath}}');
   expect(self.selfDeclared()).toBeUndefined();
-  self.compile('int f(void) { return 0; }\n', 'f', 'c');
+  await self.worker()('int f(void) { return 0; }\n', 'f', 'c');
   expect(self.selfDeclared()).toBe(true);
 
   const headers = compilersFromCommand('! grep -q typedef {{inputPath}} && cp {{inputPath}} {{outputPath}}');
-  headers.compile('int f(void) { return 0; }\n', 'f', 'c');
+  await headers.worker()('int f(void) { return 0; }\n', 'f', 'c');
   expect(headers.selfDeclared()).toBe(false);
 });
 
-test('the probe itself carries a representative decl block (struct/volatile/const/prototype vocabulary)', () => {
+test('the probe itself carries a representative decl block (struct/volatile/const/prototype vocabulary)', async () => {
   // capture every input the template sees: the probe must exercise the same declaration
   // vocabulary synthesis emits, so a world that accepts the probe accepts any real block —
   // and it IS synthesis output (renderDeclarations over a fixed synthetic ref set), so the
@@ -189,7 +187,7 @@ test('the probe itself carries a representative decl block (struct/volatile/cons
   // volatile member, pointer member, volatile scalar, const array, void prototype
   const log = `${process.env.TMPDIR ?? '/tmp'}/asmlift-probe-decls-${process.pid}`;
   const compile = compileFromCommand(`cat {{inputPath}} >> ${log} && cp {{inputPath}} {{outputPath}}`);
-  compile('s32 f(void) { return 1; }\n', 'f', 'c');
+  await compile('s32 f(void) { return 1; }\n', 'f', 'c');
   const seen = readFileSync(log, 'utf8');
   expect(seen).toContain(
     'struct AsmliftProbeShape { s8 lvl; u8 asmlift_pad_0[1]; volatile u16 gain; void *next; u8 asmlift_pad_1[4]; };',
@@ -200,29 +198,20 @@ test('the probe itself carries a representative decl block (struct/volatile/cons
   expect(seen).toContain('void AsmliftProbeFn(void);');
 });
 
-test('no declarations argument ⇒ exactly the historical prelude behavior', () => {
+test('no declarations argument ⇒ exactly the historical prelude behavior', async () => {
   const compile = compileFromCommand('cp {{inputPath}} {{outputPath}}');
-  const obj = compile('s32 f(void) { return 1; }\n', 'f', 'c');
+  const obj = await compile('s32 f(void) { return 1; }\n', 'f', 'c');
   const written = readFileSync(obj, 'utf8');
   expect(written).toBe(C_TYPEDEFS + 's32 f(void) { return 1; }\n');
 });
 
 // ── the pooled flavour: `worker()` mints an independent async compiler per pool worker ──
 
-test('an async worker compiles exactly like the sync compiler', async () => {
-  const { compile, worker } = compilersFromCommand('cp {{inputPath}} {{outputPath}}');
-  const src = 's32 f(s32 a0) { return a0; }\n';
-  const sync = readFileSync(compile(src, 'f', 'c'), 'utf8');
-  const async1 = readFileSync(await worker()(src, 'f', 'c'), 'utf8');
-  expect(async1).toBe(sync);
-  expect(async1.startsWith(C_TYPEDEFS)).toBe(true);
-});
-
 test('the world is probed ONCE across every worker, not once per worker', async () => {
   // N workers starting together each see an unset probe verdict; without a shared in-flight
   // promise they all probe, and a slow template pays for it N times
   const counter = `${process.env.TMPDIR ?? '/tmp'}/asmlift-worker-probe-${process.pid}`;
-  rmSync(counter, { force: true }); // appended to, and pids are reused — see the sync twin above
+  rmSync(counter, { force: true }); // appended to, and pids are reused — see the single-compiler case above
   const { worker } = compilersFromCommand(`echo x >> ${counter} && cp {{inputPath}} {{outputPath}}`);
   const workers = [worker(), worker(), worker(), worker()];
   await Promise.all(workers.map((w, i) => w(`s32 f${i}(void) { return ${i}; }\n`, `f${i}`, 'c')));
@@ -268,31 +257,18 @@ test('a candidate never inherits a sibling, and never inherits a PATH either', a
 // recycled path) can no longer fail for any reason, so it stopped being a pin — and this is the
 // only assertion in the repo on "exited 0 but produced no object", the verdict that stands
 // between a compiler which wrote nothing and a silent pass.
-test('a command that exits 0 without writing its object fails LOUD, not silently', () => {
-  const { compile } = compilersFromCommand('true {{inputPath}} {{outputPath}}');
-  expect(() => compile('s32 f(void) { return 1; }\n', 'f', 'c')).toThrow(
+test('a command that exits 0 without writing its object fails LOUD, not silently', async () => {
+  const compile = compileFromCommand('true {{inputPath}} {{outputPath}}');
+  await expect(compile('s32 f(void) { return 1; }\n', 'f', 'c')).rejects.toThrow(
     /compile command exited 0 but produced no object/,
   );
 });
 
-test('an async worker reports a failed compile as a THROW, exactly like the sync one', async () => {
-  const { compile, worker } = compilersFromCommand(
-    "echo 'version 2.4.2 required' >&2; false # {{inputPath}} {{outputPath}}",
-  );
-  expect(() => compile('int x;', 'f', 'c')).toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
-  await expect(worker()('int x;', 'f', 'c')).rejects.toThrow(/exit 1[\s\S]*version 2\.4\.2 required/);
-});
-
 // The stillborn rule (core stillborn.ts) keys a rejection by its DIAGNOSTIC, and a `decomp.yaml`
 // template is text this process wrote, not the compiler: what it says is not the verdict.
-test("a rejection's diagnostic is the compiler's output alone, never the command that ran it", () => {
+test("a rejection's diagnostic is the compiler's output alone, never the command that ran it", async () => {
   const compile = compileFromCommand('echo "{{inputPath}}:1: error: boom" >&2; false; cp {{inputPath}} {{outputPath}}');
-  let thrown: unknown;
-  try {
-    compile('int x;', 'f', 'c');
-  } catch (e) {
-    thrown = e;
-  }
+  const thrown = await compile('int x;', 'f', 'c').catch((e: unknown) => e);
   expect(thrown).toBeInstanceOf(CompilerRejection);
   const e = thrown as CompilerRejection;
   expect(e.message).toMatch(/exit 1[\s\S]*error: boom/);
@@ -300,7 +276,7 @@ test("a rejection's diagnostic is the compiler's output alone, never the command
   // a compiler that said nothing is read as nothing, whatever the template's own text spells
   const silent = compileFromCommand('false # x.c:1: error: not the compiler ; {{inputPath}} {{outputPath}}');
   try {
-    silent('int x;', 'f', 'c');
+    await silent('int x;', 'f', 'c');
     throw new Error('compiled?');
   } catch (e2) {
     expect(e2).toBeInstanceOf(CompilerRejection);

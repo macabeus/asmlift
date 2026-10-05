@@ -9,7 +9,7 @@ import { availableToolchains, canonicalCodegen } from '../toolchains';
 const REF = 'int add(int a, int b){ return a + b; }';
 const SYM = 'add';
 
-export function smoke(): void {
+export async function smoke(): Promise<void> {
   for (const tc of availableToolchains()) {
     // The smoke test compiles ONE fixed reference at the toolchain's canonical flags. A toolchain
     // with none has no flag set of its own to run it at — its rows each bring their build's.
@@ -21,7 +21,7 @@ export function smoke(): void {
       const codegen = canonicalCodegen(tc.id);
       const { obj, asm } = tc.buildTarget(REF, SYM, codegen.cflags);
       const r = decompile(SYM, asm, codegen.target);
-      const s = benchScorer(tc.id, codegen.cflags)(r.source, SYM, obj);
+      const s = await benchScorer(tc.id, codegen.cflags)(r.source, SYM, obj);
       console.log(`[${tc.id}] asmlift → score=${s.score}/${s.rows} match=${s.match}`);
       console.log(
         r.source

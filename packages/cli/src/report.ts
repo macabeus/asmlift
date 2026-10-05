@@ -43,12 +43,12 @@ export interface ReportOptions extends Omit<TraceOptions, 'probeScore'> {
 }
 
 /** Run the tower while recording a DecompileReport. */
-export function decompileWithReport(
+export async function decompileWithReport(
   name: string,
   asm: string,
   resolved: ResolvedTarget,
   opts: ReportOptions = {},
-): { source: string; report: DecompileReport } {
+): Promise<{ source: string; report: DecompileReport }> {
   const { target } = resolved;
   const { targetObj, compile, ...traceOpts } = opts;
   const backend = opts.backend ?? cBackend;
@@ -91,7 +91,7 @@ export function decompileWithReport(
       // zero-extends, so the bare form is refused) while every ranked candidate was
       // `gTbl[a0]` — a bare subscript whose meaning rests on a declaration the caller's own map
       // contradicts. A candidate list that cannot contain the headline is not a ranking of it.
-      const ranked = decompileRanked(name, asm, target, targetObj, {
+      const ranked = await decompileRanked(name, asm, target, targetObj, {
         patterns: opts.patterns,
         backend,
         prototypes: opts.prototypes,

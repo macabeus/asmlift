@@ -317,7 +317,7 @@ describe('the whole mechanism is inside the module — neither call site changes
       await withCompile(
         { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '100', ASMLIFT_CANDCACHE_DIR: store },
         async ({ compileFromCommand }) => {
-          served = compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c');
+          served = await compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c');
           mismatches = (await import('../../src/candcache')).cacheMismatches();
         },
       );
@@ -349,7 +349,7 @@ describe('the whole mechanism is inside the module — neither call site changes
     const { served, mismatches } = await withCompile(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store },
       async ({ compileFromCommand }) => ({
-        served: compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c'),
+        served: await compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c'),
         mismatches: (await import('../../src/candcache')).cacheMismatches(),
       }),
     );

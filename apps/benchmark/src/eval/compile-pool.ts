@@ -2,7 +2,7 @@
 // `decompileRankedParallel`). The harness's compile ladders are synchronous — each rung a blocking
 // spawn — so a compiler that runs beside others has to run on a thread of its own; the ranking
 // itself stays on this thread, over the same enumeration and the same memoized scores, so the
-// winner, the tie-breaks, the dropped list and the stillborn verdict are the serial driver's.
+// winner, the tie-breaks, the dropped list and the stillborn verdict are a one-worker ranking's.
 import { absorbCacheStats, cacheSampleSeed } from '@asmlift/cli/candcache';
 import type { AsyncCandidateCompiler } from '@asmlift/cli/compile-command';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
