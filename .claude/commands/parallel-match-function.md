@@ -329,11 +329,16 @@ blocked round can check without asking, and that you cannot forget the meaning o
 
 ### A slot that carries a silent wrong is held, and its fix becomes a lane
 
-A merge slot that lists an open silent wrong — a CONFIRMED-OPEN finding of severity `silent-wrong`,
-or a decline→wrong, on a bench row or on a function outside the bench — is **held, and it is not a
-question for the user.** Merging it trades a loud failure for a silent wrong answer, which
-[`/match-function`](./match-function.md) never does. The slot's reply file is `answered: held`, and
-the PR's `MERGE-QUEUE.md` row is held until the fix merges.
+A merge slot that lists an open silent wrong the PR newly reaches — a CONFIRMED-OPEN finding of
+severity `silent-wrong`, or a decline→wrong, on a bench row or on a function outside the bench, where
+`main` declines or emits different C — is **held, and it is not a question for the user.** Merging
+it trades a loud failure for a silent wrong answer, which [`/match-function`](./match-function.md)
+never does. The slot's reply file is `answered: held`, and the PR's `MERGE-QUEUE.md` row is held
+until the fix merges.
+
+A silent wrong the PR leaves exactly as `main` has it — the same emitted C on both — holds nothing:
+merging changes no answer. The slot merges, and the finding is recorded as a known gap in the
+closing report, not opened as a lane.
 
 **The fix is a lane of its own, opened in the same pass, before any pending target.** It is a
 `match-round` run like any other, branched from `origin/main` and never from the held PR:
