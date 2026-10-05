@@ -299,16 +299,6 @@
     "ctx": "ctx-623b7d027065.i.gz",
     "m2c": "ctx-623b7d027065.i.gz"
   },
-  "Cmd_getswitchedmondata": {
-    "tu": "Cmd_getswitchedmondata.i.gz",
-    "ctx": "ctx-1e510b77ad8d.i.gz",
-    "m2c": "ctx-1e510b77ad8d.i.gz"
-  },
-  "DrawListIndexNumber": {
-    "tu": "DrawListIndexNumber.i.gz",
-    "ctx": "ctx-92fb46a46a7c.i.gz",
-    "m2c": "ctx-92fb46a46a7c.i.gz"
-  },
   "SelectOpponentMons_Good": {
     "tu": "SelectOpponentMons_Good.i.gz",
     "ctx": "ctx-be6ff75affbf.i.gz",

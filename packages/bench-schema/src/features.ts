@@ -612,7 +612,7 @@ export const FEATURES: readonly FeatureDef[] = [
     label: 'Operand order',
     group: 'arithmetic',
     evidence: 'judgement',
-    summary: 'the bytes depend on the order or grouping of a sum the source spelled',
+    summary: 'the bytes depend on the order or grouping of an address sum the recovery has to spell',
     detail:
       'Addition commutes and its compiled form does not: an old compiler emits a sum in an order ' +
       'fixed by how the source spelled it — which operand comes first, which pair is added first, ' +
