@@ -42,12 +42,12 @@ import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
-import { integerCellStores } from './l3/intcell';
-import { legalizePointerCells } from './l3/ptrcell';
+import { integerCells } from './l3/intcell';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
 import { parkParamsFirst } from './l3/parkfirst';
+import { legalizePointerCells } from './l3/ptrcell';
 import { pointerFields } from './l3/ptrfield';
 import { type RegcopyTail, registerishSpellings } from './l3/regspell';
 import { reindexWalks } from './l3/reindex';
@@ -100,7 +100,13 @@ import {
   symbolsByName,
 } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
-import { type SubjectVariationName, type Variation, offeredOn, withSubject } from './variation-tokens';
+import {
+  type SubjectVariationName,
+  type Variation,
+  type VariationName,
+  offeredOn,
+  withSubject,
+} from './variation-tokens';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
@@ -241,14 +247,19 @@ export interface Candidate {
    *
    *  The third admission ground, and the narrowest. A respell variation must preserve semantics by
    *  construction (the POLICY note at the respell site), because on a nonmatch row the best
-   *  spelling is what the user is shown. One spelling cannot meet that bar from inside the pass:
-   *  `l3/unreduce.ts` moves a memory read into a loop whose stores are all device registers, and
-   *  on this board a device store can make the DEVICE write ordinary memory (a DMA trigger), which
-   *  no gate over the C can rule out. What settles it instead is the object: a candidate that
-   *  assembles to the target's own bytes IS the program, whatever a gate could have proved. So the
-   *  spelling is offered, scored, and then either wins on proof or is WITHHELD — never shown as a
-   *  best-effort answer. Both ranking drivers ask `withheldReason`, so neither can publish what the
-   *  other would not. */
+   *  spelling is what the user is shown. Two spellings cannot meet that bar from inside the pass,
+   *  each for its own fact (`PROOF_OBLIGATIONS` states them):
+   *
+   *   • `l3/unreduce.ts` moves a memory read into a loop whose stores are all device registers, and
+   *     on this board a device store can make the DEVICE write ordinary memory (a DMA trigger),
+   *     which no gate over the C can rule out;
+   *   • `l3/intcell.ts` spells a global as the integer a project may have declared it, where a
+   *     pointer declaration scales the offset it adds, and no declaration is in the asm.
+   *
+   *  What settles both instead is the object: a candidate that assembles to the target's own bytes
+   *  IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
+   *  either wins on proof or is WITHHELD — never shown as a best-effort answer. Both ranking drivers
+   *  ask `withheldReason`, so neither can publish what the other would not. */
   matchOnly?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
    *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
@@ -357,10 +368,19 @@ export interface RankedResult<S> {
  *  `score === 0` is objdiff's byte-exact match (@match-kit/scoring states the equivalence), which is
  *  why a bare `.score` suffices and the generic needs no `match` field. */
 export function withheldReason<S extends { score: number }>(c: Candidate, score: S): string | null {
-  return c.matchOnly === true && score.score !== 0
-    ? 'this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it'
-    : null;
+  if (c.matchOnly !== true || score.score === 0) {
+    return null;
+  }
+  const facts = c.variations.flatMap((v) => PROOF_OBLIGATIONS.get(v) ?? []);
+  const fact = facts.length > 0 ? facts.join(' and on ') : 'a fact no gate over the C can settle';
+  return `this spelling rests on ${fact}; only a byte-exact score proves it`;
 }
+
+/** The fact each proof-carrying variation (`needsProof`) rests on, as `withheldReason` publishes it. */
+const PROOF_OBLIGATIONS: ReadonlyMap<string, string> = new Map<VariationName, string>([
+  ['unreduce', 'a device-behaviour fact no gate over the C can settle'],
+  ['int-cell', 'the project declaring the global an integer, which the assembly does not show'],
+]);
 
 /** What a respell variation hands `respell`: its tree, or — when the variation cannot establish the
  *  candidate's semantics from inside the pass — the tree paired with that fact. `undefined`/`null`
@@ -1734,7 +1754,7 @@ export function enumerateCandidates(
     // is right under a pointer declaration of g and rejected by CodeWarrior under an integer one,
     // where this is the source; which the project declared is not in the asm, so it is published
     // only at a byte-exact score.
-    respell(['int-cell'], () => integerCellStores(sfn));
+    respell(['int-cell'], () => integerCells(sfn));
     // the register-copy variation (l3/regspell.ts): 0–3 results (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail decision is allocator-
     // ambiguous, so both are ranked).

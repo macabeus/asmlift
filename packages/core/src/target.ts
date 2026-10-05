@@ -641,6 +641,16 @@ export interface TargetDescription {
     // the plain variation ships, which is the conservative reading for a compiler whose pair nobody has
     // compiled — a compiler opts in on its own evidence and never by inheriting.
     foldsPointerAdvance?: boolean;
+    // Does this compiler build a word global read through a pointer conversion, or stored a pointer
+    // it converts implicitly, into the object of the bare integer spelling? agbcc does: under
+    // `extern u32 g;` the pointer spelling of a cell, `g = (void *)((u8 *)g + 4); … (gLimit ^ (u32)g)`,
+    // and the integer one, `g = g + 4; … (gLimit ^ g)`, are one object (the pair
+    // `TARGET_BEHAVIOR_READINGS` compiles), the implicit conversion costing a warning. True ⇒ the
+    // `int-cell` registry entry's target gate withholds that variation, which can only tie the
+    // default here. IDO builds the pair into two objects and CodeWarrior rejects the pointer store,
+    // so both are offered. KMC gcc builds one object too and does not declare it: the matching suite
+    // compiles each witness on one compiler. Absent ⇒ offered.
+    pointerIntConversionIsFree?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
     // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
@@ -871,6 +881,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
     foldsPointerAdvance: true,
+    pointerIntConversionIsFree: true,
     readsStayWhereWritten: true,
     switchBoundCase: 'taken',
     switchArmsFollowLayout: true,

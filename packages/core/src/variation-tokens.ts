@@ -132,7 +132,11 @@ const TOKENS = [
   { name: 'pollread', variationKind: 'respell' },
   { name: 'narrow-decl', variationKind: 'respell' },
   { name: 'narrow-read', variationKind: 'respell' },
-  { name: 'int-cell', variationKind: 'respell' },
+  {
+    name: 'int-cell',
+    variationKind: 'respell',
+    target: { behavior: 'pointerIntConversionIsFree', declared: false },
+  },
   // symbol map: the map's shaped spellings withheld; always the last part
   { name: 'raw-globals', variationKind: 'symbol-map' },
 ] as const satisfies readonly VariationToken[];
