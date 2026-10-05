@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vitest';
 import { renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
+import { prototypesFromContext } from '../src/proto-context';
 import { enumerateCandidates, rankBy } from '../src/rank';
 import {
   type SymbolInfo,
@@ -718,6 +719,27 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
       '\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tldrb\tr0, [r2]\n\tadd\tr2, r2, #0x4\n\tstr\tr2, [r1]\n\tbx\tlr\n' +
       '.L3:\n\t.word\tgPtr\n';
     expect(run('f', body)).toContain('gPtr = (void *)((u8 *)gPtr + 4);');
+  });
+
+  test('returned as an integer, the cast-then-add sum is cast to the return type', () => {
+    // agbcc -O2 of `extern struct S *gPtr; s32 rt(void) { sink(*(u8 *)gPtr); return (u32)gPtr + 16; }`:
+    // CodeWarrior rejects a `u8 *` returned as an `int`, and the cast keeps the sum's bytes
+    const body =
+      '\tpush\t{r4, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tldrb\tr0, [r0]\n\tbl\tsink\n\tldr\tr0, [r4]\n\tadd\tr0, #0x10\n' +
+      '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('return (s32)((u8 *)gPtr + 16);');
+  });
+
+  test('compared with an integer, the cast-then-add sum is compared as a u32', () => {
+    // agbcc -O2 of `extern struct S *gP; void e3(u32 a0) { gP->a = 1; ext(); if ((u32)gP + 16 ==
+    // a0) ext(); }`: IDO 7.1 rejects `a0 == (u8 *)gP + 16` ("Unacceptable operand of == or !=")
+    const body =
+      '\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tldr\tr4, .L4\n\tldr\tr1, [r4]\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+      '\tbl\text\n\tldr\tr0, [r4]\n\tadd\tr0, r0, #0x10\n\tcmp\tr0, r5\n\tbne\t.L3\n\tbl\text\n.L3:\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.word\tgP\n';
+    const prototypes = prototypesFromContext('void ext(void); void e3(unsigned int a0);', 'c');
+    const src = decompile('e3', asmOf('e3', body), ARMV4T_AGBCC, { prototypes }).source;
+    expect(src).toContain('if ((u32)((u8 *)gP + 16) == a0)');
   });
 
   test('under a non-additive or unary operator, the value is an integer', () => {

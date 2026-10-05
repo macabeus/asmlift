@@ -2521,10 +2521,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   /** A byte sum the pointer-value arithmetic rule below made of a global's value (`(u8 *)g + K`),
    *  and the same sum as the integer it also is (`(u32)g + K`), which an integer added in front of
-   *  it takes. KNOWN GAP: an integer READER of the byte sum (a return, a store, a compare, a call
-   *  argument) warns `makes integer from pointer`. The integer spelling there is not the same
-   *  bytes: gcc orders a pointer sum's operands and an integer sum's differently, and the reader's
-   *  integer type is the IR's default, not a declaration. */
+   *  it takes. KNOWN GAP: an integer READER of the byte sum converts a pointer to an integer. The
+   *  backend casts it where the reader's type is known (an assignment, a store through a typed
+   *  slot, a return: cfamily `legalizePointerWrites`), and a compare against an integer compares
+   *  it as a `u32`. A call argument and a global cell no declaration types keep the pointer, which
+   *  agbcc and KMC gcc warn about and CodeWarrior rejects: where the self-declared world declares
+   *  the global `extern u32`, they fail where the integer sum compiled. The integer spelling is not
+   *  the same bytes, because gcc orders a pointer sum's operands and an integer sum's differently. */
   const castGlobal = (x: Expr, undeclared = false): x is Extract<Expr, { k: 'cast' }> =>
     x.k === 'cast' &&
     typeEquals(x.to, T.ptr(T.u(8))) &&
@@ -2875,6 +2878,14 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // A value that RENDERS a pointer of another type is the same assignment with its type in plain
     // sight: the byte arithmetic below spells `(u8 *)gPtr + 3544` and `(u8 *)a0 + 2` for the
     // address alone, and a `u16 *` or `s32 *` temp takes neither without the cast.
+    //
+    // KNOWN GAP: a global no declaration types, read at offset 0 only, may be declared an ARRAY
+    // (`u16 *gArr[4]`, the asm reading `gArr[0]`). Its value spelling is then the array's address,
+    // and this cast compiles that clean where the bare value keeps agbcc's `incompatible pointer
+    // type`, fatal under -Werror. The cast stays: a substitution variation (`/unmerge`) carries the
+    // temp's value into the arithmetic it feeds, and bare, that arithmetic scales by the declared
+    // pointee. `*(T *)&gArr` reads the word under every declaration; it is not spelled, because it
+    // reads as a type pun.
     const vt = ctype(value);
     if (isPtrValue(value) || (vt?.kind === 'ptr' && !typeEquals(vt, t))) {
       return { k: 'cast', to: t, e: value };
@@ -3927,6 +3938,17 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           renderedIntSignedness(x, vtEnv) === true ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
         l = pinSigned(l);
         r = pinSigned(r);
+      } else {
+        // A pointer-rendered side against an INTEGER one (the byte arithmetic's `(u8 *)g + K`
+        // against an `int`) is a constraint violation IDO 7.1 and CodeWarrior reject and agbcc
+        // warns about. The asm compared two words, and unsigned, as C compares a pointer, so the
+        // pointer side is compared as the `u32` it is. A literal 0 is the null pointer constant.
+        const intSide = (x: Expr): boolean => ctype(x)?.kind === 'int' && !(x.k === 'const' && x.value === 0);
+        if (ptrSide(l) && intSide(r)) {
+          l = { k: 'cast', to: T.u(32), e: l };
+        } else if (ptrSide(r) && intSide(l)) {
+          r = { k: 'cast', to: T.u(32), e: r };
+        }
       }
       return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
@@ -4839,10 +4861,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler.
    *
    *  KNOWN GAP: a cell no declaration types may still be declared an INTEGER (the self-declared
-   *  `extern u32 gSym;`), where `(void *)` warns `assignment makes integer from pointer without a
-   *  cast`. `*(u32 *)&gSym = (u32)gSym + K` is clean under both declarations and compiles to the
-   *  same bytes; it is not spelled here, because it reads as a type pun and the load the IR types a
-   *  pointer is the evidence that the project declares one. */
+   *  `extern u32 gSym;`), where `(void *)` makes an integer from a pointer: agbcc warns, CodeWarrior
+   *  rejects it. `*(void **)&gSym = (u8 *)gSym + K` compiles under both declarations to the same
+   *  bytes on agbcc, IDO 7.1 and CodeWarrior; it is not spelled here, because it reads as a type pun
+   *  and the load the IR types a pointer is the evidence that the project declares one. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
     if (!isPtrValue(lval)) {
       return value;

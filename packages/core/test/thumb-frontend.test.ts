@@ -524,7 +524,7 @@ describe('pre-UAL mnemonic spellings', () => {
     // frontend targets ARMv4T and used to emit the ARMv5 answer silently.
     expect(() => dc('f', '\tstm\tr4!, {r0, r2, r4}\n\tbx\tlr\n')).toThrow(/UNPREDICTABLE/);
     // …but the LOWEST-entry case is defined (old base) and must still lift.
-    expect(dc('f', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n').source).toContain('*a0 = a0;');
+    expect(dc('f', '\tstm\tr0!, {r0, r1}\n\tbx\tlr\n').source).toContain('*a0 = (s32)a0;');
   });
 
   test('a decline names the spelling the INPUT used, not the canonical one', () => {

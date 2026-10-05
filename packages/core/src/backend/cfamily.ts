@@ -651,8 +651,12 @@ function endsTerminated(body: Stmt[]): boolean {
 // traversal-vocabulary exemption.)
 function legalizePointerWrites(fn: SFn): SFn {
   const vt = declaredTypes(fn);
+  // …and the mirror: a rendered pointer into an INTEGER slot takes the slot's type. A cast keeps
+  // the sum it wraps, so the bytes are the uncast write's; CodeWarrior rejects that write outright.
   const castTo = (t: IrType | undefined, e: Expr): Expr =>
-    writesNonPointerIntoPointer(t, e, vt) ? { k: 'cast', to: t, e } : e;
+    writesNonPointerIntoPointer(t, e, vt) || (t?.kind === 'int' && exprCType(e, vt)?.kind === 'ptr')
+      ? { k: 'cast', to: t, e }
+      : e;
   const fix = (s: Stmt): Stmt => {
     switch (s.k) {
       case 'assign':
