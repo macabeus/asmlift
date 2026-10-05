@@ -513,6 +513,22 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     }
   });
 
+  test('the /raw-globals candidate adds a map pointer in the asm order, which the map candidate cannot', () => {
+    // `add r0, r0, r1` with the pointer second: gcc puts a pointer first in `a0 + (u8 *)gPtr`, so
+    // only the integer sum `a0 + (u32)gPtr` reproduces the order. The map candidate keeps the
+    // pointer for its field spellings; the raw one has no pointee to fold, so it spells the order
+    const body = '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgPtr\n';
+    const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols: PTR_MAP });
+    const raw = cands.filter((c) => c.variations.includes('raw-globals'));
+    expect(raw.length).toBeGreaterThan(0);
+    for (const c of raw) {
+      expect(c.source).toContain('*(u8 *)(a0 + (u32)gPtr)');
+    }
+    for (const c of cands.filter((c) => !c.variations.includes('raw-globals'))) {
+      expect(c.source).toContain('*(a0 + (u8 *)gPtr)');
+    }
+  });
+
   test('under an operator C rejects for pointers, the cell spells integer math', () => {
     // `gPtr & 0xFF` is not C at all; the asm did 32-bit integer math on the address value
     const body =
