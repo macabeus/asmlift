@@ -392,7 +392,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   The reach bounds it twice more. `asIfUndecompiled` redacts the row's own signature BY DESIGN
   (a compiler emits one only for a function it compiled), so the transferable half is the
   CALLEES — and of the 252 real rows over six projects the corpus held when this was measured
-  (before the three GameCube projects landed on 2026-09-17; it is 402 over nine now, and those
+  (before the three GameCube projects landed on 2026-09-17; it is 422 over nine now, and those
   three vendor no signatures either — `apps/benchmark/README.md`'s residuals 6 and 10 measure
   ac-decomp at `signature` 0, pikmin the same shape, and Mario Party 4 with no DWARF at all — so
   the conclusion below still holds over the rows it did not see), 109 call anything, 25 call
