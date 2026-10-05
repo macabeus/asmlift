@@ -521,7 +521,7 @@ type Verdict =
   /** `output` is the compiler's own text; `err` is that behind the command that produced it */
   | { ok: false; transient: boolean; err: string; output: string };
 
-/** A match-kit outcome as asmlift reports it. The scratch directory reads `<scratch>` in every
+/** A match-kit outcome as asmlift reports it. The compile's directory reads `<compile-dir>` in every
  *  message, so a rejection replayed from the cache reads the same as a fresh one, and the ranked
  *  path's published `dropped[].error` carries no machine path. A compile that crashed, was killed
  *  (`docker run` exits 137 on an OOM-killed container) or did not run is transient: storing it would

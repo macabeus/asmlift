@@ -112,12 +112,12 @@ export function readCommitted(ref = 'HEAD'): BenchOutput {
   return JSON.parse(raw) as BenchOutput;
 }
 
-/** Scratch-dir names and machine temp paths are run-local noise, not measurement: a cold run
+/** Compile-dir names and machine temp paths are run-local noise, not measurement: a cold run
  *  re-mints them inside embedded asm comments, so comparing them raw reports a change that no
  *  reader could act on. */
 export const scrub = (s: string): string =>
   s
-    .replace(/(?:asmlift|bench)-[A-Za-z0-9-]+-[A-Za-z0-9]{6}/g, '<scratch>')
+    .replace(/(?:asmlift|bench|match-kit)-[A-Za-z0-9-]+-[A-Za-z0-9]{6}/g, '<compile-dir>')
     .replace(/\/host-tmp\S*|\/var\/folders\S*|\/tmp\/\S*/g, '<tmp>');
 
 /** Do two artifacts come out of the SAME merge? `bench merge` re-mints `meta.generatedAt` from

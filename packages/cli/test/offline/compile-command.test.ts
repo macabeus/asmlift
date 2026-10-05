@@ -264,7 +264,7 @@ test("a rejection's diagnostic is the compiler's output alone, never the command
   expect(thrown).toBeInstanceOf(CompilerRejection);
   const e = thrown as CompilerRejection;
   expect(e.message).toMatch(/exit 1[\s\S]*error: boom/);
-  expect(e.diagnostic).toBe('<scratch>/cand.c:1: error: boom');
+  expect(e.diagnostic).toBe('<compile-dir>/cand.c:1: error: boom');
   // a compiler that said nothing is read as nothing, whatever the template's own text spells
   const silent = compileFromCommand('false # x.c:1: error: not the compiler ; {{inputPath}} {{outputPath}}');
   try {

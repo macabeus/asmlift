@@ -385,8 +385,8 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
     expect(failEntries(p.store).length, 'the rejection really is in the store').toBe(1);
     const [cold, warm] = errors;
     expect(warm, 'the second run was served from the store').toBe(cold);
-    expect(cold).toContain('<scratch>');
-    expect(cold, 'no mkdtemp directory reaches a published error').not.toMatch(/asmlift-usercc-/);
+    expect(cold).toContain('<compile-dir>');
+    expect(cold, 'no mkdtemp directory reaches a published error').not.toMatch(/match-kit-compile-/);
     expect(cold).not.toMatch(/\/var\/folders|\/private\/tmp|\/tmp\//);
   });
 
