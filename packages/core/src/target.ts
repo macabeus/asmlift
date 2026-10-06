@@ -1370,6 +1370,7 @@ export function structureOptionsFor(
   return {
     returnsVoid,
     declaredArgs: declaredArgTypes(prototypes),
+    declaredReturns: declaredReturnTypes(prototypes),
     ...(t.dialect === 'c++' ? { dialect: 'c++' as const } : {}),
     littleEndian: t.capabilities.endianness === 'little',
     ...(t.capabilities.deviceRegisters ? { deviceRegisters: t.capabilities.deviceRegisters } : {}),
@@ -1396,6 +1397,18 @@ function declaredArgTypes(prototypes: Prototypes): Record<string, readonly (Para
   for (const [name, p] of Object.entries(prototypes)) {
     if (Array.isArray(p.params)) {
       out[name] = p.params.map((t) => (spellableType(t) && declaredWidth(t) !== undefined ? t : undefined));
+    }
+  }
+  return out;
+}
+
+/** Each declared callee's return type as the project spells it, which is never printed: whether a
+ *  pointer cell compared with the call meets a pointer (l3/ptrcell.ts). */
+function declaredReturnTypes(prototypes: Prototypes): Record<string, ParamType> {
+  const out: Record<string, ParamType> = {};
+  for (const [name, p] of Object.entries(prototypes)) {
+    if (p.returns !== undefined) {
+      out[name] = p.returns;
     }
   }
   return out;

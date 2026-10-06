@@ -1609,6 +1609,8 @@ export interface StructureOptions {
   // Each declared callee's parameter types, carried to the backend on `SFn.declaredArgs` (see
   // there). Built by `structureOptionsFor` from the prototype table.
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
+  // Each declared callee's return type, carried on `SFn.declaredReturns` the same way.
+  declaredReturns?: Readonly<Record<string, string>>;
   // The emitted C is compiled as C++ (`SFn.dialect`).
   dialect?: 'c++';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
@@ -2087,6 +2089,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     spellSwitchFallthrough = true,
     spillSlotOrder,
     declaredArgs,
+    declaredReturns,
     dialect,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
@@ -7069,7 +7072,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // absent stays absent: the backend asks "is a direction known?", and there is no third state
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
-    ...(declaredArgs !== undefined ? calledArgs(declaredArgs, body) : {}),
+    ...calledOnly({ declaredArgs, declaredReturns }, body),
     ...(dialect !== undefined ? { dialect } : {}),
   };
   if (fn.localObjects === undefined) {
@@ -7084,19 +7087,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   return named;
 }
 
-/** Of the declared callees' parameter types, the ones this body calls — every tree the ranked pass
- *  structures carries its own, and is keyed by its whole text. */
-function calledArgs(
-  declared: NonNullable<StructureOptions['declaredArgs']>,
+/** Of each table of declared callees, the entries this body calls — every tree the ranked pass
+ *  structures carries its own, and is keyed by its whole text. A table this body calls nothing in is
+ *  absent. */
+function calledOnly(
+  tables: Pick<StructureOptions, 'declaredArgs' | 'declaredReturns'>,
   body: Stmt[],
-): { declaredArgs?: NonNullable<StructureOptions['declaredArgs']> } {
-  const called: Record<string, readonly (string | undefined)[]> = {};
+): Pick<StructureOptions, 'declaredArgs' | 'declaredReturns'> {
+  const callees = new Set<string>();
   for (const e of walkExprs(body)) {
-    if (e.k === 'call' && typeof e.fn === 'string' && Object.hasOwn(declared, e.fn)) {
-      called[e.fn] = declared[e.fn];
+    if (e.k === 'call' && typeof e.fn === 'string') {
+      callees.add(e.fn);
     }
   }
-  return Object.keys(called).length > 0 ? { declaredArgs: called } : {};
+  const of = <T>(table: Readonly<Record<string, T>> | undefined): Record<string, T> | undefined => {
+    const called = Object.fromEntries(Object.entries(table ?? {}).filter(([n]) => callees.has(n)));
+    return Object.keys(called).length > 0 ? called : undefined;
+  };
+  const declaredArgs = of(tables.declaredArgs);
+  const declaredReturns = of(tables.declaredReturns);
+  return { ...(declaredArgs ? { declaredArgs } : {}), ...(declaredReturns ? { declaredReturns } : {}) };
 }
 
 // Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/

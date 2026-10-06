@@ -288,6 +288,11 @@ export function legalizePointerCells(sfn: SFn): SFn {
   const partners = pointerPartners(sfn);
   const vt = declaredTypes(sfn);
   const isCell = (e: Expr): boolean => e.k === 'var' && cells.has(e.name);
+  const returnsPointer = (fn: string | Expr): boolean =>
+    typeof fn === 'string' &&
+    sfn.declaredReturns !== undefined &&
+    Object.hasOwn(sfn.declaredReturns, fn) &&
+    sfn.declaredReturns[fn].includes('*');
   const asInt = (e: Expr): Expr =>
     isCell(e)
       ? { k: 'cast', to: T.u(32), e }
@@ -305,6 +310,7 @@ export function legalizePointerCells(sfn: SFn): SFn {
       isCell(e) ||
       (e.k === 'var' && partners.has(e.name)) ||
       e.k === 'addr' ||
+      (e.k === 'call' && returnsPointer(e.fn)) ||
       (e.k === 'const' && e.value === 0) ||
       exprCType(e, vt)?.kind === 'ptr',
     int: asInt,

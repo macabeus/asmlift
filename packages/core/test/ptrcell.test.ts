@@ -50,6 +50,13 @@ const F1 =
   '\tldr\tr1, .L3+0x8\n\tldr\tr0, [r5]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1]\n\tmov\tr0, #0x0\n\tpop\t{r4, r5}\n' +
   '\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgCur\n\t.word\tgSave\n\t.word\tgOut\n';
 
+// agbcc -O2 of `struct N *GetNode(void); u32 k1(void) { u32 v = gCur->v; gCur = gCur + 1; use(v);
+//   if (gCur == GetNode()) use(1); return 0; }`
+const K1 =
+  'k1:\n\tpush\t{r4, lr}\n\tldr\tr4, .L4\n\tldr\tr1, [r4]\n\tldr\tr0, [r1, #0x4]\n\tadd\tr1, r1, #0x8\n' +
+  '\tstr\tr1, [r4]\n\tbl\tuse\n\tbl\tGetNode\n\tldr\tr1, [r4]\n\tcmp\tr1, r0\n\tbne\t.L3\t@cond_branch\n' +
+  '\tmov\tr0, #0x1\n\tbl\tuse\n.L3:\n\tmov\tr0, #0x0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L4:\n\t.word\tgCur\n';
+
 const SINK = { sink2: { params: [], returnsVoid: true } };
 const USE = { use: { params: ['u32'], returnsVoid: true } };
 const defaultOf = (name: string, asm: string, prototypes = {}) =>
@@ -110,6 +117,10 @@ describe('legalizePointerCells', () => {
     expect(renderDeclarations(c.symbolRefs!)).toContain('extern void *gSave;\n');
   });
 
+  test('leaves a cell compared with a call the prototype says returns a pointer bare', () => {
+    const c = defaultOf('k1', K1, { ...USE, GetNode: { params: [], returns: 'struct N *' } });
+    expect(c.source).toContain('if (gCur == GetNode()) use(1);');
+  });
 });
 
 describe('the C backend', () => {

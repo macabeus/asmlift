@@ -430,6 +430,9 @@ export interface SFn {
    *  refuses three conversions C makes implicitly (backend/cfamily.ts `argConversion`), and by the
    *  pointer-cell conversions in every dialect (l3/ptrcell.ts). */
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
+  /** Each declared callee's return type as the project spells it, never printed: whether a call a
+   *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
+  declaredReturns?: Readonly<Record<string, string>>;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
 }
