@@ -333,5 +333,10 @@
     "tu": "GetGroundEffectFlags_JumpLanding.i.gz",
     "ctx": "ctx-039f29162530.i.gz",
     "m2c": "ctx-039f29162530.i.gz"
+  },
+  "DrawListIndexNumber": {
+    "tu": "DrawListIndexNumber.i.gz",
+    "ctx": "ctx-92fb46a46a7c.i.gz",
+    "m2c": "ctx-92fb46a46a7c.i.gz"
   }
 }

@@ -165,9 +165,16 @@ export const JUDGEMENT_FLOOR: Record<string, (body: string, asm: string, whole: 
   // The necessary condition is a UNARY `&` on an identifier — `use(&w)`, `*p = &tmp`. `&&` and a
   // binary `&` are excluded by requiring the nearest NON-SPACE character before it to be neither
   // an identifier character, nor a closing `)`/`]`, nor another `&` — the whitespace has to be
-  // skipped, or a spaced binary `a & b` passes. Whether the address-taken object is the one the
-  // diff turns on stays a human call.
-  'stack-addr': (b) => /(?:^|[^\w)\]&\s])\s*&(?!&)\s*[A-Za-z_]/.test(b),
+  // skipped, or a spaced binary `a & b` passes. An array local named whole, as an argument or an
+  // initialiser (`f(buf)`, `u8 *p = buf;`), decays to its address and passes too. Whether the
+  // address-taken object is the one the diff turns on stays a human call.
+  'stack-addr': (b) =>
+    /(?:^|[^\w)\]&\s])\s*&(?!&)\s*[A-Za-z_]/.test(b) ||
+    [
+      ...b.matchAll(
+        /(?:^|[;{}])\s*(?:(?:const|volatile|unsigned|signed|struct|union)\s+)*\w+\s+(\w+)\s*\[[^\]]+\]\s*[;=,]/g,
+      ),
+    ].some((m) => new RegExp(`[(,=]\\s*${m[1]}\\s*[,);]`).test(b)),
 
   // The necessary condition is a counted loop whose induction variable is DECLARED narrow —
   // `s16 i; … for (i = 0; …)`. BOTH halves are required, because either alone is a different tag:

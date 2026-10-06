@@ -662,6 +662,22 @@
         "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
         "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/field_weather_effect.c | tools/preproc/preproc -i -g build/assets src/field_weather_effect.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/field_weather_effect.o -"
       }
+    },
+    "src/pokenav_ribbons_list.c": {
+      "toolchain": "agbcc",
+      "cflags": [
+        "-mthumb-interwork",
+        "-O2",
+        "-fhex-asm",
+        "-g"
+      ],
+      "flagsFrom": {
+        "from": "makefile",
+        "commit": "b8e6454238e039845f5ac8d42c03bf05d73cdbc7",
+        "file": "Makefile",
+        "sha256": "edac67e8b6e5b28baf9b67c3f6fc6b8b06bbc551b1fba0217a91259bc56feec3",
+        "command": "arm-none-eabi-cpp -iquote include -Wno-trigraphs -DMODERN=0 -I tools/agbcc/include -I tools/agbcc -nostdinc -undef -std=gnu89 src/pokenav_ribbons_list.c | tools/preproc/preproc -i -g build/assets src/pokenav_ribbons_list.c charmap.txt | tools/agbcc/bin/agbcc -mthumb-interwork -Wimplicit -Wparentheses -Werror -O2 -fhex-asm -g -o - - | cat - <(echo -e \".text\\n\\t.align\\t2, 0\") | arm-none-eabi-as -mcpu=arm7tdmi --defsym MODERN=0 -o build/emerald/src/pokenav_ribbons_list.o -"
+      }
     }
   },
   "functions": [
@@ -1882,6 +1898,27 @@
       "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/event_object_movement.c#L7549-L7584",
       "proto": {
         "GetGroundEffectFlags_JumpLanding": {
+          "returnsVoid": true
+        }
+      }
+    },
+    {
+      "sym": "DrawListIndexNumber",
+      "addr": "0x081d02b0",
+      "unit": "src/pokenav_ribbons_list.c",
+      "romDigest": "213084b3d5e832538723b1527987e316cbd108d33531b34fb767398bff428614",
+      "features": [
+        "array",
+        "pointer",
+        "multi-arg",
+        "stack-addr"
+      ],
+      "funcC": "static void DrawListIndexNumber(s32 windowId, s32 index, s32 max)\n{\n    u8 strbuf[16];\n    u32 x;\n\n    u8 *ptr = strbuf;\n    ptr = ConvertIntToDecimalStringN(ptr, index, STR_CONV_MODE_RIGHT_ALIGN, 3);\n    *ptr++ = CHAR_SLASH;\n    ConvertIntToDecimalStringN(ptr, max, STR_CONV_MODE_RIGHT_ALIGN, 3);\n    x = GetStringCenterAlignXOffset(FONT_NORMAL, strbuf, 56);\n    AddTextPrinterParameterized(windowId, FONT_NORMAL, strbuf, x, 1, TEXT_SKIP_DRAW, NULL);\n}",
+      "prependC": "#include \"global.h\"\n#include \"pokenav.h\"\n#include \"bg.h\"\n#include \"menu.h\"\n#include \"palette.h\"\n#include \"window.h\"\n#include \"sound.h\"\n#include \"string_util.h\"\n#include \"international_string_util.h\"\n#include \"constants/songs.h\"\nenum\n{\n    RIBBONS_MON_LIST_FUNC_NONE,\n    RIBBONS_MON_LIST_FUNC_MOVE_UP,\n    RIBBONS_MON_LIST_FUNC_MOVE_DOWN,\n    RIBBONS_MON_LIST_FUNC_PAGE_UP,\n    RIBBONS_MON_LIST_FUNC_PAGE_DOWN,\n    RIBBONS_MON_LIST_FUNC_EXIT,\n    RIBBONS_MON_LIST_FUNC_OPEN_RIBBONS_SUMMARY\n};\nstruct Pokenav_RibbonsMonList\n{\n    u32 (*callback)(struct Pokenav_RibbonsMonList *);\n    u32 loopedTaskId;\n    u16 winid;\n    s32 boxId;\n    s32 monId;\n    u32 changeBgs;\n    u32 saveMonList;\n    struct PokenavMonList *monList;\n};\nstruct Pokenav_RibbonsMonMenu\n{\n    bool32 (*callback)(void);\n    u32 loopedTaskId;\n    u16 winid;\n    bool32 fromSummary;\n    u8 buff[BG_SCREEN_SIZE];\n};\nstatic u32 HandleRibbonsMonListInput_WaitListInit(struct Pokenav_RibbonsMonList *);\nstatic u32 HandleRibbonsMonListInput(struct Pokenav_RibbonsMonList *);\nstatic u32 RibbonsMonMenu_ReturnToMainMenu(struct Pokenav_RibbonsMonList *);\nstatic u32 RibbonsMonMenu_ToSummaryScreen(struct Pokenav_RibbonsMonList *);\nstatic u32 BuildPartyMonRibbonList(s32);\nstatic u32 InitBoxMonRibbonList(s32);\nstatic u32 BuildBoxMonRibbonList(s32);\nstatic u32 GetMonRibbonListLoopTaskFunc(s32);\nstatic void InsertMonListItem(struct Pokenav_RibbonsMonList *, struct PokenavMonListItem *);\nstatic u32 LoopedTask_OpenRibbonsMonList(s32);\nstatic bool32 GetRibbonsMonCurrentLoopedTaskActive(void);\nstatic u32 LoopedTask_RibbonsListMoveCursorUp(s32);\nstatic u32 LoopedTask_RibbonsListMoveCursorDown(s32);\nstatic u32 LoopedTask_RibbonsListMovePageUp(s32);\nstatic u32 LoopedTask_RibbonsListMovePageDown(s32);\nstatic u32 LoopedTask_RibbonsListReturnToMainMenu(s32);\nstatic u32 LoopedTask_RibbonsListOpenSummary(s32);\nstatic void AddRibbonsMonListWindow(struct Pokenav_RibbonsMonMenu *);\nstatic void UpdateIndexNumberDisplay(struct Pokenav_RibbonsMonMenu *);\nstatic void CreateRibbonMonsList(void);\nstatic void BufferRibbonMonInfoText(struct PokenavListItem *, u8 *);",
+      "m2cCtx": true,
+      "sourceUrl": "https://github.com/macabeus/pokeemerald/blob/a3c9fb02ce32eb573750f8dd3b95b22df8390689/src/pokenav_ribbons_list.c#L666-L677",
+      "proto": {
+        "DrawListIndexNumber": {
           "returnsVoid": true
         }
       }
