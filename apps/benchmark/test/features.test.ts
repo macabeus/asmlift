@@ -397,6 +397,11 @@ describe('the detectors themselves', () => {
     // every ISA the benchmark runs (ac-decomp:mCoBG_MakeJumpFlag, ac-decomp:aBALL_actor_move)
     expect(JUDGEMENT_FLOOR.fnptr('{ p->proc(a); }', '  9c:\tbctrl', '')).toBe(true);
     expect(JUDGEMENT_FLOOR.fnptr('{ draw(o); }', '  9c:\tbl\tdraw', '')).toBe(false);
+    // an array local passed whole decays to its address (pokeemerald:DrawListIndexNumber); an
+    // element read, or a global array, is not that
+    expect(JUDGEMENT_FLOOR['stack-addr']('{ u8 buf[16]; u8 *p = buf; f(1, buf, 2); }', '', '')).toBe(true);
+    expect(JUDGEMENT_FLOOR['stack-addr']('{ u8 buf[16]; f(buf[0]); }', '', '')).toBe(false);
+    expect(JUDGEMENT_FLOOR['stack-addr']('{ f(gBuf); }', '', '')).toBe(false);
     // `double` reads the type, not the keyword: `f64` is the same type (ac-decomp:Matrix_MtxtoMtxF)
     expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f64)0x10000); }')).toBe(true);
     expect(JUDGEMENT_FLOOR.double('', '', 'void f(void) { x = y * (1 / (f32)0x10000); }')).toBe(false);
