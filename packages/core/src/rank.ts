@@ -1749,7 +1749,12 @@ export function enumerateCandidates(
     // is right under a pointer declaration of g and rejected by CodeWarrior under an integer one,
     // where this is the source; which the project declared is not in the asm, so it is published
     // only at a byte-exact score.
-    respell(['int-cell'], () => integerCells(sfn));
+    respell(['int-cell'], () =>
+      integerCells(sfn, (n) => {
+        const shape = mapSymbols?.get(n)?.shape;
+        return shape !== undefined && shape !== 'scalar';
+      }),
+    );
     // the register-copy variation (l3/regspell.ts): 0–3 results (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail decision is allocator-
     // ambiguous, so both are ranked).

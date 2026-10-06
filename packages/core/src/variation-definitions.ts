@@ -1668,7 +1668,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'CodeWarrior rejects a pointer stored into an integer global; IDO allocates registers differently around ' +
       'a `(u32)` conversion of one.',
     offeredWhen: {
-      when: 'A store of a `void *` value into a global no declaration in the function types.',
+      when:
+        'A store of a `void *` value into a global no declaration in the function types and the symbol map ' +
+        'declares, if at all, an integer.',
       decidedBy: { symbol: 'integerCells', file: l3('intcell') },
     },
     example: {

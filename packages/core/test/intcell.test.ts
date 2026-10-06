@@ -82,6 +82,13 @@ describe('integerCells', () => {
     expect(all.some((c) => hasVariation(c.variations, 'int-cell'))).toBe(false);
   });
 
+  test('is not offered where the symbol map declares the cell a pointer', () => {
+    const symbols = new Map([[0x80001000, [{ name: 'g', kind: 'data' as const, shape: 'pointer' as const }]]]);
+    const all = enumerateCandidates('kr2', KR2, MIPS_IDO, { asmData: KR2_RELOCS, symbols });
+    expect(all.some((c) => c.source.includes('g = (void *)((u8 *)g + 4);'))).toBe(true);
+    expect(all.some((c) => hasVariation(c.variations, 'int-cell'))).toBe(false);
+  });
+
   test('is not offered on agbcc, which builds both spellings into one object', () => {
     const all = enumerateCandidates('kpA', STORE_ADVANCE, ARMV4T_AGBCC);
     expect(all.some((c) => c.source.includes('g = (void *)((u8 *)g + 4);'))).toBe(true);

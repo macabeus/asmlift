@@ -14,9 +14,12 @@
 // against gives K the asm's stride. Its own self-declared world declares the cell an integer,
 // because no pointer store is left in it.
 //
-// SCOPE (decline over approximate): a cell no declaration in the tree types, and of its uses only
-// the ones the pointer spelling made: the `(void *)` stores into it and a `(u32)` conversion of its
-// bare value. A global the body only reads converted is not this question.
+// SCOPE (decline over approximate): a cell no declaration in the tree types and the symbol map
+// does not declare other than an integer, and of its uses only the ones the pointer spelling made:
+// the `(void *)` stores into it and a `(u32)` conversion of its bare value. A map's pointer is the
+// project's own declaration, and its own world declares that, under which a byte-exact score is
+// no evidence of the stride the project's pointee gives K. A global the body only reads converted
+// is not this question.
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
 import { type Expr, type SFn, type Stmt, mapExprChildren, mapStmtExprs } from './ast';
@@ -43,10 +46,14 @@ function integerValue(value: Expr, name: string): Expr {
   return stored.k === 'var' ? stored : { k: 'cast', to: T.u(32), e: stored };
 }
 
-/** The `/int-cell` candidate: every pointer cell no declaration types, spelled as an integer. */
-export function integerCells(sfn: SFn): { sfn: SFn; needsProof: boolean } | null {
+/** The `/int-cell` candidate: every pointer cell no declaration types, spelled as an integer.
+ *  `mapDeclared` says the symbol map declares a name something other than an integer. */
+export function integerCells(
+  sfn: SFn,
+  mapDeclared: (name: string) => boolean,
+): { sfn: SFn; needsProof: boolean } | null {
   const vt = declaredTypes(sfn);
-  const cells = new Set([...pointerCellsOf(sfn)].filter((n) => vt(n) === undefined));
+  const cells = new Set([...pointerCellsOf(sfn)].filter((n) => vt(n) === undefined && !mapDeclared(n)));
   if (cells.size === 0) {
     return null;
   }
