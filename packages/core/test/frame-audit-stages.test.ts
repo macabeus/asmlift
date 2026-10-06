@@ -482,7 +482,8 @@ describe('keepAsOneObject', () => {
     blk.params.push(p);
     blk.ops.splice(2, 0, store(p, blk.ops[0].results[0], 0, 4));
     expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
-    expect(blk.ops[0].attrs).toMatchObject({ count: 8, volatile: true });
+    expect(blk.ops[0].attrs).toMatchObject({ count: 8 });
+    expect(blk.ops[0].attrs.volatile).toBeUndefined();
   });
 
   test('refuses an address a callee takes at argument 0 with nothing said of what it returns', () => {

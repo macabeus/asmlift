@@ -964,7 +964,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // and its store stays a store.
     test('a control word that is not a literal keeps the whole local area as one object', () => {
       const src = decompile('f', escapeTo('0x00', 'gCtl'), ARMV4T_AGBCC).source;
-      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('    u8 sp0[8];');
       expect(src).toContain('if (v0 != 0) ((s32 *)sp0)[1] = v0;');
       expect(src).toContain('return v0 + ((s32 *)sp0)[1];');
     });
@@ -1001,7 +1001,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tstr\tr3, [r2, #0x4]\n\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r5}\n\tbx\tr5\n' +
         '.L9:\n\t.word\t0x040000D4\n';
       const src = decompile('f', twoObjects, ARMV4T_AGBCC).source;
-      expect(src).toContain('volatile u8 sp0[16];');
+      expect(src).toContain('    u8 sp0[16];');
       expect(src).toContain('p0 = (u16 *)sp0;');
       expect(src).toContain('*p0 = a0;');
       expect(src).toContain('p0[1] = a1;');
@@ -1022,7 +1022,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const src = decompile('u1', atBase, ARMV4T_AGBCC, {
         prototypes: { u1: { params: 3, returnsVoid: true } },
       }).source;
-      expect(src).toContain('volatile u8 sp0[12];');
+      expect(src).toContain('    u8 sp0[12];');
       expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;');
       // …and where the read is bounded, the overlap is still refused, by the refusal it always had
       const bounded = atBase.replace(
@@ -1058,7 +1058,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\t.align\t2, 0\n.L3:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n' +
         '\t.word\t-0x7bfffffe\n\t.word\tgCnt\n';
       const src = decompile('g5', unionAtBase, ARMV4T_AGBCC).source;
-      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('    u8 sp0[8];');
       expect(src).toContain('*(s32 *)sp0 = a0;');
       expect(src).toContain('return *(u8 *)sp0;');
       // …and bounded, the per-object refusal stands
@@ -1084,7 +1084,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x8\n\tbx\tlr\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n' +
         '\t.word\tgDst\n';
       const src = decompile('m6', lone, ARMV4T_AGBCC).source;
-      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('    u8 sp0[8];');
       expect(src).toContain('*(u16 *)sp0 = a0;');
       expect(src).toContain('return *(u16 *)sp0;');
       // …and a read alone: the machine loads the word at [sp], it does not return the frame address
@@ -1092,7 +1092,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         'j:\n\tadd\tsp, sp, #-0x10\n\tmov\tr1, sp\n\tldr\tr0, .L3\n\tstr\tr1, [r0]\n\tldr\tr0, [r1]\n' +
         '\tadd\tsp, sp, #0x10\n\tbx\tlr\n.L3:\n\t.word\t0x40000d4\n';
       const read = decompile('j', readOnly, ARMV4T_AGBCC).source;
-      expect(read).toContain('volatile u8 sp0[16];');
+      expect(read).toContain('    u8 sp0[16];');
       expect(read).toContain('return *(s32 *)sp0;');
     });
 
@@ -1108,7 +1108,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tsp, sp, #0x4\n\tbx\tlr\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x10000\n' +
         '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\tgDst\n\t.word\t-0x7effffff\n\t.word\tgCnt\n';
       const src = decompile('g1', unionMember, ARMV4T_AGBCC).source;
-      expect(src).toContain('volatile u8 sp0[4];');
+      expect(src).toContain('    u8 sp0[4];');
       expect(src).toContain('return ((u8 *)sp0)[1];');
     });
 
@@ -1126,7 +1126,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tmov\tr0, #0x0\n\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.L15:\n' +
         '\t.align\t2, 0\n.L14:\n\t.word\tgDst\n\t.word\t0x40000d4\n';
       const src = decompile('g3', byteBuffer, ARMV4T_AGBCC).source;
-      expect(src).toContain('volatile u8 sp0[8];');
+      expect(src).toContain('    u8 sp0[8];');
       expect(src).toContain('((u8 *)sp0)[v0] = *(u8 *)(a1 + v0);');
     });
 
@@ -2367,7 +2367,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ).concat('\t.word\t0x81000001\n');
         expect(armed).not.toBe(PUBLISH);
         expect(() => decompile('f', armed, undeclared)).toThrow(TWO_MODELS);
-        expect(decompile('f', PUBLISH, undeclared).source).toContain('volatile u8 sp0[4];');
+        expect(decompile('f', PUBLISH, undeclared).source).toContain('    u8 sp0[4];');
       });
 
       // The walk is kill-on-mention and a `bl` drops every held capture, including one in a
@@ -2908,7 +2908,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '.L16:\n\t.align\t2, 0\n.L15:\n\t.word\t0x40000d4\n\t.word\t0x40000dc\n\t.word\t-0x7effffff\n' +
         '\t.word\t-0x7bfffffe\n';
       const pube = decompile('pube', unresolved, ARMV4T_AGBCC, dmaProtos).source;
-      expect(pube).toContain('volatile u8 sp0[8];');
+      expect(pube).toContain('    u8 sp0[8];');
       expect(pube).toContain('*(u8 *)sp0 = a0;');
       expect(pube).toContain('((s32 *)sp0)[1] = h(1);');
       expect(pube).toContain('return ((s32 *)sp0)[1];');
@@ -2932,7 +2932,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ARMV4T_AGBCC,
         five,
       ).source;
-      expect(e9).toContain('volatile u8 sp4[12];');
+      expect(e9).toContain('    u8 sp4[12];');
       expect(e9).toContain('if (a2 == 0) a2 = (s32 *)((u32)sp4 + 8);');
       expect(e9).toContain('p0[1] = a1;');
       expect(e9).toContain('*a2 = -2080374782;');
@@ -2971,7 +2971,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // …exactly, where a map places the name: at 0x040000d8, `gNamed.g` IS the control word
       const onControl = new Map([[0x040000d8, [{ name: 'gNamed', kind: 'data' as const }]]]);
       const kept = decompile('n1', n1, ARMV4T_AGBCC, { ...five, symbols: onControl }).source;
-      expect(kept).toContain('volatile u8 sp4[8];');
+      expect(kept).toContain('    u8 sp4[8];');
       expect(kept).toContain('p0[1] = a1;');
       const n3 = armed(
         'n3',
@@ -2995,7 +2995,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ['e4s', e4s],
       ]) {
         const src = decompile(name, asm, ARMV4T_AGBCC, five).source;
-        expect(src).toContain('volatile u8 sp4[8];');
+        expect(src).toContain('    u8 sp4[8];');
         expect(src).toContain('p0[1] = a1;');
       }
     });
@@ -3272,7 +3272,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
           '\tldr\tr2, [sp, #0x8]\n\torr\tr0, r0, r2\n\tstr\tr0, [r1]\n',
       );
       const kept = decompile('dmawide', runtimeCount, ARMV4T_AGBCC, protos).source;
-      expect(kept).toContain('volatile u8 sp0[12];');
+      expect(kept).toContain('    u8 sp0[12];');
       expect(kept).toContain('((s32 *)sp0)[1] = a0;');
       expect(kept).toContain('((s32 *)sp0)[2] = a1;');
       expect(kept).toContain('*(volatile s32 *)67109084 = 129 << 24 | ((s32 *)sp0)[2];');
@@ -3368,7 +3368,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
       '\t.word\t0x40000d4\n\t.word\t-0x7afffff0\n\t.word\t-0x7effffe0\n';
     const src = decompile('p3', threeFills, ARMV4T_AGBCC).source;
-    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('    u8 sp0[8];');
     expect(src).not.toMatch(/\(s32 \*\)67109/);
     expect(src.match(/\(volatile s32 \*\)67109076\S* = /g)).toHaveLength(9);
     expect(src.match(/^ +\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(3);
@@ -3392,7 +3392,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\t-0x7afffff0\n' +
       '\t.word\t-0x7effffe0\n\t.word\t-0x7fffffe0\n';
     const src = decompile('q4', runtimeChannel, ARMV4T_AGBCC).source;
-    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('    u8 sp0[8];');
     expect(src).not.toMatch(/\(struct Elem0 \*\)67109040/);
     expect(src.match(/\(volatile struct Elem0 \*\)67109040\)\[a2\]/g)).toHaveLength(6);
   });
@@ -3446,7 +3446,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.align\t2, 0\n.L5:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
       '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t-0x7fffffe0\n';
     const src = decompile('q7', eitherChannel, ARMV4T_AGBCC).source;
-    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('    u8 sp0[8];');
     expect(src.match(/\(volatile s32 \*\)v0/g)).toHaveLength(6);
   });
 
@@ -3482,7 +3482,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.align\t2, 0\n.L7:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n' +
       '\t.word\t-0x7effffe0\n\t.word\t-0x7afffff0\n\t.word\t0x4000006\n';
     const src = decompile('q5', poll, ARMV4T_AGBCC).source;
-    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('    u8 sp0[8];');
     expect(src).toContain('while (*(volatile u16 *)67108870 != 160);');
   });
 
@@ -3503,7 +3503,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '.L9:\n\t.word\t0x40000d4\n\t.word\t0x40000d8\n\t.word\t0x40000dc\n\t.word\tgCnt\n' +
       '\t.word\t0x4000068\n';
     const src = decompile('f3', phiPoll, ARMV4T_AGBCC).source;
-    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('    u8 sp0[8];');
     expect(src).toContain('((volatile struct Struct1 *)v1)->field_4 = 5;');
     expect(src).toContain('} while (((volatile struct Struct1 *)v1)->field_0 != 0);');
     expect(src).toContain('return ((volatile struct Struct1 *)v1)->field_4;');

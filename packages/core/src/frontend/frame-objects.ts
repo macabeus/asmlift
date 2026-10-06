@@ -1553,25 +1553,19 @@ function keepAsOneObject({
   // at `k - from` off the object, and a member address used any other way becomes the object's
   // address moved by that constant.
   //
-  // `volatile` on the array keys on `published`. On each ACCESS it keys on `publishedToWriter`:
-  // every member is spelled through a cast, and a cast's pointee drops the array's qualifier, so
-  // where a holder of the published address may write the object, a qualifier on the array alone
-  // lets the recompile keep a re-read in a register — a spin on a byte that holder sets compiles
-  // to a loop that never reads it again. A device that only reads (a DMA source) changes no byte
-  // a re-read returns, and neither does a block transfer's fill source (`filledFrom`, the
-  // per-object stamp's second key), so there the access qualifier would change how the object
-  // compiles and not what any read of it returns.
-  const qualified = uses.published.size > 0;
+  // `volatile` goes on each ACCESS, where the address was stored somewhere a writer may hold it
+  // (`publishedToWriter`), and never on the array: every member is spelled through a cast, whose
+  // pointee drops an array's qualifier, so there it would reach no access and only make agbcc
+  // warn `discards qualifiers` wherever the bare array is named — a callee handed it, a global
+  // it is stored to. Unqualified, a spin on a byte a holder of the address sets compiles to a
+  // loop that never reads it again. A device that only reads (a DMA source) changes no byte a
+  // re-read returns, and neither does a block transfer's fill source (`filledFrom`, the
+  // per-object stamp's second key), so there the qualifier would change how the object compiles
+  // and not what any read of it returns.
   const reread = uses.publishedToWriter.size > 0;
   const object = mkOp('laddr', {
     results: [mkValue(T.unk(32))],
-    attrs: {
-      off: from,
-      width: 1,
-      signed: false,
-      count: to - from,
-      ...(qualified ? { volatile: true } : {}),
-    },
+    attrs: { off: from, width: 1, signed: false, count: to - from },
   });
   const base = object.results[0];
   const memberAt = new Map<Value, number>();

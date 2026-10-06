@@ -167,7 +167,9 @@ describe('an unbounded device read keeps the local area as one object', () => {
     ]);
     expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
     const object = blk.ops[0];
-    expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8, volatile: true });
+    expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8 });
+    // every member is spelled through a cast, which a qualifier on the array would not reach
+    expect(object.attrs.volatile).toBeUndefined();
     const members = blk.ops.filter((op) => op.opcode === 'store' && op.operands[0] === object.results[0]);
     expect(members).toHaveLength(2);
     // a device that only reads changes no byte a re-read of the object returns
