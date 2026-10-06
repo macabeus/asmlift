@@ -340,6 +340,21 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([null], [], [REG]), [write(REG), readThrough('p')])).not.toThrow();
   });
 
+  // The frame audit qualifies the accesses of a stack object a writer may hold; those are unplaced
+  // too, and a dropped one is that local's read, not a register's.
+  test('a dropped read at no constant address that may be a stack object names the stack local', () => {
+    const fn = irReading([]);
+    const object = mkValue(T.ptr(T.u(8)));
+    fn.blocks[0].ops.unshift(
+      mkOp('laddr', { results: [object], attrs: { off: 0, width: 1, count: 8 } }),
+      mkOp('load', { operands: [object], results: [mkValue(T.u(8))], attrs: { off: 0, width: 1, volatile: true } }),
+    );
+    expect(() => checkReads(fn, [])).toThrow(/dropped a read of an address-taken stack local in 'F'/);
+    const both = irReading([null]);
+    both.blocks[0].ops.unshift(...fn.blocks[0].ops.slice(0, 2));
+    expect(() => checkReads(both, [])).toThrow(/dropped a read of a device register or a stack local in 'F'/);
+  });
+
   test('a read does not stand for a write, nor a write for a read', () => {
     expect(() => checkReads(irReading([REG], [], [REG]), [read(REG), read(REG)])).toThrow(
       /dropped the write to the device register at 0x4000006/,

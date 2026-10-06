@@ -399,6 +399,10 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     }
   }
   const bump = (m: EffectCounts, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  // The unplaced qualified accesses whose address may be a stack object a writer holds (the frame
+  // audit qualifies those too), so a refusal names that object rather than a device register.
+  const stackUnplaced: Record<Direction, number> = { r: 0, w: 0 };
+  const mayBeStack = stackObjectReach(fn, defs);
   for (const b of seen) {
     for (const op of b.ops) {
       const reads = op.opcode === 'load' || op.opcode === 'aload';
@@ -415,6 +419,9 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
           const dir = reads ? 'r' : 'w';
           const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
           bump(irDevices, key);
+          if (key === deviceKey(dir, null) && mayBeStack(op.operands[0])) {
+            stackUnplaced[dir]++;
+          }
           const object = globalBaseOf(defs, op.operands[0]);
           if (object !== null) {
             bump(namedDevices, key);
@@ -508,7 +515,7 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     }
   }
   if (irDevices.size) {
-    devicesPreserved(sfn.name, irDevices, namedDevices, total, path);
+    devicesPreserved(sfn.name, irDevices, namedDevices, total, path, stackUnplaced);
   }
   for (const object of declaredWritten) {
     if (total.has(`${STRIPPED_WRITE}${object}`)) {
@@ -556,6 +563,56 @@ function oneDirection(m: EffectCounts, dir: Direction): { at: Map<string, number
   return { at, unplaced, all };
 }
 
+/** May `addr` be the address of a stack object: a `laddr`, moved by `add`/`sub`, or a phi some
+ *  incoming value of which is one. */
+function stackObjectReach(fn: Fn, defs: ReadonlyMap<Value, Op>): (addr: Value) => boolean {
+  const incoming = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors ?? []) {
+        s.args.forEach((arg, i) => {
+          const param = s.block.params[i];
+          if (param !== undefined) {
+            (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(arg);
+          }
+        });
+      }
+    }
+  }
+  const memo = new Map<Value, boolean>();
+  const reach = (v: Value): boolean => {
+    const had = memo.get(v);
+    if (had !== undefined) {
+      return had;
+    }
+    memo.set(v, false);
+    const d = defs.get(v);
+    const roots =
+      d === undefined
+        ? (incoming.get(v) ?? [])
+        : d.opcode === 'add'
+          ? d.operands
+          : d.opcode === 'sub'
+            ? d.operands.slice(0, 1)
+            : [];
+    const answer = d?.opcode === 'laddr' || roots.some(reach);
+    memo.set(v, answer);
+    return answer;
+  };
+  return reach;
+}
+
+/** What an unplaced qualified access may be, given how many of `unplaced` may be a stack object. */
+function unplacedNoun(stack: number, unplaced: number): { one: string; many: string } {
+  if (stack === 0) {
+    return { one: 'a device register', many: 'device registers' };
+  }
+  if (stack >= unplaced) {
+    return { one: 'an address-taken stack local', many: 'address-taken stack locals' };
+  }
+  return { one: 'a device register or a stack local', many: 'device registers or a stack local' };
+}
+
 const NOUNS: Readonly<Record<Direction, { one: string; many: string }>> = {
   r: { one: 'read of', many: 'reads of' },
   w: { one: 'write to', many: 'writes to' },
@@ -569,6 +626,7 @@ function devicesPreserved(
   named: EffectCounts,
   total: EffectCounts,
   path: EffectCounts,
+  stackUnplaced: Readonly<Record<Direction, number>>,
 ): void {
   const directions = ['r', 'w'] as const;
   for (const dir of directions) {
@@ -591,8 +649,8 @@ function devicesPreserved(
     const owedAll = [...made.at.keys()].reduce((n, a) => n + owed(a), 0) + Math.max(0, made.unplaced - exempt.unplaced);
     if (owedAll > renders.all) {
       throw new ContractError(
-        `structuring dropped a ${NOUNS[dir].one} a device register in '${name}' — the machine made it and the ` +
-          'source does not',
+        `structuring dropped a ${NOUNS[dir].one} ${unplacedNoun(stackUnplaced[dir], made.unplaced).one} in ` +
+          `'${name}' — the machine made it and the source does not`,
       );
     }
   }
@@ -611,8 +669,10 @@ function devicesPreserved(
       excess += Math.max(0, p - n);
     }
     if (excess > made.unplaced || onPath.all > made.all) {
+      // past the unplaced count, the excess is at the addresses, every one a device register
+      const what = excess > made.unplaced ? 'device registers' : unplacedNoun(stackUnplaced[dir], made.unplaced).many;
       throw new ContractError(
-        `structuring emitted ${onPath.all} ${NOUNS[dir].many} device registers on one path in '${name}', where the ` +
+        `structuring emitted ${onPath.all} ${NOUNS[dir].many} ${what} on one path in '${name}', where the ` +
           `asm makes ${made.all}`,
       );
     }
