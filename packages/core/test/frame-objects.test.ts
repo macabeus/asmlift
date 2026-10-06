@@ -128,10 +128,12 @@ describe('an unbounded device read keeps the local area as one object', () => {
     expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('accessed 4 and 2 bytes wide');
   });
 
-  test('an address a callee may write through is not what the one object keeps', () => {
+  test('an address a callee may write through, also stored to memory, is not what the one object keeps', () => {
     const call = mkOp('call', { operands: [mkValue(T.unk(32))], attrs: { target: 'g' } });
     const { blk } = published([{ off: 0, width: 2 }], [call]);
-    expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('a callee or a store may write through');
+    expect(() => run(blk, [], { from: 0, to: 8 })).toThrow(
+      'cannot hold every writer — the captured address at [sp,#0) is stored to memory',
+    );
   });
 });
 

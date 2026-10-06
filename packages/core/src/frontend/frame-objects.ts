@@ -306,7 +306,7 @@ export function auditFrameObjects({
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
-    keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, fail });
+    keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, returnsWithoutHiddenPointer, fail });
     return { policy: 'one-object', sinks };
   }
   const shapes = objectShapes({
@@ -1201,6 +1201,32 @@ interface ModelChoice {
   shapeRefused(why: string): void;
 }
 
+/** Why a writer of the frame keeps the one-object answer from holding it, or null. A callee handed
+ *  an address as an argument is kept: the one object is every byte of the declared area, so what
+ *  the callee writes through any address inside it is bytes one declaration owns, at offsets one
+ *  array makes adjacent — below them is the outgoing block and above them the saved registers,
+ *  neither a local. Not kept are an address STORED to memory, which nothing declares a reader or a
+ *  writer of, and a callee's RETURN STORAGE: the struct it returns through a hidden pointer is its
+ *  declared type, not bytes of an array — the stamped `sret` call, and a callee taking the address
+ *  at argument 0 with nothing said of what it returns. */
+function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: string) => boolean): string | null {
+  for (const off of uses.mayWrite) {
+    const at = `the captured address at [sp,#${off})`;
+    if (!uses.passedToCallee.has(off) || uses.published.has(off)) {
+      return `${at} is stored to memory, and nothing declares who may write through it`;
+    }
+    const temp = uses.returnTemps.get(off)?.[0];
+    if (temp !== undefined) {
+      return `${at} is where \`${temp.attrs.target}\` returns its struct`;
+    }
+    const why = hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
+    if (why !== null) {
+      return `${at} is written by a callee, and ${why}`;
+    }
+  }
+  return null;
+}
+
 /** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where every escape only reads and one reads
  *  without bound, the one-object answer is on offer, and the shapes the per-object model
  *  refuses are ones it can hold: a member at [+k] through a capture, two widths or two
@@ -1404,9 +1430,10 @@ function failIfSlotKeysIt(
   }
 }
 
-/** ONE OBJECT IN MEMORY, the answer a device read nothing bounds is given instead of a refusal
- *  (`oneObject`, requested by the relift test where the escapes are judged). Every byte of
- *  `[from, to)` is declared one `u8` array whose address the device holds, and every access inside
+/** ONE OBJECT IN MEMORY, the answer a device read or a callee write nothing bounds is given
+ *  instead of a refusal (`oneObject`, requested by the relift test where the escapes are judged).
+ *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
+ *  holds (`writerNotKept` says which writers it can hold), and every access inside
  *  it is a cast-spelled access to that array — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
@@ -1419,6 +1446,7 @@ function keepAsOneObject({
   objects,
   uses,
   usedSlotOffsets,
+  returnsWithoutHiddenPointer,
   fail,
 }: {
   oneObject: FrameRange;
@@ -1426,6 +1454,7 @@ function keepAsOneObject({
   objects: ReadonlyMap<number, readonly Op[]>;
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
@@ -1439,10 +1468,9 @@ function keepAsOneObject({
       fail(`the SSA slot at [sp,#${slot}] lies inside ${kept} — one byte, two models`);
     }
   }
-  // A writer is not what this keeps: a callee handed an address inside the object may write
-  // any byte of the frame, and the object's extent says nothing about how far.
-  if (uses.mayWrite.size > 0) {
-    fail(`${kept} are reached by an address a callee or a store may write through, not only by a device that reads`);
+  const writer = writerNotKept(uses, returnsWithoutHiddenPointer);
+  if (writer !== null) {
+    fail(`${kept} cannot hold every writer — ${writer}`);
   }
   // A runtime index names no byte, so no access type can be checked against the others at the
   // bytes it reaches — except a byte access, which needs none: character types alias every type.

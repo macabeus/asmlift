@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
-import { type FrameRange, __testing } from '../src/frontend/frame-objects';
+import { type FrameRange, __testing, auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -353,5 +353,58 @@ describe('frameEscapes', () => {
         unaccountedWord: undefined,
       },
     ]);
+  });
+});
+
+// The second audit, which judges the bytes a first one asked to keep as one object.
+describe('keepAsOneObject', () => {
+  const kept = (blk: Block) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: [blk],
+      ownedLocals: { from: 0, to: 8 },
+      declaredLocals: { from: 0, to: 8 },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+      oneObject: { from: 0, to: 8 },
+    });
+  // `u8 sp[4]; u32 sp4; h(x, sp, &sp4); return sp[0];` — two out-parameters of one callee, at
+  // arguments 1 and 2, with `callee` taking the first at argument 0 instead when given
+  const outParams = (callee?: string): Block => {
+    const x = value();
+    const a = laddr(0);
+    const b = laddr(4);
+    const args = callee === undefined ? [x, a.results[0], b.results[0]] : [a.results[0], b.results[0]];
+    return { params: [x], ops: [a, b, call(callee ?? 'h', ...args), load(a.results[0], 0, 1), ret()] };
+  };
+
+  test('keeps two addresses a callee may write through as one byte array', () => {
+    const blk = outParams();
+    expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
+    const [object] = blk.ops;
+    expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8 });
+    expect(blk.ops.find((op) => op.opcode === 'call')!.operands[1]).toBe(object.results[0]);
+  });
+
+  test('refuses a writer whose address is stored to memory', () => {
+    const p = value();
+    const a = laddr(0);
+    const blk: Block = { params: [p], ops: [a, store(p, a.results[0], 0, 4), call('h', p), ret()] };
+    expect(() => kept(blk)).toThrow('the captured address at [sp,#0) is stored to memory');
+  });
+
+  test('refuses an address a callee takes at argument 0 with nothing said of what it returns', () => {
+    expect(() => kept(outParams('k'))).toThrow('`k` takes it at argument 0 and nothing says what that callee returns');
+  });
+
+  test('refuses the storage a callee returns its struct through', () => {
+    const a = laddr(0);
+    const s = mkValue(T.struct('S8', [], 8));
+    const sret = mkOp('call', { operands: [a.results[0]], results: [s], attrs: { target: 'mk', sret: true } });
+    expect(() => kept({ params: [], ops: [a, sret, ret()] })).toThrow('is where `mk` returns its struct');
   });
 });
