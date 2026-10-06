@@ -54,8 +54,8 @@ export interface FrameRange {
   readonly to: number;
 }
 
-/** What an audit answers instead of a refusal when a device may read the frame without bound: lift
- *  again with `oneObject` set to these bytes. */
+/** What an audit answers instead of a refusal when a device may read the frame, or a callee write
+ *  it, without bound: lift again with `oneObject` set to these bytes. */
 export interface FrameObjectRelift {
   readonly oneObject: FrameRange;
 }
@@ -1509,10 +1509,11 @@ function keepAsOneObject({
   }
   // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
   // at `k - from` off the object, and a member address used any other way becomes the object's
-  // address moved by that constant. `volatile` keys on `published` alone, and a block
-  // transfer's fill source (`filledFrom`) needs no second key here: this answer is asked for
-  // only where a read is unbounded, a call's read is always bounded, so the unbounded one is
-  // a device's, handed the address by a store — which publishes it.
+  // address moved by that constant. `volatile` keys on `published` alone. A block transfer's
+  // fill source (`filledFrom`) is a second key per object (`stampObjects`) and not here: every
+  // member is spelled through a cast, which drops the array's qualifier, so on the array it
+  // cannot give the fill temp what `vu32 tmp` gives it — and where a callee is handed the array,
+  // it would add a `discards qualifiers` diagnostic at that call.
   const object = mkOp('laddr', {
     results: [mkValue(T.unk(32))],
     attrs: {

@@ -2390,10 +2390,11 @@ function recoverJumpTable(
  *  how many argument registers a `bl` passes (falling back to a heuristic when absent).
  *
  *  AT MOST TWICE. The frame-object audit runs over the finished IR, and where a device may read
- *  the frame without bound it answers with the bytes to keep in memory rather than a refusal
- *  (`FrameObjectRelift`). Which `[sp,#k]` words are SSA slots is decided while the blocks are
- *  filled, so the answer is taken by lifting again with those words routed through `laddr`; the
- *  second audit judges them as one object, and refuses rather than asking again. */
+ *  the frame, or a callee write it, without bound it answers with the bytes to keep in memory
+ *  rather than a refusal (`FrameObjectRelift`). Which `[sp,#k]` words are SSA slots is decided
+ *  while the blocks are filled, so the answer is taken by lifting again with those words routed
+ *  through `laddr`; the second audit judges them as one object, and refuses rather than asking
+ *  again. */
 export function lift(
   name: string,
   asm: string,
@@ -3111,7 +3112,8 @@ function measureThumbFrame({
   // reserved area, where a slot could have been.
   //
   // …AND EVERY WORD OF THE BYTES A FIRST AUDIT ASKED TO KEEP AS ONE OBJECT (`oneObject`), where a
-  // device may read the frame without bound: a word there is memory the device reads, not a slot.
+  // device may read the frame, or a callee write it, without bound: a word there is memory the
+  // device reads or the callee writes, not a slot.
   const isFrameObjectAccess = (base: string, off: number, regOff: string | undefined, width: number): boolean =>
     slotsOk &&
     isSpReg(base) &&

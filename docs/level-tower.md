@@ -1441,7 +1441,8 @@ address — through a pointer, or to a name no symbol map places — leaves the 
 no fact about one function can check is stated as a premise instead: a callee or an interrupt
 handler arms only a transfer it set up itself, source register first, so neither a call on the
 path nor an interrupt at any instruction re-arms this frame's transfer. Where the read is still
-unbounded and nothing but devices holds the address, the audit does not refuse: it answers with the
+unbounded and every address a writer holds was also handed to a callee as an argument — or nothing
+writes, and only devices hold it — the audit does not refuse: it answers with the
 local area, the frontend lifts once more with every word of it routed through `laddr`, and the
 second audit declares those bytes one `u8` array in memory, so every store the machine made there
 is a store the recompile makes. The asm cannot tell a member the
