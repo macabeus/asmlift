@@ -161,6 +161,22 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     );
   });
 
+  // A PUBLISHED one object is spelled member by member through casts, and a cast's pointee drops the
+  // array's `volatile`: each access carries it, or the spin on a byte a holder of `gp` sets compiles
+  // to a loop that never reads it again.
+  test('a published one object keeps every re-read of a member', () => {
+    const asm = compileTargetAsm(
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; unsigned int spin2(void){ ' +
+        'volatile unsigned char buf[8]; buf[0] = 0; gp = (unsigned char *)buf; h((unsigned char *)buf, (unsigned char *)buf + 4); ' +
+        'while (buf[0] == 0) ; gp = 0; return buf[4]; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    const src = decompile('spin2', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } }).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('while (*(volatile u8 *)sp0 == 0);');
+    expect(src).not.toMatch(/\(u8 \*\)sp0/);
+  });
+
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: unsaid })).toThrow(/address-taken stack local/);

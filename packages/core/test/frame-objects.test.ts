@@ -117,7 +117,33 @@ describe('an unbounded device read keeps the local area as one object', () => {
     expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
     const object = blk.ops[0];
     expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8, volatile: true });
-    expect(blk.ops.filter((op) => op.opcode === 'store' && op.operands[0] === object.results[0])).toHaveLength(2);
+    const members = blk.ops.filter((op) => op.opcode === 'store' && op.operands[0] === object.results[0]);
+    expect(members).toHaveLength(2);
+    // a device that only reads changes no byte a re-read of the object returns
+    expect(members.every((op) => op.attrs.volatile === undefined)).toBe(true);
+  });
+
+  // `vu8 buf[8]; gp = buf; g(buf); while (buf[0] == 0);` — the members are spelled through casts,
+  // which drop the array's qualifier, so the qualifier a holder of `gp` needs is on each access
+  test('kept, each access is volatile where the address is stored where a writer may hold it', () => {
+    const { blk } = published([{ off: 0, width: 1 }]);
+    const a = blk.ops[0].results[0];
+    const gp = mkValue(T.unk(32));
+    const ret = blk.ops.pop()!;
+    blk.ops.push(
+      mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+      mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+      mkOp('call', { operands: [a], attrs: { target: 'g' } }),
+      mkOp('load', { operands: [a], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 1, signed: false } }),
+      ret,
+    );
+    expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
+    const object = blk.ops[0];
+    const members = blk.ops.filter(
+      (op) => (op.opcode === 'load' || op.opcode === 'store') && op.operands[0] === object.results[0],
+    );
+    expect(members.map((op) => op.opcode)).toEqual(['store', 'load']);
+    expect(members.every((op) => op.attrs.volatile === true)).toBe(true);
   });
 
   test('a byte two widths reach is refused, since agbcc reads through casts by type', () => {

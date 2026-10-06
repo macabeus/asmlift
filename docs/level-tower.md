@@ -1446,7 +1446,11 @@ writes, and only devices hold it — the audit does not refuse: it answers with 
 local area, the frontend lifts once more with every word of it routed through `laddr`, and the
 second audit declares those bytes one `u8` array in memory, so every store the machine made there
 is a store the recompile makes. The asm cannot tell a member the
-device reads from a spill nobody reads, and keeping both in memory is right for both. The transfer
+device reads from a spill nobody reads, and keeping both in memory is right for both. Every member
+is spelled through a cast, and a cast's pointee drops the array's `volatile`, so where the address
+was stored somewhere a writer may hold it — a global an interrupt reads, a device's destination —
+each access carries the qualifier itself: a spin on a byte that holder sets is otherwise compiled
+to a loop that never reads it again. The transfer
 has to run too, so the device pin ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts),
 applied by the frontend from the policy the audit answers) makes every device access of a function
 kept this way `volatile` — at a register's literal address, that address plus a runtime index, a

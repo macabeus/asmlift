@@ -776,6 +776,7 @@ interface FrameUses {
   readonly passedToCallee: ReadonlySet<number>;
   readonly published: ReadonlySet<number>;
   readonly publishedOutward: ReadonlySet<number>;
+  readonly publishedToWriter: ReadonlySet<number>;
   readonly arg0Callees: ReadonlyMap<number, ReadonlySet<string | null>>;
   readonly returnTemps: ReadonlyMap<number, readonly Op[]>;
   readonly useCount: ReadonlyMap<number, number>;
@@ -845,6 +846,11 @@ function classifyFrameUses({
   // audit that re-proves a WEAKER premise than the licence it audits is not a containment, it
   // is a second, wider door into the same acceptance.
   const publishedOutward = new Set<number>();
+  // …and the third question `published` answers, of what HOLDS the address it wrote: anything but
+  // a device's read-only source register (`facts.readsThrough`) may write through it — an
+  // interrupt reading a global, a device writing its destination — at any point in this function,
+  // so a re-read of the object is a read the recompile must make too.
+  const publishedToWriter = new Set<number>();
   // …and WHICH CALLEE took it at ARGUMENT 0, because that is the one position a hidden
   // struct-return pointer can occupy and that callee's declared RETURN TYPE is the one fact that
   // tells an out-parameter from one. A `call`'s operand index IS the argument index here (the
@@ -917,6 +923,9 @@ function classifyFrameUses({
             }
           } else if (handedTo.length === 0) {
             mayWrite.add(off);
+            if (op.opcode === 'store') {
+              publishedToWriter.add(off);
+            }
           } else {
             const stores = sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!;
             handedTo.forEach((sink) => stores.push({ op, sink }));
@@ -984,6 +993,7 @@ function classifyFrameUses({
     passedToCallee,
     published,
     publishedOutward,
+    publishedToWriter,
     arg0Callees,
     returnTemps,
     useCount,
@@ -1509,11 +1519,18 @@ function keepAsOneObject({
   }
   // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
   // at `k - from` off the object, and a member address used any other way becomes the object's
-  // address moved by that constant. `volatile` keys on `published` alone. A block transfer's
-  // fill source (`filledFrom`) is a second key per object (`stampObjects`) and not here: every
-  // member is spelled through a cast, which drops the array's qualifier, so on the array it
-  // cannot give the fill temp what `vu32 tmp` gives it — and where a callee is handed the array,
-  // it would add a `discards qualifiers` diagnostic at that call.
+  // address moved by that constant.
+  //
+  // `volatile` on the array keys on `published`. On each ACCESS it keys on `publishedToWriter`:
+  // every member is spelled through a cast, and a cast's pointee drops the array's qualifier, so
+  // where a holder of the published address may write the object, a qualifier on the array alone
+  // lets the recompile keep a re-read in a register — a spin on a byte that holder sets compiles
+  // to a loop that never reads it again. A device that only reads (a DMA source) changes no byte
+  // a re-read returns, and neither does a block transfer's fill source (`filledFrom`, the
+  // per-object stamp's second key), so there the access qualifier would change how the object
+  // compiles and not what any read of it returns.
+  const qualified = uses.published.size > 0;
+  const reread = uses.publishedToWriter.size > 0;
   const object = mkOp('laddr', {
     results: [mkValue(T.unk(32))],
     attrs: {
@@ -1521,7 +1538,7 @@ function keepAsOneObject({
       width: 1,
       signed: false,
       count: to - from,
-      ...(uses.published.size > 0 ? { volatile: true } : {}),
+      ...(qualified ? { volatile: true } : {}),
     },
   });
   const base = object.results[0];
@@ -1529,11 +1546,25 @@ function keepAsOneObject({
   for (const op of [...objects.values()].flat()) {
     memberAt.set(op.results[0], op.attrs.off as number);
   }
+  // …and the runtime-indexed sums into a member, the one other address an access reaches the
+  // object through (`indexedAccess` admits it only as a load's or a store's address)
+  const indexedSums = new Set<Value>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if (op.opcode === 'add' && op.operands.some((v) => memberAt.has(v))) {
+        indexedSums.add(op.results[0]);
+      }
+    }
+  }
   const stillUsed = new Set<Value>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       const at = memberAt.get(op.operands[0]);
-      if ((op.opcode === 'load' || op.opcode === 'store') && at !== undefined) {
+      const access = op.opcode === 'load' || op.opcode === 'store';
+      if (access && reread && (at !== undefined || indexedSums.has(op.operands[0]))) {
+        op.attrs = { ...op.attrs, volatile: true };
+      }
+      if (access && at !== undefined) {
         op.operands = [base, ...op.operands.slice(1)];
         op.attrs = { ...op.attrs, off: (op.attrs.off as number) + at - from };
       }
