@@ -318,15 +318,15 @@ describe('--whole compiles the rest of a stopped fan', () => {
     { variations: ['unsigned', 'flip-join', 'unmerge'], source: '/* unsigned/flip-join/unmerge */' },
     { variations: ['unsigned', 'unmerge'], source: '/* unsigned/unmerge */' },
   ];
-  const scoreOnly = (name: string) => (c: { variations: readonly string[] }) => {
+  const scoreOnly = (name: string) => async (c: { variations: readonly string[] }) => {
     if (c.variations.join('/') !== name) {
       throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
     }
     return cand(name, 3, 20).score;
   };
 
-  it('holds when the compiler refuses every candidate of the rest, and exits 0', () => {
-    const check = checkStop(rest, fan, scoreOnly('none'));
+  it('holds when the compiler refuses every candidate of the rest, and exits 0', async () => {
+    const check = await checkStop(rest, fan, scoreOnly('none'));
     expect(check).toEqual({ compiled: [], refused: 2, unchecked: [] });
     const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
     expect(report.code).toBe(0);
@@ -334,8 +334,8 @@ describe('--whole compiles the rest of a stopped fan', () => {
     expect(report.notes.join('\n')).toContain('all 2 candidate(s) the stillborn stop did not compile');
   });
 
-  it('names every candidate of the rest that compiles as a FALSE STOP, and exits 1', () => {
-    const check = checkStop(rest, fan, scoreOnly('unsigned/flip-join/unmerge'));
+  it('names every candidate of the rest that compiles as a FALSE STOP, and exits 1', async () => {
+    const check = await checkStop(rest, fan, scoreOnly('unsigned/flip-join/unmerge'));
     expect(check.refused).toBe(1);
     expect(check.compiled.map((c) => c.variations.join('/'))).toEqual(['unsigned/flip-join/unmerge']);
     const report = stopCheckReport('pikmin:f:mwcc_233_163n', check);
@@ -346,11 +346,11 @@ describe('--whole compiles the rest of a stopped fan', () => {
 
   // A killed compiler, a Docker outage or a timeout throws too, and says nothing about the
   // candidate: counted as a refusal, a check whose compiler died would print "the stop held", exit 0.
-  it('never counts a throw that is no refusal as refused: the stop is UNCHECKED, exit 3', () => {
+  it('never counts a throw that is no refusal as refused: the stop is UNCHECKED, exit 3', async () => {
     const killed = () => {
       throw new Error('mwcceppc (docker) did not run to completion (exit 137)\nkilled');
     };
-    const check = checkStop(rest, fan, killed);
+    const check = await checkStop(rest, fan, killed);
     expect(check.refused).toBe(0);
     expect(check.unchecked.map((u) => u.error)).toEqual([
       'mwcceppc (docker) did not run to completion (exit 137)',
@@ -369,7 +369,7 @@ describe('--whole compiles the rest of a stopped fan', () => {
   // A Docker CLI that cannot reach its daemon exits 1, as a refusing compiler does, so the harness
   // throws a CompilerRejection whose text holds no error: read as a refusal, a check run while the
   // daemon was down would print "the stop held", exit 0.
-  it('never counts a rejection that prints no error as refused: the stop is UNCHECKED, exit 3', () => {
+  it('never counts a rejection that prints no error as refused: the stop is UNCHECKED, exit 3', async () => {
     const daemonGone = () => {
       throw new CompilerRejection(
         'mwcceppc failed',
@@ -377,15 +377,15 @@ describe('--whole compiles the rest of a stopped fan', () => {
           'the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory',
       );
     };
-    const check = checkStop(rest, fan, daemonGone);
+    const check = await checkStop(rest, fan, daemonGone);
     expect(check.refused).toBe(0);
     expect(check.unchecked).toHaveLength(2);
     expect(stopCheckReport('pikmin:f:mwcc_233_163n', check).code).toBe(3);
   });
 
-  it('one transient among refusals still leaves the stop unchecked', () => {
+  it('one transient among refusals still leaves the stop unchecked', async () => {
     let n = 0;
-    const check = checkStop(rest, fan, () => {
+    const check = await checkStop(rest, fan, async () => {
       if (n++ === 0) {
         throw new CompilerRejection('mwcceppc failed', 'c.c:12: error: pointer/array required');
       }
@@ -395,9 +395,9 @@ describe('--whole compiles the rest of a stopped fan', () => {
     expect(stopCheckReport('pikmin:f:mwcc_233_163n', check).code).toBe(3);
   });
 
-  it('a false stop is named first, with the unchecked beside it, and exits 1', () => {
+  it('a false stop is named first, with the unchecked beside it, and exits 1', async () => {
     let n = 0;
-    const check = checkStop(rest, fan, (c) => {
+    const check = await checkStop(rest, fan, async (c) => {
       if (n++ === 0) {
         return cand(c.variations.join('/'), 3, 20).score;
       }
@@ -411,8 +411,8 @@ describe('--whole compiles the rest of a stopped fan', () => {
     ]);
   });
 
-  it('refuses to pass over a candidate the enumeration no longer holds', () => {
-    expect(() => checkStop([{ variations: ['signed'], source: '' }], fan, scoreOnly('none'))).toThrow(
+  it('refuses to pass over a candidate the enumeration no longer holds', async () => {
+    await expect(checkStop([{ variations: ['signed'], source: '' }], fan, scoreOnly('none'))).rejects.toThrow(
       /not in this enumeration/,
     );
   });

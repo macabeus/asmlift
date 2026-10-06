@@ -86,7 +86,7 @@ tools:
 
     # Optional. The command that compiles a candidate for `--score-against` — and the place
     # asmlift reads this file's codegen flags from when nothing else states them. A project whose
-    # units build with several flag sets writes `{{cflags}}` here instead and lets asmlift find
+    # units build with several flag sets writes `{{flags}}` here instead and lets asmlift find
     # each function's unit; `--cflags` overrides both.
     compiler: |
       arm-none-eabi-cpp -nostdinc -I tools/agbcc/include {{inputPath}} -o {{outputPath}}.i
@@ -95,7 +95,7 @@ tools:
 ```
 
 > 🎮 **A GameCube/Wii project** (`platform: gc`) wires up differently, because its units build with
-> many flag sets: `compiler` takes `{{cflags}}` — plus `{{cc}}` where a unit names its own
+> many flag sets: `compiler` takes `{{flags}}` — plus `{{cc}}` where a unit names its own
 > CodeWarrior build — and asmlift reads each function's flags from the `objdiff.json` beside
 > `decomp.yaml`. A function in a REL module needs `--module <name>`, which both narrows that lookup
 > and points asmlift at the module's own symbols. See

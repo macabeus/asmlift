@@ -92,7 +92,7 @@ test('a changed marker vocabulary is a MISS, and an unchanged one is a hit', asy
       DECLINE_VOCABULARY: vocabulary,
     }));
     const cache = await import('../src/cache');
-    return cache.cachedM2cResult(inputs, () => (computed.push(source), result(source)));
+    return cache.cachedM2cResult(inputs, async () => (computed.push(source), result(source)));
   };
 
   const computed: string[] = [];

@@ -120,12 +120,15 @@ async function acrossAnEdit(
   p: ReturnType<typeof project>,
   template: string,
 ): Promise<{ first: string; second: string; namespaces: number }> {
-  const seen = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-    const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
-    p.setK(999);
-    const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
-    return { first, second };
-  });
+  const seen = await withCache(
+    { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+    async ({ compileFromCommand }) => {
+      const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      p.setK(999);
+      const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      return { first, second };
+    },
+  );
   const ns = join(p.store, 'ns');
   return { ...seen, namespaces: existsSync(ns) ? readdirSync(ns).length : 0 };
 }
@@ -220,12 +223,12 @@ describe('a directory a compile flag names is MEASURED, whatever the operand loo
     const template = templateWith('-iquote inc');
     const served = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
+      async ({ compileFromCommand }) => {
         symlinkSync(a, join(p.cwd, 'inc'));
-        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         rmSync(join(p.cwd, 'inc'));
         symlinkSync(b, join(p.cwd, 'inc'));
-        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -286,10 +289,10 @@ describe('an input that CANNOT be named is refused out loud, not hashed as a sta
   test('a container runtime in the command refuses the whole pipeline', async () => {
     const p = project();
     const err = await stderrOf(async () => {
-      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
         const compile = compileFromCommand(templateWith('docker run i386/ubuntu:bionic gcc'), { cwd: p.cwd });
         // A refusal is not a failure: the compile still happens and still answers.
-        expect(readFileSync(compile(CAND_K, 'f', 'c'), 'utf8')).toContain('#define K 3');
+        expect(readFileSync(await compile(CAND_K, 'f', 'c'), 'utf8')).toContain('#define K 3');
       });
     });
     expect(err).toContain('[candcache] REFUSED label=command reason=stamp-threw');
@@ -303,8 +306,8 @@ describe('an input that CANNOT be named is refused out loud, not hashed as a sta
     process.env.ASMLIFT_TEST_DOCKER = '/usr/local/bin/podman';
     try {
       const err = await stderrOf(async () => {
-        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-          compileFromCommand(templateWith('$ASMLIFT_TEST_DOCKER run img'), { cwd: p.cwd })(CAND_K, 'f', 'c');
+        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
+          await compileFromCommand(templateWith('$ASMLIFT_TEST_DOCKER run img'), { cwd: p.cwd })(CAND_K, 'f', 'c');
         });
       });
       expect(err).toContain('reason=stamp-threw');
@@ -432,10 +435,10 @@ describe('a flag NOBODY listed still measures its operand, because the filesyste
       `if grep -q USES_K "{{inputPath}}"; then cat ${deep}/k.h >> "{{outputPath}}"; fi`;
     const served = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
-        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      async ({ compileFromCommand }) => {
+        const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         writeFileSync(join(deep, 'k.h'), '#define K 999\n');
-        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -467,10 +470,10 @@ describe('an operand the SHELL spells differently than the scan does', () => {
       'if grep -q USES_K "{{inputPath}}"; then D=my; cat "$D inc/k.h" >> "{{outputPath}}"; fi';
     const served = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
-        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      async ({ compileFromCommand }) => {
+        const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         writeFileSync(join(p.cwd, 'my inc/k.h'), '#define K 999\n');
-        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -489,10 +492,10 @@ describe('an operand the SHELL spells differently than the scan does', () => {
       'if grep -q USES_K "{{inputPath}}"; then H=in; cat ${H}c/k.h >> "{{outputPath}}"; fi';
     const served = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
-        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      async ({ compileFromCommand }) => {
+        const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         writeFileSync(join(p.cwd, 'sub/inc/k.h'), '#define K 999\n');
-        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -516,10 +519,10 @@ describe('an operand the SHELL spells differently than the scan does', () => {
     try {
       const served = await withCache(
         { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-        ({ compileFromCommand }) => {
-          const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        async ({ compileFromCommand }) => {
+          const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
           writeFileSync(join(home, 'inc/k.h'), '#define K 999\n');
-          const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+          const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
           return { first, second };
         },
       );
@@ -552,10 +555,10 @@ describe('an operand the SHELL spells differently than the scan does', () => {
       'if grep -q USES_K "{{inputPath}}"; then cat *.h >> "{{outputPath}}"; fi';
     const served = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
-        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      async ({ compileFromCommand }) => {
+        const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         writeFileSync(join(p.cwd, 'k.h'), '#define K 999\n');
-        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -577,15 +580,18 @@ describe('an operand the SHELL spells differently than the scan does', () => {
     mkdirSync(join(p.cwd, 'build'));
     writeFileSync(join(p.cwd, 'build/out.o'), 'first\n');
     const template = ': -nostdinc; cat "{{inputPath}}" > "{{outputPath}}" # remember to clean build';
-    const r = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-      compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
-      writeFileSync(join(p.cwd, 'build/out.o'), 'second\n');
-      compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
-      const count = (): number => (existsSync(join(p.store, 'ns')) ? readdirSync(join(p.store, 'ns')).length : 0);
-      const sameComment = count();
-      compileFromCommand(template + ' now', { cwd: p.cwd })(CAND_K, 'f', 'c');
-      return { sameComment, edited: count() };
-    });
+    const r = await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
+      async ({ compileFromCommand }) => {
+        await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
+        writeFileSync(join(p.cwd, 'build/out.o'), 'second\n');
+        await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c');
+        const count = (): number => (existsSync(join(p.store, 'ns')) ? readdirSync(join(p.store, 'ns')).length : 0);
+        const sameComment = count();
+        await compileFromCommand(template + ' now', { cwd: p.cwd })(CAND_K, 'f', 'c');
+        return { sameComment, edited: count() };
+      },
+    );
     expect(r.sameComment, 'rewriting the build tree must not move the namespace').toBe(1);
     expect(r.edited, 'the raw template text is still hashed, so editing the comment does move it').toBe(2);
   });
@@ -666,10 +672,10 @@ describe('a file that holds MORE FLAGS is scanned, not merely hashed', () => {
       'if grep -q USES_K "{{inputPath}}"; then H=in; cat ${H}c/sub/x.h >> "{{outputPath}}"; fi';
     const served = await withCache(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      ({ compileFromCommand }) => {
-        const first = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      async ({ compileFromCommand }) => {
+        const first = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         writeFileSync(join(p.cwd, 'inc/sub/x.h'), '#define K 999\n');
-        const second = readFileSync(compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+        const second = readFileSync(await compileFromCommand(template, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
         return { first, second };
       },
     );
@@ -717,9 +723,9 @@ describe('a path the walk CANNOT read is a refusal, never a miss', () => {
         return;
       }
       const err = await stderrCapture(async () => {
-        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
+        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
           // A refusal is not a failure: the compile still happens and still answers.
-          const out = compileFromCommand(templateWith('-iquote inc'), { cwd: p.cwd })(CAND_K, 'f', 'c');
+          const out = await compileFromCommand(templateWith('-iquote inc'), { cwd: p.cwd })(CAND_K, 'f', 'c');
           expect(readFileSync(out, 'utf8')).toContain('#define K 3');
         });
       });
@@ -747,8 +753,12 @@ describe('a path the walk CANNOT read is a refusal, never a miss', () => {
     // `process.env` — and every template in this repo assigns shell variables.
     const p = project();
     const err = await stderrCapture(async () => {
-      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-        compileFromCommand('DOCKER=docker; ' + templateWith('$DOCKER run img cc'), { cwd: p.cwd })(CAND_K, 'f', 'c');
+      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
+        await compileFromCommand('DOCKER=docker; ' + templateWith('$DOCKER run img cc'), { cwd: p.cwd })(
+          CAND_K,
+          'f',
+          'c',
+        );
       });
     });
     expect(err).toContain('reason=stamp-threw');
@@ -760,8 +770,8 @@ describe('a path the walk CANNOT read is a refusal, never a miss', () => {
     async (runner) => {
       const p = project();
       const err = await stderrCapture(async () => {
-        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, ({ compileFromCommand }) => {
-          compileFromCommand(templateWith(runner), { cwd: p.cwd })(CAND_K, 'f', 'c');
+        await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
+          await compileFromCommand(templateWith(runner), { cwd: p.cwd })(CAND_K, 'f', 'c');
         });
       });
       expect(err).toContain('reason=stamp-threw');

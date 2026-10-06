@@ -23,7 +23,7 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     try {
       const compile = pool.worker();
       const viaThread = await compile(source, 'divc', 'c');
-      expect(readFileSync(viaThread)).toEqual(readFileSync(direct(source, 'divc', 'c')));
+      expect(readFileSync(viaThread)).toEqual(readFileSync(await direct(source, 'divc', 'c')));
       const refused = await compile('s32 divc(s32 a0) { return a0 +; }\n', 'divc', 'c').catch((e: unknown) => e);
       expect(refused).toBeInstanceOf(CompilerRejection);
       expect((refused as CompilerRejection).diagnostic).toMatch(/error/i);
@@ -41,7 +41,7 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     try {
       const viaThread = await pool.worker()(source, c.sym, 'c');
       expect(readFileSync(viaThread)).toEqual(
-        readFileSync(rowCompiler(c.toolchain, c.codegen, c.compile)(source, c.sym, 'c')),
+        readFileSync(await rowCompiler(c.toolchain, c.codegen, c.compile)(source, c.sym, 'c')),
       );
     } finally {
       await pool.close();

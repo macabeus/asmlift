@@ -107,13 +107,13 @@ describe('MIPS (IDO) control flow: compile → disasm → decompile → recompil
 // mis-scores them. `scoreSource` dispatches by target.compiler, so the ranked path genuinely
 // selects the matching type on MIPS.
 describe('MIPS (IDO) ranked candidates — scoring dispatches to the right compiler (F1)', () => {
-  test('the differ picks the unsigned candidate for `x >> 1` on MIPS/IDO', () => {
+  test('the differ picks the unsigned candidate for `x >> 1` on MIPS/IDO', async () => {
     const { obj, asm } = compileMipsTarget(
       'unsigned ushr(unsigned x){ return x >> 1; }',
       'ushr',
       TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
     );
-    const ranked = decompileRanked('ushr', asm, MIPS_IDO, obj);
+    const ranked = await decompileRanked('ushr', asm, MIPS_IDO, obj);
     expect(joinVariations(ranked.winner.variations)).toBe('unsigned'); // srl ⇒ unsigned wins; agbcc-scoring couldn't tell
     expect(ranked.winner.score.match).toBe(true); // byte-exact via the IDO scorer, not agbcc
     // What this pins is the DISPATCH: an agbcc-scored MIPS candidate would be compiled by the

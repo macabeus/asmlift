@@ -36,9 +36,9 @@ function recorder(succeedOn?: (src: string, decls?: string) => boolean) {
 }
 
 describe('scoreM2c reports the failure of the most informed attempt on the source m2c emitted', () => {
-  test('with no declarations, that is the plain attempt', () => {
+  test('with no declarations, that is the plain attempt', async () => {
     const { score, seen } = recorder();
-    expect(() => scoreM2c(score, SRC, 'f', 'obj', undefined)).toThrow('FAIL dialect=false decls=false');
+    await expect(scoreM2c(score, SRC, 'f', 'obj', undefined)).rejects.toThrow('FAIL dialect=false decls=false');
     expect(seen).toEqual([
       { dialect: false, decls: false },
       { dialect: true, decls: false },
@@ -47,9 +47,9 @@ describe('scoreM2c reports the failure of the most informed attempt on the sourc
 
   // THE REGRESSION THIS FILE EXISTS FOR. The plain rung fails for a cause the declarations rung
   // does not have; publishing the plain rung's error names a missing declaration the row supplies.
-  test('with declarations, it is the declarations attempt — not the plain one, not a dialect one', () => {
+  test('with declarations, it is the declarations attempt — not the plain one, not a dialect one', async () => {
     const { score, seen } = recorder();
-    expect(() => scoreM2c(score, SRC, 'f', 'obj', DECLS)).toThrow('FAIL dialect=false decls=true');
+    await expect(scoreM2c(score, SRC, 'f', 'obj', DECLS)).rejects.toThrow('FAIL dialect=false decls=true');
     expect(seen).toEqual([
       { dialect: false, decls: false },
       { dialect: true, decls: false },
@@ -61,18 +61,18 @@ describe('scoreM2c reports the failure of the most informed attempt on the sourc
   // The dialect rungs stay unreported for the reason they always were: they prepend typedefs, so a
   // failure there can be theirs rather than the source's. Here only the dialect+decls rung could
   // have produced an error, and the reported one is still the plain+decls rung's.
-  test('a dialect rung never supplies the reported error', () => {
+  test('a dialect rung never supplies the reported error', async () => {
     const { score } = recorder();
-    expect(() => scoreM2c(score, SRC, 'f', 'obj', DECLS)).toThrow(/dialect=false/);
+    await expect(scoreM2c(score, SRC, 'f', 'obj', DECLS)).rejects.toThrow(/dialect=false/);
   });
 
-  test('a rung that compiles is the measurement, and nothing after it runs', () => {
+  test('a rung that compiles is the measurement, and nothing after it runs', async () => {
     for (const [where, ok] of [
       ['dialect', (src: string, decls?: string) => src !== SRC && decls === undefined],
       ['declarations', (src: string, decls?: string) => src === SRC && decls !== undefined],
     ] as [string, (s: string, d?: string) => boolean][]) {
       const { score, seen } = recorder(ok);
-      expect(scoreM2c(score, SRC, 'f', 'obj', DECLS), where).toBe(OK);
+      expect(await scoreM2c(score, SRC, 'f', 'obj', DECLS), where).toBe(OK);
       expect(seen.length, where).toBe(where === 'dialect' ? 2 : 3);
     }
   });

@@ -38,8 +38,8 @@ const scorer = (errors: Record<string, string>, scores: string[] = []) =>
   }) as unknown as Parameters<typeof evaluateM2c>[4];
 
 describe('the row publishes the m2c text that decided it', () => {
-  test('nothing compiles: the RENAMED attempt’s text and its own error, with the name', () => {
-    const r = evaluateM2c(
+  test('nothing compiles: the RENAMED attempt’s text and its own error, with the name', async () => {
+    const r = await evaluateM2c(
       TC,
       SPEC,
       'obj',
@@ -54,8 +54,8 @@ describe('the row publishes the m2c text that decided it', () => {
     expect(r.receiverRenamed).toBe('this_');
   });
 
-  test('the as-emitted text compiles: it is published, and no rename is claimed', () => {
-    const r = evaluateM2c(TC, SPEC, 'obj', 'asm', scorer({}, ['*this)']), undefined);
+  test('the as-emitted text compiles: it is published, and no rename is claimed', async () => {
+    const r = await evaluateM2c(TC, SPEC, 'obj', 'asm', scorer({}, ['*this)']), undefined);
     expect(r.outcome).toBe('match');
     expect(r.source).toBe(M2C_SOURCE);
     expect(r.receiverRenamed).toBeUndefined();

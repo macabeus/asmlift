@@ -28,7 +28,7 @@ import { assessQuality } from './quality';
  *  source — the prelude already carries `C_TYPEDEFS`, so a hand-concatenated block redefines
  *  `s16`/`s32` and the compile fails for a reason that has nothing to do with the candidate.
  *  Optional: a scorer whose rows declare nothing ignores it. */
-export type Scorer = (candC: string, sym: string, obj: string, declarations?: string) => MatchScore;
+export type Scorer = (candC: string, sym: string, obj: string, declarations?: string) => Promise<MatchScore>;
 
 /** THE INPUTS one benchmark row hands asmlift — the asm-data side table, the row's prototypes,
  *  the candidate compiler and the vendored symbol map — as the single options object both phases
@@ -102,15 +102,15 @@ export function rowCompiler(
  *
  *  `runAsmlift` publishes four facts out of this object — the winner's variations and source, the
  *  dropped list and the withheld list — and drops `candidates` on the floor. `bench fan` is the
- *  one supported way to read them. The harness ranks through `decompileRankedParallel` (`rankRow`),
- *  which orders the same memoized scores and so publishes what this serial call would. */
+ *  one supported way to read them. The harness ranks the same way with a big fan's compiles spread
+ *  over threads (`rankRow`), and so publishes what this one-worker call would. */
 export function asmliftFan(
   codegen: ResolvedTarget,
   sym: string,
   asm: string,
   obj: string,
   opts: ReturnType<typeof rankOptionsFor> & Pick<RankOptions, 'onProgress' | 'onEnumerationError'>,
-): RankedResult {
+): Promise<RankedResult> {
   return decompileRanked(sym, asm, codegen.target, obj, opts);
 }
 
@@ -126,9 +126,9 @@ export const ROW_COMPILE_WORKERS = 4;
 export const PARALLEL_FAN = 500;
 
 /** The ranked pass the harness publishes: `asmliftFan`'s ranking, with a big fan's compiles spread
- *  over `ROW_COMPILE_WORKERS` threads (compile-pool.ts). The ranking is the parallel driver's, which
- *  orders the same memoized scores the serial driver does, so every published field is the same;
- *  only `rankSeconds` depends on the threads. */
+ *  over `ROW_COMPILE_WORKERS` threads (compile-pool.ts). The ranking orders the same memoized scores
+ *  at any worker count, so every published field is the same; only `rankSeconds` depends on the
+ *  threads. */
 async function rankRow(
   codegen: ResolvedTarget,
   sym: string,

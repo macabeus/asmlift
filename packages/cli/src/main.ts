@@ -151,7 +151,7 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --name           select the function in multi-function input (default: detected;
                    required for an object whose code sections share addresses)
   --cflags         the flags your build compiles this function's file with; they
-                   fill {{cflags}} in tools.asmlift.compiler (default: the objdiff.json
+                   fill {{flags}} in tools.asmlift.compiler (default: the objdiff.json
                    unit that defines the function, else the flags that command already
                    spells, else the target's canonical flags)
   --module         the dtk module the function belongs to: its unit is looked for
@@ -829,11 +829,10 @@ export async function runCli(
     } catch (e) {
       return refuse(`tools.asmlift.compiler: ${e instanceof Error ? e.message : e}`);
     }
-    const compile = compilers.compile;
     try {
       // Sampled BEFORE the run and again after it — see provenance.ts for the run this exists for.
       const treeBefore = sampleSourceTree();
-      const { decompileRanked, decompileRankedParallel } = await import('./rank');
+      const { decompileRankedParallel } = await import('./rank');
       // Under `--progress` — the flag that already says "report on this run as it goes" — the run
       // also says what it SPENT (phase.ts). A run nobody is watching writes only what it computed.
       const clock = flags.has('progress') ? new PhaseClock() : undefined;
@@ -847,7 +846,6 @@ export async function runCli(
         asmData,
         prototypes,
         symbols,
-        compile,
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -857,16 +855,12 @@ export async function runCli(
         ...(onProgress ? { onProgress } : {}),
         ...(clock ? { clock } : {}),
       };
-      // jobs > 1 pools the candidate COMPILES; the ranking itself is the same code either way
-      // (rank.ts), so the two differ in scheduling only.
-      const ranked =
-        jobs > 1
-          ? await decompileRankedParallel(name, asm, unitTarget, targetObj, {
-              ...rankOpts,
-              jobs,
-              worker: compilers.worker,
-            })
-          : decompileRanked(name, asm, unitTarget, targetObj, rankOpts);
+      // jobs compile at once; the ranking itself is the same at any count (rank.ts).
+      const ranked = await decompileRankedParallel(name, asm, unitTarget, targetObj, {
+        ...rankOpts,
+        jobs,
+        worker: compilers.worker,
+      });
       const stamp = sourceStamp(treeBefore, sampleSourceTree(), bakedBuild());
       // Read AFTER the tree sample, which is work this run did and the clock should have charged.
       const phaseReport = clock?.report() ?? '';

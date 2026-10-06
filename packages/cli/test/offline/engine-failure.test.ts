@@ -19,7 +19,7 @@ let compiles = 0;
 beforeEach(() => {
   compiles = 0;
 });
-const compile = (): string => {
+const compile = async (): Promise<string> => {
   compiles++;
   return fixture('candidate-diff.o');
 };
@@ -38,8 +38,8 @@ beforeAll(() => {
   throw new Error('the engine survived 20,000 panics');
 }, 60_000);
 
-test('the serial ranking stops at the failure and throws it', () => {
-  expect(() => decompileRanked('clamp0', asm, ARMV4T_AGBCC, TARGET, { compile })).toThrow(EngineFailedError);
+test('the serial ranking stops at the failure and throws it', async () => {
+  await expect(decompileRanked('clamp0', asm, ARMV4T_AGBCC, TARGET, { compile })).rejects.toThrow(EngineFailedError);
   expect(fan).toBeGreaterThan(1);
   expect(compiles).toBe(1);
 });

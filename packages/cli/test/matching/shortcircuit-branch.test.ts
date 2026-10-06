@@ -32,14 +32,14 @@ const ARM = 'p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4;';
 const src = (op: string) =>
   `int f(int a, int b, int *p, int *q){ if (a ${op} b) { ${ARM} } else { p[0] = -1; } return p[1]; }`;
 
-const ranked = (c: string) => {
+const ranked = async (c: string) => {
   const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-  return { rk: decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)), target: assembleTarget(asm) };
+  return { rk: await decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)), target: assembleTarget(asm) };
 };
 
 describe('the emitted orientation decides the match, and only one orientation is reachable', () => {
-  test('a reconverging `&&` reaches the source orientation at the default sense and matches', () => {
-    const { rk, target } = ranked(src('&&'));
+  test('a reconverging `&&` reaches the source orientation at the default sense and matches', async () => {
+    const { rk, target } = await ranked(src('&&'));
     // the `&&`'s tests all branch to the ELSE arm, so the fall-through IS the then-arm and the
     // default joined sense spells the source's own orientation — which is the bytes
     expect(rk.winner.source).toContain('&&');
@@ -49,16 +49,16 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(scoreC(dual, 'f', target, TOOLCHAIN_TARGETS.agbcc.canonicalFlags).match).toBe(true);
   });
 
-  test('the same shape written `||` matches, so the fold itself is not the defect', () => {
+  test('the same shape written `||` matches, so the fold itself is not the defect', async () => {
     // The control that keeps the claim honest, and the variation's own reason to exist: an `||`'s first
     // test branches INTO the then-arm, so the fall-through reading is inverted here and the source
     // orientation is /flip-join's.
-    const { rk } = ranked(src('||'));
+    const { rk } = await ranked(src('||'));
     expect(rk.winner.source).toContain('||');
     expect(rk.winner.score.match).toBe(true);
   });
 
-  test('a far arm recovers the source `&&` through its long-branch trampolines', () => {
+  test('a far arm recovers the source `&&` through its long-branch trampolines', async () => {
     // Past Thumb's ±256-byte reach agbcc inverts the branch and emits `bne ^g / b shared`, so the
     // shared block arrives behind a forwarding block on EACH edge. The fold looks through them, and
     // this orientation lands on the source's own spelling rather than the dual.
@@ -68,7 +68,7 @@ describe('the emitted orientation decides the match, and only one orientation is
     // asserted is the `&&`.
     const far = Array.from({ length: 32 }, (_, i) => `p[${i}] = ${i * 2 + 1}; q[${i}] = ${i * 2 + 2};`).join(' ');
     const c = `int f(int a, int b, int *p, int *q){ if (a && b) { ${far} } else { p[0] = -1; } return p[1]; }`;
-    const { rk } = ranked(c);
+    const { rk } = await ranked(c);
     expect(rk.winner.source).toContain('&&');
     expect(rk.winner.source).not.toContain('||');
     expect(rk.winner.score.match).toBe(true);
@@ -76,20 +76,20 @@ describe('the emitted orientation decides the match, and only one orientation is
     expect(rk.winner.source.split('-1').length - 1).toBe(1);
   });
 
-  test('each if class carries its own orientation variation: /flip-branch divergent, /flip-join joined', () => {
+  test('each if class carries its own orientation variation: /flip-branch divergent, /flip-join joined', async () => {
     // Asserted on the CANDIDATE LIST, not on the winner: the default sense already spells `&&`
     // for the divergent shape, so a winner assertion would pass with the variation deleted.
     const divergent = compileTargetAsm(
       `int f(int a, int b, int *p, int *q){ if (a && b) { ${ARM} return 2; } return 3; }`,
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
-    const dv = decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
+    const dv = await decompileRanked('f', divergent, ARMV4T_AGBCC, assembleTarget(divergent));
     expect(dv.candidates.some((c) => hasVariation(c.variations, 'flip-branch'))).toBe(true);
     expect(dv.winner.score.match).toBe(true);
     // the reconverging sibling, which differs only in that its arms rejoin, is /flip-join's:
     // its flipped spelling is a distinct candidate where the divergent-sense variation never fires
     const reconverging = compileTargetAsm(src('&&'), TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    const rc = decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
+    const rc = await decompileRanked('f', reconverging, ARMV4T_AGBCC, assembleTarget(reconverging));
     expect(rc.candidates.some((c) => hasVariation(c.variations, 'flip-branch'))).toBe(false);
     expect(rc.candidates.some((c) => hasVariation(c.variations, 'flip-join'))).toBe(true);
   });
@@ -104,13 +104,13 @@ describe('the emitted orientation decides the match, and only one orientation is
 // a regression here would otherwise ride main for weeks. Each score in a test name below is what the
 // shape scores with `negateCondOps`' connective case ablated.
 describe('a three-clause short-circuit chain folds flat', () => {
-  const best = (c: string) => {
+  const best = async (c: string) => {
     const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).winner;
+    return (await decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm))).winner;
   };
 
-  test('`a || (b && c)` guarding two arms — 5 without the second fold, THEN arm duplicated', () => {
-    const b = best(
+  test('`a || (b && c)` guarding two arms — 5 without the second fold, THEN arm duplicated', async () => {
+    const b = await best(
       'int f(int a,int b,int c,int *p){ if (a > 0 || (b > 0 && c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
     );
     expect(b.score.match).toBe(true);
@@ -122,26 +122,26 @@ describe('a three-clause short-circuit chain folds flat', () => {
     expect(b.source.split('= 1').length - 1).toBe(1);
   });
 
-  test('`a || (b && c)` over an accumulator — 7 without the second fold', () => {
-    const b = best('int f(int a,int b,int c){ int r = 0; if (a > 0 || (b > 0 && c > 0)) r = 1; return r; }');
+  test('`a || (b && c)` over an accumulator — 7 without the second fold', async () => {
+    const b = await best('int f(int a,int b,int c){ int r = 0; if (a > 0 || (b > 0 && c > 0)) r = 1; return r; }');
     expect(b.score.match).toBe(true);
     expect(b.source).toContain('a0 > 0 || a1 > 0 && a2 > 0');
   });
 
-  test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, 11 without the second fold', () => {
+  test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, 11 without the second fold', async () => {
     // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast by the
     // existing `/uns-cmp` variation, NOT as a parameter type: the winner is `signed/defsite/uns-cmp` with
     // four `s32` params, so the fan reaches the bytes with no per-parameter signedness candidate.
-    const b = best(
+    const b = await best(
       'int f(unsigned a,int b,unsigned c,int d){ int r=0; if (d > b || (d == b && c > a)) r=1; return r; }',
     );
     expect(b.score.match).toBe(true);
     expect(b.source).toContain('(u32)');
   });
 
-  test('the CONTROL: `a && (b || c)`, whose orientation never asks for the negation, still matches', () => {
+  test('the CONTROL: `a && (b || c)`, whose orientation never asks for the negation, still matches', async () => {
     // Ablated it matches too, so it pins that the connective case takes nothing away.
-    const b = best(
+    const b = await best(
       'int f(int a,int b,int c,int *p){ if (a > 0 && (b > 0 || c > 0)) { p[0]=1; } else { p[0]=2; } return p[1]; }',
     );
     expect(b.score.match).toBe(true);
@@ -162,11 +162,11 @@ describe('a three-clause short-circuit chain folds flat', () => {
 // host `cc` and run over a 512-point grid of `p`/`q` contents and `n` (including `n < 0` and
 // `n` past the array), print identical output.
 describe('a loop-exit connective folds, and the loop it un-declines stays recovered', () => {
-  test('`while (i < n && (p[i] || q[i]))` keeps ONE loop with the connective in its condition', () => {
+  test('`while (i < n && (p[i] || q[i]))` keeps ONE loop with the connective in its condition', async () => {
     const c =
       'int f(int*p,int*q,int n,int*o){ int i=0; while (i<n && (p[i]!=0 || q[i]!=0)) i++; o[0]=i; o[2]=q[1]; return i; }';
     const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    const best = decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm)).winner;
+    const best = (await decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm))).winner;
     expect(best.source).toMatch(/while \(v0 < a2 && \(a0\[v0\] != 0 \|\| a1\[v0\] != 0\)\)/);
     expect(best.source.split('do {').length - 1).toBe(1); // no tail-duplicated loop
     expect(best.source).not.toContain('ASMLIFT_ERROR');
@@ -184,11 +184,13 @@ describe('a loop-exit connective folds, and the loop it un-declines stays recove
 describe('an arm that re-reads what its second test loaded', () => {
   const PROTOS = { fnB: { params: 0, returnsVoid: true }, sink: { params: 1, returnsVoid: true } };
   const X = 'extern void fnB(void); extern void sink(s32);\n';
-  const best = (c: string, self: { params: number }) => {
+  const best = async (c: string, self: { params: number }) => {
     const asm = compileTargetAsm(X + c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    return decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm), {
-      prototypes: { f: { ...self, returnsVoid: true }, ...PROTOS },
-    }).winner;
+    return (
+      await decompileRanked('f', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+        prototypes: { f: { ...self, returnsVoid: true }, ...PROTOS },
+      })
+    ).winner;
   };
 
   test('the compiler fact: an INLINE re-read is one load, a LOCAL is two', () => {
@@ -205,8 +207,8 @@ describe('an arm that re-reads what its second test loaded', () => {
     expect(loads('fnB(); p[2] = p[1];')).toBe(2);
   });
 
-  test('re-derived inline, the ladder arm folds flat and matches — the nest scored 3', () => {
-    const b = best(
+  test('re-derived inline, the ladder arm folds flat and matches — the nest scored 3', async () => {
+    const b = await best(
       'void f(u8 *p, u8 *q, s32 a){ if (a && (p[1] & 0x7f) == 0x7f) { p[1] &= 0x80; q[0] = 5; return; } fnB(); }',
       { params: 3 },
     );
@@ -214,31 +216,36 @@ describe('an arm that re-reads what its second test loaded', () => {
     expect(b.source).toContain('&&');
   });
 
-  test('a read the arm holds across a CALL keeps the nest, which matches', () => {
+  test('a read the arm holds across a CALL keeps the nest, which matches', async () => {
     // Re-derived, the copy would be a local ahead of the call and a second load.
-    const b = best('void f(u8 *p, s32 a){ u8 v; if (a) { v = p[3]; if ((v & 0x7f) == 0x7f) { fnB(); sink(v); } } }', {
+    const b = await best(
+      'void f(u8 *p, s32 a){ u8 v; if (a) { v = p[3]; if ((v & 0x7f) == 0x7f) { fnB(); sink(v); } } }',
+      {
+        params: 2,
+      },
+    );
+    expect(b.score.match).toBe(true);
+  });
+
+  test('a read the arm uses TWICE keeps the nest, which matches', async () => {
+    const b = await best('void f(u8 *p, s32 a){ u8 v; if (a && ((v = p[3]) & 0x7f) == 0x7f) { sink(v); sink(v); } }', {
       params: 2,
     });
     expect(b.score.match).toBe(true);
   });
 
-  test('a read the arm uses TWICE keeps the nest, which matches', () => {
-    const b = best('void f(u8 *p, s32 a){ u8 v; if (a && ((v = p[3]) & 0x7f) == 0x7f) { sink(v); sink(v); } }', {
-      params: 2,
-    });
-    expect(b.score.match).toBe(true);
-  });
-
-  test('a read only the arm consumes is not moved under the second test, and matches', () => {
+  test('a read only the arm consumes is not moved under the second test, and matches', async () => {
     // The target reads p[5] before `b == 3`, on both of its exits.
-    const b = best('void f(u8 *p, s32 a, s32 b){ u8 v; if (a) { v = p[5]; if (b == 3) sink(v); } }', { params: 3 });
+    const b = await best('void f(u8 *p, s32 a, s32 b){ u8 v; if (a) { v = p[5]; if (b == 3) sink(v); } }', {
+      params: 3,
+    });
     expect(b.score.match).toBe(true);
   });
 
-  test('a store to ANOTHER field of the same struct is no barrier, and the flat fold matches', () => {
+  test('a store to ANOTHER field of the same struct is no barrier, and the flat fold matches', async () => {
     // analysis.ts inlines the copy past a provably disjoint store (`disjointConstSlots`), so agbcc
     // merges it into the test's load. Counting every effect keeps the nest here: 8/22.
-    const b = best(
+    const b = await best(
       'struct R { s32 x; u16 h; u8 fl; u8 k; };\n' +
         'void f(struct R *r, s32 a){ if (a && (r->fl & 0x7f) == 0x7f) { r->x = 5; r->fl &= 0x80; return; } fnB(); }',
       { params: 2 },
@@ -247,10 +254,10 @@ describe('an arm that re-reads what its second test loaded', () => {
     expect(b.source).toContain('&&');
   });
 
-  test('an INDEXED re-read folds like a constant-offset one — the address carries no read', () => {
+  test('an INDEXED re-read folds like a constant-offset one — the address carries no read', async () => {
     // The copy re-derives `p + i` beside the load. Treating that `add` as a read refuses this where
     // `p[5]` folds (3/22).
-    const b = best(
+    const b = await best(
       'void f(u8 *p, s32 i, s32 a){ if (a && (p[i] & 0x7f) == 0x7f) { p[i] &= 0x80; fnB(); p[i] = 1; return; } fnB(); }',
       { params: 3 },
     );
@@ -258,9 +265,9 @@ describe('an arm that re-reads what its second test loaded', () => {
     expect(b.source).toContain('&&');
   });
 
-  test('a search loop whose hit arm returns keeps its nest, which matches', () => {
+  test('a search loop whose hit arm returns keeps its nest, which matches', async () => {
     // `loop-exit`: fused whole, the condition becomes the loop header's exit. Ablated, 21/33.
-    const b = best(
+    const b = await best(
       'void f(u8 *p, u8 *q, u8 *r){ u8 v; s32 i; for (i = 0; i < 8; i++) { if (q[i] != 0 && (v = p[i]) > 5) { r[0] = v; return; } } fnB(); }',
       { params: 3 },
     );

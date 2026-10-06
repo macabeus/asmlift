@@ -114,13 +114,13 @@ const REACHED_ONLY_THROUGH: readonly VariationName[] = [
 
 describe("asmlift matches an example's `after` only through its variation", () => {
   for (const name of REACHED_ONLY_THROUGH) {
-    test(name, () => {
+    test(name, async () => {
       const { example } = VARIATION_DEFINITIONS[name];
       expect(example.compiler).toBe('agbcc');
       const asm = compileTargetAsm(spell(example.unit, example.after), flagsOf('agbcc'));
-      const matched = decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm)).candidates.filter(
-        (c) => c.score.match,
-      );
+      const matched = (
+        await decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm))
+      ).candidates.filter((c) => c.score.match);
       expect(matched.length).toBeGreaterThan(0);
       expect(matched.filter((c) => !hasVariation(c.variations, name)).map((c) => c.variations.join('/'))).toEqual([]);
     });

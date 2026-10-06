@@ -15,9 +15,9 @@ import { decompileRanked } from '../../src/rank';
 const spec = SYNTHETIC.find((s) => s.sym === 'leafand')!;
 const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
 
-test('leafand matches only through a region copy over a `&&`-holding leaf arm', () => {
+test('leafand matches only through a region copy over a `&&`-holding leaf arm', async () => {
   const asm = compileTargetAsm(spec.src, FLAGS);
-  const ranked = decompileRanked(spec.sym, asm, ARMV4T_AGBCC, assembleTarget(asm), { prototypes: spec.proto });
+  const ranked = await decompileRanked(spec.sym, asm, ARMV4T_AGBCC, assembleTarget(asm), { prototypes: spec.proto });
   const exact = ranked.candidates.filter((c) => c.score.score === 0).map((c) => joinVariations(c.variations));
   expect(exact.length).toBeGreaterThan(0);
   // every byte-exact spelling copies the parameter, and the copy's region is a leaf

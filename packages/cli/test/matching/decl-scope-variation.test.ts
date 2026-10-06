@@ -104,7 +104,7 @@ void f(int n) {
 describe.runIf(HAVE)('the DECLARATION-PLACEMENT variation (checkout-gated)', () => {
   const hex = new Map<string, string>();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     const tool = asmliftBlock(loadDecompYaml(join(CHECKOUT, 'decomp.yaml')));
     const template = tool?.compiler;
     if (!template) {
@@ -116,7 +116,7 @@ describe.runIf(HAVE)('the DECLARATION-PLACEMENT variation (checkout-gated)', () 
       ['block3', BLOCK3],
       ['one', ONE],
     ] as const) {
-      const obj = compile(src, 'f', 'c');
+      const obj = await compile(src, 'f', 'c');
       const bin = join(mkdtempSync(join(tmpdir(), 'asmlift-declscope-')), `${name}.bin`);
       const r = spawnSync('arm-none-eabi-objcopy', ['-O', 'binary', obj, bin], { encoding: 'utf8' });
       if (r.status !== 0) {

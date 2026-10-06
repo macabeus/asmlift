@@ -194,7 +194,7 @@ export function compileCandAgbcc(cSource: string, flags: readonly string[]): str
 /** agbcc's candidate compiler at `flags`. The registry holds it at agbcc's canonical flags. */
 export const agbccCandidateCompiler =
   (flags: readonly string[]): CandidateCompiler =>
-  (source, _symbol, backendId) =>
+  async (source, _symbol, backendId) =>
     backendId === 'pascal' ? noPascal('agbcc') : compileCandAgbcc(source, flags);
 
 registerCandidateCompiler('agbcc', agbccCandidateCompiler(TOOLCHAIN_TARGETS.agbcc.canonicalFlags));
@@ -378,7 +378,7 @@ export function compileCandIdoC(cSource: string, flags: readonly string[]): stri
 /** IDO's candidate compiler at `flags`. The registry holds it at ido7.1's canonical flags. */
 export const idoCandidateCompiler =
   (flags: readonly string[]): CandidateCompiler =>
-  (source, _symbol, backendId) =>
+  async (source, _symbol, backendId) =>
     backendId === 'pascal' ? compileCandIdoPascal(source, flags) : compileCandIdoC(source, flags);
 
 registerCandidateCompiler('ido', idoCandidateCompiler(TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags));
@@ -588,7 +588,7 @@ export function compileCandKmc(cSource: string, flags: readonly string[]): strin
 /** KMC GCC's candidate compiler at `flags`. The registry holds it at gcc2.7.2kmc's canonical flags. */
 export const kmcCandidateCompiler =
   (flags: readonly string[]): CandidateCompiler =>
-  (source, _symbol, backendId) =>
+  async (source, _symbol, backendId) =>
     backendId === 'pascal' ? noPascal('gcc') : compileCandKmc(source, flags);
 
 registerCandidateCompiler('gcc', kmcCandidateCompiler(TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags));
@@ -784,7 +784,7 @@ export function compileCandPpc(mwcc: MwccToolchainId, cSource: string, flags: re
 export const mwccCandidateCompiler =
   (mwcc: MwccToolchainId) =>
   (flags: readonly string[]): CandidateCompiler =>
-  (source, _symbol, backendId) =>
+  async (source, _symbol, backendId) =>
     backendId === 'pascal' ? noPascal('mwcc') : compileCandPpc(mwcc, source, flags);
 
 // The registry is keyed by `TargetDescription.compiler`, which all three CodeWarrior builds spell

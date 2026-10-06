@@ -5,8 +5,8 @@
 //   • humans — the web playground's Pipeline tab renders the browser-pure TraceReport subset.
 //
 // The tracing tower itself lives in @asmlift/core/trace (browser-pure). This wrapper is the
-// scoring side of the seam: when a target object is available it probes a per-pattern objdiff
-// score (the `probeScore` hook), scores the headline source, and ranks candidates. asmlift
+// scoring side of the seam: when a target object is available it scores the source probed at each
+// pattern boundary (the `probeSource` hook), scores the headline source, and ranks candidates. asmlift
 // stays a pure generator: the score comes through the scoring seam (scoreSource), never a
 // diff of asmlift's own.
 import { cBackend } from '@asmlift/core/backend/c';
@@ -16,7 +16,7 @@ import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import { type ResolvedTarget, type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
-import { type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
+import { type PatternEvent, type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
 
 import { decompileRanked } from './rank';
 import { type CandidateCompiler, MatchScore, NoCandidateCompilerError, scoreSource } from './score';
@@ -30,25 +30,33 @@ export interface CandidateReport {
   source: string;
 }
 
-export interface DecompileReport extends TraceReport {
+/** A pattern event with the objdiff scores of the sources probed at its boundaries. */
+export interface ScoredPatternEvent extends Omit<PatternEvent, 'sourceBefore' | 'sourceAfter'> {
+  scoreBefore?: number;
+  scoreAfter?: number;
+  scoreDelta?: number; // negative = improved toward match
+}
+
+export interface DecompileReport extends Omit<TraceReport, 'patternEvents'> {
+  patternEvents: ScoredPatternEvent[];
   candidates?: CandidateReport[];
   score?: MatchScore;
   outcome: 'match' | 'near' | 'unscored';
 }
 
-export interface ReportOptions extends Omit<TraceOptions, 'probeScore'> {
+export interface ReportOptions extends Omit<TraceOptions, 'probeSource'> {
   targetObj?: string; // if given, the report is scored + ranked by real objdiff
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
 }
 
 /** Run the tower while recording a DecompileReport. */
-export function decompileWithReport(
+export async function decompileWithReport(
   name: string,
   asm: string,
   resolved: ResolvedTarget,
   opts: ReportOptions = {},
-): { source: string; report: DecompileReport } {
+): Promise<{ source: string; report: DecompileReport }> {
   const { target } = resolved;
   const { targetObj, compile, ...traceOpts } = opts;
   const backend = opts.backend ?? cBackend;
@@ -58,16 +66,13 @@ export function decompileWithReport(
   // a program asmlift does not emit. Built once here rather than per probe — `symbolsByName`
   // walks the whole project map, and a probe fires at every pattern boundary.
   const mapSymbols = opts.symbols ? symbolsByName(opts.symbols) : undefined;
-  const probeScore = targetObj
+  const probeSource = targetObj
     ? (fn: Fn, inferredSymbols: Map<string, SymbolInfo>) =>
-        tryScore(
+        probedSource(
           backend,
           fn,
           target,
-          name,
-          targetObj,
           returnsVoid,
-          compile,
           opts.prototypes?.[name],
           prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
           inferredSymbols,
@@ -75,7 +80,25 @@ export function decompileWithReport(
         )
     : undefined;
 
-  const { source, report } = decompileTraced(name, asm, resolved, { ...traceOpts, probeScore });
+  const { source, report } = decompileTraced(name, asm, resolved, { ...traceOpts, probeSource });
+
+  // Each distinct probed source compiles once, one at a time; a probe that fails to score reads as
+  // unscored.
+  const probeScores = new Map<string, number | undefined>();
+  if (targetObj) {
+    for (const probed of report.patternEvents.flatMap((e) => [e.sourceBefore, e.sourceAfter])) {
+      if (probed !== undefined && !probeScores.has(probed)) {
+        const scored = await scoreSource(probed, name, targetObj, target, backend.id, compile).catch(() => undefined);
+        probeScores.set(probed, scored?.score);
+      }
+    }
+  }
+  const patternEvents = report.patternEvents.map(({ sourceBefore, sourceAfter, ...event }): ScoredPatternEvent => {
+    const scoreBefore = sourceBefore === undefined ? undefined : probeScores.get(sourceBefore);
+    const scoreAfter = sourceAfter === undefined ? undefined : probeScores.get(sourceAfter);
+    const scoreDelta = scoreBefore !== undefined && scoreAfter !== undefined ? scoreAfter - scoreBefore : undefined;
+    return { ...event, scoreBefore, scoreAfter, scoreDelta };
+  });
 
   let score: MatchScore | undefined;
   let candidates: CandidateReport[] | undefined;
@@ -83,7 +106,7 @@ export function decompileWithReport(
   // has an empty trace and nothing meaningful to score).
   if (targetObj && report.trace.length > 0) {
     try {
-      score = scoreSource(source, name, targetObj, target, backend.id, compile);
+      score = await scoreSource(source, name, targetObj, target, backend.id, compile);
       // …and the SAME symbol map, for the same reason the probe above gets it: without it the
       // `candidates` list is enumerated from a different program family than the report's own
       // headline and `score`. Measured on a function whose map declares `const s16 gTbl[4][64]`:
@@ -91,7 +114,7 @@ export function decompileWithReport(
       // zero-extends, so the bare form is refused) while every ranked candidate was
       // `gTbl[a0]` — a bare subscript whose meaning rests on a declaration the caller's own map
       // contradicts. A candidate list that cannot contain the headline is not a ranking of it.
-      const ranked = decompileRanked(name, asm, target, targetObj, {
+      const ranked = await decompileRanked(name, asm, target, targetObj, {
         patterns: opts.patterns,
         backend,
         prototypes: opts.prototypes,
@@ -124,22 +147,20 @@ export function decompileWithReport(
   }
 
   const outcome: DecompileReport['outcome'] = !score ? 'unscored' : score.match ? 'match' : 'near';
-  return { source, report: { ...report, candidates, score, outcome } };
+  return { source, report: { ...report, patternEvents, candidates, score, outcome } };
 }
 
-function tryScore(
+/** The source asmlift would emit for `fn` at a pattern boundary, or undefined when it fails to build. */
+function probedSource(
   backend: LanguageBackend,
   fn: Fn,
   target: TargetDescription,
-  name: string,
-  obj: string,
   returnsVoid: boolean,
-  compile: CandidateCompiler | undefined,
   self: FnProto | undefined,
   prototypes: Prototypes,
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
-): number | undefined {
+): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
     // The SAME shared spine as the main path (patterns are already applied on `fn` at the point
@@ -161,7 +182,7 @@ function tryScore(
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),
     });
-    return scoreSource(backend.emit(sfn), name, obj, target, backend.id, compile).score;
+    return backend.emit(sfn);
   } catch {
     return undefined;
   }

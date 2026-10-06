@@ -267,7 +267,7 @@ export function ladderCompile(
   ctxI: string,
   language: 'c' | 'c++',
 ) {
-  return (candC: string, sym: string, _backendId?: string, declarations?: string): string => {
+  return async (candC: string, sym: string, _backendId?: string, declarations?: string): Promise<string> => {
     // The candidate's ADDRESS-CAST MACRO defines ride every rung. Every rung here is a headers
     // world — rungs 1/2 are asmlift's own prelude, rung 3 the project's PREPROCESSED context —
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
@@ -380,6 +380,6 @@ export function makeRealScorer(
   language: 'c' | 'c++',
 ) {
   const compile = makeRealCompile(toolchain, cflags, tu, prependC, ctxI, language);
-  return (candC: string, sym: string, targetObj: string): MatchScore =>
-    scoreObjects(targetObj, compile(candC, sym), sym);
+  return async (candC: string, sym: string, targetObj: string): Promise<MatchScore> =>
+    scoreObjects(targetObj, await compile(candC, sym), sym);
 }

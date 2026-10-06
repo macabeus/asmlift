@@ -64,18 +64,18 @@ afterAll(() => {
   vi.resetModules();
 });
 
-test('a byte-identical target at other candidate flags is a miss, not the other flags’ result', () => {
+test('a byte-identical target at other candidate flags is a miss, not the other flags’ result', async () => {
   const obj = join(scratch, 'sa2__sub_808558C.o');
   writeFileSync(obj, 'the same target object at both flag sets');
   // the asm names the scratch directory, so this test's keys are its own
   const inputs = { tcId: 'agbcc', sym: 'sa2__sub_808558C', asm: `\tbx lr @ ${scratch}\n`, obj } as const;
   const computed: number[] = [];
   const run = (cflags: string[], score: number) =>
-    cache.cachedM2cResult({ ...inputs, cflags }, () => (computed.push(score), scored(score)));
+    cache.cachedM2cResult({ ...inputs, cflags }, async () => (computed.push(score), scored(score)));
 
-  expect(run(CANONICAL, 16).score).toBe(16);
-  expect(run(MATH_C, 15).score).toBe(15);
-  expect(run(CANONICAL, -1).score).toBe(16);
-  expect(run(MATH_C, -1).score).toBe(15);
+  expect((await run(CANONICAL, 16)).score).toBe(16);
+  expect((await run(MATH_C, 15)).score).toBe(15);
+  expect((await run(CANONICAL, -1)).score).toBe(16);
+  expect((await run(MATH_C, -1)).score).toBe(15);
   expect(computed).toEqual([16, 15]);
 });

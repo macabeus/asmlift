@@ -1,6 +1,6 @@
 // One compile worker thread of a row's ranked pass (compile-pool.ts): it rebuilds the row's case and
-// compiles each candidate it is sent with the compiler the ranked pass itself uses, synchronously,
-// on its own thread.
+// compiles each candidate it is sent with the compiler the ranked pass itself uses, on its own thread.
+// The pool sends a thread its next candidate only once this one's reply is back.
 import { cacheStats } from '@asmlift/cli/candcache';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { parentPort, workerData } from 'node:worker_threads';
@@ -19,13 +19,13 @@ if (c === undefined) {
 }
 const compile = rowCompiler(c.toolchain, c.codegen, c.compile);
 
-parentPort!.on('message', (m: CompileRequest) => {
+parentPort!.on('message', async (m: CompileRequest) => {
   let reply: CompileReply;
   if (m.kind === 'stats') {
     reply = { kind: 'stats', stats: cacheStats() };
   } else {
     try {
-      reply = { kind: 'object', seq: m.seq, obj: compile(m.source, m.symbol, m.backendId, m.declarations) };
+      reply = { kind: 'object', seq: m.seq, obj: await compile(m.source, m.symbol, m.backendId, m.declarations) };
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
       reply = {

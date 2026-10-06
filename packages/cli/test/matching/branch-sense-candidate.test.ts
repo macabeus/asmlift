@@ -16,22 +16,22 @@ import { describe, expect, test } from 'vitest';
 
 import { decompileRanked } from '../../src/rank';
 
-const ranked = (sym: string, src: string) => {
+const ranked = async (sym: string, src: string) => {
   const asm = compileTargetAsm(src, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-  return decompileRanked(sym, asm, ARMV4T_AGBCC, assembleTarget(asm));
+  return await decompileRanked(sym, asm, ARMV4T_AGBCC, assembleTarget(asm));
 };
 
 describe('branch-sense candidate: || short-circuit return matches via the flipped sense', () => {
-  test('if (a || b) return X — the flip-branch candidate wins byte-exact', () => {
-    const r = ranked('ifor', 'int ifor(int a, int b){ if (a || b) return 42; return 7; }');
+  test('if (a || b) return X — the flip-branch candidate wins byte-exact', async () => {
+    const r = await ranked('ifor', 'int ifor(int a, int b){ if (a || b) return 42; return 7; }');
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(true); // the non-default sense is what matched
     // the default sense is still in the set (never dropped) and does NOT match here
     expect(r.candidates.some((c) => !hasVariation(c.variations, 'flip-branch'))).toBe(true);
   });
 
-  test('if (a && b) return X still matches on the DEFAULT sense (flip not needed)', () => {
-    const r = ranked('ifand', 'int ifand(int a, int b){ if (a && b) return 42; return 7; }');
+  test('if (a && b) return X still matches on the DEFAULT sense (flip not needed)', async () => {
+    const r = await ranked('ifand', 'int ifand(int a, int b){ if (a && b) return 42; return 7; }');
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'flip-branch')).toBe(false);
   });
@@ -40,10 +40,12 @@ describe('branch-sense candidate: || short-circuit return matches via the flippe
 describe('rank.ts is in sync with the pipeline (no candidate under-scoring)', () => {
   // half needs the default sdiv idiom pattern; clamp0 needs the simple-select form preserved. Both must
   // match through decompileRanked, proving the ranked path applies the same passes as decompile.
-  test('half (needs default idiom patterns) matches', () => {
-    expect(ranked('half', 'int half(int x){ return x / 2; }').winner.score.match).toBe(true);
+  test('half (needs default idiom patterns) matches', async () => {
+    expect((await ranked('half', 'int half(int x){ return x / 2; }')).winner.score.match).toBe(true);
   });
-  test('clamp0 (simple select) matches', () => {
-    expect(ranked('clamp0', 'int clamp0(int a){ if (a < 0) return 0; return a; }').winner.score.match).toBe(true);
+  test('clamp0 (simple select) matches', async () => {
+    expect((await ranked('clamp0', 'int clamp0(int a){ if (a < 0) return 0; return a; }')).winner.score.match).toBe(
+      true,
+    );
   });
 });

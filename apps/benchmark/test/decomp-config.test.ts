@@ -4,7 +4,7 @@
 // @asmlift/toolchains (same binaries, same flags, same order). Parity is the contract: the
 // expected strings below are built from the same pins the built-in compile path uses, so a flag
 // edited in only one place fails here loudly. Every compile passes the harness words first and the
-// row's flags, which fill `{{cflags}}`, after them.
+// row's flags, which fill `{{flags}}`, after them.
 import { readCompilerCommand } from '@asmlift/cli/flags';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import {
@@ -105,13 +105,13 @@ describe('committed decomp.yaml configs mirror the built-in toolchain invocation
       expect(cmd.includes(`-v ${shq(mwccDir(other))}:/mwcc:ro`)).toBe(other === id);
     }
     expect(readCompilerCommand(cmd, 'mwcc')?.flagWords.map((w) => w.value)).toEqual([...cflags]);
-    const template = readCompilerCommand(renderScoreCommand(id, ['{{cflags}}']), 'mwcc');
+    const template = readCompilerCommand(renderScoreCommand(id, ['{{flags}}']), 'mwcc');
     expect(template?.takesCflags).toBe(true);
     expect(template?.flagWords).toEqual([]);
   });
 
-  test.each(IDS)('%s: the template spells no codegen flag beside {{cflags}}', (id) => {
-    const reading = readCompilerCommand(renderScoreCommand(id, ['{{cflags}}']), TOOLCHAIN_TARGETS[id].family);
+  test.each(IDS)('%s: the template spells no codegen flag beside {{flags}}', (id) => {
+    const reading = readCompilerCommand(renderScoreCommand(id, ['{{flags}}']), TOOLCHAIN_TARGETS[id].family);
     expect(reading?.takesCflags).toBe(true);
     expect(reading?.flagWords).toEqual([]);
   });

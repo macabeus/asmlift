@@ -62,49 +62,71 @@ const fan = () => [
   { variations: ['unsigned', 'fixg', 'fixh'], source: body('1', '3'), preference: 0 },
 ];
 
-/** What the manifest rung — alive whichever richest rung the row has — refused `source` with. */
-const manifestErrors = (compile: (c: string, sym: string) => string, source: string): string[] => {
-  try {
-    compile(source, 'f');
-  } catch (e) {
-    const rung = attemptsOf((e as CompilerRejection).diagnostic).find((a) => a.label === '+ manifest prependC (c)');
-    return errorMessages(rung!.diagnostic);
+type Compile = (c: string, sym: string) => Promise<string>;
+
+/** What compiling `source` threw, or undefined when it compiled. */
+const thrownBy = (compile: Compile, source: string): Promise<unknown> =>
+  compile(source, 'f').then(
+    () => undefined,
+    (e: unknown) => e,
+  );
+
+/** Each candidate's compile, settled one at a time, so `rankBy` can replay them. */
+async function settle(compile: Compile, sources: readonly string[]): Promise<Map<string, unknown>> {
+  const thrown = new Map<string, unknown>();
+  for (const source of sources) {
+    thrown.set(source, await thrownBy(compile, source));
   }
-  throw new Error('compiled');
+  return thrown;
+}
+
+/** What the manifest rung — alive whichever richest rung the row has — refused `source` with. */
+const manifestErrors = async (compile: Compile, source: string): Promise<string[]> => {
+  const e = await thrownBy(compile, source);
+  if (e === undefined) {
+    throw new Error('compiled');
+  }
+  const rung = attemptsOf((e as CompilerRejection).diagnostic).find((a) => a.label === '+ manifest prependC (c)');
+  return errorMessages(rung!.diagnostic);
 };
 
 test.each([
   ['dead', DEAD_CTX],
   ['alive', PREPEND_C],
-])('with the richest rung %s, each probe cures one error in a live rung and the product is found', (_, ctxI) => {
+])('with the richest rung %s, each probe cures one error in a live rung and the product is found', async (_, ctxI) => {
   const compiled: string[] = [];
   const compile = ladderCompile(fakeAgbcc(compiled), [], 'assembled', PREPEND_C, ctxI, 'c');
   const candidates = fan();
-  const [dflt, fixg, fixh] = candidates.slice(0, 3).map((c) => manifestErrors(compile, c.source));
+  const errors: string[][] = [];
+  for (const c of candidates.slice(0, 3)) {
+    errors.push(await manifestErrors(compile, c.source));
+  }
+  const [dflt, fixg, fixh] = errors;
   const G = "too many arguments to function `g'";
   const H = "too many arguments to function `h'";
   expect(dflt).toEqual([G, H]);
   expect(fixg).toEqual([H]);
   expect(fixh).toEqual([G]);
 
+  const thrown = await settle(
+    compile,
+    candidates.map((c) => c.source),
+  );
   const scored: string[] = [];
   const ranked = rankBy(candidates, 'f', (source) => {
     scored.push(source);
-    compile(source, 'f');
+    if (thrown.get(source) !== undefined) {
+      throw thrown.get(source);
+    }
     return { score: 0 };
   });
   expect(ranked.winner.variations).toEqual(['unsigned', 'fixg', 'fixh']);
   expect(scored).toHaveLength(candidates.length);
 });
 
-test('the published message stays the richest rung’s: the world the candidate had to compile in', () => {
+test('the published message stays the richest rung’s: the world the candidate had to compile in', async () => {
   const compile = ladderCompile(fakeAgbcc([]), [], 'assembled', PREPEND_C, DEAD_CTX, 'c');
-  let thrown: unknown;
-  try {
-    compile(fan()[0].source, 'f');
-  } catch (e) {
-    thrown = e;
-  }
+  const thrown = await thrownBy(compile, fan()[0].source);
   expect(thrown).toBeInstanceOf(CompilerRejection);
   const e = thrown as CompilerRejection;
   expect(e.message).toBe('cpp failed: c.c:3:10: fatal error: global.h: No such file or directory');
@@ -115,14 +137,9 @@ test('the published message stays the richest rung’s: the world the candidate 
   expect(e.diagnostic).toContain("too many arguments to function `g'");
 });
 
-test('a C++ row’s rejection splits back into its six attempts, in the order the ladder tried them', () => {
+test('a C++ row’s rejection splits back into its six attempts, in the order the ladder tried them', async () => {
   const compile = ladderCompile(fakeAgbcc([]), [], 'assembled', PREPEND_C, DEAD_CTX, 'c++');
-  let thrown: unknown;
-  try {
-    compile(fan()[0].source, 'f');
-  } catch (e) {
-    thrown = e;
-  }
+  const thrown = await thrownBy(compile, fan()[0].source);
   expect(thrown).toBeInstanceOf(CompilerRejection);
   const attempts = attemptsOf((thrown as CompilerRejection).diagnostic);
   expect(attempts.map((a) => a.label)).toEqual([
@@ -143,7 +160,7 @@ test('a C++ row’s rejection splits back into its six attempts, in the order th
   );
 });
 
-test('a fan whose every rung is dead for one reason is still stillborn', () => {
+test('a fan whose every rung is dead for one reason is still stillborn', async () => {
   const rc = fakeAgbcc([]);
   const compile = ladderCompile(
     {
@@ -157,18 +174,24 @@ test('a fan whose every rung is dead for one reason is still stillborn', () => {
     'c',
   );
   const candidates = fan();
+  const thrown = await settle(
+    compile,
+    candidates.map((c) => c.source),
+  );
   const scored: string[] = [];
   expect(() =>
     rankBy(candidates, 'f', (source) => {
       scored.push(source);
-      compile(source, 'f');
+      if (thrown.get(source) !== undefined) {
+        throw thrown.get(source);
+      }
       return { score: 0 };
     }),
   ).toThrow(NoScorableCandidateError);
   expect(scored).toHaveLength(3);
 });
 
-test('one rung that did not run to completion leaves the candidate undecided: a plain Error', () => {
+test('one rung that did not run to completion leaves the candidate undecided: a plain Error', async () => {
   const rc = fakeAgbcc([]);
   let calls = 0;
   const flaky: RealCompile = {
@@ -181,12 +204,7 @@ test('one rung that did not run to completion leaves the candidate undecided: a 
     },
   };
   const compile = ladderCompile(flaky, [], 'assembled', PREPEND_C, DEAD_CTX, 'c');
-  let thrown: unknown;
-  try {
-    compile(fan()[0].source, 'f');
-  } catch (e) {
-    thrown = e;
-  }
+  const thrown = await thrownBy(compile, fan()[0].source);
   expect(thrown).toBeInstanceOf(Error);
   expect(thrown).not.toBeInstanceOf(CompilerRejection);
 });
