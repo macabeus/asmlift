@@ -330,28 +330,23 @@ export function auditFrameObjects({
   // registers, neither of them an object. Where the
   // per-object model does describe the frame — one object and nothing else in reach — it stands,
   // and the object keeps its own type.
-  if (
-    model.onOffer &&
-    (model.refused ||
-      shapes.overSlot.length > 0 ||
-      escapes.some(
-        (e) =>
-          e.lo === -Infinity &&
-          e.hi === Infinity &&
-          (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined),
-      ))
-  ) {
+  const answered = (e: FrameEscape): boolean =>
+    e.lo === -Infinity &&
+    e.hi === Infinity &&
+    (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
+  if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
     return { oneObject: { from: declared.from, to: declared.to } };
   }
+  const failWithheld: Refuse = (why) => fail(model.withheld(why));
   for (const [off, width] of shapes.overSlot) {
-    failIfSlotKeysIt(off, width, { usedSlotOffsets, objects, foldedHere, fail });
+    failIfSlotKeysIt(off, width, { usedSlotOffsets, objects, foldedHere, fail: failWithheld });
   }
   // RULE-MAJOR, not escape-major: every escape is asked a rule before any is asked the next, so
   // the refusal a function reports does not turn on the order its escapes were found in.
   for (const gate of gates) {
     const hit = escapes.find((e) => gate.rejects(e));
     if (hit !== undefined) {
-      fail(escapeRefusal(gate.id, hit));
+      (answered(hit) ? failWithheld : fail)(escapeRefusal(gate.id, hit));
     }
   }
   stampObjects(objects, shapes, uses);
@@ -1201,6 +1196,9 @@ interface ModelChoice {
   refused: boolean;
   /** refuses `why` where it stands, or, with the one-object answer on offer, asks for it instead */
   shapeRefused(why: string): void;
+  /** `why`, naming the writer that withheld the one-object answer where one did — for a refusal
+   *  that answer would otherwise have taken */
+  withheld(why: string): string;
 }
 
 /** Why a writer of the frame keeps the one-object answer from holding it, or null. The one object
@@ -1240,19 +1238,22 @@ function chooseFrameModel(
   returnsWithoutHiddenPointer: (callee: string) => boolean,
   fail: Refuse,
 ): ModelChoice {
-  const onOffer =
-    oneObject === undefined &&
-    writerNotKept(uses, returnsWithoutHiddenPointer) === null &&
-    [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
+  const unbounded =
+    oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
+  const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
+  const onOffer = unbounded && writer === null;
   const model: ModelChoice = {
     onOffer,
     refused: false,
     shapeRefused: (why) => {
       if (!onOffer) {
-        fail(why);
+        fail(model.withheld(why));
       }
       model.refused = true;
     },
+    // A refusal the one-object answer would have taken names the writer that withheld it: the
+    // shape alone is one the answer holds, so the shape alone does not say why this declined.
+    withheld: (why) => (writer === null ? why : `${why} — and the one object cannot hold every writer: ${writer}`),
   };
   if (uses.memberRefusal !== undefined) {
     model.shapeRefused(uses.memberRefusal);

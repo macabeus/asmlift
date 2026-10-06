@@ -149,6 +149,18 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     expect(scoreC(ctx + src, fn, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
+  // …while an address stored to memory and handed to no callee is a writer nothing names, and the
+  // decline says so beside the shape it would otherwise have kept
+  test('a COMPUTED stack address only stored to memory declines naming that writer', () => {
+    const asm = compileTargetAsm(
+      'extern void h(unsigned char*); extern unsigned char *gp; void pub1(void){ unsigned char buf[8]; gp = buf + 4; h(buf); }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    expect(() => decompile('pub1', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 1, returnsVoid: true } } })).toThrow(
+      /another address-taken object shares the frame, so the reservation is not this one alone — and the one object cannot hold every writer: the captured address at \[sp,#4\): the address is published rather than passed as an argument/,
+    );
+  });
+
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: unsaid })).toThrow(/address-taken stack local/);

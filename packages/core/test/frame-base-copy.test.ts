@@ -188,10 +188,13 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
       '\tldrh\tr1, [r4, #0x2]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x100\n\t.word\t-0xff01\n\t.word\t0xffff\n';
     const prototypes = { five: { params: 5, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
-    // `g` saying nothing of what it returns is a writer the one object cannot hold
+    // `g` saying nothing of what it returns is a writer the one object cannot hold, and the refusal
+    // names it beside the shape
     expect(() =>
       decompile('e1', e1, ARMV4T_AGBCC, { prototypes: { five: prototypes.five, g: { params: 1 } } }),
-    ).toThrow(/a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled/);
+    ).toThrow(
+      /a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled — and the one object cannot hold every writer: the captured address at \[sp,#4\): `g` takes it at argument 0/,
+    );
     // …and kept as one object, the word, the byte and the halfword at one address are refused by
     // that answer's own rule
     expect(() => decompile('e1', e1, ARMV4T_AGBCC, { prototypes })).toThrow(/is accessed 4 and 2 bytes wide/);
@@ -319,7 +322,9 @@ describe('the audit judges each frame object on its own bytes', () => {
     const keyed = frame('\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r4\n');
     // handed at argument 0 to a `g` nothing says the return of, the one object cannot hold it
     const atArg0 = keyed.replace('\tmov\tr1, sp\n', '\tmov\tr0, sp\n');
-    expect(() => lift(atArg0)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+    expect(() => lift(atArg0)).toThrow(
+      /overlaps the SSA slot at \[sp,#0\] — one byte, two models — and the one object cannot hold every writer/,
+    );
     // …and with a callee it holds the only writer, the slot is a word of the one object in memory
     expect(lift(keyed).source).toContain('*(s32 *)sp0 = a0;');
   });
@@ -614,7 +619,9 @@ describe('the audit judges each frame object on its own bytes', () => {
 
       test('an object above the bottom of the declared range is not the whole of it', () => {
         expect(() => liftWith(fill())).not.toThrow();
-        expect(() => withUnsaidH(fill('0x14'))).toThrow(/the object does not start at the bottom of the declared area/);
+        expect(() => withUnsaidH(fill('0x14'))).toThrow(
+          /the object does not start at the bottom of the declared area.* — and the one object cannot hold every writer/,
+        );
         expect(liftWith(fill('0x14')).source).toContain('h((u32)sp16 + 4);');
       });
 
@@ -644,7 +651,7 @@ describe('the audit judges each frame object on its own bytes', () => {
         );
         const unsaidG = { prototypes: { ...protos.prototypes, g: { params: 8 } } };
         expect(() => decompile('f', indexed, ARMV4T_AGBCC, unsaidG)).toThrow(
-          /a runtime index into the object at \[sp,#16\), which an access of its own types as one scalar — only the untyped storage of the whole declared area is indexed/,
+          /a runtime index into the object at \[sp,#16\), which an access of its own types as one scalar — only the untyped storage of the whole declared area is indexed — and the one object cannot hold every writer/,
         );
         expect(liftWith(indexed).source).toContain('u8 sp16[8];');
       });

@@ -296,14 +296,29 @@ describe('chooseFrameModel', () => {
     expect(modelOf('g', { stored: true }).onOffer).toBe(true);
   });
 
-  test('refuses a shape where it stands when an address is only stored to memory', () => {
+  test('refuses a shape where it stands, naming the writer, when an address is only stored to memory', () => {
     const model = modelOf('g', { stored: true, passed: false });
     expect(model.onOffer).toBe(false);
-    expect(() => model.shapeRefused('two widths')).toThrow("cannot lift 'f': address-taken stack local — two widths");
+    expect(() => model.shapeRefused('two widths')).toThrow(
+      "cannot lift 'f': address-taken stack local — two widths — and the one object cannot hold every writer: " +
+        'the captured address at [sp,#0): the address is published rather than passed as an argument',
+    );
   });
 
   test('refuses a shape where it stands when a callee at argument 0 says nothing of its return', () => {
-    expect(modelOf('k').onOffer).toBe(false);
+    const model = modelOf('k');
+    expect(model.onOffer).toBe(false);
+    expect(() => model.shapeRefused('two widths')).toThrow('two widths — and the one object cannot hold every writer');
+  });
+
+  // …and where nothing reaches without bound the answer is never on offer, so no writer is named
+  test('refuses a shape with its own reason alone where no escape reaches without bound', () => {
+    const blk = published(2, 0x8100);
+    const { fail, facts, flow, uses } = classify([blk]);
+    const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
+    const model = chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+    expect(model.onOffer).toBe(false);
+    expect(() => model.shapeRefused('two widths')).toThrow(/two widths$/);
   });
 });
 
