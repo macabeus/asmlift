@@ -774,6 +774,7 @@ interface FrameUses {
   readonly calleeReads: ReadonlyMap<number, { readonly lo: number; readonly hi: number }>;
   readonly filledFrom: ReadonlySet<number>;
   readonly passedToCallee: ReadonlySet<number>;
+  readonly passedToWriter: ReadonlySet<number>;
   readonly published: ReadonlySet<number>;
   readonly publishedOutward: ReadonlySet<number>;
   readonly publishedToWriter: ReadonlySet<number>;
@@ -834,6 +835,9 @@ function classifyFrameUses({
   // WRITTEN TO MEMORY, how the DMA idiom hands the object to hardware, and what `volatile` at the
   // stamp keys on. Reading either off `escaped` gets the other one wrong.
   const passedToCallee = new Set<number>();
+  // …and of those, the callees that may WRITE through it: every one but a bounded block transfer
+  // reading its source (`calleeReads`), which names no writer
+  const passedToWriter = new Set<number>();
   const published = new Set<number>();
   // …and `published` SPLITS AGAIN, because it answers two questions of different strengths and
   // the weaker one may not be read as the stronger. "Did the address reach memory at all" is
@@ -932,6 +936,9 @@ function classifyFrameUses({
           }
           if (op.opcode === 'call') {
             passedToCallee.add(off);
+            if (read === undefined) {
+              passedToWriter.add(off);
+            }
             if (idx === 0 && op.attrs.sret === true) {
               (returnTemps.get(off) ?? returnTemps.set(off, []).get(off)!).push(op);
             } else if (idx === 0) {
@@ -991,6 +998,7 @@ function classifyFrameUses({
     calleeReads,
     filledFrom,
     passedToCallee,
+    passedToWriter,
     published,
     publishedOutward,
     publishedToWriter,
@@ -1862,7 +1870,11 @@ function notTheWholeArea(
  *  (`notTheWholeArea`) and for the one object several captures are members of (`writerNotKept`).
  *  It needs a callee to have been handed the address as an argument, the one holder this frontend
  *  can name; an address that only reached memory has none. A store of the address beside that
- *  call is held with it, whether to an ordinary global or into a device's source register.
+ *  call is held with it, whether to an ordinary global or into a device's source register — and
+ *  where the store hands the address to something that may write through it (`publishedToWriter`),
+ *  only when that callee may write through it too. A bounded block transfer reading its source
+ *  names no writer, so two frames whose writers are the same decide alike whether or not one also
+ *  hands the address to a transfer.
  *
  *  The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question is
  *  the one the one-word arm asks, asked here of the same callees. */
@@ -1873,6 +1885,12 @@ function wholeAreaEscapeRefusal(
 ): string | null {
   if (!uses.passedToCallee.has(off)) {
     return 'the address is published rather than passed as an argument, and nothing declares what reads it';
+  }
+  if (uses.publishedToWriter.has(off) && !uses.passedToWriter.has(off)) {
+    return (
+      'the address is published, and the only callee handed it is a block transfer that reads through it, ' +
+      'so nothing declares what reads it'
+    );
   }
   return hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
 }

@@ -179,6 +179,64 @@ describe('an unbounded device read keeps the local area as one object', () => {
   });
 });
 
+// The whole-area argument holds a store of the address only beside a callee that may write through
+// it: a block transfer reading its source names no writer, so with or without one the frame decides
+// as it does with none.
+describe('a block transfer reading the object holds no published address', () => {
+  const { CpuSet } = ARMV4T_AGBCC.capabilities.blockTransferCalls!;
+  const declared = (callee: string): boolean =>
+    returnsWithoutHiddenPointer(
+      callee,
+      { g: { params: 1, returnsVoid: true }, CpuSet: { params: 3, returnsVoid: true } },
+      ARMV4T_AGBCC,
+    );
+  // `u8 buf[16]; gp = buf; <callee>(buf, gDst, 0x05000004);`
+  const storedAndHanded = (callee: string): Block => {
+    const a = mkValue(T.unk(32));
+    const gp = mkValue(T.unk(32));
+    const dst = mkValue(T.unk(32));
+    const control = mkValue(T.unk(32));
+    return {
+      params: [],
+      ops: [
+        mkOp('laddr', { results: [a], attrs: { off: 0 } }),
+        mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+        mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+        mkOp('const', { results: [dst], attrs: { value: 0x02000000 } }),
+        mkOp('const', { results: [control], attrs: { value: 0x05000004 } }),
+        mkOp('call', { operands: [a, dst, control], attrs: { target: callee } }),
+        mkOp('ret'),
+      ],
+    };
+  };
+  const run = (blk: Block) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: [blk],
+      ownedLocals: { from: 0, to: 16 },
+      declaredLocals: { from: 0, to: 16 },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declared,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+    });
+
+  test('a published address a block transfer reads is not the whole area', () => {
+    expect(CpuSet).toBeDefined();
+    expect(() => run(storedAndHanded('CpuSet'))).toThrow(
+      'the address is published, and the only callee handed it is a block transfer that reads through it',
+    );
+  });
+
+  test('a published address a callee may write through is the whole area', () => {
+    const blk = storedAndHanded('g');
+    run(blk);
+    expect(blk.ops[0].attrs).toMatchObject({ off: 0, width: 1, count: 16, volatile: true });
+  });
+});
+
 // The GBA BIOS block transfers, decoded from the control words the vendored projects' `CPU_FILL`,
 // `CPU_COPY` and `CPU_FAST_FILL` macros build (sa3 include/gba/cpuset_macros.h).
 describe('a block-transfer call reads as far as its control word says', () => {

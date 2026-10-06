@@ -161,6 +161,20 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     );
   });
 
+  // …and a block transfer that READS the address is no callee that holds it: with or without one,
+  // a published address beside no writing callee declines alike
+  test('a stack address stored to memory and read by a block transfer declines naming that writer', () => {
+    const asm = compileTargetAsm(
+      'extern void CpuSet(const void *, void *, unsigned int); extern unsigned int gDst[4]; extern void k(void); ' +
+        'extern unsigned char *gp; void pubt(void){ unsigned char buf[8]; gp = buf; CpuSet(buf, gDst, 0x04000002); k(); }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    const prototypes = { CpuSet: { params: 3, returnsVoid: true }, k: { params: 0, returnsVoid: true } };
+    expect(() => decompile('pubt', asm, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /the address is published, and the only callee handed it is a block transfer that reads through it/,
+    );
+  });
+
   // A PUBLISHED one object is spelled member by member through casts, and a cast's pointee drops the
   // array's `volatile`: each access carries it, or the spin on a byte a holder of `gp` sets compiles
   // to a loop that never reads it again.
