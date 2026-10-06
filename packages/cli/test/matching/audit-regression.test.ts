@@ -191,6 +191,38 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     expect(src).not.toMatch(/\(u8 \*\)sp0/);
   });
 
+  // A spin through a phi that carries the published address — `p = c ? buf : gOther` — reaches the
+  // object where neither the declaration nor a member cast does. Qualified, agbcc's peeled first
+  // test is a second read the C spells once, so it declines loud and names the stack local; plain,
+  // it compiled to a loop that never reads the byte again.
+  test('a spin through a phi carrying a published capture declines naming the stack local', () => {
+    const asm = compileTargetAsm(
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8]; ' +
+        'unsigned int p1(unsigned int c){ volatile unsigned char buf[8]; volatile unsigned char *p; buf[0] = 0; ' +
+        'gp = (unsigned char *)buf; h((unsigned char *)buf, (unsigned char *)buf + 4); ' +
+        'p = c ? buf : (volatile unsigned char *)gOther; *p = 0; while (*p == 0) ; gp = 0; return buf[4]; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    expect(() => decompile('p1', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } })).toThrow(
+      "structuring dropped a read of an address-taken stack local in 'p1'",
+    );
+  });
+
+  // …and two reads through it are two reads, for one published local as for the one object
+  test('two reads through a phi carrying a published local both survive, and match', () => {
+    const ctx = 'extern void h1(unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8];\n';
+    const asm = compileTargetAsm(
+      ctx +
+        'unsigned int q7(unsigned int c){ volatile unsigned char b; volatile unsigned char *p; unsigned int x, y; ' +
+        'b = 0; gp = (unsigned char *)&b; h1((unsigned char *)&b); p = c ? &b : (volatile unsigned char *)gOther; ' +
+        'x = *p; y = *p; gp = 0; return x + y; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    const src = decompile('q7', asm, ARMV4T_AGBCC, { prototypes: { h1: { params: 1, returnsVoid: true } } }).source;
+    expect(src.match(/= \*\(volatile u8 \*\)v\d+;/g)).toHaveLength(2);
+    expect(scoreC(ctx + src, 'q7', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
+
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: unsaid })).toThrow(/address-taken stack local/);

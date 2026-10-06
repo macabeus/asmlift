@@ -764,12 +764,19 @@ interface FrameAccess {
   readonly isLoad: boolean;
 }
 
+/** A load or store judged an access to the object at `off`, and the address value it reaches the
+ *  object through: a capture, or a phi that carries one — for a runtime index, the indexed one. */
+interface FrameAccessOp {
+  readonly off: number;
+  readonly through: Value;
+}
+
 /** Every use of every frame object, by offset — what each later stage reads. Each field is
  *  declared, with the question it answers, where `classifyFrameUses` builds it. */
 interface FrameUses {
   readonly accesses: ReadonlyMap<number, readonly FrameAccess[]>;
+  readonly accessOps: ReadonlyMap<Op, FrameAccessOp>;
   readonly escaped: ReadonlySet<number>;
-  readonly mayWrite: ReadonlySet<number>;
   readonly sourceStores: ReadonlyMap<number, readonly { readonly op: Op; readonly sink: number }[]>;
   readonly calleeReads: ReadonlyMap<number, { readonly lo: number; readonly hi: number }>;
   readonly filledFrom: ReadonlySet<number>;
@@ -784,6 +791,12 @@ interface FrameUses {
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
+}
+
+/** Did the address at `off` reach something that may write the frame back: a callee that is not a
+ *  bounded block transfer reading through it, or memory a writer may hold. */
+function mayWrite(uses: FrameUses, off: number): boolean {
+  return uses.passedToWriter.has(off) || uses.publishedToWriter.has(off);
 }
 
 /** Judges every use of a tainted value, against the object it names. */
@@ -808,14 +821,19 @@ function classifyFrameUses({
 }): FrameUses {
   const { defOf } = facts;
   const accesses = new Map<number, FrameAccess[]>();
-  const escaped = new Set<number>();
+  // …and every load and store judged an access, by the object it reaches: through a capture, a
+  // phi that carries one, or a runtime index into one. A later stage that rewrites or qualifies
+  // "the accesses to the object" reads this list rather than recognizing them again, since a
+  // narrower recognizer misses exactly the phi-carried ones `taint` admits.
+  const accessOps = new Map<Op, FrameAccessOp>();
   // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, which is what
-  // decides `volatile`. `mayWrite` asks whether it reached something that could write the frame
-  // BACK, which is what every "a callee may write any frame offset" refusal rests on. A
-  // store into a device's SOURCE register answers yes to the first and no to the second: the
-  // hardware reads the object, and the DMA-fill idiom this capability was built for
-  // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
-  const mayWrite = new Set<number>();
+  // decides `volatile`, in the order the escapes were found. Whether it reached something that
+  // could write the frame BACK — what every "a callee may write any frame offset" refusal rests
+  // on — is `mayWrite`, read off the splits below. A store into a device's SOURCE register
+  // answers yes to the first and no to the second: the hardware reads the object, and the
+  // DMA-fill idiom this capability was built for (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly
+  // that shape.
+  const escaped = new Set<number>();
   // …and for the others, the stores that handed the address to a source register, which is
   // where `readWindow` reads how far the device reads
   const sourceStores = new Map<number, { op: Op; sink: number }[]>();
@@ -903,6 +921,7 @@ function classifyFrameUses({
         useCount.set(off, (useCount.get(off) ?? 0) + 1);
         if (op.opcode === 'load' && idx === 0) {
           scalar('load', op, off, v);
+          accessOps.set(op, { off, through: v });
           accesses.get(off)!.push({
             width: op.attrs.width as number,
             signed: (op.attrs.signed as boolean) ?? false,
@@ -912,6 +931,7 @@ function classifyFrameUses({
         }
         if (op.opcode === 'store' && idx === 0) {
           scalar('store', op, off, v);
+          accessOps.set(op, { off, through: v });
           accesses.get(off)!.push({ width: op.attrs.width as number, signed: false, isLoad: false });
           continue;
         }
@@ -926,7 +946,6 @@ function classifyFrameUses({
               filledFrom.add(off);
             }
           } else if (handedTo.length === 0) {
-            mayWrite.add(off);
             if (op.opcode === 'store') {
               publishedToWriter.add(off);
             }
@@ -966,7 +985,7 @@ function classifyFrameUses({
         // judged with the rest (`objectShapes`).
         const other = op.opcode === 'add' && op.operands.length === 2 ? op.operands[1 - idx] : undefined;
         if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
-          indexedAccess(irBlocks, indexed, off, op.results[0], fail);
+          indexedAccess(irBlocks, { indexed, accessOps }, { off, through: v }, op.results[0], fail);
           continue;
         }
         // A CONSTANT move left after the fold (`foldMovedCaptures`) moves a capture a phi carried.
@@ -992,8 +1011,8 @@ function classifyFrameUses({
   }
   return {
     accesses,
+    accessOps,
     escaped,
-    mayWrite,
     sourceStores,
     calleeReads,
     filledFrom,
@@ -1035,11 +1054,15 @@ function transferRead(
 // Records every access through `sum`, a runtime index into the object at `off`.
 function indexedAccess(
   irBlocks: readonly Block[],
-  indexed: Map<number, { width: number; signed: boolean }[]>,
-  off: number,
+  {
+    indexed,
+    accessOps,
+  }: { indexed: Map<number, { width: number; signed: boolean }[]>; accessOps: Map<Op, FrameAccessOp> },
+  object: FrameAccessOp,
   sum: Value,
   fail: Refuse,
 ): void {
+  const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
@@ -1055,6 +1078,7 @@ function indexedAccess(
           );
         }
         got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+        accessOps.set(op, object);
       }
     }
   }
@@ -1139,10 +1163,10 @@ function readWindow(
   const control = target.capabilities.readSourceControl;
   const stores = uses.sourceStores.get(off);
   const called = uses.calleeReads.get(off);
-  if (!uses.mayWrite.has(off) && stores === undefined && called !== undefined) {
+  if (!mayWrite(uses, off) && stores === undefined && called !== undefined) {
     return { lo: called.lo, hi: called.hi, why: 'that reads through it' };
   }
-  if (uses.mayWrite.has(off) || stores === undefined || control === undefined) {
+  if (mayWrite(uses, off) || stores === undefined || control === undefined) {
     return unbounded('that reads through it');
   }
   const little = target.capabilities.endianness === 'little';
@@ -1227,7 +1251,7 @@ interface ModelChoice {
  *  kept besides is a callee's RETURN STORAGE: the struct it returns through a hidden pointer is its
  *  declared type, not bytes of an array. */
 function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: string) => boolean): string | null {
-  for (const off of uses.mayWrite) {
+  for (const off of [...uses.escaped].filter((o) => mayWrite(uses, o))) {
     const at = `the captured address at [sp,#${off})`;
     const temp = uses.returnTemps.get(off)?.[0];
     if (temp !== undefined) {
@@ -1554,22 +1578,16 @@ function keepAsOneObject({
   for (const op of [...objects.values()].flat()) {
     memberAt.set(op.results[0], op.attrs.off as number);
   }
-  // …and the runtime-indexed sums into a member, the one other address an access reaches the
-  // object through (`indexedAccess` admits it only as a load's or a store's address)
-  const indexedSums = new Set<Value>();
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      if (op.opcode === 'add' && op.operands.some((v) => memberAt.has(v))) {
-        indexedSums.add(op.results[0]);
-      }
-    }
-  }
+  // The qualifier goes on every access the classification judged one (`accessOps`) — through a
+  // member, a runtime index into one, or a phi that carries one (`p = c ? buf : gOther; while
+  // (*p == 0);`). Only an access through a member is rebased: a phi's incoming member is
+  // rewritten below, where it is an edge argument.
   const stillUsed = new Set<Value>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       const at = memberAt.get(op.operands[0]);
       const access = op.opcode === 'load' || op.opcode === 'store';
-      if (access && reread && (at !== undefined || indexedSums.has(op.operands[0]))) {
+      if (reread && uses.accessOps.has(op)) {
         op.attrs = { ...op.attrs, volatile: true };
       }
       if (access && at !== undefined) {
@@ -1940,7 +1958,7 @@ function frameEscapes({
   const escapes: FrameEscape[] = [];
   for (const off of uses.escaped) {
     const { lo, hi, why } = windows.get(off)!;
-    const writes = uses.mayWrite.has(off);
+    const writes = mayWrite(uses, off);
     const objectReached = [...extent].find(([o, obj]) => o !== off && o < off + hi && off + lo < o + span(obj));
     let slotReached: FrameEscape['slotReached'];
     for (const slot of usedSlotOffsets) {
@@ -2064,6 +2082,16 @@ function stampObjects(
       if (aggregate !== undefined) {
         op.results[0].type = T.ptr(aggregate);
       }
+    }
+  }
+  // The declaration carries the qualifier to an access spelled through the object's own name, and
+  // not to one through a phi that carries its address: that phi is a pointer local typed from the
+  // access, so `p = c ? &b : gOther; while (*p == 0);` would compile to a loop that never reads
+  // `b` again. Such an access carries the qualifier itself.
+  for (const [op, { off, through }] of uses.accessOps) {
+    const own = objects.get(off)!.some((o) => o.results[0] === through);
+    if (!own && (uses.published.has(off) || uses.filledFrom.has(off))) {
+      op.attrs = { ...op.attrs, volatile: true };
     }
   }
 }

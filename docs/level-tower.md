@@ -1450,8 +1450,11 @@ is a store the recompile makes. The asm cannot tell a member the
 device reads from a spill nobody reads, and keeping both in memory is right for both. Every member
 is spelled through a cast, and a cast's pointee drops the array's `volatile`, so where the address
 was stored somewhere a writer may hold it — a global an interrupt reads, a device's destination —
-each access carries the qualifier itself: a spin on a byte that holder sets is otherwise compiled
-to a loop that never reads it again. The transfer
+each access carries the qualifier itself, whether it reaches the object through a member, a runtime
+index or a phi that carries one (`p = c ? buf : gOther`): a spin on a byte that holder sets is
+otherwise compiled to a loop that never reads it again. An object kept object by object qualifies
+its declaration, which a phi's pointer local does not inherit, so an access through such a phi
+carries the qualifier too. The transfer
 has to run too, so the device pin ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts),
 applied by the frontend from the policy the audit answers) makes every device access of a function
 kept this way `volatile` — at a register's literal address, that address plus a runtime index, a

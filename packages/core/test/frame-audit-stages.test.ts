@@ -201,7 +201,7 @@ describe('classifyFrameUses', () => {
   test('reads a word store to a DMA source register as a publish only a device reads through', () => {
     const { uses } = classify([published(2)]);
     expect([...uses.escaped]).toEqual([0]);
-    expect(uses.mayWrite.size).toBe(0);
+    expect([...uses.passedToWriter, ...uses.publishedToWriter]).toEqual([]);
     expect(uses.sourceStores.get(0)?.map((s) => s.sink)).toEqual([DMA3SAD]);
     expect([...uses.published, ...uses.publishedOutward]).toEqual([0, 0]);
     expect(uses.accesses.get(0)).toEqual([{ width: 2, signed: false, isLoad: false }]);
@@ -210,7 +210,7 @@ describe('classifyFrameUses', () => {
   test('reads an address handed to a callee at argument 0 as a writer, naming the callee', () => {
     const a = laddr(0);
     const { uses } = classify([{ params: [], ops: [a, call('g', a.results[0]), ret()] }]);
-    expect([...uses.mayWrite]).toEqual([0]);
+    expect([...uses.passedToWriter]).toEqual([0]);
     expect([...uses.passedToCallee]).toEqual([0]);
     expect([...uses.arg0Callees.get(0)!]).toEqual(['g']);
     expect(uses.useCount.get(0)).toBe(1);
@@ -229,6 +229,23 @@ describe('classifyFrameUses', () => {
       { at: 0, width: 4 },
       { at: 4, width: 4 },
     ]);
+  });
+
+  // `p = c ? buf : gOther; *p = 0;` — the store reaches the object through a phi `taint` closes
+  // over, and is listed with the capture it carries so a later stage need not recognize it again
+  test('lists an access through a phi that carries the capture, with the value it goes through', () => {
+    const a = laddr(0);
+    const v = value();
+    const p = value();
+    const st = store(p, v, 0, 1);
+    const join: Block = { params: [p], ops: [st, ret()] };
+    const entry: Block = {
+      params: [v],
+      ops: [a, mkOp('br', { successors: [{ block: join, args: [a.results[0]] }] })],
+    };
+    const { uses } = classify([entry, join]);
+    expect(uses.accessOps.get(st)).toEqual({ off: 0, through: p });
+    expect(uses.accesses.get(0)).toEqual([{ width: 1, signed: false, isLoad: false }]);
   });
 
   test('records a runtime index apart from the accesses that type the object', () => {

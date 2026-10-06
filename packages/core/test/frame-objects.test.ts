@@ -68,6 +68,57 @@ describe('the audit reads the frame partition as ranges', () => {
   });
 });
 
+// `gp = &obj; g(&obj); p = c ? &obj : gOther; while (*p == 0);` — the access reaches the object
+// through a phi, which the declaration's qualifier does not reach: the phi is a pointer local
+// typed from the access. A holder of `gp` may set the byte, so the access carries the qualifier.
+describe('an access through a phi that carries a published capture is volatile', () => {
+  const published = (width: number): { blocks: Block[]; access: Op } => {
+    const a = mkValue(T.unk(32));
+    const gp = mkValue(T.unk(32));
+    const p = mkValue(T.unk(32));
+    const access = mkOp('load', { operands: [p], results: [mkValue(T.unk(32))], attrs: { off: 0, width } });
+    const join: Block = { params: [p], ops: [access, mkOp('ret')] };
+    const entry: Block = {
+      params: [],
+      ops: [
+        mkOp('laddr', { results: [a], attrs: { off: 0 } }),
+        mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+        mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+        mkOp('call', { operands: [a], attrs: { target: 'g' } }),
+        mkOp('br', { successors: [{ block: join, args: [a] }] }),
+      ],
+    };
+    return { blocks: [entry, join], access };
+  };
+  const run = (blocks: Block[], declared: number, oneObject?: { from: number; to: number }) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: blocks,
+      ownedLocals: { from: 0, to: declared },
+      declaredLocals: { from: 0, to: declared },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+      oneObject,
+    });
+
+  test('kept as one object', () => {
+    const { blocks, access } = published(1);
+    expect(run(blocks, 8, { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [] });
+    expect(access.attrs.volatile).toBe(true);
+  });
+
+  test('as its own object', () => {
+    const { blocks, access } = published(4);
+    expect(run(blocks, 4)).toEqual({ policy: 'per-object', sinks: [] });
+    expect(blocks[0].ops[0].attrs.volatile).toBe(true);
+    expect(access.attrs.volatile).toBe(true);
+  });
+});
+
 // A device READ nothing bounds keeps the local area in memory rather than refusing: the audit
 // answers with the bytes to keep, and judges them as one object when the frontend lifts again.
 describe('an unbounded device read keeps the local area as one object', () => {
