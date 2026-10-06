@@ -34,7 +34,24 @@ const KR5 =
   '\tadd\tr0, r0, #0x4\n\tstr\tr0, [r4]\n\tbl\tsink2\n\tldr\tr0, [r4]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
   '.L3:\n\t.word\tg\n';
 
+// agbcc -O2 of `extern struct N *gCur; extern s32 gLim; u32 r5(void) { u32 v = gCur->v; gCur = gCur + 1;
+//   use(v); if ((s32)gCur == gLim) use(1); use(2); return gLim * 3; }`
+const R5 =
+  'r5:\n\tpush\t{r4, r5, lr}\n\tldr\tr4, .L21\n\tldr\tr1, [r4]\n\tldr\tr0, [r1, #0x4]\n\tadd\tr1, r1, #0x8\n' +
+  '\tstr\tr1, [r4]\n\tbl\tuse\n\tldr\tr5, .L21+0x4\n\tldr\tr1, [r4]\n\tldr\tr0, [r5]\n\tcmp\tr1, r0\n' +
+  '\tbne\t.L20\t@cond_branch\n\tmov\tr0, #0x1\n\tbl\tuse\n.L20:\n\tmov\tr0, #0x2\n\tbl\tuse\n\tldr\tr1, [r5]\n' +
+  '\tlsl\tr0, r1, #0x1\n\tadd\tr0, r0, r1\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.L21:\n\t.word\tgCur\n\t.word\tgLim\n';
+
+// agbcc -O2 of `extern s32 gSave; extern u32 gOut; u32 f1(void) { u32 v = gCur->v; gCur = gCur + 1;
+//   use(v); gSave = (s32)gCur; use(1); gOut = gSave + 4; return 0; }`
+const F1 =
+  'f1:\n\tpush\t{r4, r5, lr}\n\tldr\tr4, .L3\n\tldr\tr1, [r4]\n\tldr\tr0, [r1, #0x4]\n\tadd\tr1, r1, #0x8\n' +
+  '\tstr\tr1, [r4]\n\tbl\tuse\n\tldr\tr5, .L3+0x4\n\tldr\tr0, [r4]\n\tstr\tr0, [r5]\n\tmov\tr0, #0x1\n\tbl\tuse\n' +
+  '\tldr\tr1, .L3+0x8\n\tldr\tr0, [r5]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1]\n\tmov\tr0, #0x0\n\tpop\t{r4, r5}\n' +
+  '\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgCur\n\t.word\tgSave\n\t.word\tgOut\n';
+
 const SINK = { sink2: { params: [], returnsVoid: true } };
+const USE = { use: { params: ['u32'], returnsVoid: true } };
 const defaultOf = (name: string, asm: string, prototypes = {}) =>
   enumerateCandidates(name, asm, ARMV4T_AGBCC, { prototypes }).find((c) => c.variations.length === 1)!;
 
@@ -76,6 +93,23 @@ describe('legalizePointerCells', () => {
   test('converts a cell returned as an integer', () => {
     expect(defaultOf('kr5', KR5, SINK).source).toContain('return (u32)g;');
   });
+
+  test('converts the cell to meet a global the body also reads as an integer, which stays one', () => {
+    const c = defaultOf('r5', R5, USE);
+    expect(c.source).toContain('if ((u32)gCur == (u32)(u8 *)gLim) use(1);');
+    expect(c.source).toContain('return gLim * 3;');
+    const decls = renderDeclarations(c.symbolRefs!);
+    expect(decls).toContain('extern void *gCur;\n');
+    expect(decls).not.toContain('extern void *gLim;');
+  });
+
+  test('converts a cell a sum reads, stored into a global no cell is', () => {
+    const c = defaultOf('f1', F1, USE);
+    expect(c.source).toContain('gSave = gCur;');
+    expect(c.source).toContain('gOut = (u32)gSave + 4;');
+    expect(renderDeclarations(c.symbolRefs!)).toContain('extern void *gSave;\n');
+  });
+
 });
 
 describe('the C backend', () => {

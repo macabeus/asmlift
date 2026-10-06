@@ -227,7 +227,7 @@ export function makeRefCollector(ctx: {
         );
       }
     }
-    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, target, refuse).flatMap((r) => {
+    const refs = collectSymbolRefs(tree, declSymbols, prototypes, target, refuse).flatMap((r) => {
       if (statics.has(r.name)) {
         return []; // defined in the body — the map's global of the same name is another object
       }
