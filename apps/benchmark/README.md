@@ -33,7 +33,7 @@ plus a transparent **readability heuristic** (`quality`), a measured **gap size*
 non-matching rows.
 
 The `declined` label is symmetric: capability gaps on both sides. Every real row **receives its
-context**: 379 of the 422 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
+context**: 378 of the 421 rows are flagged `m2cCtx` in their manifest, which feeds m2c that row's
 vendored project context verbatim (the row publishes the file as `ctxRef`). A row may instead carry
 a hand-written `ctx`, held symmetric with the `proto` hints asmlift gets by
 `test/authored-facts.test.ts`; one row does — a C++ unit, whose vendored context is not C and so
@@ -104,14 +104,14 @@ nine it is name, kind and size alone: residual 6 measures it.
 **The row's own signature is no longer pasted into m2c's context out of the reference source.**
 That is the harness's own leakage rule (core's `asIfUndecompiled`: "only CALLEE signatures
 transfer"), and it now applies to both halves — with residuals 4 and 5 as the measured exceptions.
-How m2c learns the row's own declaration, over the 422 real rows. Every count here is re-derived
+How m2c learns the row's own declaration, over the 421 real rows. Every count here is re-derived
 from the manifests by `test/authored-facts.test.ts`, so none of them can go stale:
 
 | how m2c learns the row's own declaration                                                                                                                                   | rows |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---: |
 | the vendored context already declares it — the project's own header, which a user mid-decomp genuinely has: a header declares a function whose body is still `INCLUDE_ASM` |  124 |
 | the forward declaration a manifest's `prependC` needs to compile the reference standalone — residual 4                                                                     |    1 |
-| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |  119 |
+| the one line `proto` also gives asmlift (`m2cOwnPrototype`, at most `void f(…);`)                                                                                          |  118 |
 | the row's own hand-written `ctx` — residual 5                                                                                                                              |    1 |
 | no context at all — its C++ unit's own is not C, so m2c infers the signature from the asm, as asmlift does                                                                 |   42 |
 | nothing is appended, and m2c infers the signature as asmlift does                                                                                                          |  135 |
@@ -169,7 +169,7 @@ _Favouring m2c._
    66,630 in the `foresta` module, `declared` 0, `shape` 0, `signature` 0, `layout` 0), while m2c
    gets that row's ~650 KB preprocessed context with every struct and every prototype. pikmin's map
    is the same shape (29,158 entries, names and sizes; its matching build carries no DWARF either),
-   and so is Mario Party 4's (residual 10), so 126 of the 422 real rows are on that footing — and
+   and so is Mario Party 4's (residual 10), so 126 of the 421 real rows are on that footing — and
    pikmin's rows are given no m2c context at all, so there the asymmetry runs the other way. The
    other six projects carry the shape family (`declared`: pokeemerald 24,538, marioparty3 902,
    kleod 332, sa3 153, af 89, snowboardkids2 27).
@@ -225,7 +225,7 @@ deleting `__attribute__((packed))` silently repadded the project's own structs.
   control), each run on its assigned toolchains: 323 distinct functions, authored as 330 specs — a few carry a
   different source per toolchain — → 822 cases.
 - **Real tier** (`--tier real`) — `dataset/real/*.json`: real matched functions extracted **verbatim** from nine decomp projects (ac-decomp, af, kleod, marioparty3, marioparty4, pikmin, pokeemerald, sa3, snowboardkids2), compiled standalone
-  with asmlift's canonical toolchain flags using each project's headers as context: 422 cases
+  with asmlift's canonical toolchain flags using each project's headers as context: 421 cases
   (one toolchain each). Real game-code shapes, for anti-overfitting.
 
 Reference objects — the byte-exact goal each case is scored against — are built by compiling the reference C with asmlift's toolchain (not the shipped ROM object)
