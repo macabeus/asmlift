@@ -6,7 +6,8 @@
 // all three ask `pointerCells` rather than re-reading the cast:
 //
 //   • l3/symbol-refs.ts declares a name-only cell `void *` in the candidate's own world, the type
-//     that store needs, and so each global the cell meets bare (`pointerPartners`);
+//     that store needs, and so each global the cell meets bare that nothing reads as an integer
+//     (`pointerPartners`);
 //   • `legalizePointerCells` below converts the cell's other uses to match that declaration;
 //   • l3/intcell.ts spells the cell as the integer a project may have declared instead.
 //
@@ -112,19 +113,19 @@ interface SlotRules {
   int: (e: Expr) => Expr;
   /** An argument an integer parameter takes. */
   intArg: (e: Expr) => Expr;
-  /** A bare global compared with a cell, which no pointer partners. */
+  /** A bare global compared with a cell that is no partner. */
   comparedGlobal: (e: Expr) => Expr;
   /** A value stored into a cell. */
   intoCell: (e: Expr) => Expr;
-  /** A global no cell is, stored into: an integer slot. */
+  /** A global stored into that is no cell, which is an integer slot. */
   storedGlobal: (name: string) => void;
 }
 
 /** `sfn` with `rules` applied at every place its context states an integer type: an operand of a
  *  non-additive operator, of `-`/`~`, an index, a switch, a comparison with no pointer, a call
  *  argument whose callee's declared parameter (`SFn.declaredArgs`) is an integer, and a store, an
- *  assignment or a return into an integer slot. A global no cell is takes an integer when stored
- *  into, which is what the candidate's own world declares it. */
+ *  assignment or a return into an integer slot. A global stored into that is no cell is an integer
+ *  slot: the candidate's own world declares it one. */
 function mapIntegerSlots(sfn: SFn, cells: ReadonlySet<string>, rules: SlotRules): SFn {
   const isGlobal = globalOf(sfn);
   const vt = declaredTypes(sfn);
@@ -273,7 +274,8 @@ export function pointerPartners(sfn: SFn): Set<string> {
  *  SCOPE: a use whose context states an integer type (`mapIntegerSlots`); elsewhere the use is left
  *  as the structurer spelled it. A truth test, a sum that renders a pointer (the structurer's own
  *  byte sum, which the backend converts at an integer slot: `legalizePointerWrites`), and a
- *  comparison with a pointer, with 0 or with a partner (`pointerPartners`) are left alone. A global
+ *  comparison with a pointer (a call by its declared return, `SFn.declaredReturns`), with 0 or with
+ *  a partner (`pointerPartners`) are left alone. A global
  *  compared with the cell that is no partner goes `(u32)(u8 *)g` beside the cell's `(u32)g`: under a
  *  float declaration that is no C, as the bare comparison was not.
  *
@@ -294,11 +296,7 @@ export function legalizePointerCells(sfn: SFn): SFn {
     Object.hasOwn(sfn.declaredReturns, fn) &&
     sfn.declaredReturns[fn].includes('*');
   const asInt = (e: Expr): Expr =>
-    isCell(e)
-      ? { k: 'cast', to: T.u(32), e }
-      : integerSum(e, vt)
-        ? { ...e, l: asInt(e.l), r: asInt(e.r) }
-        : e;
+    isCell(e) ? { k: 'cast', to: T.u(32), e } : integerSum(e, vt) ? { ...e, l: asInt(e.l), r: asInt(e.r) } : e;
   // The structurer's byte sum on a cell's value (`(u8 *)g + 8`) is a pointer too, which an integer
   // parameter takes converted as a bare cell does; the backend converts it at every other integer
   // slot (`legalizePointerWrites`).
