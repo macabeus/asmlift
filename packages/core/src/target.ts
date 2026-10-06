@@ -647,9 +647,12 @@ export interface TargetDescription {
     // and the integer one, `g = g + 4; … (gLimit ^ g)`, are one object (the pair
     // `TARGET_BEHAVIOR_READINGS` compiles), the implicit conversion costing a warning. True ⇒ the
     // `int-cell` registry entry's target gate withholds that variation, which can only tie the
-    // default here. IDO builds the pair into two objects and CodeWarrior rejects the pointer store,
-    // so both are offered. KMC gcc builds one object too and does not declare it: the matching suite
-    // compiles each witness on one compiler. Absent ⇒ offered.
+    // default's bytes here. It does not tie the warning: under -Werror the pointer spelling does not
+    // build against the integer declaration and the integer one does, which no gate sees, since the
+    // witness and the bench compile without -Werror. IDO builds the pair into two objects and
+    // CodeWarrior rejects the pointer store, so both are offered. KMC gcc builds one object too and
+    // does not declare it: the matching suite compiles each witness on one compiler. Absent ⇒
+    // offered.
     pointerIntConversionIsFree?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read

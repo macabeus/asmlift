@@ -2941,8 +2941,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // and this cast compiles that wrong value with no diagnostic, where the bare value keeps
     // agbcc's `incompatible pointer type`, fatal under -Werror. The cast is load-bearing all the
     // same: a substitution variation (`/unmerge`) carries the temp's value into the arithmetic it
-    // feeds, and bare, that arithmetic scales by the declared pointee. `*(T *)&gArr` reads the word under every declaration; it is not spelled, because it
-    // reads as a type pun.
+    // feeds, and bare, that arithmetic scales by the declared pointee. A pun, `*(T *)&gArr`, is no
+    // fix: where the declaration is not exactly T it loses gcc's fold of the read (agbcc
+    // c-typeck.c), it drops a `volatile` declaration's qualifier, and agbcc's strict aliasing at
+    // -O2 moves it past a store through the declared type.
     const vt = ctype(value);
     if (isPtrValue(value) || (vt?.kind === 'ptr' && !typeEquals(vt, t))) {
       return { k: 'cast', to: t, e: value };
