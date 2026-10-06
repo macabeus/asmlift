@@ -338,5 +338,10 @@
     "tu": "AskUsePokeblock.i.gz",
     "ctx": "ctx-f5b95c697dcb.i.gz",
     "m2c": "ctx-f5b95c697dcb.i.gz"
+  },
+  "DrawListIndexNumber": {
+    "tu": "DrawListIndexNumber.i.gz",
+    "ctx": "ctx-92fb46a46a7c.i.gz",
+    "m2c": "ctx-92fb46a46a7c.i.gz"
   }
 }
