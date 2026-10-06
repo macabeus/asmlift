@@ -39,7 +39,7 @@ import {
   cacheStats,
 } from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
-import { type AsmliftToolConfig, asmliftBlock, resolveTarget } from './config';
+import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
 import { isDecline } from './decline';
 import { moduleHasUnits, objdiffAbove, readObjdiffUnits, unitDefining } from './dtk-unit';
@@ -115,6 +115,11 @@ const BACKENDS: Record<string, LanguageBackend> = {
   pascal: pascalBackend,
 };
 
+/** The version of the package this file ships in: `package.json` is one directory above both
+ *  `src/main.ts` and the bundled `dist/asmlift.mjs`. */
+const packageVersion = (): string =>
+  (JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as { version: string }).version;
+
 // Every flag the CLI understands. An unknown flag is a HARD usage error — silently ignoring
 // `--nmae foo` or `--backned pascal` would quietly discard the user's intent.
 const KNOWN_FLAGS = new Set([
@@ -142,6 +147,7 @@ const USAGE = `usage: asmlift <file.s|file.asm|file.o|-> [--target <${Object.key
                 [--config <decomp.yaml>] [--score-against <target.o>]
                 [--asm-data <dump.txt>] [--proto <json|proto.json>]
                 [--context <ctx.h>] [--jobs <n>] [--progress]
+       asmlift --help | --version
 
 Decompiles a function to source on stdout.
 Input: GBA .s text (agbcc output or pret-style splits), objdump -d text, or a
@@ -479,6 +485,13 @@ export async function runCli(
   const usage = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n${USAGE}\n` });
   /** A refusal that names its own fix: the message alone, with no usage block. */
   const refuse = (msg: string) => ({ code: EXIT.usage, stdout: '', stderr: `asmlift: ${msg}\n` });
+  // Asked for, so on stdout and exit 0, whatever else the line holds.
+  if (argv.includes('--help') || argv.includes('-h')) {
+    return { code: EXIT.clean, stdout: `${USAGE}\n`, stderr: '' };
+  }
+  if (argv.includes('--version')) {
+    return { code: EXIT.clean, stdout: `asmlift ${packageVersion()}\n`, stderr: '' };
+  }
   const parsed = parseFlags(argv);
   if (!parsed.ok) {
     // A named complaint gets `usage(msg)`; the wrong number of operands gets the bare USAGE dump,
@@ -504,7 +517,24 @@ export async function runCli(
     toolCfg = asmliftBlock(loaded);
     configPath = loaded?.path;
     configDir = loaded?.dir;
-    const res = resolveTarget(flags.get('target') as string | undefined, loaded, toolCfg);
+    // The unit that defines `--name`, read the way the flags below read it. Without --name the
+    // function is not known yet, and --cflags is the escape hatch from an objdiff.json this cannot
+    // read; an unreadable one is reported where the flags read it.
+    const unitCompiler = (): UnitCompiler | undefined => {
+      const name = flags.get('name');
+      if (loaded === null || typeof name !== 'string' || flags.has('cflags')) {
+        return undefined;
+      }
+      try {
+        const project = readObjdiffUnits(loaded.dir);
+        const lookup =
+          project && unitDefining(loaded.dir, project.units, name, flags.get('module') as string | undefined);
+        return lookup?.kind === 'found' ? { unit: lookup.unit.name, compiler: lookup.unit.compiler } : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const res = resolveTarget(flags.get('target') as string | undefined, loaded, toolCfg, unitCompiler);
     if ('error' in res) {
       return usage(res.error);
     }

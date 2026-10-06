@@ -108,8 +108,18 @@ export interface CompileCommandOptions {
 /** A compiler name that reaches the shell as itself. */
 const COMPILER_NAME = /^[A-Za-z0-9_.+-]+$/;
 
+/** Every placeholder a `compiler` command may write: @match-kit/compiler's, and `{{cc}}`, which is
+ *  rendered here before the runner reads the command and so is absent from the runner's own list. */
+const PLACEHOLDERS = ['inputPath', 'outputPath', 'symbol', 'flags', 'cc'];
+
 /** The command with `{{cc}}` rendered as the compiler's name. */
 export function renderCc(command: string, cc: string | undefined): string {
+  const unknown = [...command.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).find((p) => !PLACEHOLDERS.includes(p));
+  if (unknown !== undefined) {
+    throw new Error(
+      `compile command has an unknown placeholder {{${unknown}}} (known: ${PLACEHOLDERS.map((p) => `{{${p}}}`).join(', ')}): ${command}`,
+    );
+  }
   const takesCc = command.includes('{{cc}}');
   if (takesCc && cc === undefined) {
     throw new Error(`compiler command takes {{cc}}, and no compiler was given — got: ${command}`);

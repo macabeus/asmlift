@@ -73,13 +73,23 @@ export function targetSetting(targetKey: string): string {
 
 export type TargetResolution = { targetKey: string; trace: string } | { error: string };
 
-/** Resolve the target key: `--target` flag > `tools.asmlift.target` > platform inference.
- *  Returns a trace of HOW it resolved; ambiguity or an
- *  unknown platform is an error naming the candidates, never a guess. */
+/** The objdiff.json unit that defines the function, as far as target resolution reads it. */
+export interface UnitCompiler {
+  /** `<module>/<path>`, as objdiff names it */
+  unit: string;
+  /** its `scratch.compiler` */
+  compiler: string;
+}
+
+/** Resolve the target key: `--target` flag > `tools.asmlift.target` > platform inference, where a
+ *  platform that names several compilers takes the one the function's objdiff.json unit compiles
+ *  with. Returns a trace of HOW it resolved; ambiguity or an unknown platform is an error naming the
+ *  candidates, never a guess. `unit` is asked only for an ambiguous platform. */
 export function resolveTarget(
   flag: string | undefined,
   loaded: LoadedConfig | null,
   tool: AsmliftToolConfig | undefined,
+  unit: () => UnitCompiler | undefined = () => undefined,
 ): TargetResolution {
   if (flag) {
     return { targetKey: flag, trace: '--target flag' };
@@ -98,8 +108,12 @@ export function resolveTarget(
     };
   }
   if (candidates.length > 1) {
+    const defining = unit();
+    if (defining !== undefined && candidates.includes(defining.compiler)) {
+      return { targetKey: defining.compiler, trace: `objdiff.json unit ${defining.unit}` };
+    }
     return {
-      error: `platform '${platform}' is ambiguous (${candidates.join(' or ')}) — set tools.asmlift.target in ${loaded.path}`,
+      error: `platform '${platform}' is ambiguous (${candidates.join(' or ')}) — set tools.asmlift.target in ${loaded.path}, or pass --target`,
     };
   }
   return { targetKey: candidates[0], trace: `platform '${platform}' in ${loaded.path}` };

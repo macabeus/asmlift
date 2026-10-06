@@ -313,6 +313,25 @@ describe('at the CLI surface', () => {
     expect(r.stdout).toContain('clamp0');
   });
 
+  test('a GameCube platform takes its target from the unit that defines --name, and asks without one', async () => {
+    const { asm, root } = project('marioparty4', { [REL_MAP]: ['clamp0'], 'main/game/main': ['main'] });
+    const config = join(root, 'decomp.yaml');
+    writeFileSync(config, 'name: test\nplatform: gc\nversions: []\n');
+    const r = await runCli([asm, '--name', 'clamp0']);
+    expect(r.code).toBe(0);
+    expect(r.stderr).toContain(`asmlift: [config] target mwcc_242_81 (objdiff.json unit ${REL_MAP})\n`);
+    expect(r.stdout).toContain('clamp0');
+    // the unit is the function's: with no --name, a name no unit defines, or --cflags in its place,
+    // the choice stays the user's
+    for (const argv of [[asm], [asm, '--name', 'nowhere'], [asm, '--name', 'clamp0', '--cflags', '-O4,p']]) {
+      const asked = await runCli(argv);
+      expect(asked.code).toBe(64);
+      expect(asked.stderr).toContain(
+        `platform 'gc' is ambiguous (mwcc_242_81 or mwcc_233_163n or mwcc_247_107) — set tools.asmlift.target in ${config}, or pass --target`,
+      );
+    }
+  });
+
   test('--module narrows the lookup; a module with no units and a --module with nothing to narrow are refused', async () => {
     const { asm, root } = project('marioparty4', { 'm403Dll/REL/executor': ['clamp0'], [REL_MAP]: ['clamp0'] });
     expect((await runCli([asm])).stderr).toMatch(
