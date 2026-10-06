@@ -2572,11 +2572,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
     (!undeclared || mapUndeclared(x.e.name));
   /** The integer sum the rule spells in the asm's order instead (`(u32)g + x`), cast back to the
-   *  byte pointer it stands for: `(u8 *)((u32)g + x)`. */
+   *  byte pointer it stands for: `(u8 *)((u32)g + x)`. A byte sum converted whole (byteSumAsInt's
+   *  `(u32)((u8 *)g + x - gB)`) is one of its words. */
   const intGlobalWord = (x: Expr, undeclared: boolean): boolean =>
     x.k === 'cast' &&
     typeEquals(x.to, T.u(32)) &&
     (castGlobal(x.e, undeclared) ||
+      (x.e.k === 'bin' && isByteGlobalSum(x.e, undeclared)) ||
       (x.e.k === 'var' &&
         (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
         (!undeclared || mapUndeclared(x.e.name))));
