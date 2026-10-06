@@ -1759,7 +1759,8 @@
         "arithmetic",
         "narrow",
         "signed",
-        "branch"
+        "branch",
+        "stack-addr"
       ],
       "prependC": "#include \"m_card.h\"\n#include \"card.h\"\n#include \"card/CARDBios.h\"\n#include \"card/CARDCheck.h\"\n#include \"card/CARDMount.h\"\n#include \"card/__card.h\"\n#include \"graph.h\"\n#include \"lb_rtc.h\"\n#include \"libultra/libultra.h\"\n#include \"m_actor_type.h\"\n#include \"m_all_grow_ovl.h\"\n#include \"m_event.h\"\n#include \"m_flashrom.h\"\n#include \"m_home.h\"\n#include \"m_island.h\"\n#include \"m_land.h\"\n#include \"m_land_h.h\"\n#include \"m_mail.h\"\n#include \"m_malloc.h\"\n#include \"libc64/sleep.h\"\n#include \"m_common_data.h\"\n#include \"m_font.h\"\n#include \"jsyswrap.h\"\n#include \"m_name_table.h\"\n#include \"m_npc.h\"\n#include \"m_private.h\"\n#include \"m_private_h.h\"\n#include \"m_quest.h\"\n#include \"m_time.h\"\n#include \"types.h\"\n#include \"zurumode.h\"\n#include \"m_house.h\"\n#include \"m_cockroach.h\"\n#include \"m_start_data_init.h\"\n#include <string.h>",
       "funcC": "static void mCD_set_number_str(char* str, u8 num) {\n    int n = num;\n    int f = FALSE;\n    int fig_table[3];\n    int i;\n    \n    bzero(fig_table, sizeof(fig_table));\n    \n    for (i = 0; i < 3; i++) {\n        const int remain = n % 10;\n        const int div = n / 10;\n        \n        fig_table[i] = remain;\n        n = div;\n    }\n\n    for (i = 2; i > 0; i--) {\n        if (fig_table[i] > 0 || f == TRUE) {\n            *str++ = fig_table[i] + '0';\n            f = TRUE;\n        }\n    }\n\n    *str = fig_table[0] + '0';\n}",
