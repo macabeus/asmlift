@@ -250,10 +250,10 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     width and one agreed extension, or a byte read or written through a runtime index into
  *     storage nothing else types, and its bytes must belong to nothing else in the frame;
  *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
- *     that answer can hold (`oneObject`, which this answers and the frontend lifts again with,
- *     and `writerNotKept`): the local area is one `u8` array in
- *     memory, every fixed-offset access in it is a member at its own offset, a runtime index may
- *     reach a byte of it, and two widths at one byte refuse.
+ *     that answer can hold (`writerNotKept`; `oneObject`, which this answers and the frontend
+ *     lifts again with): the local area is one `u8` array in memory, every fixed-offset access in
+ *     it is a member at its own offset, a runtime index may reach a byte of it, and two widths at
+ *     one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -322,14 +322,13 @@ export function auditFrameObjects({
   });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
   // THE ONE-OBJECT ANSWER, where it is on offer (one escape reaches without bound, and every
-  // writer is one it can hold) and the per-object model does not describe the frame: it
-  // refused a shape, an object sits over a slot, or the unbounded reach meets another object, a
-  // slot or a word nothing accounts for. Then what the device may read or the callee may write is
-  // kept rather than refused: lift again with the local area as one object in memory
+  // writer is one it can hold) and the per-object model does not describe the frame: it refused a
+  // shape, an object sits over a slot, or the unbounded reach meets another object, a slot or a
+  // word nothing accounts for. Then what the device may read or the callee may write is kept
+  // rather than refused: lift again with the local area as one object in memory
   // (`keepAsOneObject`). Below the local area are the outgoing arguments and above it the saved
-  // registers, neither of them an object. Where the
-  // per-object model does describe the frame — one object and nothing else in reach — it stands,
-  // and the object keeps its own type.
+  // registers, neither of them an object. Where the per-object model does describe the frame —
+  // one object and nothing else in reach — it stands, and the object keeps its own type.
   const answered = (e: FrameEscape): boolean =>
     e.lo === -Infinity &&
     e.hi === Infinity &&
@@ -826,10 +825,10 @@ function classifyFrameUses({
   // "the accesses to the object" reads this list rather than recognizing them again, since a
   // narrower recognizer misses exactly the phi-carried ones `taint` admits.
   const accessOps = new Map<Op, FrameAccessOp>();
-  // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, which is what
-  // decides `volatile`, in the order the escapes were found. Whether it reached something that
-  // could write the frame BACK — what every "a callee may write any frame offset" refusal rests
-  // on — is `mayWrite`, read off the splits below. A store into a device's SOURCE register
+  // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, in the order the
+  // escapes were found — the order windows and refusals are read in. Whether it reached something
+  // that could write the frame BACK — what every "a callee may write any frame offset" refusal
+  // rests on — is `mayWrite`, read off the splits below. A store into a device's SOURCE register
   // answers yes to the first and no to the second: the hardware reads the object, and the
   // DMA-fill idiom this capability was built for (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly
   // that shape.
@@ -1270,9 +1269,9 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
  *  out-parameters handed to one callee as readily as a device read — and the shapes the
  *  per-object model refuses are ones it can hold: a member at [+k] through a capture, two widths
  *  or two signednesses at one address, a runtime index, overlapping objects, a second object
- *  beside an untyped one, an object over a slot. So there each of those refusals asks for that answer instead of declining (`shapeRefused`), and
- *  the second audit judges the bytes as one object by its own rules — two types at one byte
- *  still refuse there. Where the answer is not on offer, each refuses where it stands. */
+ *  beside an untyped one, an object over a slot. So there each of those refusals asks for that
+ *  answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
+ *  object by its own rules — two types at one byte still refuse there. Where the answer is not on offer, each refuses where it stands. */
 function chooseFrameModel(
   oneObject: FrameRange | undefined,
   uses: FrameUses,
@@ -1476,8 +1475,8 @@ function failIfSlotKeysIt(
 /** ONE OBJECT IN MEMORY, the answer a device read or a callee write nothing bounds is given
  *  instead of a refusal (`oneObject`, requested by the relift test where the escapes are judged).
  *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
- *  holds (`writerNotKept` says which writers it can hold), and every access inside
- *  it is a cast-spelled access to that array — so each store the machine made there is a store the
+ *  holds (`writerNotKept` says which writers it can hold), and every access inside it is a
+ *  cast-spelled access to that array — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
  *  store in the same block overwrites it). And it is right whichever the source had there: a
@@ -1553,15 +1552,15 @@ function keepAsOneObject({
   // at `k - from` off the object, and a member address used any other way becomes the object's
   // address moved by that constant.
   //
-  // `volatile` goes on each ACCESS, where the address was stored somewhere a writer may hold it
-  // (`publishedToWriter`), and never on the array: every member is spelled through a cast, whose
-  // pointee drops an array's qualifier, so there it would reach no access and only make agbcc
-  // warn `discards qualifiers` wherever the bare array is named — a callee handed it, a global
-  // it is stored to. Unqualified, a spin on a byte a holder of the address sets compiles to a
-  // loop that never reads it again. A device that only reads (a DMA source) changes no byte a
-  // re-read returns, and neither does a block transfer's fill source (`filledFrom`, the
-  // per-object stamp's second key), so there the qualifier would change how the object compiles
-  // and not what any read of it returns.
+  // `volatile` goes on each ACCESS where the address was stored somewhere a writer may hold it
+  // (`publishedToWriter`): unqualified, a spin on a byte a holder of the address sets compiles to
+  // a loop that never reads it again. Never on the array: every member is spelled through a cast,
+  // whose pointee drops the array's qualifier, so it would reach no access and only make agbcc
+  // warn `discards qualifiers` wherever the bare array is named. A reader alone — a DMA source, a
+  // transfer's fill source (`filledFrom`) — changes no byte a re-read returns. KNOWN GAP: a
+  // callee that keeps the address it was handed, for an interrupt to write later, is a holder
+  // nothing here sees, so a spin on such a byte compiles unqualified; the per-object stamp has the
+  // same gap (`stampObjects`: not on an ordinary `&local` argument).
   const reread = uses.publishedToWriter.size > 0;
   const object = mkOp('laddr', {
     results: [mkValue(T.unk(32))],
@@ -1884,9 +1883,8 @@ function notTheWholeArea(
  *  can name; an address that only reached memory has none. A store of the address beside that
  *  call is held with it, whether to an ordinary global or into a device's source register — and
  *  where the store hands the address to something that may write through it (`publishedToWriter`),
- *  only when that callee may write through it too. A bounded block transfer reading its source
- *  names no writer, so two frames whose writers are the same decide alike whether or not one also
- *  hands the address to a transfer.
+ *  only when that callee may write through it too: a bounded block transfer reading its source
+ *  names no writer.
  *
  *  The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question is
  *  the one the one-word arm asks, asked here of the same callees. */

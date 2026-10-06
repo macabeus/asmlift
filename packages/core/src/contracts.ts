@@ -399,8 +399,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     }
   }
   const bump = (m: EffectCounts, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
-  // The unplaced qualified accesses whose address may be a stack object a writer holds (the frame
-  // audit qualifies those too), so a refusal names that object rather than a device register.
+  // Of the unplaced qualified accesses, those whose address may be a stack object the frame audit
+  // qualified, so a refusal names that object rather than a device register.
   const stackUnplaced: Record<Direction, number> = { r: 0, w: 0 };
   const mayBeStack = stackObjectReach(fn, defs);
   for (const b of seen) {

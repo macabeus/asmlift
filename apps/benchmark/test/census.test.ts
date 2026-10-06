@@ -55,7 +55,7 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
     // what the standalone `respell`s cost from how rarely they win alone. They are kept so a
     // variation can LOSE on its own terms, which is only observable while the single-variation
     // candidate is in the fan — and a standalone winner this list does not name means the note's
-    // premise moved again.
+    // premise moved.
     const unpaired = [...carrying('unreduce'), ...carrying('ptr-field')].filter(
       (w) => !hasVariation(w.variations, 'vol-store'),
     );

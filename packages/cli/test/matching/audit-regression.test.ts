@@ -194,7 +194,7 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
   // A spin through a phi that carries the published address — `p = c ? buf : gOther` — reaches the
   // object where neither the declaration nor a member cast does. Qualified, agbcc's peeled first
   // test is a second read the C spells once, so it declines loud and names the stack local; plain,
-  // it compiled to a loop that never reads the byte again.
+  // it compiles to a loop that never reads the byte again.
   test('a spin through a phi carrying a published capture declines naming the stack local', () => {
     const asm = compileTargetAsm(
       'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8]; ' +
@@ -342,7 +342,7 @@ describe('report path parity with decompile()', () => {
     // stub; the report path must not accept onGap yet re-throw on the same input.
     // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`), handed to a callee whose
     // return nothing says — the single-local shape, and the same two locals under a callee declared
-    // `void`, are modelled now and lift, which would make this test assert parity on a success path.
+    // `void`, are modelled and lift, which would make this test assert parity on a success path.
     const asm = compileTargetAsm(
       'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }',
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,

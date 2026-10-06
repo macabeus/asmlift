@@ -42,12 +42,13 @@ const SPILL = `f:
 const lift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC);
 
 // THE PER-OBJECT REFUSALS STAND WHERE THE ONE-OBJECT ANSWER CANNOT HOLD A WRITER. A callee handed a
-// captured address is a writer that answer holds, and so is a store of that same address beside
-// the call, so a fixture whose writers are those lifts the whole declared area as one byte array
-// instead. The writers it cannot hold are an address stored to memory that no callee is handed —
-// this publishes the frame address at `off` to a global — and a callee taking one at argument 0
-// with nothing said of what it returns; each refusal here is judged per object beside one of them,
-// or with nothing reaching the frame without bound. `r2`/`r3` are free at entry where this is used.
+// captured address that may write through it is a writer that answer holds, and so is a store of
+// that same address beside the call, so a fixture whose writers are those lifts the whole declared
+// area as one byte array instead. Two writers it cannot hold are used here: an address stored to
+// memory that no callee is handed — this publishes the frame address at `off` to a global — and a
+// callee taking one at argument 0 with nothing said of what it returns; each refusal here is judged
+// per object beside one of them, or with nothing reaching the frame without bound. `r2`/`r3` are
+// free at entry where this is used.
 const alsoPublished = (asm: string, off = 0): string =>
   asm.replace(
     /(\tadd\tsp, sp, #-0x[0-9a-f]+\n)/,

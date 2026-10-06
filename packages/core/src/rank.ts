@@ -1221,9 +1221,9 @@ export function enumerateCandidates(
     // only ties `/vol-store`'s 27, and RT's 32 beats the admitted standalone `/unreduce`'s 35, so
     // "worse than an admitted variation" would exclude neither.
     //
-    // WHAT THE STANDALONE LINES COST, since neither of the two variations ever wins an artifact row
-    // ALONE — every `/unreduce` and `/ptr-field` winner rides inside a `/vol-store` pairing, which
-    // is the property `apps/benchmark/test/census.test.ts` asserts. They are kept because a
+    // WHAT THE STANDALONE LINES COST, since the two variations rarely win an artifact row ALONE —
+    // `apps/benchmark/test/census.test.ts` names every `/unreduce` and `/ptr-field` winner outside
+    // a `/vol-store` pairing, and fails on one it does not name. They are kept because a
     // variation has to be able to LOSE on its own terms: the admission posture (compareScored orders
     // by score) is what makes a wrong respelled source harmless, and it is only observable when the
     // single-variation candidate is in the fan —
