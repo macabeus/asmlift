@@ -68,6 +68,57 @@ describe('the audit reads the frame partition as ranges', () => {
   });
 });
 
+// `gp = &obj; g(&obj); p = c ? &obj : gOther; while (*p == 0);` — the access reaches the object
+// through a phi, which the declaration's qualifier does not reach: the phi is a pointer local
+// typed from the access. A holder of `gp` may set the byte, so the access carries the qualifier.
+describe('an access through a phi that carries a published capture is volatile', () => {
+  const published = (width: number): { blocks: Block[]; access: Op } => {
+    const a = mkValue(T.unk(32));
+    const gp = mkValue(T.unk(32));
+    const p = mkValue(T.unk(32));
+    const access = mkOp('load', { operands: [p], results: [mkValue(T.unk(32))], attrs: { off: 0, width } });
+    const join: Block = { params: [p], ops: [access, mkOp('ret')] };
+    const entry: Block = {
+      params: [],
+      ops: [
+        mkOp('laddr', { results: [a], attrs: { off: 0 } }),
+        mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+        mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+        mkOp('call', { operands: [a], attrs: { target: 'g' } }),
+        mkOp('br', { successors: [{ block: join, args: [a] }] }),
+      ],
+    };
+    return { blocks: [entry, join], access };
+  };
+  const run = (blocks: Block[], declared: number, oneObject?: { from: number; to: number }) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: blocks,
+      ownedLocals: { from: 0, to: declared },
+      declaredLocals: { from: 0, to: declared },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+      oneObject,
+    });
+
+  test('kept as one object', () => {
+    const { blocks, access } = published(1);
+    expect(run(blocks, 8, { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [] });
+    expect(access.attrs.volatile).toBe(true);
+  });
+
+  test('as its own object', () => {
+    const { blocks, access } = published(4);
+    expect(run(blocks, 4)).toEqual({ policy: 'per-object', sinks: [] });
+    expect(blocks[0].ops[0].attrs.volatile).toBe(true);
+    expect(access.attrs.volatile).toBe(true);
+  });
+});
+
 // A device READ nothing bounds keeps the local area in memory rather than refusing: the audit
 // answers with the bytes to keep, and judges them as one object when the frontend lifts again.
 describe('an unbounded device read keeps the local area as one object', () => {
@@ -116,8 +167,36 @@ describe('an unbounded device read keeps the local area as one object', () => {
     ]);
     expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
     const object = blk.ops[0];
-    expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8, volatile: true });
-    expect(blk.ops.filter((op) => op.opcode === 'store' && op.operands[0] === object.results[0])).toHaveLength(2);
+    expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8 });
+    // every member is spelled through a cast, which a qualifier on the array would not reach
+    expect(object.attrs.volatile).toBeUndefined();
+    const members = blk.ops.filter((op) => op.opcode === 'store' && op.operands[0] === object.results[0]);
+    expect(members).toHaveLength(2);
+    // a device that only reads changes no byte a re-read of the object returns
+    expect(members.every((op) => op.attrs.volatile === undefined)).toBe(true);
+  });
+
+  // `vu8 buf[8]; gp = buf; g(buf); while (buf[0] == 0);` — the members are spelled through casts,
+  // which drop the array's qualifier, so the qualifier a holder of `gp` needs is on each access
+  test('kept, each access is volatile where the address is stored where a writer may hold it', () => {
+    const { blk } = published([{ off: 0, width: 1 }]);
+    const a = blk.ops[0].results[0];
+    const gp = mkValue(T.unk(32));
+    const ret = blk.ops.pop()!;
+    blk.ops.push(
+      mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+      mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+      mkOp('call', { operands: [a], attrs: { target: 'g' } }),
+      mkOp('load', { operands: [a], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 1, signed: false } }),
+      ret,
+    );
+    expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
+    const object = blk.ops[0];
+    const members = blk.ops.filter(
+      (op) => (op.opcode === 'load' || op.opcode === 'store') && op.operands[0] === object.results[0],
+    );
+    expect(members.map((op) => op.opcode)).toEqual(['store', 'load']);
+    expect(members.every((op) => op.attrs.volatile === true)).toBe(true);
   });
 
   test('a byte two widths reach is refused, since agbcc reads through casts by type', () => {
@@ -128,10 +207,86 @@ describe('an unbounded device read keeps the local area as one object', () => {
     expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('accessed 4 and 2 bytes wide');
   });
 
-  test('an address a callee may write through is not what the one object keeps', () => {
+  // The device's source register is a reader, so the store into it adds no writer to the callee's
+  test('an address a callee may write through, also handed to a device, is what the one object keeps', () => {
     const call = mkOp('call', { operands: [mkValue(T.unk(32))], attrs: { target: 'g' } });
     const { blk } = published([{ off: 0, width: 2 }], [call]);
-    expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('a callee or a store may write through');
+    expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
+  });
+
+  // …while an address stored to an ordinary global and handed to no callee has no holder to name
+  test('an address stored to memory and passed to no callee is not what the one object keeps', () => {
+    const { blk } = published([{ off: 0, width: 2 }]);
+    const a = blk.ops[0].results[0];
+    const gp = mkValue(T.unk(32));
+    const ret = blk.ops.pop()!;
+    blk.ops.push(
+      mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+      mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+      ret,
+    );
+    expect(() => run(blk, [], { from: 0, to: 8 })).toThrow(
+      'cannot hold every writer — the captured address at [sp,#0): the address is published rather than passed ' +
+        'as an argument',
+    );
+  });
+});
+
+// The whole-area argument holds a store of the address only beside a callee that may write through
+// it: a block transfer reading its source names no writer, so with or without one the frame decides
+// as it does with none.
+describe('a block transfer reading the object holds no published address', () => {
+  const { CpuSet } = ARMV4T_AGBCC.capabilities.blockTransferCalls!;
+  const declared = (callee: string): boolean =>
+    returnsWithoutHiddenPointer(
+      callee,
+      { g: { params: 1, returnsVoid: true }, CpuSet: { params: 3, returnsVoid: true } },
+      ARMV4T_AGBCC,
+    );
+  // `u8 buf[16]; gp = buf; <callee>(buf, gDst, 0x05000004);`
+  const storedAndHanded = (callee: string): Block => {
+    const a = mkValue(T.unk(32));
+    const gp = mkValue(T.unk(32));
+    const dst = mkValue(T.unk(32));
+    const control = mkValue(T.unk(32));
+    return {
+      params: [],
+      ops: [
+        mkOp('laddr', { results: [a], attrs: { off: 0 } }),
+        mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+        mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+        mkOp('const', { results: [dst], attrs: { value: 0x02000000 } }),
+        mkOp('const', { results: [control], attrs: { value: 0x05000004 } }),
+        mkOp('call', { operands: [a, dst, control], attrs: { target: callee } }),
+        mkOp('ret'),
+      ],
+    };
+  };
+  const run = (blk: Block) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: [blk],
+      ownedLocals: { from: 0, to: 16 },
+      declaredLocals: { from: 0, to: 16 },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declared,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+    });
+
+  test('a published address a block transfer reads is not the whole area', () => {
+    expect(CpuSet).toBeDefined();
+    expect(() => run(storedAndHanded('CpuSet'))).toThrow(
+      'the address is published, and the only callee handed it is a block transfer that reads through it',
+    );
+  });
+
+  test('a published address a callee may write through is the whole area', () => {
+    const blk = storedAndHanded('g');
+    run(blk);
+    expect(blk.ops[0].attrs).toMatchObject({ off: 0, width: 1, count: 16, volatile: true });
   });
 });
 

@@ -107,22 +107,131 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     expect(scoreC(srcAcross, 'atlc', assembleTarget(across), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
-  // TWO locals, so the second sits above the first and its address is COMPUTED. Same capability,
-  // one step past what the `mov` proof covers — it must still decline loud, in both modes, and
-  // name the shape rather than the generic sp message.
+  // TWO locals, so the second sits above the first and its address is COMPUTED. A callee declared
+  // to return nothing holds both addresses as a writer the one-object frame keeps: the whole area
+  // is one byte array, and that recompiles to the target. A callee whose return nothing says may
+  // take a hidden struct-return pointer at argument 0 instead, so there the two locals are judged
+  // per object and decline loud, in both modes, naming the shape rather than the generic sp message.
   const twoLocals = 'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }';
+  const unsaid = { g: { params: 1 } };
+
+  test('two COMPUTED stack addresses a declared callee writes through are one object', () => {
+    const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+    const src = decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }).source;
+    expect(src).toContain('u8 sp0[8];');
+    expect(src).toContain('g((u32)sp0 + 4);');
+    expect(scoreC(src, 'atl2', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
+
+  // …and a STORE of one of those addresses beside the call is held with it, as it is for one untyped
+  // object (`gp = buf; g(buf);`): the whole-area argument does not ask who else holds the address.
+  // A store into a device's source register adds a reader, never a writer.
+  test.each([
+    [
+      'stored to a global',
+      'pub2',
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; ' +
+        'void pub2(void){ unsigned char buf[8]; gp = buf; h(buf, buf + 4); }',
+      'extern u8 *gp;\n',
+    ],
+    [
+      'handed to a device as its source',
+      'dev2',
+      'extern void h(unsigned short*, unsigned short*); ' +
+        'void dev2(void){ unsigned short buf[4]; *(volatile unsigned int *)0x40000D4 = (unsigned int)buf; h(buf, buf + 2); }',
+      '',
+    ],
+  ])('two COMPUTED stack addresses a declared callee writes through, one also %s, are one object', (_, fn, c, ctx) => {
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+    const src = decompile(fn, asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } }).source;
+    expect(src).toContain('    u8 sp0[8];');
+    expect(src).toContain('h(sp0, (u32)sp0 + 4);');
+    expect(scoreC(ctx + src, fn, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
+
+  // …while an address stored to memory and handed to no callee is a writer nothing names, and the
+  // decline says so beside the shape it would otherwise have kept
+  test('a COMPUTED stack address only stored to memory declines naming that writer', () => {
+    const asm = compileTargetAsm(
+      'extern void h(unsigned char*); extern unsigned char *gp; void pub1(void){ unsigned char buf[8]; gp = buf + 4; h(buf); }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    expect(() => decompile('pub1', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 1, returnsVoid: true } } })).toThrow(
+      /another address-taken object shares the frame, so the reservation is not this one alone — and the one object cannot hold every writer: the captured address at \[sp,#4\): the address is published rather than passed as an argument/,
+    );
+  });
+
+  // …and a block transfer that READS the address is no callee that holds it: with or without one,
+  // a published address beside no writing callee declines alike
+  test('a stack address stored to memory and read by a block transfer declines naming that writer', () => {
+    const asm = compileTargetAsm(
+      'extern void CpuSet(const void *, void *, unsigned int); extern unsigned int gDst[4]; extern void k(void); ' +
+        'extern unsigned char *gp; void pubt(void){ unsigned char buf[8]; gp = buf; CpuSet(buf, gDst, 0x04000002); k(); }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    const prototypes = { CpuSet: { params: 3, returnsVoid: true }, k: { params: 0, returnsVoid: true } };
+    expect(() => decompile('pubt', asm, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /the address is published, and the only callee handed it is a block transfer that reads through it/,
+    );
+  });
+
+  // A PUBLISHED one object is spelled member by member through casts, and a cast's pointee drops the
+  // array's `volatile`: each access carries it, or the spin on a byte a holder of `gp` sets compiles
+  // to a loop that never reads it again.
+  test('a published one object keeps every re-read of a member', () => {
+    const asm = compileTargetAsm(
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; unsigned int spin2(void){ ' +
+        'volatile unsigned char buf[8]; buf[0] = 0; gp = (unsigned char *)buf; h((unsigned char *)buf, (unsigned char *)buf + 4); ' +
+        'while (buf[0] == 0) ; gp = 0; return buf[4]; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    const src = decompile('spin2', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } }).source;
+    expect(src).toContain('    u8 sp0[8];');
+    expect(src).toContain('while (*(volatile u8 *)sp0 == 0);');
+    expect(src).not.toMatch(/\(u8 \*\)sp0/);
+  });
+
+  // A spin through a phi that carries the published address — `p = c ? buf : gOther` — reaches the
+  // object where neither the declaration nor a member cast does. Qualified, agbcc's peeled first
+  // test is a second read the C spells once, so it declines loud and names the stack local; plain,
+  // it compiles to a loop that never reads the byte again.
+  test('a spin through a phi carrying a published capture declines naming the stack local', () => {
+    const asm = compileTargetAsm(
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8]; ' +
+        'unsigned int p1(unsigned int c){ volatile unsigned char buf[8]; volatile unsigned char *p; buf[0] = 0; ' +
+        'gp = (unsigned char *)buf; h((unsigned char *)buf, (unsigned char *)buf + 4); ' +
+        'p = c ? buf : (volatile unsigned char *)gOther; *p = 0; while (*p == 0) ; gp = 0; return buf[4]; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    expect(() => decompile('p1', asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } })).toThrow(
+      "structuring dropped a read of an address-taken stack local in 'p1'",
+    );
+  });
+
+  // …and two reads through it are two reads, for one published local as for the one object
+  test('two reads through a phi carrying a published local both survive, and match', () => {
+    const ctx = 'extern void h1(unsigned char*); extern unsigned char *gp; extern unsigned char gOther[8];\n';
+    const asm = compileTargetAsm(
+      ctx +
+        'unsigned int q7(unsigned int c){ volatile unsigned char b; volatile unsigned char *p; unsigned int x, y; ' +
+        'b = 0; gp = (unsigned char *)&b; h1((unsigned char *)&b); p = c ? &b : (volatile unsigned char *)gOther; ' +
+        'x = *p; y = *p; gp = 0; return x + y; }',
+      TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
+    );
+    const src = decompile('q7', asm, ARMV4T_AGBCC, { prototypes: { h1: { params: 1, returnsVoid: true } } }).source;
+    expect(src.match(/= \*\(volatile u8 \*\)v\d+;/g)).toHaveLength(2);
+    expect(scoreC(ctx + src, 'q7', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
 
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
-      /address-taken stack local/,
-    );
+    expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: unsaid })).toThrow(/address-taken stack local/);
   });
 
   test('a COMPUTED stack address stubs with a lift diagnostic in annotate mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const r = decompile('atl2', asm, ARMV4T_AGBCC, {
-      prototypes: { g: { params: 1, returnsVoid: true } },
+      prototypes: unsaid,
       onGap: 'annotate',
     });
     expect(r.diagnostics.length).toBe(1);
@@ -231,13 +340,14 @@ describe('report path parity with decompile()', () => {
   test('annotate mode: a NON-localizable failure stubs identically on both paths', () => {
     // The sp-as-data decline is a frontend THROW (no line to mark). decompile() degrades to a
     // stub; the report path must not accept onGap yet re-throw on the same input.
-    // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`) — the single-local shape
-    // is modelled now and lifts, which would make this test assert parity on a success path.
+    // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`), handed to a callee whose
+    // return nothing says — the single-local shape, and the same two locals under a callee declared
+    // `void`, are modelled and lift, which would make this test assert parity on a success path.
     const asm = compileTargetAsm(
       'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }',
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
-    const protos = { prototypes: { g: { params: 1, returnsVoid: true } } as const, onGap: 'annotate' as const };
+    const protos = { prototypes: { g: { params: 1 } } as const, onGap: 'annotate' as const };
     const viaPipeline = decompile('atl2', asm, ARMV4T_AGBCC, protos);
     expect(viaPipeline.source).toContain('could not decompile'); // really the stub path
     const viaReport = decompileWithReport('atl2', asm, AGBCC, protos);

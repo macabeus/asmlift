@@ -340,6 +340,84 @@ describe('assertEffectsPreserved — a pinned device access', () => {
     expect(() => checkReads(irReading([null], [], [REG]), [write(REG), readThrough('p')])).not.toThrow();
   });
 
+  // The frame audit qualifies the accesses of a stack object a writer may hold; those are unplaced
+  // too, and a dropped one is that local's read, not a register's.
+  test('a dropped read at no constant address that may be a stack object names the stack local', () => {
+    const fn = irReading([]);
+    const object = mkValue(T.ptr(T.u(8)));
+    fn.blocks[0].ops.unshift(
+      mkOp('laddr', { results: [object], attrs: { off: 0, width: 1, count: 8 } }),
+      mkOp('load', { operands: [object], results: [mkValue(T.u(8))], attrs: { off: 0, width: 1, volatile: true } }),
+    );
+    expect(() => checkReads(fn, [])).toThrow(/dropped a read of an address-taken stack local in 'F'/);
+    const both = irReading([null]);
+    both.blocks[0].ops.unshift(...fn.blocks[0].ops.slice(0, 2));
+    expect(() => checkReads(both, [])).toThrow(/dropped a read of a device register or a stack local in 'F'/);
+  });
+
+  /** `p = c ? buf : <other>; *p` — one qualified read through a phi of a stack object and `other`. */
+  const readThroughPhi = (other: (into: ReturnType<typeof mkValue>) => ReturnType<typeof mkOp>): Fn => {
+    const object = mkValue(T.ptr(T.u(8)));
+    const second = mkValue(T.ptr(T.u(8)));
+    const p = mkValue(T.ptr(T.u(8)));
+    const join: Block = {
+      params: [p],
+      ops: [
+        mkOp('load', { operands: [p], results: [mkValue(T.u(8))], attrs: { off: 0, width: 1, volatile: true } }),
+        mkOp('ret', {}),
+      ],
+    };
+    const entry: Block = {
+      params: [],
+      ops: [
+        mkOp('laddr', { results: [object], attrs: { off: 0, width: 1, count: 8 } }),
+        other(second),
+        mkOp('cond_br', {
+          operands: [mkValue(T.s(32))],
+          successors: [
+            { block: join, args: [object] },
+            { block: join, args: [second] },
+          ],
+        }),
+      ],
+    };
+    return { ...irReading([]), blocks: [entry, join] };
+  };
+
+  test('a dropped read through a phi of a stack object and a register address names both', () => {
+    const fn = readThroughPhi((r) => mkOp('const', { results: [r], attrs: { value: 0x4000004 } }));
+    expect(() => checkReads(fn, [])).toThrow(/dropped a read of a device register or a stack local in 'F'/);
+  });
+
+  // An access through a named global is exempt from the dropped rule, so that side is not named.
+  test('a dropped read through a phi of a stack object and a named global names the stack local', () => {
+    const fn = readThroughPhi((r) => mkOp('gaddr', { results: [r], attrs: { sym: 'gOther' } }));
+    expect(() => checkReads(fn, [])).toThrow(/dropped a read of an address-taken stack local in 'F'/);
+  });
+
+  test('a dropped read through a loop phi stepped from a stack object names the stack local', () => {
+    const object = mkValue(T.ptr(T.u(8)));
+    const p = mkValue(T.ptr(T.u(8)));
+    const next = mkValue(T.ptr(T.u(8)));
+    const one = mkValue(T.s(32));
+    const loop: Block = { params: [p], ops: [] };
+    loop.ops.push(
+      mkOp('load', { operands: [p], results: [mkValue(T.u(8))], attrs: { off: 0, width: 1, volatile: true } }),
+      mkOp('const', { results: [one], attrs: { value: 1 } }),
+      mkOp('add', { operands: [p, one], results: [next] }),
+      mkOp('br', { successors: [{ block: loop, args: [next] }] }),
+    );
+    const entry: Block = {
+      params: [],
+      ops: [
+        mkOp('laddr', { results: [object], attrs: { off: 0, width: 1, count: 8 } }),
+        mkOp('br', { successors: [{ block: loop, args: [object] }] }),
+      ],
+    };
+    const fn: Fn = { ...irReading([]), blocks: [entry, loop] };
+    expect(() => checkReads(fn, [])).toThrow(/dropped a read of an address-taken stack local in 'F'/);
+  });
+
   test('a read does not stand for a write, nor a write for a read', () => {
     expect(() => checkReads(irReading([REG], [], [REG]), [read(REG), read(REG)])).toThrow(
       /dropped the write to the device register at 0x4000006/,

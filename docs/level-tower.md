@@ -1440,12 +1440,22 @@ control halfword), read per transfer, and an unresolved store after the transfer
 address — through a pointer, or to a name no symbol map places — leaves the read unbounded. What
 no fact about one function can check is stated as a premise instead: a callee or an interrupt
 handler arms only a transfer it set up itself, source register first, so neither a call on the
-path nor an interrupt at any instruction re-arms this frame's transfer. Where the read is still
-unbounded and nothing but devices holds the address, the audit does not refuse: it answers with the
-local area, the frontend lifts once more with every word of it routed through `laddr`, and the
-second audit declares those bytes one `u8` array in memory, so every store the machine made there
-is a store the recompile makes. The asm cannot tell a member the
-device reads from a spill nobody reads, and keeping both in memory is right for both. The transfer
+path nor an interrupt at any instruction re-arms this frame's transfer. Where the reach is still
+unbounded — a device's read or a callee's write — and every writer of the frame is one the
+whole-area argument holds (none at all, or a callee handed the address as an argument that may
+write through it, which a block transfer reading its source is not, with any store of the address
+beside that call), the audit does not refuse: it answers with the local area, the frontend lifts
+once more with every word of it routed through `laddr`, and the second audit declares those bytes
+one `u8` array in memory, so every store the machine made there is a store the recompile makes.
+The asm cannot tell a member the device reads from a spill nobody reads, and keeping both in
+memory is right for both. Every member
+is spelled through a cast, whose pointee would drop a qualifier on the array, so the array carries
+none, and where the address was stored somewhere a writer may hold it — a global an interrupt
+reads, a device's destination — each access carries the qualifier itself, whether it reaches the
+object through a member, a runtime index or a phi that carries one (`p = c ? buf : gOther`): a
+spin on a byte that holder sets is otherwise compiled to a loop that never reads it again. An
+object kept object by object qualifies its declaration, which a phi's pointer local does not
+inherit, so an access through such a phi carries the qualifier too. The transfer
 has to run too, so the device pin ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts),
 applied by the frontend from the policy the audit answers) makes every device access of a function
 kept this way `volatile` — at a register's literal address, that address plus a runtime index, a

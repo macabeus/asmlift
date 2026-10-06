@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
-import { type FrameRange, __testing } from '../src/frontend/frame-objects';
+import { type FrameRange, __testing, auditFrameObjects } from '../src/frontend/frame-objects';
 import { type Block, type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -73,7 +73,7 @@ const shape = (
 ) => {
   const { fail, facts, objects, flow, uses } = classify(irBlocks, { owned: range });
   const windows = escapeWindows(irBlocks, uses, flow, facts, ARMV4T_AGBCC);
-  const model = chooseFrameModel(undefined, uses, windows, fail);
+  const model = chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
   const usedSlotOffsets = new Set(slots);
   const args = { objects, uses, owned: range, declared, usedSlotOffsets };
   const shapes = objectShapes({ ...args, returnsWithoutHiddenPointer: declaresNoHiddenPointer, model, fail });
@@ -201,7 +201,7 @@ describe('classifyFrameUses', () => {
   test('reads a word store to a DMA source register as a publish only a device reads through', () => {
     const { uses } = classify([published(2)]);
     expect([...uses.escaped]).toEqual([0]);
-    expect(uses.mayWrite.size).toBe(0);
+    expect([...uses.passedToWriter, ...uses.publishedToWriter]).toEqual([]);
     expect(uses.sourceStores.get(0)?.map((s) => s.sink)).toEqual([DMA3SAD]);
     expect([...uses.published, ...uses.publishedOutward]).toEqual([0, 0]);
     expect(uses.accesses.get(0)).toEqual([{ width: 2, signed: false, isLoad: false }]);
@@ -210,7 +210,7 @@ describe('classifyFrameUses', () => {
   test('reads an address handed to a callee at argument 0 as a writer, naming the callee', () => {
     const a = laddr(0);
     const { uses } = classify([{ params: [], ops: [a, call('g', a.results[0]), ret()] }]);
-    expect([...uses.mayWrite]).toEqual([0]);
+    expect([...uses.passedToWriter]).toEqual([0]);
     expect([...uses.passedToCallee]).toEqual([0]);
     expect([...uses.arg0Callees.get(0)!]).toEqual(['g']);
     expect(uses.useCount.get(0)).toBe(1);
@@ -229,6 +229,23 @@ describe('classifyFrameUses', () => {
       { at: 0, width: 4 },
       { at: 4, width: 4 },
     ]);
+  });
+
+  // `p = c ? buf : gOther; *p = 0;` — the store reaches the object through a phi `taint` closes
+  // over, and is listed with the capture it carries so a later stage need not recognize it again
+  test('lists an access through a phi that carries the capture, with the value it goes through', () => {
+    const a = laddr(0);
+    const v = value();
+    const p = value();
+    const st = store(p, v, 0, 1);
+    const join: Block = { params: [p], ops: [st, ret()] };
+    const entry: Block = {
+      params: [v],
+      ops: [a, mkOp('br', { successors: [{ block: join, args: [a.results[0]] }] })],
+    };
+    const { uses } = classify([entry, join]);
+    expect(uses.accessOps.get(st)).toEqual({ off: 0, through: p });
+    expect(uses.accesses.get(0)).toEqual([{ width: 1, signed: false, isLoad: false }]);
   });
 
   test('records a runtime index apart from the accesses that type the object', () => {
@@ -260,19 +277,65 @@ describe('chooseFrameModel', () => {
   test('offers the one-object answer where every escape only reads and one reads without bound', () => {
     const blk = published(2);
     const { fail, facts, flow, uses } = classify([blk]);
-    const model = chooseFrameModel(undefined, uses, escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC), fail);
+    const model = chooseFrameModel(
+      undefined,
+      uses,
+      escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC),
+      declaresNoHiddenPointer,
+      fail,
+    );
     expect(model.onOffer).toBe(true);
     model.shapeRefused('two widths');
     expect(model.refused).toBe(true);
   });
 
-  test('refuses a shape where it stands when a writer holds the address', () => {
+  // the model a writer leaves: `laddr 0` stored to the memory `p` points at when `stored`, and
+  // handed to `callee` at argument 0 — or, with `passed` false, `p` handed there instead
+  const modelOf = (callee: string, { stored = false, passed = true } = {}) => {
+    const p = value();
     const a = laddr(0);
-    const blk: Block = { params: [], ops: [a, call('g', a.results[0]), ret()] };
+    const blk: Block = {
+      params: [p],
+      ops: [a, ...(stored ? [store(p, a.results[0], 0, 4)] : []), call(callee, passed ? a.results[0] : p), ret()],
+    };
     const { fail, facts, flow, uses } = classify([blk]);
-    const model = chooseFrameModel(undefined, uses, escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC), fail);
+    const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
+    return chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+  };
+
+  test('offers the one-object answer where every writer is a callee it holds', () => {
+    expect(modelOf('g').onOffer).toBe(true);
+  });
+
+  // `gp = buf; g(buf);` — the whole-area argument the untyped object is sized by holds the store
+  // beside the call, so the one object holds it too
+  test('offers the one-object answer where an address stored to memory is also handed to a callee', () => {
+    expect(modelOf('g', { stored: true }).onOffer).toBe(true);
+  });
+
+  test('refuses a shape where it stands, naming the writer, when an address is only stored to memory', () => {
+    const model = modelOf('g', { stored: true, passed: false });
     expect(model.onOffer).toBe(false);
-    expect(() => model.shapeRefused('two widths')).toThrow("cannot lift 'f': address-taken stack local — two widths");
+    expect(() => model.shapeRefused('two widths')).toThrow(
+      "cannot lift 'f': address-taken stack local — two widths — and the one object cannot hold every writer: " +
+        'the captured address at [sp,#0): the address is published rather than passed as an argument',
+    );
+  });
+
+  test('refuses a shape where it stands when a callee at argument 0 says nothing of its return', () => {
+    const model = modelOf('k');
+    expect(model.onOffer).toBe(false);
+    expect(() => model.shapeRefused('two widths')).toThrow('two widths — and the one object cannot hold every writer');
+  });
+
+  // …and where nothing reaches without bound the answer is never on offer, so no writer is named
+  test('refuses a shape with its own reason alone where no escape reaches without bound', () => {
+    const blk = published(2, 0x8100);
+    const { fail, facts, flow, uses } = classify([blk]);
+    const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
+    const model = chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+    expect(model.onOffer).toBe(false);
+    expect(() => model.shapeRefused('two widths')).toThrow(/two widths$/);
   });
 });
 
@@ -313,12 +376,25 @@ describe('objectShapes', () => {
     expect(shape([blk], [4]).shapes.overSlot).toEqual([[4, 4]]);
   });
 
+  // `u8 sp[4]; u32 sp4; h(x, sp, &sp4);` — neither capture is accessed, and neither is the whole area
+  test('asks for the one object rather than sizing each of two captures by the whole area', () => {
+    const x = value();
+    const a = laddr(0);
+    const b = laddr(4);
+    const blk: Block = { params: [x], ops: [a, b, call('h', x, a.results[0], b.results[0]), ret()] };
+    const { model, shapes } = shape([blk], []);
+    expect(model.refused).toBe(true);
+    expect(shapes.extent.size).toBe(0);
+  });
+
+  // `k` takes the address at argument 0 with nothing said of its return: not a writer the one
+  // object holds
   test('refuses two widths where the one-object answer is not on offer', () => {
     const v = value();
     const a = laddr(0);
     const blk: Block = {
       params: [v],
-      ops: [a, store(a.results[0], v, 0, 2), load(a.results[0], 0, 4), call('g', a.results[0]), ret()],
+      ops: [a, store(a.results[0], v, 0, 2), load(a.results[0], 0, 4), call('k', a.results[0]), ret()],
     };
     expect(() => shape([blk], [])).toThrow('disagree on width (2 vs 4)');
   });
@@ -353,5 +429,71 @@ describe('frameEscapes', () => {
         unaccountedWord: undefined,
       },
     ]);
+  });
+});
+
+// The second audit, which judges the bytes a first one asked to keep as one object.
+describe('keepAsOneObject', () => {
+  const kept = (blk: Block) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: [blk],
+      ownedLocals: { from: 0, to: 8 },
+      declaredLocals: { from: 0, to: 8 },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+      oneObject: { from: 0, to: 8 },
+    });
+  // `u8 sp[4]; u32 sp4; h(x, sp, &sp4); return sp[0];` — two out-parameters of one callee, at
+  // arguments 1 and 2, with `callee` taking the first at argument 0 instead when given
+  const outParams = (callee?: string): Block => {
+    const x = value();
+    const a = laddr(0);
+    const b = laddr(4);
+    const args = callee === undefined ? [x, a.results[0], b.results[0]] : [a.results[0], b.results[0]];
+    return { params: [x], ops: [a, b, call(callee ?? 'h', ...args), load(a.results[0], 0, 1), ret()] };
+  };
+
+  test('keeps two addresses a callee may write through as one byte array', () => {
+    const blk = outParams();
+    expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
+    const [object] = blk.ops;
+    expect(object.attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8 });
+    expect(blk.ops.find((op) => op.opcode === 'call')!.operands[1]).toBe(object.results[0]);
+  });
+
+  test('refuses a writer whose address is only stored to memory', () => {
+    const p = value();
+    const a = laddr(0);
+    const blk: Block = { params: [p], ops: [a, store(p, a.results[0], 0, 4), call('h', p), ret()] };
+    expect(() => kept(blk)).toThrow(
+      'the captured address at [sp,#0): the address is published rather than passed as an argument',
+    );
+  });
+
+  // `gp = sp; h(x, sp, &sp4);` — stored to memory and handed to the callee, which is held
+  test('keeps an address stored to memory that a callee is also handed', () => {
+    const blk = outParams();
+    const p = value();
+    blk.params.push(p);
+    blk.ops.splice(2, 0, store(p, blk.ops[0].results[0], 0, 4));
+    expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
+    expect(blk.ops[0].attrs).toMatchObject({ count: 8 });
+    expect(blk.ops[0].attrs.volatile).toBeUndefined();
+  });
+
+  test('refuses an address a callee takes at argument 0 with nothing said of what it returns', () => {
+    expect(() => kept(outParams('k'))).toThrow('`k` takes it at argument 0 and nothing says what that callee returns');
+  });
+
+  test('refuses the storage a callee returns its struct through', () => {
+    const a = laddr(0);
+    const s = mkValue(T.struct('S8', [], 8));
+    const sret = mkOp('call', { operands: [a.results[0]], results: [s], attrs: { target: 'mk', sret: true } });
+    expect(() => kept({ params: [], ops: [a, sret, ret()] })).toThrow('is where `mk` returns its struct');
   });
 });

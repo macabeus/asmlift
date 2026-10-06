@@ -54,8 +54,8 @@ export interface FrameRange {
   readonly to: number;
 }
 
-/** What an audit answers instead of a refusal when a device may read the frame without bound: lift
- *  again with `oneObject` set to these bytes. */
+/** What an audit answers instead of a refusal when a device may read the frame, or a callee write
+ *  it, without bound: lift again with `oneObject` set to these bytes. */
 export interface FrameObjectRelift {
   readonly oneObject: FrameRange;
 }
@@ -208,9 +208,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // source reserved and the recompile does not. `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`
   // reads the sixteen bytes its control word names, and a DMA copy incrementing from `buf` reads
   // every word above it; lifted as `u16 sp0`, the recompile's frame is four bytes wide and the
-  // transfer copies the saved `lr` and the caller's frame out with it. A read unbounded both ways
-  // meets this rule only beside a writer, which reaches the same word: alone, the audit keeps the
-  // local area as one object instead (`oneObjectOnOffer`).
+  // transfer copies the saved `lr` and the caller's frame out with it. A read unbounded both ways,
+  // and a callee's write, meet this rule only beside a writer the one-object answer cannot hold
+  // (`writerNotKept`): otherwise the audit keeps the local area as one object instead.
   //
   // WHAT IT LEAVES, since this is the extent question the gate comment above is about: an escape
   // is accepted only where the modelled objects and the keyed slots tile the reserved area it
@@ -249,10 +249,11 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *   - PER OBJECT, the default: every MEMORY access through it must be at offset 0, with one agreed
  *     width and one agreed extension, or a byte read or written through a runtime index into
  *     storage nothing else types, and its bytes must belong to nothing else in the frame;
- *   - ONE OBJECT, where every escape only reads and a device reads without bound (`oneObject`,
- *     which this answers and the frontend lifts again with): the local area is one `u8` array in
- *     memory, every fixed-offset access in it is a member at its own offset, a runtime index may
- *     reach a byte of it, and two widths at one byte refuse.
+ *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
+ *     that answer can hold (`writerNotKept`; `oneObject`, which this answers and the frontend
+ *     lifts again with): the local area is one `u8` array in memory, every fixed-offset access in
+ *     it is a member at its own offset, a runtime index may reach a byte of it, and two widths at
+ *     one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -299,14 +300,14 @@ export function auditFrameObjects({
   const flow = addressFlow(irBlocks, objects, facts, fail);
   const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel(oneObject, uses, windows, fail);
+  const model = chooseFrameModel(oneObject, uses, windows, returnsWithoutHiddenPointer, fail);
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
-    keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, fail });
+    keepAsOneObject({ oneObject, irBlocks, objects, uses, usedSlotOffsets, returnsWithoutHiddenPointer, fail });
     return { policy: 'one-object', sinks };
   }
   const shapes = objectShapes({
@@ -320,36 +321,31 @@ export function auditFrameObjects({
     fail,
   });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
-  // THE ONE-OBJECT ANSWER, where it is on offer (every escape only READS and one of them reads
-  // without bound) and the per-object model does not describe the frame: it refused a shape, an
-  // object sits over a slot, or the unbounded read reaches another object, a slot or a word
-  // nothing accounts for. Then what the device may read is kept rather than refused: lift again
-  // with the local area as one object in memory (`keepAsOneObject`). Below the local area are the
-  // outgoing arguments and above it the saved registers, neither of them an object. Where the
-  // per-object model does describe the frame — one object and nothing else in reach — it stands,
-  // and the object keeps its own type.
-  if (
-    model.onOffer &&
-    (model.refused ||
-      shapes.overSlot.length > 0 ||
-      escapes.some(
-        (e) =>
-          e.lo === -Infinity &&
-          e.hi === Infinity &&
-          (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined),
-      ))
-  ) {
+  // THE ONE-OBJECT ANSWER, where it is on offer (one escape reaches without bound, and every
+  // writer is one it can hold) and the per-object model does not describe the frame: it refused a
+  // shape, an object sits over a slot, or the unbounded reach meets another object, a slot or a
+  // word nothing accounts for. Then what the device may read or the callee may write is kept
+  // rather than refused: lift again with the local area as one object in memory
+  // (`keepAsOneObject`). Below the local area are the outgoing arguments and above it the saved
+  // registers, neither of them an object. Where the per-object model does describe the frame —
+  // one object and nothing else in reach — it stands, and the object keeps its own type.
+  const answered = (e: FrameEscape): boolean =>
+    e.lo === -Infinity &&
+    e.hi === Infinity &&
+    (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
+  if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
     return { oneObject: { from: declared.from, to: declared.to } };
   }
+  const failWithheld: Refuse = (why) => fail(model.withheld(why));
   for (const [off, width] of shapes.overSlot) {
-    failIfSlotKeysIt(off, width, { usedSlotOffsets, objects, foldedHere, fail });
+    failIfSlotKeysIt(off, width, { usedSlotOffsets, objects, foldedHere, fail: failWithheld });
   }
   // RULE-MAJOR, not escape-major: every escape is asked a rule before any is asked the next, so
   // the refusal a function reports does not turn on the order its escapes were found in.
   for (const gate of gates) {
     const hit = escapes.find((e) => gate.rejects(e));
     if (hit !== undefined) {
-      fail(escapeRefusal(gate.id, hit));
+      (answered(hit) ? failWithheld : fail)(escapeRefusal(gate.id, hit));
     }
   }
   stampObjects(objects, shapes, uses);
@@ -767,24 +763,39 @@ interface FrameAccess {
   readonly isLoad: boolean;
 }
 
+/** A load or store judged an access to the object at `off`, and the address value it reaches the
+ *  object through: a capture, or a phi that carries one — for a runtime index, the indexed one. */
+interface FrameAccessOp {
+  readonly off: number;
+  readonly through: Value;
+}
+
 /** Every use of every frame object, by offset — what each later stage reads. Each field is
  *  declared, with the question it answers, where `classifyFrameUses` builds it. */
 interface FrameUses {
   readonly accesses: ReadonlyMap<number, readonly FrameAccess[]>;
+  readonly accessOps: ReadonlyMap<Op, FrameAccessOp>;
   readonly escaped: ReadonlySet<number>;
-  readonly mayWrite: ReadonlySet<number>;
   readonly sourceStores: ReadonlyMap<number, readonly { readonly op: Op; readonly sink: number }[]>;
   readonly calleeReads: ReadonlyMap<number, { readonly lo: number; readonly hi: number }>;
   readonly filledFrom: ReadonlySet<number>;
   readonly passedToCallee: ReadonlySet<number>;
+  readonly passedToWriter: ReadonlySet<number>;
   readonly published: ReadonlySet<number>;
   readonly publishedOutward: ReadonlySet<number>;
+  readonly publishedToWriter: ReadonlySet<number>;
   readonly arg0Callees: ReadonlyMap<number, ReadonlySet<string | null>>;
   readonly returnTemps: ReadonlyMap<number, readonly Op[]>;
   readonly useCount: ReadonlyMap<number, number>;
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
+}
+
+/** Did the address at `off` reach something that may write the frame back: a callee that is not a
+ *  bounded block transfer reading through it, or memory a writer may hold. */
+function mayWrite(uses: FrameUses, off: number): boolean {
+  return uses.passedToWriter.has(off) || uses.publishedToWriter.has(off);
 }
 
 /** Judges every use of a tainted value, against the object it names. */
@@ -809,14 +820,19 @@ function classifyFrameUses({
 }): FrameUses {
   const { defOf } = facts;
   const accesses = new Map<number, FrameAccess[]>();
+  // …and every load and store judged an access, by the object it reaches: through a capture, a
+  // phi that carries one, or a runtime index into one. A later stage that rewrites or qualifies
+  // "the accesses to the object" reads this list rather than recognizing them again, since a
+  // narrower recognizer misses exactly the phi-carried ones `taint` admits.
+  const accessOps = new Map<Op, FrameAccessOp>();
+  // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, in the order the
+  // escapes were found — the order windows and refusals are read in. Whether it reached something
+  // that could write the frame BACK — what every "a callee may write any frame offset" refusal
+  // rests on — is `mayWrite`, read off the splits below. A store into a device's SOURCE register
+  // answers yes to the first and no to the second: the hardware reads the object, and the
+  // DMA-fill idiom this capability was built for (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly
+  // that shape.
   const escaped = new Set<number>();
-  // TWO QUESTIONS, not one. `escaped` asks whether the address LEFT the function, which is what
-  // decides `volatile`. `mayWrite` asks whether it reached something that could write the frame
-  // BACK, which is what every "a callee may write any frame offset" refusal rests on. A
-  // store into a device's SOURCE register answers yes to the first and no to the second: the
-  // hardware reads the object, and the DMA-fill idiom this capability was built for
-  // (`vu16 tmp; DmaSet(n, &tmp, …)`) is exactly that shape.
-  const mayWrite = new Set<number>();
   // …and for the others, the stores that handed the address to a source register, which is
   // where `readWindow` reads how far the device reads
   const sourceStores = new Map<number, { op: Op; sink: number }[]>();
@@ -836,6 +852,9 @@ function classifyFrameUses({
   // WRITTEN TO MEMORY, how the DMA idiom hands the object to hardware, and what `volatile` at the
   // stamp keys on. Reading either off `escaped` gets the other one wrong.
   const passedToCallee = new Set<number>();
+  // …and of those, the callees that may WRITE through it: every one but a bounded block transfer
+  // reading its source (`calleeReads`), which names no writer
+  const passedToWriter = new Set<number>();
   const published = new Set<number>();
   // …and `published` SPLITS AGAIN, because it answers two questions of different strengths and
   // the weaker one may not be read as the stronger. "Did the address reach memory at all" is
@@ -848,6 +867,11 @@ function classifyFrameUses({
   // audit that re-proves a WEAKER premise than the licence it audits is not a containment, it
   // is a second, wider door into the same acceptance.
   const publishedOutward = new Set<number>();
+  // …and the third question `published` answers, of what HOLDS the address it wrote: anything but
+  // a device's read-only source register (`facts.readsThrough`) may write through it — an
+  // interrupt reading a global, a device writing its destination — at any point in this function,
+  // so a re-read of the object is a read the recompile must make too.
+  const publishedToWriter = new Set<number>();
   // …and WHICH CALLEE took it at ARGUMENT 0, because that is the one position a hidden
   // struct-return pointer can occupy and that callee's declared RETURN TYPE is the one fact that
   // tells an out-parameter from one. A `call`'s operand index IS the argument index here (the
@@ -896,6 +920,7 @@ function classifyFrameUses({
         useCount.set(off, (useCount.get(off) ?? 0) + 1);
         if (op.opcode === 'load' && idx === 0) {
           scalar('load', op, off, v);
+          accessOps.set(op, { off, through: v });
           accesses.get(off)!.push({
             width: op.attrs.width as number,
             signed: (op.attrs.signed as boolean) ?? false,
@@ -905,6 +930,7 @@ function classifyFrameUses({
         }
         if (op.opcode === 'store' && idx === 0) {
           scalar('store', op, off, v);
+          accessOps.set(op, { off, through: v });
           accesses.get(off)!.push({ width: op.attrs.width as number, signed: false, isLoad: false });
           continue;
         }
@@ -919,13 +945,18 @@ function classifyFrameUses({
               filledFrom.add(off);
             }
           } else if (handedTo.length === 0) {
-            mayWrite.add(off);
+            if (op.opcode === 'store') {
+              publishedToWriter.add(off);
+            }
           } else {
             const stores = sourceStores.get(off) ?? sourceStores.set(off, []).get(off)!;
             handedTo.forEach((sink) => stores.push({ op, sink }));
           }
           if (op.opcode === 'call') {
             passedToCallee.add(off);
+            if (read === undefined) {
+              passedToWriter.add(off);
+            }
             if (idx === 0 && op.attrs.sret === true) {
               (returnTemps.get(off) ?? returnTemps.set(off, []).get(off)!).push(op);
             } else if (idx === 0) {
@@ -953,7 +984,7 @@ function classifyFrameUses({
         // judged with the rest (`objectShapes`).
         const other = op.opcode === 'add' && op.operands.length === 2 ? op.operands[1 - idx] : undefined;
         if (other !== undefined && taint.get(other) === undefined && defOf.get(other)?.opcode !== 'const') {
-          indexedAccess(irBlocks, indexed, off, op.results[0], fail);
+          indexedAccess(irBlocks, { indexed, accessOps }, { off, through: v }, op.results[0], fail);
           continue;
         }
         // A CONSTANT move left after the fold (`foldMovedCaptures`) moves a capture a phi carried.
@@ -979,14 +1010,16 @@ function classifyFrameUses({
   }
   return {
     accesses,
+    accessOps,
     escaped,
-    mayWrite,
     sourceStores,
     calleeReads,
     filledFrom,
     passedToCallee,
+    passedToWriter,
     published,
     publishedOutward,
+    publishedToWriter,
     arg0Callees,
     returnTemps,
     useCount,
@@ -1020,11 +1053,15 @@ function transferRead(
 // Records every access through `sum`, a runtime index into the object at `off`.
 function indexedAccess(
   irBlocks: readonly Block[],
-  indexed: Map<number, { width: number; signed: boolean }[]>,
-  off: number,
+  {
+    indexed,
+    accessOps,
+  }: { indexed: Map<number, { width: number; signed: boolean }[]>; accessOps: Map<Op, FrameAccessOp> },
+  object: FrameAccessOp,
   sum: Value,
   fail: Refuse,
 ): void {
+  const { off } = object;
   const got = indexed.get(off) ?? indexed.set(off, []).get(off)!;
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
@@ -1040,6 +1077,7 @@ function indexedAccess(
           );
         }
         got.push({ width: op.attrs.width as number, signed: op.opcode === 'load' && op.attrs.signed === true });
+        accessOps.set(op, object);
       }
     }
   }
@@ -1124,10 +1162,10 @@ function readWindow(
   const control = target.capabilities.readSourceControl;
   const stores = uses.sourceStores.get(off);
   const called = uses.calleeReads.get(off);
-  if (!uses.mayWrite.has(off) && stores === undefined && called !== undefined) {
+  if (!mayWrite(uses, off) && stores === undefined && called !== undefined) {
     return { lo: called.lo, hi: called.hi, why: 'that reads through it' };
   }
-  if (uses.mayWrite.has(off) || stores === undefined || control === undefined) {
+  if (mayWrite(uses, off) || stores === undefined || control === undefined) {
     return unbounded('that reads through it');
   }
   const little = target.capabilities.endianness === 'little';
@@ -1199,34 +1237,64 @@ interface ModelChoice {
   refused: boolean;
   /** refuses `why` where it stands, or, with the one-object answer on offer, asks for it instead */
   shapeRefused(why: string): void;
+  /** `why`, naming the writer that withheld the one-object answer where one did — for a refusal
+   *  that answer would otherwise have taken */
+  withheld(why: string): string;
 }
 
-/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where every escape only reads and one reads
- *  without bound, the one-object answer is on offer, and the shapes the per-object model
- *  refuses are ones it can hold: a member at [+k] through a capture, two widths or two
- *  signednesses at one address, a runtime index, overlapping objects, an object over a slot. So
- *  there each of those refusals asks for that answer instead of declining (`shapeRefused`), and
- *  the second audit judges the bytes as one object by its own rules — two types at one byte
- *  still refuse there. Where the answer is not on offer, each refuses where it stands. */
+/** Why a writer of the frame keeps the one-object answer from holding it, or null. The one object
+ *  is every byte of the declared area, so what a holder writes through any address inside it is
+ *  bytes one declaration owns, at offsets one array makes adjacent — below them is the outgoing
+ *  block and above them the saved registers, neither a local. That is the whole-area argument the
+ *  untyped object is sized by, and it holds the same escapes here (`wholeAreaEscapeRefusal`). Not
+ *  kept besides is a callee's RETURN STORAGE: the struct it returns through a hidden pointer is its
+ *  declared type, not bytes of an array. */
+function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: string) => boolean): string | null {
+  for (const off of [...uses.escaped].filter((o) => mayWrite(uses, o))) {
+    const at = `the captured address at [sp,#${off})`;
+    const temp = uses.returnTemps.get(off)?.[0];
+    if (temp !== undefined) {
+      return `${at} is where \`${temp.attrs.target}\` returns its struct`;
+    }
+    const why = wholeAreaEscapeRefusal(off, uses, returnsWithoutHiddenPointer);
+    if (why !== null) {
+      return `${at}: ${why}`;
+    }
+  }
+  return null;
+}
+
+/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where one escape reaches without bound and the
+ *  one-object answer can hold every writer (`writerNotKept`), that answer is on offer — two
+ *  out-parameters handed to one callee as readily as a device read — and the shapes the
+ *  per-object model refuses are ones it can hold: a member at [+k] through a capture, two widths
+ *  or two signednesses at one address, a runtime index, overlapping objects, a second object
+ *  beside an untyped one, an object over a slot. So there each of those refusals asks for that
+ *  answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
+ *  object by its own rules — two types at one byte still refuse there. Where the answer is not on offer, each refuses where it stands. */
 function chooseFrameModel(
   oneObject: FrameRange | undefined,
   uses: FrameUses,
   windows: ReadonlyMap<number, ReadWindow>,
+  returnsWithoutHiddenPointer: (callee: string) => boolean,
   fail: Refuse,
 ): ModelChoice {
-  const onOffer =
-    oneObject === undefined &&
-    uses.mayWrite.size === 0 &&
-    [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
+  const unbounded =
+    oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
+  const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
+  const onOffer = unbounded && writer === null;
   const model: ModelChoice = {
     onOffer,
     refused: false,
     shapeRefused: (why) => {
       if (!onOffer) {
-        fail(why);
+        fail(model.withheld(why));
       }
       model.refused = true;
     },
+    // A refusal the one-object answer would have taken names the writer that withheld it: the
+    // shape alone is one the answer holds, so the shape alone does not say why this declined.
+    withheld: (why) => (writer === null ? why : `${why} — and the one object cannot hold every writer: ${writer}`),
   };
   if (uses.memberRefusal !== undefined) {
     model.shapeRefused(uses.memberRefusal);
@@ -1404,10 +1472,11 @@ function failIfSlotKeysIt(
   }
 }
 
-/** ONE OBJECT IN MEMORY, the answer a device read nothing bounds is given instead of a refusal
- *  (`oneObject`, requested by the relift test where the escapes are judged). Every byte of
- *  `[from, to)` is declared one `u8` array whose address the device holds, and every access inside
- *  it is a cast-spelled access to that array — so each store the machine made there is a store the
+/** ONE OBJECT IN MEMORY, the answer a device read or a callee write nothing bounds is given
+ *  instead of a refusal (`oneObject`, requested by the relift test where the escapes are judged).
+ *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
+ *  holds (`writerNotKept` says which writers it can hold), and every access inside it is a
+ *  cast-spelled access to that array — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
  *  store in the same block overwrites it). And it is right whichever the source had there: a
@@ -1419,6 +1488,7 @@ function keepAsOneObject({
   objects,
   uses,
   usedSlotOffsets,
+  returnsWithoutHiddenPointer,
   fail,
 }: {
   oneObject: FrameRange;
@@ -1426,6 +1496,7 @@ function keepAsOneObject({
   objects: ReadonlyMap<number, readonly Op[]>;
   uses: FrameUses;
   usedSlotOffsets: ReadonlySet<number>;
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
 }): void {
   const kept = `the bytes [sp,#${from}) to [sp,#${to}) kept as one object`;
@@ -1439,10 +1510,9 @@ function keepAsOneObject({
       fail(`the SSA slot at [sp,#${slot}] lies inside ${kept} — one byte, two models`);
     }
   }
-  // A writer is not what this keeps: a callee handed an address inside the object may write
-  // any byte of the frame, and the object's extent says nothing about how far.
-  if (uses.mayWrite.size > 0) {
-    fail(`${kept} are reached by an address a callee or a store may write through, not only by a device that reads`);
+  const writer = writerNotKept(uses, returnsWithoutHiddenPointer);
+  if (writer !== null) {
+    fail(`${kept} cannot hold every writer — ${writer}`);
   }
   // A runtime index names no byte, so no access type can be checked against the others at the
   // bytes it reaches — except a byte access, which needs none: character types alias every type.
@@ -1480,30 +1550,40 @@ function keepAsOneObject({
   }
   // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
   // at `k - from` off the object, and a member address used any other way becomes the object's
-  // address moved by that constant. `volatile` keys on `published` alone, and a block
-  // transfer's fill source (`filledFrom`) needs no second key here: this answer is asked for
-  // only where a read is unbounded, a call's read is always bounded, so the unbounded one is
-  // a device's, handed the address by a store — which publishes it.
+  // address moved by that constant.
+  //
+  // `volatile` goes on each ACCESS where the address was stored somewhere a writer may hold it
+  // (`publishedToWriter`): unqualified, a spin on a byte a holder of the address sets compiles to
+  // a loop that never reads it again. Never on the array: every member is spelled through a cast,
+  // whose pointee drops the array's qualifier, so it would reach no access and only make agbcc
+  // warn `discards qualifiers` wherever the bare array is named. A reader alone — a DMA source, a
+  // transfer's fill source (`filledFrom`) — changes no byte a re-read returns. KNOWN GAP: a
+  // callee that keeps the address it was handed, for an interrupt to write later, is a holder
+  // nothing here sees, so a spin on such a byte compiles unqualified; the per-object stamp has the
+  // same gap (`stampObjects`: not on an ordinary `&local` argument).
+  const reread = uses.publishedToWriter.size > 0;
   const object = mkOp('laddr', {
     results: [mkValue(T.unk(32))],
-    attrs: {
-      off: from,
-      width: 1,
-      signed: false,
-      count: to - from,
-      ...(uses.published.size > 0 ? { volatile: true } : {}),
-    },
+    attrs: { off: from, width: 1, signed: false, count: to - from },
   });
   const base = object.results[0];
   const memberAt = new Map<Value, number>();
   for (const op of [...objects.values()].flat()) {
     memberAt.set(op.results[0], op.attrs.off as number);
   }
+  // The qualifier goes on every access the classification judged one (`accessOps`) — through a
+  // member, a runtime index into one, or a phi that carries one (`p = c ? buf : gOther; while
+  // (*p == 0);`). Only an access through a member is rebased: a phi's incoming member is
+  // rewritten below, where it is an edge argument.
   const stillUsed = new Set<Value>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
       const at = memberAt.get(op.operands[0]);
-      if ((op.opcode === 'load' || op.opcode === 'store') && at !== undefined) {
+      const access = op.opcode === 'load' || op.opcode === 'store';
+      if (reread && uses.accessOps.has(op)) {
+        op.attrs = { ...op.attrs, volatile: true };
+      }
+      if (access && at !== undefined) {
         op.operands = [base, ...op.operands.slice(1)];
         op.attrs = { ...op.attrs, off: (op.attrs.off as number) + at - from };
       }
@@ -1638,6 +1718,8 @@ function objectShapes({
             : 'the captured address is never dereferenced in this function') +
             `, so nothing pins the local object type — and ${why}`,
         );
+        // …asked for the one object instead, which sizes no object of its own
+        continue;
       }
       // An indexed access reads ONE ELEMENT of the storage declared below, so it must be one:
       // an unsigned byte. A wider element is a different array over the same bytes, and a
@@ -1757,10 +1839,10 @@ function objectShapes({
  *  declared return — and each has a test that fails without it. A fifth return, the precautionary
  *  one marked where it sits, has none.
  *
- *  The last two are about an ESCAPE, and they are asked only of an object that escapes or that
- *  nothing in this function addresses. An object this function indexes and never lets go of is
- *  written and read by its own indexed accesses alone, so the reservation is all there is to
- *  size it by: `u8 a[8]; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i];`. */
+ *  The last two are about an ESCAPE (`wholeAreaEscapeRefusal`), and they are asked only of an
+ *  object that escapes or that nothing in this function addresses. An object this function indexes
+ *  and never lets go of is written and read by its own indexed accesses alone, so the reservation
+ *  is all there is to size it by: `u8 a[8]; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i];`. */
 function notTheWholeArea(
   off: number,
   indexedHere: boolean,
@@ -1790,11 +1872,36 @@ function notTheWholeArea(
       ? null
       : 'the address never leaves this function, so there is no writer of the storage to size it for';
   }
+  return wholeAreaEscapeRefusal(off, uses, returnsWithoutHiddenPointer);
+}
+
+/** Why the escape of the address at `off` is not one the WHOLE-AREA argument holds, or null. That
+ *  argument — the object is every byte of the declared area, so whatever a holder of the address
+ *  does through it lands on bytes one declaration owns — is made twice: for one untyped object
+ *  (`notTheWholeArea`) and for the one object several captures are members of (`writerNotKept`).
+ *  It needs a callee to have been handed the address as an argument, the one holder this frontend
+ *  can name; an address that only reached memory has none. A store of the address beside that
+ *  call is held with it, whether to an ordinary global or into a device's source register — and
+ *  where the store hands the address to something that may write through it (`publishedToWriter`),
+ *  only when that callee may write through it too: a bounded block transfer reading its source
+ *  names no writer.
+ *
+ *  The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question is
+ *  the one the one-word arm asks, asked here of the same callees. */
+function wholeAreaEscapeRefusal(
+  off: number,
+  uses: FrameUses,
+  returnsWithoutHiddenPointer: (callee: string) => boolean,
+): string | null {
   if (!uses.passedToCallee.has(off)) {
     return 'the address is published rather than passed as an argument, and nothing declares what reads it';
   }
-  // The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question
-  // is the one the one-word arm asks, asked here of the same callees.
+  if (uses.publishedToWriter.has(off) && !uses.passedToWriter.has(off)) {
+    return (
+      'the address is published, and the only callee handed it is a block transfer that reads through it, ' +
+      'so nothing declares what reads it'
+    );
+  }
   return hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
 }
 
@@ -1843,7 +1950,7 @@ function frameEscapes({
   const escapes: FrameEscape[] = [];
   for (const off of uses.escaped) {
     const { lo, hi, why } = windows.get(off)!;
-    const writes = uses.mayWrite.has(off);
+    const writes = mayWrite(uses, off);
     const objectReached = [...extent].find(([o, obj]) => o !== off && o < off + hi && off + lo < o + span(obj));
     let slotReached: FrameEscape['slotReached'];
     for (const slot of usedSlotOffsets) {
@@ -1967,6 +2074,16 @@ function stampObjects(
       if (aggregate !== undefined) {
         op.results[0].type = T.ptr(aggregate);
       }
+    }
+  }
+  // The declaration carries the qualifier to an access spelled through the object's own name, and
+  // not to one through a phi that carries its address: that phi is a pointer local typed from the
+  // access, so `p = c ? &b : gOther; while (*p == 0);` would compile to a loop that never reads
+  // `b` again. Such an access carries the qualifier itself.
+  for (const [op, { off, through }] of uses.accessOps) {
+    const own = objects.get(off)!.some((o) => o.results[0] === through);
+    if (!own && (uses.published.has(off) || uses.filledFrom.has(off))) {
+      op.attrs = { ...op.attrs, volatile: true };
     }
   }
 }
