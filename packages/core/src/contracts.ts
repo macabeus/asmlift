@@ -401,8 +401,8 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
   const bump = (m: EffectCounts, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
   // Of the unplaced qualified accesses, those whose address may be a stack object the frame audit
   // qualified, so a refusal names that object rather than a device register.
-  const stackUnplaced: Record<Direction, number> = { r: 0, w: 0 };
-  const mayBeStack = stackObjectReach(fn, defs);
+  const stackUnplaced: Record<Direction, StackUnplaced> = { r: { may: 0, only: 0 }, w: { may: 0, only: 0 } };
+  const reachOf = addressReach(fn, defs);
   for (const b of seen) {
     for (const op of b.ops) {
       const reads = op.opcode === 'load' || op.opcode === 'aload';
@@ -419,8 +419,12 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
           const dir = reads ? 'r' : 'w';
           const key = deviceKey(dir, plain ? constAddressOf(defs, op.operands[0], op.attrs.off as number) : null);
           bump(irDevices, key);
-          if (key === deviceKey(dir, null) && mayBeStack(op.operands[0])) {
-            stackUnplaced[dir]++;
+          const reach = key === deviceKey(dir, null) ? reachOf(op.operands[0]) : null;
+          if (reach?.stack === true) {
+            stackUnplaced[dir].may++;
+            if (!reach.other) {
+              stackUnplaced[dir].only++;
+            }
           }
           const object = globalBaseOf(defs, op.operands[0]);
           if (object !== null) {
@@ -563,9 +567,16 @@ function oneDirection(m: EffectCounts, dir: Direction): { at: Map<string, number
   return { at, unplaced, all };
 }
 
-/** May `addr` be the address of a stack object: a `laddr`, moved by `add`/`sub`, or a phi some
- *  incoming value of which is one. */
-function stackObjectReach(fn: Fn, defs: ReadonlyMap<Value, Op>): (addr: Value) => boolean {
+/** What an address may be: a stack object, something else, or either. */
+interface AddressReach {
+  stack: boolean;
+  other: boolean;
+}
+
+/** What each address may be: a stack object (a `laddr`, moved by `add`/`sub`), anything but a named
+ *  global, or — through a phi whose incoming values differ — either. A fixpoint, so a loop phi
+ *  stepped from a `laddr` is a stack object only. */
+function addressReach(fn: Fn, defs: ReadonlyMap<Value, Op>): (addr: Value) => AddressReach {
   const incoming = new Map<Value, Value[]>();
   for (const b of fn.blocks) {
     for (const op of b.ops) {
@@ -579,35 +590,65 @@ function stackObjectReach(fn: Fn, defs: ReadonlyMap<Value, Op>): (addr: Value) =
       }
     }
   }
-  const memo = new Map<Value, boolean>();
-  const reach = (v: Value): boolean => {
-    const had = memo.get(v);
-    if (had !== undefined) {
-      return had;
-    }
-    memo.set(v, false);
+  const NONE: AddressReach = { stack: false, other: false };
+  const known = new Map<Value, AddressReach>();
+  const at = (v: Value) => known.get(v) ?? NONE;
+  // A value not yet reached stays NONE, so an `add` waiting on one does not call itself `other`.
+  const step = (v: Value): AddressReach => {
     const d = defs.get(v);
-    const roots =
-      d === undefined
-        ? (incoming.get(v) ?? [])
-        : d.opcode === 'add'
-          ? d.operands
-          : d.opcode === 'sub'
-            ? d.operands.slice(0, 1)
-            : [];
-    const answer = d?.opcode === 'laddr' || roots.some(reach);
-    memo.set(v, answer);
-    return answer;
+    if (d === undefined) {
+      const from = incoming.get(v) ?? [];
+      return from.length === 0
+        ? { stack: false, other: true }
+        : { stack: from.some((a) => at(a).stack), other: from.some((a) => at(a).other) };
+    }
+    if (d.opcode === 'laddr') {
+      return { stack: true, other: false };
+    }
+    // An access through a named global is exempt from the dropped rule, so a phi side that names
+    // one is not what a refusal names.
+    if (d.opcode === 'gaddr') {
+      return NONE;
+    }
+    if (d.opcode !== 'add' && d.opcode !== 'sub') {
+      return { stack: false, other: true };
+    }
+    const roots = (d.opcode === 'add' ? d.operands : d.operands.slice(0, 1)).map(at);
+    const bases = roots.filter((r) => r.stack);
+    if (bases.length > 0) {
+      return { stack: true, other: bases.some((r) => r.other) };
+    }
+    return roots.some((r) => !r.other) ? NONE : { stack: false, other: true };
   };
-  return reach;
+  const values = [...defs.keys(), ...incoming.keys()];
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const v of values) {
+      const was = at(v);
+      const now = step(v);
+      const joined = { stack: was.stack || now.stack, other: was.other || now.other };
+      if (joined.stack !== was.stack || joined.other !== was.other) {
+        known.set(v, joined);
+        changed = true;
+      }
+    }
+  }
+  return (addr) => (known.has(addr) ? at(addr) : { stack: false, other: true });
 }
 
-/** What an unplaced qualified access may be, given how many of `unplaced` may be a stack object. */
-function unplacedNoun(stack: number, unplaced: number): { one: string; many: string } {
-  if (stack === 0) {
+/** How many unplaced qualified accesses may be a stack object, and how many can be nothing else. */
+interface StackUnplaced {
+  may: number;
+  only: number;
+}
+
+/** What an unplaced qualified access may be, given how many of `unplaced` may or must be a stack
+ *  object. */
+function unplacedNoun(stack: StackUnplaced, unplaced: number): { one: string; many: string } {
+  if (stack.may === 0) {
     return { one: 'a device register', many: 'device registers' };
   }
-  if (stack >= unplaced) {
+  if (stack.only >= unplaced) {
     return { one: 'an address-taken stack local', many: 'address-taken stack locals' };
   }
   return { one: 'a device register or a stack local', many: 'device registers or a stack local' };
@@ -626,7 +667,7 @@ function devicesPreserved(
   named: EffectCounts,
   total: EffectCounts,
   path: EffectCounts,
-  stackUnplaced: Readonly<Record<Direction, number>>,
+  stackUnplaced: Readonly<Record<Direction, StackUnplaced>>,
 ): void {
   const directions = ['r', 'w'] as const;
   for (const dir of directions) {
