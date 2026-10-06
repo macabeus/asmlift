@@ -107,22 +107,31 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     expect(scoreC(srcAcross, 'atlc', assembleTarget(across), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
-  // TWO locals, so the second sits above the first and its address is COMPUTED. Same capability,
-  // one step past what the `mov` proof covers — it must still decline loud, in both modes, and
-  // name the shape rather than the generic sp message.
+  // TWO locals, so the second sits above the first and its address is COMPUTED. A callee declared
+  // to return nothing holds both addresses as a writer the one-object frame keeps: the whole area
+  // is one byte array, and that recompiles to the target. A callee whose return nothing says may
+  // take a hidden struct-return pointer at argument 0 instead, so there the two locals are judged
+  // per object and decline loud, in both modes, naming the shape rather than the generic sp message.
   const twoLocals = 'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }';
+  const unsaid = { g: { params: 1 } };
+
+  test('two COMPUTED stack addresses a declared callee writes through are one object', () => {
+    const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+    const src = decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } }).source;
+    expect(src).toContain('u8 sp0[8];');
+    expect(src).toContain('g((u32)sp0 + 4);');
+    expect(scoreC(src, 'atl2', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
 
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
-    expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: { g: { params: 1, returnsVoid: true } } })).toThrow(
-      /address-taken stack local/,
-    );
+    expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: unsaid })).toThrow(/address-taken stack local/);
   });
 
   test('a COMPUTED stack address stubs with a lift diagnostic in annotate mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     const r = decompile('atl2', asm, ARMV4T_AGBCC, {
-      prototypes: { g: { params: 1, returnsVoid: true } },
+      prototypes: unsaid,
       onGap: 'annotate',
     });
     expect(r.diagnostics.length).toBe(1);
@@ -231,13 +240,14 @@ describe('report path parity with decompile()', () => {
   test('annotate mode: a NON-localizable failure stubs identically on both paths', () => {
     // The sp-as-data decline is a frontend THROW (no line to mark). decompile() degrades to a
     // stub; the report path must not accept onGap yet re-throw on the same input.
-    // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`) — the single-local shape
-    // is modelled now and lifts, which would make this test assert parity on a success path.
+    // TWO locals, so the second's address is COMPUTED (`add rD, sp, #4`), handed to a callee whose
+    // return nothing says — the single-local shape, and the same two locals under a callee declared
+    // `void`, are modelled now and lift, which would make this test assert parity on a success path.
     const asm = compileTargetAsm(
       'extern void g(int*); int atl2(int a){ int x = a; int y = a + 1; g(&x); g(&y); return x + y; }',
       TOOLCHAIN_TARGETS.agbcc.canonicalFlags,
     );
-    const protos = { prototypes: { g: { params: 1, returnsVoid: true } } as const, onGap: 'annotate' as const };
+    const protos = { prototypes: { g: { params: 1 } } as const, onGap: 'annotate' as const };
     const viaPipeline = decompile('atl2', asm, ARMV4T_AGBCC, protos);
     expect(viaPipeline.source).toContain('could not decompile'); // really the stub path
     const viaReport = decompileWithReport('atl2', asm, AGBCC, protos);

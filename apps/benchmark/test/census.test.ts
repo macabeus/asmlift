@@ -50,15 +50,18 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
     expect(both.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([]);
   });
 
-  it('every /unreduce and /ptr-field winner rides inside a /vol-store pairing', () => {
-    // Guards the `/vol-store` × `/unreduce` (× `/ptr-field`) pairing note: "neither of the two
-    // variations ever wins one of the artifact's rows alone". The standalone `respell`s are kept so a
-    // variation can LOSE on its own terms, which is only observable while the single-variation candidate is
-    // in the fan — but a winner would mean the note's premise had changed.
+  it('every /unreduce and /ptr-field winner outside a /vol-store pairing is named here', () => {
+    // Guards the `/vol-store` × `/unreduce` (× `/ptr-field`) pairing note in rank.ts, which argues
+    // what the standalone `respell`s cost from how rarely they win alone. They are kept so a
+    // variation can LOSE on its own terms, which is only observable while the single-variation
+    // candidate is in the fan — and a standalone winner this list does not name means the note's
+    // premise moved again.
     const unpaired = [...carrying('unreduce'), ...carrying('ptr-field')].filter(
       (w) => !hasVariation(w.variations, 'vol-store'),
     );
-    expect(unpaired.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([]);
+    expect(unpaired.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([
+      'pokeemerald:CreateBattleTowerMon:agbcc  unsigned/unreduce',
+    ]);
   });
 
   it('exactly one winner carries /no-ptr-elem, and it is the synthetic row the variation was built for', () => {
