@@ -64,8 +64,8 @@ export interface SymbolRef {
    *  to type the call). */
   returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
   /** The bare name holds a pointer (l3/ptrcell.ts): the body stores one into it, or it meets such a
-   *  cell bare. A name-only declaration of it is a pointer, which the store needs and an integer
-   *  cell rejects on CodeWarrior. */
+   *  cell bare and nothing reads it as an integer (`pointerPartners`). A name-only declaration of it
+   *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
   holdsPointer?: true;
 }
 

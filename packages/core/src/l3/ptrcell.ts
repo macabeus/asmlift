@@ -275,9 +275,9 @@ export function pointerPartners(sfn: SFn): Set<string> {
  *  as the structurer spelled it. A truth test, a sum that renders a pointer (the structurer's own
  *  byte sum, which the backend converts at an integer slot: `legalizePointerWrites`), and a
  *  comparison with a pointer (a call by its declared return, `SFn.declaredReturns`), with 0 or with
- *  a partner (`pointerPartners`) are left alone. A global
- *  compared with the cell that is no partner goes `(u32)(u8 *)g` beside the cell's `(u32)g`: under a
- *  float declaration that is no C, as the bare comparison was not.
+ *  a partner (`pointerPartners`) are left alone. A global compared with the cell that is no partner
+ *  goes `(u32)(u8 *)g` beside the cell's `(u32)g`: under a float declaration that is no C, as the
+ *  bare comparison was not.
  *
  *  Run by the C-family backend's `emit` (backend/cfamily.ts), after every respell variation, so a
  *  respell reads the uses as the structurer spelled them and a store it removes takes the

@@ -1,6 +1,7 @@
 // A pointer cell (l3/ptrcell.ts): a global the body stores a pointer into is declared `void *` in the
 // candidate's own world, so its integer uses convert to the integer they read as, and an integer
-// stored into it converts to a pointer. A global the cell meets bare holds a pointer too.
+// stored into it converts to a pointer. A global the cell meets bare holds a pointer too, unless the
+// body also reads it as an integer.
 import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';

@@ -29,7 +29,6 @@ import type { Prototypes } from '../src/proto';
 import { type RefusedDeclarationReason, enumerateCandidates } from '../src/rank';
 import { type SymbolMap, symbolsByName } from '../src/symbols';
 import { ARMV4T_AGBCC, C_TYPEDEFS, MIPS_IDO } from '../src/target';
-import { hasVariation } from '../src/variation-tokens';
 
 const corpus = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
 
@@ -391,8 +390,7 @@ describe('a cell the candidate stores a pointer into is declared a pointer', () 
     '\tmov\tr0, #0x0\n\tbx\tlr\n.L3:\n\t.word\tg\n';
 
   test('the name-only declaration is `void *`', () => {
-    // `/int-cell` stores the cell's own arithmetic instead, and is integerCellStores' business
-    const cands = enumerateCandidates('kpA', asm, ARMV4T_AGBCC).filter((c) => !hasVariation(c.variations, 'int-cell'));
+    const cands = enumerateCandidates('kpA', asm, ARMV4T_AGBCC);
     expect(cands.length).toBeGreaterThan(0);
     for (const c of cands) {
       expect(c.source).toContain('g = (void *)((u8 *)g + 4);');

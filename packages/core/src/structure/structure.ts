@@ -2532,9 +2532,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     x.k === 'var' && wordLoadedGlobals.has(x.name) && declaredShape(x.name) === undefined;
 
   /** A pointer value or a global's word as the integer the asm added. A global no declaration
-   *  types and the IR never loads through may be declared a float, whose value `(u32)g` converts,
-   *  so it goes through `(u8 *)` first: `(u32)(u8 *)g` is `(u32)g`'s bytes under every integer and
-   *  pointer declaration, and no C under a float one. */
+   *  types and the IR never loads as a pointer may be declared a float, whose value `(u32)g`
+   *  converts, so it goes through `(u8 *)` first: `(u32)(u8 *)g` is `(u32)g`'s bytes under every
+   *  integer and pointer declaration, and no C under a float one. KNOWN GAP: under an array or a
+   *  function declaration `g` decays to its address, which this spells with no diagnostic; only a
+   *  pun reads the word there, and intoDeclaredTemp's KNOWN GAP says why none is spelled. */
   const globalWord = (x: Expr): Expr => ({
     k: 'cast',
     to: T.u(32),
@@ -2559,8 +2561,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
    *  it takes. KNOWN GAP: an integer READER of the byte sum converts a pointer to an integer. The
    *  backend casts it where the reader's type is known (an assignment, a store through a typed
    *  slot, a return: cfamily `legalizePointerWrites`), and a compare against an integer compares
-   *  it as a `u32`. A call argument and a global cell no declaration types keep the pointer, which
-   *  agbcc and KMC gcc warn about and CodeWarrior rejects. The integer sum is no fix there: gcc
+   *  it as a `u32`. A call argument and a global no declaration types keep the pointer, which agbcc
+   *  and KMC gcc warn about and CodeWarrior rejects; only a pointer cell's sum passed to a parameter
+   *  the prototype declares an integer is converted (l3/ptrcell.ts). The integer sum is no fix: gcc
    *  orders a pointer sum's operands and an integer sum's differently, so the bytes differ. */
   const castGlobal = (x: Expr, undeclared = false): x is Extract<Expr, { k: 'cast' }> =>
     x.k === 'cast' &&
@@ -4933,11 +4936,11 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   /** A pointer VALUE assigned into a pointer CELL (isPtrValue), spelled so the assignment is legal
    *  against ANY pointer declaration of that cell. The byte-arithmetic guard renders such a
    *  right-hand side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole
-   *  point of it, and a `u8 *` where the declaration says `u16 *`. READING one is fine (C converts an object
-   *  pointer freely under a deref, a call argument or a compare); ASSIGNING one is `warning:
-   *  assignment from incompatible pointer type`, and this project's own `-Werror` compiler
-   *  template makes that FATAL — so a source that scores clean here fails to build in the tree a
-   *  user pastes it into, which no score gate can observe.
+   *  point of it, and a `u8 *` where the declaration says `u16 *`. READING one is fine (C converts
+   *  an object pointer freely under a deref, a call argument or a compare); ASSIGNING one is
+   *  `warning: assignment from incompatible pointer type`, and this project's own `-Werror`
+   *  compiler template makes that FATAL — so a source that scores clean here fails to build in the
+   *  tree a user pastes it into, which no score gate can observe.
    *
    *  `void *`, NOT the map's declared pointee: it is the one target assignment-compatible with any
    *  object-pointer declaration, the same "same answer in every world" property the guard that
