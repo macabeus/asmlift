@@ -227,7 +227,7 @@ export function makeRefCollector(ctx: {
         );
       }
     }
-    const refs = collectSymbolRefs(tree.body, declSymbols, tree.name, prototypes, target, refuse).flatMap((r) => {
+    const refs = collectSymbolRefs(tree, declSymbols, prototypes, target, refuse).flatMap((r) => {
       if (statics.has(r.name)) {
         return []; // defined in the body — the map's global of the same name is another object
       }
@@ -277,6 +277,11 @@ export function makeRefCollector(ctx: {
       // A ref no MAP accounts for is a hypothesis read out of the target asm, and it is marked
       // as one all the way to the consumer (SymbolRef.synthesized).
       const synthesized = mapSymbols?.has(r.name) ? {} : { synthesized: true as const };
+      // A global the asm reads narrower than a word holds no pointer, whatever it meets bare.
+      if (r.holdsPointer && access !== undefined && access.width !== 4) {
+        const { holdsPointer: _, ...integer } = r;
+        return [{ ...integer, access, ...synthesized }];
+      }
       return [{ ...r, ...(access ? { access } : {}), ...synthesized }];
     });
     return refs.length ? { symbolRefs: refs } : {};

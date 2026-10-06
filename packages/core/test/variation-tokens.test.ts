@@ -283,7 +283,7 @@ describe('a target gate withholds a variation where its compiler behavior says',
     VARIATION_TOKENS.filter((t) => !offeredOn(target, [t.name])).map((t) => t.name);
 
   test('each shipped target withholds exactly these variations on their own', () => {
-    expect(withheld(ARMV4T_AGBCC)).toEqual(['advance']);
+    expect(withheld(ARMV4T_AGBCC)).toEqual(['advance', 'int-cell']);
     const unfolding = ['offmember', 'basefold', 'unfolded', 'orderbase', 'orderbase-scoped', 'nearbase'];
     expect(withheld(MIPS_IDO)).toEqual(unfolding);
     expect(withheld(MIPS_GCC)).toEqual(unfolding);

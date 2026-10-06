@@ -1606,9 +1606,13 @@ export interface StructureOptions {
   // spell "no" on a public option type. The translation happens once, in `structureOptionsFor`
   // (target.ts), which is where the target-to-structurer mapping lives.
   spillSlotOrder?: 'ascending' | 'descending';
-  // C++ only: each declared callee's parameter types, carried to the backend on `SFn.declaredArgs`
-  // (see there). Built by `structureOptionsFor` from the prototype table.
+  // Each declared callee's parameter types, carried to the backend on `SFn.declaredArgs` (see
+  // there). Built by `structureOptionsFor` from the prototype table.
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
+  // Each declared callee's return type, carried on `SFn.declaredReturns` the same way.
+  declaredReturns?: Readonly<Record<string, string>>;
+  // The emitted C is compiled as C++ (`SFn.dialect`).
+  dialect?: 'c++';
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -1807,6 +1811,12 @@ export interface StructureOptions {
    *  A SUPERSET of `inferredSymbols`' names, and its own field for exactly that reason: a struct
    *  element is licensed here and has no shape there. */
   orderLicensedGlobals?: ReadonlySet<string>;
+  /** The globals the project map declares POINTERS, handed to a structuring that runs without the
+   *  map (rank.ts `/raw-globals`). Spelling a global raw does not make it an integer: C still scales
+   *  arithmetic on its value by the declared pointee, so the byte-arithmetic rules read this where
+   *  they would read the map's `shape:'pointer'`. The operand-order rules do not read it: no element
+   *  or field spelling folds from a name with no pointee. */
+  pointerGlobals?: ReadonlySet<string>;
 }
 
 /** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
@@ -2079,6 +2089,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     spellSwitchFallthrough = true,
     spillSlotOrder,
     declaredArgs,
+    declaredReturns,
+    dialect,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -2104,6 +2116,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     symbols: mapSymbols,
     inferredSymbols,
     orderLicensedGlobals,
+    pointerGlobals,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -2358,10 +2371,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   })();
 
   const scalarGlobals = new Set<string>();
+  /** The scalar GLOBALS (never a frame object) the IR loads as a pointer at least once: one load
+   *  typed a pointer is the value used as an address somewhere in the function, while its other
+   *  loads may type an integer only because they reach a call argument or a compare. */
+  const pointerLoadedGlobals = new Set<string>();
+  /** Every scalar GLOBAL (never a frame object) whose value the function loads as a word, the
+   *  only width a pointer has: a `u8`/`u16` global is an integer whatever it is added to. */
+  const wordLoadedGlobals = new Set<string>();
   {
     const offsets = new Map<string, Set<number>>();
     const widths = new Map<string, Set<number>>();
     const loadSigns = new Map<string, Set<boolean>>();
+    const loadsPointer = new Map<string, boolean>();
     const bumpAgg = (sym: string) => offsets.set(sym, new Set([-1])); // -1 marks "variable index"
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -2389,6 +2410,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
             (widths.get(s) ?? widths.set(s, new Set()).get(s)!).add(op.attrs.width as number);
             if (op.opcode === 'load') {
               (loadSigns.get(s) ?? loadSigns.set(s, new Set()).get(s)!).add(op.attrs.signed as boolean);
+              if (defs.get(op.operands[0])?.opcode === 'gaddr') {
+                loadsPointer.set(s, loadsPointer.get(s) === true || op.results[0].type.kind === 'ptr');
+              }
             }
           }
         } else if (op.opcode === 'add' || op.opcode === 'sub') {
@@ -2414,6 +2438,16 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     for (const [sym, offs] of offsets) {
       if (offs.size === 1 && offs.has(0) && widths.get(sym)?.size === 1 && (loadSigns.get(sym)?.size ?? 1) === 1) {
         scalarGlobals.add(sym);
+      }
+    }
+    for (const [sym, ptr] of loadsPointer) {
+      if (scalarGlobals.has(sym)) {
+        if (widths.get(sym)?.has(4)) {
+          wordLoadedGlobals.add(sym);
+        }
+        if (ptr) {
+          pointerLoadedGlobals.add(sym);
+        }
       }
     }
     // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
@@ -2459,15 +2493,128 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
     : undefined;
 
-  /** A value the MAP declares a pointer: a bare `gSym` naming a pointer global (the VALUE of a
-   *  pointer cell), or a named MEMBER whose declaration is a pointer (`gSym.pBuf`, `gPtr->pBuf`).
-   *  Load, store and compare of such a 4-byte cell are identical for any object-pointer type, so
-   *  the declared pointee never matters to THEM; arithmetic on the loaded value is the opposite
-   *  case, where the pointee's size scales what is added and every stride must therefore be made
-   *  explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types only params/locals, so
-   *  both spellings render `undefined` there. */
-  const isPtrValue = (x: Expr): boolean =>
-    (x.k === 'var' && symCtx?.info(x.name)?.shape === 'pointer') || ptrMemberDecl(x, symCtx) !== null;
+  /** The declared shape of a global as the pointer-value rules below read it: the map's, or a
+   *  pointer the map declares to a structuring that does not spell from it (`pointerGlobals`). */
+  const declaredShape = (name: string): SymbolInfo['shape'] =>
+    symCtx?.info(name)?.shape ?? (pointerGlobals?.has(name) ? 'pointer' : undefined);
+  /** Whether no declaration a spelling folds from types the global: the map's is the only one.
+   *  The operand-order rules read this, not declaredShape: a declared pointer keeps `x + (u8 *)p`
+   *  for the element and field spellings to read, and a `pointerGlobals` name has no pointee for
+   *  them, so its sum is spelled in the asm's order like any other undeclared global's. */
+  const mapUndeclared = (name: string): boolean => symCtx?.info(name)?.shape === undefined;
+
+  /** A POINTER VALUE whose type the project's header owns: a bare `gSym` naming a pointer global
+   *  (the VALUE of a pointer cell), or a named MEMBER whose declaration is a pointer (`gSym.pBuf`,
+   *  `gPtr->pBuf`). Load, store and compare of such a 4-byte cell are identical for any
+   *  object-pointer type, so the declared pointee never matters to THEM; arithmetic on the loaded
+   *  value is the opposite case, where the pointee's size scales what is added and every stride
+   *  must therefore be made explicit (`(u8 *)gPtr + K`). `ctype` cannot see any of this: it types
+   *  only params/locals, so both spellings render `undefined` there.
+   *
+   *  A bare global is one when its declared shape is `'pointer'` (declaredShape), or when no
+   *  declaration this pass can read says anything (no map, a symtab-only name, entries that
+   *  disagree and were dropped to the bare name, a name the map lacks) and the IR loads it as a
+   *  pointer at least once. The project still declares it, typically `struct S *`. A map
+   *  `shape:'scalar'` is a declaration and is excluded; so is a global the IR never loads as a
+   *  pointer (`gCount + 1`, or the `u8` index in `gIdx + gItems`), where casting would make a
+   *  pointer of an integer the source added as one. */
+  const isPtrValue = (x: Expr): boolean => {
+    if (x.k !== 'var') {
+      return ptrMemberDecl(x, symCtx) !== null;
+    }
+    const shape = declaredShape(x.name);
+    return shape === 'pointer' || (shape === undefined && pointerLoadedGlobals.has(x.name));
+  };
+
+  /** A global's word VALUE that no declaration this pass can read types, whatever the IR loaded it
+   *  as. */
+  const isUndeclaredGlobalValue = (x: Expr): boolean =>
+    x.k === 'var' && wordLoadedGlobals.has(x.name) && declaredShape(x.name) === undefined;
+
+  /** A pointer value or a global's word as the integer the asm added. A global no declaration
+   *  types and the IR never loads as a pointer may be declared a float, whose value `(u32)g`
+   *  converts, so it goes through `(u8 *)` first: `(u32)(u8 *)g` is `(u32)g`'s bytes under every
+   *  integer and pointer declaration, and no C under a float one. KNOWN GAP: under an array or a
+   *  function declaration `g` decays to its address, which this spells with no diagnostic; only a
+   *  pun reads the word there, and intoDeclaredTemp's KNOWN GAP says why none is spelled. */
+  const globalWord = (x: Expr): Expr => ({
+    k: 'cast',
+    to: T.u(32),
+    e:
+      x.k === 'var' && declaredShape(x.name) === undefined && !pointerLoadedGlobals.has(x.name)
+        ? { k: 'cast', to: T.ptr(T.u(8)), e: x }
+        : x,
+  });
+
+  /** An integer operand with every undeclared global it adds or subtracts made a word as well:
+   *  bare, `a0 + g` is pointer arithmetic under a pointer declaration of g. Other operators reject
+   *  a pointer operand, and a load or a cast types its own value. */
+  const intWords = (x: Expr): Expr =>
+    isUndeclaredGlobalValue(x)
+      ? globalWord(x)
+      : x.k === 'bin' && (x.op === '+' || x.op === '-')
+        ? { ...x, l: intWords(x.l), r: intWords(x.r) }
+        : x;
+
+  /** A byte sum the pointer-value arithmetic rule below made of a global's value (`(u8 *)g + K`),
+   *  and the same sum as the integer it also is (`(u32)g + K`), which an integer added in front of
+   *  it takes. KNOWN GAP: an integer READER of the byte sum converts a pointer to an integer. The
+   *  backend casts it where the reader's type is known (an assignment, a store through a typed
+   *  slot, a return: cfamily `legalizePointerWrites`), and a compare against an integer compares
+   *  it as a `u32`. A call argument and a global no declaration types keep the pointer, which agbcc
+   *  and KMC gcc warn about and CodeWarrior rejects; only a pointer cell's sum passed to a parameter
+   *  the prototype declares an integer is converted (l3/ptrcell.ts). The integer sum is no fix: gcc
+   *  orders a pointer sum's operands and an integer sum's differently, so the bytes differ. */
+  const castGlobal = (x: Expr, undeclared = false): x is Extract<Expr, { k: 'cast' }> =>
+    x.k === 'cast' &&
+    typeEquals(x.to, T.ptr(T.u(8))) &&
+    x.e.k === 'var' &&
+    (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
+    (!undeclared || mapUndeclared(x.e.name));
+  /** The integer sum the rule spells in the asm's order instead (`(u32)g + x`), cast back to the
+   *  byte pointer it stands for: `(u8 *)((u32)g + x)`. A byte sum converted whole (byteSumAsInt's
+   *  `(u32)((u8 *)g + x - gB)`) is one of its words. */
+  const intGlobalWord = (x: Expr, undeclared: boolean): boolean =>
+    x.k === 'cast' &&
+    typeEquals(x.to, T.u(32)) &&
+    (castGlobal(x.e, undeclared) ||
+      (x.e.k === 'bin' && isByteGlobalSum(x.e, undeclared)) ||
+      (x.e.k === 'var' &&
+        (isPtrValue(x.e) || isUndeclaredGlobalValue(x.e)) &&
+        (!undeclared || mapUndeclared(x.e.name))));
+  const isIntGlobalSum = (x: Expr, undeclared: boolean): boolean =>
+    x.k === 'bin' &&
+    (x.op === '+' || x.op === '-') &&
+    (intGlobalWord(x.l, undeclared) ||
+      intGlobalWord(x.r, undeclared) ||
+      isIntGlobalSum(x.l, undeclared) ||
+      isIntGlobalSum(x.r, undeclared));
+  const restoredIntSum = (x: Expr, undeclared: boolean): Expr | undefined =>
+    x.k === 'cast' && typeEquals(x.to, T.ptr(T.u(8))) && isIntGlobalSum(x.e, undeclared) ? x.e : undefined;
+  const isByteGlobalSum = (x: Expr, undeclared = false): boolean =>
+    restoredIntSum(x, undeclared) !== undefined ||
+    (x.k === 'bin' &&
+      (x.op === '+' || x.op === '-') &&
+      (castGlobal(x.l, undeclared) ||
+        castGlobal(x.r, undeclared) ||
+        isByteGlobalSum(x.l, undeclared) ||
+        isByteGlobalSum(x.r, undeclared)));
+  /** The integer a byte sum is. Every global it adds bare goes a word with it. A lone global it
+   *  subtracts stays the pointer difference, `(u32)((u8 *)g + x - gB)`: the asm's integer under an
+   *  integer or a byte-pointer declaration of `gB`, and no C under a wider pointer or array, a
+   *  function or a float one, where the word `(u32)(u8 *)gB` would subtract an address. Under a byte
+   *  array it subtracts the array's address: globalWord's KNOWN GAP. A difference has one operand
+   *  order, so the asm's needs no integer sum. A sum of globals it subtracts goes words: bare,
+   *  `gB2 - gB3` is an element count under a wider pointer declaration. */
+  const byteSumAsInt = (x: Expr): Expr =>
+    restoredIntSum(x, false) ??
+    (castGlobal(x)
+      ? globalWord(x.e)
+      : x.k === 'bin' && isByteGlobalSum(x)
+        ? x.op === '-' && isUndeclaredGlobalValue(x.r)
+          ? { k: 'cast', to: T.u(32), e: x }
+          : { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
+        : intWords(x));
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
    *  global's value. All three are ill-formed C under a unary arithmetic operator — the asm did
@@ -2783,18 +2930,34 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     if (t === undefined) {
       return value;
     }
-    // ── the MAP's pointer values, whose type this side of the program does not own ──────────────
+    // ── pointer values whose type this side of the program does not own ────────────────────────
     // A `gaddr` at least states a type the IR knows. `gSym.pBuf` and a pointer global's own value
-    // state one only the MAP knows, and `ctype` — which types params and locals — reads them as
-    // `undefined`, so the test above cannot see them at all. Assigning one bare declares that the
-    // temp's type and the project's declaration of that pointer are the same type, which nothing
-    // here established: the project's header says `struct Unk_03005284 *` where the recovered temp
-    // says `struct Struct0 *`, and `-Werror` makes the mismatch fatal in the tree the source is
-    // pasted into. The destination's type is the one this pass DID choose, so unlike the
-    // map-declared cells below it can be named exactly rather than defused through `void *`. That
-    // holds for an INTEGER temp too, and there the diagnostic is the mirror one, `assignment makes
-    // integer from pointer without a cast` — same site, same argument, same `(T)` answer.
-    if (isPtrValue(value)) {
+    // (isPtrValue) state one only the project's header knows, and `ctype` — which types params and
+    // locals — reads them as `undefined`, so the test above cannot see them at all. Assigning one
+    // bare declares that the temp's type and the project's declaration of that pointer are the
+    // same type, which nothing here established: the project's header says
+    // `struct Unk_03005284 *` where the recovered temp says `struct Struct0 *`, and `-Werror` makes
+    // the mismatch fatal in the tree the source is pasted into. The destination's type is the one
+    // this pass DID choose, so unlike the map-declared cells below it can be named exactly rather
+    // than defused through `void *`. That holds for an INTEGER temp too, and there the diagnostic
+    // is the mirror one, `assignment makes integer from pointer without a cast` — same site, same
+    // argument, same `(T)` answer.
+    //
+    // A value that RENDERS a pointer of another type is the same assignment with its type in plain
+    // sight: the byte arithmetic below spells `(u8 *)gPtr + 3544` and `(u8 *)a0 + 2` for the
+    // address alone, and a `u16 *` or `s32 *` temp takes neither without the cast.
+    //
+    // KNOWN GAP: a global no declaration types, read at offset 0 only, may be declared an ARRAY
+    // (`u16 *gArr[4]`, the asm reading `gArr[0]`). Its value spelling is then the array's address,
+    // and this cast compiles that wrong value with no diagnostic, where the bare value keeps
+    // agbcc's `incompatible pointer type`, fatal under -Werror. The cast is load-bearing all the
+    // same: a substitution variation (`/unmerge`) carries the temp's value into the arithmetic it
+    // feeds, and bare, that arithmetic scales by the declared pointee. A pun, `*(T *)&gArr`, is no
+    // fix: where the declaration is not exactly T it loses gcc's fold of the read (agbcc
+    // c-typeck.c), it drops a `volatile` declaration's qualifier, and agbcc's strict aliasing at
+    // -O2 moves it past a store through the declared type.
+    const vt = ctype(value);
+    if (isPtrValue(value) || (vt?.kind === 'ptr' && !typeEquals(vt, t))) {
       return { k: 'cast', to: t, e: value };
     }
     if (t.kind !== 'ptr' || value.k !== 'addr') {
@@ -3836,16 +3999,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       //
       // `undefined` takes the cast exactly as a definite `false` does (see
       // renderedIntSignedness): a call's signedness is the project header's, not this function's.
-      // A POINTER-rendered side is the one operand left alone, and not out of caution — `p < q`
-      // is already the unsigned compare C gives two addresses, where `(s32)p < (s32)q` would
-      // compare them signed.
+      // A POINTER-rendered side takes it too. C compares an address unsigned (`p < q` is agbcc
+      // `bcc`, IDO `sltu`), so a signed opcode over one is a source that compared the address as
+      // an integer, and the byte arithmetic's `(u8 *)g + K` left bare against an `int` compiles
+      // `bcs` where the asm says `blt`.
       if (/^icmp_s/.test(d.opcode)) {
         const pinSigned = (x: Expr): Expr =>
-          renderedIntSignedness(x, vtEnv) === true || ptrSide(x)
-            ? x
-            : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
+          renderedIntSignedness(x, vtEnv) === true ? x : { k: 'cast', to: T.s(exprIntWidth(x, vtEnv)), e: x };
         l = pinSigned(l);
         r = pinSigned(r);
+      } else {
+        // A pointer-rendered side against an INTEGER one (the byte arithmetic's `(u8 *)g + K`
+        // against an `int`) is a constraint violation IDO 7.1 and CodeWarrior reject and agbcc
+        // warns about. The asm compared two words, and unsigned, as C compares a pointer, so the
+        // pointer side is compared as the `u32` it is. A literal 0 is the null pointer constant.
+        const intSide = (x: Expr): boolean => ctype(x)?.kind === 'int' && !(x.k === 'const' && x.value === 0);
+        if (ptrSide(l) && intSide(r)) {
+          l = { k: 'cast', to: T.u(32), e: l };
+        } else if (ptrSide(r) && intSide(l)) {
+          r = { k: 'cast', to: T.u(32), e: r };
+        }
       }
       return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
@@ -3862,7 +4035,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
       // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
       // LIST order), both operand VALUES un-named (see below), no pointer side (load-bearing for
-      // the stride rules below), and no effect moves (call, marker).
+      // the stride rules below), and no effect moves (call, marker). A global's value that the
+      // pointer-value rule below spells as a base is a pointer side too, though `ctype` types no
+      // global: that rule keeps the add's operand order, which a swap here would undo.
+      const ptrGlobalSide = (x: Expr): boolean =>
+        x.k === 'var' &&
+        mapUndeclared(x.name) &&
+        (pointerLoadedGlobals.has(x.name) || (d.results[0]?.type.kind === 'ptr' && wordLoadedGlobals.has(x.name)));
       if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
         const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
         if (
@@ -3885,6 +4064,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           activeSub?.has(d.operands[1]) !== true &&
           ctype(l)?.kind !== 'ptr' &&
           ctype(r)?.kind !== 'ptr' &&
+          !ptrGlobalSide(l) &&
+          !ptrGlobalSide(r) &&
           !exprHasEffect(l) &&
           !exprHasEffect(r) &&
           opBlock.get(da) === opBlock.get(db) &&
@@ -3944,15 +4125,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // by 4 twice. Both sides go byte pointers, `(u8 *)v0 - (u8 *)a0`, the byte count in every
       // world — unless both already are.
       //
-      // KNOWN GAP: `ptr + ptr` becomes `l + (s32)r` in the intify rules below, which C scales. It
-      // wants the same cast-then-add, but which side is the base, and so which type the sum is cast
-      // back to, is not knowable from the op.
-      //
-      // KNOWN GAP: the inexact-CONSTANT branch above casts its base and does NOT cast the sum
-      // back, so `v1 = (u8 *)a0 + 2` still lands in an `s32 *` slot. Copying the restore up churns
-      // the common case, where the sum is consumed by a deref that supplies its own cast — the
-      // real predicate is the CONSUMER, and deciding it here at the producer is what these two
-      // branches would have to stop doing.
+      // The inexact-CONSTANT branch above casts its base and does not cast the sum back: a deref
+      // supplies its own cast, and a temp of another pointer type takes the sum through
+      // intoDeclaredTemp's cast.
       const walkVar = (x: Expr): IrType | undefined => {
         const t = ctype(x);
         return t?.kind === 'ptr' && ptrElemBytes(t.to) !== 1 ? t : undefined;
@@ -3986,14 +4161,27 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // DEFINITELY-pointer rendering is cast (same conservative direction as memAccess); the
       // additive ops keep C's legal pointer arithmetic untouched.
       const op = ARITH_TO_BIN[d.opcode];
-      const intify = (x: Expr): Expr => (ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x);
+      const intify = (x: Expr): Expr =>
+        restoredIntSum(x, false) ?? (ctype(x)?.kind === 'ptr' ? { k: 'cast', to: T.s(32), e: x } : x);
       if (!['+', '-', '&&', '||'].includes(op)) {
         l = intify(l);
         r = intify(r);
       } else if (op === '+' && ctype(l)?.kind === 'ptr' && ctype(r)?.kind === 'ptr') {
-        r = intify(r); // ptr + ptr is not C; ptr + (s32)ptr is, with the same bytes
+        // ptr + ptr is not C; ptr + (s32)ptr is, and C scales it by the left pointee. So the left
+        // side is the base, and the sum goes back to its type as the walk's does.
+        r = intify(r);
+        if (!restoreTo) {
+          restoreTo = walkVar(l);
+          l = restoreTo ? bytePtr(l) : l;
+        }
       } else if (op === '-' && ctype(l)?.kind !== 'ptr' && ctype(r)?.kind === 'ptr') {
-        r = intify(r); // int - ptr is not C
+        // int - ptr is not C. A byte sum this rule made integer leaves a global it is taken from a
+        // pointer under a pointer declaration, which the integer would scale; a word, it is the
+        // asm's under any integer or pointer one.
+        if (restoredIntSum(r, false) !== undefined) {
+          l = intWords(l);
+        }
+        r = intify(r);
       }
       // A bare global address `&gSym` under ANY of these operators is never emitted as-is: its C
       // type comes from the PROJECT's own declaration (unknowable here — exprCType types `addr`
@@ -4007,10 +4195,10 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const intifyAddr = (x: Expr): Expr => (x.k === 'addr' ? { k: 'cast', to: T.u(32), e: x } : x);
       l = intifyAddr(l);
       r = intifyAddr(r);
-      // The SAME hazard one level down, for a value the MAP declares a pointer (`gPtr`, `gSym.pBuf`
-      // — isPtrValue): C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized
-      // `void *`, but whatever the PROJECT's header declares (a `u16 *` member, a 0x5C-byte
-      // struct) in the world a user actually recompiles in. The asm added BYTES, so the honest
+      // The SAME hazard one level down, for a pointer VALUE (`gPtr`, `gSym.pBuf` — isPtrValue):
+      // C scales `gPtr + K` by sizeof(*gPtr) — 1 under the map's synthesized `void *`, but
+      // whatever the PROJECT's header declares (a `u16 *` member, a 0x5C-byte struct) in the
+      // world a user actually recompiles in. The asm added BYTES, so the honest
       // spelling makes the stride explicit: CAST-THEN-ADD, `(u8 *)gPtr + K`, the same address in
       // EVERY world. Add-then-cast (`(u8 *)(gPtr + K)`, what the backend's deref legalization
       // would otherwise produce) is byte-correct in exactly one of them — a silent wrongness, the
@@ -4021,16 +4209,96 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // ACCESS width, a different address whenever that width is not 1.
       // Under the non-additive operators C rejects a pointer outright, so there the honest
       // spelling is integer math on the cell — exactly intifyAddr's `(u32)&gSym` rule.
-      const intifyPtrValue = (x: Expr): Expr => ({ k: 'cast', to: T.u(32), e: x });
+      const intifyPtrValue = globalWord;
       if (op === '+' || op === '-') {
         // `ptr ± int` and `ptr - ptr` are byte arithmetic once both sides are byte pointers;
-        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer.
-        const bothPtr = isPtrValue(l) && isPtrValue(r);
-        if (isPtrValue(l)) {
-          l = bytePtr(l);
+        // `ptr + ptr` and `int - ptr` are not C at all, so the second pointer goes integer. The
+        // other side is a pointer when it is a pointer value too or when it already renders one
+        // (a pointer temp, the walk's `(u8 *)v1`), and then the global's value is the side that
+        // goes integer.
+        //
+        // A global's value no declaration types, added to an integer, is a pointer value too
+        // when the IR types the SUM a pointer: `(u8 *)g + x` is the asm's address under every
+        // declaration of `g` once `x` renders an integer, whichever operand the source held as
+        // the pointer. An integer side that IS an address (`(u32)&gArr + gIdx`) says the address
+        // is the base and the global its index, so that sum stays as it is. An address under a
+        // load (`((u16 *)&gTbl)[a0]`) is a loaded value, and that side is an integer. A global
+        // that is no pointer value renders an integer too, though `ctype` types no global.
+        const isAddr = (x: Expr): boolean =>
+          x.k === 'addr' ||
+          (x.k === 'cast' && isAddr(x.e)) ||
+          (x.k === 'bin' && (x.op === '+' || x.op === '-') && (isAddr(x.l) || isAddr(x.r)));
+        const intSide = (x: Expr): boolean =>
+          !isAddr(x) && (ctype(x)?.kind === 'int' || (x.k === 'var' && ctype(x) === undefined && !isPtrValue(x)));
+        const sumBase =
+          d.results[0]?.type.kind === 'ptr' && !isPtrValue(l) && !isPtrValue(r)
+            ? isUndeclaredGlobalValue(l) && intSide(r)
+              ? l
+              : op === '+' && isUndeclaredGlobalValue(r) && intSide(l)
+                ? r
+                : undefined
+            : undefined;
+        const ptrValue = (x: Expr): boolean => isPtrValue(x) || x === sumBase;
+        // A global no declaration types in the base's partner is added as an integer, which it is
+        // under an integer declaration and a pointer one alike.
+        if (sumBase !== undefined) {
+          l = l !== sumBase ? intWords(l) : l;
+          r = r !== sumBase ? intWords(r) : r;
         }
-        if (isPtrValue(r)) {
+        const rendersPtr = (x: Expr): boolean => ptrValue(x) || ctype(x)?.kind === 'ptr';
+        const bothPtr = rendersPtr(l) && rendersPtr(r);
+        // `x + (u8 *)g` is pointer arithmetic, and gcc makes the pointer the first operand of the
+        // add, which swaps the asm's. So under an integer left side, the value of a global no
+        // declaration types, or a byte sum this rule made of one, is added as an integer in the
+        // asm's order, and the cast keeps the sum the byte pointer it would have been. A declared
+        // pointer keeps `x + (u8 *)p`, the operand the element and field spellings read.
+        const undeclaredPtr = (x: Expr): boolean => x.k === 'var' && mapUndeclared(x.name);
+        // The same global LEFT of a runtime offset is added as an integer too: CodeWarrior at -O4
+        // puts the index first in every pointer sum, where an integer sum keeps the source's
+        // order, so `(u8 *)g + x` is the asm's order on agbcc, KMC gcc and IDO only. The partner
+        // goes integer with it, or a pointer partner would scale the sum. A constant offset folds
+        // into the access and keeps `(u8 *)g + K`.
+        const constValued = (x: Expr): boolean =>
+          x.k === 'const' ||
+          (x.k === 'cast' && constValued(x.e)) ||
+          (x.k === 'bin' && constValued(x.l) && constValued(x.r));
+        const intSum = op === '+' && !constValued(r) && ptrValue(l) && undeclaredPtr(l);
+        if (intSum) {
+          l = intifyPtrValue(l);
+          r = ptrValue(r)
+            ? intifyPtrValue(r)
+            : ctype(r)?.kind === 'ptr'
+              ? isByteGlobalSum(r)
+                ? byteSumAsInt(r)
+                : { k: 'cast', to: T.u(32), e: r }
+              : intWords(r);
+          restoreTo ??= T.ptr(T.u(8));
+        } else if (ptrValue(l)) {
+          l = op === '+' && bothPtr && !ptrValue(r) ? intifyPtrValue(l) : bytePtr(l);
+        }
+        if (intSum) {
+          // both operands are integers now
+        } else if (
+          op === '+' &&
+          !bothPtr &&
+          !restoreTo &&
+          ((ptrValue(r) && undeclaredPtr(r)) || (ctype(r)?.kind === 'ptr' && isByteGlobalSum(r, true)))
+        ) {
+          r = ptrValue(r) ? intifyPtrValue(r) : byteSumAsInt(r);
+          // A left global no declaration types may be a pointer in the project's header, which
+          // would scale the integer sum; as an integer it is the asm's word under any declaration.
+          l = intWords(l);
+          restoreTo = T.ptr(T.u(8));
+        } else if (ptrValue(r)) {
           r = bothPtr && op === '-' ? bytePtr(r) : op === '+' && !bothPtr ? bytePtr(r) : intifyPtrValue(r);
+        }
+        // A byte sum less an integer sum of globals no declaration types: bare, `gB2 - gB3` is an
+        // element count under a wider pointer declaration of them, where the asm subtracted bytes.
+        if (op === '-' && r.k === 'bin' && !rendersPtr(r) && isByteGlobalSum(l)) {
+          r = intWords(r);
+        }
+        if (op === '-' && ctype(l)?.kind === 'ptr' && ctype(r)?.kind === 'ptr') {
+          restoreTo = undefined; // a byte pointer less a byte pointer is the byte count, an integer
         }
       } else if (op !== '&&' && op !== '||') {
         // (`&&`/`||` take a pointer operand legally — a truth test, no arithmetic.)
@@ -4040,10 +4308,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
       // Which token a language spells each with, and what cast pins the choice, is a BACKEND
       // decision; see l3/ast.ts BinOp and backend/cfamily.ts's C_SPELLING.)
-      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer global under a
-      // COMPARISON (`gPtr < K` — C compares unsigned whatever the asm's icmp_s* said) is the same
-      // class as intifyAddrCmp's `addr` rule and is deliberately left alone here: it is valid C
-      // today, so closing it would churn spellings for a signedness case no row exercises.
+      // SCOPE: this and intifyAddr cover the ARITHMETIC escapes. A pointer value under a
+      // COMPARISON (`gPtr < K`, `(u8 *)gPtr + K < a0`) needs nothing here: an icmp_s* pins every
+      // operand that does not provably render signed, a pointer included (pinSigned above).
       //
       // A `+`/`|` over two IR `const`s that both RENDER as literals is the literal it is. After
       // pre-recovery there is only one way such an op still exists: `raise/const.ts` refuses to fold
@@ -4685,24 +4952,28 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // EFFECTFUL op whose result nothing consumes (a void/discarded call, and an `opaque` standing for
   // an instruction asmlift could not model); and MATERIALIZED defs — a call/load whose value cannot
   // soundly render at its use is assigned to its named temp here, at its own program position.
-  /** A pointer VALUE assigned into a map-declared pointer CELL, spelled so the assignment is legal
-   *  against ANY declaration of that cell. The byte-arithmetic guard renders such a right-hand
-   *  side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole point of it,
-   *  and a `u8 *` where the declaration says `u16 *`. READING one is fine (C converts an object
-   *  pointer freely under a deref, a call argument or a compare); ASSIGNING one is `warning:
-   *  assignment from incompatible pointer type`, and this project's own `-Werror` compiler
-   *  template makes that FATAL — so a source that scores clean here fails to build in the tree a
-   *  user pastes it into, which no score gate can observe.
+  /** A pointer VALUE assigned into a pointer CELL (isPtrValue), spelled so the assignment is legal
+   *  against ANY pointer declaration of that cell. The byte-arithmetic guard renders such a
+   *  right-hand side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole
+   *  point of it, and a `u8 *` where the declaration says `u16 *`. READING one is fine (C converts
+   *  an object pointer freely under a deref, a call argument or a compare); ASSIGNING one is
+   *  `warning: assignment from incompatible pointer type`, and this project's own `-Werror`
+   *  compiler template makes that FATAL — so a source that scores clean here fails to build in the
+   *  tree a user pastes it into, which no score gate can observe.
    *
    *  `void *`, NOT the map's declared pointee: it is the one target assignment-compatible with any
    *  object-pointer declaration, the same "same answer in every world" property the guard that
    *  made the `u8 *` exists for. Trusting the map's pointee would put the spelling back in one
    *  world. It costs nothing: agbcc compiles `p = (void *)((u8 *)p + 4)` and the warning-carrying
    *  `p = (u8 *)p + 4` to BYTE-IDENTICAL objects (`-mthumb-interwork -Wimplicit -O2 -fhex-asm
-   *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler. */
+   *  -fprologue-bugfix`), so the fix is invisible to the differ and visible to the compiler.
+   *
+   *  A project may still declare a cell no map types an INTEGER (`u32 gSym;`), where `(void *)`
+   *  makes an integer from a pointer: agbcc warns, CodeWarrior rejects it. The candidate's own world
+   *  declares the cell `void *` (l3/symbol-refs.ts), and `/int-cell` (l3/intcell.ts) spells the
+   *  integer declaration's source, published only at a byte-exact score. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
-    const cell = lval.k === 'var' ? symCtx?.info(lval.name)?.shape === 'pointer' : ptrMemberDecl(lval, symCtx) !== null;
-    if (!cell) {
+    if (!isPtrValue(lval)) {
       return value;
     }
     const vt = ctype(value);
@@ -6825,7 +7096,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     // absent stays absent: the backend asks "is a direction known?", and there is no third state
     // at this boundary — `structureOptionsFor` dropped the target's `'unknown'` already.
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
-    ...(declaredArgs !== undefined ? calledArgs(declaredArgs, body) : {}),
+    ...calledOnly({ declaredArgs, declaredReturns }, body),
+    ...(dialect !== undefined ? { dialect } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;
@@ -6839,19 +7111,26 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   return named;
 }
 
-/** Of the declared callees' parameter types, the ones this body calls — every tree the ranked pass
- *  structures carries its own, and is keyed by its whole text. */
-function calledArgs(
-  declared: NonNullable<StructureOptions['declaredArgs']>,
+/** Of each table of declared callees, the entries this body calls — every tree the ranked pass
+ *  structures carries its own, and is keyed by its whole text. A table this body calls nothing in is
+ *  absent. */
+function calledOnly(
+  tables: Pick<StructureOptions, 'declaredArgs' | 'declaredReturns'>,
   body: Stmt[],
-): { declaredArgs?: NonNullable<StructureOptions['declaredArgs']> } {
-  const called: Record<string, readonly (string | undefined)[]> = {};
+): Pick<StructureOptions, 'declaredArgs' | 'declaredReturns'> {
+  const callees = new Set<string>();
   for (const e of walkExprs(body)) {
-    if (e.k === 'call' && typeof e.fn === 'string' && Object.hasOwn(declared, e.fn)) {
-      called[e.fn] = declared[e.fn];
+    if (e.k === 'call' && typeof e.fn === 'string') {
+      callees.add(e.fn);
     }
   }
-  return Object.keys(called).length > 0 ? { declaredArgs: called } : {};
+  const of = <T>(table: Readonly<Record<string, T>> | undefined): Record<string, T> | undefined => {
+    const called = Object.fromEntries(Object.entries(table ?? {}).filter(([n]) => callees.has(n)));
+    return Object.keys(called).length > 0 ? called : undefined;
+  };
+  const declaredArgs = of(tables.declaredArgs);
+  const declaredReturns = of(tables.declaredReturns);
+  return { ...(declaredArgs ? { declaredArgs } : {}), ...(declaredReturns ? { declaredReturns } : {}) };
 }
 
 // Does any statement CONTINUE this loop (vs. a nested one)? A `continue` inside a nested while/dowhile/

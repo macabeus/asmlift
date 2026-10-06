@@ -42,6 +42,7 @@ import type { Gate } from './l3/gates';
 import type { HoistPlacement } from './l3/hoist';
 import { homeSplitTag, homeSplitWithholds, splitHomeBases } from './l3/homesplit';
 import { inlinableConstBases, inlineConstBases } from './l3/inlinebase';
+import { integerCells } from './l3/intcell';
 import { mulFirstSums } from './l3/mulfirst';
 import { nearBaseClusters } from './l3/nearbase';
 import { spellOperandMembers } from './l3/offmember';
@@ -98,7 +99,13 @@ import {
   symbolsByName,
 } from './symbols';
 import { type TargetDescription, structureOptionsFor } from './target';
-import { type SubjectVariationName, type Variation, offeredOn, withSubject } from './variation-tokens';
+import {
+  type SubjectVariationName,
+  type Variation,
+  type VariationName,
+  offeredOn,
+  withSubject,
+} from './variation-tokens';
 
 /** Pin every SCALAR entry param (index not in `ptrIdx`) to the candidate signedness, before
  *  recovery. Answers whether any param was PINNABLE — not whether its type moved: which of the
@@ -239,14 +246,19 @@ export interface Candidate {
    *
    *  The third admission ground, and the narrowest. A respell variation must preserve semantics by
    *  construction (the POLICY note at the respell site), because on a nonmatch row the best
-   *  spelling is what the user is shown. One spelling cannot meet that bar from inside the pass:
-   *  `l3/unreduce.ts` moves a memory read into a loop whose stores are all device registers, and
-   *  on this board a device store can make the DEVICE write ordinary memory (a DMA trigger), which
-   *  no gate over the C can rule out. What settles it instead is the object: a candidate that
-   *  assembles to the target's own bytes IS the program, whatever a gate could have proved. So the
-   *  spelling is offered, scored, and then either wins on proof or is WITHHELD — never shown as a
-   *  best-effort answer. Both ranking drivers ask `withheldReason`, so neither can publish what the
-   *  other would not. */
+   *  spelling is what the user is shown. Two spellings cannot meet that bar from inside the pass,
+   *  each for its own fact (`PROOF_OBLIGATIONS` states them):
+   *
+   *   • `l3/unreduce.ts` moves a memory read into a loop whose stores are all device registers, and
+   *     on this board a device store can make the DEVICE write ordinary memory (a DMA trigger),
+   *     which no gate over the C can rule out;
+   *   • `l3/intcell.ts` spells a global as the integer a project may have declared it, where a
+   *     pointer declaration scales the offset it adds, and no declaration is in the asm.
+   *
+   *  What settles both instead is the object: a candidate that assembles to the target's own bytes
+   *  IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
+   *  either wins on proof or is WITHHELD — never shown as a best-effort answer. Both ranking drivers
+   *  ask `withheldReason`, so neither can publish what the other would not. */
   matchOnly?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
    *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
@@ -355,10 +367,19 @@ export interface RankedResult<S> {
  *  `score === 0` is objdiff's byte-exact match (@match-kit/scoring states the equivalence), which is
  *  why a bare `.score` suffices and the generic needs no `match` field. */
 export function withheldReason<S extends { score: number }>(c: Candidate, score: S): string | null {
-  return c.matchOnly === true && score.score !== 0
-    ? 'this spelling rests on a device-behaviour fact no gate over the C can settle; only a byte-exact score proves it'
-    : null;
+  if (c.matchOnly !== true || score.score === 0) {
+    return null;
+  }
+  const facts = c.variations.flatMap((v) => PROOF_OBLIGATIONS.get(v) ?? []);
+  const fact = facts.length > 0 ? facts.join(' and on ') : 'a fact no gate over the C can settle';
+  return `this spelling rests on ${fact}; only a byte-exact score proves it`;
 }
+
+/** The fact each proof-carrying variation (`needsProof`) rests on, as `withheldReason` publishes it. */
+const PROOF_OBLIGATIONS: ReadonlyMap<string, string> = new Map<VariationName, string>([
+  ['unreduce', 'a device-behaviour fact no gate over the C can settle'],
+  ['int-cell', 'the project declaring the global an integer, which the assembly does not show'],
+]);
 
 /** What a respell variation hands `respell`: its tree, or — when the variation cannot establish the
  *  candidate's semantics from inside the pass — the tree paired with that fact. `undefined`/`null`
@@ -1723,6 +1744,17 @@ export function enumerateCandidates(
     // Which placement the source used is not derivable from the asm, so both are emitted and the
     // differ referees.
     respell(['sinkinit'], () => sinkInitsToFirstUse(sfn));
+    // `/int-cell` — every pointer cell spelled as the integer a project may have declared it,
+    // `g = g + K` and no conversions (l3/intcell.ts). The default's `g = (void *)((u8 *)g + K)` is
+    // right under a pointer declaration of g and rejected by CodeWarrior under an integer one, where
+    // this is the source; which the project declared is not in the asm, so it is published only at
+    // a byte-exact score.
+    respell(['int-cell'], () =>
+      integerCells(sfn, (n) => {
+        const shape = mapSymbols?.get(n)?.shape;
+        return shape !== undefined && shape !== 'scalar';
+      }),
+    );
     // the register-copy variation (l3/regspell.ts): 0–3 results (base; tail assign-back reusing
     // the dead value var; tail assign-back into a fresh var — the tail decision is allocator-
     // ambiguous, so both are ranked).
@@ -1764,8 +1796,13 @@ export function enumerateCandidates(
         { variations: ['raw-globals'], symbols: undefined },
       ]
     : [{ variations: [] }];
+  // The map's POINTER declarations go to the raw setting all the same: a raw name is still a
+  // pointer in the project's file, so arithmetic on its value scales unless spelled in bytes.
+  const pointerGlobals = new Set(
+    [...(baseOpts.symbols?.entries() ?? [])].filter(([, info]) => info.shape === 'pointer').map(([n]) => n),
+  );
   for (const [symbolIndex, symbolSetting] of symbolSettings.entries()) {
-    const symbolSettingOpts = symbolSetting.symbols ? baseOpts : { ...baseOpts, symbols: undefined };
+    const symbolSettingOpts = symbolSetting.symbols ? baseOpts : { ...baseOpts, symbols: undefined, pointerGlobals };
     // `/no-bitfield` names a spelling the MAP makes available, so it has no inhabitant on the
     // symbol-map setting that structures without one: structure() normalizes `spellBitfieldMembers`
     // to false when `symbols` is absent, so both settings structure the identical tree whatever

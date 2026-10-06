@@ -20,7 +20,8 @@ import type { IrType } from '../ir/types';
 import { type AggregateLayout, type ParamType, type Prototypes, spellableProto } from '../proto';
 import type { SymbolInfo } from '../symbols';
 import type { TargetDescription } from '../target';
-import { Expr, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
+import { Expr, SFn, Stmt, exprChildren, mentionedName, stmtChildren, stmtExprs } from './ast';
+import { pointerCellsOf, pointerPartners } from './ptrcell';
 
 /** One recorded VALUE reference — a name the tree references plus the facts to declare it. */
 export interface SymbolRef {
@@ -62,13 +63,17 @@ export interface SymbolRef {
    *  by its tag (`name`), from the members the declaration lists (`layout`, which the lift laid out
    *  to type the call). */
   returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
+  /** The bare name holds a pointer (l3/ptrcell.ts): the body stores one into it, or it meets such a
+   *  cell bare and nothing reads it as an integer (`pointerPartners`). A name-only declaration of it
+   *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
+  holdsPointer?: true;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
  *  scoring layer's declaration synthesis. A name counts when it appears as a `var`/`addr` leaf
  *  and the caller's dictionary knows it (bare `gSym`, `&gSym`, `(u32)Func`, a `field` base — all reduce to
  *  those leaves). The function's OWN name
- *  (`selfName`) is excluded too — the candidate's definition IS its declaration, and a
+ *  (`tree.name`) is excluded too — the candidate's definition IS its declaration, and a
  *  synthesized `void F(void);` above `s32 F(...)` is a conflicting-types hard error (a
  *  self-address reference resolves against the definition itself).
  *
@@ -85,9 +90,8 @@ export interface SymbolRef {
  *  leave a name undeclared for asmlift's own reason, and a consumer's list of those reasons is
  *  incomplete without them. */
 export function collectSymbolRefs(
-  body: Stmt[],
+  tree: SFn,
   symbols: Map<string, SymbolInfo>,
-  selfName: string,
   /** the project's prototype table — the only thing that can turn a call target into a
    *  declaration. REQUIRED, not optional: a caller that forgot it would silently get the old
    *  blanket refusal back, which is the shape of an optional refusal a second caller switches off. */
@@ -121,7 +125,8 @@ export function collectSymbolRefs(
     stmtExprs(s).forEach(visitExpr);
     stmtChildren(s).forEach(visitStmt);
   };
-  body.forEach(visitStmt);
+  tree.body.forEach(visitStmt);
+  const holdsPointer = new Set([...pointerCellsOf(tree), ...pointerPartners(tree)]);
   // A call target is a ref in its own right, whether or not the body also names it as a value —
   // `Object.hasOwn`, because `prototypes` is caller-supplied JSON and a callee may be named
   // `toString`. The union is sorted as one list so the rendered block stays deterministic.
@@ -144,7 +149,7 @@ export function collectSymbolRefs(
         onRefused?.(n, 'call-target');
         return false;
       }
-      if (n === selfName) {
+      if (n === tree.name) {
         onRefused?.(n, 'self-name');
         return false;
       }
@@ -159,6 +164,12 @@ export function collectSymbolRefs(
       const r = p ? returned.get(n) : undefined;
       const layout = r?.declared !== undefined ? prototypes[n].returnLayout : undefined;
       const definition = layout?.members !== undefined ? { name: r!.name, declared: r!.declared!, layout } : undefined;
-      return { name: n, info, ...(p ? { proto: p } : {}), ...(definition ? { returned: definition } : {}) };
+      return {
+        name: n,
+        info,
+        ...(p ? { proto: p } : {}),
+        ...(definition ? { returned: definition } : {}),
+        ...(holdsPointer.has(n) ? { holdsPointer: true as const } : {}),
+      };
     });
 }

@@ -13,6 +13,7 @@
 import { doubleLiteral } from '../ir/float-bits';
 import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
 import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
+import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
 import {
   type PrintEnv,
@@ -251,7 +252,7 @@ function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt
  *  made and the compiled code is C's: an object pointer to a pointer of another pointee (a conversion
  *  to `void *`, or one that only adds a qualifier, is implicit in C++ too), an integer to a pointer
  *  (the literal `0` is the one integer that converts), and a pointer to an integer. Only reached on a
- *  function compiled as C++ (`SFn.declaredArgs`). */
+ *  function compiled as C++ (`SFn.dialect`). */
 function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
   const from = exprCType(a, vt.type);
   // qualifiers never decide it: a `T * const` parameter is a pointer parameter
@@ -651,8 +652,12 @@ function endsTerminated(body: Stmt[]): boolean {
 // traversal-vocabulary exemption.)
 function legalizePointerWrites(fn: SFn): SFn {
   const vt = declaredTypes(fn);
+  // …and the mirror: a rendered pointer into an INTEGER slot takes the slot's type. A cast keeps
+  // the sum it wraps, so the bytes are the uncast write's; CodeWarrior rejects that write outright.
   const castTo = (t: IrType | undefined, e: Expr): Expr =>
-    writesNonPointerIntoPointer(t, e, vt) ? { k: 'cast', to: t, e } : e;
+    writesNonPointerIntoPointer(t, e, vt) || (t?.kind === 'int' && exprCType(e, vt)?.kind === 'ptr')
+      ? { k: 'cast', to: t, e }
+      : e;
   const fix = (s: Stmt): Stmt => {
     switch (s.k) {
       case 'assign':
@@ -780,10 +785,11 @@ function structDecls(fn: SFn): string[] {
 
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body. */
 export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook): string {
-  // The declaration list is put into the target's own frame order HERE — in the shared C-family
-  // assembler, reached only from `cBackend.emit` and `cppBackend(...).emit`, so both C-family
-  // backends order and no `.emit(` call site does (l3/slotorder.ts says why `emit` owns it).
-  const fn = orderSlotLocals(fn0);
+  // The declaration list is put into the target's own frame order, and a pointer cell's integer
+  // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from
+  // `cBackend.emit` and `cppBackend(...).emit`, so both C-family backends print them and no `.emit(`
+  // call site does (l3/slotorder.ts says why `emit` owns it).
+  const fn = orderSlotLocals(legalizePointerCells(fn0));
   const decls = structDecls(fn);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';
   return preamble + [`${signature} {`, ...cFamilyBody(fn, leaf), '}'].join('\n') + '\n';

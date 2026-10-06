@@ -10,6 +10,7 @@ import { describe, expect, test } from 'vitest';
 import { renderDeclarations } from '../src/declare';
 import type { SymbolRef } from '../src/l3/symbol-refs';
 import { decompile } from '../src/pipeline';
+import { prototypesFromContext } from '../src/proto-context';
 import { enumerateCandidates, rankBy } from '../src/rank';
 import {
   type SymbolInfo,
@@ -19,7 +20,7 @@ import {
   lookupSymbol,
   symbolsByName,
 } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 import { hasVariation, joinVariations } from '../src/variation-tokens';
 
 const asmOf = (sym: string, body: string) => `${sym}:\n${body}`;
@@ -499,6 +500,36 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     expect(src).not.toMatch(/\*\)\(gPtr \+/); // never the add-then-cast shape at any width
   });
 
+  test('the /raw-globals candidate keeps the byte arithmetic the map declared', () => {
+    // g(gPtr + 18), the pointer's only use: nothing in the IR types its load a pointer, so the map is
+    // the whole evidence, and the candidate that spells the name raw adds bytes all the same
+    const body =
+      '\tpush\t{lr}\n\tldr\tr0, .L1\n\tldr\tr0, [r0]\n\tadds\tr0, #18\n\tbl\tg\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L1:\n\t.word\tgPtr\n';
+    const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols: PTR_MAP });
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      expect(c.source).toContain('g((u8 *)gPtr + 18)');
+    }
+  });
+
+  test('the /raw-globals candidate adds a map pointer in the asm order, which the map candidate cannot', () => {
+    // `add r0, r0, r1` with the pointer second: gcc puts a pointer first in `a0 + (u8 *)gPtr`, so
+    // only the integer sum `a0 + (u32)gPtr` reproduces the order. The map candidate keeps the
+    // pointer for its field spellings; the raw one has no pointee to fold, so it spells the order
+    const body =
+      '\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgPtr\n';
+    const cands = enumerateCandidates('f', asmOf('f', body), ARMV4T_AGBCC, { symbols: PTR_MAP });
+    const raw = cands.filter((c) => c.variations.includes('raw-globals'));
+    expect(raw.length).toBeGreaterThan(0);
+    for (const c of raw) {
+      expect(c.source).toContain('*(u8 *)(a0 + (u32)gPtr)');
+    }
+    for (const c of cands.filter((c) => !c.variations.includes('raw-globals'))) {
+      expect(c.source).toContain('*(a0 + (u8 *)gPtr)');
+    }
+  });
+
   test('under an operator C rejects for pointers, the cell spells integer math', () => {
     // `gPtr & 0xFF` is not C at all; the asm did 32-bit integer math on the address value
     const body =
@@ -506,11 +537,345 @@ describe('a POINTER-shaped global under arithmetic is spelled CAST-THEN-ADD', ()
     const src = run('f', body, PTR_MAP);
     expect(src).toContain('(u32)gPtr');
   });
+});
 
-  test('INERT without the shape fact: a plain data symbol keeps the raw add', () => {
-    const plain = mapOf([[0x03001234, { name: 'gPtr', kind: 'data' }]]);
-    const src = run('f', derefAt('ldrb\tr0, [r1, #0x10]'), plain);
-    expect(src).not.toContain('(u8 *)gPtr +'); // nothing to legalize — gPtr is not a pointer cell
+describe('a global the IR uses as a pointer, with no declared shape, is spelled CAST-THEN-ADD', () => {
+  // The project still declares the global, as `static struct UsePokeblockMenu *sMenu` in
+  // pokeemerald's use_pokeblock.c, even when no declaration reaches the lift: the map holds the name
+  // with no shape (symtab-only, or several file statics of that name that disagree), lacks it, or
+  // there is no map. Spelled `*(u8 *)(sMenu + 32691)`, C scales 32691 by sizeof(struct
+  // UsePokeblockMenu) = 32876 inside that file, and agbcc's pool word is 0x400f5f84 where the asm
+  // has 0x7fb3. `(u8 *)sMenu + 32691` is the same address under any object-pointer declaration
+  // and under any integer one.
+  // r1 = gPtr (the cell's value); r1 += 0x7fb3, a pool constant, so the add is an op; byte read
+  const bigOffset = (word: string) =>
+    `\tldr\tr1, .L1\n\tldr\tr1, [r1]\n\tldr\tr2, .L2\n\tadds\tr1, r1, r2\n\tldrb\tr0, [r1]\n\tbx\tlr\n` +
+    `.L1:\n\t.word\t${word}\n.L2:\n\t.word\t0x7fb3\n`;
+  const CAST_THEN_ADD = 'return *((u8 *)gPtr + 32691);';
+
+  test('with no map, the pool names the global and its value is cast before the add', () => {
+    const src = run('f', bigOffset('gPtr'));
+    expect(src).toContain(CAST_THEN_ADD);
+    expect(src).not.toContain('(gPtr +');
+  });
+
+  test('a map entry with no shape (a symtab-only name) is spelled the same way', () => {
+    expect(run('f', bigOffset('0x03001234'), mapOf([[0x03001234, { name: 'gPtr', kind: 'data' }]]))).toContain(
+      CAST_THEN_ADD,
+    );
+  });
+
+  test('two map entries that disagree leave the bare name, and it is spelled the same way', () => {
+    // symbolsByName drops a name whose entries disagree to the name alone, so the pointer entry's
+    // shape is gone by the time the structurer asks
+    const conflicted: SymbolMap = new Map([
+      [0x03001234, [{ name: 'gPtr', kind: 'data', shape: 'pointer' }]],
+      [0x03005678, [{ name: 'gPtr', kind: 'data', shape: 'scalar', size: 4 }]],
+    ]);
+    expect(run('f', bigOffset('0x03001234'), conflicted)).toContain(CAST_THEN_ADD);
+  });
+
+  test('a global the map lacks, named by the pool, is spelled the same way', () => {
+    expect(run('f', bigOffset('gPtr'), mapOf([[0x03009999, { name: 'gOther', kind: 'data' }]]))).toContain(
+      CAST_THEN_ADD,
+    );
+  });
+
+  test('a call argument takes the cast too, once the function uses the value as a pointer', () => {
+    // g(gPtr + 0x7c58); return gPtr[4]. The argument's own load is typed an integer (nothing
+    // dereferences that load), but the second load of the same cell is a pointer, and the
+    // callee receives the same scaled address a deref would read.
+    const body =
+      '\tpush\t{r4, lr}\n\tldr\tr4, .L1\n\tldr\tr0, [r4]\n\tldr\tr1, .L2\n\tadds\tr0, r0, r1\n\tbl\tg\n' +
+      '\tldr\tr0, [r4]\n\tldrb\tr0, [r0, #4]\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\tgPtr\n.L2:\n\t.word\t0x7c58\n';
+    expect(run('f', body)).toContain('g((u8 *)gPtr + 31832');
+  });
+
+  test('a map shape:scalar is a declaration, and its integer add stays as it is', () => {
+    const scalar = mapOf([[0x03001234, { name: 'gPtr', kind: 'data', shape: 'scalar', size: 4, signed: false }]]);
+    expect(run('f', bigOffset('0x03001234'), scalar)).toContain('*(u8 *)(gPtr + 32691)');
+  });
+
+  test('an integer counter is not cast', () => {
+    // gCount = gCount + 1: no load of the cell is used as an address
+    const body = '\tldr\tr1, .L1\n\tldr\tr0, [r1]\n\tadds\tr0, #1\n\tstr\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgCount\n';
+    const src = run('f', body);
+    expect(src).toContain('gCount = v0 + 1;');
+    expect(src).not.toContain('(u8 *)');
+  });
+
+  test('of an index and a pointer, only the side the IR uses as a pointer is cast', () => {
+    // *(u8 *)(gIdx + gItems) with gItems the base of a byte read elsewhere: casting the u8 index
+    // instead gives `(u8 *)gIdx + gItems`, a pointer plus a pointer, which agbcc rejects
+    const body =
+      '\tldr\tr0, .L1\n\tldrb\tr0, [r0]\n\tldr\tr2, .L2\n\tldr\tr1, [r2]\n\tadds\tr0, r0, r1\n\tldrb\tr0, [r0]\n' +
+      '\tldr\tr1, [r2]\n\tldrb\tr1, [r1, #1]\n\tadds\tr0, r0, r1\n\tbx\tlr\n' +
+      '.L1:\n\t.word\tgIdx\n.L2:\n\t.word\tgItems\n';
+    const src = run('f', body);
+    expect(src).toContain('*(u8 *)(gIdx + (u32)gItems)');
+    expect(src).not.toContain('(u8 *)gIdx');
+  });
+
+  test('added after an integer, the value is added as an integer, in the order the asm adds', () => {
+    // agbcc -O2 of `extern u32 gOff; u8 m1(s32 x) { return *(u8 *)(x + gOff); }`: `add r0, r0, r1`.
+    // `a0 + (u8 *)gOff` is pointer arithmetic, which agbcc compiles `add r1, r1, r0`. The function
+    // never loads through gOff, so a float declaration is possible, and `(u32)gOff` would convert it.
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L3:\n\t.word\tgOff\n';
+    expect(run('f', body)).toContain('*(u8 *)(a0 + (u32)(u8 *)gOff)');
+  });
+
+  test('a byte sum added after an integer is added as an integer too', () => {
+    // agbcc -O2 of `extern struct Big *gBig; u8 f3(s32 *p, s32 i) { sink(gBig->pad[3]); return
+    // *(u8 *)((u32)p + ((u32)gBig + i)); }`
+    const body =
+      '\tpush\t{r4, r5, r6, lr}\n\tadd\tr4, r0, #0\n\tadd\tr6, r1, #0\n\tldr\tr5, .L9\n\tldr\tr0, [r5]\n\tldrb\tr0, [r0, #0x3]\n\tbl\tsink\n' +
+      '\tldr\tr0, [r5]\n\tadd\tr0, r0, r6\n\tadd\tr4, r4, r0\n\tldrb\tr0, [r4]\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgBig\n';
+    expect(run('f', body)).toContain('*(u8 *)(a0 + ((u32)gBig + a1))');
+  });
+
+  test('a pointer plus a byte sum casts the left pointer, not the sum alone', () => {
+    // agbcc -O2 of `extern struct Big *gBig; extern s32 *gArr; u32 e2(s32 x) { s32 *q = gArr;
+    // sink(q[1]); sink(q[2]); sink(gBig->pad[3]); return *(u8 *)((u32)q + ((u32)gBig + x)); }`.
+    // `v0 + (s32)((u8 *)gBig + a0)` scales the sum by sizeof(s32).
+    const body =
+      '\tpush\t{r4, r5, r6, lr}\n\tadd\tr6, r0, #0\n\tldr\tr0, .L6\n\tldr\tr4, [r0]\n\tldr\tr0, [r4, #0x4]\n\tbl\tsink\n' +
+      '\tldr\tr0, [r4, #0x8]\n\tbl\tsink\n\tldr\tr5, .L6+0x4\n\tldr\tr0, [r5]\n\tldrb\tr0, [r0, #0x3]\n\tbl\tsink\n' +
+      '\tldr\tr0, [r5]\n\tadd\tr0, r0, r6\n\tadd\tr4, r4, r0\n\tldrb\tr0, [r4]\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L6:\n\t.word\tgArr\n\t.word\tgBig\n';
+    const src = run('f', body);
+    expect(src).toContain('(u8 *)v0 + ((u32)gBig + a0)');
+  });
+
+  test('added to another global no declaration types, the partner is added as an integer', () => {
+    // agbcc -O2 of `extern struct S *gPtr; extern u32 gK; u8 b2(void) { return *((u8 *)gPtr + gK +
+    // 16); }`. Bare, `gPtr + gK` scales gK by sizeof(struct S) in the project's file. Under a
+    // `float gK`, `(u32)gK` converts the value where `(u32)(u8 *)gK` does not compile.
+    const body =
+      '\tldr\tr0, .L6\n\tldr\tr0, [r0]\n\tldr\tr1, .L6+0x4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x10]\n' +
+      '\tbx\tlr\n.L6:\n\t.word\tgPtr\n\t.word\tgK\n';
+    expect(run('f', body)).toContain('((u8 *)((u32)(u8 *)gPtr + (u32)(u8 *)gK))[16]');
+  });
+
+  test('a global left of the integer sum is added as an integer, through a byte pointer', () => {
+    // agbcc -O2 of `extern struct S *gPtr; extern u16 *gOther; u8 x1(void) { return *(u8 *)((u32)gOther +
+    // (u32)gPtr); }`. Bare, `gOther + (u32)gPtr` scales gPtr's value by sizeof(u16) in the project's
+    // file, and `(u32)gOther` converts a `float gOther`.
+    const body =
+      '\tldr\tr0, .L3\n\tldr\tr0, [r0]\n\tldr\tr1, .L3+0x4\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n' +
+      '\tldr\tr1, .L3+0x4\n\tldr\tr1, [r1]\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n\tbx\tlr\n.L3:\n\t.word\tgOther\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('*(u8 *)((u32)(u8 *)gOther + (u32)gPtr)');
+  });
+
+  test('added to a value loaded through an address, the value is the base', () => {
+    // agbcc -O2 of `extern struct S *gPtr; extern u16 gTbl[]; u8 b1(s32 i) { return *((u8 *)gPtr +
+    // gTbl[i] + 16); }`. The `&gTbl` sits under the load: the side is a u16, not an address.
+    const body =
+      '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, r1\n\tldrh\tr1, [r0]\n\tldr\tr0, .L3+0x4\n\tldr\tr0, [r0]\n' +
+      '\tadd\tr0, r0, r1\n\tldrb\tr0, [r0, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgTbl\n\t.word\tgPtr\n';
+    const named = mapOf([[0x03001000, { name: 'gTbl', kind: 'data' }]]);
+    expect(run('f', body, named)).toContain('((u8 *)((u32)(u8 *)gPtr + ((u16 *)&gTbl)[a0]))[16]');
+  });
+
+  test('assigned to a temp, the value is cast to the temp type', () => {
+    // v0 = gPtr held across a call. The project's `struct S *` is not `u8 *`, and assigning one
+    // to the other is the incompatible-pointer warning a -Werror build stops on.
+    const body =
+      '\tpush\t{r4, lr}\n\tldr\tr0, .L1\n\tldr\tr4, [r0]\n\tbl\tg\n\tldr\tr1, .L2\n\tadds\tr0, r4, r1\n\tldrb\tr0, [r0]\n' +
+      '\tldrb\tr1, [r4, #8]\n\tadds\tr0, r0, r1\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
+      '.L1:\n\t.word\tgPtr\n.L2:\n\t.word\t0x7fb3\n';
+    expect(run('f', body)).toContain('v0 = (u8 *)gPtr;');
+  });
+
+  test('a cast-then-add sum assigned to a wider pointer temp is cast to the temp type', () => {
+    // each arm leaves gPtr + K in one register and the join stores a halfword through it: the
+    // temp is `u16 *`, and the arms' `(u8 *)gPtr + K` is a `u8 *` chosen for the address alone
+    const body =
+      '\tldr\tr3, .L1\n\tldr\tr1, [r3]\n\tldrb\tr0, [r1, #1]\n\tcmp\tr0, #0\n\tbeq\t.La\n\tldr\tr2, .L2\n\tadds\tr1, r1, r2\n' +
+      '\tb\t.Lj\n.La:\n\tldr\tr2, .L3\n\tadds\tr1, r1, r2\n.Lj:\n\tstrh\tr0, [r1]\n\tbx\tlr\n' +
+      '.L1:\n\t.word\tgPtr\n.L2:\n\t.word\t0xdd8\n.L3:\n\t.word\t0xdda\n';
+    const src = run('f', body);
+    expect(src).toContain('v1 = (u16 *)((u8 *)gPtr + 3544);');
+    expect(src).toContain('v1 = (u16 *)((u8 *)gPtr + 3546);');
+  });
+
+  test('a runtime index added to the value is cast-then-add when the IR types the sum a pointer', () => {
+    // agbcc -O2 of `extern struct Big *gPtr; u8 b1(s32 x) { return *((u8 *)gPtr + x + 0x10); }`.
+    // Neither load is typed a pointer, but the sum is, and with `x` an integer the integer sum is
+    // the asm's address whichever operand the source held as the pointer.
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tadd\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('((u8 *)((u32)(u8 *)gPtr + a0))[16]');
+  });
+
+  test('a global inside the runtime offset is added as an integer too', () => {
+    // agbcc -O2 of `extern struct S *gPtr; extern u16 *gW; u8 n1(int a) { sink(gPtr->a); return
+    // *(u8 *)((u32)gPtr + (a + (u32)gW)); }`. `(u32)gPtr + (a0 + gW)` is pointer arithmetic on gW
+    // in the project's file, and scales a0 by sizeof(u16).
+    const body =
+      '\tpush\t{r4, r5, lr}\n\tadd\tr4, r0, #0\n\tldr\tr5, .L3\n\tldr\tr0, [r5]\n\tldr\tr0, [r0]\n\tbl\tsink\n' +
+      '\tldr\tr1, [r5]\n\tldr\tr0, .L3+0x4\n\tldr\tr0, [r0]\n\tadd\tr4, r4, r0\n\tadd\tr1, r1, r4\n\tldrb\tr0, [r1]\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n\t.word\tgW\n';
+    expect(run('f', body)).toContain('*(u8 *)((u32)gPtr + (a0 + (u32)(u8 *)gW))');
+  });
+
+  test('a runtime offset right of the value is added as an integer, in the order the asm adds', () => {
+    // mwcc_242_81 -O4 of `extern struct S *gPtr; extern u32 gU; u8 i3(void) { sink(gPtr->a); return
+    // *(u8 *)((u32)gPtr + gU); }`: `lbzx r3, r3, r0` adds gPtr first. CodeWarrior compiles
+    // `(u8 *)gPtr + gU` index first, under every declaration of gPtr.
+    const i3 =
+      '00000000 <i3>:\n   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n   8:\tstw     r0,20(r1)\n' +
+      '   c:\tlwz     r3,0(0)\n\t\t\tc: R_PPC_EMB_SDA21\tgPtr\n  10:\tlwz     r3,0(r3)\n' +
+      '  14:\tbl      14 <i3+0x14>\n\t\t\t14: R_PPC_REL24\tsink\n  18:\tlwz     r3,0(0)\n\t\t\t18: R_PPC_EMB_SDA21\tgPtr\n' +
+      '  1c:\tlwz     r0,0(0)\n\t\t\t1c: R_PPC_EMB_SDA21\tgU\n  20:\tlbzx    r3,r3,r0\n  24:\tlwz     r0,20(r1)\n' +
+      '  28:\tmtlr    r0\n  2c:\taddi    r1,r1,16\n  30:\tblr\n';
+    const src = decompile('i3', i3, PPC_MWCC).source;
+    expect(src).toContain('*(u8 *)((u32)gPtr + (u32)(u8 *)gU)');
+    expect(src).not.toContain('*((u8 *)gPtr +');
+  });
+
+  test('the /reread-globals candidate adds a runtime offset as an integer too', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase; extern enum E gE; u32 a4(int n) { u32 s = *(gBase + gE);
+    // gE = (enum E)n; gC = gB2; return s + *(gBase + gE); }`: both `lbzx` add gBase first.
+    const a4 =
+      '00000000 <a4>:\n   0:\tlwz     r5,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tlwz     r4,0(0)\n' +
+      '\t\t\t4: R_PPC_EMB_SDA21\tgE\n   8:\tlwz     r0,0(0)\n\t\t\t8: R_PPC_EMB_SDA21\tgB2\n   c:\tlbzx    r4,r5,r4\n' +
+      '  10:\tstw     r3,0(0)\n\t\t\t10: R_PPC_EMB_SDA21\tgE\n  14:\tstw     r0,0(0)\n\t\t\t14: R_PPC_EMB_SDA21\tgC\n' +
+      '  18:\tlbzx    r0,r5,r3\n  1c:\tadd     r3,r4,r0\n  20:\tblr\n';
+    const reread = enumerateCandidates('a4', a4, PPC_MWCC).filter((c) => hasVariation(c.variations, 'reread-globals'));
+    expect(reread.length).toBeGreaterThan(0);
+    for (const c of reread) {
+      expect(c.source).toContain('*(u8 *)((u32)(u8 *)gBase + a0)');
+      expect(c.source).not.toContain('*((u8 *)gBase +');
+    }
+  });
+
+  test('a global the byte sum subtracts stays the pointer difference when an integer takes the sum', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase, *gB2; s32 d1(u32 x) { u32 v = *gBase;
+    // return (gBase + x) - gB2 + v; }`. A word, `gB2` declared `u32 gB2[4]` would subtract its address.
+    const d1 =
+      '00000000 <d1>:\n   0:\tlwz     r5,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tlwz     r4,0(0)\n' +
+      '\t\t\t4: R_PPC_EMB_SDA21\tgB2\n   8:\tadd     r0,r5,r3\n   c:\tlbz     r3,0(r5)\n  10:\tsubf    r0,r4,r0\n' +
+      '  14:\tadd     r3,r3,r0\n  18:\tblr\n';
+    expect(decompile('d1', d1, PPC_MWCC).source).toContain('(u32)((u8 *)((u32)gBase + a0) - gB2)');
+  });
+
+  test('a difference of globals the byte sum subtracts goes words', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase; extern u16 *gB2, *gB3; s32 k1(u32 x, u32 y) {
+    // u32 v = *gBase; return (s32)(y * 3 + ((u32)(gBase + x) - ((u32)gB2 - (u32)gB3))) + v; }`.
+    // Bare, `gB2 - gB3` is an element count under the `u16 *` declarations.
+    const k1 =
+      '00000000 <k1>:\n   0:\tlwz     r7,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tmulli   r6,r4,3\n' +
+      '   8:\tlwz     r5,0(0)\n\t\t\t8: R_PPC_EMB_SDA21\tgB3\n   c:\tlwz     r4,0(0)\n\t\t\tc: R_PPC_EMB_SDA21\tgB2\n' +
+      '  10:\tadd     r0,r7,r3\n  14:\tlbz     r7,0(r7)\n  18:\tsubf    r3,r5,r4\n  1c:\tsubf    r0,r3,r0\n' +
+      '  20:\tadd     r3,r0,r7\n  24:\tadd     r3,r6,r3\n  28:\tblr\n';
+    expect(decompile('k1', k1, PPC_MWCC).source).toContain('((u32)(u8 *)gB2 - (u32)(u8 *)gB3)');
+    // The same difference less a byte pointer, with no integer taking the sum.
+    const k3 =
+      '00000000 <k3>:\n   0:\tlwz     r0,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tlwz     r4,0(0)\n' +
+      '\t\t\t4: R_PPC_EMB_SDA21\tgB3\n   8:\tlwz     r5,0(0)\n\t\t\t8: R_PPC_EMB_SDA21\tgB2\n   c:\tlbz     r6,0(r0)\n' +
+      '  10:\tadd     r0,r0,r3\n  14:\tsubf    r4,r4,r5\n  18:\tsubf    r3,r4,r0\n  1c:\tadd     r3,r3,r6\n  20:\tblr\n';
+    expect(decompile('k3', k3, PPC_MWCC).source).toContain(
+      '(u8 *)((u32)gBase + a0) - ((u32)(u8 *)gB2 - (u32)(u8 *)gB3)',
+    );
+  });
+
+  test('a global a byte sum is taken from goes a word when the sum goes an integer', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase, *gB2; s32 e4(u32 x) { u32 v = *gBase;
+    // return (s32)((u32)gB2 - (u32)(gBase + x) + v); }`. Bare, `gB2` less an integer is pointer
+    // arithmetic under a pointer declaration.
+    const e4 =
+      '0000007c <e4>:\n  7c:\tlwz     r4,0(0)\n\t\t\t7c: R_PPC_EMB_SDA21\tgBase\n  80:\tlwz     r0,0(0)\n' +
+      '\t\t\t80: R_PPC_EMB_SDA21\tgB2\n  84:\tadd     r3,r4,r3\n  88:\tlbz     r4,0(r4)\n  8c:\tsubf    r0,r3,r0\n' +
+      '  90:\tadd     r3,r4,r0\n  94:\tblr\n';
+    expect(decompile('e4', e4, PPC_MWCC).source).toContain('((u32)(u8 *)gB2 - ((u32)gBase + a0))');
+  });
+
+  test('a byte global added to a runtime integer is the index, and is not cast', () => {
+    // agbcc -O2 of `extern u8 gIdx; u8 bi(u8 *p) { return p[gIdx + 0x10]; }`. A pointer is a word, so
+    // `(u8 *)gIdx` would be the cast from a narrower integer agbcc warns about
+    const body =
+      '\tldr\tr1, .L3\n\tldrb\tr1, [r1]\n\tadd\tr1, r1, r0\n\tldrb\tr0, [r1, #0x10]\n\tbx\tlr\n.L3:\n\t.word\tgIdx\n';
+    expect(run('f', body)).toContain('((u8 *)(gIdx + a0))[16]');
+  });
+
+  test('a global added to an address is the index, and is not cast', () => {
+    // agbcc -O2 of `extern u8 gIdx; extern u8 gArr[]; u8 ix(void) { return gArr[gIdx]; }`. The sum
+    // is a pointer, but `&gArr` is its base: `[(u8 *)gIdx]` is a pointer subscript agbcc rejects.
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr0, .L3+0x4\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r1\n\tldrb\tr0, [r0]\n\tbx\tlr\n' +
+      '.L3:\n\t.word\tgArr\n\t.word\tgIdx\n';
+    const src = run('f', body);
+    expect(src).toContain('[gIdx]');
+    expect(src).not.toContain('(u8 *)gIdx');
+  });
+
+  test('added to a pointer temp, the value is added as an integer', () => {
+    // agbcc -O2 of `extern u8 *gA; extern u16 *gArr; void sink(u32); s32 pp(void) { u8 x = *gA;
+    // u16 *q = gArr; sink(q[1]); sink(q[2]); return *(u8 *)((u32)q + (u32)gA) + x; }`: a second
+    // `(u8 *)` would make the sum a pointer plus a pointer
+    const body =
+      '\tpush\t{r4, r5, r6, lr}\n\tldr\tr5, .L3\n\tldr\tr0, [r5]\n\tldrb\tr6, [r0]\n\tldr\tr0, .L3+0x4\n\tldr\tr4, [r0]\n' +
+      '\tldrh\tr0, [r4, #0x2]\n\tbl\tsink\n\tldrh\tr0, [r4, #0x4]\n\tbl\tsink\n\tldr\tr0, [r5]\n\tadd\tr4, r4, r0\n' +
+      '\tldrb\tr0, [r4]\n\tadd\tr0, r0, r6\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgA\n\t.word\tgArr\n';
+    const src = run('f', body);
+    expect(src).toContain('(u8 *)v1 + (u32)gA');
+    expect(src).not.toContain('(u8 *)gA)');
+  });
+
+  test('stored back into its own cell, the sum is assigned through void *', () => {
+    // agbcc -O2 of `extern struct S *gPtr; u8 st(void) { u8 r = *(u8 *)gPtr; gPtr = (struct S *)((u8
+    // *)gPtr + 4); return r; }`
+    const body =
+      '\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tldrb\tr0, [r2]\n\tadd\tr2, r2, #0x4\n\tstr\tr2, [r1]\n\tbx\tlr\n' +
+      '.L3:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('gPtr = (void *)((u8 *)gPtr + 4);');
+  });
+
+  test('returned as an integer, the cast-then-add sum is cast to the return type', () => {
+    // agbcc -O2 of `extern struct S *gPtr; s32 rt(void) { sink(*(u8 *)gPtr); return (u32)gPtr + 16; }`:
+    // CodeWarrior rejects a `u8 *` returned as an `int`, and the cast keeps the sum's bytes
+    const body =
+      '\tpush\t{r4, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tldrb\tr0, [r0]\n\tbl\tsink\n\tldr\tr0, [r4]\n\tadd\tr0, #0x10\n' +
+      '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', body)).toContain('return (s32)((u8 *)gPtr + 16);');
+  });
+
+  test('compared with an integer, the cast-then-add sum is compared as a u32', () => {
+    // agbcc -O2 of `extern struct S *gP; void e3(u32 a0) { gP->a = 1; ext(); if ((u32)gP + 16 ==
+    // a0) ext(); }`: IDO 7.1 rejects `a0 == (u8 *)gP + 16` ("Unacceptable operand of == or !=")
+    const body =
+      '\tpush\t{r4, r5, lr}\n\tadd\tr5, r0, #0\n\tldr\tr4, .L4\n\tldr\tr1, [r4]\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n' +
+      '\tbl\text\n\tldr\tr0, [r4]\n\tadd\tr0, r0, #0x10\n\tcmp\tr0, r5\n\tbne\t.L3\n\tbl\text\n.L3:\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.word\tgP\n';
+    const prototypes = prototypesFromContext('void ext(void); void e3(unsigned int a0);', 'c');
+    const src = decompile('e3', asmOf('e3', body), ARMV4T_AGBCC, { prototypes }).source;
+    expect(src).toContain('if ((u32)((u8 *)gP + 16) == a0)');
+  });
+
+  test('under a non-additive or unary operator, the value is an integer', () => {
+    // agbcc -O2 of `u32 an(void) { u8 r = *(u8 *)gPtr; return r + ((u32)gPtr & 3); }` and of
+    // `s32 ng(void) { sink(*(u8 *)gPtr); return -(s32)gPtr; }`, over `extern struct S *gPtr`
+    const and =
+      '\tldr\tr0, .L3\n\tldr\tr1, [r0]\n\tmov\tr0, #0x3\n\tand\tr0, r0, r1\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n' +
+      '\tbx\tlr\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', and)).toContain('3 & (u32)gPtr');
+    const neg =
+      '\tpush\t{r4, lr}\n\tldr\tr4, .L3\n\tldr\tr0, [r4]\n\tldrb\tr0, [r0]\n\tbl\tsink\n\tldr\tr0, [r4]\n' +
+      '\tneg\tr0, r0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgPtr\n';
+    expect(run('f', neg)).toContain('-(s32)gPtr');
+  });
+
+  test('under a signed compare, the cast-then-add sum is compared as an s32', () => {
+    // agbcc -O2 of `extern struct Big *gBig; s32 cmpS(s32 x) { u8 a = gBig->pad[0]; if
+    // ((s32)&gBig->pad[0x200] < x) return a; return 0; }`: the asm branches `blt`, and the bare
+    // `(u8 *)gBig + 512` against an `int` compiles `bcs`
+    const body =
+      '\tpush\t{lr}\n\tldr\tr1, .L5\n\tldr\tr1, [r1]\n\tldrb\tr2, [r1]\n\tmov\tr3, #0x80\n\tlsl\tr3, r3, #0x2\n' +
+      '\tadd\tr1, r1, r3\n\tcmp\tr1, r0\n\tblt\t.L3\n\tmov\tr0, #0x0\n\tb\t.L4\n.L5:\n\t.word\tgBig\n' +
+      '.L3:\n\tadd\tr0, r2, #0\n.L4:\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(run('f', body)).toContain('(s32)((u8 *)gBig + (128 << 2))');
   });
 });
 

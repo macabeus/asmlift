@@ -200,6 +200,18 @@ export const TARGET_BEHAVIOR_READINGS: { readonly [B in GatingBehavior]: TargetB
         'the span is how far one instruction can add to a base register, a fact of the instruction set that no pair of spellings decides',
     },
   },
+  pointerIntConversionIsFree: {
+    reads: 'builds a word global read or stored through a pointer conversion into the integer spelling',
+    witness: {
+      compiler: 'agbcc',
+      unit: 'extern u32 g; extern u32 gLimit; void sink(void); u32 example(u32 a) { @ }',
+      spellings: [
+        '*(s32 *)g = a; g = (void *)((u8 *)g + 4); sink(); return (gLimit ^ (u32)g) < 1;',
+        '*(s32 *)g = a; g = g + 4; sink(); return (gLimit ^ g) < 1;',
+      ],
+      compiles: 'same',
+    },
+  },
   foldsPointerAdvance: {
     reads: 'folds a stepped pointer back into an offset load',
     witness: {
@@ -1642,6 +1654,33 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     },
     implementedIn: l3('narrowdecl'),
     seeAlso: ['narrow-decl'],
+  },
+  'int-cell': {
+    title: 'Global stored a pointer, spelled as an integer',
+    summary: 'a global the function stores a pointer into is written as an integer: `g = g + K`, no conversions',
+    detail:
+      'A global the function stores a pointer into is written as a pointer by default: `g = (void *)((u8 *)g + K)` ' +
+      'for the byte the assembly addressed, `(u32)g` where the value is used as an integer, and a `void *` ' +
+      'declaration. A project that declares the global an integer wrote `g = g + K` and no conversion, and a ' +
+      'pointer declaration scales that offset instead, so which one is right depends on a declaration the ' +
+      'assembly does not show. Published only when the candidate matches byte for byte; otherwise it is withheld.',
+    compilerBehavior:
+      'CodeWarrior rejects a pointer stored into an integer global; IDO allocates registers differently around ' +
+      'a `(u32)` conversion of one.',
+    offeredWhen: {
+      when:
+        'A store of a `void *` value into a global no declaration in the function types and the symbol map ' +
+        'declares, if at all, an integer.',
+      decidedBy: { symbol: 'integerCells', file: l3('intcell') },
+    },
+    example: {
+      compiler: 'ido',
+      unit: 'extern u32 g; extern u32 gLimit; void sink(void);\nu32 example(u32 a) { @ }',
+      before: '*(s32 *)g = a; g = (void *)((u8 *)g + 4); sink(); return (gLimit ^ (u32)g) < 1;',
+      after: '*(s32 *)g = a; g = g + 4; sink(); return (gLimit ^ g) < 1;',
+      note: 'under the integer declaration the `after` spelling was written against',
+    },
+    implementedIn: l3('intcell'),
   },
 
   // ── symbol map ──────────────────────────────────────────────────────────────────────────────

@@ -425,11 +425,16 @@ export interface SFn {
    *  `TargetDescription.compilerBehaviors`. ABSENT means the direction is unknown for this target
    *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
   slotOrder?: 'ascending' | 'descending';
-  /** The emitted C is compiled AS C++, and these are each declared callee's parameter types (an
-   *  entry the printer cannot spell is `undefined`). An emission policy like `slotOrder`: C converts
-   *  any pointer or integer argument to its parameter type, C++ refuses three of those conversions,
-   *  and the printer spells the cast for exactly those (backend/cfamily.ts `argConversion`). */
+  /** Each declared callee's parameter types (an entry the printer cannot spell is `undefined`):
+   *  what an argument converts to. Read by the C-family printer where `dialect` says C++, which
+   *  refuses three conversions C makes implicitly (backend/cfamily.ts `argConversion`), and by the
+   *  pointer-cell conversions in every dialect (l3/ptrcell.ts). */
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
+  /** Each declared callee's return type as the project spells it, never printed: whether a call a
+   *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
+  declaredReturns?: Readonly<Record<string, string>>;
+  /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
+  dialect?: 'c++';
 }
 
 /** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is
