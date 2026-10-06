@@ -51,6 +51,15 @@ const F1 =
   '\tldr\tr1, .L3+0x8\n\tldr\tr0, [r5]\n\tadd\tr0, r0, #0x4\n\tstr\tr0, [r1]\n\tmov\tr0, #0x0\n\tpop\t{r4, r5}\n' +
   '\tpop\t{r1}\n\tbx\tr1\n.L3:\n\t.word\tgCur\n\t.word\tgSave\n\t.word\tgOut\n';
 
+// agbcc -O2 of `extern u8 *gCur, *gSave, *gP2; u32 u3(void) { u32 v = *(u32 *)(gCur + 4); gCur = gCur + 8;
+//   use(v); gSave = gCur; use(1); if (gSave + 4 == gP2) use(2); return 0; }`
+const U3 =
+  'u3:\n\tpush\t{r4, r5, lr}\n\tldr\tr4, .L10\n\tldr\tr1, [r4]\n\tldr\tr0, [r1, #0x4]\n\tadd\tr1, r1, #0x8\n' +
+  '\tstr\tr1, [r4]\n\tbl\tuse\n\tldr\tr5, .L10+0x4\n\tldr\tr0, [r4]\n\tstr\tr0, [r5]\n\tmov\tr0, #0x1\n\tbl\tuse\n' +
+  '\tldr\tr0, [r5]\n\tadd\tr0, r0, #0x4\n\tldr\tr1, .L10+0x8\n\tldr\tr1, [r1]\n\tcmp\tr0, r1\n\tbne\t.L9\t@cond_branch\n' +
+  '\tmov\tr0, #0x2\n\tbl\tuse\n.L9:\n\tmov\tr0, #0x0\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n' +
+  '.L10:\n\t.word\tgCur\n\t.word\tgSave\n\t.word\tgP2\n';
+
 // agbcc -O2 of `struct N *GetNode(void); u32 k1(void) { u32 v = gCur->v; gCur = gCur + 1; use(v);
 //   if (gCur == GetNode()) use(1); return 0; }`
 const K1 =
@@ -111,11 +120,19 @@ describe('legalizePointerCells', () => {
     expect(decls).not.toContain('extern void *gLim;');
   });
 
-  test('converts a cell a sum reads, stored into a global no cell is', () => {
+  test('takes a global stored a cell moved by integers for a cell, stored in bytes', () => {
     const c = defaultOf('f1', F1, USE);
     expect(c.source).toContain('gSave = gCur;');
-    expect(c.source).toContain('gOut = (u32)gSave + 4;');
-    expect(renderDeclarations(c.symbolRefs!)).toContain('extern void *gSave;\n');
+    expect(c.source).toContain('gOut = (void *)((u8 *)gSave + 4);');
+    const decls = renderDeclarations(c.symbolRefs!);
+    expect(decls).toContain('extern void *gSave;\n');
+    expect(decls).toContain('extern void *gOut;\n');
+  });
+
+  test('leaves a global compared with a cell moved by integers bare, and declares it a pointer', () => {
+    const c = defaultOf('u3', U3, USE);
+    expect(c.source).toContain('if ((u8 *)gSave + 4 == gP2) use(2);');
+    expect(renderDeclarations(c.symbolRefs!)).toContain('extern void *gP2;\n');
   });
 
   test('leaves a cell compared with a call the prototype says returns a pointer bare', () => {

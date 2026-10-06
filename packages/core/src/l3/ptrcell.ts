@@ -15,7 +15,7 @@
 // l3/symbol-refs.ts's header gives: a rewrite that drops the store must drop the fact with it.
 import { type IrType, T } from '../ir/types';
 import { declaredWidth } from '../proto';
-import { type Expr, type SFn, type Stmt, mapExprChildren, stmtChildren, walkExprs } from './ast';
+import { type Expr, type SFn, type Stmt, exprChildren, mapExprChildren, stmtChildren, walkExprs } from './ast';
 import { declaredTypes, exprCType } from './typing';
 
 /** The bare name an `assign` stores a `(void *)` value into: a pointer cell, when no local binds
@@ -40,15 +40,31 @@ const assigns = (body: Stmt[]): Extract<Stmt, { k: 'assign' }>[] => {
   return out;
 };
 
-/** The globals `body` stores a pointer into: a `(void *)` store, or the bare value of another
- *  one. */
+/** Whether `e` reads a variable `pick` takes. */
+const readsVar = (e: Expr, pick: (name: string) => boolean): boolean =>
+  (e.k === 'var' && pick(e.name)) || exprChildren(e).some((c) => readsVar(c, pick));
+
+/** A cell's value moved by integers (`g + 4`, `g + a0 - 8`): pointer arithmetic, a pointer as the
+ *  cell is. Whatever is added is an integer, as no pointer is; what is subtracted is a constant,
+ *  since a pointer's difference is no pointer. */
+export function cellOffset(e: Expr, cells: ReadonlySet<string>): boolean {
+  if (e.k !== 'bin' || (e.op !== '+' && e.op !== '-')) {
+    return false;
+  }
+  const base = (x: Expr): boolean => (x.k === 'var' && cells.has(x.name)) || cellOffset(x, cells);
+  const offset = (x: Expr): boolean => !readsVar(x, (n) => e.op === '-' || cells.has(n));
+  return (base(e.l) && offset(e.r)) || (e.op === '+' && base(e.r) && offset(e.l));
+}
+
+/** The globals `body` stores a pointer into: a `(void *)` store, or the bare value of another one,
+ *  or that value moved by integers (`cellOffset`). */
 export function pointerCells(body: Stmt[], isGlobal: (name: string) => boolean): Set<string> {
   const stores = assigns(body).filter((s) => isGlobal(s.name));
   const out = new Set(stores.filter((s) => pointerCellStore(s) !== undefined).map((s) => s.name));
   for (let grew = true; grew;) {
     grew = false;
     for (const s of stores) {
-      if (!out.has(s.name) && s.value.k === 'var' && out.has(s.value.name)) {
+      if (!out.has(s.name) && ((s.value.k === 'var' && out.has(s.value.name)) || cellOffset(s.value, out))) {
         out.add(s.name);
         grew = true;
       }
@@ -57,7 +73,8 @@ export function pointerCells(body: Stmt[], isGlobal: (name: string) => boolean):
   return out;
 }
 
-/** The bare globals a pointer cell meets bare: compared with one, or stored into one. */
+/** The bare globals a pointer cell meets bare: compared with one or with its `cellOffset`, or
+ *  stored into one. */
 function meetsBare(body: Stmt[], isGlobal: (name: string) => boolean, cells: ReadonlySet<string>): Set<string> {
   const out = new Set<string>();
   const meets = (e: Expr): void => {
@@ -65,7 +82,7 @@ function meetsBare(body: Stmt[], isGlobal: (name: string) => boolean, cells: Rea
       out.add(e.name);
     }
   };
-  const isCell = (e: Expr): boolean => e.k === 'var' && cells.has(e.name);
+  const isCell = (e: Expr): boolean => (e.k === 'var' && cells.has(e.name)) || cellOffset(e, cells);
   for (const s of assigns(body)) {
     if (cells.has(s.name)) {
       meets(s.value);
@@ -117,6 +134,8 @@ interface SlotRules {
   comparedGlobal: (e: Expr) => Expr;
   /** A value stored into a cell. */
   intoCell: (e: Expr) => Expr;
+  /** A `cellOffset` a pointer meets. */
+  pointerOffset: (e: Expr) => Expr;
   /** A global stored into that is no cell, which is an integer slot. */
   storedGlobal: (name: string) => void;
 }
@@ -129,13 +148,15 @@ interface SlotRules {
 function mapIntegerSlots(sfn: SFn, cells: ReadonlySet<string>, rules: SlotRules): SFn {
   const isGlobal = globalOf(sfn);
   const vt = declaredTypes(sfn);
-  const isCell = (e: Expr): boolean => e.k === 'var' && cells.has(e.name);
+  const isCell = (e: Expr): boolean => (e.k === 'var' && cells.has(e.name)) || cellOffset(e, cells);
   const bareGlobal = (e: Expr): boolean => e.k === 'var' && isGlobal(e.name) && !cells.has(e.name);
   const compare = (x: Expr, other: Expr): Expr =>
     isCell(other) && bareGlobal(x) && !rules.pointerTyped(x)
       ? rules.comparedGlobal(x)
-      : rules.pointerTyped(other)
-        ? x
+      : rules.pointerTyped(other) || cellOffset(other, cells)
+        ? cellOffset(x, cells)
+          ? rules.pointerOffset(x)
+          : x
         : rules.int(x);
   const expr = (e0: Expr): Expr => {
     const e = mapExprChildren(e0, expr);
@@ -222,7 +243,7 @@ const integerSum = (e: Expr, vt: (name: string) => IrType | undefined): e is Ext
   exprCType(e.l, vt)?.kind !== 'ptr' &&
   exprCType(e.r, vt)?.kind !== 'ptr';
 
-/** The globals a pointer cell meets bare (compared with it, or stored into it) that hold a pointer
+/** The globals a pointer cell meets bare (compared with it or its offset, or stored into it) that hold a pointer
  *  too: the candidate's own world declares each `void *` beside the cells, and they are left as
  *  spelled, since converting one would convert whatever the project declares it, where bare a
  *  float, an array or a function meets the cell as a constraint violation.
@@ -253,6 +274,7 @@ export function pointerPartners(sfn: SFn): Set<string> {
     intArg: int,
     comparedGlobal: int,
     intoCell: (e) => e,
+    pointerOffset: (e) => e,
     storedGlobal: (name) => {
       if (meets.has(name)) {
         read.add(name);
@@ -266,10 +288,12 @@ export function pointerPartners(sfn: SFn): Set<string> {
  *  integer stored into one converted to a pointer.
  *
  *  A cell the body stores a pointer into is a pointer under every declaration that store compiles
- *  against, so the cell's integer readers (`return g;`, `if (g >= a0)`, `v0 = g;`, `g + 4` stored
- *  into an integer, an integer parameter's argument) and its integer writers (`g = a0;`) need the
+ *  against, so the cell's integer readers (`return g;`, `if (g >= a0)`, `v0 = g;`, `g + 4` returned
+ *  as an integer, an integer parameter's argument) and its integer writers (`g = a0;`) need the
  *  conversion C leaves implicit and CodeWarrior and IDO reject: `(u32)g`, `g = (void *)a0`. The
- *  conversion of a word is no instruction, so the bytes are the implicit one's.
+ *  conversion of a word is no instruction, so the bytes are the implicit one's. A cell's offset
+ *  (`cellOffset`) stored into a cell or compared with a pointer is the pointer it is, spelled in
+ *  bytes: `gOut = (void *)((u8 *)g + 4)`, `(u8 *)g + 4 == gP`.
  *
  *  SCOPE: a use whose context states an integer type (`mapIntegerSlots`); elsewhere the use is left
  *  as the structurer spelled it. A truth test, a sum that renders a pointer (the structurer's own
@@ -277,7 +301,10 @@ export function pointerPartners(sfn: SFn): Set<string> {
  *  comparison with a pointer (a call by its declared return, `SFn.declaredReturns`), with 0 or with
  *  a partner (`pointerPartners`) are left alone. A global compared with the cell that is no partner
  *  goes `(u32)(u8 *)g` beside the cell's `(u32)g`: under a float declaration that is no C, as the
- *  bare comparison was not.
+ *  bare comparison was not. KNOWN GAP: under an array or a function declaration that is the
+ *  global's address, compared with no diagnostic, and IDO takes the integer read that made it no
+ *  partner (`v1 = g`) with none either; structure.ts `globalWord` says why no spelling reads the
+ *  word there.
  *
  *  Run by the C-family backend's `emit` (backend/cfamily.ts), after every respell variation, so a
  *  respell reads the uses as the structurer spelled them and a store it removes takes the
@@ -297,6 +324,14 @@ export function legalizePointerCells(sfn: SFn): SFn {
     sfn.declaredReturns[fn].includes('*');
   const asInt = (e: Expr): Expr =>
     isCell(e) ? { k: 'cast', to: T.u(32), e } : integerSum(e, vt) ? { ...e, l: asInt(e.l), r: asInt(e.r) } : e;
+  // A cell's offset as the pointer it is: byte arithmetic on the cell, `(u8 *)g + 4`, which no
+  // pointee scales and which a `void *` takes.
+  const asBytes = (e: Expr): Expr =>
+    isCell(e)
+      ? { k: 'cast', to: T.ptr(T.u(8)), e }
+      : e.k === 'bin' && cellOffset(e, cells)
+        ? { ...e, l: asBytes(e.l), r: e.op === '+' ? asBytes(e.r) : e.r }
+        : e;
   // The structurer's byte sum on a cell's value (`(u8 *)g + 8`) is a pointer too, which an integer
   // parameter takes converted as a bare cell does; the backend converts it at every other integer
   // slot (`legalizePointerWrites`).
@@ -315,7 +350,8 @@ export function legalizePointerCells(sfn: SFn): SFn {
     intArg: (e) =>
       e.k === 'bin' && cellSum(e) && exprCType(e, vt)?.kind === 'ptr' ? { k: 'cast', to: T.u(32), e } : asInt(e),
     comparedGlobal: (e) => ({ k: 'cast', to: T.u(32), e: { k: 'cast', to: T.ptr(T.u(8)), e } }),
-    intoCell: (e) => ({ k: 'cast', to: T.ptr(T.void()), e }),
+    intoCell: (e) => ({ k: 'cast', to: T.ptr(T.void()), e: asBytes(e) }),
+    pointerOffset: asBytes,
     storedGlobal: () => {},
   });
 }
