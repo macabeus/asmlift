@@ -751,14 +751,14 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     }
   });
 
-  test('a global the byte sum subtracts goes a word when an integer takes the sum', () => {
+  test('a global the byte sum subtracts stays the pointer difference when an integer takes the sum', () => {
     // mwcc_242_81 -O4 of `extern u8 *gBase, *gB2; s32 d1(u32 x) { u32 v = *gBase;
-    // return (gBase + x) - gB2 + v; }`. Bare, `gB2` is a `u8 *` subtracted from an integer.
+    // return (gBase + x) - gB2 + v; }`. A word, `gB2` declared `u32 gB2[4]` would subtract its address.
     const d1 =
       '00000000 <d1>:\n   0:\tlwz     r5,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tlwz     r4,0(0)\n' +
       '\t\t\t4: R_PPC_EMB_SDA21\tgB2\n   8:\tadd     r0,r5,r3\n   c:\tlbz     r3,0(r5)\n  10:\tsubf    r0,r4,r0\n' +
       '  14:\tadd     r3,r3,r0\n  18:\tblr\n';
-    expect(decompile('d1', d1, PPC_MWCC).source).toContain('((u32)gBase + a0 - (u32)(u8 *)gB2)');
+    expect(decompile('d1', d1, PPC_MWCC).source).toContain('(u32)((u8 *)((u32)gBase + a0) - gB2)');
   });
 
   test('a byte global added to a runtime integer is the index, and is not cast', () => {

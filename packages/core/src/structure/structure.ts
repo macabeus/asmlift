@@ -2597,15 +2597,23 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         castGlobal(x.r, undeclared) ||
         isByteGlobalSum(x.l, undeclared) ||
         isByteGlobalSum(x.r, undeclared)));
-  /** The integer a byte sum is. Every global it adds or subtracts bare goes a word with it: in
-   *  `(u8 *)g + x - gB`, `gB` is the byte count a pointer declaration subtracts, and an integer
-   *  less a pointer is no C. */
+  /** Whether `intWords` makes a word of a global in `x`. */
+  const addsGlobalWord = (x: Expr): boolean =>
+    isUndeclaredGlobalValue(x) ||
+    (x.k === 'bin' && (x.op === '+' || x.op === '-') && (addsGlobalWord(x.l) || addsGlobalWord(x.r)));
+  /** The integer a byte sum is. Every global it adds bare goes a word with it. One it subtracts
+   *  stays the pointer difference, `(u32)((u8 *)g + x - gB)`: the asm's integer under an integer or
+   *  a byte-pointer declaration of `gB`, and no C under a wider pointer, an array, a function or a
+   *  float one, where the word `(u32)(u8 *)gB` would subtract an array's or a function's address. A
+   *  difference has one operand order, so the asm's needs no integer sum. */
   const byteSumAsInt = (x: Expr): Expr =>
     restoredIntSum(x, false) ??
     (castGlobal(x)
       ? globalWord(x.e)
       : x.k === 'bin' && isByteGlobalSum(x)
-        ? { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
+        ? x.op === '-' && !isByteGlobalSum(x.r) && addsGlobalWord(x.r)
+          ? { k: 'cast', to: T.u(32), e: x }
+          : { ...x, l: byteSumAsInt(x.l), r: byteSumAsInt(x.r) }
         : intWords(x));
 
   /** Operands `-`/`~` cannot take as spelled: a rendered pointer, a bare `&gSym`, a pointer
