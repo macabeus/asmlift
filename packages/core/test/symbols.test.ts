@@ -761,6 +761,17 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(decompile('d1', d1, PPC_MWCC).source).toContain('(u32)((u8 *)((u32)gBase + a0) - gB2)');
   });
 
+  test('a global a byte sum is taken from goes a word when the sum goes an integer', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase, *gB2; s32 e4(u32 x) { u32 v = *gBase;
+    // return (s32)((u32)gB2 - (u32)(gBase + x) + v); }`. Bare, `gB2` less an integer is pointer
+    // arithmetic under a pointer declaration.
+    const e4 =
+      '0000007c <e4>:\n  7c:\tlwz     r4,0(0)\n\t\t\t7c: R_PPC_EMB_SDA21\tgBase\n  80:\tlwz     r0,0(0)\n' +
+      '\t\t\t80: R_PPC_EMB_SDA21\tgB2\n  84:\tadd     r3,r4,r3\n  88:\tlbz     r4,0(r4)\n  8c:\tsubf    r0,r3,r0\n' +
+      '  90:\tadd     r3,r4,r0\n  94:\tblr\n';
+    expect(decompile('e4', e4, PPC_MWCC).source).toContain('((u32)(u8 *)gB2 - ((u32)gBase + a0))');
+  });
+
   test('a byte global added to a runtime integer is the index, and is not cast', () => {
     // agbcc -O2 of `extern u8 gIdx; u8 bi(u8 *p) { return p[gIdx + 0x10]; }`. A pointer is a word, so
     // `(u8 *)gIdx` would be the cast from a narrower integer agbcc warns about

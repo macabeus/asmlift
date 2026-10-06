@@ -4175,7 +4175,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           l = restoreTo ? bytePtr(l) : l;
         }
       } else if (op === '-' && ctype(l)?.kind !== 'ptr' && ctype(r)?.kind === 'ptr') {
-        r = intify(r); // int - ptr is not C
+        // int - ptr is not C. A byte sum this rule made integer leaves a global it is taken from a
+        // pointer under a pointer declaration, which the integer would scale; a word, it is the
+        // asm's under any integer or pointer one.
+        if (restoredIntSum(r, false) !== undefined) {
+          l = intWords(l);
+        }
+        r = intify(r);
       }
       // A bare global address `&gSym` under ANY of these operators is never emitted as-is: its C
       // type comes from the PROJECT's own declaration (unknowable here — exprCType types `addr`
