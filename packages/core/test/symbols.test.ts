@@ -761,6 +761,26 @@ describe('a global the IR uses as a pointer, with no declared shape, is spelled 
     expect(decompile('d1', d1, PPC_MWCC).source).toContain('(u32)((u8 *)((u32)gBase + a0) - gB2)');
   });
 
+  test('a difference of globals the byte sum subtracts goes words', () => {
+    // mwcc_242_81 -O4 of `extern u8 *gBase; extern u16 *gB2, *gB3; s32 k1(u32 x, u32 y) {
+    // u32 v = *gBase; return (s32)(y * 3 + ((u32)(gBase + x) - ((u32)gB2 - (u32)gB3))) + v; }`.
+    // Bare, `gB2 - gB3` is an element count under the `u16 *` declarations.
+    const k1 =
+      '00000000 <k1>:\n   0:\tlwz     r7,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tmulli   r6,r4,3\n' +
+      '   8:\tlwz     r5,0(0)\n\t\t\t8: R_PPC_EMB_SDA21\tgB3\n   c:\tlwz     r4,0(0)\n\t\t\tc: R_PPC_EMB_SDA21\tgB2\n' +
+      '  10:\tadd     r0,r7,r3\n  14:\tlbz     r7,0(r7)\n  18:\tsubf    r3,r5,r4\n  1c:\tsubf    r0,r3,r0\n' +
+      '  20:\tadd     r3,r0,r7\n  24:\tadd     r3,r6,r3\n  28:\tblr\n';
+    expect(decompile('k1', k1, PPC_MWCC).source).toContain('((u32)(u8 *)gB2 - (u32)(u8 *)gB3)');
+    // The same difference less a byte pointer, with no integer taking the sum.
+    const k3 =
+      '00000000 <k3>:\n   0:\tlwz     r0,0(0)\n\t\t\t0: R_PPC_EMB_SDA21\tgBase\n   4:\tlwz     r4,0(0)\n' +
+      '\t\t\t4: R_PPC_EMB_SDA21\tgB3\n   8:\tlwz     r5,0(0)\n\t\t\t8: R_PPC_EMB_SDA21\tgB2\n   c:\tlbz     r6,0(r0)\n' +
+      '  10:\tadd     r0,r0,r3\n  14:\tsubf    r4,r4,r5\n  18:\tsubf    r3,r4,r0\n  1c:\tadd     r3,r3,r6\n  20:\tblr\n';
+    expect(decompile('k3', k3, PPC_MWCC).source).toContain(
+      '(u8 *)((u32)gBase + a0) - ((u32)(u8 *)gB2 - (u32)(u8 *)gB3)',
+    );
+  });
+
   test('a global a byte sum is taken from goes a word when the sum goes an integer', () => {
     // mwcc_242_81 -O4 of `extern u8 *gBase, *gB2; s32 e4(u32 x) { u32 v = *gBase;
     // return (s32)((u32)gB2 - (u32)(gBase + x) + v); }`. Bare, `gB2` less an integer is pointer
