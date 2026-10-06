@@ -272,14 +272,14 @@ describe('chooseFrameModel', () => {
     expect(model.refused).toBe(true);
   });
 
-  // the model a writer leaves: `laddr 0` handed to `callee` at argument 0, and stored to the memory
-  // `p` points at when `stored`
-  const modelOf = (callee: string, stored = false) => {
+  // the model a writer leaves: `laddr 0` stored to the memory `p` points at when `stored`, and
+  // handed to `callee` at argument 0 — or, with `passed` false, `p` handed there instead
+  const modelOf = (callee: string, { stored = false, passed = true } = {}) => {
     const p = value();
     const a = laddr(0);
     const blk: Block = {
       params: [p],
-      ops: [a, ...(stored ? [store(p, a.results[0], 0, 4)] : []), call(callee, a.results[0]), ret()],
+      ops: [a, ...(stored ? [store(p, a.results[0], 0, 4)] : []), call(callee, passed ? a.results[0] : p), ret()],
     };
     const { fail, facts, flow, uses } = classify([blk]);
     const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
@@ -290,8 +290,14 @@ describe('chooseFrameModel', () => {
     expect(modelOf('g').onOffer).toBe(true);
   });
 
-  test('refuses a shape where it stands when a writer is stored to memory', () => {
-    const model = modelOf('g', true);
+  // `gp = buf; g(buf);` — the whole-area argument the untyped object is sized by holds the store
+  // beside the call, so the one object holds it too
+  test('offers the one-object answer where an address stored to memory is also handed to a callee', () => {
+    expect(modelOf('g', { stored: true }).onOffer).toBe(true);
+  });
+
+  test('refuses a shape where it stands when an address is only stored to memory', () => {
+    const model = modelOf('g', { stored: true, passed: false });
     expect(model.onOffer).toBe(false);
     expect(() => model.shapeRefused('two widths')).toThrow("cannot lift 'f': address-taken stack local — two widths");
   });
@@ -428,11 +434,23 @@ describe('keepAsOneObject', () => {
     expect(blk.ops.find((op) => op.opcode === 'call')!.operands[1]).toBe(object.results[0]);
   });
 
-  test('refuses a writer whose address is stored to memory', () => {
+  test('refuses a writer whose address is only stored to memory', () => {
     const p = value();
     const a = laddr(0);
     const blk: Block = { params: [p], ops: [a, store(p, a.results[0], 0, 4), call('h', p), ret()] };
-    expect(() => kept(blk)).toThrow('the captured address at [sp,#0) is stored to memory');
+    expect(() => kept(blk)).toThrow(
+      'the captured address at [sp,#0): the address is published rather than passed as an argument',
+    );
+  });
+
+  // `gp = sp; h(x, sp, &sp4);` — stored to memory and handed to the callee, which is held
+  test('keeps an address stored to memory that a callee is also handed', () => {
+    const blk = outParams();
+    const p = value();
+    blk.params.push(p);
+    blk.ops.splice(2, 0, store(p, blk.ops[0].results[0], 0, 4));
+    expect(kept(blk)).toEqual({ policy: 'one-object', sinks: [] });
+    expect(blk.ops[0].attrs).toMatchObject({ count: 8, volatile: true });
   });
 
   test('refuses an address a callee takes at argument 0 with nothing said of what it returns', () => {

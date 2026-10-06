@@ -27,7 +27,8 @@ const symbols = new Map([
   [0x03000000, [{ name: 'gNamed', kind: 'data' as const }]],
   [0x03000100, [{ name: 'gDst', kind: 'data' as const }]],
 ]);
-const DECLINE = /kept as one object cannot hold every writer — the captured address at \[sp,#4\) is stored to memory/;
+const DECLINE =
+  /kept as one object cannot hold every writer — the captured address at \[sp,#4\): the address is published rather than passed as an argument/;
 
 test('the map-less lift declining drops `/raw-globals` and keeps the mapped candidates', () => {
   // CONTROL: the two lifts disagree — the map places `gNamed`, and without it the lift declines

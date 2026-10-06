@@ -123,6 +123,32 @@ describe('M1 — Thumb sp-as-data loud-fails (the MIPS/PPC guard, ported)', () =
     expect(scoreC(src, 'atl2', assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
   });
 
+  // …and a STORE of one of those addresses beside the call is held with it, as it is for one untyped
+  // object (`gp = buf; g(buf);`): the whole-area argument does not ask who else holds the address.
+  // A store into a device's source register adds a reader, never a writer.
+  test.each([
+    [
+      'stored to a global',
+      'pub2',
+      'extern void h(unsigned char*, unsigned char*); extern unsigned char *gp; ' +
+        'void pub2(void){ unsigned char buf[8]; gp = buf; h(buf, buf + 4); }',
+      'extern u8 *gp;\n',
+    ],
+    [
+      'handed to a device as its source',
+      'dev2',
+      'extern void h(unsigned short*, unsigned short*); ' +
+        'void dev2(void){ unsigned short buf[4]; *(volatile unsigned int *)0x40000D4 = (unsigned int)buf; h(buf, buf + 2); }',
+      '',
+    ],
+  ])('two COMPUTED stack addresses a declared callee writes through, one also %s, are one object', (_, fn, c, ctx) => {
+    const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+    const src = decompile(fn, asm, ARMV4T_AGBCC, { prototypes: { h: { params: 2, returnsVoid: true } } }).source;
+    expect(src).toContain('volatile u8 sp0[8];');
+    expect(src).toContain('h(sp0, (u32)sp0 + 4);');
+    expect(scoreC(ctx + src, fn, assembleTarget(asm), TOOLCHAIN_TARGETS.agbcc.canonicalFlags).score).toBe(0);
+  });
+
   test('a COMPUTED stack address declines loud in strict mode', () => {
     const asm = compileTargetAsm(twoLocals, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
     expect(() => decompile('atl2', asm, ARMV4T_AGBCC, { prototypes: unsaid })).toThrow(/address-taken stack local/);

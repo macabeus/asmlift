@@ -322,7 +322,7 @@ export function auditFrameObjects({
   });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
   // THE ONE-OBJECT ANSWER, where it is on offer (one escape reaches without bound, and every
-  // writer is a callee it can hold) and the per-object model does not describe the frame: it
+  // writer is one it can hold) and the per-object model does not describe the frame: it
   // refused a shape, an object sits over a slot, or the unbounded reach meets another object, a
   // slot or a word nothing accounts for. Then what the device may read or the callee may write is
   // kept rather than refused: lift again with the local area as one object in memory
@@ -1203,27 +1203,23 @@ interface ModelChoice {
   shapeRefused(why: string): void;
 }
 
-/** Why a writer of the frame keeps the one-object answer from holding it, or null. A callee handed
- *  an address as an argument is kept: the one object is every byte of the declared area, so what
- *  the callee writes through any address inside it is bytes one declaration owns, at offsets one
- *  array makes adjacent — below them is the outgoing block and above them the saved registers,
- *  neither a local. Not kept are an address STORED to memory, which nothing declares a reader or a
- *  writer of, and a callee's RETURN STORAGE: the struct it returns through a hidden pointer is its
- *  declared type, not bytes of an array — the stamped `sret` call, and a callee taking the address
- *  at argument 0 with nothing said of what it returns. */
+/** Why a writer of the frame keeps the one-object answer from holding it, or null. The one object
+ *  is every byte of the declared area, so what a holder writes through any address inside it is
+ *  bytes one declaration owns, at offsets one array makes adjacent — below them is the outgoing
+ *  block and above them the saved registers, neither a local. That is the whole-area argument the
+ *  untyped object is sized by, and it holds the same escapes here (`wholeAreaEscapeRefusal`). Not
+ *  kept besides is a callee's RETURN STORAGE: the struct it returns through a hidden pointer is its
+ *  declared type, not bytes of an array. */
 function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: string) => boolean): string | null {
   for (const off of uses.mayWrite) {
     const at = `the captured address at [sp,#${off})`;
-    if (!uses.passedToCallee.has(off) || uses.published.has(off)) {
-      return `${at} is stored to memory, and nothing declares who may write through it`;
-    }
     const temp = uses.returnTemps.get(off)?.[0];
     if (temp !== undefined) {
       return `${at} is where \`${temp.attrs.target}\` returns its struct`;
     }
-    const why = hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
+    const why = wholeAreaEscapeRefusal(off, uses, returnsWithoutHiddenPointer);
     if (why !== null) {
-      return `${at} is written by a callee, and ${why}`;
+      return `${at}: ${why}`;
     }
   }
   return null;
@@ -1791,10 +1787,10 @@ function objectShapes({
  *  declared return — and each has a test that fails without it. A fifth return, the precautionary
  *  one marked where it sits, has none.
  *
- *  The last two are about an ESCAPE, and they are asked only of an object that escapes or that
- *  nothing in this function addresses. An object this function indexes and never lets go of is
- *  written and read by its own indexed accesses alone, so the reservation is all there is to
- *  size it by: `u8 a[8]; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i];`. */
+ *  The last two are about an ESCAPE (`wholeAreaEscapeRefusal`), and they are asked only of an
+ *  object that escapes or that nothing in this function addresses. An object this function indexes
+ *  and never lets go of is written and read by its own indexed accesses alone, so the reservation
+ *  is all there is to size it by: `u8 a[8]; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i];`. */
 function notTheWholeArea(
   off: number,
   indexedHere: boolean,
@@ -1824,11 +1820,27 @@ function notTheWholeArea(
       ? null
       : 'the address never leaves this function, so there is no writer of the storage to size it for';
   }
+  return wholeAreaEscapeRefusal(off, uses, returnsWithoutHiddenPointer);
+}
+
+/** Why the escape of the address at `off` is not one the WHOLE-AREA argument holds, or null. That
+ *  argument — the object is every byte of the declared area, so whatever a holder of the address
+ *  does through it lands on bytes one declaration owns — is made twice: for one untyped object
+ *  (`notTheWholeArea`) and for the one object several captures are members of (`writerNotKept`).
+ *  It needs a callee to have been handed the address as an argument, the one holder this frontend
+ *  can name; an address that only reached memory has none. A store of the address beside that
+ *  call is held with it, whether to an ordinary global or into a device's source register.
+ *
+ *  The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question is
+ *  the one the one-word arm asks, asked here of the same callees. */
+function wholeAreaEscapeRefusal(
+  off: number,
+  uses: FrameUses,
+  returnsWithoutHiddenPointer: (callee: string) => boolean,
+): string | null {
   if (!uses.passedToCallee.has(off)) {
     return 'the address is published rather than passed as an argument, and nothing declares what reads it';
   }
-  // The frame's SIZE changes nothing about whose storage it is, so the hidden-pointer question
-  // is the one the one-word arm asks, asked here of the same callees.
   return hiddenReturnPointerStands(off, uses.arg0Callees, returnsWithoutHiddenPointer);
 }
 

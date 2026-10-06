@@ -128,11 +128,27 @@ describe('an unbounded device read keeps the local area as one object', () => {
     expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('accessed 4 and 2 bytes wide');
   });
 
-  test('an address a callee may write through, also stored to memory, is not what the one object keeps', () => {
+  // The device's source register is a reader, so the store into it adds no writer to the callee's
+  test('an address a callee may write through, also handed to a device, is what the one object keeps', () => {
     const call = mkOp('call', { operands: [mkValue(T.unk(32))], attrs: { target: 'g' } });
     const { blk } = published([{ off: 0, width: 2 }], [call]);
+    expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
+  });
+
+  // …while an address stored to an ordinary global and handed to no callee has no holder to name
+  test('an address stored to memory and passed to no callee is not what the one object keeps', () => {
+    const { blk } = published([{ off: 0, width: 2 }]);
+    const a = blk.ops[0].results[0];
+    const gp = mkValue(T.unk(32));
+    const ret = blk.ops.pop()!;
+    blk.ops.push(
+      mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+      mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+      ret,
+    );
     expect(() => run(blk, [], { from: 0, to: 8 })).toThrow(
-      'cannot hold every writer — the captured address at [sp,#0) is stored to memory',
+      'cannot hold every writer — the captured address at [sp,#0): the address is published rather than passed ' +
+        'as an argument',
     );
   });
 });

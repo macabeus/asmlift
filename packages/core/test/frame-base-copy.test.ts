@@ -42,10 +42,12 @@ const SPILL = `f:
 const lift = (asm: string) => decompile('f', asm, ARMV4T_AGBCC);
 
 // THE PER-OBJECT REFUSALS STAND WHERE THE ONE-OBJECT ANSWER CANNOT HOLD A WRITER. A callee handed a
-// captured address is a writer that answer holds, so a fixture whose only writer is one lifts the
-// whole declared area as one byte array instead; the same fixture with the address ALSO stored to
-// a global — a writer nothing declares — is judged per object, which is what each refusal here is
-// about. `r2`/`r3` are free at entry in every fixture this is applied to.
+// captured address is a writer that answer holds, and so is a store of that same address beside
+// the call, so a fixture whose writers are those lifts the whole declared area as one byte array
+// instead. The writers it cannot hold are an address stored to memory that no callee is handed —
+// this publishes the frame address at `off` to a global — and a callee taking one at argument 0
+// with nothing said of what it returns; each refusal here is judged per object beside one of them,
+// or with nothing reaching the frame without bound. `r2`/`r3` are free at entry where this is used.
 const alsoPublished = (asm: string, off = 0): string =>
   asm.replace(
     /(\tadd\tsp, sp, #-0x[0-9a-f]+\n)/,
@@ -186,9 +188,10 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
       '\tldrh\tr1, [r4, #0x2]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t-0x100\n\t.word\t-0xff01\n\t.word\t0xffff\n';
     const prototypes = { five: { params: 5, returnsVoid: true }, g: { params: 1, returnsVoid: true } };
-    expect(() => decompile('e1', alsoPublished(e1, 4), ARMV4T_AGBCC, { prototypes })).toThrow(
-      /a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled/,
-    );
+    // `g` saying nothing of what it returns is a writer the one object cannot hold
+    expect(() =>
+      decompile('e1', e1, ARMV4T_AGBCC, { prototypes: { five: prototypes.five, g: { params: 1 } } }),
+    ).toThrow(/a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled/);
     // …and kept as one object, the word, the byte and the halfword at one address are refused by
     // that answer's own rule
     expect(() => decompile('e1', e1, ARMV4T_AGBCC, { prototypes })).toThrow(/is accessed 4 and 2 bytes wide/);
@@ -314,8 +317,10 @@ describe('the audit judges each frame object on its own bytes', () => {
     // after the `bl` is a value the callee destroyed (frontend/ssa.ts), which would refuse this
     // function ahead of the audit and hide what it is here to show.
     const keyed = frame('\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tmov\tr1, sp\n\tbl\tg\n\tadd\tr0, r0, r4\n');
-    expect(() => lift(alsoPublished(keyed))).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
-    // …and with the callee the only writer, the slot is a word of the one object in memory
+    // handed at argument 0 to a `g` nothing says the return of, the one object cannot hold it
+    const atArg0 = keyed.replace('\tmov\tr1, sp\n', '\tmov\tr0, sp\n');
+    expect(() => lift(atArg0)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+    // …and with a callee it holds the only writer, the slot is a word of the one object in memory
     expect(lift(keyed).source).toContain('*(s32 *)sp0 = a0;');
   });
 
@@ -350,6 +355,22 @@ describe('the audit judges each frame object on its own bytes', () => {
     const copy = (body: string, reserve = '0x10') =>
       `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-${reserve}\n${body}\tadd\tsp, sp, #${reserve}\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
     const FILL = '\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n';
+    // A READER its control word bounds: a 32-bit CpuSet fill reads one word at the object's address
+    // and writes none of the frame. With nothing reaching the frame without bound the one-object
+    // answer is never on offer, so a refusal beside it is the per-object model's own.
+    const READ = '\tmov\tr0, sp\n\tldr\tr1, .Lsrc\n\tldr\tr2, .Lsrc+0x4\n\tbl\tCpuSet\n';
+    const readOnly = (asm: string) =>
+      decompile('f', `${asm}.Lsrc:\n\t.word\tgDst\n\t.word\t0x05000004\n`, ARMV4T_AGBCC, {
+        prototypes: { CpuSet: { params: 3, returnsVoid: true } },
+      });
+    // an indexed object that never escapes (agbcc's own output, quoted at its test below): nothing
+    // outside the function reaches the frame at all
+    const LOCAL =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tmov\tr2, #0x0\n\tldr\tr3, .L8\n' +
+      '.L6:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tadd\tr1, r2, r3\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n' +
+      '\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n\tbls\t.L6\n\tmov\tr1, sp\n\tadd\tr0, r1, r4\n\tldrb\tr0, [r0]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L8:\n\t.word\ttbl\n';
+    const atTheIndexedRead = (asm: string) => LOCAL.replace('\tldrb\tr0, [r0]\n\tadd\tsp', `${asm}\tadd\tsp`);
 
     test('the reservation is the declared extent, and it declares as an array', () => {
       expect(lift(copy(FILL)).source).toBe('s32 f(s32 a0) {\n    u8 sp0[16];\n    return memcpy(sp0, a0, 16);\n}\n');
@@ -481,8 +502,8 @@ describe('the audit judges each frame object on its own bytes', () => {
 
     test('a slot in the reserved area is not this object`s, and refuses', () => {
       const keyed = copy(`\tstr\tr0, [sp, #0xc]\n${FILL}\tldr\tr0, [sp, #0xc]\n`);
-      expect(() => lift(alsoPublished(keyed))).toThrow(
-        /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#12\] — one byte, two models/,
+      expect(() => readOnly(copy(`\tstr\tr0, [sp, #0xc]\n${READ}\tldr\tr0, [sp, #0xc]\n`))).toThrow(
+        /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#12\] — one byte, two models$/,
       );
       // …kept as one object, the slot is a word of it, reloaded after the copy wrote it
       expect(lift(keyed).source).toContain('memcpy(sp0, a0, 16);\n    return ((s32 *)sp0)[3];');
@@ -490,8 +511,8 @@ describe('the audit judges each frame object on its own bytes', () => {
 
     test('a second address-taken object means the reservation is not this one`s', () => {
       const withNeighbour = '\tmov\tr3, sp\n\tstrh\tr1, [r3, #0xc]\n\tmov\tr3, sp\n\tldrh\tr4, [r3, #0xc]\n';
-      expect(() => lift(alsoPublished(copy(withNeighbour + FILL)))).toThrow(
-        /another address-taken object shares the frame, so the reservation is not this one alone/,
+      expect(() => readOnly(copy(withNeighbour + READ))).toThrow(
+        /another address-taken object shares the frame, so the reservation is not this one alone$/,
       );
       // …kept as one object, the neighbour is a halfword of it
       expect(lift(copy(withNeighbour + FILL)).source).toContain('((u16 *)sp0)[6] = a1;');
@@ -518,7 +539,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
       test('a wider element is another array over the same bytes, and declines naming its width', () => {
         // `u16 a[4]; … return a[i];` — agbcc scales the index and reads a halfword
-        expect(() => lift(alsoPublished(indexed('\tldrh\tr0, [r0]\n')))).toThrow(
+        expect(() => lift(atTheIndexedRead('\tldrh\tr0, [r0]\n'))).toThrow(
           /a runtime index into the object at \[sp,#0\) accesses 2 bytes/,
         );
         // …and the one object refuses it too: an index names no byte its width can be checked at
@@ -537,12 +558,7 @@ describe('the audit judges each frame object on its own bytes', () => {
       // …and the storage need not escape: its own indexed stores write it. agbcc's own output for
       // `u32 f(u32 i){ u8 a[8]; u32 j; for (j = 0; j < 8; j++) a[j] = tbl[j]; return a[i]; }`.
       test('an indexed object that never escapes is written by its own indexed stores', () => {
-        const local =
-          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tmov\tr2, #0x0\n\tldr\tr3, .L8\n' +
-          '.L6:\n\tmov\tr1, sp\n\tadd\tr0, r1, r2\n\tadd\tr1, r2, r3\n\tldrb\tr1, [r1]\n\tstrb\tr1, [r0]\n' +
-          '\tadd\tr2, r2, #0x1\n\tcmp\tr2, #0x7\n\tbls\t.L6\n\tmov\tr1, sp\n\tadd\tr0, r1, r4\n\tldrb\tr0, [r0]\n' +
-          '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L8:\n\t.word\ttbl\n';
-        const src = lift(local).source;
+        const src = lift(LOCAL).source;
         expect(src).toContain('u8 sp0[8];');
         expect(src).toContain('((u8 *)sp0)[v0] = ((u8 *)&tbl)[v0];');
         expect(src).toContain('return ((u8 *)sp0)[a0];');
@@ -550,7 +566,8 @@ describe('the audit judges each frame object on its own bytes', () => {
 
       test('an object an access of its own types as a scalar is not indexed', () => {
         const typed = indexed('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n');
-        expect(() => lift(alsoPublished(typed))).toThrow(
+        const typedHere = atTheIndexedRead('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n');
+        expect(() => lift(typedHere)).toThrow(
           /a runtime index into the object at \[sp,#0\), which an access of its own types as one scalar/,
         );
         // …while kept as one object, the scalar is its byte 0 and the index another byte of it
@@ -561,7 +578,7 @@ describe('the audit judges each frame object on its own bytes', () => {
     test('an object that does not start at the bottom of the area is not the whole area', () => {
       // `add rD, sp, #k` names an object at [sp,#k), so the bytes below it are something else
       const above = copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n');
-      expect(() => lift(alsoPublished(above, 4))).toThrow(
+      expect(() => readOnly(copy(READ.replace('\tmov\tr0, sp\n', '\tadd\tr0, sp, #0x4\n')))).toThrow(
         /the object does not start at the bottom of the declared area/,
       );
       // …unless they are all one object, which the callee is handed the inside of
@@ -584,6 +601,9 @@ describe('the audit judges each frame object on its own bytes', () => {
           '0x18',
         );
       const liftWith = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, protos);
+      // …and with `h` saying nothing of what it returns, a writer the one object cannot hold
+      const withUnsaidH = (asm: string) =>
+        decompile('f', asm, ARMV4T_AGBCC, { prototypes: { ...protos.prototypes, h: { params: 1 } } });
 
       test('the object above the argument words is declared over the rest of the frame', () => {
         const src = liftWith(fill()).source;
@@ -594,9 +614,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
       test('an object above the bottom of the declared range is not the whole of it', () => {
         expect(() => liftWith(fill())).not.toThrow();
-        expect(() => liftWith(alsoPublished(fill('0x14'), 0x14))).toThrow(
-          /the object does not start at the bottom of the declared area/,
-        );
+        expect(() => withUnsaidH(fill('0x14'))).toThrow(/the object does not start at the bottom of the declared area/);
         expect(liftWith(fill('0x14')).source).toContain('h((u32)sp16 + 4);');
       });
 
@@ -605,8 +623,15 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => liftWith(fill())).not.toThrow();
         const kept = `${STAGED}\tstr\tr4, [sp, #0x14]\n`;
         const keyed = fill('0x10', kept).replace('\tbl\th\n', '\tbl\th\n\tldr\tr0, [sp, #0x14]\n');
-        expect(() => liftWith(alsoPublished(keyed, 0x10))).toThrow(
-          /the object at \[sp,#16\) overlaps the SSA slot at \[sp,#20\] — one byte, two models/,
+        // judged per object where nothing reaches the frame without bound: the object only indexed
+        // here, never handed out, and `g` given its staged arguments alone
+        const indexedOnly = copy(
+          `${kept}\tmov\tr0, #0x0\n\tmov\tr1, #0x0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x0\n\tbl\tg\n` +
+            '\tadd\tr1, sp, #0x10\n\tldrb\tr0, [r1, r0]\n\tldr\tr1, [sp, #0x14]\n\tadd\tr0, r0, r1\n',
+          '0x18',
+        );
+        expect(() => liftWith(indexedOnly)).toThrow(
+          /the object at \[sp,#16\) overlaps the SSA slot at \[sp,#20\] — one byte, two models$/,
         );
         expect(liftWith(keyed).source).toContain('return ((s32 *)sp16)[1];');
       });
@@ -617,7 +642,8 @@ describe('the audit judges each frame object on its own bytes', () => {
             '\tbl\tg\n\tldrb\tr0, [r4]\n\tldrb\tr1, [r4, r0]\n\tmov\tr0, r1\n\tbl\th\n',
           '0x18',
         );
-        expect(() => liftWith(alsoPublished(indexed, 0x10))).toThrow(
+        const unsaidG = { prototypes: { ...protos.prototypes, g: { params: 8 } } };
+        expect(() => decompile('f', indexed, ARMV4T_AGBCC, unsaidG)).toThrow(
           /a runtime index into the object at \[sp,#16\), which an access of its own types as one scalar — only the untyped storage of the whole declared area is indexed/,
         );
         expect(liftWith(indexed).source).toContain('u8 sp16[8];');
@@ -626,7 +652,7 @@ describe('the audit judges each frame object on its own bytes', () => {
       test('a second object above the block means the reservation is not this one`s', () => {
         expect(() => liftWith(fill())).not.toThrow();
         const two = fill().replace('\tadd\tr0, sp, #0x10\n\tbl\th\n', '\tadd\tr0, sp, #0x14\n\tbl\th\n');
-        expect(() => liftWith(alsoPublished(two, 0x10))).toThrow(/another address-taken object shares the frame/);
+        expect(() => withUnsaidH(two)).toThrow(/another address-taken object shares the frame/);
         // …unless both are one object: the frame bytes above the block, handed out at two offsets
         const kept = liftWith(two).source;
         expect(kept).toContain('g(sp16, 0, 0, 0, 8, 2, 15, a0);');

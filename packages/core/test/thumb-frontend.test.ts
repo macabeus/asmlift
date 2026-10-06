@@ -1322,12 +1322,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tldr\tr1, [r4]\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tstr\tr1, [sp, #4]\n' +
       '.L2:\n\tldr\tr2, [sp, #4]\n\tadd\tr0, r1, r2\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r3}\n\tbx\tr3\n';
     // `g` declared `void`: an object only READ here and taken at argument 0 is otherwise a struct
-    // return's temp, which refuses first. A callee writer alone is held by keeping the frame as one
+    // return's temp, which refuses first. A callee writer is held by keeping the frame as one
     // object in memory, where the reload reads what `g` wrote — so the rule is met where the
-    // address is ALSO stored to a global, a writer nothing declares.
+    // address is instead stored to a global that `g` may write through, and handed to no callee:
+    // `gp = &s; g(&gp);`, a writer nothing declares.
     const voidG = { prototypes: { g: { params: 1, returnsVoid: true } } };
-    const published =
-      escaped.replace('\tmov\tr4, sp\n', '\tmov\tr4, sp\n\tldr\tr0, .L9\n\tstr\tr4, [r0]\n') + '.L9:\n\t.word\tgPtr\n';
+    const published = escaped.replace('\tmov\tr0, r4\n', '\tldr\tr0, .L9\n\tstr\tr4, [r0]\n') + '.L9:\n\t.word\tgPtr\n';
     expect(() => decompile('f', published, ARMV4T_AGBCC, voidG)).toThrow(
       /address-taken stack local — the captured address escapes/,
     );
