@@ -46,6 +46,16 @@ test('usage errors: unknown target, missing input, missing flag value', async ()
   expect((await run('ido-add1.asm', '--target')).code).toBe(64);
 });
 
+test('--help and --version answer on stdout with exit 0, whatever else the line holds', async () => {
+  for (const argv of [['--help'], ['-h'], ['f.s', '--nmae', 'x', '--help']]) {
+    const r = await runCli(argv, corpus);
+    expect(r).toMatchObject({ code: 0, stderr: '' });
+    expect(r.stdout).toMatch(/^usage: asmlift /);
+  }
+  const { version } = JSON.parse(readFileSync(join(import.meta.dirname, '../../package.json'), 'utf8'));
+  expect(await runCli(['--version'], corpus)).toEqual({ code: 0, stdout: `asmlift ${version}\n`, stderr: '' });
+});
+
 test('an unknown flag is a usage error, never silently ignored', async () => {
   const r = await run('ido-add1.asm', '--target', 'ido7.1', '--nmae', 'foo');
   expect(r.code).toBe(64);

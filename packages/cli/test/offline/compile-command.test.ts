@@ -43,10 +43,15 @@ test('missing {{inputPath}}/{{outputPath}} placeholders is a construction-time e
   expect(() => compileFromCommand('cc {{inputPath}}')).toThrow(/lacks \{\{outputPath\}\}/);
 });
 
-test('an unknown {{...}} placeholder is named loudly', () => {
+test('an unknown {{...}} placeholder is named loudly, beside every placeholder the command may write', () => {
   expect(() => compileFromCommand('cc {{inputPath}} -o {{outputPath}} -f {{function}}')).toThrow(
-    /unknown placeholder \{\{function\}\}/,
+    'compile command has an unknown placeholder {{function}} (known: {{inputPath}}, {{outputPath}}, {{symbol}}, {{flags}}, {{cc}}): ' +
+      'cc {{inputPath}} -o {{outputPath}} -f {{function}}',
   );
+  // every name the list offers is one the runner accepts, once {{cc}} is rendered
+  expect(() =>
+    compileFromCommand('{{cc}} {{flags}} -D{{symbol}} {{inputPath}} -o {{outputPath}}', { cc: 'cc', cflags: ['-O2'] }),
+  ).not.toThrow();
 });
 
 test('happy path: command runs via sh, {in} carries the typedef prelude, {out} is returned', async () => {
