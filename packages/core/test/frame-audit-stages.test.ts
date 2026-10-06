@@ -73,7 +73,7 @@ const shape = (
 ) => {
   const { fail, facts, objects, flow, uses } = classify(irBlocks, { owned: range });
   const windows = escapeWindows(irBlocks, uses, flow, facts, ARMV4T_AGBCC);
-  const model = chooseFrameModel(undefined, uses, windows, fail);
+  const model = chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
   const usedSlotOffsets = new Set(slots);
   const args = { objects, uses, owned: range, declared, usedSlotOffsets };
   const shapes = objectShapes({ ...args, returnsWithoutHiddenPointer: declaresNoHiddenPointer, model, fail });
@@ -260,19 +260,44 @@ describe('chooseFrameModel', () => {
   test('offers the one-object answer where every escape only reads and one reads without bound', () => {
     const blk = published(2);
     const { fail, facts, flow, uses } = classify([blk]);
-    const model = chooseFrameModel(undefined, uses, escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC), fail);
+    const model = chooseFrameModel(
+      undefined,
+      uses,
+      escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC),
+      declaresNoHiddenPointer,
+      fail,
+    );
     expect(model.onOffer).toBe(true);
     model.shapeRefused('two widths');
     expect(model.refused).toBe(true);
   });
 
-  test('refuses a shape where it stands when a writer holds the address', () => {
+  // the model a writer leaves: `laddr 0` handed to `callee` at argument 0, and stored to the memory
+  // `p` points at when `stored`
+  const modelOf = (callee: string, stored = false) => {
+    const p = value();
     const a = laddr(0);
-    const blk: Block = { params: [], ops: [a, call('g', a.results[0]), ret()] };
+    const blk: Block = {
+      params: [p],
+      ops: [a, ...(stored ? [store(p, a.results[0], 0, 4)] : []), call(callee, a.results[0]), ret()],
+    };
     const { fail, facts, flow, uses } = classify([blk]);
-    const model = chooseFrameModel(undefined, uses, escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC), fail);
+    const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
+    return chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+  };
+
+  test('offers the one-object answer where every writer is a callee it holds', () => {
+    expect(modelOf('g').onOffer).toBe(true);
+  });
+
+  test('refuses a shape where it stands when a writer is stored to memory', () => {
+    const model = modelOf('g', true);
     expect(model.onOffer).toBe(false);
     expect(() => model.shapeRefused('two widths')).toThrow("cannot lift 'f': address-taken stack local — two widths");
+  });
+
+  test('refuses a shape where it stands when a callee at argument 0 says nothing of its return', () => {
+    expect(modelOf('k').onOffer).toBe(false);
   });
 });
 
@@ -313,12 +338,25 @@ describe('objectShapes', () => {
     expect(shape([blk], [4]).shapes.overSlot).toEqual([[4, 4]]);
   });
 
+  // `u8 sp[4]; u32 sp4; h(x, sp, &sp4);` — neither capture is accessed, and neither is the whole area
+  test('asks for the one object rather than sizing each of two captures by the whole area', () => {
+    const x = value();
+    const a = laddr(0);
+    const b = laddr(4);
+    const blk: Block = { params: [x], ops: [a, b, call('h', x, a.results[0], b.results[0]), ret()] };
+    const { model, shapes } = shape([blk], []);
+    expect(model.refused).toBe(true);
+    expect(shapes.extent.size).toBe(0);
+  });
+
+  // `k` takes the address at argument 0 with nothing said of its return: not a writer the one
+  // object holds
   test('refuses two widths where the one-object answer is not on offer', () => {
     const v = value();
     const a = laddr(0);
     const blk: Block = {
       params: [v],
-      ops: [a, store(a.results[0], v, 0, 2), load(a.results[0], 0, 4), call('g', a.results[0]), ret()],
+      ops: [a, store(a.results[0], v, 0, 2), load(a.results[0], 0, 4), call('k', a.results[0]), ret()],
     };
     expect(() => shape([blk], [])).toThrow('disagree on width (2 vs 4)');
   });

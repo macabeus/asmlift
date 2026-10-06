@@ -208,9 +208,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // source reserved and the recompile does not. `u16 buf[8]; buf[0] = x; CpuSet(buf, gDst, 8);`
   // reads the sixteen bytes its control word names, and a DMA copy incrementing from `buf` reads
   // every word above it; lifted as `u16 sp0`, the recompile's frame is four bytes wide and the
-  // transfer copies the saved `lr` and the caller's frame out with it. A read unbounded both ways
-  // meets this rule only beside a writer, which reaches the same word: alone, the audit keeps the
-  // local area as one object instead (`oneObjectOnOffer`).
+  // transfer copies the saved `lr` and the caller's frame out with it. A read unbounded both ways,
+  // and a callee's write, meet this rule only beside a writer the one-object answer cannot hold
+  // (`writerNotKept`): otherwise the audit keeps the local area as one object instead.
   //
   // WHAT IT LEAVES, since this is the extent question the gate comment above is about: an escape
   // is accepted only where the modelled objects and the keyed slots tile the reserved area it
@@ -249,8 +249,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *   - PER OBJECT, the default: every MEMORY access through it must be at offset 0, with one agreed
  *     width and one agreed extension, or a byte read or written through a runtime index into
  *     storage nothing else types, and its bytes must belong to nothing else in the frame;
- *   - ONE OBJECT, where every escape only reads and a device reads without bound (`oneObject`,
- *     which this answers and the frontend lifts again with): the local area is one `u8` array in
+ *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
+ *     that answer can hold (`oneObject`, which this answers and the frontend lifts again with,
+ *     and `writerNotKept`): the local area is one `u8` array in
  *     memory, every fixed-offset access in it is a member at its own offset, a runtime index may
  *     reach a byte of it, and two widths at one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
@@ -299,7 +300,7 @@ export function auditFrameObjects({
   const flow = addressFlow(irBlocks, objects, facts, fail);
   const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel(oneObject, uses, windows, fail);
+  const model = chooseFrameModel(oneObject, uses, windows, returnsWithoutHiddenPointer, fail);
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -320,12 +321,13 @@ export function auditFrameObjects({
     fail,
   });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
-  // THE ONE-OBJECT ANSWER, where it is on offer (every escape only READS and one of them reads
-  // without bound) and the per-object model does not describe the frame: it refused a shape, an
-  // object sits over a slot, or the unbounded read reaches another object, a slot or a word
-  // nothing accounts for. Then what the device may read is kept rather than refused: lift again
-  // with the local area as one object in memory (`keepAsOneObject`). Below the local area are the
-  // outgoing arguments and above it the saved registers, neither of them an object. Where the
+  // THE ONE-OBJECT ANSWER, where it is on offer (one escape reaches without bound, and every
+  // writer is a callee it can hold) and the per-object model does not describe the frame: it
+  // refused a shape, an object sits over a slot, or the unbounded reach meets another object, a
+  // slot or a word nothing accounts for. Then what the device may read or the callee may write is
+  // kept rather than refused: lift again with the local area as one object in memory
+  // (`keepAsOneObject`). Below the local area are the outgoing arguments and above it the saved
+  // registers, neither of them an object. Where the
   // per-object model does describe the frame — one object and nothing else in reach — it stands,
   // and the object keeps its own type.
   if (
@@ -1227,22 +1229,24 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
   return null;
 }
 
-/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where every escape only reads and one reads
- *  without bound, the one-object answer is on offer, and the shapes the per-object model
- *  refuses are ones it can hold: a member at [+k] through a capture, two widths or two
- *  signednesses at one address, a runtime index, overlapping objects, an object over a slot. So
- *  there each of those refusals asks for that answer instead of declining (`shapeRefused`), and
+/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where one escape reaches without bound and the
+ *  one-object answer can hold every writer (`writerNotKept`), that answer is on offer — two
+ *  out-parameters handed to one callee as readily as a device read — and the shapes the
+ *  per-object model refuses are ones it can hold: a member at [+k] through a capture, two widths
+ *  or two signednesses at one address, a runtime index, overlapping objects, a second object
+ *  beside an untyped one, an object over a slot. So there each of those refusals asks for that answer instead of declining (`shapeRefused`), and
  *  the second audit judges the bytes as one object by its own rules — two types at one byte
  *  still refuse there. Where the answer is not on offer, each refuses where it stands. */
 function chooseFrameModel(
   oneObject: FrameRange | undefined,
   uses: FrameUses,
   windows: ReadonlyMap<number, ReadWindow>,
+  returnsWithoutHiddenPointer: (callee: string) => boolean,
   fail: Refuse,
 ): ModelChoice {
   const onOffer =
     oneObject === undefined &&
-    uses.mayWrite.size === 0 &&
+    writerNotKept(uses, returnsWithoutHiddenPointer) === null &&
     [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
   const model: ModelChoice = {
     onOffer,
@@ -1666,6 +1670,8 @@ function objectShapes({
             : 'the captured address is never dereferenced in this function') +
             `, so nothing pins the local object type — and ${why}`,
         );
+        // …asked for the one object instead, which sizes no object of its own
+        continue;
       }
       // An indexed access reads ONE ELEMENT of the storage declared below, so it must be one:
       // an unsigned byte. A wider element is a different array over the same bytes, and a
