@@ -333,5 +333,10 @@
     "tu": "GetGroundEffectFlags_JumpLanding.i.gz",
     "ctx": "ctx-039f29162530.i.gz",
     "m2c": "ctx-039f29162530.i.gz"
+  },
+  "AskUsePokeblock": {
+    "tu": "AskUsePokeblock.i.gz",
+    "ctx": "ctx-f5b95c697dcb.i.gz",
+    "m2c": "ctx-f5b95c697dcb.i.gz"
   }
 }
