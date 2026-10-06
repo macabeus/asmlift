@@ -65,12 +65,17 @@ const classify = (
 };
 
 // …and on through the model choice and the shapes.
-const shape = (irBlocks: Block[], slots: number[], range: FrameRange = { from: 0, to: 8 }) => {
+const shape = (
+  irBlocks: Block[],
+  slots: number[],
+  range: FrameRange = { from: 0, to: 8 },
+  declared: FrameRange = range,
+) => {
   const { fail, facts, objects, flow, uses } = classify(irBlocks, { owned: range });
   const windows = escapeWindows(irBlocks, uses, flow, facts, ARMV4T_AGBCC);
   const model = chooseFrameModel(undefined, uses, windows, fail);
   const usedSlotOffsets = new Set(slots);
-  const args = { objects, uses, owned: range, declared: range, usedSlotOffsets };
+  const args = { objects, uses, owned: range, declared, usedSlotOffsets };
   const shapes = objectShapes({ ...args, returnsWithoutHiddenPointer: declaresNoHiddenPointer, model, fail });
   return { uses, windows, model, shapes, usedSlotOffsets };
 };
@@ -283,6 +288,22 @@ describe('objectShapes', () => {
     const a = laddr(0);
     const blk: Block = { params: [], ops: [a, call('g', a.results[0]), ret()] };
     expect(shape([blk], [], { from: 0, to: 16 }).shapes.extent.get(0)).toEqual({ width: 1, count: 16 });
+  });
+
+  // [sp,#0..#0xc] are a licensed outgoing block's argument words, keyed as slots, and the
+  // declared range starts above them
+  test('sizes a buffer above the outgoing block by the declared range', () => {
+    const a = laddr(0x10);
+    const blk: Block = { params: [], ops: [a, call('g', a.results[0]), ret()] };
+    const { shapes } = shape([blk], [0, 4, 8, 0xc], { from: 0, to: 0x18 }, { from: 0x10, to: 0x18 });
+    expect(shapes.extent.get(0x10)).toEqual({ width: 1, count: 8 });
+  });
+
+  test('sets a buffer above the outgoing block over a slot in the declared range aside for the last refusal', () => {
+    const a = laddr(0x10);
+    const blk: Block = { params: [], ops: [a, call('g', a.results[0]), ret()] };
+    const { shapes } = shape([blk], [0, 4, 8, 0xc, 0x14], { from: 0, to: 0x18 }, { from: 0x10, to: 0x18 });
+    expect(shapes.overSlot).toEqual([[0x10, 8]]);
   });
 
   test('sets an object over a slot aside for the last refusal', () => {

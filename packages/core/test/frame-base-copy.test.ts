@@ -460,7 +460,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
     test('a slot in the reserved area is not this object`s, and refuses', () => {
       expect(() => lift(copy(`\tstr\tr0, [sp, #0xc]\n${FILL}\tldr\tr0, [sp, #0xc]\n`))).toThrow(
-        /the slot model keys \[sp,#12\], so part of the reserved area is not this object/,
+        /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#12\] — one byte, two models/,
       );
     });
 
@@ -528,14 +528,79 @@ describe('the audit judges each frame object on its own bytes', () => {
     test('an object that does not start at the bottom of the area is not the whole area', () => {
       // `add rD, sp, #k` names an object at [sp,#k), so the bytes below it are something else
       expect(() => lift(copy('\tadd\tr1, r0, #0\n\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n'))).toThrow(
-        /the object does not start at the bottom of the reserved area/,
+        /the object does not start at the bottom of the declared area/,
       );
     });
 
-    // THE CLAUSES NOTHING REACHES, pinned as unreachable rather than left unstated. Each is a
-    // precaution in `notTheWholeArea`, and each is unreachable because an EARLIER refusal owns
-    // the shape — these assert that the earlier refusal is the one that fires, so a change that
-    // relaxes one of them shows up here as a message that moved.
+    // AN OUTGOING BLOCK BELOW THE OBJECT. agbcc stages arguments 5+ of a call at the bottom of the
+    // frame and lays every local above them, so `struct S t; g(&t, 0, 0, 0, 8, 2, 15, a0);` with
+    // an 8-byte `S` reserves 0x18 and puts `t` at [sp,#0x10], over four argument words. The
+    // declared range — the frame less the licensed block — is the object's extent.
+    describe('above a licensed outgoing block, the declared range is the extent', () => {
+      const protos = { prototypes: { g: { params: 8, returnsVoid: true }, h: { params: 1, returnsVoid: true } } };
+      const STAGED =
+        '\tmov\tr1, #0x8\n\tstr\tr1, [sp]\n\tmov\tr1, #0x2\n\tstr\tr1, [sp, #0x4]\n' +
+        '\tmov\tr1, #0xf\n\tstr\tr1, [sp, #0x8]\n\tstr\tr0, [sp, #0xc]\n';
+      const fill = (at = '0x10', staged = STAGED) =>
+        copy(
+          `${staged}\tadd\tr0, sp, #${at}\n\tmov\tr1, #0x0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x0\n\tbl\tg\n` +
+            `\tadd\tr0, sp, #${at}\n\tbl\th\n`,
+          '0x18',
+        );
+      const liftWith = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, protos);
+
+      test('the object above the argument words is declared over the rest of the frame', () => {
+        const src = liftWith(fill()).source;
+        expect(src).toContain('u8 sp16[8];');
+        expect(src).toContain('g(sp16, 0, 0, 0, 8, 2, 15, a0);');
+        expect(src).toContain('h(sp16);');
+      });
+
+      test('an object above the bottom of the declared range is not the whole of it', () => {
+        expect(() => liftWith(fill())).not.toThrow();
+        expect(() => liftWith(fill('0x14'))).toThrow(/the object does not start at the bottom of the declared area/);
+      });
+
+      test('a slot inside the declared range is not this object`s', () => {
+        // a local kept across the call at [sp,#0x14], above the argument words
+        expect(() => liftWith(fill())).not.toThrow();
+        const kept = `${STAGED}\tstr\tr4, [sp, #0x14]\n`;
+        expect(() => liftWith(fill('0x10', kept).replace('\tbl\th\n', '\tbl\th\n\tldr\tr0, [sp, #0x14]\n'))).toThrow(
+          /the object at \[sp,#16\) overlaps the SSA slot at \[sp,#20\] — one byte, two models/,
+        );
+      });
+
+      test('a runtime index into an object a scalar access types names the declared area', () => {
+        const indexed = copy(
+          `${STAGED}\tadd\tr4, sp, #0x10\n\tmov\tr0, r4\n\tmov\tr1, #0x0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x0\n` +
+            '\tbl\tg\n\tldrb\tr0, [r4]\n\tldrb\tr1, [r4, r0]\n\tmov\tr0, r1\n\tbl\th\n',
+          '0x18',
+        );
+        expect(() => liftWith(indexed)).toThrow(
+          /a runtime index into the object at \[sp,#16\), which an access of its own types as one scalar — only the untyped storage of the whole declared area is indexed/,
+        );
+      });
+
+      test('a second object above the block means the reservation is not this one`s', () => {
+        expect(() => liftWith(fill())).not.toThrow();
+        const two = fill().replace('\tadd\tr0, sp, #0x10\n\tbl\th\n', '\tadd\tr0, sp, #0x14\n\tbl\th\n');
+        expect(() => liftWith(two)).toThrow(/another address-taken object shares the frame/);
+      });
+
+      test('a block not stored on every path licenses nothing, and declines', () => {
+        expect(() => liftWith(fill())).not.toThrow();
+        const oneArmed = STAGED.replace(
+          '\tstr\tr0, [sp, #0xc]\n',
+          '\tcmp\tr0, #0x0\n\tbeq\t.L1\n\tstr\tr0, [sp, #0xc]\n.L1:\n',
+        );
+        expect(() => liftWith(fill('0x10', oneArmed))).toThrow(/\[sp,#12\] is not stored on every path to the call/);
+      });
+    });
+
+    // THE CLAUSE NOTHING REACHES, pinned as unreachable rather than left unstated: the precaution
+    // in `notTheWholeArea` is unreachable because an EARLIER refusal owns the shape — this asserts
+    // that the earlier refusal is the one that fires, so a change that relaxes it shows up here as
+    // a message that moved.
     test('a capture that neither accesses nor escapes declines where its uses are classified', () => {
       expect(() => lift(copy('\tmov\tr0, sp\n'))).toThrow(
         /the captured address flows into `ret` — not an access, an escape, or a phi/,

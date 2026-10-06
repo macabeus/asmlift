@@ -220,11 +220,15 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
   // all — the second access that would reach it is a `[+4]` the `scalar()` guard refuses — so no
   // widening of the frame licence admits a shape this rule would then have to judge.
   //
-  // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole reserved area by
-  // construction — `notTheWholeArea` accepts nothing else — so it accounts for every word this
-  // walk then asks about, and no input makes the rule fire on that path. What bounds THAT path
-  // is `notTheWholeArea`'s own live clauses: a second object, a slot inside the area, an address
-  // that reaches memory rather than a callee, and the callee's declared return.
+  // AND IT IS THE SCALAR ARM THIS BOUNDS. An UNTYPED object is the whole DECLARED area by
+  // construction — `notTheWholeArea` accepts nothing else — and every word below the declared
+  // area is the licensed outgoing block, whose argument words the slot model keys. The object and
+  // those slots together account for every word this walk asks about, so no input makes the rule
+  // fire on that path; `accountedWords` needs its slot term for that as much as its object term.
+  // What bounds THAT path is `notTheWholeArea`'s own live clauses — a second object, an object
+  // that does not start at the bottom of the declared area, an address that reaches memory rather
+  // than a callee, and the callee's declared return — and `overSlot`, which refuses a slot keyed
+  // inside the declared area.
   {
     id: 'reaches-an-unaccounted-word',
     why: 'an escape reaching a frame word no declaration covers reaches past what the recompile allocates',
@@ -1624,8 +1628,6 @@ function objectShapes({
       const why = notTheWholeArea(off, byIndex.length > 0, {
         objects,
         uses,
-        usedSlotOffsets,
-        owned,
         declared,
         returnsWithoutHiddenPointer,
       });
@@ -1676,7 +1678,7 @@ function objectShapes({
     if (byIndex.length > 0) {
       model.shapeRefused(
         `a runtime index into the object at [sp,#${off}), which an access of its own types as one ` +
-          'scalar — only the untyped storage of the whole reserved area is indexed',
+          'scalar — only the untyped storage of the whole declared area is indexed',
       );
     }
     const widths = new Set(acc.map((a) => a.width));
@@ -1726,22 +1728,34 @@ function objectShapes({
   return { extent, aggregateAt, overSlot };
 }
 
-/** THE FRAME RESERVATION IS AN EXTENT, when the reserved area is provably one object's alone.
+/** THE FRAME RESERVATION IS AN EXTENT, when the declared local area is provably one object's alone.
  *  `add sp, sp, #-0x10` reserves sixteen bytes; if exactly one address-taken object sits at the
- *  bottom of them, the slot model keys none of them, and no outgoing argument block is staged
- *  in them, then there is nothing else those bytes can be — a compiler does not reserve frame
- *  for nothing. That is the frame-accounting equation the escape rules (`FRAME_ESCAPE_GATES`)
- *  already solve word by word, asked in the other direction: they check that the objects and
- *  slots TILE the reserved area, this reads the area off as the one object's size.
+ *  bottom of the DECLARED part of them and the slot model keys none of that part (`overSlot`, which
+ *  `objectShapes` asks of every extent), then there is nothing else those bytes can be — a
+ *  compiler does not reserve frame for nothing. That is the frame-accounting equation the escape
+ *  rules (`FRAME_ESCAPE_GATES`) already solve word by word, asked in the other direction: they
+ *  check that the objects and slots TILE the reserved area, this reads the declared range off as
+ *  the one object's size.
+ *
+ *  THE DECLARED RANGE, NOT THE OWNED ONE. Below `declared.from` lies the outgoing stack-argument
+ *  block `analyzeOutgoingArgs` licensed — arguments 5+ of this function's calls, which C stages
+ *  and never declares — so those bytes are not this object's, and the slots keyed there are those
+ *  arguments. The escape gates read the frame the same way: `reaches-a-slot` looks no lower than
+ *  `declared.from`, and `reaches-an-unaccounted-word` counts the argument words as accounted.
+ *  agbcc lays its locals out like this (ACCUMULATE_OUTGOING_ARGS 1, STARTING_FRAME_OFFSET 0,
+ *  thumb.h): `struct S t; f(&t, b, c, d, e, g, h, i)` with an 8-byte `S` reserves 0x18, stages
+ *  the four argument words at [sp,#0..#0xc] and puts `t` at [sp,#0x10]. The block is LICENSED by
+ *  construction: one not stored on every path is `analyzeOutgoingArgs`'s own blocker, which turns
+ *  the slot model off, and every `laddr` mint is behind `slotsOk`.
  *
  *  Returns why it does not apply, or null. Every clause refuses in its own words: the reason an
  *  acceptance did not fire is as much an attribution as the reason a lift declined, and one
  *  sentence covering all of them is how several gaps come to look like one.
  *
- *  FIVE CLAUSES BOUND THIS PATH — a second object, a slot inside the area, an object that does
- *  not start at the bottom of it, an address that reaches memory rather than a callee, and the
- *  callee's declared return — and each has a test that fails without it. The precautionary
- *  ones are marked where they sit.
+ *  FOUR CLAUSES BOUND THIS PATH — a second object, an object that does not start at the bottom of
+ *  the declared area, an address that reaches memory rather than a callee, and the callee's
+ *  declared return — and each has a test that fails without it. A fifth return, the precautionary
+ *  one marked where it sits, has none.
  *
  *  The last two are about an ESCAPE, and they are asked only of an object that escapes or that
  *  nothing in this function addresses. An object this function indexes and never lets go of is
@@ -1753,15 +1767,11 @@ function notTheWholeArea(
   {
     objects,
     uses,
-    usedSlotOffsets,
-    owned,
     declared,
     returnsWithoutHiddenPointer,
   }: {
     objects: ReadonlyMap<number, readonly Op[]>;
     uses: FrameUses;
-    usedSlotOffsets: ReadonlySet<number>;
-    owned: FrameRange;
     declared: FrameRange;
     returnsWithoutHiddenPointer: (callee: string) => boolean;
   },
@@ -1769,29 +1779,12 @@ function notTheWholeArea(
   if (objects.size !== 1) {
     return 'another address-taken object shares the frame, so the reservation is not this one alone';
   }
-  if (usedSlotOffsets.size > 0) {
-    const lowest = [...usedSlotOffsets].sort((a, b) => a - b)[0];
-    return `the slot model keys [sp,#${lowest}], so part of the reserved area is not this object`;
-  }
-  // PRECAUTIONARY, and each names why nothing reaches it — so the next reader does not read
-  // two dead lines as live rules, and knows what would wake each one. They are kept
-  // because every one of them guards a SILENT wrong answer: storage declared over bytes the
-  // object does not own is a frame the recompile lays out differently, with no diagnostic.
-  //   • An outgoing block is staged at the BOTTOM of the reserved area, exactly where this
-  //     object claims to start, and neither way in reaches: a block stored on every path keys
-  //     its offsets as slots at the call, so the slot clause above fires first, and a block
-  //     NOT stored on every path is `analyzeOutgoingArgs`'s own blocker, which turns the slot
-  //     model OFF — and no untyped object survives that, because every `laddr` mint is behind
-  //     `slotsOk`. The second half is also why nothing here asks whether the analysis LICENSED
-  //     the block: an `laddr` exists only in a function where it did, by construction.
-  //   • An address that neither accesses nor escapes already declines where the audit
-  //     classifies its uses ("flows into `ret`"), so it never arrives here unescaped.
-  if (declared.from > owned.from) {
-    return `[sp,#${owned.from}) to [sp,#${declared.from}) stages outgoing stack arguments, which belong to the callee`;
-  }
   if (off !== declared.from || declared.to <= declared.from) {
-    return 'the object does not start at the bottom of the reserved area, so something below it is unaccounted for';
+    return 'the object does not start at the bottom of the declared area, so something below it is unaccounted for';
   }
+  // PRECAUTIONARY for an object nothing indexes: an address that neither accesses nor escapes
+  // already declines where the audit classifies its uses ("flows into `ret`"), so it never arrives
+  // here unescaped. Kept because storage declared with no writer is a SILENT wrong answer.
   if (!uses.escaped.has(off)) {
     return indexedHere
       ? null
