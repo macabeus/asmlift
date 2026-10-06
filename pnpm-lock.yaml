@@ -58,8 +58,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/toolchains
       '@match-kit/compiler':
-        specifier: link:../../../matchkit/packages/compiler
-        version: link:../../../matchkit/packages/compiler
+        specifier: 0.1.0
+        version: 0.1.0
       '@match-kit/decomp-yaml':
         specifier: 0.1.0
         version: 0.1.0
@@ -158,8 +158,8 @@ importers:
         specifier: ^0.5.0
         version: 0.5.0
       '@match-kit/compiler':
-        specifier: link:../../../matchkit/packages/compiler
-        version: link:../../../matchkit/packages/compiler
+        specifier: 0.1.0
+        version: 0.1.0
       '@match-kit/decomp-yaml':
         specifier: 0.1.0
         version: 0.1.0
@@ -698,6 +698,10 @@ packages:
 
   '@marijn/find-cluster-break@1.0.3':
     resolution: {integrity: sha512-FY+MKLBoTsLNJF/eLWaOsXGdz6uh3Iu1axjPf6TUq92IYumcTcXWHoS747JARLkcdlJ/Waiaxc5wQfFO8jC6NA==}
+
+  '@match-kit/compiler@0.1.0':
+    resolution: {integrity: sha512-te7Ai1ul2Eq8uu8/GAPMfgVaWdRzBZh8ncLmCBn24qAMKODFaZ3NQ/Qj86Ef6bN8uND08naAscpE9vSLwZ7/Rg==}
+    engines: {node: '>=24'}
 
   '@match-kit/decomp-yaml@0.1.0':
     resolution: {integrity: sha512-OBeM70MXAzC3bnaxyiuuy4eqxR54LdJVGICGDSkOJ3Nzl7y/FDEtxc8G0nB/HQ3wRCOJHHkEJIGNyjFFO9uGWQ==}
@@ -2412,6 +2416,8 @@ snapshots:
       '@lezer/common': 1.5.2
 
   '@marijn/find-cluster-break@1.0.3': {}
+
+  '@match-kit/compiler@0.1.0': {}
 
   '@match-kit/decomp-yaml@0.1.0':
     dependencies:

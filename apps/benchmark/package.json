@@ -10,7 +10,7 @@
     "@asmlift/cli": "workspace:*",
     "@asmlift/core": "workspace:*",
     "@asmlift/toolchains": "workspace:*",
-    "@match-kit/compiler": "link:../../../matchkit/packages/compiler",
+    "@match-kit/compiler": "0.1.0",
     "@match-kit/decomp-yaml": "0.1.0",
     "@match-kit/scoring": "0.1.0",
     "yaml": "^2.9.0"
