@@ -1,9 +1,9 @@
 // L3: a POINTER CELL — a global the body stores a pointer into, and the one place that spelling is
 // recognised.
 //
-// structure() spells a pointer value stored into a word global as `g = (void *)X` (structure.ts
-// `intoPtrCell`), the store every pointer declaration of `g` takes. Three readers act on it, and
-// all three ask `pointerCells` rather than re-reading the cast:
+// structure() spells a pointer value stored into a word global as `g = (void *)X`
+// (structure/pointer-spelling.ts `intoPtrCell`), the store every pointer declaration of `g` takes.
+// Three readers act on it, and all three ask `pointerCells` rather than re-reading the cast:
 //
 //   • l3/symbol-refs.ts declares a name-only cell `void *` in the candidate's own world, the type
 //     that store needs, and so each global the cell meets bare that nothing reads as an integer
@@ -303,8 +303,8 @@ export function pointerPartners(sfn: SFn): Set<string> {
  *  goes `(u32)(u8 *)g` beside the cell's `(u32)g`: under a float declaration that is no C, as the
  *  bare comparison was not. KNOWN GAP: under an array or a function declaration that is the
  *  global's address, compared with no diagnostic, and IDO takes the integer read that made it no
- *  partner (`v1 = g`) with none either; structure.ts `globalWord` says why no spelling reads the
- *  word there.
+ *  partner (`v1 = g`) with none either; structure/pointer-spelling.ts `globalWord` says why no
+ *  spelling reads the word there.
  *
  *  Run by the C-family backend's `emit` (backend/cfamily.ts), after every respell variation, so a
  *  respell reads the uses as the structurer spelled them and a store it removes takes the

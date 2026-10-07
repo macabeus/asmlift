@@ -11,7 +11,7 @@ import type { Expr } from '../l3/ast';
 import { type SymbolInfo, arrayInnerExtents } from '../symbols';
 
 // `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
-// (`(u32)&gSym` — see `intifyAddr` in structure.ts's lowerDef): both spell the same link-time
+// (`(u32)&gSym` — see `intifyAddr` in pointer-spelling.ts): both spell the same link-time
 // constant, so the fold rules match through the cast and every access that CAN spell a named
 // element still does.
 // WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
