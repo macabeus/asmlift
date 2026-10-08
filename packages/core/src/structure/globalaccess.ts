@@ -20,7 +20,7 @@ import {
 } from '../symbols';
 
 // `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
-// (`(u32)&gSym` — see `intifyAddr` in pointer-spelling.ts): both spell the same link-time
+// (`(u32)&gSym` — see `ARITH_ROWS` in pointer-spelling.ts): both spell the same link-time
 // constant, so the fold rules match through the cast and every access that CAN spell a named
 // element still does.
 // WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
@@ -315,8 +315,8 @@ export interface MemberLookup {
 }
 
 /** {@link MemberLookup.fieldsOf} over `info`, MEMOIZED per symbol. `declaredFields` validates every
- *  member and returns a fresh sorted copy on every call, and pointer-spelling.ts's `isPtrValue`
- *  asks it for both operands of every binary node lowered, so an uncached lookup is an
+ *  member and returns a fresh sorted copy on every call, and pointer-spelling.ts's `roleOf`
+ *  asks it for every member operand of every arithmetic op lowered, so an uncached lookup is an
  *  O(n log n) allocation on a hot path — inside a `structure()` a ranked run repeats once per
  *  candidate, 17,856 times on the largest fan. */
 export function memoFieldsOf(info: (name: string) => SymbolInfo | undefined): MemberLookup['fieldsOf'] {
