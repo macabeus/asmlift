@@ -324,7 +324,7 @@ interface Reach {
 const ALWAYS: Reach = { onTrue: true, onFalse: true };
 
 /** The reach each operand of a SHORT-CIRCUIT op inherits. These two are the whole set: they are the
- *  ops `ARITH_TO_BIN` (structure.ts) renders as `&&`/`||` — a test holds the two lists together,
+ *  ops `ARITH_TO_BIN` (arith-ops.ts) renders as `&&`/`||` — a test holds the two lists together,
  *  since a connective missing from here is read as an ordinary op and its arms inherit a reach they
  *  do not have — and `Expr` has no conditional form besides them, no ternary, so every other op
  *  evaluates all of its operands whenever it is itself evaluated and they inherit its reach

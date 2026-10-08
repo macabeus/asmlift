@@ -98,6 +98,7 @@ import {
   structFieldInnerExtents,
 } from '../symbols';
 import { analyze, shortCircuitGuardedValues } from './analysis';
+import { ARITH_TO_BIN } from './arith-ops';
 import { makeBitfieldSpelling } from './bitfields';
 import {
   addOffset,
@@ -107,6 +108,8 @@ import {
   elementIndex,
   globalByteBase,
   globalOf,
+  memoFieldsOf,
+  ptrMemberDecl,
   subscriptsFromExtents,
 } from './globalaccess';
 import {
@@ -120,7 +123,7 @@ import {
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { makePointerSpelling, ptrMemberDecl } from './pointer-spelling';
+import { makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
@@ -160,11 +163,7 @@ interface SymRenderCtx {
    *  the byte residual — the `/flat-rank` arm's OFF switch, off the `spellDeclaredSubscripts`
    *  structure option. */
   declRank: boolean;
-  /** The members a symbol's declaration seats — a struct global's own, or a pointer global's
-   *  pointee's — MEMOIZED per symbol. `declaredFields` validates every member and returns a fresh
-   *  sorted copy on every call, and `isPtrValue` asks it for both operands of every binary node
-   *  lowered, so an uncached lookup is an O(n log n) allocation on a hot path — inside a
-   *  `structure()` a ranked run repeats once per candidate, 17,856 times on the largest fan. */
+  /** {@link memoFieldsOf} over `info`. */
   fieldsOf(name: string): DeclaredField[] | null;
 }
 
@@ -182,9 +181,9 @@ interface SymRenderCtx {
 
 /** The global named by a pointer global's VALUE as the additive lowering spells it: the bare
  *  `gPtr`, or that value wearing the byte-pointer / u32 cast that lowering adds (cast-then-add,
- *  see the `needsIntSpelling` / pointer-global arithmetic rules below). Both denote the same
- *  address and add BYTES to it, so both fold here; a cast to any other pointer type is NOT looked
- *  through — a `(u16 *)` base would re-scale everything added after it. */
+ *  see the `needsIntSpelling` / pointer-global arithmetic rules in pointer-spelling.ts). Both
+ *  denote the same address and add BYTES to it, so both fold here; a cast to any other pointer
+ *  type is NOT looked through — a `(u16 *)` base would re-scale everything added after it. */
 function ptrGlobalValueName(x: Expr): string | null {
   if (x.k === 'var') {
     return x.name;
@@ -987,30 +986,11 @@ const CMP_TO_BIN: Record<string, BinOp> = {
   icmp_eq: '==',
   icmp_ne: '!=',
 };
-export const ARITH_TO_BIN: Record<string, BinOp> = {
-  add: '+',
-  sub: '-',
-  mul: '*',
-  sdiv: '/',
-  // the UNSIGNED quotient/remainder — the C backend spells them `/`/`%` over an operand it casts
-  // unsigned (l3/ast.ts BinOp, backend/cfamily.ts C_SPELLING)
-  udiv: '/u',
-  smod: '%',
-  umod: '%u',
-  or: '|',
-  and: '&',
-  xor: '^',
-  shl: '<<',
-  shr_u: '>>>', // the LOGICAL right shift; the C backend spells it `>>` over an unsigned operand
-  shr_s: '>>',
-  logic_and: '&&',
-  logic_or: '||', // short-circuit connectives (raise/shortcircuit.ts)
-};
 
 // The float ops (ir/opcodes.ts) and their L3 operators (l3/ast.ts BinOp). A table of their own and
-// not entries in ARITH_TO_BIN, because every rule that table's consumers apply — the pointer
-// stride, the integer legalizations, the constant fold, the commutative re-spelling — is an
-// integer rule.
+// not entries in ARITH_TO_BIN (arith-ops.ts), because every rule that table's consumers apply —
+// the pointer stride, the integer legalizations, the constant fold, the commutative re-spelling —
+// is an integer rule.
 const FLOAT_TO_BIN: Record<string, BinOp> = { fadd: 'f+', fsub: 'f-', fmul: 'f*', fdiv: 'f/' };
 
 // The operators whose operand order the machine does not fix — candidates for the def-order
@@ -2435,28 +2415,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // Symbol-map rendering context (memAccess/arrayAccess): shape lookups + the env registry for
   // array-shaped globals actually referenced (they surface as SFn.globals — typed, undeclared).
   const shapedGlobalTypes = new Map<string, IrType>();
-  const declaredFieldCache = new Map<string, DeclaredField[] | null>();
   const symCtx: SymRenderCtx | undefined = symbols
     ? {
         info: (n) => symbols.get(n),
         noteGlobal: (n, t) => shapedGlobalTypes.set(n, t),
         ptrElements: ptrElementSpellingWanted,
         declRank: declRankSpellingWanted,
-        fieldsOf: (n) => {
-          const hit = declaredFieldCache.get(n);
-          if (hit !== undefined) {
-            return hit;
-          }
-          const si = symbols.get(n);
-          const fields =
-            si?.shape === 'struct'
-              ? declaredFields(si.layout)
-              : si?.shape === 'pointer'
-                ? pointeeFields(si.pointee)
-                : null;
-          declaredFieldCache.set(n, fields);
-          return fields;
-        },
+        fieldsOf: memoFieldsOf((n) => symbols.get(n)),
       }
     : undefined;
 
@@ -3849,8 +3814,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       }
       // The pointer stride, the integer legalizations and the pointer-value byte arithmetic
       // (structure/pointer-spelling.ts). `restoreTo` is the pointer type the sum goes back to.
-      const op = ARITH_TO_BIN[d.opcode];
-      const spelled = spellArith(d, op, l, r);
+      const spelled = spellArith(d, l, r);
       l = spelled.l;
       r = spelled.r;
       const { restoreTo } = spelled;
@@ -3901,7 +3865,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
           return restoreTo ? { k: 'cast', to: restoreTo, e: folded } : folded;
         }
       }
-      const sum: Expr = { k: 'bin', op, l, r };
+      const sum: Expr = { k: 'bin', op: ARITH_TO_BIN[d.opcode], l, r };
       return restoreTo ? { k: 'cast', to: restoreTo, e: sum } : sum;
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.

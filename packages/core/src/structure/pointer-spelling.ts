@@ -10,45 +10,15 @@
 // that exist at call time.
 import { Op } from '../ir/core';
 import { type IrType, T, typeEquals } from '../ir/types';
-import { BinOp, Expr } from '../l3/ast';
+import { Expr } from '../l3/ast';
 import { exprCType, ptrElemBytes } from '../l3/typing';
-import { type DeclaredField, type SymbolInfo, isPtrField, isScalarCellSize, scalarCellType } from '../symbols';
+import { type SymbolInfo, isScalarCellSize, scalarCellType } from '../symbols';
+import { ARITH_TO_BIN } from './arith-ops';
+import { type MemberLookup, ptrMemberDecl } from './globalaccess';
 
 /** The slice of structure.ts's symbol-map rendering context these rules read. */
-export interface PointerSpellingSymCtx {
+export interface PointerSpellingSymCtx extends MemberLookup {
   info(name: string): SymbolInfo | undefined;
-  fieldsOf(name: string): DeclaredField[] | null;
-}
-
-/** The map member a `field` node NAMES, or null when it names none — THE one resolver for "what
- *  does the declaration say about this member", for rules that must reason about a member's type
- *  after the access rules have already spelled it. Both named spellings resolve, through the same
- *  shared gate their spelling passed: `gSym.member` off a struct global's {@link declaredFields},
- *  `gPtr->member` off the pointee's ({@link pointeeFields}). A synthesized `field_K` — the
- *  recovered-struct spelling, which no map declares — resolves to null, and so does any base that
- *  is not a map-shaped global, which is what makes every caller refuse rather than guess.
- *
- *  The pointee arm reaches only what the MAP lets it: `pointeeAccess` gates every `gPtr->member`
- *  spelling on `spellsAccessType(f.signed, …)`, so a pointer field declaring no signedness — which
- *  is every one in the corpus's vendored maps — is never named, and a pointer read one indirection
- *  down spells `((s32 *)gQ)[1]`. That is a fact about those maps, not about this code: `SymbolMap`
- *  is a caller-supplied input, and one field flips it (`signed: true` on a 4-byte pointer member
- *  of a pointee yields `(u8 *)gQ->pInner`, cast and all, pinned in pointer-members.test.ts). So
- *  the arm is live and tested, and the byte-arithmetic rule that reads this answer is correct for
- *  it — where resolving a pointee member to null would reopen the double-scaling hole silently. */
-function declaredMemberOf(x: Expr, sym: PointerSpellingSymCtx | undefined): DeclaredField | null {
-  if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
-    return null;
-  }
-  return sym.fieldsOf(x.base.name)?.find((f) => f.name === x.name) ?? null;
-}
-
-/** The map member a `field` node names when the declaration makes it a POINTER — {@link
- *  isPtrField} being the shared two-fact test, so this and the synthesized declaration cannot
- *  disagree about what a member is. */
-export function ptrMemberDecl(x: Expr, sym: PointerSpellingSymCtx | undefined): DeclaredField | null {
-  const f = declaredMemberOf(x, sym);
-  return f !== null && isPtrField(f) ? f : null;
 }
 
 export interface PointerSpellingDeps {
@@ -77,8 +47,8 @@ export interface PointerSpelling {
   needsIntSpelling(x: Expr): boolean;
   intoDeclaredTemp(name: string, value: Expr): Expr;
   intoPtrCell(lval: Expr, value: Expr): Expr;
-  ptrGlobalSide(x: Expr, sum: Op): boolean;
-  arith(d: Op, op: BinOp, l: Expr, r: Expr): ArithSpelling;
+  ptrGlobalSide(x: Expr, d: Op): boolean;
+  arith(d: Op, l: Expr, r: Expr): ArithSpelling;
 }
 
 export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling {
@@ -326,18 +296,19 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
   };
 
-  /** A global's value the arithmetic rule below spells as a base in the sum `sum` computes,
-   *  though `ctype` types no global: a value no map declaration types that the IR loads as a
-   *  pointer, or as a word into a sum the IR types a pointer. That rule keeps the add's operand
-   *  order, so an operand-order rule asks this before it swaps. */
-  const ptrGlobalSide = (x: Expr, sum: Op): boolean =>
+  /** A global's value the arithmetic rule below spells as a base of the op `d`, though `ctype`
+   *  types no global: a value no map declaration types that the IR loads as a pointer, or as a
+   *  word into an op the IR types a pointer. That rule keeps the add's operand order, so an
+   *  operand-order rule asks this before it swaps. */
+  const ptrGlobalSide = (x: Expr, d: Op): boolean =>
     x.k === 'var' &&
     mapUndeclared(x.name) &&
-    (pointerLoadedGlobals.has(x.name) || (sum.results[0]?.type.kind === 'ptr' && wordLoadedGlobals.has(x.name)));
+    (pointerLoadedGlobals.has(x.name) || (d.results[0]?.type.kind === 'ptr' && wordLoadedGlobals.has(x.name)));
 
-  /** The operands of `d`, an integer arithmetic op rendered as `op`, spelled for the address the
-   *  asm computed, and the pointer type their sum is cast back to. */
-  const arith = (d: Op, op: BinOp, l0: Expr, r0: Expr): ArithSpelling => {
+  /** The operands of `d`, an integer arithmetic op (ARITH_TO_BIN), spelled for the address the asm
+   *  computed, and the pointer type their sum is cast back to. */
+  const arith = (d: Op, l0: Expr, r0: Expr): ArithSpelling => {
+    const op = ARITH_TO_BIN[d.opcode];
     let l = l0;
     let r = r0;
     // Pointer stride: C pointer arithmetic is ELEMENT-scaled, but the asm added a BYTE

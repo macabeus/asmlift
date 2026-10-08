@@ -9,9 +9,9 @@ import { describe, expect, test } from 'vitest';
 import { type Op, mkOp, mkValue } from '../src/ir/core';
 import { type IrType, T } from '../src/ir/types';
 import type { BinOp, Expr } from '../src/l3/ast';
+import { memoFieldsOf } from '../src/structure/globalaccess';
 import { makePointerSpelling } from '../src/structure/pointer-spelling';
-import { ARITH_TO_BIN } from '../src/structure/structure';
-import { type SymbolInfo, declaredFields, pointeeFields } from '../src/symbols';
+import type { SymbolInfo } from '../src/symbols';
 
 interface Fixture {
   /** the project map's entries; absent ⇒ no map */
@@ -21,25 +21,12 @@ interface Fixture {
   wordLoaded?: string[];
   varType?: Record<string, IrType>;
 }
-// The map lookup as structure() builds it from a SymbolMap: by name, a struct global seating its
-// own members and a pointer global its pointee's.
+// The map lookup as structure() builds it: by name, with its member lookup.
 const make = (f: Fixture = {}) => {
   const byName = new Map((f.map ?? []).map((si) => [si.name, si]));
+  const info = (n: string) => byName.get(n);
   return makePointerSpelling({
-    sym:
-      f.map === undefined
-        ? undefined
-        : {
-            info: (n) => byName.get(n),
-            fieldsOf: (n) => {
-              const si = byName.get(n);
-              return si?.shape === 'struct'
-                ? declaredFields(si.layout)
-                : si?.shape === 'pointer'
-                  ? pointeeFields(si.pointee)
-                  : null;
-            },
-          },
+    sym: f.map === undefined ? undefined : { info, fieldsOf: memoFieldsOf(info) },
     pointerGlobals: f.pointerGlobals === undefined ? undefined : new Set(f.pointerGlobals),
     pointerLoadedGlobals: new Set(f.pointerLoaded ?? []),
     wordLoadedGlobals: new Set(f.wordLoaded ?? []),
@@ -52,13 +39,15 @@ const c = (value: number): Expr => ({ k: 'const', value });
 const addr = (name: string): Expr => ({ k: 'addr', name });
 const cast = (to: IrType, e: Expr): Expr => ({ k: 'cast', to, e });
 const bin = (op: BinOp, l: Expr, r: Expr): Expr => ({ k: 'bin', op, l, r });
+const member = (base: string, name: string): Expr => ({ k: 'field', base: v(base), name });
+const dotMember = (base: string, name: string): Expr => ({ k: 'field', base: v(base), name, dot: true });
 const bytes = (e: Expr): Expr => cast(T.ptr(T.u(8)), e);
 const word = (e: Expr): Expr => cast(T.u(32), e);
 
 /** A two-operand integer arithmetic op whose result the IR types `result`. */
-const arithOp = (opcode: 'add' | 'sub' | 'and', result: IrType): Op =>
+const arithOp = (opcode: 'add' | 'sub' | 'and' | 'logic_and', result: IrType): Op =>
   mkOp(opcode, { operands: [mkValue(T.u(32)), mkValue(T.u(32))], results: [mkValue(result)] });
-const spell = (s: ReturnType<typeof make>, d: Op, l: Expr, r: Expr) => s.arith(d, ARITH_TO_BIN[d.opcode], l, r);
+const spell = (s: ReturnType<typeof make>, d: Op, l: Expr, r: Expr) => s.arith(d, l, r);
 
 const ptrInfo = (name: string): SymbolInfo => ({ name, kind: 'data', declared: true, shape: 'pointer', size: 4 });
 const u16Info = (name: string, over: Partial<SymbolInfo> = {}): SymbolInfo => ({
@@ -70,6 +59,39 @@ const u16Info = (name: string, over: Partial<SymbolInfo> = {}): SymbolInfo => ({
   signed: false,
   ...over,
 });
+
+// A struct global with a `void *` and a `u16 *` member beside an integer one, and a pointer global
+// whose pointee seats a pointer member.
+const bgPtrsInfo: SymbolInfo = {
+  name: 'gBgPtrs',
+  kind: 'data',
+  declared: true,
+  shape: 'struct',
+  structName: 'BgPtrs',
+  size: 12,
+  layout: [
+    { name: 'pTiles', offset: 0, size: 4, pointer: true },
+    { name: 'pMap', offset: 4, size: 4, pointer: true, pointeeSize: 2, pointeeSigned: false },
+    { name: 'count', offset: 8, size: 4, signed: true },
+  ],
+};
+const outerInfo: SymbolInfo = {
+  name: 'gQ',
+  kind: 'data',
+  declared: true,
+  shape: 'pointer',
+  size: 4,
+  pointee: {
+    structName: 'Inner',
+    size: 8,
+    volatile: false,
+    const: false,
+    layout: [
+      { name: 'n', offset: 0, size: 4, signed: true },
+      { name: 'pInner', offset: 4, size: 4, pointer: true },
+    ],
+  },
+};
 
 describe('needsIntSpelling', () => {
   test('a pointer-typed local, a bare address and an undeclared pointer-loaded global need the integer', () => {
@@ -88,6 +110,18 @@ describe('needsIntSpelling', () => {
   test('a global the map declares a pointer needs it whatever the IR loaded it as', () => {
     expect(make({ map: [ptrInfo('gP')] }).needsIntSpelling(v('gP'))).toBe(true);
     expect(make({ pointerGlobals: ['gP'] }).needsIntSpelling(v('gP'))).toBe(true);
+  });
+
+  test('a member the map declares a pointer needs it, through a struct global or a pointee', () => {
+    const s = make({ map: [bgPtrsInfo, outerInfo] });
+    expect(s.needsIntSpelling(dotMember('gBgPtrs', 'pMap'))).toBe(true);
+    expect(s.needsIntSpelling(member('gQ', 'pInner'))).toBe(true);
+    expect(s.needsIntSpelling(dotMember('gBgPtrs', 'count'))).toBe(false);
+    expect(s.needsIntSpelling(member('gQ', 'n'))).toBe(false);
+  });
+
+  test('a member no map declares is no pointer value', () => {
+    expect(make().needsIntSpelling(dotMember('gBgPtrs', 'pMap'))).toBe(false);
   });
 });
 
@@ -320,5 +354,180 @@ describe('arith: a byte sum the rule already spelled', () => {
       r: bin('+', word(v('gPtr')), v('a1')),
       restoreTo: undefined,
     });
+  });
+});
+
+describe('arith: a pointer member', () => {
+  test('plus a runtime offset is byte arithmetic on the member', () => {
+    const s = make({ map: [bgPtrsInfo], varType: { a1: T.s(32) } });
+    expect(spell(s, arithOp('add', T.ptr(T.u(16))), v('a1'), dotMember('gBgPtrs', 'pMap'))).toEqual({
+      l: v('a1'),
+      r: bytes(dotMember('gBgPtrs', 'pMap')),
+      restoreTo: undefined,
+    });
+  });
+});
+
+describe('arith: the operators that take a pointer as it is', () => {
+  test('`&&` keeps a pointer global value bare', () => {
+    const s = make({ pointerLoaded: ['gPtr'], varType: { a1: T.s(32) } });
+    expect(spell(s, arithOp('logic_and', T.s(32)), v('gPtr'), v('a1'))).toEqual({
+      l: v('gPtr'),
+      r: v('a1'),
+      restoreTo: undefined,
+    });
+  });
+
+  test('a byte pointer less a byte pointer is left as it is', () => {
+    const s = make({ varType: { a4: T.ptr(T.u(8)), a5: T.ptr(T.u(8)) } });
+    expect(spell(s, arithOp('sub', T.s(32)), v('a4'), v('a5'))).toEqual({
+      l: v('a4'),
+      r: v('a5'),
+      restoreTo: undefined,
+    });
+  });
+});
+
+describe('arith: two pointers', () => {
+  const s = make({
+    pointerLoaded: ['gPtr'],
+    map: [ptrInfo('gP')],
+    varType: { a0: T.ptr(T.s(32)), a2: T.ptr(T.u(16)) },
+  });
+
+  test('a pointer plus a pointer walks the left one as bytes and goes back to its type', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(16))), v('a2'), v('a0'))).toEqual({
+      l: bytes(v('a2')),
+      r: cast(T.s(32), v('a0')),
+      restoreTo: T.ptr(T.u(16)),
+    });
+  });
+
+  test('a wider pointer less a pointer global value is the byte count, not cast back', () => {
+    expect(spell(s, arithOp('sub', T.s(32)), v('a0'), v('gPtr'))).toEqual({
+      l: bytes(v('a0')),
+      r: bytes(v('gPtr')),
+      restoreTo: undefined,
+    });
+  });
+
+  test('a map-declared pointer global plus a wider pointer local is the global as its word', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(16))), v('gP'), v('a2'))).toEqual({
+      l: word(v('gP')),
+      r: bytes(v('a2')),
+      restoreTo: T.ptr(T.u(16)),
+    });
+  });
+});
+
+describe('arith: the integer sum of an undeclared pointer global', () => {
+  const s = make({
+    pointerLoaded: ['gPtr', 'gQ'],
+    wordLoaded: ['gW', 'gB'],
+    varType: { a1: T.s(32), a2: T.s(32) },
+  });
+
+  test('its byte-sum partner goes the integer it also is', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('gPtr'), bin('+', bytes(v('gQ')), v('a1')))).toEqual({
+      l: word(v('gPtr')),
+      r: bin('+', word(v('gQ')), v('a1')),
+      restoreTo: T.ptr(T.u(8)),
+    });
+  });
+
+  test('a word-loaded global its byte-sum partner holds goes its word', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('gPtr'), bin('-', bytes(v('gW')), v('a2')))).toEqual({
+      l: word(v('gPtr')),
+      r: bin('-', word(bytes(v('gW'))), v('a2')),
+      restoreTo: T.ptr(T.u(8)),
+    });
+  });
+
+  test('a constant-valued partner keeps the byte pointer', () => {
+    const k = bin('<<', c(1), c(2));
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('gPtr'), k)).toEqual({
+      l: bytes(v('gPtr')),
+      r: k,
+      restoreTo: undefined,
+    });
+  });
+
+  test('right of a word-loaded global, the left one goes its word too', () => {
+    expect(spell(s, arithOp('add', T.u(32)), v('gW'), v('gPtr'))).toEqual({
+      l: word(bytes(v('gW'))),
+      r: word(v('gPtr')),
+      restoreTo: T.ptr(T.u(8)),
+    });
+  });
+
+  test('right of an integer, a byte sum less a word-loaded global is converted whole', () => {
+    const r = bin('-', bin('+', bytes(v('gPtr')), v('a2')), v('gB'));
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('a1'), r)).toEqual({
+      l: v('a1'),
+      r: word(r),
+      restoreTo: T.ptr(T.u(8)),
+    });
+  });
+
+  test('`int - ptr` with a restored sum takes a word-loaded global on the left as its word', () => {
+    const restored = bytes(bin('+', word(v('gPtr')), v('a1')));
+    expect(spell(s, arithOp('sub', T.s(32)), v('gW'), restored)).toEqual({
+      l: word(bytes(v('gW'))),
+      r: bin('+', word(v('gPtr')), v('a1')),
+      restoreTo: undefined,
+    });
+  });
+
+  test('under a non-additive operator, a restored sum whose word is a converted byte sum is unwrapped', () => {
+    const inner = bin('+', word(bin('-', bin('+', bytes(v('gPtr')), v('a1')), v('gB'))), v('a2'));
+    expect(spell(s, arithOp('and', T.u(32)), bytes(inner), c(255))).toEqual({
+      l: inner,
+      r: c(255),
+      restoreTo: undefined,
+    });
+  });
+});
+
+describe('arith: a word-loaded global as the base of a pointer-typed op', () => {
+  const s = make({ wordLoaded: ['gW', 'gW2'], varType: { a1: T.s(32) } });
+
+  test('right of an integer, it is the base, added as its word', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('a1'), v('gW'))).toEqual({
+      l: v('a1'),
+      r: word(bytes(v('gW'))),
+      restoreTo: T.ptr(T.u(8)),
+    });
+  });
+
+  test('right of an integer it is subtracted from, it is no base', () => {
+    expect(spell(s, arithOp('sub', T.ptr(T.u(8))), v('a1'), v('gW'))).toEqual({
+      l: v('a1'),
+      r: v('gW'),
+      restoreTo: undefined,
+    });
+  });
+
+  test('left of a word-loaded global it is subtracted from, its partner goes its word', () => {
+    expect(spell(s, arithOp('sub', T.ptr(T.u(8))), v('gW'), v('gW2'))).toEqual({
+      l: bytes(v('gW')),
+      r: word(bytes(v('gW2'))),
+      restoreTo: undefined,
+    });
+  });
+
+  test('right of a global address, the address stays the base', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), addr('gArr'), v('gW'))).toEqual({
+      l: word(addr('gArr')),
+      r: v('gW'),
+      restoreTo: undefined,
+    });
+  });
+});
+
+describe('arith: a map-declared byte sum right of an integer', () => {
+  test('keeps its byte pointer', () => {
+    const s = make({ map: [ptrInfo('gP')], pointerLoaded: ['gP'], varType: { a1: T.s(32) } });
+    const r = bin('+', bytes(v('gP')), c(4));
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('a1'), r)).toEqual({ l: v('a1'), r, restoreTo: undefined });
   });
 });
