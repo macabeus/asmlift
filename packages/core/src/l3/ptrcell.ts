@@ -3,7 +3,9 @@
 //
 // structure() spells a pointer value stored into a word global as `g = (void *)X`
 // (structure/pointer-spelling.ts `intoPtrCell`), the store every pointer declaration of `g` takes.
-// Three readers act on it, and all three ask `pointerCells` rather than re-reading the cast:
+// That store is built by `pointerCellValue` and read by `pointerCellStore`, both below; the one other
+// writer of it, `legalizePointerCells`, converts an integer stored into a cell through the same
+// function. Three readers act on it, and all three ask `pointerCells` rather than re-reading the cast:
 //
 //   • l3/symbol-refs.ts declares a name-only cell `void *` in the candidate's own world, the type
 //     that store needs, and so each global the cell meets bare that nothing reads as an integer
@@ -18,8 +20,12 @@ import { declaredWidth } from '../proto';
 import { type Expr, type SFn, type Stmt, exprChildren, mapExprChildren, stmtChildren, walkExprs } from './ast';
 import { declaredTypes, exprCType } from './typing';
 
-/** The bare name an `assign` stores a `(void *)` value into: a pointer cell, when no local binds
- *  it. */
+/** A value stored into a pointer cell: `(void *)X`, which every pointer declaration of the cell
+ *  takes. */
+export const pointerCellValue = (e: Expr): Expr => ({ k: 'cast', to: T.ptr(T.void()), e });
+
+/** The bare name an `assign` stores a `(void *)` value into (`pointerCellValue`): a pointer cell,
+ *  when no local binds it. */
 export function pointerCellStore(s: Stmt): string | undefined {
   return s.k === 'assign' && s.value.k === 'cast' && s.value.to.kind === 'ptr' && s.value.to.to.kind === 'void'
     ? s.name
@@ -350,7 +356,7 @@ export function legalizePointerCells(sfn: SFn): SFn {
     intArg: (e) =>
       e.k === 'bin' && cellSum(e) && exprCType(e, vt)?.kind === 'ptr' ? { k: 'cast', to: T.u(32), e } : asInt(e),
     comparedGlobal: (e) => ({ k: 'cast', to: T.u(32), e: { k: 'cast', to: T.ptr(T.u(8)), e } }),
-    intoCell: (e) => ({ k: 'cast', to: T.ptr(T.void()), e: asBytes(e) }),
+    intoCell: (e) => pointerCellValue(asBytes(e)),
     pointerOffset: asBytes,
     storedGlobal: () => {},
   });

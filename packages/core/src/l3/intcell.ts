@@ -38,7 +38,8 @@ const isCell = (x: Expr, name: string): boolean =>
  *  a bare value as it stands, anything else converted. */
 function integerValue(value: Expr, name: string): Expr {
   const stored = value.k === 'cast' ? value.e : value;
-  // `(u8 *)((u32)g + r)`: the integer sum the operand-order rule restores to a byte pointer
+  // `(u8 *)((u32)g + r)`: the integer sum the arithmetic table restores to a byte pointer
+  // (structure/pointer-spelling.ts ARITH_ROWS, `restore: 'bytes'`)
   const sum = stored.k === 'cast' && isPtrTo(stored.to, 'u8') ? stored.e : stored;
   if (sum.k === 'bin' && (sum.op === '+' || sum.op === '-') && isCell(sum.l, name)) {
     return { ...sum, l: { k: 'var', name } };

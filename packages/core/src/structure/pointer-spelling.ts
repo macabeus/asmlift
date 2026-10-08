@@ -19,6 +19,7 @@
 import { Op } from '../ir/core';
 import { type IrType, T, typeEquals } from '../ir/types';
 import { type BinOp, Expr } from '../l3/ast';
+import { pointerCellValue } from '../l3/ptrcell';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { type SymbolInfo, isScalarCellSize, scalarCellType } from '../symbols';
 import { ARITH_TO_BIN } from './arith-ops';
@@ -755,7 +756,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     // the population this rule exists for — reads `undefined` there. An already-`void *` value is
     // assignable as it stands.
     const isPtr = pointerValue(roleOf(value)) || (vt?.kind === 'ptr' && vt.to.kind !== 'void');
-    return isPtr ? { k: 'cast', to: T.ptr(T.void()), e: value } : value;
+    return isPtr ? pointerCellValue(value) : value;
   };
 
   return { needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
