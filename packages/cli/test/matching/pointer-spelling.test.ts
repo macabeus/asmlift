@@ -110,3 +110,45 @@ describe('the integer sum of an undeclared pointer global, real compilers', () =
     });
   }
 });
+
+// The evaluation-order re-spelling of a commutative load pair (core structure/pointer-spelling.ts
+// `pointerSide`) against IDO 7.1, which evaluated the right side of each pair below first. The table
+// spells the global as its word in an integer sum, and the sum's operand order must stay the IR's:
+// re-spelled in evaluation order, IDO compiles different code.
+const PAIR_DECLS =
+  'extern u8 *gPtr; extern u32 gIdx; extern u8 *gP; extern u32 gJ; void use(u32); void usep(void *);\n';
+const PAIRS = [
+  {
+    what: 'a pointer-loaded global',
+    body: 'void pair(void) { use(*gP); usep(gJ + gP); }',
+    spelled: '(u8 *)((u32)(u8 *)gJ + (u32)gP)',
+    evaluated: '(u8 *)((u32)gP + (u32)(u8 *)gJ)',
+  },
+  {
+    what: 'two word-loaded globals in a sum the IR types a pointer',
+    body: 'void pair(void) { use(*(gIdx + gPtr)); }',
+    spelled: '(u32)(u8 *)gIdx + (u32)(u8 *)gPtr',
+    evaluated: '(u32)(u8 *)gPtr + (u32)(u8 *)gIdx',
+  },
+];
+
+describe('the operand order of a load pair beside an undeclared global, IDO 7.1', () => {
+  for (const { what, body, spelled, evaluated } of PAIRS) {
+    it(`keeps the IR's order of ${what}`, () => {
+      const project = PAIR_DECLS + body;
+      const { asm, obj } = compileTarget('ido', project, 'pair');
+      const { target } = targetFor(ID.ido, flags('ido'));
+      const candidate = enumerateCandidates('pair', asm, target, {
+        prototypes: prototypesFromContext(C_TYPEDEFS + project, 'c'),
+        asmData: extractAsmData(obj, target, 'pair'),
+      }).find((c) => matches('ido', PAIR_DECLS + c.source, 'pair', obj));
+      expect(candidate?.source).toContain(spelled);
+      if (candidate === undefined) {
+        return;
+      }
+      const self = renderDeclarations(candidate.symbolRefs ?? []) + 'void use(u32); void usep(void *);\n';
+      expect(matches('ido', self + candidate.source, 'pair', obj)).toBe(true);
+      expect(matches('ido', PAIR_DECLS + candidate.source.replace(spelled, evaluated), 'pair', obj)).toBe(false);
+    });
+  }
+});

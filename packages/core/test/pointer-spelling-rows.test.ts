@@ -73,6 +73,9 @@ const op = (opcode: Opcode, result: IrType = T.u(32)): Op =>
   mkOp(opcode, { operands: [mkValue(T.u(32)), mkValue(T.u(32))], results: [mkValue(result)] });
 const add = (l: Expr, r: Expr, result?: IrType) => make().arith(op('add', result), l, r, false);
 const sub = (l: Expr, r: Expr, result?: IrType) => make().arith(op('sub', result), l, r, false);
+/** the byte difference of two undeclared pointer globals, an integer with a byte sum in it */
+const byteDiff = (s: ReturnType<typeof make>) => s.arith(op('sub', T.s(32)), v('gPtr'), v('gQ'), false);
+const BYTE_DIFF = bin('-', bytes(v('gPtr')), bytes(v('gQ')));
 /** two ops over one factory, so the second reads the role the first one built */
 const chain = <A>(first: (s: ReturnType<typeof make>) => A, then: (s: ReturnType<typeof make>, x: A) => Expr) => {
   const s = make();
@@ -165,6 +168,14 @@ describe('arith: the operators that are not additive', () => {
     const restored = s.arith(op('add', U8P), v('gPtr'), v('i'), false);
     expect(s.arith(op('and'), restored, c(255), false)).toEqual(bin('&', bin('+', word(v('gPtr')), v('i')), c(255)));
   });
+
+  it('takes a byte sum under a bitwise operator as its `s32`', () => {
+    const r = chain(
+      (s) => s.arith(op('sub', U8P), v('gPtr'), v('pb'), false),
+      (s, x) => s.arith(op('and'), v('i'), x, false),
+    );
+    expect(r).toEqual(bin('&', v('i'), s32(bin('-', bytes(v('gPtr')), s32(v('pb'))))));
+  });
 });
 
 describe('arith: a constant right operand', () => {
@@ -241,20 +252,40 @@ describe('arith: a constant left of `+`', () => {
     expect(add(c(4), v('gW'), U8P)).toEqual(bytes(bin('+', c(4), untypedWord('gW'))));
   });
 
-  it('leaves an integer as it is', () => {
+  it('leaves an integer and a byte pointer as they are', () => {
     expect(add(c(4), v('i'))).toEqual(bin('+', c(4), v('i')));
+    expect(add(c(4), v('i'), U8P)).toEqual(bin('+', c(4), v('i')));
+    expect(add(c(4), v('pb'), U8P)).toEqual(bin('+', c(4), v('pb')));
   });
 });
 
-describe('arith: two rendered pointers', () => {
-  it('walks a wider left pointer as bytes plus the right one’s integer, cast back to the left type', () => {
+describe('arith: a rendered pointer left of `+`', () => {
+  it('walks a wider one as bytes plus a right pointer’s integer, cast back to its type', () => {
     expect(add(v('ph'), v('pw'), U16P)).toEqual(cast(U16P, bin('+', bytes(v('ph')), s32(v('pw')))));
   });
 
-  it('adds the right pointer’s integer to a byte pointer', () => {
+  it('walks a wider one as bytes plus a pointer global’s word, cast back to its type', () => {
+    expect(add(v('ph'), v('gPtr'), U16P)).toEqual(cast(U16P, bin('+', bytes(v('ph')), word(v('gPtr')))));
+  });
+
+  it('walks a wider one as bytes plus a runtime offset, cast back to its type', () => {
+    expect(add(v('ph'), v('i'), U16P)).toEqual(cast(U16P, bin('+', bytes(v('ph')), v('i'))));
+  });
+
+  it('adds a right pointer’s integer to a byte pointer', () => {
     expect(add(v('pb'), v('pw'), U8P)).toEqual(bin('+', v('pb'), s32(v('pw'))));
   });
 
+  it('adds a pointer global’s word to a byte pointer', () => {
+    expect(add(v('pb'), v('gPtr'), U8P)).toEqual(bin('+', v('pb'), word(v('gPtr'))));
+  });
+
+  it('leaves a byte pointer plus an integer as it is', () => {
+    expect(add(v('pb'), v('i'), U8P)).toEqual(bin('+', v('pb'), v('i')));
+  });
+});
+
+describe('arith: a rendered pointer left of `-`', () => {
   it('subtracts a wider pointer as the byte count', () => {
     expect(sub(v('pb'), v('pw'), T.s(32))).toEqual(bin('-', bytes(v('pb')), bytes(v('pw'))));
     expect(sub(v('pw'), v('pb'), T.s(32))).toEqual(bin('-', bytes(v('pw')), bytes(v('pb'))));
@@ -268,26 +299,13 @@ describe('arith: two rendered pointers', () => {
     );
     expect(restored).toEqual(bin('-', v('pb'), bytes(bin('+', word(v('gQ')), v('i')))));
   });
-});
 
-describe('arith: a rendered pointer left of a pointer global', () => {
-  it('walks a wider pointer as bytes plus the global’s word, cast back to the left type', () => {
-    expect(add(v('ph'), v('gPtr'), U16P)).toEqual(cast(U16P, bin('+', bytes(v('ph')), word(v('gPtr')))));
-  });
-
-  it('adds the global’s word to a byte pointer', () => {
-    expect(add(v('pb'), v('gPtr'), U8P)).toEqual(bin('+', v('pb'), word(v('gPtr'))));
-  });
-
-  it('subtracts the global as a byte pointer, so the difference is the byte count', () => {
+  it('subtracts a pointer global as a byte pointer, so the difference is the byte count', () => {
     expect(sub(v('pw'), v('gPtr'), T.s(32))).toEqual(bin('-', bytes(v('pw')), bytes(v('gPtr'))));
     expect(sub(v('pb'), v('gPtr'), T.s(32))).toEqual(bin('-', v('pb'), bytes(v('gPtr'))));
   });
-});
 
-describe('arith: a rendered pointer left of a runtime operand', () => {
-  it('walks a wider pointer as bytes and casts the sum back to its type', () => {
-    expect(add(v('ph'), v('i'), U16P)).toEqual(cast(U16P, bin('+', bytes(v('ph')), v('i'))));
+  it('walks a wider pointer as bytes less an integer and casts the difference back to its type', () => {
     expect(sub(v('ph'), v('i'), U16P)).toEqual(cast(U16P, bin('-', bytes(v('ph')), v('i'))));
   });
 
@@ -299,8 +317,12 @@ describe('arith: a rendered pointer left of a runtime operand', () => {
     expect(r).toEqual(bin('-', bin('+', bytes(v('gPtr')), c(4)), bin('-', untypedWord('gB2'), untypedWord('gB3'))));
   });
 
-  it('leaves a byte pointer plus an integer as it is', () => {
-    expect(add(v('pb'), v('i'), U8P)).toEqual(bin('+', v('pb'), v('i')));
+  it('subtracts a byte difference from a byte sum as the byte difference', () => {
+    const r = chain(
+      (s) => [s.arith(op('add', U8P), v('gPtr'), c(4), false), byteDiff(s)],
+      (s, [l, r]) => s.arith(op('sub'), l, r, false),
+    );
+    expect(r).toEqual(bin('-', bin('+', bytes(v('gPtr')), c(4)), BYTE_DIFF));
   });
 });
 
@@ -335,14 +357,40 @@ describe('arith: `int - ptr`', () => {
     expect(sub(v('gW'), v('pb'), U8P)).toEqual(bin('-', bytes(v('gW')), s32(v('pb'))));
   });
 
+  it('takes a restored sum as its integer sum, and leaves a byte difference left of it as it is', () => {
+    const r = chain(
+      (s) => [byteDiff(s), restoredSum(s)],
+      (s, [l, r]) => s.arith(op('sub', T.s(32)), l, r, false),
+    );
+    expect(r).toEqual(bin('-', BYTE_DIFF, bin('+', word(v('gQ')), v('i'))));
+  });
+
   it('takes a rendered pointer as an `s32` from an integer', () => {
     expect(sub(v('i'), v('pb'), T.s(32))).toEqual(bin('-', v('i'), s32(v('pb'))));
+    expect(sub(v('i'), v('pb'), U8P)).toEqual(bin('-', v('i'), s32(v('pb'))));
+    expect(sub(v('i'), v('pw'), T.s(32))).toEqual(bin('-', v('i'), s32(v('pw'))));
+  });
+
+  it('takes a rendered pointer as an `s32` from a byte difference', () => {
+    const r = chain(
+      (s) => [byteDiff(s), s.arith(op('add', U8P), v('pb'), v('i'), false)],
+      (s, [l, r]) => s.arith(op('sub', T.s(32)), l, r, false),
+    );
+    expect(r).toEqual(bin('-', BYTE_DIFF, s32(bin('+', v('pb'), v('i')))));
   });
 });
 
 describe('arith: a rendered pointer right of `+`', () => {
   it('adds an undeclared pointer global as its word to the walked pointer’s word, cast back to the right type', () => {
     expect(add(v('gPtr'), v('ph'), U16P)).toEqual(cast(U16P, bin('+', word(v('gPtr')), word(bytes(v('ph'))))));
+  });
+
+  it('walks a wider pointer sum right of an undeclared pointer global as bytes before taking its word', () => {
+    const r = chain(
+      (s) => s.arith(op('add', T.ptr(T.s(32))), v('pw'), c(8), false),
+      (s, x) => s.arith(op('add', T.ptr(T.s(32))), v('gPtr'), x, false),
+    );
+    expect(r).toEqual(cast(T.ptr(T.s(32)), bin('+', word(v('gPtr')), word(bytes(bin('+', v('pw'), c(2)))))));
   });
 
   it('adds an undeclared pointer global as its word to a byte pointer’s word, restoring the byte pointer', () => {
@@ -376,6 +424,30 @@ describe('arith: a rendered pointer right of `+`', () => {
     expect(r).toEqual(bytes(bin('+', v('i'), bin('+', word(v('gPtr')), c(4)))));
   });
 
+  it('adds an untyped global word left of that byte sum as its word', () => {
+    const r = chain(
+      (s) => s.arith(op('add', U8P), v('gPtr'), c(4), false),
+      (s, x) => s.arith(op('add', U8P), v('gW'), x, false),
+    );
+    expect(r).toEqual(bytes(bin('+', untypedWord('gW'), bin('+', word(v('gPtr')), c(4)))));
+  });
+
+  it('leaves a byte difference left of that byte sum as it is', () => {
+    const r = chain(
+      (s) => [byteDiff(s), s.arith(op('add', U8P), v('gPtr'), c(4), false)],
+      (s, [l, r]) => s.arith(op('add', U8P), l, r, false),
+    );
+    expect(r).toEqual(bytes(bin('+', BYTE_DIFF, bin('+', word(v('gPtr')), c(4)))));
+  });
+
+  it('leaves an integer plus a byte difference of undeclared globals, an integer, as it is', () => {
+    const r = chain(
+      (s) => s.arith(op('sub', T.s(32)), v('gPtr'), v('gQ'), false),
+      (s, x) => s.arith(op('add', T.s(32)), v('i'), x, false),
+    );
+    expect(r).toEqual(bin('+', v('i'), bin('-', bytes(v('gPtr')), bytes(v('gQ')))));
+  });
+
   it('leaves an integer plus a byte pointer as it is', () => {
     expect(add(v('i'), v('pb'), U8P)).toEqual(bin('+', v('i'), v('pb')));
   });
@@ -384,6 +456,13 @@ describe('arith: a rendered pointer right of `+`', () => {
 describe('arith: `+` with no rendered pointer', () => {
   it('adds an undeclared pointer global plus a runtime offset as its word, the asm’s order on CodeWarrior too, and restores the byte pointer', () => {
     expect(add(v('gPtr'), v('i'), U8P)).toEqual(bytes(bin('+', word(v('gPtr')), v('i'))));
+  });
+
+  it('adds an undeclared pointer global’s partner as its integer: a pointer global’s or member’s word, an untyped global’s word', () => {
+    expect(add(v('gPtr'), v('gQ'), U8P)).toEqual(bytes(bin('+', word(v('gPtr')), word(v('gQ')))));
+    const pMap = dotMember('gBgPtrs', 'pMap');
+    expect(add(v('gPtr'), pMap, U8P)).toEqual(bytes(bin('+', word(v('gPtr')), word(pMap))));
+    expect(add(v('gPtr'), v('gW'), U8P)).toEqual(bytes(bin('+', word(v('gPtr')), untypedWord('gW'))));
   });
 
   it('walks the left of two declared pointer globals as bytes and adds the right one’s word', () => {
@@ -398,12 +477,25 @@ describe('arith: `+` with no rendered pointer', () => {
     expect(add(v('i'), v('gPtr'), U8P)).toEqual(bytes(bin('+', v('i'), word(v('gPtr')))));
   });
 
+  it('leaves a byte difference left of an undeclared pointer global as it is', () => {
+    expect(chain(byteDiff, (s, x) => s.arith(op('add', U8P), x, v('gPtr'), false))).toEqual(
+      bytes(bin('+', BYTE_DIFF, word(v('gPtr')))),
+    );
+  });
+
   it('walks a declared pointer global right of an integer as bytes, the asm’s order on CodeWarrior', () => {
     expect(add(v('i'), v('gP'), U8P)).toEqual(bin('+', v('i'), bytes(v('gP'))));
   });
 
   it('adds an untyped global word plus a runtime offset as integers and restores the byte pointer', () => {
     expect(add(v('gW'), v('i'), U8P)).toEqual(bytes(bin('+', untypedWord('gW'), v('i'))));
+  });
+
+  it('adds an untyped global word plus another one, or a byte difference, as integers', () => {
+    expect(add(v('gW'), v('gW2'), U8P)).toEqual(bytes(bin('+', untypedWord('gW'), untypedWord('gW2'))));
+    expect(chain(byteDiff, (s, x) => s.arith(op('add', U8P), v('gW'), x, false))).toEqual(
+      bytes(bin('+', untypedWord('gW'), BYTE_DIFF)),
+    );
   });
 
   it('walks an untyped global word as bytes plus a constant-valued integer', () => {
@@ -415,8 +507,23 @@ describe('arith: `+` with no rendered pointer', () => {
     expect(add(v('i'), v('gW'), U8P)).toEqual(bytes(bin('+', v('i'), untypedWord('gW'))));
   });
 
+  it('leaves a byte difference left of an untyped global word as it is', () => {
+    expect(chain(byteDiff, (s, x) => s.arith(op('add', U8P), x, v('gW'), false))).toEqual(
+      bytes(bin('+', BYTE_DIFF, untypedWord('gW'))),
+    );
+  });
+
+  it('adds every untyped global word of a sum left of it as its word', () => {
+    const r = chain(
+      (s) => s.arith(op('add'), v('j'), v('gW2'), false),
+      (s, x) => s.arith(op('add', U8P), x, v('gW'), false),
+    );
+    expect(r).toEqual(bytes(bin('+', bin('+', v('j'), untypedWord('gW2')), untypedWord('gW'))));
+  });
+
   it('leaves two integers as they are', () => {
     expect(add(v('i'), v('j'))).toEqual(bin('+', v('i'), v('j')));
+    expect(add(v('i'), v('j'), U8P)).toEqual(bin('+', v('i'), v('j')));
   });
 });
 
@@ -435,6 +542,20 @@ describe('arith: `-` with no rendered pointer', () => {
 
   it('walks an untyped global word as bytes less an integer where the IR types it a pointer', () => {
     expect(sub(v('gW'), v('i'), U8P)).toEqual(bin('-', bytes(v('gW')), v('i')));
+  });
+
+  it('leaves a byte difference less an untyped global word as it is where the IR types it a pointer', () => {
+    expect(chain(byteDiff, (s, x) => s.arith(op('sub', U8P), v('gW'), x, false))).toEqual(
+      bin('-', bytes(v('gW')), BYTE_DIFF),
+    );
+  });
+
+  it('subtracts a byte difference from a byte difference as it is', () => {
+    const r = chain(
+      (s) => [byteDiff(s), byteDiff(s)],
+      (s, [l, r]) => s.arith(op('sub', T.s(32)), l, r, false),
+    );
+    expect(r).toEqual(bin('-', BYTE_DIFF, BYTE_DIFF));
   });
 
   it('subtracts a sum of untyped global words from a byte difference word by word', () => {
@@ -470,6 +591,23 @@ describe('arith: known gaps', () => {
   it('leaves an untyped global word bare left of a pointer holding an address', () => {
     const p = bin('+', bytes(addr('gArr')), v('i'));
     expect(sub(v('gW'), p, U8P)).toEqual(bin('-', v('gW'), s32(p)));
+  });
+
+  it('leaves an untyped global word bare beside a global’s address', () => {
+    expect(add(v('gW'), addr('gArr'), U8P)).toEqual(bin('+', v('gW'), word(addr('gArr'))));
+    expect(sub(v('gW'), addr('gArr'), U8P)).toEqual(bin('-', v('gW'), word(addr('gArr'))));
+  });
+
+  it('leaves an untyped global word, or a sum of one, bare right of an integer or a byte difference it is subtracted from', () => {
+    expect(add(c(4), v('gW'))).toEqual(bin('+', c(4), v('gW')));
+    const r = chain(
+      (s) => s.arith(op('add'), v('gW'), c(4), false),
+      (s, x) => s.arith(op('sub'), v('j'), x, false),
+    );
+    expect(r).toEqual(bin('-', v('j'), bin('+', v('gW'), c(4))));
+    expect(chain(byteDiff, (s, x) => s.arith(op('sub', T.s(32)), x, v('gW'), false))).toEqual(
+      bin('-', BYTE_DIFF, v('gW')),
+    );
   });
 
   it('leaves a sum of an untyped global word bare right of a byte pointer holding no byte sum', () => {

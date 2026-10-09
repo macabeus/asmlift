@@ -182,14 +182,14 @@ describe('arith: the operand order of a load pair evaluated right first', () => 
     expect(swapped(s, arithOp('add', T.u(32)), v('gX'), v('a1'))).toEqual(bin('+', v('a1'), v('gX')));
   });
 
-  test('keeps a pointer-loaded global no map declares in place, in the IR’s order of the integer sum (pointerSide’s KNOWN GAP)', () => {
+  test('keeps a pointer-loaded global no map declares in the IR’s order of its integer sum, the asm’s on IDO 7.1', () => {
     const s = make({ pointerLoaded: ['gPtr'], varType: { a1: T.s(32) } });
     expect(swapped(s, arithOp('add', T.u(32)), v('gPtr'), v('a1'))).toEqual(
       sum('+', word(v('gPtr')), v('a1'), T.ptr(T.u(8))),
     );
   });
 
-  test('keeps a word-loaded global only in a sum the IR types a pointer', () => {
+  test('keeps a word-loaded global in the IR’s order only in a sum the IR types a pointer, the asm’s on IDO 7.1', () => {
     const s = make({ wordLoaded: ['gW'], varType: { a1: T.s(32) } });
     expect(swapped(s, arithOp('add', T.ptr(T.u(8))), v('gW'), v('a1'))).toEqual(
       sum('+', word(bytes(v('gW'))), v('a1'), T.ptr(T.u(8))),
@@ -202,12 +202,12 @@ describe('arith: the operand order of a load pair evaluated right first', () => 
     expect(swapped(s, arithOp('add', T.u(32)), v('a0'), v('a1'))).toEqual(bin('+', v('a0'), v('a1')));
   });
 
-  test('re-spells a pointer global the map declares, which the table then spells as a pointer (pointerSide’s KNOWN GAP)', () => {
+  test('re-spells a pointer global the map declares, which the table then spells as a pointer sum', () => {
     const s = make({ map: [ptrInfo('gP')], pointerLoaded: ['gP'], varType: { a1: T.s(32) } });
     expect(swapped(s, arithOp('add', T.u(32)), v('gP'), v('a1'))).toEqual(bin('+', v('a1'), bytes(v('gP'))));
   });
 
-  test('keeps a `pointerGlobals` name with no map entry', () => {
+  test('keeps a `pointerGlobals` name with no map entry in the IR’s order of its integer sum', () => {
     const s = make({ pointerGlobals: ['gP'], pointerLoaded: ['gP'], varType: { a1: T.s(32) } });
     expect(swapped(s, arithOp('add', T.u(32)), v('gP'), v('a1'))).toEqual(
       sum('+', word(v('gP')), v('a1'), T.ptr(T.u(8))),
@@ -330,6 +330,15 @@ describe('arith: a byte sum the rule already spelled', () => {
     expect(restored).toEqual(bytes(bin('+', word(v('gPtr')), v('a1'))));
     expect(spell(s, arithOp('sub', T.s(32)), c(100), restored)).toEqual(
       bin('-', c(100), bin('+', word(v('gPtr')), v('a1'))),
+    );
+  });
+
+  test('a global’s byte pointer printed by another rule is no global of this one: the pointer sum stays', () => {
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('a1'), v('gPtr'))).toEqual(
+      sum('+', v('a1'), word(v('gPtr')), T.ptr(T.u(8))),
+    );
+    expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('a1'), bytes(v('gPtr')))).toEqual(
+      bin('+', v('a1'), bytes(v('gPtr'))),
     );
   });
 
