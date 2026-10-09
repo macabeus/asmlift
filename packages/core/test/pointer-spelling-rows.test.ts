@@ -13,7 +13,7 @@ import { type Op, mkOp, mkValue } from '../src/ir/core';
 import { type IrType, T } from '../src/ir/types';
 import type { BinOp, Expr } from '../src/l3/ast';
 import { memoFieldsOf } from '../src/structure/globalaccess';
-import { makePointerSpelling } from '../src/structure/pointer-spelling';
+import { type ArithCompilerFacts, makePointerSpelling } from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
 
 const ptrInfo = (name: string): SymbolInfo => ({ name, kind: 'data', declared: true, shape: 'pointer', size: 4 });
@@ -34,10 +34,11 @@ const bgPtrsInfo: SymbolInfo = {
 // gPtr and gQ are globals no map declares that the IR loads as pointers, gW, gW2, gB2 and gB3
 // ones it loads as words, and gPW one it loads as both; the locals are typed as named.
 const MAP = [ptrInfo('gP'), ptrInfo('gR'), bgPtrsInfo];
-const make = () => {
+const make = (compiler?: ArithCompilerFacts) => {
   const byName = new Map(MAP.map((si) => [si.name, si]));
   const info = (n: string) => byName.get(n);
   return makePointerSpelling({
+    compiler,
     sym: { info, fieldsOf: memoFieldsOf(info) },
     pointerGlobals: undefined,
     pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR', 'gPW']),
@@ -456,6 +457,55 @@ describe('arith: a rendered pointer right of `+`', () => {
 describe('arith: `+` with no rendered pointer', () => {
   it('adds an undeclared pointer global plus a runtime offset as its word, the asm’s order on CodeWarrior too, and restores the byte pointer', () => {
     expect(add(v('gPtr'), v('i'), U8P)).toEqual(bytes(bin('+', word(v('gPtr')), v('i'))));
+  });
+
+  describe('where the compiler reassociates an integer sum’s constant', () => {
+    const gcc = make({ reassociatesIntegerSumConstant: true });
+    const shifted = bin('<<', v('i'), c(13));
+
+    it('walks an undeclared pointer global plus an integer offset with a constant term as bytes, the pointer sum', () => {
+      for (const offset of [bin('+', shifted, c(772)), bin('-', v('i'), c(4)), bin('+', c(4), v('i'))]) {
+        expect(gcc.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(bin('+', bytes(v('gPtr')), offset));
+        expect(gcc.arith(op('add'), v('gPtr'), offset, false)).toEqual(bin('+', bytes(v('gPtr')), offset));
+      }
+      const unfolded = bin('+', shifted, bin('<<', c(193), c(2)));
+      expect(gcc.arith(op('add', U8P), v('gPtr'), unfolded, false)).toEqual(bin('+', bytes(v('gPtr')), unfolded));
+    });
+
+    it('adds an untyped global word in that offset as its word', () => {
+      const s = make({ reassociatesIntegerSumConstant: true });
+      const offset = s.arith(op('add'), v('gW'), c(4), false);
+      expect(s.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(
+        bin('+', bytes(v('gPtr')), bin('+', untypedWord('gW'), c(4))),
+      );
+    });
+
+    it('does not walk it beside an offset with no constant term, where the two sums are one object', () => {
+      expect(gcc.arith(op('add', U8P), v('gPtr'), v('i'), false)).toEqual(bytes(bin('+', word(v('gPtr')), v('i'))));
+      const product = bin('*', v('i'), c(24));
+      expect(gcc.arith(op('add', U8P), v('gPtr'), product, false)).toEqual(bytes(bin('+', word(v('gPtr')), product)));
+    });
+
+    it('does not walk it beside a partner that is no integer', () => {
+      const byteSum = gcc.arith(op('add', U8P), v('pb'), c(4), false);
+      expect(gcc.arith(op('add', U8P), v('gPtr'), byteSum, false)).toEqual(
+        bytes(bin('+', word(v('gPtr')), word(bin('+', v('pb'), c(4))))),
+      );
+      const addressSum = bin('+', addr('gArr'), c(4));
+      expect(gcc.arith(op('add', U8P), v('gPtr'), addressSum, false)).toEqual(
+        bytes(bin('+', word(v('gPtr')), addressSum)),
+      );
+    });
+
+    it('does not walk it right of an integer, whose order the pointer sum would swap', () => {
+      const offset = bin('+', shifted, c(772));
+      expect(gcc.arith(op('add', U8P), offset, v('gPtr'), false)).toEqual(bytes(bin('+', offset, word(v('gPtr')))));
+    });
+
+    it('keeps the integer sum where the compiler does not reassociate it', () => {
+      const offset = bin('+', shifted, c(772));
+      expect(add(v('gPtr'), offset, U8P)).toEqual(bytes(bin('+', word(v('gPtr')), offset)));
+    });
   });
 
   it('adds an undeclared pointer global’s partner as its integer: a pointer global’s or member’s word, an untyped global’s word', () => {

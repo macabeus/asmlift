@@ -43,6 +43,15 @@ export interface PointerSpellingDeps {
   wordLoadedGlobals: ReadonlySet<string>;
   /** each declared variable's type — LIVE, read at call time. */
   varType: ReadonlyMap<string, IrType>;
+  /** the compiler behaviors a row is guarded on (`ArithRow.when`); absent ⇒ none holds. */
+  compiler?: ArithCompilerFacts;
+}
+
+/** The compiler behaviors (target.ts `compilerBehaviors`) the table's rows may be guarded on. */
+export interface ArithCompilerFacts {
+  /** the compiler moves the constant addend of an integer sum's offset out to the base, and not a
+   *  pointer sum's (target.ts) */
+  reassociatesIntegerSumConstant?: boolean;
 }
 
 /** Which globals a fact holds of: some global, and whether one of them is a global no map
@@ -159,6 +168,8 @@ export type SideFact =
   /** a global's word no declaration types (`untypedWord`) */
   | 'untyped'
   | 'constant'
+  /** an additive expression with a constant term (`x + K`, `x - K`, `K + x`) */
+  | 'addend'
   /** a global's address is in it */
   | 'address'
   /** renders an integer, or is a bare name nothing types that is no pointer value, and holds no
@@ -190,6 +201,8 @@ export type Restore = 'bytes' | 'left' | 'right';
 export interface ArithRow {
   /** the operator: `±` is both additive ones, `logical` is `&&`/`||`, `bitwise` is the rest */
   readonly op: '+' | '-' | '±' | 'logical' | 'bitwise';
+  /** the row holds only where the compiler has this behavior */
+  readonly when?: keyof ArithCompilerFacts;
   /** the IR types the op's result a pointer */
   readonly resultPointer?: true;
   readonly l?: Readonly<Partial<Record<SideFact, boolean>>>;
@@ -243,8 +256,11 @@ export interface ArithRow {
  *  offset is added as an integer too: CodeWarrior at -O4 puts the index first in every pointer
  *  sum, where an integer sum keeps the source's order, so `(u8 *)g + x` is the asm's order on
  *  agbcc, KMC gcc and IDO only. The partner goes integer with it, or a pointer partner would scale
- *  the sum. A constant offset folds into the access and keeps `(u8 *)g + K`. A declared pointer
- *  keeps `x + (u8 *)p`, the operand the element and field spellings read.
+ *  the sum. Except where the compiler reassociates an integer sum (`reassociatesIntegerSumConstant`)
+ *  and the offset has a constant term: the gcc family folds `(u32)g + (x + K)` to `(g + K) + x` and
+ *  keeps the pointer sum's `g + (x + K)`, so there an integer offset keeps the pointer sum. A
+ *  constant offset folds into the access and keeps `(u8 *)g + K`. A declared pointer keeps
+ *  `x + (u8 *)p`, the operand the element and field spellings read.
  *
  *  A byte sum less an integer sum of globals no declaration types: bare, `gB2 - gB3` is an element
  *  count under a wider pointer declaration of them, where the asm subtracted bytes.
@@ -316,6 +332,14 @@ export const ARITH_ROWS: readonly ArithRow[] = [
   },
   {
     op: '+',
+    when: 'reassociatesIntegerSumConstant',
+    l: { pointerValue: true, undeclared: true },
+    r: { integer: true, addend: true, constant: false },
+    lSpell: ['bytes'],
+    rSpell: ['words'],
+  },
+  {
+    op: '+',
     l: { pointerValue: true, undeclared: true },
     r: { constant: false },
     lSpell: ['word'],
@@ -384,7 +408,7 @@ export interface PointerSpelling {
 const BYTE_PTR = T.ptr(T.u(8));
 
 export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling {
-  const { sym, pointerGlobals, pointerLoadedGlobals, wordLoadedGlobals, varType } = deps;
+  const { sym, pointerGlobals, pointerLoadedGlobals, wordLoadedGlobals, varType, compiler = {} } = deps;
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
 
   /** The declared shape of a global as the pointer-value rules read it: the map's, or a pointer
@@ -590,6 +614,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
       undeclared: x.k === 'name' && x.facts.mapUndeclared,
       untyped: untypedWord(x),
       constant: m.constant,
+      addend: x.e.k === 'bin' && (x.e.op === '+' || x.e.op === '-') && (constantExpr(x.e.l) || constantExpr(x.e.r)),
       address: m.address,
       integer: !m.address && (t?.kind === 'int' || (x.k === 'name' && t === undefined && !pv)),
       restored: m.restored.any,
@@ -631,6 +656,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     const { row } = ROW_TESTS.find(
       (w) =>
         (w.row.op === opClass || (w.row.op === '±' && (opClass === '+' || opClass === '-'))) &&
+        (w.row.when === undefined || compiler[w.row.when] === true) &&
         (w.row.resultPointer === undefined || resultPointer) &&
         w.l.every(([f, v]) => lf[f] === v) &&
         w.r.every(([f, v]) => rf[f] === v),

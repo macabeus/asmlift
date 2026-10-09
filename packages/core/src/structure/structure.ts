@@ -1701,6 +1701,9 @@ export interface StructureOptions {
   // is nothing to referee. Absent ⇒ off — the target field carries the evidence a compiler owes,
   // analysis.ts AnalyzeOptions the refusals.
   readsStayWhereWritten?: boolean;
+  // A compiler behavior (TargetDescription.compilerBehaviors): the arithmetic table spells a pointer
+  // global plus an integer offset as the pointer sum — structure/pointer-spelling.ts `ARITH_ROWS`.
+  reassociatesIntegerSumConstant?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
   // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
@@ -2053,6 +2056,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds = false,
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
+    reassociatesIntegerSumConstant = false,
     contractsFloatProducts = false,
     staticLayout,
     unsignedCompareSpelling = false,
@@ -2719,6 +2723,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     pointerLoadedGlobals,
     wordLoadedGlobals,
     varType,
+    compiler: { reassociatesIntegerSumConstant },
   });
 
   let fresh = 0;
