@@ -86,6 +86,7 @@ import {
   UNFOLDED_HOISTS,
   applyStacked,
   createdLocals,
+  firstFired,
   sameBases,
 } from './rank-variations';
 import { type Stillborn, stillbornVerdict } from './stillborn';
@@ -1114,6 +1115,7 @@ export function enumerateCandidates(
           // which moves only const or pure-read assigns and so cannot lift a read of a base local
           // above its init.
           const minted = createdLocals(sfn, alt);
+          const firedSets = new Set<string>();
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
@@ -1121,7 +1123,7 @@ export function enumerateCandidates(
             const shapeVariations = subset.map((x) => x.name);
             try {
               const shaped = applyStacked(subset, alt);
-              if (shaped !== null) {
+              if (shaped !== null && firstFired(firedSets, shaped.variations)) {
                 assertResolved(shaped.out);
                 assertDerefsTyped(shaped.out);
                 assertLocalsWritten(shaped.out);
@@ -1154,12 +1156,13 @@ export function enumerateCandidates(
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A variation on the
     // same footing as the others: the default inline spelling stays in the list, so the differ
     // referees and this can never cost a match.
+    const firedSets = new Set<string>();
     for (const subset of STACKED_SUBSETS) {
       // the truthful variations need the pass to RUN first, so this bypasses respell's
       // variations-then-thunk shape: same try posture, variations from the fired members
       try {
         const shaped = applyStacked(subset, sfn);
-        if (shaped !== null) {
+        if (shaped !== null && firstFired(firedSets, shaped.variations)) {
           // the ONE call whose variations already name shapes — say so, rather than making `respell`
           // read them back out of the variations it was handed
           respell(shaped.variations, () => shaped.out, true);

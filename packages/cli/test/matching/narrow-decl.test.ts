@@ -223,3 +223,41 @@ describe('/narrow-decl, /narrow-load and /narrow-read in one function, real agbc
     expect(hasVariation(r.winner.variations, 'narrow-read')).toBe(read === 'u8');
   });
 });
+
+// A statement-shape member beside the width members: a loop whose accumulator `/initfirst` moves
+// up, after the cast-written local and the two byte reads. Each width subset must be reachable with
+// the shape as well as without it.
+const LOOP_DECLS = 'struct P { s32 x; s32 y; }; extern struct P gArr[]; extern s32 gN; extern s32 gS;\n';
+const SHAPE_DECLS = DECLS + LOAD_DECLS + LOOP_DECLS;
+
+const rankedShapeAndWidths = async (written: string, loaded: string) => {
+  const write = written === 'u8' ? 'gA.c - 1' : '(u8)(gA.c - 1)';
+  const c =
+    `${SHAPE_DECLS}void sw(u8 *p, s32 x) { ${written} v; ${loaded} a; ${loaded} b; s32 s, i; v = ${write}; ` +
+    'gB.d = (1 & v) + rnd() % (5 - v) + 1; a = p[100]; b = p[101]; ' +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); ' +
+    's = 0; for (i = 0; i < gN; i++) s += gArr[i].x; gS = s; }';
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('sw', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      sw: { params: ['u8 *', 's32'], returnsVoid: true },
+      rnd: { params: [] },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+    },
+    compile: async (source) => compileCandAgbcc(SHAPE_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('a statement shape with the width members, real agbcc', () => {
+  it.each([
+    ['u8', 's32'],
+    ['s32', 'u8'],
+    ['u8', 'u8'],
+    ['s32', 's32'],
+  ])('matches %s written and %s loaded locals', async (written, loaded) => {
+    const r = await rankedShapeAndWidths(written, loaded);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(written === 'u8');
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(loaded === 'u8');
+  });
+});

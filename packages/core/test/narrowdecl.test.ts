@@ -488,26 +488,25 @@ describe('/narrow-decl and /narrow-read stacked', () => {
 
 describe('the stacked subsets', () => {
   const names = STACKED_SUBSETS.map((subset) => subset.map((x) => x.name).join('/'));
+  const shapes = [[], ['initfirst'], ['pollguard'], ['pollread'], ['initfirst', 'pollguard', 'pollread']];
+  const widths = [
+    [],
+    ['narrow-decl'],
+    ['narrow-load'],
+    ['narrow-read'],
+    ['narrow-decl', 'narrow-load'],
+    ['narrow-decl', 'narrow-read'],
+    ['narrow-load', 'narrow-read'],
+    ['narrow-decl', 'narrow-load', 'narrow-read'],
+  ];
 
-  it.each([
-    'narrow-decl',
-    'narrow-load',
-    'narrow-read',
-    'narrow-decl/narrow-load',
-    'narrow-decl/narrow-read',
-    'narrow-load/narrow-read',
-    'narrow-decl/narrow-load/narrow-read',
-  ])('offers the width subset %s', (subset) => {
-    expect(names).toContain(subset);
+  it('offers every shape choice with every width subset, each once, the shapes first', () => {
+    const product = shapes.flatMap((s) => widths.map((w) => [...s, ...w].join('/'))).filter((n) => n !== '');
+    expect([...names].sort()).toEqual(product.sort());
   });
 
-  it('does not cross a width subset with a shape short of the all-together candidate', () => {
-    const crossed = STACKED_SUBSETS.filter(
-      (subset) =>
-        subset.length > 1 &&
-        subset.length < STACKED_VARIATIONS.length &&
-        subset.some((x) => !x.name.startsWith('narrow-')),
-    );
-    expect(crossed).toEqual([]);
+  it('lists fewer members first', () => {
+    const sizes = STACKED_SUBSETS.map((subset) => subset.length);
+    expect(sizes).toEqual([...sizes].sort((a, b) => a - b));
   });
 });

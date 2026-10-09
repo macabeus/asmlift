@@ -1,7 +1,7 @@
 // A SHAPE IS ITS OWN CANDIDATE — and it must fail as its own candidate.
 //
-// `rank.ts`'s `respell` derives the statement shapes (`/initfirst`, `/pollguard`, `/pollread`, and
-// all of them together) onto every respelled tree. Each subset gets its own try, so two facts hold of
+// `rank.ts`'s `respell` derives the stacked subsets (rank-variations.ts `STACKED_SUBSETS`) onto
+// every respelled tree. Each subset gets its own try, so two facts hold of
 // that loop: a throw deriving one subset leaves the later ones in the fan, and the report names
 // the respell variation followed by the shape's variations — the shape that failed, not the respell
 // variation alone.
@@ -16,6 +16,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { T } from '../src/ir/types';
 import type { SFn } from '../src/l3/ast';
 import { enumerateCandidates } from '../src/rank';
+import { STACKED_SUBSETS } from '../src/rank-variations';
 import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation } from '../src/variation-tokens';
 
@@ -47,14 +48,12 @@ describe('one throwing shape does not take the others with it', () => {
   });
 
   test('…and the report names the STACKED SUBSET, not just the variation it was derived onto', () => {
-    // the subset is the candidate's identity, so that is what a failure is reported under: the
-    // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
+    // the subset is the candidate's identity, so that is what a failure is reported under: every
+    // subset holding `/initfirst` is its own candidate and its own report.
     expect(errors.every((e) => hasVariation(e.variations, 'initfirst'))).toBe(true);
     const subsets = new Set(errors.map((e) => e.variations.slice(e.variations.indexOf('initfirst')).join('/')));
-    expect([...subsets].sort()).toEqual([
-      'initfirst',
-      'initfirst/pollguard/pollread/narrow-decl/narrow-load/narrow-read',
-    ]);
+    const holding = STACKED_SUBSETS.map((s) => s.map((x) => x.name)).filter((names) => names.includes('initfirst'));
+    expect([...subsets].sort()).toEqual(holding.map((names) => names.join('/')).sort());
   });
 
   test('…while the LATER subsets are still derived ONTO THE RESPELLED TREES', () => {

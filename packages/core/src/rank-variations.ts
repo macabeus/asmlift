@@ -383,9 +383,7 @@ const STACKED_SHAPES: { name: VariationName; apply: (sfn: SFn) => SFn | null }[]
 /** The declaration-width members: one dimension, the width each kind of local is declared at
  *  (l3/narrowdecl.ts). A function holding a cast-written local,
  *  load-written locals and call-result locals may need any combination of the three kinds narrow
- *  while all three fire (the matching suite compiles all eight), so every subset is offered: at most
- *  seven candidates per source where three fire, and a subset whose other members decline repeats a
- *  smaller one and dedups. */
+ *  while all three fire (the matching suite compiles all eight), so every subset is offered. */
 const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
   { name: 'narrow-decl', apply: narrowDeclarations },
   { name: 'narrow-load', apply: narrowLoadDeclarations },
@@ -396,13 +394,8 @@ const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[]
  *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
  *  variation outside this table, derived onto every source. Two members need not commute
  *  (`/narrow-decl` and `/narrow-read` compete for one cast, `/narrow-load` and `/narrow-read` for
- *  one local), and table order then decides which one takes it in a candidate holding both. Each
- *  fires alone, plus every subset of the width members, plus all of them together in table order —
- *  not the full lattice of the table; the remaining pairs question is settled by applyStacked'
- *  skip-on-decline below, and a row demanding a true EXCLUSION pair across the shapes — every
- *  member fires, the match needs a strict subset of them — is what would earn the lattice there
- *  too, as it did for the widths. So a member appended here also changes the all-together candidate
- *  wherever it fires beside two or more of the others. */
+ *  one local), and table order then decides which one takes it in a candidate holding both. Which
+ *  of them a candidate applies is STACKED_SUBSETS. */
 export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree
@@ -472,22 +465,34 @@ export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
  *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
 export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ name: 'unmerge', apply: unmergeJoins }];
 
-/** The subsets of `xs` with at least two members, each in `xs`' order. */
-const multiSubsets = <X>(xs: readonly X[]): X[][] =>
-  xs.reduce<X[][]>((acc, x) => [...acc, [x], ...acc.map((s) => [...s, x])], []).filter((s) => s.length > 1);
+/** Every subset of `xs`, the empty one first, each in `xs`' order. */
+const subsets = <X>(xs: readonly X[]): X[][] =>
+  xs.reduce<X[][]>((acc, x) => [...acc, ...acc.map((s) => [...s, x])], [[]]);
 
-export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = [
-  ...STACKED_VARIATIONS.map((x) => [x]),
-  ...multiSubsets(STACKED_WIDTHS),
-  ...(STACKED_VARIATIONS.length > 1 ? [STACKED_VARIATIONS] : []),
-];
+/** The stacked members a candidate applies: the table's two dimensions crossed, a shape choice
+ *  (none, each shape alone, or every shape) by a width choice (any subset of the widths, none
+ *  included), the shapes first. A product, because a function may need a shape AND a strict subset
+ *  of the widths that fire: `initfirst` beside a narrow cast-written local and wide load-written
+ *  ones (the matching suite compiles that pair both ways). The shapes are not a lattice of their own:
+ *  applyStacked's skip-on-decline makes "every shape" each pair of them wherever the third declines,
+ *  and a row demanding a strict subset of the shapes while all fire is what would earn one. Fewest
+ *  members first, so a tie goes to the smaller set. */
+export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = subsets(STACKED_WIDTHS)
+  .flatMap((widths) =>
+    [[], ...STACKED_SHAPES.map((x) => [x]), ...(STACKED_SHAPES.length > 1 ? [STACKED_SHAPES] : [])].map((shapes) => [
+      ...shapes,
+      ...widths,
+    ]),
+  )
+  .filter((subset) => subset.length > 0)
+  .sort((a, b) => a.length - b.length);
 
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
  *  nothing rather than killing the combination — the all-shapes candidate is "everything that
  *  fires", so a pair is reachable whenever the third declines. The variations are the members that
- *  actually FIRED, so they never name a variation that declined; a fired-set that
- *  duplicates a smaller subset emits identical source and the dedup collapses it. Null when
- *  nothing fired. */
+ *  actually FIRED, so they never name a variation that declined; a fired set that
+ *  duplicates a smaller subset's derives the same tree, which the caller emits once
+ *  (`firstFired`). Null when nothing fired. */
 export const applyStacked = (
   subset: readonly (typeof STACKED_VARIATIONS)[number][],
   from: SFn,
@@ -502,6 +507,17 @@ export const applyStacked = (
     }
   }
   return fired.length > 0 ? { out: cur, variations: fired } : null;
+};
+
+/** Whether `fired` is a fired set not yet in `seen`, recording it. Two subsets that fire the same
+ *  members derive the same tree, so a caller emits only the first. */
+export const firstFired = (seen: Set<string>, fired: readonly VariationName[]): boolean => {
+  const key = fired.join('/');
+  if (seen.has(key)) {
+    return false;
+  }
+  seen.add(key);
+  return true;
 };
 
 /** The locals a variation added — a NAME diff rather than a positional slice, so a pass that ever
