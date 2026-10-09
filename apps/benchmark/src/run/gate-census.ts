@@ -38,7 +38,7 @@
 //     retsink.sinkReturns = () => false;
 //     → TypeError: Cannot assign to read only property 'sinkReturns' of object '[object Module]'
 //
-// So the three unregistered passes with a seam cost an entry here, any other pass the seam its
+// So the two unregistered passes with a seam cost an entry here, any other pass the seam its
 // caller does not have yet, and the registry is the place that will say so. `enumerateRanked` is
 // deliberately the only driver: it is the same entry `bench fan` and the runner use, so a census
 // here counts the refusals the BENCHMARK'S configuration produced rather than a rig's.
@@ -66,6 +66,7 @@ import {
   type OffsetAddress,
   nameOffsetAddresses,
 } from '@asmlift/core/raise/offsetnames';
+import { type NarrowParamCandidate, PARAM_WIDTH_GATES, narrowEntryParams } from '@asmlift/core/raise/paramwidth';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
@@ -159,6 +160,32 @@ export const PASSES: Record<string, CensusablePass> = {
       const restore = pass.run;
       pass.run = (fn, _self, _opts, target) =>
         foldTruncatedLoads(fn, target.capabilities.endianness === 'little', gates);
+      return () => {
+        pass.run = restore;
+      };
+    },
+  },
+  paramwidth: {
+    // raise/paramwidth.ts's `PARAM_WIDTH_GATES` — which entry parameters take the width of their
+    // extension. ONE table, asked once per extension of an entry parameter in the entry block, so a
+    // parameter read through two extensions is counted twice, and once per lift that reaches it.
+    tables: [['param', PARAM_WIDTH_GATES as readonly Gate<never>[]]],
+    install: (w) => {
+      // BY ID, never by index, for the reason the `unmerge` entry gives.
+      const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'paramwidth');
+      if (!pass) {
+        throw new Error("no PRE_RECOVERY_PASSES entry 'paramwidth' — the pass's caller-side seam moved");
+      }
+      const gates = w[0] as readonly Gate<NarrowParamCandidate>[];
+      const restore = pass.run;
+      pass.run = (fn, self, _opts, target, lifted) =>
+        narrowEntryParams(
+          fn,
+          target.compilerBehaviors.narrowParamWitness ?? 'none',
+          self,
+          gates,
+          lifted.scales.behindPool,
+        );
       return () => {
         pass.run = restore;
       };
