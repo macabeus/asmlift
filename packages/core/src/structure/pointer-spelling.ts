@@ -17,7 +17,7 @@
 // pattern. `varType` is captured as a LIVE reference: the naming pipeline is still declaring
 // temps when the factory is created, and every rule types an expression over the declarations
 // that exist at call time.
-import type { Op, Value } from '../ir/core';
+import { Op, type Value } from '../ir/core';
 import { MEM_BASE_OPS } from '../ir/opcodes';
 import { type IrType, T, typeEquals } from '../ir/types';
 import { type BinOp, Expr } from '../l3/ast';
@@ -405,6 +405,9 @@ const ROW_TESTS = ARITH_ROWS.map((row) => ({
 }));
 
 export interface PointerSpelling {
+  /** The declared shape of a global as the pointer-value rules read it: the map's, or `'pointer'`
+   *  for a `pointerGlobals` name. */
+  declaredShape(name: string): SymbolInfo['shape'];
   needsIntSpelling(x: Expr): boolean;
   intoDeclaredTemp(name: string, value: Expr): Expr;
   intoPtrCell(lval: Expr, value: Expr): Expr;
@@ -829,5 +832,41 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return isPtr ? pointerCellValue(value) : value;
   };
 
-  return { needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
+  return { declaredShape, needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
+}
+
+/** The IR around a value that `holdsPointerWord` reads. */
+export interface PointerWordIr {
+  defOf(v: Value): Op | undefined;
+  /** a block parameter's in-edge values; undefined for any other value */
+  inArgs(v: Value): readonly Value[] | undefined;
+}
+
+/** Whether `v` only ever holds the value of a pointer cell a declaration types: a whole-word load
+ *  at offset 0 of a global whose declared shape is `'pointer'`, or a block parameter every in-edge
+ *  value of which is one.
+ *
+ *  A temp holding such a value is declared `u8 *` where the IR types it an integer, on a compiler
+ *  whose integer sum loses the source's association and whose pointer sum keeps it
+ *  (`compilerBehaviors.keepsPointerSumAddend`, structure.ts). Byte arithmetic is the asm's address
+ *  under every pointer declaration of the global; a declared pointee would scale it, and `void *`
+ *  arithmetic is a GNU extension. A global no declaration types may be an integer cell
+ *  (`/int-cell`), so it is not one. */
+export function holdsPointerWord(
+  v: Value,
+  ir: PointerWordIr,
+  declaredShape: (name: string) => SymbolInfo['shape'],
+  seen: Set<Value> = new Set(),
+): boolean {
+  if (seen.has(v)) {
+    return true;
+  }
+  seen.add(v);
+  const d = ir.defOf(v);
+  if (d !== undefined) {
+    const g = d.opcode === 'load' && d.attrs.off === 0 && d.attrs.width === 4 ? ir.defOf(d.operands[0]) : undefined;
+    return g?.opcode === 'gaddr' && declaredShape(g.attrs.sym as string) === 'pointer';
+  }
+  const ins = ir.inArgs(v);
+  return ins !== undefined && ins.length > 0 && ins.every((a) => holdsPointerWord(a, ir, declaredShape, seen));
 }

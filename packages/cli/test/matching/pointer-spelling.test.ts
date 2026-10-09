@@ -16,6 +16,7 @@
 import { renderDeclarations } from '@asmlift/core/declare';
 import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { enumerateCandidates } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
   assembleTarget,
@@ -208,6 +209,94 @@ describe('the operand order of a load pair beside an undeclared global, IDO 7.1'
       const self = renderDeclarations(candidate.symbolRefs ?? []) + 'void use(u32); void usep(void *);\n';
       expect(matches('ido', self + candidate.source, 'pair', obj)).toBe(true);
       expect(matches('ido', PAIR_DECLS + candidate.source.replace(spelled, evaluated), 'pair', obj)).toBe(false);
+    });
+  }
+});
+
+// A temp that only holds the value of a global the map declares a pointer is declared `u8 *` (core
+// structure.ts, pointer-spelling.ts `holdsPointerWord`) on the compilers whose
+// `compilerBehaviors.keepsPointerSumAddend` holds. agbcc and KMC gcc fold an integer sum's constant
+// addend onto its base, through a temp as well (`t + (x + K)` compiles as `(t + K) + x`), and keep a
+// pointer sum's `t + (x + K)`; IDO 7.1 and CodeWarrior compile the two alike in this shape.
+const TEMP_DECLS = 'struct S { u8 pad[4000]; }; extern struct S *gP; extern s32 gOut;\n';
+const INT_TEMP = 'void f(u8 x) { s32 t = (s32)gP; gOut = t + ((x << 2) + 2672); }';
+const PTR_TEMP = 'void f(u8 x) { u8 *t = (u8 *)gP; gOut = (s32)(t + ((x << 2) + 2672)); }';
+const TEMP_SPLITS: Record<Cc, boolean> = { agbcc: true, kmc: true, ido: false, mwcc: false };
+
+describe('a pointer global summed through an integer or a byte-pointer temp, real compilers', () => {
+  for (const cc of Object.keys(TEMP_SPLITS) as Cc[]) {
+    it.runIf(HAVE[cc])(`${TEMP_SPLITS[cc] ? 'compiles them differently' : 'compiles them alike'} on ${cc}`, () => {
+      const { obj } = compileTarget(cc, TEMP_DECLS + PTR_TEMP, 'f');
+      expect(matches(cc, TEMP_DECLS + INT_TEMP, 'f', obj)).toBe(!TEMP_SPLITS[cc]);
+    });
+  }
+});
+
+// Read through, IDO 7.1 splits the two the other way: the byte-pointer temp puts the index first in
+// the `addu`, where the integer temp and the struct source the project would write keep the base
+// first. So IDO keeps the integer temp.
+const DEREF_DECLS = 'struct S { u16 arr[4000]; }; extern struct S *gP; void use(u32);\n';
+const DEREF = {
+  integer: 'u16 f(u32 x) { s32 t = (s32)gP; use(t); return *(u16 *)(t + ((x << 4) + 772)); }',
+  bytes: 'u16 f(u32 x) { u8 *t = (u8 *)gP; use((u32)t); return *(u16 *)(t + ((x << 4) + 772)); }',
+  struct: 'u16 f(u32 x) { struct S *p = gP; use((u32)p); return p->arr[(x << 3) + 386]; }',
+};
+
+describe('a pointer global read through an integer or a byte-pointer temp, IDO 7.1', () => {
+  // the operands of the one `addu` that adds the base `a0` and the scaled index
+  const adduFirst = (src: string): string | undefined =>
+    /addu\s+\w+,(\w+),(\w+)/.exec(compileTarget('ido', DEREF_DECLS + src, 'f').asm)?.[1];
+
+  it('keeps the base first under the integer temp and the struct source, and not under the byte pointer', () => {
+    expect(adduFirst(DEREF.struct)).toBe('a0');
+    expect(adduFirst(DEREF.integer)).toBe('a0');
+    expect(adduFirst(DEREF.bytes)).not.toBe('a0');
+  });
+});
+
+// Each case merges the global's value across two arms and adds it to `(pos << 2) + K`, finds the
+// candidate byte-exact in the project's world, checks it is the pointer sum and byte-exact in its
+// own declared world too, and compiles the integer sum it replaces in one arm, which must not be.
+const MERGE_DECLS =
+  'struct S { u8 pad[2672]; void *party[6]; void *box[30]; void **shift; };\nextern struct S *gP;\nextern s32 gOut;\n';
+const MERGE_MAP: SymbolMap = new Map([
+  [0x03001000, [{ name: 'gP', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+  [0x03001004, [{ name: 'gOut', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: true }]],
+]);
+const MERGE_CASES: { cc: Cc; body: string; spelled: string; integer: string }[] = [
+  {
+    cc: 'agbcc',
+    body: 'void f(u8 a, u8 pos) { if (a == 14) gP->shift = &gP->party[pos]; else gP->shift = &gP->box[pos]; }',
+    spelled: '(u8 *)gP + ((a1 << 2) + (167 << 4))',
+    integer: '(s32)gP + ((a1 << 2) + (167 << 4))',
+  },
+  {
+    cc: 'kmc',
+    body:
+      'void f(u8 a, u8 pos) { if (a == 14) gOut = (s32)((u8 *)gP + ((pos << 2) + 2672));' +
+      ' else gOut = (s32)((u8 *)gP + ((pos << 2) + 2696)); }',
+    spelled: '(u8 *)gP + (((a1 & 255) << 2) + 2672)',
+    integer: '(s32)gP + (((a1 & 255) << 2) + 2672)',
+  },
+];
+
+describe('a temp holding a map-declared pointer global, real compilers', () => {
+  for (const { cc, body, spelled, integer } of MERGE_CASES) {
+    it.runIf(HAVE[cc])(`spells the pointer sum the asm's association needs on ${cc}`, () => {
+      const project = MERGE_DECLS + body;
+      const { asm, obj } = compileTarget(cc, project, 'f');
+      const { target } = targetFor(ID[cc], flags(cc));
+      const candidate = enumerateCandidates('f', asm, target, {
+        symbols: MERGE_MAP,
+        prototypes: prototypesFromContext(C_TYPEDEFS + project, 'c'),
+        asmData: extractAsmData(obj, target, 'f'),
+      }).find((c) => matches(cc, MERGE_DECLS + c.source, 'f', obj));
+      expect(candidate?.source).toContain(spelled);
+      if (candidate === undefined) {
+        return;
+      }
+      expect(matches(cc, renderDeclarations(candidate.symbolRefs ?? []) + candidate.source, 'f', obj)).toBe(true);
+      expect(matches(cc, MERGE_DECLS + candidate.source.replaceAll(spelled, integer), 'f', obj)).toBe(false);
     });
   }
 });

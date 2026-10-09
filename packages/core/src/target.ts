@@ -769,6 +769,18 @@ export interface TargetDescription {
     // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
     // compute on a float at all.
     contractsFloatProducts?: boolean;
+    // Does this compiler compile a pointer global's value plus `x + K` held in a byte-pointer temp
+    // the way the source's pointer sum does, where an integer temp does not? gcc folds an INTEGER
+    // sum's constant addend onto its base (agbcc fold-const.c, `EXPR is ARG0 +- (CON +- VAR)`:
+    // `t + (x + K)` compiles as `(t + K) + x`) and keeps a pointer sum's `t + (x + K)`, so on agbcc
+    // and KMC gcc the integer temp loses the source's association (pointer-spelling.test.ts in the
+    // cli matching suite). Where it holds, the structurer declares such a temp `u8 *`
+    // (pointer-spelling.ts `holdsPointerWord`). IDO 7.1 puts the index first in the byte-pointer
+    // sum where the integer temp and the struct source keep the base first, and CodeWarrior
+    // compiles the two temps alike, so both keep the integer.
+    //
+    // ABSENT ⇒ false: the temp keeps the integer the IR types it.
+    keepsPointerSumAddend?: boolean;
     // Does this compiler read a double literal's shortest round-trip decimal (`ir/float-bits.ts`
     // `doubleLiteral`) back as the same double? That is how an `fconst` is printed, so its
     // producers run only where this is true. agbcc does: c-lex.c:1308 hands the token to
@@ -894,6 +906,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
+    keepsPointerSumAddend: true,
     nearBaseSpan: 255,
     volatileReadsExtendInRegister: true,
     foldsConstAddrOffset: true,
@@ -995,6 +1008,7 @@ export const MIPS_IDO: TargetDescription = {
   // leaving it permissive mis-recognises `!=`-rooted if-else chains as switches.
   compilerBehaviors: {
     contractsFloatProducts: false,
+    keepsPointerSumAddend: false,
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -1078,6 +1092,7 @@ export const MIPS_GCC: TargetDescription = {
   capabilities: { endianness: 'big', hwDivide: true, hwFloat: true, flags: false },
   compilerBehaviors: {
     contractsFloatProducts: false,
+    keepsPointerSumAddend: true,
     coalesceLoopInit: true,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,
@@ -1165,6 +1180,7 @@ export const PPC_MWCC: TargetDescription = {
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
     contractsFloatProducts: true,
+    keepsPointerSumAddend: false,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,

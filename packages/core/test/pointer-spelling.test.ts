@@ -6,11 +6,11 @@
 // end-to-end suites (pointer-members.test.ts, ptrcell.test.ts, deref-typing.test.ts).
 import { describe, expect, test } from 'vitest';
 
-import { type Op, mkOp, mkValue } from '../src/ir/core';
+import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { type IrType, T } from '../src/ir/types';
 import type { BinOp, Expr } from '../src/l3/ast';
 import { memoFieldsOf } from '../src/structure/globalaccess';
-import { makePointerSpelling } from '../src/structure/pointer-spelling';
+import { holdsPointerWord, makePointerSpelling } from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
 
 interface Fixture {
@@ -482,5 +482,60 @@ describe('arith: a map-declared byte sum right of an integer', () => {
     const s = make({ map: [ptrInfo('gP')], pointerLoaded: ['gP'], varType: { a1: T.s(32) } });
     const r = spell(s, arithOp('add', T.ptr(T.u(8))), v('gP'), c(4));
     expect(spell(s, arithOp('add', T.ptr(T.u(8))), v('a1'), r)).toEqual(bin('+', v('a1'), r));
+  });
+});
+
+describe('holdsPointerWord: a value that only ever holds a declared pointer global', () => {
+  // The IR around the value: each op's results map back to it, and each block parameter to the
+  // values its in-edges pass.
+  const defs = new Map<Value, Op>();
+  const ins = new Map<Value, Value[]>();
+  const ir = { defOf: (x: Value) => defs.get(x), inArgs: (x: Value) => ins.get(x) };
+  const def = (op: Op): Value => {
+    defs.set(op.results[0], op);
+    return op.results[0];
+  };
+  const load = (sym: string, off = 0, width = 4): Value =>
+    def(
+      mkOp('load', {
+        operands: [def(mkOp('gaddr', { attrs: { sym }, results: [mkValue(T.ptr(T.s(32)))] }))],
+        attrs: { off, width, signed: false },
+        results: [mkValue(T.s(32))],
+      }),
+    );
+  const merge = (...args: Value[]): Value => {
+    const p = mkValue(T.s(32));
+    ins.set(p, args);
+    return p;
+  };
+  const shape = make({ map: [ptrInfo('gP'), u16Info('gS')], pointerGlobals: ['gRaw'] }).declaredShape;
+  const holds = (x: Value) => holdsPointerWord(x, ir, shape);
+
+  test("holds a word load at offset 0 of a global the map declares a pointer, or a `pointerGlobals` one's", () => {
+    expect(holds(load('gP'))).toBe(true);
+    expect(holds(load('gRaw'))).toBe(true);
+  });
+
+  test('holds a merge every in-edge of which passes one, through a loop back to itself', () => {
+    expect(holds(merge(load('gP'), load('gP')))).toBe(true);
+    const loop = merge(load('gP'));
+    ins.get(loop)!.push(loop);
+    expect(holds(loop)).toBe(true);
+  });
+
+  test('does not hold a global whose declared shape is not a pointer, or one nothing declares', () => {
+    expect(holds(load('gS'))).toBe(false);
+    expect(holds(load('gW'))).toBe(false);
+  });
+
+  test('does not hold a load at another offset or narrower than a word', () => {
+    expect(holds(load('gP', 4))).toBe(false);
+    expect(holds(load('gP', 0, 2))).toBe(false);
+  });
+
+  test('does not hold a merge with any other in-edge value, or a parameter no edge passes', () => {
+    expect(holds(merge(load('gP'), mkValue(T.s(32))))).toBe(false);
+    expect(holds(merge(load('gP'), load('gS')))).toBe(false);
+    expect(holds(mkValue(T.s(32)))).toBe(false);
   });
 });

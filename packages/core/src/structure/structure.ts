@@ -123,7 +123,7 @@ import {
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { type ArithCompilerFacts, makePointerSpelling } from './pointer-spelling';
+import { type ArithCompilerFacts, holdsPointerWord, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
@@ -1682,6 +1682,9 @@ export interface StructureOptions extends ArithCompilerFacts {
   // compiles to the unfused pair the object holds. A compiler opts in; the target says which
   // (`compilerBehaviors.contractsFloatProducts`).
   contractsFloatProducts?: boolean;
+  // Declare a temp that only holds a declared pointer global's value `u8 *`, where this compiler
+  // compiles the byte-pointer sum as the source's (`compilerBehaviors.keepsPointerSumAddend`).
+  keepsPointerSumAddend?: boolean;
   // How this compiler lays out a function-scope static (`compilerBehaviors.staticLayout`), which
   // decides the definition that puts one where the target has it. Absent ⇒ unmeasured, and a
   // function that defines a static declines.
@@ -2055,6 +2058,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
     contractsFloatProducts = false,
+    keepsPointerSumAddend = false,
     staticLayout,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
@@ -2710,6 +2714,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // integer, and through which cast. `varType` and `varName` are read live: the naming below is
   // still declaring temps.
   const {
+    declaredShape,
     needsIntSpelling,
     intoDeclaredTemp,
     intoPtrCell,
@@ -3429,6 +3434,38 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         vs.every((v) => !signedEvidence.has(v))
       ) {
         varType.set(n, T.u(32));
+      }
+    }
+  }
+
+  // ── a temp that only holds a declared pointer global's value is a byte pointer ─────────────
+  // (pointer-spelling.ts `holdsPointerWord` says why.) Decided over every value under the name
+  // once the names are settled, so a name that also holds anything else keeps its integer. Only a
+  // temp a sum reads: the byte pointer is for the sum's association, and a temp read only as a
+  // value (a call argument, a store) keeps the integer the existing rules legalize there.
+  if (keepsPointerSumAddend) {
+    const inArgs = (v: Value): Value[] | undefined => {
+      const b = paramBlock.get(v);
+      if (b === undefined || entryParams.has(v)) {
+        return undefined;
+      }
+      const i = b.params.indexOf(v);
+      return [...inEdgeRecords(preds, b)].map(({ succ }) => succ.args[i]);
+    };
+    const ir = { defOf: (v: Value) => defs.get(v), inArgs };
+    const holders = new Map<string, Value[]>();
+    for (const [v, n] of [...varName, ...backArgName]) {
+      (holders.get(n) ?? holders.set(n, []).get(n)!).push(v);
+    }
+    for (const [n, vs] of holders) {
+      const t = varType.get(n);
+      if (
+        t?.kind === 'int' &&
+        t.width === 32 &&
+        vs.some((v) => (useSitesOf.get(v) ?? []).some((u) => u.op.opcode === 'add' || u.op.opcode === 'sub')) &&
+        vs.every((v) => holdsPointerWord(v, ir, declaredShape))
+      ) {
+        varType.set(n, T.ptr(T.u(8)));
       }
     }
   }
