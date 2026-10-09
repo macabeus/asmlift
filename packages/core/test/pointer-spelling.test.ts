@@ -173,6 +173,28 @@ describe('intoPtrCell', () => {
     expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(v('a1'));
     expect(s.intoPtrCell(v('gWord'), v('a0'))).toEqual(v('a0'));
   });
+
+  test("a pointer value stored into a word cell the map declares an integer takes the cell's type", () => {
+    const s = make({
+      map: [ptrInfo('gP'), u16Info('gOut', { size: 4, signed: true }), u16Info('gCount', { size: 4 })],
+      varType: { a0: T.ptr(T.u(8)) },
+    });
+    const sum = bin('+', v('a0'), c(4));
+    expect(s.intoPtrCell(v('gOut'), sum)).toEqual(cast(T.s(32), sum));
+    expect(s.intoPtrCell(v('gCount'), v('gP'))).toEqual(cast(T.u(32), v('gP')));
+    expect(s.intoPtrCell(v('gOut'), addr('gArr'))).toEqual(cast(T.s(32), addr('gArr')));
+  });
+
+  test('an integer value, a narrower integer cell and a cell no map declares are left alone', () => {
+    const s = make({
+      map: [u16Info('gOut', { size: 4, signed: true }), u16Info('gHalf')],
+      varType: { a0: T.ptr(T.u(8)), a1: T.s(32) },
+    });
+    expect(s.intoPtrCell(v('gOut'), v('a1'))).toEqual(v('a1'));
+    expect(s.intoPtrCell(v('gHalf'), v('a0'))).toEqual(v('a0'));
+    expect(s.intoPtrCell(v('gOther'), v('a0'))).toEqual(v('a0'));
+    expect(make({ varType: { a0: T.ptr(T.u(8)) } }).intoPtrCell(v('gOut'), v('a0'))).toEqual(v('a0'));
+  });
 });
 
 describe('arith: the operand order of a load pair evaluated right first', () => {

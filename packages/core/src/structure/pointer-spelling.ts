@@ -799,6 +799,19 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return { k: 'cast', to: t, e: value };
   };
 
+  /** The mirror of `intoPtrCell`: a value that is no integer as spelled (`needsIntSpelling`)
+   *  assigned into a word cell the map declares an integer takes that cell's type. Without it
+   *  agbcc and KMC gcc warn `assignment makes integer from pointer without a cast` — fatal under
+   *  the project's `-Werror` — and CodeWarrior rejects the write. A conversion of a word is no
+   *  instruction, so the bytes are the uncast write's. A global no declaration types keeps the
+   *  value as spelled: its candidate world may declare it either way. */
+  const intoIntCell = (lval: Expr, value: Expr): Expr => {
+    const si = lval.k === 'var' ? sym?.info(lval.name) : undefined;
+    return si?.shape === 'scalar' && si.size === 4 && needsIntSpelling(value)
+      ? { k: 'cast', to: scalarCellType(4, si.signed), e: value }
+      : value;
+  };
+
   /** A pointer VALUE assigned into a pointer CELL (pointerValue), spelled so the assignment is
    *  legal against ANY pointer declaration of that cell. The arithmetic table renders such a
    *  right-hand side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole
@@ -821,7 +834,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
    *  integer declaration's source, published only at a byte-exact score. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
     if (!pointerValue(roleOf(lval))) {
-      return value;
+      return intoIntCell(lval, value);
     }
     const vt = ctype(value);
     // BOTH ways a pointer value reaches here. `ctype` types params and locals, so it sees the
@@ -891,8 +904,8 @@ export function holdsPointerWord(
  *    into a declared integer local or slot, and not into a callee's parameter or a global (cfamily
  *    `legalizePointerWrites`), so the write warns where the integer temp's compiles clean, and the
  *    byte pointer buys such a write nothing. A SUM written there keeps the byte pointer: its
- *    association is the point, and the uncast pointer sum into an integer global is the shape the
- *    map-declared pointer row already prints without a temp. */
+ *    association is the point, and `intoIntCell` casts it into a global the map declares an
+ *    integer. */
 export function declaresBytePointer(
   values: readonly Value[],
   ir: PointerWordIr,
