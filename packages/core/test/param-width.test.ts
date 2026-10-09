@@ -23,7 +23,12 @@ import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import type { FnProto } from '../src/proto';
 import { fuseParamPairs } from '../src/raise/pairparams';
-import { PARAM_WIDTH_GATES, narrowEntryParams } from '../src/raise/paramwidth';
+import {
+  PARAM_READER_WIDTH_GATES,
+  PARAM_WIDTH_GATES,
+  narrowEntryParams,
+  narrowExtendedParams,
+} from '../src/raise/paramwidth';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
@@ -448,5 +453,85 @@ describe('the declaration witness', () => {
     verify(fn);
     expect(narrowEntryParams(fn, AGBCC_WITNESS, { params: ['long long', 's32 *'] })).toBe(0);
     expect(runWithout(PROLOGUE_S16, 'proto-width', { params: ['long long', 's32 *'] })).toBe(1);
+  });
+});
+
+// `/narrow-param` (narrowExtendedParams): LoadMonInfo's `s16 partyId`, widened at each use — behind a
+// load for the scaled read, and again for a `u16` argument — and never in the prologue.
+const EXTENDED_AT_USES = `fn f {
+^bb0(%0: unk32, %1: u8*):
+  %2: u8 = load %1 {off=0, signed=false, width=1}
+  %3: unk32 = sext %0 {width=16}
+  %4: unk32 = shl %3 {imm=2}
+  store %1, %4 {off=4, width=4}
+  %5: unk32 = zext %0 {width=16}
+  store %1, %5 {off=8, width=4}
+  ret
+}
+`;
+
+const runExtended = (
+  ir: string,
+  self?: FnProto,
+  gates = PARAM_READER_WIDTH_GATES,
+  witness: NarrowParamWitness = AGBCC_WITNESS,
+  apply = true,
+) => {
+  const fn = parse(ir);
+  verify(fn);
+  const n = narrowExtendedParams(fn, witness, self, gates, apply);
+  verify(fn);
+  return { fn, n, ir: print(fn) };
+};
+
+describe('a parameter every reader of which is an extension (/narrow-param)', () => {
+  test('the default pass leaves it wide: its readers are not one prologue extension', () => {
+    expect(run(EXTENDED_AT_USES).n).toBe(0);
+  });
+
+  test('is declared at the widest reader, signed as the first one, which becomes the parameter itself', () => {
+    const { n, fn, ir } = runExtended(EXTENDED_AT_USES);
+    expect(n).toBe(1);
+    expect(fn.blocks[0].params[0].type).toEqual(T.int(16, true));
+    expect(ir).not.toMatch(/sext/);
+    expect(ir).toMatch(/shl %0 \{imm=2\}/);
+    // the reader of the other signedness keeps its extension
+    expect(ir).toMatch(/zext %0 \{width=16\}/);
+  });
+
+  test('a narrower reader keeps its extension', () => {
+    const { fn, ir } = runExtended(EXTENDED_AT_USES.replace('zext %0 {width=16}', 'zext %0 {width=8}'));
+    expect(fn.blocks[0].params[0].type).toEqual(T.int(16, true));
+    expect(ir).toMatch(/zext %0 \{width=8\}/);
+  });
+
+  test("the caller's declaration says the signedness", () => {
+    const { fn, ir } = runExtended(EXTENDED_AT_USES, { params: ['u16', 'u8 *'] });
+    expect(fn.blocks[0].params[0].type).toEqual(T.int(16, false));
+    expect(ir).toMatch(/sext %0 \{width=16\}/);
+    expect(ir).not.toMatch(/zext/);
+  });
+
+  test('only counts what it would narrow when asked not to apply it', () => {
+    const { n, fn } = runExtended(EXTENDED_AT_USES, undefined, PARAM_READER_WIDTH_GATES, AGBCC_WITNESS, false);
+    expect(n).toBe(1);
+    expect(fn.blocks[0].params[0].type.kind).toBe('unknown');
+  });
+
+  test('a reader that is no narrow extension keeps the parameter wide', () => {
+    const wide = EXTENDED_AT_USES.replace('store %1, %5 {off=8, width=4}', 'store %1, %0 {off=8, width=4}');
+    expect(runExtended(wide).n).toBe(0);
+    expect(runExtended(wide, undefined, without(PARAM_READER_WIDTH_GATES, 'wide-reader')).n).toBe(1);
+    const passed = EXTENDED_AT_USES.replace('  ret\n}', '  br ^bb1(%0)\n^bb1(%6: unk32):\n  ret\n}');
+    expect(runExtended(passed).n).toBe(0);
+  });
+
+  test('a declared width the readers contradict refuses it', () => {
+    expect(runExtended(EXTENDED_AT_USES, { params: ['s32', 'u8 *'] }).n).toBe(0);
+    expect(runExtended(EXTENDED_AT_USES, { params: ['s16', 'u8 *'] }).n).toBe(1);
+  });
+
+  test('a compiler whose two spellings are one object refuses it', () => {
+    expect(runExtended(EXTENDED_AT_USES, undefined, PARAM_READER_WIDTH_GATES, 'none').n).toBe(0);
   });
 });

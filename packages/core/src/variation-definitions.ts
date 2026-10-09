@@ -371,6 +371,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: 'packages/core/src/raise/shortcircuit.ts',
     seeAlso: ['site-sense'],
   },
+  'narrow-param': {
+    title: 'Parameter declared at the width every use extends it to',
+    summary: 'a parameter read only through narrowing casts is declared narrow, though the prologue does not widen it',
+    detail:
+      'A parameter the function only ever reads through narrowing casts can be declared at 32 bits and cast ' +
+      'at each use, or declared at the widest cast and read bare. Every use is the same value either way, ' +
+      'and where the compiler widens it at each use rather than on entry, the assembly does not say which ' +
+      'one the source declared. This lift declares it narrow.',
+    compilerBehavior:
+      'agbcc widens an `s16` parameter at each use when every use extends it, and then the two declarations ' +
+      'differ only in how the registers around them are allocated: a sibling `u8` parameter is copied ' +
+      'before it is widened under the narrow one.',
+    offeredWhen: {
+      when: 'Some parameter is read only through casts to 8 or 16 bits, and the default lift left it 32 bits wide.',
+      decidedBy: { symbol: 'runPreRecovery', file: 'packages/core/src/raise/pre-recovery.ts' },
+      gates: ['PARAM_READER_WIDTH_GATES'],
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'extern u8 *gM; void f3(u8 *, u16, u8); void f2(u8 *, u8);\n@',
+      before: 'void example(s32 a, u8 b) { u8 *p = gM; f3(p + (s16)a * 4, (u16)a, b); f2(p + b * 8, b); }',
+      after: 'void example(s16 a, u8 b) { u8 *p = gM; f3(p + a * 4, (u16)a, b); f2(p + b * 8, b); }',
+    },
+    implementedIn: 'packages/core/src/raise/paramwidth.ts',
+  },
   'shared-ret': {
     title: 'Shared code after an early return',
     summary: 'code both arms of an `if` reach before returning is written once, after the `if`',

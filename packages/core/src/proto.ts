@@ -370,6 +370,26 @@ export function declaredWidth(t: ParamType): number | undefined {
   return BASE_WIDTHS.get(base === '' && s !== '' ? 'int' : base);
 }
 
+/** Whether one declared parameter type spells a signed integer, or `undefined` where it does not say:
+ *  a project typedef, a pointer, a plain `char` (whose signedness is the compiler's). */
+export function declaredSigned(t: ParamType): boolean | undefined {
+  const s = t
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  if (isAddress(s)) {
+    return undefined;
+  }
+  const own = /^([su])(8|16|32|64)$/.exec(s);
+  if (own) {
+    return own[1] === 's';
+  }
+  if (/\bunsigned\b/.test(s) || /^uint\d+_t$/.test(s)) {
+    return false;
+  }
+  return /\bsigned\b/.test(s) || /^int\d+_t$/.test(s) || /^(?:short|int|long)\b/.test(s) ? true : undefined;
+}
+
 /** Whether the type name `s` is a pointer by its abstract declarator, the derivation nearest the
  *  absent name: `u8 *`, `void (*)(s32)`, `f32 (*)[3]`, `void (**)(void)`. A C++ pointer to a data
  *  member is one too, and a pointer to a member function is not: compiled with mwcc GC/1.2.5n,

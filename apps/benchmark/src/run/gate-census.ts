@@ -66,8 +66,8 @@ import {
   type OffsetAddress,
   nameOffsetAddresses,
 } from '@asmlift/core/raise/offsetnames';
-import { type NarrowParamCandidate, PARAM_WIDTH_GATES, narrowEntryParams } from '@asmlift/core/raise/paramwidth';
-import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
+import { type NarrowParamCandidate, PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '@asmlift/core/raise/paramwidth';
+import { PRE_RECOVERY_PASSES, narrowParamWidths } from '@asmlift/core/raise/pre-recovery';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
@@ -166,26 +166,26 @@ export const PASSES: Record<string, CensusablePass> = {
     },
   },
   paramwidth: {
-    // raise/paramwidth.ts's `PARAM_WIDTH_GATES` — which entry parameters take the width of their
-    // extension. ONE table, asked once per extension of an entry parameter in the entry block, so a
-    // parameter read through two extensions is counted twice, and once per lift that reaches it.
-    tables: [['param', PARAM_WIDTH_GATES as readonly Gate<never>[]]],
+    // raise/paramwidth.ts's two tables: `PARAM_WIDTH_GATES`, which entry parameters take the width
+    // of their prologue extension, asked once per extension of an entry parameter in the entry
+    // block, so a parameter read through two extensions is counted twice; and `/narrow-param`'s
+    // `PARAM_READER_WIDTH_GATES`, asked once per parameter some extension reads, on the lift that
+    // asks whether the variation reaches as well as on its own. Both once per lift that reaches them.
+    tables: [
+      ['param', PARAM_WIDTH_GATES as readonly Gate<never>[]],
+      ['reader', PARAM_READER_WIDTH_GATES as readonly Gate<never>[]],
+    ],
     install: (w) => {
       // BY ID, never by index, for the reason the `unmerge` entry gives.
       const pass = PRE_RECOVERY_PASSES.find((p) => p.id === 'paramwidth');
       if (!pass) {
         throw new Error("no PRE_RECOVERY_PASSES entry 'paramwidth' — the pass's caller-side seam moved");
       }
-      const gates = w[0] as readonly Gate<NarrowParamCandidate>[];
+      const prologue = w[0] as readonly Gate<NarrowParamCandidate>[];
+      const reader = w[1] as readonly Gate<NarrowParamCandidate>[];
       const restore = pass.run;
-      pass.run = (fn, self, _opts, target, lifted) =>
-        narrowEntryParams(
-          fn,
-          target.compilerBehaviors.narrowParamWitness ?? 'none',
-          self,
-          gates,
-          lifted.scales.behindPool,
-        );
+      pass.run = (fn, self, opts, target, lifted) =>
+        narrowParamWidths(fn, self, opts.paramWidth, target, lifted, prologue, reader);
       return () => {
         pass.run = restore;
       };

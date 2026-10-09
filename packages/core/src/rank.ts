@@ -600,6 +600,7 @@ export function enumerateCandidates(
   // it buys is that a lift-time change which splits them enumerates both settings rather than
   // silently dropping one, the failure nothing reports.
   let sharedLiftTreeOwned = false;
+  let sharedLiftExtendedReaders = false;
   // Shared lift: recover ONCE with no signedness pin, to learn which entry params are
   // pointers/aggregates so they are excluded from the signedness variation (see NO_PIN_KINDS). One
   // extra lift+recover, no compile. (The shared lift deliberately stops after recoverTypes — it only reads the param KINDS, so
@@ -617,6 +618,11 @@ export function enumerateCandidates(
     shortCircuit: {
       onTreeOwned: () => {
         sharedLiftTreeOwned = true;
+      },
+    },
+    paramWidth: {
+      onExtendedReaders: () => {
+        sharedLiftExtendedReaders = true;
       },
     },
   });
@@ -643,17 +649,25 @@ export function enumerateCandidates(
   // shared lift's `onTreeOwned` hook has had its chance to fire. Called any earlier it would report a confident
   // `false` for a function that owns a tree. As a `const` below that call, an early call is a TDZ
   // ReferenceError instead — a wrong answer traded for a loud one.
-  const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
+  //
+  // `/narrow-param`'s gate is read off the same lift the same way: the width pass reports a
+  // parameter the variation's lift would narrow (raise/pre-recovery.ts `ParamWidthOptions`).
+  const liftReportsIn = (symbols: typeof opts.symbols): { treeOwned: boolean; extendedReaders: boolean } => {
     if (symbols === opts.symbols) {
-      return sharedLiftTreeOwned;
+      return { treeOwned: sharedLiftTreeOwned, extendedReaders: sharedLiftExtendedReaders };
     }
     const p = liftStamped(name, asm, target, prototypes, opts.asmData, symbols);
     applyIdiomPatterns(p, target, opts.patterns);
-    let seen = false;
+    const seen = { treeOwned: false, extendedReaders: false };
     runPreRecovery(p, target, () => verify(p), prototypes[name], {
       shortCircuit: {
         onTreeOwned: () => {
-          seen = true;
+          seen.treeOwned = true;
+        },
+      },
+      paramWidth: {
+        onExtendedReaders: () => {
+          seen.extendedReaders = true;
         },
       },
     });
@@ -1828,8 +1842,9 @@ export function enumerateCandidates(
     // audit cannot bound. This is the setting's first lift, and every later one is the same lift
     // again.
     let treeOwnedFold: boolean;
+    let extendedReaders: boolean;
     try {
-      treeOwnedFold = treeOwnedIn(symbolSetting.symbols);
+      ({ treeOwned: treeOwnedFold, extendedReaders } = liftReportsIn(symbolSetting.symbols));
     } catch (e) {
       if (abortsRow(symbolSetting.variations)) {
         throw e;
@@ -1918,8 +1933,26 @@ export function enumerateCandidates(
             { variations: ['setup-args'], narrow: true },
           ]
         : [{ variations: [], narrow: false }];
+      // `/narrow-param` — declare a parameter every reader of which is an extension at the widest
+      // reader's width (raise/paramwidth.ts, EVERY READER AN EXTENSION). A lift variation for the
+      // reason `/connective` is: the raise mutates in place, and the parameter's width is what
+      // recovery and every later stage read. Enumerated only where this symbol-map setting's lift
+      // reports such a parameter; crossed with the other two, and the dedup collapses what agrees.
+      const paramSettings: { variations: readonly Variation[]; extendedReaders: boolean }[] = extendedReaders
+        ? [
+            { variations: [], extendedReaders: false },
+            { variations: ['narrow-param'], extendedReaders: true },
+          ]
+        : [{ variations: [], extendedReaders: false }];
       const liftSettings = narrowSettings.flatMap((l) =>
-        connectiveSettings.map((c) => ({ ...l, ...c, variations: [...l.variations, ...c.variations] })),
+        connectiveSettings.flatMap((c) =>
+          paramSettings.map((w) => ({
+            ...l,
+            ...c,
+            ...w,
+            variations: [...l.variations, ...c.variations, ...w.variations],
+          })),
+        ),
       );
       for (const liftSetting of liftSettings) {
         let fn: Fn;
@@ -1992,7 +2025,10 @@ export function enumerateCandidates(
               },
             },
             prototypes[name],
-            { shortCircuit: { foldTreeOwned: liftSetting.connective } },
+            {
+              shortCircuit: { foldTreeOwned: liftSetting.connective },
+              paramWidth: { extendedReaders: liftSetting.extendedReaders },
+            },
           );
         } catch (e) {
           // THE DEFAULT CARRIES NO VARIATION, by construction: every lift variation appends one, so

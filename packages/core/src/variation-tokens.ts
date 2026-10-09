@@ -67,6 +67,7 @@ const TOKENS = [
   // lift: the assembly lifted or raised again
   { name: 'setup-args', variationKind: 'lift' },
   { name: 'connective', variationKind: 'lift' },
+  { name: 'narrow-param', variationKind: 'lift' },
   { name: 'shared-ret', variationKind: 'lift' },
   { name: 'shared-tail', variationKind: 'lift' },
   // structure: `structure()` re-run with other options
