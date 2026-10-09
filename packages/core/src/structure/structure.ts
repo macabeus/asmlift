@@ -1682,8 +1682,10 @@ export interface StructureOptions extends ArithCompilerFacts {
   // compiles to the unfused pair the object holds. A compiler opts in; the target says which
   // (`compilerBehaviors.contractsFloatProducts`).
   contractsFloatProducts?: boolean;
-  // Declare a temp that only holds a declared pointer global's value `u8 *`, where this compiler
-  // compiles the byte-pointer sum as the source's (`compilerBehaviors.keepsPointerSumAddend`).
+  // Declare `u8 *` a temp that only holds a declared pointer global's value and is the base of a
+  // sum with a variable addend plus a constant (pointer-spelling.ts `declaresBytePointer` says
+  // when), where this compiler compiles the byte-pointer sum as the source's
+  // (`compilerBehaviors.keepsPointerSumAddend`).
   keepsPointerSumAddend?: boolean;
   // How this compiler lays out a function-scope static (`compilerBehaviors.staticLayout`), which
   // decides the definition that puts one where the target has it. Absent ⇒ unmeasured, and a
@@ -3438,7 +3440,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   }
 
-  // ── a temp that only holds a declared pointer global's value is a byte pointer ─────────────
+  // ── a temp holding a declared pointer global's value, summed with `x + K`, is a byte pointer ──
   // (pointer-spelling.ts `declaresBytePointer` says when.) Decided over every value under the name
   // once the names are settled, so a name that also holds anything else keeps its integer.
   if (keepsPointerSumAddend) {

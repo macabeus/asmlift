@@ -631,6 +631,23 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     expect(declares(t)).toBe(false);
   });
 
+  test('does not count an addend that is itself a constant, `t + (K1 - K2)`', () => {
+    const t = word();
+    op('add', [t, op('sub', [k(1753), k(23)])]);
+    op('add', [t, op('add', [op('shl', [k(167)], { imm: 4 }), k(4)])]);
+    expect(declares(t)).toBe(false);
+  });
+
+  test('does not count a sum read only as a load or store address', () => {
+    const t = word();
+    const sum = op('add', [t, plusK()]);
+    op('load', [sum], { off: 0, width: 1, signed: false });
+    effect('store', [sum, k(255)], { off: 0, width: 1 });
+    expect(declares(t)).toBe(false);
+    effect('store', [scratch(), sum], { off: 0, width: 4 });
+    expect(declares(t)).toBe(true);
+  });
+
   test('does not count a loop counter as a constant', () => {
     const i = mkValue(T.s(32));
     ins.set(i, [k(0), op('add', [i, k(1)])]);
@@ -644,6 +661,21 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     op('add', [t, plusK()]);
     op('add', [x(), t]);
     expect(declares(t)).toBe(false);
+  });
+
+  test('does not declare a temp whose sum is the right operand of a sum, or beside a pointer', () => {
+    const t = word();
+    op('add', [x(), op('add', [t, plusK()])]);
+    expect(declares(t)).toBe(false);
+    const u = word();
+    op('add', [op('add', [u, plusK()]), mkValue(T.ptr(T.u(16)))]);
+    expect(declares(u)).toBe(false);
+  });
+
+  test('declares a temp whose sum is the base of a further sum', () => {
+    const t = word();
+    op('add', [op('add', [t, plusK()]), x()]);
+    expect(declares(t)).toBe(true);
   });
 
   test("does not declare a sum's base beside a global's address or a pointer", () => {

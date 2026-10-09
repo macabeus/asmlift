@@ -889,23 +889,27 @@ export function holdsPointerWord(
 /** Whether a temp whose values are `values` is declared `u8 *` where the IR types it an integer.
  *
  *  Every value holds a declared pointer word (`holdsPointerWord`), and one of them is the base of a
- *  sum with a constant addend, `t + (x + K)`, where `x + K` may be merged across arms. There the
- *  integer temp's sum loses the source's association and the byte pointer's keeps it. Without an
- *  addend the two compile alike, so the temp keeps the integer the IR gives it.
+ *  sum with a constant addend, `t + (x + K)`, where `x + K` may be merged across arms and `x` is
+ *  not itself a constant, and the sum is read as a value. There the integer temp's sum loses the
+ *  source's association and the byte pointer's keeps it. Without a variable addend the two compile
+ *  alike, so the temp keeps the integer the IR gives it. A sum read only as a load or store address
+ *  is the source's under neither: there agbcc compiles the byte pointer's index first,
+ *  `(x + t) + K`, and which of the two is closer depends on the index, so it licenses nothing.
  *
  *  A use the byte pointer would print wrong refuses it:
- *  - a sum whose other operand comes first: `x + t` is a pointer sum the gcc family orders pointer
- *    first, the swap of the asm's `x + t` (ARITH_ROWS, THE INTEGER SUM);
- *  - a sum with a global's address or a pointer: `t + gArr` prints the subscript `gArr[t]`, which C
- *    rejects for a pointer index, and two pointers do not add;
- *  - the temp, or a sum it is the base of, as a switch selector or an array index, which C rejects
- *    for a pointer;
- *  - the temp itself as a call argument or a word written to a global. The backend casts a pointer
- *    into a declared integer local or slot, and not into a callee's parameter or a global (cfamily
- *    `legalizePointerWrites`), so the write warns where the integer temp's compiles clean, and the
- *    byte pointer buys such a write nothing. A SUM written there keeps the byte pointer: its
- *    association is the point, and `intoIntCell` casts it into a global the map declares an
- *    integer. */
+ *  - a sum, of the temp or of a sum it is the base of, whose other operand comes first: `x + t` is
+ *    a pointer sum the gcc family orders pointer first, the swap of the asm's `x + t` (ARITH_ROWS,
+ *    THE INTEGER SUM);
+ *  - such a sum with a global's address or a pointer: `t + gArr` prints the subscript `gArr[t]`,
+ *    which C rejects for a pointer index, and two pointers do not add;
+ *  - the temp, or such a sum, as a switch selector or an array index, which C rejects for a
+ *    pointer;
+ *  - the temp itself as a call argument or a word written to a global, a write the byte pointer
+ *    buys nothing. The backend casts a pointer into a declared integer local or slot and not into a
+ *    callee's parameter (cfamily `legalizePointerWrites`), so the argument would warn where the
+ *    integer temp's compiles clean. A SUM keeps the byte pointer there, its association being the
+ *    point: `intoIntCell` casts it into a global the map declares an integer, and a call argument
+ *    keeps the pointer (`byteSumAsInt`'s KNOWN GAP). */
 export function declaresBytePointer(
   values: readonly Value[],
   ir: PointerWordIr,
@@ -920,15 +924,27 @@ export function declaresBytePointer(
     const [l, r] = u.operands;
     return l === t && r !== t && !isGlobal(r) && r.type.kind !== 'ptr';
   };
+  // a sum stays a pointer sum through every sum that reads it, each with it as the base
+  const okSum = (s: Value): boolean =>
+    ir.usesOf(s).every((w) => !integerOnly(s, w) && (w.opcode !== 'add' || (baseOf(s, w) && okSum(w.results[0]))));
   const okUse = (t: Value, u: Op): boolean =>
     u.opcode === 'add'
-      ? baseOf(t, u) && !ir.usesOf(u.results[0]).some((w) => integerOnly(u.results[0], w))
+      ? baseOf(t, u) && okSum(u.results[0])
       : u.opcode !== 'call' && !integerOnly(t, u) && !intoGlobal(t, u);
-  // `x + K`, or a merge every in-edge of which passes one
+  // a sum read only as the address of a load or store
+  const addressOnly = (s: Value): boolean => {
+    const us = ir.usesOf(s);
+    return (
+      us.length > 0 &&
+      us.every((w) => (w.opcode === 'load' || w.opcode === 'store') && w.operands[0] === s && w.operands[1] !== s)
+    );
+  };
+  // `x + K` with `x` not itself constant, or a merge every in-edge of which passes one
   const hasAddend = (x: Value, path: Set<Value> = new Set()): boolean => {
     const d = ir.defOf(x);
     if (d !== undefined) {
-      return (d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => isConstant(o, ir));
+      const constant = d.operands.map((o) => isConstant(o, ir));
+      return (d.opcode === 'add' || d.opcode === 'sub') && constant.includes(true) && constant.includes(false);
     }
     const ins = ir.inArgs(x);
     if (path.has(x) || ins === undefined || ins.length === 0) {
@@ -939,7 +955,9 @@ export function declaresBytePointer(
   };
   return (
     values.every((t) => holdsPointerWord(t, ir, declaredShape) && ir.usesOf(t).every((u) => okUse(t, u))) &&
-    values.some((t) => ir.usesOf(t).some((u) => u.opcode === 'add' && hasAddend(u.operands[1])))
+    values.some((t) =>
+      ir.usesOf(t).some((u) => u.opcode === 'add' && hasAddend(u.operands[1]) && !addressOnly(u.results[0])),
+    )
   );
 }
 
