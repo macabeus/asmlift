@@ -1,8 +1,11 @@
 // UNIT tests for the arithmetic table (structure/pointer-spelling.ts `ARITH_ROWS`), one case per
-// row, in the table's order, and one per operand role. Each expectation is the spelling that
-// computes the asm's bytes in the project's translation unit and in the candidate's own declared
-// world, where a global no map declares is `extern u32 g;`. A rule that is a compiler's own choice
-// says which compiler; the compiled checks of those live in the matching suite
+// row, in the table's order, one per operand role, and one just outside each fact that decides
+// between two rows. Each expectation is the spelling that computes the asm's bytes in the
+// candidate's own declared world, where a global no map declares is `extern u32 g;`, and in the
+// project's translation unit under the declarations the table's doc says it covers. The cases
+// under `arith: known gaps` pin a spelling that is the asm's in the candidate's world only, and
+// name the declarations it is wrong under. A rule that is a compiler's own choice says which
+// compiler; the compiled checks of those live in the matching suite
 // (packages/cli/test/matching/pointer-spelling.test.ts).
 import { describe, expect, it } from 'vitest';
 
@@ -29,7 +32,7 @@ const bgPtrsInfo: SymbolInfo = {
 
 // One world for every row: the map declares the pointer globals gP and gR and the struct gBgPtrs;
 // gPtr and gQ are globals no map declares that the IR loads as pointers, gW, gW2, gB2 and gB3
-// ones it loads as words; the locals are typed as named.
+// ones it loads as words, and gPW one it loads as both; the locals are typed as named.
 const MAP = [ptrInfo('gP'), ptrInfo('gR'), bgPtrsInfo];
 const make = () => {
   const byName = new Map(MAP.map((si) => [si.name, si]));
@@ -37,8 +40,8 @@ const make = () => {
   return makePointerSpelling({
     sym: { info, fieldsOf: memoFieldsOf(info) },
     pointerGlobals: undefined,
-    pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR']),
-    wordLoadedGlobals: new Set(['gW', 'gW2', 'gB2', 'gB3']),
+    pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR', 'gPW']),
+    wordLoadedGlobals: new Set(['gW', 'gW2', 'gB2', 'gB3', 'gPW']),
     varType: new Map<string, IrType>([
       ['i', T.s(32)],
       ['j', T.s(32)],
@@ -64,7 +67,7 @@ const s32 = (e: Expr): Expr => cast(T.s(32), e);
 /** an untyped global's word: through `(u8 *)`, so no float declaration converts it */
 const untypedWord = (name: string): Expr => word(bytes(v(name)));
 
-type Opcode = 'add' | 'sub' | 'and' | 'or' | 'shl' | 'logic_and' | 'logic_or';
+type Opcode = 'add' | 'sub' | 'and' | 'or' | 'shl' | 'udiv' | 'logic_and' | 'logic_or';
 /** An integer arithmetic op whose result the IR types `result`. */
 const op = (opcode: Opcode, result: IrType = T.u(32)): Op =>
   mkOp(opcode, { operands: [mkValue(T.u(32)), mkValue(T.u(32))], results: [mkValue(result)] });
@@ -122,6 +125,22 @@ describe('pointer spelling roles', () => {
   it('does not read a cast printed elsewhere as one the table built', () => {
     expect(s.roleOf(bytes(bin('+', word(v('gPtr')), v('i')))).k).toBe('value');
   });
+
+  it('does not read an op that is not additive as a byte sum or an integer sum', () => {
+    const s = make();
+    const byteSum = s.arith(op('add', U8P), v('gPtr'), c(4), false);
+    expect(s.roleOf(s.arith(op('logic_and', T.s(32)), byteSum, byteSum, false))).toMatchObject({
+      made: { byteSum: { any: false } },
+    });
+    const intSum = s.arith(op('sub'), v('i'), v('gPtr'), false);
+    expect(s.roleOf(s.arith(op('udiv'), intSum, v('j'), false))).toMatchObject({ made: { intSum: { any: false } } });
+  });
+
+  it('reads a sum of a sum of a global word as an integer sum', () => {
+    const s = make();
+    const intSum = s.arith(op('sub'), v('i'), v('gPtr'), false);
+    expect(s.roleOf(s.arith(op('add'), intSum, v('j'), false))).toMatchObject({ made: { intSum: { any: true } } });
+  });
 });
 
 describe('arith: an address operand', () => {
@@ -170,10 +189,9 @@ describe('arith: a constant right operand', () => {
     expect(sub(v('gW'), c(4), U8P)).toEqual(bin('-', bytes(v('gW')), c(4)));
   });
 
-  it('leaves an integer, a byte pointer and an integer sum of a global word as they are', () => {
+  it('leaves an integer and a byte pointer as they are', () => {
     expect(add(v('i'), c(4))).toEqual(bin('+', v('i'), c(4)));
     expect(add(v('pb'), c(3), U8P)).toEqual(bin('+', v('pb'), c(3)));
-    expect(add(v('gW'), c(4))).toEqual(bin('+', v('gW'), c(4)));
   });
 });
 
@@ -192,6 +210,23 @@ describe('arith: a constant left of `+`', () => {
       (s, x) => s.arith(op('add', U8P), c(4), x, false),
     );
     expect(r).toEqual(bytes(bin('+', c(4), bin('+', word(v('gPtr')), c(16)))));
+  });
+
+  it('takes that restored sum as its integer sum under a bitwise operator', () => {
+    const s = make();
+    const byteSum = s.arith(op('add', U8P), v('gPtr'), c(16), false);
+    const restored = s.arith(op('add', U8P), c(4), byteSum, false);
+    expect(s.arith(op('and'), restored, c(255), false)).toEqual(
+      bin('&', bin('+', c(4), bin('+', word(v('gPtr')), c(16))), c(255)),
+    );
+  });
+
+  it('leaves a byte difference of undeclared globals, an integer, as it is', () => {
+    const r = chain(
+      (s) => s.arith(op('sub', T.s(32)), v('gPtr'), v('gQ'), false),
+      (s, x) => s.arith(op('add', T.s(32)), c(4), x, false),
+    );
+    expect(r).toEqual(bin('+', c(4), bin('-', bytes(v('gPtr')), bytes(v('gQ')))));
   });
 
   it('adds an undeclared pointer global as its word, in that order, and restores the byte pointer', () => {
@@ -232,11 +267,6 @@ describe('arith: two rendered pointers', () => {
       (s, x) => s.arith(op('sub', T.s(32)), v('pb'), x, false),
     );
     expect(restored).toEqual(bin('-', v('pb'), bytes(bin('+', word(v('gQ')), v('i')))));
-    const sums = chain(
-      (s) => [s.arith(op('add', U8P), v('gPtr'), c(4), false), s.arith(op('add', U8P), v('pb'), v('gW'), false)],
-      (s, [l, r]) => s.arith(op('sub', T.s(32)), l, r, false),
-    );
-    expect(sums).toEqual(bin('-', bin('+', bytes(v('gPtr')), c(4)), bin('+', v('pb'), v('gW'))));
   });
 });
 
@@ -282,6 +312,12 @@ describe('arith: `int - ptr`', () => {
     expect(r).toEqual(bin('-', bytes(v('gPtr')), bin('+', word(v('gQ')), v('i'))));
   });
 
+  it('takes a restored sum as its integer sum, and a global loaded as a pointer and as a word left of it as its word', () => {
+    expect(chain(restoredSum, (s, x) => s.arith(op('sub', T.s(32)), v('gPW'), x, false))).toEqual(
+      bin('-', word(v('gPW')), bin('+', word(v('gQ')), v('i'))),
+    );
+  });
+
   it('takes a restored sum as its integer sum, and an untyped global word left of it as its word', () => {
     expect(chain(restoredSum, (s, x) => s.arith(op('sub', T.s(32)), v('j'), x, false))).toEqual(
       bin('-', v('j'), bin('+', word(v('gQ')), v('i'))),
@@ -311,6 +347,13 @@ describe('arith: a rendered pointer right of `+`', () => {
 
   it('adds an undeclared pointer global as its word to a byte pointer’s word, restoring the byte pointer', () => {
     expect(add(v('gPtr'), v('pb'), U8P)).toEqual(bytes(bin('+', word(v('gPtr')), word(v('pb')))));
+  });
+
+  it('adds an undeclared pointer global as its word to a pointer constant, which stays a pointer', () => {
+    const io = cast(U16P, c(0x4000000));
+    expect(add(v('gPtr'), io, U16P)).toEqual(cast(U16P, bin('+', word(v('gPtr')), bytes(io))));
+    const ewram = bytes(c(0x2000000));
+    expect(add(v('gPtr'), ewram, U8P)).toEqual(bin('+', word(v('gPtr')), ewram));
   });
 
   it('adds a declared pointer global as its word to a wider pointer walked as bytes, cast back to its type', () => {
@@ -406,5 +449,42 @@ describe('arith: `-` with no rendered pointer', () => {
 
   it('leaves two integers as they are', () => {
     expect(sub(v('i'), v('j'))).toEqual(bin('-', v('i'), v('j')));
+  });
+});
+
+// A global's word no declaration types, left bare (the table doc's KNOWN GAP): the asm's integer
+// in the candidate's own world, where it is `extern u32 g;`. Under `extern u16 *g;` C scales the
+// other side (agbcc compiles `gW + 4` to `add #8`, `gW - (s32)p` with `lsl #1`) or rejects two
+// pointers (`pb + gW`), and under `extern float g;` it is float math.
+describe('arith: known gaps', () => {
+  it('leaves an untyped global word bare beside an integer under an integer result', () => {
+    expect(add(v('gW'), c(4))).toEqual(bin('+', v('gW'), c(4)));
+    expect(add(v('gW'), v('i'))).toEqual(bin('+', v('gW'), v('i')));
+    expect(sub(v('gW'), v('i'))).toEqual(bin('-', v('gW'), v('i')));
+  });
+
+  it('leaves an untyped global word bare left of a pointer it subtracts under an integer result', () => {
+    expect(sub(v('gW'), v('pb'), T.u(32))).toEqual(bin('-', v('gW'), s32(v('pb'))));
+  });
+
+  it('leaves an untyped global word bare left of a pointer holding an address', () => {
+    const p = bin('+', bytes(addr('gArr')), v('i'));
+    expect(sub(v('gW'), p, U8P)).toEqual(bin('-', v('gW'), s32(p)));
+  });
+
+  it('leaves a sum of an untyped global word bare right of a byte pointer holding no byte sum', () => {
+    const r = chain(
+      (s) => s.arith(op('sub', T.s(32)), v('gW'), v('i'), false),
+      (s, x) => s.arith(op('sub', U8P), v('pb'), x, false),
+    );
+    expect(r).toEqual(bin('-', v('pb'), bin('-', v('gW'), v('i'))));
+  });
+
+  it('leaves an untyped global word bare right of a byte pointer, inside a byte count', () => {
+    const sums = chain(
+      (s) => [s.arith(op('add', U8P), v('gPtr'), c(4), false), s.arith(op('add', U8P), v('pb'), v('gW'), false)],
+      (s, [l, r]) => s.arith(op('sub', T.s(32)), l, r, false),
+    );
+    expect(sums).toEqual(bin('-', bin('+', bytes(v('gPtr')), c(4)), bin('+', v('pb'), v('gW'))));
   });
 });

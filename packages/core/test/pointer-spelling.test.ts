@@ -182,7 +182,7 @@ describe('arith: the operand order of a load pair evaluated right first', () => 
     expect(swapped(s, arithOp('add', T.u(32)), v('gX'), v('a1'))).toEqual(bin('+', v('a1'), v('gX')));
   });
 
-  test('keeps a pointer-loaded global no map declares where the table spells it', () => {
+  test('keeps a pointer-loaded global no map declares in place, in the IR’s order of the integer sum (pointerSide’s KNOWN GAP)', () => {
     const s = make({ pointerLoaded: ['gPtr'], varType: { a1: T.s(32) } });
     expect(swapped(s, arithOp('add', T.u(32)), v('gPtr'), v('a1'))).toEqual(
       sum('+', word(v('gPtr')), v('a1'), T.ptr(T.u(8))),
@@ -197,10 +197,14 @@ describe('arith: the operand order of a load pair evaluated right first', () => 
     expect(swapped(s, arithOp('add', T.u(32)), v('gW'), v('a1'))).toEqual(bin('+', v('a1'), v('gW')));
   });
 
-  test('re-spells a global the map declares, and keeps a rendered pointer', () => {
-    const s = make({ map: [ptrInfo('gP')], pointerLoaded: ['gP'], varType: { a0: T.ptr(T.u(8)), a1: T.s(32) } });
-    expect(swapped(s, arithOp('add', T.u(32)), v('gP'), v('a1'))).toEqual(bin('+', v('a1'), bytes(v('gP'))));
+  test('keeps a rendered pointer', () => {
+    const s = make({ varType: { a0: T.ptr(T.u(8)), a1: T.s(32) } });
     expect(swapped(s, arithOp('add', T.u(32)), v('a0'), v('a1'))).toEqual(bin('+', v('a0'), v('a1')));
+  });
+
+  test('re-spells a pointer global the map declares, which the table then spells as a pointer (pointerSide’s KNOWN GAP)', () => {
+    const s = make({ map: [ptrInfo('gP')], pointerLoaded: ['gP'], varType: { a1: T.s(32) } });
+    expect(swapped(s, arithOp('add', T.u(32)), v('gP'), v('a1'))).toEqual(bin('+', v('a1'), bytes(v('gP'))));
   });
 
   test('keeps a `pointerGlobals` name with no map entry', () => {
