@@ -1013,8 +1013,9 @@ export function assertDerefsTyped(sfn: SFn): void {
     if (e.k === 'index' && !structElem.has(e) && !SCALAR_WIDTHS.has(e.width)) {
       bad.push(`index width ${e.width} is not a C scalar width`);
     }
-    // The emitter legalizes pointer operands away from these ops (structure.ts intify); a
-    // pointer surviving here is ill-typed C the compiler will reject.
+    // The emitter legalizes pointer operands away from these ops (structure/pointer-spelling.ts
+    // `ARITH_ROWS`, its `bitwise` row); a pointer surviving here is ill-typed C the compiler will
+    // reject.
     if (e.k === 'bin' && NO_PTR_OPS.has(e.op)) {
       for (const side of [e.l, e.r]) {
         if (ctype(side)?.kind === 'ptr') {
@@ -1027,7 +1028,7 @@ export function assertDerefsTyped(sfn: SFn): void {
     // inexact. Nothing emits this shape anymore: a load/store base folds byte-correctly (globalOf
     // turns `&SYM + N` into an `index`/`field` node whose base is a bare `addr`), and the additive
     // lowering intifies every other `addr` operand to `(u32)&SYM` (structure/pointer-spelling.ts
-    // intifyAddr — the cast types int, so it never lands here). A bare `addr` reaching a `+`/`-`
+    // ARITH_ROWS — the cast types int, so it never lands here). A bare `addr` reaching a `+`/`-`
     // operand is therefore a lowering REGRESSION — flag it rather than emit wrong bytes.
     if (e.k === 'bin' && (e.op === '+' || e.op === '-')) {
       const addrSide = e.l.k === 'addr' ? e.l : e.r.k === 'addr' ? e.r : undefined;

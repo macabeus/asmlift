@@ -2712,7 +2712,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     needsIntSpelling,
     intoDeclaredTemp,
     intoPtrCell,
-    ptrGlobalSide,
     arith: spellArith,
   } = makePointerSpelling({
     sym: symCtx,
@@ -3672,7 +3671,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     if (CMP_TO_BIN[d.opcode]) {
       // A bare global address `&gSym` as a COMPARISON operand is the same unspelled escape as the
-      // arithmetic case (pointer-spelling.ts intifyAddr): its C type comes from the PROJECT's own
+      // arithmetic case (pointer-spelling.ts ARITH_ROWS): its C type comes from the PROJECT's own
       // declaration, unknowable here. Worse, the compare's SIGNEDNESS lives in the operand types
       // (CMP_TO_BIN maps icmp_ult and icmp_slt to the same '<'), so leaving `&gSym` untyped lets
       // the project's declaration pick the compare the compiler emits — silently byte-inexact
@@ -3682,7 +3681,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // compare the asm did. The deref folds never see a compare operand, so no named spelling is
       // lost; a NARROWING cast (`(u8)&gSym`) is not a bare `addr` and keeps its truncation.
       // SCOPE: this handles BARE addr operands. An addr-carrying arithmetic tree
-      // (`(u32)&gSym + 4`, spelled by intifyAddr) renders unsigned and would compare
+      // (`(u32)&gSym + 4`, spelled by the arithmetic table) renders unsigned and would compare
       // unsigned under an icmp_s*; the signed operand pin at the end of this block catches it as
       // one case of the general rule, needing no addr-specific reasoning.
       const t = /^icmp_s/.test(d.opcode) ? T.s(32) : T.u(32);
@@ -3765,63 +3764,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
     }
     if (ARITH_TO_BIN[d.opcode]) {
-      let l = e(d.operands[0]);
-      let r = d.operands.length === 2 ? e(d.operands[1]) : ({ k: 'const', value: d.attrs.imm as number } as Expr);
-      // Commutative LOAD-PAIR operands re-spell in EVALUATION order. A commutative instruction's
-      // operand order is an allocator artifact (`mul r0, r0, r2` reads dst-first, so the lift's
-      // l/r is whichever load landed in the dst), but the order the compiler EVALUATED the
-      // operands is still visible: their defs' order in the instruction stream. gcc 2.9 and IDO
-      // both emit `w * h`'s loads w-first, so def order IS source order — verified byte-identical
-      // on both (the bg_area rows). Scope, one gate per way the signal fails: BOTH root defs must
-      // be same-block memory reads (a const already has its side; arithmetic defs get combined
-      // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
-      // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
-      // LIST order), both operand VALUES un-named (see below), no pointer side (load-bearing for
-      // the stride rules), and no effect moves (call, marker). A global's value that the
-      // pointer-value rule spells as a base is a pointer side too (`ptrGlobalSide`): that rule keeps
-      // the add's operand order, which a swap here would undo.
-      if (COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) && d.operands.length === 2) {
-        const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
-        if (
-          defOrderLoadPairs &&
-          da &&
-          db &&
-          (da.opcode === 'load' || da.opcode === 'aload') &&
-          (db.opcode === 'load' || db.opcode === 'aload') &&
-          da.attrs.listOrder !== true &&
-          db.attrs.listOrder !== true &&
-          // NAMED values decline: a value that renders as a name here — a materialized def
-          // (varName), a loop-carried value in a post-loop region (activeSub) — was evaluated at
-          // its def statement, so re-ordering the reference re-orders nothing and only churns the
-          // spelling away from the machine order the allocator saw. An inlined def — a deref, a
-          // field, a bare scalar global (whose `var` node lowerDef itself mints) — evaluates at
-          // THIS site, wherever recovery spells it.
-          !varName.has(d.operands[0]) &&
-          !varName.has(d.operands[1]) &&
-          activeSub?.has(d.operands[0]) !== true &&
-          activeSub?.has(d.operands[1]) !== true &&
-          ctype(l)?.kind !== 'ptr' &&
-          ctype(r)?.kind !== 'ptr' &&
-          !ptrGlobalSide(l, d) &&
-          !ptrGlobalSide(r, d) &&
-          !exprHasEffect(l) &&
-          !exprHasEffect(r) &&
-          opBlock.get(da) === opBlock.get(db) &&
-          opIndex.get(da)! > opIndex.get(db)!
-        ) {
-          [l, r] = [r, l];
-        }
-      }
-      // The pointer stride, the integer legalizations and the pointer-value byte arithmetic
-      // (structure/pointer-spelling.ts). `restoreTo` is the pointer type the sum goes back to.
-      const spelled = spellArith(d, l, r);
-      l = spelled.l;
-      r = spelled.r;
-      const { restoreTo } = spelled;
-      // (The signedness-carrying pairs stay DISTINCT ops here — `>>>`/`>>` and `/u` `%u`/`/` `%`.
-      // Which token a language spells each with, and what cast pins the choice, is a BACKEND
-      // decision; see l3/ast.ts BinOp and backend/cfamily.ts's C_SPELLING.)
-      //
+      const l = e(d.operands[0]);
+      const r = d.operands.length === 2 ? e(d.operands[1]) : ({ k: 'const', value: d.attrs.imm as number } as Expr);
       // A `+`/`|` over two IR `const`s that both RENDER as literals is the literal it is. After
       // pre-recovery there is only one way such an op still exists: `raise/const.ts` refuses to fold
       // one shape — a register the compiler held live across a branch, whose value on this path is a
@@ -3833,7 +3777,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // stake, so `const-fold.test.ts` pins this on the emitted STRING. Re-folding HERE rather than
       // back in the IR is the point: the pair must survive pre-recovery for the enumeration gate to
       // see the merge feed, and only at rendering is it settled that this candidate named neither
-      // half.
+      // half. Two literals are spelled as they are by the arithmetic table, so the fold reads them
+      // before it.
       //
       // `foldsFromIrConsts` keeps the reach honest and is not redundant with `l`/`r` being `const`
       // Exprs: a BLOCK PARAMETER resolved to a constant on this arm also renders as a literal, and
@@ -3861,12 +3806,52 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       if (l.k === 'const' && r.k === 'const' && d.operands.every((o) => foldsFromIrConsts(o))) {
         const value = foldConstPair(d.opcode, l.value, r.value);
         if (value !== null) {
-          const folded: Expr = { k: 'const', value };
-          return restoreTo ? { k: 'cast', to: restoreTo, e: folded } : folded;
+          return { k: 'const', value };
         }
       }
-      const sum: Expr = { k: 'bin', op: ARITH_TO_BIN[d.opcode], l, r };
-      return restoreTo ? { k: 'cast', to: restoreTo, e: sum } : sum;
+      // Commutative LOAD-PAIR operands re-spell in EVALUATION order. A commutative instruction's
+      // operand order is an allocator artifact (`mul r0, r0, r2` reads dst-first, so the lift's
+      // l/r is whichever load landed in the dst), but the order the compiler EVALUATED the
+      // operands is still visible: their defs' order in the instruction stream. gcc 2.9 and IDO
+      // both emit `w * h`'s loads w-first, so def order IS source order — verified byte-identical
+      // on both (the bg_area rows). Scope, one gate per way the signal fails: BOTH root defs must
+      // be same-block memory reads (a const already has its side; arithmetic defs get combined
+      // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
+      // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
+      // LIST order), both operand VALUES un-named (see below), and no effect moves (call, marker).
+      // Which sides may move is the arithmetic's own decision (structure/pointer-spelling.ts
+      // `pointerSide`, load-bearing for the stride rules), so the pair is handed to it.
+      const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
+      const loadPairReversed =
+        COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) &&
+        d.operands.length === 2 &&
+        defOrderLoadPairs &&
+        da !== undefined &&
+        db !== undefined &&
+        (da.opcode === 'load' || da.opcode === 'aload') &&
+        (db.opcode === 'load' || db.opcode === 'aload') &&
+        da.attrs.listOrder !== true &&
+        db.attrs.listOrder !== true &&
+        // NAMED values decline: a value that renders as a name here — a materialized def
+        // (varName), a loop-carried value in a post-loop region (activeSub) — was evaluated at
+        // its def statement, so re-ordering the reference re-orders nothing and only churns the
+        // spelling away from the machine order the allocator saw. An inlined def — a deref, a
+        // field, a bare scalar global (whose `var` node lowerDef itself mints) — evaluates at
+        // THIS site, wherever recovery spells it.
+        !varName.has(d.operands[0]) &&
+        !varName.has(d.operands[1]) &&
+        activeSub?.has(d.operands[0]) !== true &&
+        activeSub?.has(d.operands[1]) !== true &&
+        !exprHasEffect(l) &&
+        !exprHasEffect(r) &&
+        opBlock.get(da) === opBlock.get(db) &&
+        opIndex.get(da)! > opIndex.get(db)!;
+      // The operand order, the pointer stride, the integer legalizations and the pointer-value
+      // byte arithmetic: structure/pointer-spelling.ts `arith`. (The signedness-carrying pairs
+      // stay DISTINCT ops — `>>>`/`>>` and `/u` `%u`/`/` `%`. Which token a language spells each
+      // with, and what cast pins the choice, is a BACKEND decision; see l3/ast.ts BinOp and
+      // backend/cfamily.ts's C_SPELLING.)
+      return spellArith(d, l, r, loadPairReversed);
     }
     // `-`/`~` on a pointer rendering is equally not C — same honest integer cast as above.
     if (d.opcode === 'rotr' || d.opcode === 'rotl') {

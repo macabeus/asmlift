@@ -137,9 +137,9 @@
 // read off `acc = acc + K`, so it counts in the units of the ACCUMULATOR's declared type: on a
 // `u16 *` a step of 32 advances 64 BYTES. The closed form spells that stride onto the INIT, whose
 // `+` scales by whatever the INIT's own C type says. Where the two disagree the candidate
-// addresses the wrong byte, compiles clean, and carries no marker — `bytePtr` in
-// structure/pointer-spelling.ts states the same rule from the other end ("a `u16 *` walked by a
-// computed offset addresses TWICE the intended byte, and nothing downstream can see the error").
+// addresses the wrong byte, compiles clean, and carries no marker — the POINTER STRIDE rule of
+// `ARITH_ROWS` in structure/pointer-spelling.ts states the same rule from the other end: a
+// runtime offset on a pointer whose pointee is not one byte walks `(u8 *)p`.
 // `stride-units` refuses unless both scales are KNOWN and equal; a narrow integer accumulator is
 // the same question in the other direction, since `u16 acc` wraps at 65536 where
 // `init + (i << 6)` does not.
