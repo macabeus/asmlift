@@ -197,10 +197,10 @@ function legalizedIndexBase(ix: Extract<Expr, { k: 'index' }>, vt: PrintEnv): Ex
  *
  *  An existing integer cast AT THE SAME WIDTH is REPLACED rather than wrapped — `(u32)(s32)&g` and
  *  `(u32)&g` are the same bytes, and the arithmetic rules upstream do emit that inner cast
- *  (structure/pointer-spelling.ts ARITH_ROWS). A cast at a DIFFERENT width is a narrowing the source wrote and must be kept. The
- *  replacement CARRIES the qualifier: re-typing a `volatile` cast without it drops an assertion the
- *  differ cannot referee the loss of, which is why l3/initfirst.ts's `stripWideIntCast` refuses the
- *  same peel one pass over. */
+ *  (structure/pointer-spelling.ts ARITH_ROWS). A cast at a DIFFERENT width is a narrowing the
+ *  source wrote and must be kept. The replacement CARRIES the qualifier: re-typing a `volatile`
+ *  cast without it drops an assertion the differ cannot referee the loss of, which is why
+ *  l3/initfirst.ts's `stripWideIntCast` refuses the same peel one pass over. */
 function recastInt(x: Expr, signed: boolean, width: 32 | 64): Expr {
   const replaced = x.k === 'cast' && x.to.kind === 'int' && x.to.width === width ? x : undefined;
   return {

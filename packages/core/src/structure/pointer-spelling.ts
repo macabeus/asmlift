@@ -10,7 +10,8 @@
 // carries what it is made of. One table (`ARITH_ROWS`) maps the operator, the two roles and the IR
 // result type to a plan: which cast each side takes, and the pointer type the sum goes back to.
 // The plan is printed once. The operand order of a commutative load pair is decided before the
-// table, by its own predicate (`pointerSide`), whose KNOWN GAP says where the two disagree.
+// table, by its own predicate (`pointerSide`), whose doc says which sides it keeps and where it
+// reads other facts than the table.
 //
 // The factory takes its dependencies EXPLICITLY (`PointerSpellingDeps`), the switch-recover
 // pattern. `varType` is captured as a LIVE reference: the naming pipeline is still declaring
@@ -103,7 +104,10 @@ const NOTHING_MADE: Made = {
  *  parameter), a `field` (a member), and anything else, a `value` typed by the C it renders. A
  *  `cast` or a `sum` is one this rule spelled, found by the identity of the expression `arith`
  *  returned: a copy of it reads as a `value`, whose facts are read back out of its C
- *  (`constantExpr`, `carriesAddress`). */
+ *  (`constantExpr`, `carriesAddress`). So does a `(u8 *)g` another rule printed: it carries no
+ *  global, and an op over it keeps the pointer sum where the table spells the integer sum in the
+ *  asm's operand order. Each operand structure.ts hands `arith` is lowered from its IR value, and
+ *  no lowering prints a global as a byte pointer; one that does goes through `arith`. */
 export type Role =
   | { readonly k: 'literal'; readonly e: Extract<Expr, { k: 'const' }> }
   | { readonly k: 'address'; readonly e: Expr }
@@ -246,9 +250,10 @@ export interface ArithRow {
  *  count under a wider pointer declaration of them, where the asm subtracted bytes.
  *
  *  KNOWN GAP: a global's word no declaration types is left bare wherever no row casts it: beside an
- *  integer under an op the IR types an integer (`gW + x`, `gW + 4`), left of a pointer it
- *  subtracts under an integer result or from an address (`gW - (s32)p`), and right of a byte
- *  pointer (`pb + gW`). That is the asm's integer under an integer declaration, the candidate's
+ *  integer under an op the IR types an integer (`gW + x`, `gW + 4`), beside a global's address
+ *  (`gW + (u32)&gArr`), left of a pointer it subtracts under an integer result or from an address
+ *  (`gW - (s32)p`), and right of a byte pointer or a byte difference (`pb + gW`,
+ *  `(u8 *)gPtr - (u8 *)gQ - gW`). That is the asm's integer under an integer declaration, the candidate's
  *  own world; under a wider pointer declaration C scales the other side or rejects the two
  *  pointers, and under a float one it is float math.
  *
@@ -273,20 +278,18 @@ export const ARITH_ROWS: readonly ArithRow[] = [
   { op: '+', l: { literal: true }, r: { pointerValue: true }, rSpell: ['bytes'] },
   { op: '+', resultPointer: true, l: { literal: true }, r: { untyped: true }, rSpell: ['word'], restore: 'bytes' },
   { op: '+', l: { literal: true } },
-  // two rendered pointers
-  { op: '+', l: { wide: true }, r: { pointer: true }, lSpell: ['bytes'], rSpell: ['integer'], restore: 'left' },
-  { op: '+', l: { pointer: true }, r: { pointer: true }, rSpell: ['integer'] },
+  // a rendered pointer left of `+`: the right side as an integer, and a wider pointer walked
+  { op: '+', l: { wide: true }, lSpell: ['bytes'], rSpell: ['integer'], restore: 'left' },
+  { op: '+', l: { pointer: true }, rSpell: ['integer'] },
+  // a rendered pointer left of `-`
   { op: '-', l: { pointer: true }, r: { wide: true }, lSpell: ['bytes'], rSpell: ['bytes'] },
   { op: '-', l: { wide: true }, r: { pointer: true }, lSpell: ['bytes'], rSpell: ['bytes'] },
   { op: '-', l: { pointer: true }, r: { pointer: true } },
-  // a rendered pointer left of anything else
-  { op: '+', l: { wide: true }, r: { pointerValue: true }, lSpell: ['bytes'], rSpell: ['word'], restore: 'left' },
-  { op: '+', l: { pointer: true }, r: { pointerValue: true }, rSpell: ['word'] },
   { op: '-', l: { wide: true }, r: { pointerValue: true }, lSpell: ['bytes'], rSpell: ['bytes'] },
   { op: '-', l: { pointer: true }, r: { pointerValue: true }, rSpell: ['bytes'] },
-  { op: '±', l: { wide: true }, lSpell: ['bytes'], restore: 'left' },
+  { op: '-', l: { wide: true }, lSpell: ['bytes'], restore: 'left' },
   { op: '-', l: { pointer: true, byteSum: true }, r: { sum: true }, rSpell: ['words'] },
-  { op: '±', l: { pointer: true } },
+  { op: '-', l: { pointer: true } },
   // `int - ptr`: the pointer goes its integer. A restored byte sum is that integer sum, which
   // leaves a global the left side takes bare a pointer under a pointer declaration, which the
   // integer would scale; a word, it is the asm's under any integer or pointer one.
@@ -302,7 +305,7 @@ export const ARITH_ROWS: readonly ArithRow[] = [
     rSpell: ['integer'],
   },
   { op: '-', r: { pointer: true }, rSpell: ['integer'] },
-  // a rendered pointer right of `+`
+  // a pointer value left of `+`: one no map declares goes its word into the integer sum
   {
     op: '+',
     l: { pointerValue: true, undeclared: true },
@@ -314,25 +317,18 @@ export const ARITH_ROWS: readonly ArithRow[] = [
   {
     op: '+',
     l: { pointerValue: true, undeclared: true },
-    r: { pointer: true, constant: false },
+    r: { constant: false },
     lSpell: ['word'],
     rSpell: ['partner'],
     restore: 'bytes',
   },
   { op: '+', l: { pointerValue: true }, r: { wide: true }, lSpell: ['word'], rSpell: ['bytes'], restore: 'right' },
   { op: '+', l: { pointerValue: true }, r: { pointer: true }, lSpell: ['word'] },
+  // a rendered pointer right of `+`
   { op: '+', r: { wide: true }, rSpell: ['bytes'], restore: 'right' },
   { op: '+', r: { pointer: true, undeclaredByteSum: true }, lSpell: ['words'], rSpell: ['asInt'], restore: 'bytes' },
   { op: '+', r: { pointer: true } },
   // no rendered pointer: `+`
-  {
-    op: '+',
-    l: { pointerValue: true, undeclared: true },
-    r: { constant: false },
-    lSpell: ['word'],
-    rSpell: ['partner'],
-    restore: 'bytes',
-  },
   { op: '+', l: { pointerValue: true }, r: { pointerValue: true }, lSpell: ['bytes'], rSpell: ['word'] },
   { op: '+', l: { pointerValue: true }, lSpell: ['bytes'] },
   { op: '+', r: { pointerValue: true, undeclared: true }, lSpell: ['words'], rSpell: ['word'], restore: 'bytes' },
@@ -346,7 +342,7 @@ export const ARITH_ROWS: readonly ArithRow[] = [
     rSpell: ['words'],
     restore: 'bytes',
   },
-  { op: '+', resultPointer: true, l: { untyped: true }, r: { integer: true }, lSpell: ['bytes'], rSpell: ['words'] },
+  { op: '+', resultPointer: true, l: { untyped: true }, r: { integer: true }, lSpell: ['bytes'] },
   {
     op: '+',
     resultPointer: true,
@@ -604,14 +600,16 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
   };
 
   /** A side the evaluation-order re-spelling may not move: a rendered pointer, or a global's
-   *  value no map declaration types that the IR loads as a pointer, or as a word into an op the IR
-   *  types a pointer.
+   *  value no map declaration types (a `pointerGlobals` name's too) that the IR loads as a pointer,
+   *  or as a word into an op the IR types a pointer. Beside an integer the table spells such a
+   *  global as its word in an integer sum, `(u32)gPtr + x` or `(u32)(u8 *)gIdx + (u32)(u8 *)gPtr`,
+   *  and the IR's operand order is then the asm's where the IR evaluated the right side first: IDO
+   *  7.1 compiles `usep(gJ + gP)` after `use(*gP)`, and `use(*(gIdx + gPtr))`, from the integer sum
+   *  in that order, where the evaluation order changes the code.
    *
-   *  KNOWN GAP: this reads other facts than the table's rows, and disagrees with them twice. A
-   *  pointer global the map declares is moved, though beside an integer the table spells it as a
-   *  pointer, `x + (u8 *)gP`. A global no map declares that the IR loads as
-   *  a pointer stays, and the table then spells it in the integer sum `(u32)gPtr + x`, in the IR's
-   *  operand order where the compiler evaluated `x` first. */
+   *  It reads other facts than the table's rows. A pointer global the map declares is moved,
+   *  though beside an integer the table spells it as a pointer, `x + (u8 *)gP`: a pointer sum,
+   *  whose operand order is the compiler's own (THE INTEGER SUM in the table's doc). */
   const pointerSide = (x: Role, resultPointer: boolean): boolean =>
     ctype(x.e)?.kind === 'ptr' ||
     (x.k === 'name' && x.facts.mapUndeclared && (x.facts.pointerLoaded || (resultPointer && x.facts.wordLoaded)));

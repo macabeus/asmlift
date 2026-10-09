@@ -32,9 +32,9 @@ export type Expr =
   // recovered form of a byte/half extend idiom — zext/sext IR ops), the STRUCT-pointer cast
   // (structure.ts memAccess/arrayAccess struct paths — see the note on `field` below), and the
   // integer legalization of a pointer operand under an operator C rejects (the arithmetic table,
-  // structure/pointer-spelling.ts: `3 & (s32)p`). Scalar deref casts are backend-owned — the C-family printer synthesizes
-  // them from the `index` node's width. Each backend spells the cast in its own syntax
-  // (C: `(u8)e`; Pascal: no spelling yet → fails loud).
+  // structure/pointer-spelling.ts: `3 & (s32)p`). Scalar deref casts are backend-owned — the
+  // C-family printer synthesizes them from the `index` node's width. Each backend spells the cast
+  // in its own syntax (C: `(u8)e`; Pascal: no spelling yet → fails loud).
   //
   // `volatile` qualifies the POINTEE of a pointer cast (`(volatile u16 *)0x4000208`) — the one
   // place asmlift can say "this access is to a volatile object" when there is no declaration to
