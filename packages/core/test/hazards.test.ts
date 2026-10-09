@@ -10,6 +10,7 @@ import { T } from '../src/ir/types';
 import type { Stmt } from '../src/l3/ast';
 import { type Gate, without } from '../src/l3/gates';
 import type { UseSite } from '../src/structure/analysis';
+import { ARITH_TO_BIN } from '../src/structure/arith-ops';
 import {
   PREUPDATE_COND_GATES,
   PREUPDATE_SINK_GATES,
@@ -20,7 +21,6 @@ import {
   sunkCopyOverDroppedUndef,
   updateWriteSet,
 } from '../src/structure/hazards';
-import { ARITH_TO_BIN } from '../src/structure/structure';
 
 const v = (): Value => mkValue(T.s(32));
 

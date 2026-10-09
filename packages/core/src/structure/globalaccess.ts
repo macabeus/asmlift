@@ -1,17 +1,26 @@
 // THE GLOBAL-ACCESS ADDRESS DECOMPOSITION — the pure half of the symbol-map access spellings.
 //
-// Everything here is a function of an `Expr`, a `SymbolInfo` and a width: no structurer state, no
-// naming walk, no loop context. It answers three questions the access spellings in structure.ts
-// ask over and over — is this address `&gSym` plus something; does that something divide into
-// whole elements; and do the terms of it name the DECLARED subscripts of a multidimensional array
-// — and it answers them the same way for every caller, which is the point of the split: the
-// rank-pinning fallback and the declared-subscript recovery share `bareArrayElement`, so the two
-// cannot disagree about what a bare element spelling is.
+// Everything here is a function of an `Expr`, the map's declarations and a width: no structurer
+// state, no naming walk, no loop context. It answers three questions the access spellings in
+// structure.ts ask over and over — is this address `&gSym` plus something; does that something
+// divide into whole elements; and do the terms of it name the DECLARED subscripts of a
+// multidimensional array — and it answers them the same way for every caller, which is the point
+// of the split: the rank-pinning fallback and the declared-subscript recovery share
+// `bareArrayElement`, so the two cannot disagree about what a bare element spelling is. The same
+// holds for what the map declares a named member to be (`ptrMemberDecl`), which the access folds
+// and the pointer spelling (pointer-spelling.ts) both read.
 import type { Expr } from '../l3/ast';
-import { type SymbolInfo, arrayInnerExtents } from '../symbols';
+import {
+  type DeclaredField,
+  type SymbolInfo,
+  arrayInnerExtents,
+  declaredFields,
+  isPtrField,
+  pointeeFields,
+} from '../symbols';
 
 // `&gSym`, possibly wearing the value-context integer cast the additive lowering adds
-// (`(u32)&gSym` — see `intifyAddr` in structure.ts's lowerDef): both spell the same link-time
+// (`(u32)&gSym` — see `intifyAddr` in pointer-spelling.ts): both spell the same link-time
 // constant, so the fold rules match through the cast and every access that CAN spell a named
 // element still does.
 // WIDTH 32 ONLY — a NARROWING cast (`(u8)&gSym`, from a zext/sext lowering) is a different
@@ -297,4 +306,61 @@ export function addOffset(idx: Expr, n: number): Expr {
   return idx.k === 'const'
     ? { k: 'const', value: idx.value + n }
     : { k: 'bin', op: '+', l: idx, r: { k: 'const', value: n } };
+}
+
+/** The members a symbol's declaration seats: a struct global's own, or a pointer global's
+ *  pointee's. */
+export interface MemberLookup {
+  fieldsOf(name: string): DeclaredField[] | null;
+}
+
+/** {@link MemberLookup.fieldsOf} over `info`, MEMOIZED per symbol. `declaredFields` validates every
+ *  member and returns a fresh sorted copy on every call, and pointer-spelling.ts's `isPtrValue`
+ *  asks it for both operands of every binary node lowered, so an uncached lookup is an
+ *  O(n log n) allocation on a hot path — inside a `structure()` a ranked run repeats once per
+ *  candidate, 17,856 times on the largest fan. */
+export function memoFieldsOf(info: (name: string) => SymbolInfo | undefined): MemberLookup['fieldsOf'] {
+  const cache = new Map<string, DeclaredField[] | null>();
+  return (name) => {
+    const hit = cache.get(name);
+    if (hit !== undefined) {
+      return hit;
+    }
+    const si = info(name);
+    const fields =
+      si?.shape === 'struct' ? declaredFields(si.layout) : si?.shape === 'pointer' ? pointeeFields(si.pointee) : null;
+    cache.set(name, fields);
+    return fields;
+  };
+}
+
+/** The map member a `field` node NAMES, or null when it names none — THE one resolver for "what
+ *  does the declaration say about this member", for rules that must reason about a member's type
+ *  after the access rules have already spelled it. Both named spellings resolve, through the same
+ *  shared gate their spelling passed: `gSym.member` off a struct global's {@link declaredFields},
+ *  `gPtr->member` off the pointee's ({@link pointeeFields}). A synthesized `field_K` — the
+ *  recovered-struct spelling, which no map declares — resolves to null, and so does any base that
+ *  is not a map-shaped global, which is what makes every caller refuse rather than guess.
+ *
+ *  The pointee arm reaches only what the MAP lets it: `pointeeAccess` gates every `gPtr->member`
+ *  spelling on `spellsAccessType(f.signed, …)`, so a pointer field declaring no signedness — which
+ *  is every one in the corpus's vendored maps — is never named, and a pointer read one indirection
+ *  down spells `((s32 *)gQ)[1]`. That is a fact about those maps, not about this code: `SymbolMap`
+ *  is a caller-supplied input, and one field flips it (`signed: true` on a 4-byte pointer member
+ *  of a pointee yields `(u8 *)gQ->pInner`, cast and all, pinned in pointer-members.test.ts). So
+ *  the arm is live and tested, and the byte-arithmetic rule that reads this answer is correct for
+ *  it — where resolving a pointee member to null would reopen the double-scaling hole silently. */
+function declaredMemberOf(x: Expr, sym: MemberLookup | undefined): DeclaredField | null {
+  if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
+    return null;
+  }
+  return sym.fieldsOf(x.base.name)?.find((f) => f.name === x.name) ?? null;
+}
+
+/** The map member a `field` node names when the declaration makes it a POINTER — {@link
+ *  isPtrField} being the shared two-fact test, so this and the synthesized declaration cannot
+ *  disagree about what a member is. */
+export function ptrMemberDecl(x: Expr, sym: MemberLookup | undefined): DeclaredField | null {
+  const f = declaredMemberOf(x, sym);
+  return f !== null && isPtrField(f) ? f : null;
 }

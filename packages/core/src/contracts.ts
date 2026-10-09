@@ -1026,9 +1026,9 @@ export function assertDerefsTyped(sfn: SFn): void {
     // offset by sizeof(SYM), which is unknown for a header-typed global, so `&SYM + N` is byte-
     // inexact. Nothing emits this shape anymore: a load/store base folds byte-correctly (globalOf
     // turns `&SYM + N` into an `index`/`field` node whose base is a bare `addr`), and the additive
-    // lowering intifies every other `addr` operand to `(u32)&SYM` (structure.ts intifyAddr — the
-    // cast types int, so it never lands here). A bare `addr` reaching a `+`/`-` operand is therefore
-    // a lowering REGRESSION — flag it rather than emit wrong bytes.
+    // lowering intifies every other `addr` operand to `(u32)&SYM` (structure/pointer-spelling.ts
+    // intifyAddr — the cast types int, so it never lands here). A bare `addr` reaching a `+`/`-`
+    // operand is therefore a lowering REGRESSION — flag it rather than emit wrong bytes.
     if (e.k === 'bin' && (e.op === '+' || e.op === '-')) {
       const addrSide = e.l.k === 'addr' ? e.l : e.r.k === 'addr' ? e.r : undefined;
       if (addrSide) {
