@@ -460,7 +460,7 @@ describe('arith: `+` with no rendered pointer', () => {
   });
 
   describe('where the compiler reassociates an integer sum’s constant', () => {
-    const gcc = make({ reassociatesIntegerSumConstant: true });
+    const gcc = make({ keepsPointerSumAddend: true });
     const shifted = bin('<<', v('i'), c(13));
 
     it('walks an undeclared pointer global plus an integer offset with a constant term as bytes, the pointer sum', () => {
@@ -473,7 +473,7 @@ describe('arith: `+` with no rendered pointer', () => {
     });
 
     it('adds an untyped global word in that offset as its word', () => {
-      const s = make({ reassociatesIntegerSumConstant: true });
+      const s = make({ keepsPointerSumAddend: true });
       const offset = s.arith(op('add'), v('gW'), c(4), false);
       expect(s.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(
         bin('+', bytes(v('gPtr')), bin('+', untypedWord('gW'), c(4))),

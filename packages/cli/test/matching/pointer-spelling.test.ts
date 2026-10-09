@@ -112,7 +112,7 @@ describe('the integer sum of an undeclared pointer global, real compilers', () =
 });
 
 // The pointer sum of an undeclared pointer global plus an offset with a constant addend, on the
-// compilers that reassociate an integer sum (core target.ts `reassociatesIntegerSumConstant`): the
+// compilers that reassociate an integer sum (core target.ts `keepsPointerSumAddend`): the
 // integer sum `(u32)gPtr + (x + K)` compiles to `(gPtr + K) + x`, and only the pointer sum keeps the
 // asm's `gPtr + (x + K)`. The project's header declares the global a `u16 *`, so the pointer sum is
 // walked as bytes.

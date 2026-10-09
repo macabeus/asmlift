@@ -123,7 +123,7 @@ import {
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { makePointerSpelling } from './pointer-spelling';
+import { type ArithCompilerFacts, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
@@ -1428,14 +1428,15 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 //   orderArgCopiesByWriteOrder     — order edge copies by the order the pred WROTE their
 //                                    destinations.
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
-// booleans, never a compiler name.
+// booleans, never a compiler name. So are the arithmetic table's (`ArithCompilerFacts`), which this
+// type extends and hands to `makePointerSpelling` whole.
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
 // the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
 // ONCE at its `STRUCTURE_VARIATIONS` entry in rank-variations.ts — restated here the two copies rot
 // separately, and only that one is the entry the enumeration reads. Figures pricing a
 // DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
-export interface StructureOptions {
+export interface StructureOptions extends ArithCompilerFacts {
   returnsVoid?: boolean;
   coalesceLoopInit?: boolean;
   preserveDivergentBranchSense?: boolean;
@@ -1701,9 +1702,6 @@ export interface StructureOptions {
   // is nothing to referee. Absent ⇒ off — the target field carries the evidence a compiler owes,
   // analysis.ts AnalyzeOptions the refusals.
   readsStayWhereWritten?: boolean;
-  // A compiler behavior (TargetDescription.compilerBehaviors): the arithmetic table spells a pointer
-  // global plus an integer offset as the pointer sum — structure/pointer-spelling.ts `ARITH_ROWS`.
-  reassociatesIntegerSumConstant?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
   // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
@@ -2056,7 +2054,6 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeMergeFeeds = false,
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
-    reassociatesIntegerSumConstant = false,
     contractsFloatProducts = false,
     staticLayout,
     unsignedCompareSpelling = false,
@@ -2723,7 +2720,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     pointerLoadedGlobals,
     wordLoadedGlobals,
     varType,
-    compiler: { reassociatesIntegerSumConstant },
+    compiler: opts,
   });
 
   let fresh = 0;

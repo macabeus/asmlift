@@ -23,6 +23,7 @@ import { type BinOp, Expr } from '../l3/ast';
 import { pointerCellValue } from '../l3/ptrcell';
 import { exprCType, ptrElemBytes } from '../l3/typing';
 import { type SymbolInfo, isScalarCellSize, scalarCellType } from '../symbols';
+import type { TargetDescription } from '../target';
 import { ARITH_TO_BIN } from './arith-ops';
 import { type MemberLookup, ptrMemberDecl } from './globalaccess';
 
@@ -47,12 +48,10 @@ export interface PointerSpellingDeps {
   compiler?: ArithCompilerFacts;
 }
 
-/** The compiler behaviors (target.ts `compilerBehaviors`) the table's rows may be guarded on. */
-export interface ArithCompilerFacts {
-  /** the compiler moves the constant addend of an integer sum's offset out to the base, and not a
-   *  pointer sum's (target.ts) */
-  reassociatesIntegerSumConstant?: boolean;
-}
+/** The compiler behaviors (target.ts `compilerBehaviors`) the table's rows may be guarded on. A row
+ *  guarded on another one adds its name here; `StructureOptions` extends this type, so the behavior
+ *  reaches the table from the target with no further edit. */
+export type ArithCompilerFacts = Pick<TargetDescription['compilerBehaviors'], 'keepsPointerSumAddend'>;
 
 /** Which globals a fact holds of: some global, and whether one of them is a global no map
  *  declaration types. */
@@ -256,8 +255,8 @@ export interface ArithRow {
  *  offset is added as an integer too: CodeWarrior at -O4 puts the index first in every pointer
  *  sum, where an integer sum keeps the source's order, so `(u8 *)g + x` is the asm's order on
  *  agbcc, KMC gcc and IDO only. The partner goes integer with it, or a pointer partner would scale
- *  the sum. Except where the compiler reassociates an integer sum (`reassociatesIntegerSumConstant`)
- *  and the offset has a constant term: the gcc family folds `(u32)g + (x + K)` to `(g + K) + x` and
+ *  the sum. Except where the compiler keeps a pointer sum's constant addend and moves an integer
+ *  sum's (`keepsPointerSumAddend`) and the offset has a constant term: the gcc family folds `(u32)g + (x + K)` to `(g + K) + x` and
  *  keeps the pointer sum's `g + (x + K)`, so there an integer offset keeps the pointer sum. A
  *  constant offset folds into the access and keeps `(u8 *)g + K`. A declared pointer keeps
  *  `x + (u8 *)p`, the operand the element and field spellings read.
@@ -332,7 +331,7 @@ export const ARITH_ROWS: readonly ArithRow[] = [
   },
   {
     op: '+',
-    when: 'reassociatesIntegerSumConstant',
+    when: 'keepsPointerSumAddend',
     l: { pointerValue: true, undeclared: true },
     r: { integer: true, addend: true, constant: false },
     lSpell: ['bytes'],
