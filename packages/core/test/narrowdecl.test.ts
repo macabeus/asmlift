@@ -1,5 +1,6 @@
-// The `/narrow-decl` and `/narrow-read` variations (l3/narrowdecl.ts): `s32 v; v = (u8)(x - 1);` is
-// spelled `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from, and `s32 v;
+// The `/narrow-decl`, `/narrow-load` and `/narrow-read` variations (l3/narrowdecl.ts): `s32 v; v =
+// (u8)(x - 1);` is spelled `u8 v; v = x - 1;`, the spelling `kleod:sub_0803E8CC` was compiled from,
+// `s32 v; v = p[4];` is spelled `u8 v; v = p[4];`, the one `pokeemerald:LoadMonInfo` was, and `s32 v;
 // v = f(); … (u8)v …` is spelled `u8 v; v = f(); … v …`, the one `pokeemerald:RtcGetDayCount` was.
 // Each refusal edits one fact of an accepted tree: a structured fixture below, or a hand-built one
 // where the fact (a pointer operand, a `for` init) is not a lift's to produce.
@@ -10,7 +11,7 @@ import { pascalBackend } from '../src/backend/pascal';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import type { Expr, SFn } from '../src/l3/ast';
-import { narrowDeclarations, narrowReadDeclarations } from '../src/l3/narrowdecl';
+import { narrowDeclarations, narrowLoadDeclarations, narrowReadDeclarations } from '../src/l3/narrowdecl';
 import { recoverTypes } from '../src/raise/recover';
 import { STACKED_VARIATIONS, applyStacked } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
@@ -58,6 +59,29 @@ const LOADED = `fn loaded {
   %2: s32 = call %1 {target="rnd"}
   %3: s32 = add %2, %1
   ret %3
+}
+`;
+
+// sub_0803E8CC's cast-written local beside LoadMonInfo's load-written one
+const BOTH = `fn both {
+^bb0(%0: u8*):
+  %1: s32 = load %0 {off=4, signed=false, width=1}
+  %2: u8* = gaddr {sym="gA"}
+  %3: s32 = load %2 {off=12, signed=false, width=1}
+  %4: s32 = const {value=1}
+  %5: s32 = sub %3, %4
+  %6: unk32 = zext %5 {width=8}
+  %7: s32 = call {target="rnd"}
+  %8: s32 = const {value=1}
+  %9: s32 = and %6, %8
+  %10: s32 = const {value=5}
+  %11: s32 = sub %10, %6
+  %12: s32 = add %9, %11
+  %13: s32 = add %12, %7
+  %14: s32 = add %13, %1
+  %15: u8* = gaddr {sym="gB"}
+  store %15, %14 {off=14, width=1}
+  ret
 }
 `;
 
@@ -259,18 +283,28 @@ describe('narrowDeclarations', () => {
     expect(local(narrowDeclarations(wide(-1))!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
   });
 
+  it('leaves a local written by a memory read to /narrow-load', () => {
+    expect(narrowDeclarations(structured(LOADED))).toBeNull();
+  });
+
+  it('leaves a local narrowed at its reads to /narrow-read', () => {
+    expect(narrowDeclarations(structured(READ))).toBeNull();
+  });
+});
+
+describe('narrowLoadDeclarations', () => {
   it('declares a once-written s32 local at the width of the memory read that writes it', () => {
     const before = structured(LOADED);
     expect(cBackend.emit(before)).toContain('s32 v0;');
-    const src = cBackend.emit(narrowDeclarations(before)!);
+    const src = cBackend.emit(narrowLoadDeclarations(before)!);
     expect(src).toContain('u8 v0;');
     expect(src).toContain('v0 = a0[4];');
-    const signed = narrowDeclarations(structured(LOADED.replace('signed=false, width=1', 'signed=true, width=2')))!;
+    const signed = narrowLoadDeclarations(structured(LOADED.replace('signed=false, width=1', 'signed=true, width=2')))!;
     expect(local(signed, 'v0')?.type).toEqual({ kind: 'int', width: 16, signed: true });
   });
 
   it('does not narrow a local written by a word read, or by a narrow variable', () => {
-    expect(narrowDeclarations(structured(LOADED.replace('width=1', 'width=4')))).toBeNull();
+    expect(narrowLoadDeclarations(structured(LOADED.replace('width=1', 'width=4')))).toBeNull();
     const byVar: SFn = {
       name: 'f',
       params: [{ name: 'a0', type: { kind: 'int', width: 8, signed: false } }],
@@ -281,7 +315,7 @@ describe('narrowDeclarations', () => {
         { k: 'return', value: { k: 'bin', op: '+', l: v0, r: v0 } },
       ],
     };
-    expect(narrowDeclarations(byVar)).toBeNull();
+    expect(narrowLoadDeclarations(byVar)).toBeNull();
   });
 
   it('does not narrow a u32 local, or one written twice, by a memory read', () => {
@@ -290,16 +324,16 @@ describe('narrowDeclarations', () => {
       ...sfn,
       locals: sfn.locals.map((l) => ({ ...l, type: { kind: 'int' as const, width: 32, signed: false } })),
     };
-    expect(narrowDeclarations(unsigned)).toBeNull();
+    expect(narrowLoadDeclarations(unsigned)).toBeNull();
     const twice = {
       ...sfn,
       body: [...sfn.body, { k: 'assign' as const, name: 'v0', value: { k: 'const' as const, value: 300 } }],
     };
-    expect(narrowDeclarations(twice)).toBeNull();
+    expect(narrowLoadDeclarations(twice)).toBeNull();
   });
 
-  it('leaves a local narrowed at its reads to /narrow-read', () => {
-    expect(narrowDeclarations(structured(READ))).toBeNull();
+  it('leaves a local written by a narrowing cast to /narrow-decl', () => {
+    expect(narrowLoadDeclarations(structured(NAMED))).toBeNull();
   });
 });
 
@@ -397,6 +431,23 @@ describe('narrowReadDeclarations', () => {
       expect(narrowReadDeclarations(at(structured(READ), { k: 'assign', name: 'v0', value }))).toBeNull();
     },
   );
+});
+
+describe('/narrow-decl and /narrow-load stacked', () => {
+  const widths = (sfn: SFn) => sfn.locals.map((l) => (l.type.kind === 'int' ? l.type.width : undefined));
+  const stacked = (...names: string[]) =>
+    applyStacked(
+      STACKED_VARIATIONS.filter((x) => names.includes(x.name)),
+      structured(BOTH),
+    )!;
+
+  it('offers the load-written local and the cast-written local each narrowed alone', () => {
+    expect(cBackend.emit(structured(BOTH))).toContain('v0 = a0[4];');
+    expect(widths(structured(BOTH))).toEqual([32, 32]);
+    expect(widths(stacked('narrow-load').out)).toEqual([8, 32]);
+    expect(widths(stacked('narrow-decl').out)).toEqual([32, 8]);
+    expect(widths(stacked('narrow-decl', 'narrow-load').out)).toEqual([8, 8]);
+  });
 });
 
 describe('/narrow-decl and /narrow-read stacked', () => {

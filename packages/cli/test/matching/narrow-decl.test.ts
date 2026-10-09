@@ -1,8 +1,8 @@
-// The `/narrow-decl` and `/narrow-read` variations (core l3/narrowdecl.ts) against the REAL agbcc
-// toolchain, in both directions. `u8 v; v = x - 1;` and `s32 v; v = (u8)(x - 1);` compute the same
-// value and compile to two different objects, and so do `u8 v; v = f(); … v` and `s32 v; v = f();
-// … (u8)v`, so neither spelling may replace the other: each source must be recovered byte-exact, by
-// the candidate whose declaration it used.
+// The `/narrow-decl`, `/narrow-load` and `/narrow-read` variations (core l3/narrowdecl.ts) against the
+// REAL agbcc toolchain, in both directions. `u8 v; v = x - 1;` and `s32 v; v = (u8)(x - 1);` compute
+// the same value and compile to two different objects, and so do `u8 v; v = p[100];` and `s32 v; v =
+// p[100];`, and `u8 v; v = f(); … v` and `s32 v; v = f(); … (u8)v`, so neither spelling may replace
+// the other: each source must be recovered byte-exact, by the candidate whose declaration it used.
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/decompileRanked use real agbcc).
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -59,19 +59,51 @@ const rankedLoads = async (decl: string) => {
   });
 };
 
-describe('/narrow-decl of a local written by a byte read, real agbcc, both directions', () => {
+describe('/narrow-load, real agbcc, both directions', () => {
   it('recovers byte locals holding byte reads through the variation', async () => {
     const r = await rankedLoads('u8');
     expect(r.winner.score.match).toBe(true);
-    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(true);
     expect(r.winner.source).toMatch(/\bu8 v0;/);
   });
 
   it('keeps s32 locals holding byte reads, which the variation would lose', async () => {
     const r = await rankedLoads('s32');
     expect(r.winner.score.match).toBe(true);
-    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(false);
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(false);
     expect(r.winner.source).toMatch(/\bs32 v0;/);
+  });
+});
+
+// A local narrowed at its cast write beside the two byte reads: either kind must be declared narrow
+// without the other
+const rankedWriteAndLoads = async (written: string, loaded: string) => {
+  const write = written === 'u8' ? 'gA.c - 1' : '(u8)(gA.c - 1)';
+  const c =
+    `${DECLS}${LOAD_DECLS}void nd(u8 *p, s32 x) { ${written} v; ${loaded} a; ${loaded} b; v = ${write}; ` +
+    'gB.d = (1 & v) + rnd() % (5 - v) + 1; a = p[100]; b = p[101]; ' +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); }';
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('nd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      nd: { params: ['u8 *', 's32'], returnsVoid: true },
+      rnd: { params: [] },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+    },
+    compile: async (source) => compileCandAgbcc(DECLS + LOAD_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-decl and /narrow-load in one function, real agbcc', () => {
+  it.each([
+    ['the cast-written local alone', 'u8', 's32', true, false],
+    ['the load-written locals alone', 's32', 'u8', false, true],
+    ['both kinds', 'u8', 'u8', true, true],
+  ])('narrows %s', async (_, written, loaded, decl, load) => {
+    const r = await rankedWriteAndLoads(written, loaded);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(decl);
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(load);
   });
 });
 

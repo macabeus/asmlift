@@ -1634,10 +1634,10 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
   },
   'narrow-decl': {
     title: 'Narrow value declared at its width',
-    summary: 'a local holding one narrowed value is declared at that width instead of as an `s32`',
+    summary: 'a local holding one narrowed value is declared at that width instead of as an `s32` with a cast',
     detail:
       'A value narrowed once and read as a local can be spelled two ways: an `s32` assigned the narrowing ' +
-      'cast or the narrow memory read, or a local declared at the narrow width. Every read is an `int` either way, so the value is the ' +
+      'cast, or a local declared at the narrow width. Every read is an `int` either way, so the value is the ' +
       "same; which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
     compilerBehavior:
       "gcc 2.9's front end sees through the promotion of a narrow variable and not through a cast assigned " +
@@ -1645,7 +1645,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'where none reads it, agbcc can still allocate registers differently. IDO, KMC gcc and gcc 2.7.2 ' +
       'each emit different code for the example too, and every mwcc build does for a compare of it.',
     offeredWhen: {
-      when: 'An `s32` local written once, outside a `for` init, by a narrowing cast or a narrow memory read, that lives in no memory.',
+      when: 'An `s32` local written once, outside a `for` init, by an integer narrowed to a narrower integer, that lives in no memory.',
       decidedBy: { symbol: 'narrowDeclarations', file: l3('narrowdecl') },
     },
     example: {
@@ -1655,7 +1655,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 'u8 v; v = gA[12] - 1; gB[14] = (v & 1) + f() % (5 - v) + 1;',
     },
     implementedIn: l3('narrowdecl'),
-    seeAlso: ['narrow-read', 'derived-home', 'escape-home'],
+    seeAlso: ['narrow-load', 'narrow-read', 'derived-home', 'escape-home'],
+  },
+  'narrow-load': {
+    title: 'Narrow load declared at its width',
+    summary: 'a local holding one narrow memory read is declared at that width instead of as an `s32`',
+    detail:
+      'A byte or halfword read from memory into a local can be spelled two ways: an `s32` local assigned the ' +
+      "read, or a local declared at the read's width. Every read of the local is the same value either way; " +
+      "which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
+    compilerBehavior:
+      'agbcc loads a narrow local where it is written and an `s32` one where it is first read, so two byte ' +
+      'reads held across two calls are loaded at different points.',
+    offeredWhen: {
+      when: 'An `s32` local written once, outside a `for` init, by an element or member read of a narrower integer, in no memory.',
+      decidedBy: { symbol: 'narrowLoadDeclarations', file: l3('narrowdecl') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'void f7(u8 *, u8 *, u8, u8, s32, u8, u8);\nvoid example(u8 *p, s32 x) { @ }',
+      before:
+        's32 a; s32 b; a = p[100]; b = p[101]; f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4);',
+      after: 'u8 a; u8 b; a = p[100]; b = p[101]; f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4);',
+    },
+    implementedIn: l3('narrowdecl'),
+    seeAlso: ['narrow-decl', 'narrow-read'],
   },
   'narrow-read': {
     title: 'Narrow value declared at its width, read bare',
@@ -1678,7 +1702,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 'u8 y; u8 m; y = cv(p[0]); m = cv(p[1]); return dc(y, m, (u8)cv(p[2]));',
     },
     implementedIn: l3('narrowdecl'),
-    seeAlso: ['narrow-decl'],
+    seeAlso: ['narrow-decl', 'narrow-load'],
   },
   'int-cell': {
     title: 'Global stored a pointer, spelled as an integer',
