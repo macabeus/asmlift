@@ -5,9 +5,13 @@
 //   s32 v; v = (u8)(x - 1); … v …        becomes   u8 v; v = x - 1; … v …       (/narrow-decl)
 //   s32 v; v = f(); … (u8)v … (u8)v …    becomes   u8 v; v = f(); … v … v …     (/narrow-read)
 //
+// `/narrow-decl` also takes a write that is a narrow memory read, which has no cast to drop:
+//
+//   s32 v; v = p[3]; … v …               becomes   u8 v; v = p[3]; … v …        (/narrow-decl)
+//
 // The two spellings compute the same C value at every read. The declaration truncates where the
-// cast did, and a `u8`, `s8`, `u16` or `s16` read is promoted to `int`, which is what an `s32` read
-// already is. They are not the same program to gcc 2.9's front end. `get_narrower`
+// cast did, or stores a value already of its type, and a `u8`, `s8`, `u16` or `s16` read is
+// promoted to `int`, which is what an `s32` read already is. They are not the same program to gcc 2.9's front end. `get_narrower`
 // (gcc/tree.c:4516) sees through the promotion of a narrow VARIABLE and not through an `int` that
 // a cast was assigned to, so for an unsigned narrow one `shorten_compare` (gcc/c-common.c:1158)
 // makes a compare against a constant unsigned and folds `>= 0`, `/` and `%` are shortened to their
@@ -62,9 +66,10 @@
 //     it would turn its compares, divisions and shifts into signed ones;
 //   • /narrow-decl: a local written more than once, or by `v++`, where a later write could store a
 //     value the narrow declaration would truncate and a bare read would not;
-//   • /narrow-decl: a local whose one write is a `for` loop's init, or that is not an integer
-//     narrowed to a narrower integer. A call's operand is not known to be an integer (its callee
-//     may return a pointer), so `(u8)f()` is refused too;
+//   • /narrow-decl: a local whose one write is a `for` loop's init, or that is neither an integer
+//     narrowed to a narrower integer nor a narrow memory read. A call's operand is not known to be
+//     an integer (its callee may return a pointer), so `(u8)f()` is refused too, and so is a narrow
+//     variable (`v = a1` of a `u8 a1`), which no row has needed;
 //   • /narrow-read: a read that is not a narrowing cast (a bare `v`, an index base, a `v++`), reads
 //     cast to two widths or two signednesses, a write in a `for` loop's init or step, and a write
 //     whose value is a pointer, a float or of no known type. A call is admitted: its value already
@@ -91,6 +96,16 @@ type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'i
  *  neither to an integer by assignment alone. */
 const isNarrowing = (e: Expr, env: ReturnType<typeof declaredTypes>): e is Narrowing =>
   e.k === 'cast' && !e.volatile && e.to.kind === 'int' && e.to.width < 32 && exprCType(e.e, env)?.kind === 'int';
+
+/** The narrower integer type a memory read (`p[i]`, `*p`, a member) already has, which a local it is
+ *  assigned to may be declared at with nothing to drop. */
+const narrowLoad = (e: Expr, env: ReturnType<typeof declaredTypes>): Narrowing['to'] | undefined => {
+  if (e.k !== 'index' && e.k !== 'field') {
+    return undefined;
+  }
+  const t = exprCType(e, env);
+  return t?.kind === 'int' && t.width < 32 ? (t as Narrowing['to']) : undefined;
+};
 
 /** `(T)v`, the read of `name` narrowed to the narrower integer T. */
 const isReadNarrowing = (e: Expr, name: string): e is Narrowing =>
@@ -181,6 +196,13 @@ export function narrowDeclarations(sfn: SFn): SFn | null {
         ) {
           to = s.value.to;
           return { ...s, value: s.value.e };
+        }
+        if (s.k === 'assign' && s.name === l.name) {
+          const t = narrowLoad(s.value, env);
+          if (t !== undefined) {
+            to = t;
+            return s;
+          }
         }
         return mapStmtLists(s, rewrite);
       });

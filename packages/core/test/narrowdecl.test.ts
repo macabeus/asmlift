@@ -51,6 +51,16 @@ const READ = `fn read {
 }
 `;
 
+// LoadMonInfo's shape: a byte read named because a call runs between it and its second read
+const LOADED = `fn loaded {
+^bb0(%0: u8*):
+  %1: s32 = load %0 {off=4, signed=false, width=1}
+  %2: s32 = call %1 {target="rnd"}
+  %3: s32 = add %2, %1
+  ret %3
+}
+`;
+
 const structured = (ir: string): SFn => {
   const fn = parse(ir);
   verify(fn);
@@ -247,6 +257,45 @@ describe('narrowDeclarations', () => {
     expect(narrowDeclarations(wide(300))).toBeNull();
     expect(narrowDeclarations(wide(-129))).toBeNull();
     expect(local(narrowDeclarations(wide(-1))!, 'v0')?.type).toEqual({ kind: 'int', width: 8, signed: false });
+  });
+
+  it('declares a once-written s32 local at the width of the memory read that writes it', () => {
+    const before = structured(LOADED);
+    expect(cBackend.emit(before)).toContain('s32 v0;');
+    const src = cBackend.emit(narrowDeclarations(before)!);
+    expect(src).toContain('u8 v0;');
+    expect(src).toContain('v0 = a0[4];');
+    const signed = narrowDeclarations(structured(LOADED.replace('signed=false, width=1', 'signed=true, width=2')))!;
+    expect(local(signed, 'v0')?.type).toEqual({ kind: 'int', width: 16, signed: true });
+  });
+
+  it('does not narrow a local written by a word read, or by a narrow variable', () => {
+    expect(narrowDeclarations(structured(LOADED.replace('width=1', 'width=4')))).toBeNull();
+    const byVar: SFn = {
+      name: 'f',
+      params: [{ name: 'a0', type: { kind: 'int', width: 8, signed: false } }],
+      locals: [{ name: 'v0', type: { kind: 'int', width: 32, signed: true } }],
+      retType: { kind: 'int', width: 32, signed: true },
+      body: [
+        { k: 'assign', name: 'v0', value: { k: 'var', name: 'a0' } },
+        { k: 'return', value: { k: 'bin', op: '+', l: v0, r: v0 } },
+      ],
+    };
+    expect(narrowDeclarations(byVar)).toBeNull();
+  });
+
+  it('does not narrow a u32 local, or one written twice, by a memory read', () => {
+    const sfn = structured(LOADED);
+    const unsigned = {
+      ...sfn,
+      locals: sfn.locals.map((l) => ({ ...l, type: { kind: 'int' as const, width: 32, signed: false } })),
+    };
+    expect(narrowDeclarations(unsigned)).toBeNull();
+    const twice = {
+      ...sfn,
+      body: [...sfn.body, { k: 'assign' as const, name: 'v0', value: { k: 'const' as const, value: 300 } }],
+    };
+    expect(narrowDeclarations(twice)).toBeNull();
   });
 
   it('leaves a local narrowed at its reads to /narrow-read', () => {

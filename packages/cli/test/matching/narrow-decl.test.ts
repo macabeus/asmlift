@@ -41,6 +41,40 @@ describe('/narrow-decl, real agbcc, both directions', () => {
   });
 });
 
+// pokeemerald:LoadMonInfo's shape: two byte reads held across two calls. Under `u8` agbcc loads each
+// as its local is written; under `s32` it moves the loads down to the first call.
+const LOAD_DECLS = 'void f7(u8 *, u8 *, u8, u8, s32, u8, u8);\n';
+
+const rankedLoads = async (decl: string) => {
+  const c =
+    `${LOAD_DECLS}void ld(u8 *p, s32 x) { ${decl} a; ${decl} b; a = p[100]; b = p[101]; ` +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); }';
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('ld', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      ld: { params: ['u8 *', 's32'], returnsVoid: true },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+    },
+    compile: async (source) => compileCandAgbcc(LOAD_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-decl of a local written by a byte read, real agbcc, both directions', () => {
+  it('recovers byte locals holding byte reads through the variation', async () => {
+    const r = await rankedLoads('u8');
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(true);
+    expect(r.winner.source).toMatch(/\bu8 v0;/);
+  });
+
+  it('keeps s32 locals holding byte reads, which the variation would lose', async () => {
+    const r = await rankedLoads('s32');
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(false);
+    expect(r.winner.source).toMatch(/\bs32 v0;/);
+  });
+});
+
 // pokeemerald:RtcGetDayCount's shape: three call results passed on as bytes
 const CALL_DECLS = 'u32 cv(u8); u16 dc(u8, u8, u8);\n';
 
