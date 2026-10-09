@@ -43,10 +43,11 @@
 // width of a declaration is orthogonal to what every respell variation outside that table changes,
 // and the row that needs it needs it on top of `/offmember`. Three, not one, because a function
 // holding a local narrowed at its cast write, a local written by a narrow load and a local narrowed
-// at its reads may need any one kind narrowed alone. Each rewrites every local it admits. They do
-// not commute: a cast that is one local's write and another's read is taken by whichever runs
-// first, and so is a load-written local whose reads are all narrowed. So each alone is its own
-// candidate, and in the all-together candidate the write-side two run first and take the local.
+// at its reads may need any combination of the kinds narrowed. Each rewrites every local it admits.
+// They do not commute: a cast that is one local's write and another's read is taken by whichever
+// runs first, and so is a load-written local whose reads are all narrowed. So every subset of the
+// three is its own candidate, and in one holding a write-side member and `/narrow-read` the
+// write side runs first and takes the local.
 //
 // KNOWN GAP, and it is the price of deciding at L3 rather than where the value is named: which
 // spelling a call's result had shows only in where its extension lands, right after its `bl` or

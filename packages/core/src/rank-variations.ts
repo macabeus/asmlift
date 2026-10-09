@@ -373,24 +373,37 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   },
 ];
 
-/** The STACKED variations (sanctioned in the POLICY note at rank.ts's respell site): each entry is
- *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
- *  variation outside this table, derived onto every source. Two members need not commute
- *  (`/narrow-decl` and `/narrow-read` compete for one cast, `/narrow-load` and `/narrow-read` for one local), and table order then decides which one
- *  takes it in the all-together candidate. Each fires alone, plus
- *  all of them together in table order — not the full subset lattice; the pairs question is
- *  settled by applyStacked' skip-on-decline below, and a row demanding a true EXCLUSION pair —
- *  every member fires, the match needs a strict subset of them — is what would earn the lattice.
- *  So a member appended here also changes the all-together candidate wherever it fires beside two
- *  or more of the others. */
-export const STACKED_VARIATIONS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
+/** The statement-order/shape members. */
+const STACKED_SHAPES: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
   { name: 'initfirst', apply: initFirstGuards },
   { name: 'pollguard', apply: pollGuards },
   { name: 'pollread', apply: pollReads },
+];
+
+/** The declaration-width members: one dimension, the width each kind of local is declared at
+ *  (l3/narrowdecl.ts). A function holding a cast-written local,
+ *  load-written locals and call-result locals may need any combination of the three kinds narrow
+ *  while all three fire (the matching suite compiles all eight), so every subset is offered: at most
+ *  seven candidates per source where three fire, and a subset whose other members decline repeats a
+ *  smaller one and dedups. */
+const STACKED_WIDTHS: { name: VariationName; apply: (sfn: SFn) => SFn | null }[] = [
   { name: 'narrow-decl', apply: narrowDeclarations },
   { name: 'narrow-load', apply: narrowLoadDeclarations },
   { name: 'narrow-read', apply: narrowReadDeclarations },
 ];
+
+/** The STACKED variations (sanctioned in the POLICY note at rank.ts's respell site): each entry is
+ *  a statement-order/shape or declaration-width respell variation orthogonal to every respell
+ *  variation outside this table, derived onto every source. Two members need not commute
+ *  (`/narrow-decl` and `/narrow-read` compete for one cast, `/narrow-load` and `/narrow-read` for
+ *  one local), and table order then decides which one takes it in a candidate holding both. Each
+ *  fires alone, plus every subset of the width members, plus all of them together in table order —
+ *  not the full lattice of the table; the remaining pairs question is settled by applyStacked'
+ *  skip-on-decline below, and a row demanding a true EXCLUSION pair across the shapes — every
+ *  member fires, the match needs a strict subset of them — is what would earn the lattice there
+ *  too, as it did for the widths. So a member appended here also changes the all-together candidate
+ *  wherever it fires beside two or more of the others. */
+export const STACKED_VARIATIONS = [...STACKED_SHAPES, ...STACKED_WIDTHS];
 
 /** The PRE-RESPELL variations (sanctioned in the POLICY note at rank.ts's respell site): a tree
  *  rewrite applied BEFORE the respell set, so the whole set derives from its output instead of
@@ -459,8 +472,13 @@ export const STACKED_VARIATIONS: { name: VariationName; apply: (sfn: SFn) => SFn
  *  method are in `apps/benchmark/dataset/synthetic.ts`'s `/unmerge` block. */
 export const PRE_RESPELL_VARIATIONS: typeof STACKED_VARIATIONS = [{ name: 'unmerge', apply: unmergeJoins }];
 
+/** The subsets of `xs` with at least two members, each in `xs`' order. */
+const multiSubsets = <X>(xs: readonly X[]): X[][] =>
+  xs.reduce<X[][]>((acc, x) => [...acc, [x], ...acc.map((s) => [...s, x])], []).filter((s) => s.length > 1);
+
 export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = [
   ...STACKED_VARIATIONS.map((x) => [x]),
+  ...multiSubsets(STACKED_WIDTHS),
   ...(STACKED_VARIATIONS.length > 1 ? [STACKED_VARIATIONS] : []),
 ];
 

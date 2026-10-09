@@ -13,7 +13,7 @@ import { verify } from '../src/ir/verify';
 import type { Expr, SFn } from '../src/l3/ast';
 import { narrowDeclarations, narrowLoadDeclarations, narrowReadDeclarations } from '../src/l3/narrowdecl';
 import { recoverTypes } from '../src/raise/recover';
-import { STACKED_VARIATIONS, applyStacked } from '../src/rank-variations';
+import { STACKED_SUBSETS, STACKED_VARIATIONS, applyStacked } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
 
 // sub_0803E8CC's shape: a byte read, less one, zero-extended once and read twice around a call
@@ -483,5 +483,31 @@ describe('/narrow-decl and /narrow-read stacked', () => {
     const both = stacked('narrow-decl', 'narrow-read');
     expect(both.variations).toEqual(['narrow-decl']);
     expect(widths(both.out)).toEqual([32, 16]);
+  });
+});
+
+describe('the stacked subsets', () => {
+  const names = STACKED_SUBSETS.map((subset) => subset.map((x) => x.name).join('/'));
+
+  it.each([
+    'narrow-decl',
+    'narrow-load',
+    'narrow-read',
+    'narrow-decl/narrow-load',
+    'narrow-decl/narrow-read',
+    'narrow-load/narrow-read',
+    'narrow-decl/narrow-load/narrow-read',
+  ])('offers the width subset %s', (subset) => {
+    expect(names).toContain(subset);
+  });
+
+  it('does not cross a width subset with a shape short of the all-together candidate', () => {
+    const crossed = STACKED_SUBSETS.filter(
+      (subset) =>
+        subset.length > 1 &&
+        subset.length < STACKED_VARIATIONS.length &&
+        subset.some((x) => !x.name.startsWith('narrow-')),
+    );
+    expect(crossed).toEqual([]);
   });
 });

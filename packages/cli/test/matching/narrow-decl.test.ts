@@ -178,3 +178,48 @@ describe('/narrow-decl and /narrow-read in one function, real agbcc', () => {
     expect(r.winner.source).toMatch(/\bs32 v0;/);
   });
 });
+
+// All three kinds in one function: a cast-written local, two locals holding byte reads across two
+// calls and two holding call results. Every combination of narrow and wide kinds must be reachable,
+// so each pair is offered while the third kind also fires.
+const TRI_DECLS = DECLS + LOAD_DECLS + CALL_DECLS;
+
+const rankedTri = async (written: string, loaded: string, read: string) => {
+  const write = written === 'u8' ? 'gA.c - 1' : '(u8)(gA.c - 1)';
+  const args = read === 'u8' ? 'y, m' : '(u8)y, (u8)m';
+  const c =
+    `${TRI_DECLS}u16 tri(u8 *p, s32 x) { ${written} v; ${loaded} a; ${loaded} b; ${read} y; ${read} m; ` +
+    `v = ${write}; gB.d = (1 & v) + rnd() % (5 - v) + 1; a = p[100]; b = p[101]; ` +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); ' +
+    `y = cv(p[0]); m = cv(p[1]); return dc(${args}, (u8)cv(p[2])); }`;
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('tri', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      tri: { params: ['u8 *', 's32'], returns: 'u16' },
+      rnd: { params: [] },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+      cv: { params: ['u8'], returns: 'u32' },
+      dc: { params: ['u8', 'u8', 'u8'], returns: 'u16' },
+    },
+    compile: async (source) => compileCandAgbcc(TRI_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-decl, /narrow-load and /narrow-read in one function, real agbcc', () => {
+  it.each([
+    ['u8', 's32', 's32'],
+    ['s32', 'u8', 's32'],
+    ['s32', 's32', 'u8'],
+    ['u8', 'u8', 's32'],
+    ['u8', 's32', 'u8'],
+    ['s32', 'u8', 'u8'],
+    ['u8', 'u8', 'u8'],
+    ['s32', 's32', 's32'],
+  ])('matches %s written, %s loaded, %s read locals', async (written, loaded, read) => {
+    const r = await rankedTri(written, loaded, read);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(written === 'u8');
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(loaded === 'u8');
+    expect(hasVariation(r.winner.variations, 'narrow-read')).toBe(read === 'u8');
+  });
+});
