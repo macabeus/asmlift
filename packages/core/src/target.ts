@@ -775,7 +775,7 @@ export interface TargetDescription {
     // `t + (x + K)` compiles as `(t + K) + x`) and keeps a pointer sum's `t + (x + K)`, so on agbcc
     // and KMC gcc the integer temp loses the source's association (pointer-spelling.test.ts in the
     // cli matching suite). Where it holds, the structurer declares such a temp `u8 *`
-    // (pointer-spelling.ts `holdsPointerWord`). IDO 7.1 puts the index first in the byte-pointer
+    // (pointer-spelling.ts `declaresBytePointer`). IDO 7.1 puts the index first in the byte-pointer
     // sum where the integer temp and the struct source keep the base first, and CodeWarrior
     // compiles the two temps alike, so both keep the integer.
     //

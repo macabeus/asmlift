@@ -123,7 +123,7 @@ import {
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { type ArithCompilerFacts, holdsPointerWord, makePointerSpelling } from './pointer-spelling';
+import { type ArithCompilerFacts, declaresBytePointer, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
@@ -3439,10 +3439,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   }
 
   // ── a temp that only holds a declared pointer global's value is a byte pointer ─────────────
-  // (pointer-spelling.ts `holdsPointerWord` says why.) Decided over every value under the name
-  // once the names are settled, so a name that also holds anything else keeps its integer. Only a
-  // temp a sum reads: the byte pointer is for the sum's association, and a temp read only as a
-  // value (a call argument, a store) keeps the integer the existing rules legalize there.
+  // (pointer-spelling.ts `declaresBytePointer` says when.) Decided over every value under the name
+  // once the names are settled, so a name that also holds anything else keeps its integer.
   if (keepsPointerSumAddend) {
     const inArgs = (v: Value): Value[] | undefined => {
       const b = paramBlock.get(v);
@@ -3452,19 +3450,18 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       const i = b.params.indexOf(v);
       return [...inEdgeRecords(preds, b)].map(({ succ }) => succ.args[i]);
     };
-    const ir = { defOf: (v: Value) => defs.get(v), inArgs };
+    const ir = {
+      defOf: (v: Value) => defs.get(v),
+      inArgs,
+      usesOf: (v: Value) => (useSitesOf.get(v) ?? []).map((u) => u.op),
+    };
     const holders = new Map<string, Value[]>();
     for (const [v, n] of [...varName, ...backArgName]) {
       (holders.get(n) ?? holders.set(n, []).get(n)!).push(v);
     }
     for (const [n, vs] of holders) {
       const t = varType.get(n);
-      if (
-        t?.kind === 'int' &&
-        t.width === 32 &&
-        vs.some((v) => (useSitesOf.get(v) ?? []).some((u) => u.op.opcode === 'add' || u.op.opcode === 'sub')) &&
-        vs.every((v) => holdsPointerWord(v, ir, declaredShape))
-      ) {
+      if (t?.kind === 'int' && t.width === 32 && declaresBytePointer(vs, ir, declaredShape)) {
         varType.set(n, T.ptr(T.u(8)));
       }
     }

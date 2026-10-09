@@ -1,5 +1,5 @@
 // A temp that only holds the value of a global the map declares a pointer is declared `u8 *`
-// (structure/structure.ts, pointer-spelling.ts `holdsPointerWord`), where the IR types it an
+// (structure/structure.ts, pointer-spelling.ts `declaresBytePointer`), where the IR types it an
 // integer because nothing it feeds is a pointer the type recovery could see: here the offsets are
 // `176 << 4` and a pool word, never a constant op. Declared an integer, the sum it feeds is an
 // integer sum, which gcc reassociates; on a compiler that does not (`keepsPointerSumAddend`) the

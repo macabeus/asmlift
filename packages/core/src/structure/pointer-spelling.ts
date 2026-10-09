@@ -835,26 +835,28 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
   return { declaredShape, needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
 }
 
-/** The IR around a value that `holdsPointerWord` reads. */
+/** The IR around a value that `holdsPointerWord` and `declaresBytePointer` read. */
 export interface PointerWordIr {
   defOf(v: Value): Op | undefined;
   /** a block parameter's in-edge values; undefined for any other value */
   inArgs(v: Value): readonly Value[] | undefined;
+  /** the ops that read `v`, a terminator passing it on an edge included */
+  usesOf(v: Value): readonly Op[];
 }
 
 /** Whether `v` only ever holds the value of a pointer cell a declaration types: a whole-word load
  *  at offset 0 of a global whose declared shape is `'pointer'`, or a block parameter every in-edge
  *  value of which is one.
  *
- *  A temp holding such a value is declared `u8 *` where the IR types it an integer, on a compiler
- *  whose integer sum loses the source's association and whose pointer sum keeps it
- *  (`compilerBehaviors.keepsPointerSumAddend`, structure.ts). Byte arithmetic is the asm's address
- *  under every pointer declaration of the global; a declared pointee would scale it, and `void *`
- *  arithmetic is a GNU extension. A global no declaration types may be an integer cell
- *  (`/int-cell`), so it is not one. */
+ *  A temp holding such a value may be declared `u8 *` where the IR types it an integer
+ *  (`declaresBytePointer` says when), on a compiler whose integer sum loses the source's
+ *  association and whose pointer sum keeps it (`compilerBehaviors.keepsPointerSumAddend`,
+ *  structure.ts). Byte arithmetic is the asm's address under every pointer declaration of the
+ *  global; a declared pointee would scale it, and `void *` arithmetic is a GNU extension. A global
+ *  no declaration types may be an integer cell (`/int-cell`), so it is not one. */
 export function holdsPointerWord(
   v: Value,
-  ir: PointerWordIr,
+  ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>,
   declaredShape: (name: string) => SymbolInfo['shape'],
   seen: Set<Value> = new Set(),
 ): boolean {
@@ -869,4 +871,84 @@ export function holdsPointerWord(
   }
   const ins = ir.inArgs(v);
   return ins !== undefined && ins.length > 0 && ins.every((a) => holdsPointerWord(a, ir, declaredShape, seen));
+}
+
+/** Whether a temp whose values are `values` is declared `u8 *` where the IR types it an integer.
+ *
+ *  Every value holds a declared pointer word (`holdsPointerWord`), and one of them is the base of a
+ *  sum with a constant addend, `t + (x + K)`, where `x + K` may be merged across arms. There the
+ *  integer temp's sum loses the source's association and the byte pointer's keeps it. Without an
+ *  addend the two compile alike, so the temp keeps the integer the IR gives it.
+ *
+ *  A use the byte pointer would print wrong refuses it:
+ *  - a sum whose other operand comes first: `x + t` is a pointer sum the gcc family orders pointer
+ *    first, the swap of the asm's `x + t` (ARITH_ROWS, THE INTEGER SUM);
+ *  - a sum with a global's address or a pointer: `t + gArr` prints the subscript `gArr[t]`, which C
+ *    rejects for a pointer index, and two pointers do not add;
+ *  - the temp, or a sum it is the base of, as a switch selector or an array index, which C rejects
+ *    for a pointer;
+ *  - the temp itself as a call argument or a word written to a global. The backend casts a pointer
+ *    into a declared integer local or slot, and not into a callee's parameter or a global (cfamily
+ *    `legalizePointerWrites`), so the write warns where the integer temp's compiles clean, and the
+ *    byte pointer buys such a write nothing. A SUM written there keeps the byte pointer: its
+ *    association is the point, and the uncast pointer sum into an integer global is the shape the
+ *    map-declared pointer row already prints without a temp. */
+export function declaresBytePointer(
+  values: readonly Value[],
+  ir: PointerWordIr,
+  declaredShape: (name: string) => SymbolInfo['shape'],
+): boolean {
+  const isGlobal = (x: Value): boolean => ir.defOf(x)?.opcode === 'gaddr';
+  const intoGlobal = (x: Value, u: Op): boolean =>
+    u.opcode === 'store' && u.operands[1] === x && isGlobal(u.operands[0]);
+  const integerOnly = (x: Value, u: Op): boolean =>
+    u.opcode === 'switch_br' || ((u.opcode === 'aload' || u.opcode === 'astore') && u.operands[1] === x);
+  const baseOf = (t: Value, u: Op): boolean => {
+    const [l, r] = u.operands;
+    return l === t && r !== t && !isGlobal(r) && r.type.kind !== 'ptr';
+  };
+  const okUse = (t: Value, u: Op): boolean =>
+    u.opcode === 'add'
+      ? baseOf(t, u) && !ir.usesOf(u.results[0]).some((w) => integerOnly(u.results[0], w))
+      : u.opcode !== 'call' && !integerOnly(t, u) && !intoGlobal(t, u);
+  // `x + K`, or a merge every in-edge of which passes one
+  const hasAddend = (x: Value, path: Set<Value> = new Set()): boolean => {
+    const d = ir.defOf(x);
+    if (d !== undefined) {
+      return (d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => isConstant(o, ir));
+    }
+    const ins = ir.inArgs(x);
+    if (path.has(x) || ins === undefined || ins.length === 0) {
+      return false;
+    }
+    path.add(x);
+    return ins.every((a) => hasAddend(a, path));
+  };
+  return (
+    values.every((t) => holdsPointerWord(t, ir, declaredShape) && ir.usesOf(t).every((u) => okUse(t, u))) &&
+    values.some((t) => ir.usesOf(t).some((u) => u.opcode === 'add' && hasAddend(u.operands[1])))
+  );
+}
+
+/** Ops whose value is a constant when every operand's is. */
+const CONSTANT_FOLDING = new Set(['shl', 'add', 'sub', 'mul', 'or', 'and', 'xor']);
+
+/** Whether `v` is a constant: a `const`, a fold of constants, or a block parameter every in-edge
+ *  of which passes one. A loop back to a parameter is not, as a counter is not. */
+function isConstant(v: Value, ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>, path: Set<Value> = new Set()): boolean {
+  if (path.has(v)) {
+    return false;
+  }
+  const d = ir.defOf(v);
+  if (d?.opcode === 'const') {
+    return true;
+  }
+  const from = d === undefined ? ir.inArgs(v) : CONSTANT_FOLDING.has(d.opcode) ? d.operands : undefined;
+  if (from === undefined || from.length === 0) {
+    return false;
+  }
+  path.add(v);
+  const all = from.every((x) => isConstant(x, ir, path));
+  path.delete(v);
+  return all;
 }

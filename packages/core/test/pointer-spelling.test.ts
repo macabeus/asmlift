@@ -7,10 +7,11 @@
 import { describe, expect, test } from 'vitest';
 
 import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
+import type { Opcode } from '../src/ir/opcodes';
 import { type IrType, T } from '../src/ir/types';
 import type { BinOp, Expr } from '../src/l3/ast';
 import { memoFieldsOf } from '../src/structure/globalaccess';
-import { holdsPointerWord, makePointerSpelling } from '../src/structure/pointer-spelling';
+import { declaresBytePointer, holdsPointerWord, makePointerSpelling } from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
 
 interface Fixture {
@@ -537,5 +538,143 @@ describe('holdsPointerWord: a value that only ever holds a declared pointer glob
     expect(holds(merge(load('gP'), mkValue(T.s(32))))).toBe(false);
     expect(holds(merge(load('gP'), load('gS')))).toBe(false);
     expect(holds(mkValue(T.s(32)))).toBe(false);
+  });
+});
+
+describe('declaresBytePointer: when a temp holding a declared pointer word is declared `u8 *`', () => {
+  // A temp `t` holding gP's word, and the ops that read it. Each op records itself as a use of its
+  // operands, an edge's args included, so a case lists only the ops it builds.
+  const defs = new Map<Value, Op>();
+  const uses = new Map<Value, Op[]>();
+  const ins = new Map<Value, Value[]>();
+  const ir = {
+    defOf: (x: Value) => defs.get(x),
+    inArgs: (x: Value) => ins.get(x),
+    usesOf: (x: Value) => uses.get(x) ?? [],
+  };
+  const op = (opcode: Opcode, operands: Value[], attrs: Op['attrs'] = {}, result: IrType = T.s(32)): Value => {
+    const o = mkOp(opcode, { operands, attrs, results: [mkValue(result)] });
+    defs.set(o.results[0], o);
+    for (const x of operands) {
+      uses.set(x, [...(uses.get(x) ?? []), o]);
+    }
+    return o.results[0];
+  };
+  const effect = (opcode: Opcode, operands: Value[], attrs: Op['attrs'] = {}): void => {
+    const o = mkOp(opcode, { operands, attrs });
+    for (const x of operands) {
+      uses.set(x, [...(uses.get(x) ?? []), o]);
+    }
+  };
+  const gaddr = (sym: string): Value => op('gaddr', [], { sym }, T.ptr(T.s(32)));
+  const word = (): Value => op('load', [gaddr('gP')], { off: 0, width: 4, signed: false });
+  const k = (value: number): Value => op('const', [], { value });
+  const x = (): Value => mkValue(T.u(32));
+  const plusK = (): Value => op('add', [op('shl', [x()], { imm: 2 }), k(2672)]);
+  const shape = make({ map: [ptrInfo('gP')] }).declaredShape;
+  const declares = (...values: Value[]) => declaresBytePointer(values, ir, shape);
+  const scratch = (): Value => op('load', [mkValue(T.ptr(T.s(32)))], { off: 0, width: 4, signed: false });
+
+  test('declares the base of a sum with a constant addend, `t + (x + K)`', () => {
+    const t = word();
+    effect('store', [scratch(), op('add', [t, plusK()])], { off: 0, width: 4 });
+    expect(declares(t)).toBe(true);
+  });
+
+  test('counts a merge of constants, or a fold of them, as the addend', () => {
+    const merged = mkValue(T.s(32));
+    ins.set(merged, [k(2672), op('shl', [k(167)], { imm: 4 })]);
+    const t = word();
+    op('add', [t, op('add', [op('shl', [x()], { imm: 2 }), merged])]);
+    expect(declares(t)).toBe(true);
+  });
+
+  test("counts a merge of addend sums as the addend, each arm's `x + K`", () => {
+    const merged = mkValue(T.s(32));
+    ins.set(merged, [plusK(), plusK()]);
+    const t = word();
+    op('add', [t, merged]);
+    expect(declares(t)).toBe(true);
+    const mixed = mkValue(T.s(32));
+    ins.set(mixed, [plusK(), x()]);
+    const u = word();
+    op('add', [u, mixed]);
+    expect(declares(u)).toBe(false);
+  });
+
+  test('does not declare a temp no sum with a constant addend reads: the two temps compile alike', () => {
+    const t = word();
+    op('add', [t, op('shl', [x()], { imm: 2 })]);
+    op('add', [t, op('shl', [k(250)], { imm: 1 })]);
+    expect(declares(t)).toBe(false);
+  });
+
+  test('does not count a loop counter as a constant', () => {
+    const i = mkValue(T.s(32));
+    ins.set(i, [k(0), op('add', [i, k(1)])]);
+    const t = word();
+    op('add', [t, op('add', [x(), i])]);
+    expect(declares(t)).toBe(false);
+  });
+
+  test('does not declare the right operand of a sum, which a pointer sum would put first', () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    op('add', [x(), t]);
+    expect(declares(t)).toBe(false);
+  });
+
+  test("does not declare a sum's base beside a global's address or a pointer", () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    op('add', [t, gaddr('gArr')]);
+    expect(declares(t)).toBe(false);
+    const u = word();
+    op('add', [u, plusK()]);
+    op('add', [u, mkValue(T.ptr(T.u(16)))]);
+    expect(declares(u)).toBe(false);
+  });
+
+  test('does not declare a switch selector or an array index', () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    effect('switch_br', [t], { cases: [0, 1] });
+    expect(declares(t)).toBe(false);
+    const u = word();
+    op('add', [u, plusK()]);
+    op('aload', [mkValue(T.ptr(T.u(8))), u], { elemSize: 1, signed: false });
+    expect(declares(u)).toBe(false);
+  });
+
+  test('does not declare a call argument, or a temp written to a global', () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    op('call', [t], { target: 'Use' });
+    expect(declares(t)).toBe(false);
+    const w = word();
+    op('add', [w, plusK()]);
+    effect('store', [gaddr('gOut'), w], { off: 0, width: 4 });
+    expect(declares(w)).toBe(false);
+  });
+
+  test('declares a temp whose sum is a call argument or written to a global', () => {
+    const t = word();
+    op('call', [op('add', [t, plusK()])], { target: 'Use' });
+    expect(declares(t)).toBe(true);
+    const u = word();
+    effect('store', [gaddr('gOut'), op('add', [u, plusK()])], { off: 0, width: 4 });
+    expect(declares(u)).toBe(true);
+  });
+
+  test('does not declare a temp whose sum is a switch selector or an array index', () => {
+    const t = word();
+    effect('switch_br', [op('add', [t, plusK()])], { cases: [0, 1] });
+    expect(declares(t)).toBe(false);
+  });
+
+  test('does not declare a temp one of whose values holds anything else', () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    expect(declares(t, scratch())).toBe(false);
   });
 });

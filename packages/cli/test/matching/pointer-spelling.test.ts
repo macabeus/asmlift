@@ -214,7 +214,7 @@ describe('the operand order of a load pair beside an undeclared global, IDO 7.1'
 });
 
 // A temp that only holds the value of a global the map declares a pointer is declared `u8 *` (core
-// structure.ts, pointer-spelling.ts `holdsPointerWord`) on the compilers whose
+// structure.ts, pointer-spelling.ts `declaresBytePointer`) on the compilers whose
 // `compilerBehaviors.keepsPointerSumAddend` holds. agbcc and KMC gcc fold an integer sum's constant
 // addend onto its base, through a temp as well (`t + (x + K)` compiles as `(t + K) + x`), and keep a
 // pointer sum's `t + (x + K)`; IDO 7.1 and CodeWarrior compile the two alike in this shape.
