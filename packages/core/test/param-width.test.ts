@@ -30,7 +30,7 @@ import {
   narrowExtendedParams,
 } from '../src/raise/paramwidth';
 import { recoverTypes } from '../src/raise/recover';
-import { enumerateCandidates } from '../src/rank';
+import { type Candidate, compareScored, enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, type NarrowParamWitness } from '../src/target';
 
@@ -479,9 +479,9 @@ const runExtended = (
 ) => {
   const fn = parse(ir);
   verify(fn);
-  const n = narrowExtendedParams(fn, witness, self, gates, apply);
+  const narrowed = narrowExtendedParams(fn, witness, self, gates, apply);
   verify(fn);
-  return { fn, n, ir: print(fn) };
+  return { fn, n: narrowed.length, narrowed, ir: print(fn) };
 };
 
 describe('a parameter every reader of which is an extension (/narrow-param)', () => {
@@ -533,5 +533,45 @@ describe('a parameter every reader of which is an extension (/narrow-param)', ()
 
   test('a compiler whose two spellings are one object refuses it', () => {
     expect(runExtended(EXTENDED_AT_USES, undefined, PARAM_READER_WIDTH_GATES, 'none').n).toBe(0);
+  });
+
+  test('reports a width no prototype declares', () => {
+    expect(runExtended(EXTENDED_AT_USES).narrowed.map((c) => c.declared)).toEqual([undefined]);
+    expect(runExtended(EXTENDED_AT_USES, { params: ['s16', 'u8 *'] }).narrowed.map((c) => c.declared)).toEqual([16]);
+  });
+});
+
+describe('a /narrow-param candidate', () => {
+  // agbcc's `void f(s32 a, s32 *out) { out[0] = 7; out[1] = (s16)a; }`: the extension is behind body
+  // code, so the default pass leaves the parameter wide
+  const BEHIND_STORE_ASM =
+    'f:\n\tmov\tr2, #0x7\n\tstr\tr2, [r1]\n\tlsl\tr0, r0, #0x10\n\tasr\tr0, r0, #0x10\n' +
+    '\tstr\tr0, [r1, #0x4]\n\tbx\tlr\n';
+  const narrowParam = (prototypes = {}) =>
+    enumerateCandidates('f', BEHIND_STORE_ASM, ARMV4T_AGBCC, { prototypes }).filter((c) =>
+      c.variations.includes('narrow-param'),
+    );
+
+  test('is marked when no prototype declares the width it guessed', () => {
+    const guessed = narrowParam();
+    expect(guessed.length).toBeGreaterThan(0);
+    expect(guessed.every((c) => c.source.includes('s16 a0') && c.guessesParamWidth === true)).toBe(true);
+  });
+
+  test('is not marked where the prototype declares that width', () => {
+    const declared = narrowParam({ f: { params: ['s16', 's32 *'], returnsVoid: true } });
+    expect(declared.length).toBeGreaterThan(0);
+    expect(declared.every((c) => c.guessesParamWidth === undefined)).toBe(true);
+  });
+
+  test('wins only on a strictly better score when marked, never on a tie', () => {
+    const [guessed] = narrowParam();
+    const wide = enumerateCandidates('f', BEHIND_STORE_ASM, ARMV4T_AGBCC, {}).find(
+      (c) => !c.variations.includes('narrow-param'),
+    )!;
+    const scored = (c: Candidate, score: number, order: number) => ({ ...c, score: { score }, order });
+    // the narrow declaration drops a cast, so every readability term below the score favours it
+    expect(compareScored(scored(guessed, 0, 0), scored(wide, 0, 1))).toBeGreaterThan(0);
+    expect(compareScored(scored(guessed, 0, 1), scored(wide, 2, 0))).toBeLessThan(0);
   });
 });

@@ -39,3 +39,38 @@ describe('/narrow-param, real agbcc, both directions', () => {
     expect(r.winner.source).toContain('void np(s32 a0, u8 a1)');
   });
 });
+
+// `s16 a` read bare and `s32 a` cast at each read build ONE object here, so the asm decides nothing,
+// and a narrow declaration costs every prototyped caller a truncation before its `bl`
+const TIE_DECLS = 'extern u32 gOut[4]; extern s32 gS[4]; void use(u32);\n';
+
+const rankedTie = async (decl: string, self?: string) => {
+  const read = decl === 's16' ? 'a' : '(s16)a';
+  const c =
+    `${TIE_DECLS}void np(${decl} a) { gS[1] = ${read}; gOut[2] = (u32)${read} / 3u; ` +
+    `gOut[3] = (u32)${read} % 7u; if ((u32)${read} > 5u) use(1); }`;
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('np', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      use: { params: ['u32'], returnsVoid: true },
+      ...(self ? { np: { params: [self], returnsVoid: true } } : {}),
+    },
+    compile: async (source) => compileCandAgbcc(TIE_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-param where both declarations build one object, real agbcc', () => {
+  it('keeps the parameter wide when no prototype declares it', async () => {
+    const r = await rankedTie('s32');
+    expect(r.winner.score.match).toBe(true);
+    expect(r.candidates.some((c) => hasVariation(c.variations, 'narrow-param') && c.score.match)).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-param')).toBe(false);
+  });
+
+  it("declares it at the prototype's width", async () => {
+    const r = await rankedTie('s16', 's16');
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-param')).toBe(true);
+    expect(r.winner.source).toContain('void np(s16 a0)');
+  });
+});

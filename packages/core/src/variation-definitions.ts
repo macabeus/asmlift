@@ -378,7 +378,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'A parameter the function only ever reads through narrowing casts can be declared at 32 bits and cast ' +
       'at each use, or declared at the widest cast and read bare. Every use is the same value either way, ' +
       'and where the compiler widens it at each use rather than on entry, the assembly does not say which ' +
-      'one the source declared. This lift declares it narrow.',
+      'one the source declared. This lift declares it narrow, and loses a tie when no prototype declares the width.',
     compilerBehavior:
       'agbcc widens an `s16` parameter at each use when every use extends it, and then the two declarations ' +
       'differ only in how the registers around them are allocated: a sibling `u8` parameter is copied ' +

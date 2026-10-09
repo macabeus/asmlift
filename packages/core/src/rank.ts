@@ -265,6 +265,11 @@ export interface Candidate {
    *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
    *  dropping a value the callee may read. */
   discardsPassedResult?: true;
+  /** This candidate's lift is `/narrow-param` and declares a parameter narrow that no prototype
+   *  declares (raise/pre-recovery.ts `onUndeclaredWidth`). It loses every score tie
+   *  (compareScored): a tie refutes neither declaration, and the narrow one changes the bytes of
+   *  every prototyped caller, which this function's score cannot see. */
+  guessesParamWidth?: true;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -1957,6 +1962,7 @@ export function enumerateCandidates(
       for (const liftSetting of liftSettings) {
         let fn: Fn;
         let discardsPassedResult = false;
+        let guessesParamWidth = false;
         let inferredSymbols = new Map<string, SymbolInfo>();
         let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
@@ -2027,7 +2033,12 @@ export function enumerateCandidates(
             prototypes[name],
             {
               shortCircuit: { foldTreeOwned: liftSetting.connective },
-              paramWidth: { extendedReaders: liftSetting.extendedReaders },
+              paramWidth: {
+                extendedReaders: liftSetting.extendedReaders,
+                onUndeclaredWidth: () => {
+                  guessesParamWidth = true;
+                },
+              },
             },
           );
         } catch (e) {
@@ -2314,6 +2325,9 @@ export function enumerateCandidates(
                 if (!discardsPassedResult) {
                   delete dup.discardsPassedResult;
                 }
+                if (!guessesParamWidth) {
+                  delete dup.guessesParamWidth;
+                }
                 continue;
               }
               const variations: readonly Variation[] = [
@@ -2337,6 +2351,7 @@ export function enumerateCandidates(
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
                 ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
+                ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
               };
               seen.set(source, made);
               out.push(made);
@@ -2476,7 +2491,8 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *
  *  A DISCARDED PASSED RESULT next (`Candidate.discardsPassedResult`): equal bytes refute neither
  *  reading, so the one that drops a value the callee may read wins only where it scores strictly
- *  better.
+ *  better. A GUESSED PARAMETER WIDTH (`Candidate.guessesParamWidth`) likewise: a narrow declaration
+ *  no prototype supplied changes its callers' bytes, which no score here reads.
  *
  *  PREFERENCE next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
@@ -2529,6 +2545,7 @@ export function compareScored<S extends { score: number }>(
   return (
     a.score.score - b.score.score ||
     (a.discardsPassedResult ? 1 : 0) - (b.discardsPassedResult ? 1 : 0) ||
+    (a.guessesParamWidth ? 1 : 0) - (b.guessesParamWidth ? 1 : 0) ||
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||

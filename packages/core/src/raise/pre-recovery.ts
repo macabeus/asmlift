@@ -58,6 +58,8 @@ export interface ParamWidthOptions {
   extendedReaders?: boolean;
   /** called when a lift without `extendedReaders` has a parameter that would narrow with it */
   onExtendedReaders?: () => void;
+  /** called when the `extendedReaders` lift narrows a parameter whose width no prototype declares */
+  onUndeclaredWidth?: () => void;
 }
 
 /** CFG facts read off the function ONCE, before the first pass below rewrites it.
@@ -321,9 +323,13 @@ export function narrowParamWidths(
   const witness = target.compilerBehaviors.narrowParamWitness ?? 'none';
   const n = narrowEntryParams(fn, witness, self, prologueGates, lifted.scales.behindPool);
   if (opts?.extendedReaders) {
-    return n + narrowExtendedParams(fn, witness, self, readerGates);
+    const lifted = narrowExtendedParams(fn, witness, self, readerGates);
+    if (lifted.some((c) => c.declared === undefined)) {
+      opts.onUndeclaredWidth?.();
+    }
+    return n + lifted.length;
   }
-  if (opts?.onExtendedReaders && narrowExtendedParams(fn, witness, self, readerGates, false) > 0) {
+  if (opts?.onExtendedReaders && narrowExtendedParams(fn, witness, self, readerGates, false).length > 0) {
     opts.onExtendedReaders();
   }
   return n;

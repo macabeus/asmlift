@@ -135,7 +135,10 @@
 // differ referees. Declaring the parameter at width w changes no reader's value when every reader is
 // an extension to w' ≤ w: ext_w'(trunc_w x) = ext_w'(x). The width is the widest reader's, its
 // signedness the caller's declaration where that spells one and the first reader of that width's
-// otherwise; each reader of exactly that type becomes the parameter itself.
+// otherwise; each reader of exactly that type becomes the parameter itself. Where no prototype
+// declares the width, the candidate loses every score tie (rank.ts `guessesParamWidth`): without
+// a sibling to separate them the two declarations are often one object, and the narrow one costs
+// each prototyped caller the truncation `proto-width` is about.
 import { type Fn, type Op, type Value, replaceAllUsesWith, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -387,7 +390,7 @@ export function narrowEntryParams(
 
 /** `/narrow-param`: type each entry parameter every reader of which is an extension of it at the
  *  widest reader's width, and drop the readers of exactly that type (EVERY READER AN EXTENSION).
- *  `apply: false` changes nothing and counts what it would narrow. Returns the number of parameters
+ *  `apply: false` changes nothing and reports what it would narrow. Returns each parameter it
  *  narrowed. */
 export function narrowExtendedParams(
   fn: Fn,
@@ -395,12 +398,12 @@ export function narrowExtendedParams(
   self?: FnProto,
   gates: readonly Gate<NarrowParamCandidate>[] = PARAM_READER_WIDTH_GATES,
   apply = true,
-): number {
+): NarrowParamCandidate[] {
   const evidence = fn.paramEvidence;
   const entry = fn.blocks[0];
   const declaredTypes = Array.isArray(self?.params) ? self.params : [];
   const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
-  let narrowed = 0;
+  const narrowed: NarrowParamCandidate[] = [];
   for (const [i, p] of entry.params.entries()) {
     const extensions = readersOf(fn, p).ops.filter((op) => isExtension(op) && op.operands.length === 1);
     if (extensions.length === 0) {
@@ -425,7 +428,7 @@ export function narrowExtendedParams(
     if (firstRejection(gates, c) !== null) {
       continue;
     }
-    narrowed++;
+    narrowed.push(c);
     if (!apply) {
       continue;
     }
