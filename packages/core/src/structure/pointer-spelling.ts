@@ -17,7 +17,8 @@
 // pattern. `varType` is captured as a LIVE reference: the naming pipeline is still declaring
 // temps when the factory is created, and every rule types an expression over the declarations
 // that exist at call time.
-import { Op } from '../ir/core';
+import type { Op, Value } from '../ir/core';
+import { MEM_BASE_OPS } from '../ir/opcodes';
 import { type IrType, T, typeEquals } from '../ir/types';
 import { type BinOp, Expr } from '../l3/ast';
 import { pointerCellValue } from '../l3/ptrcell';
@@ -46,9 +47,10 @@ export interface PointerSpellingDeps {
   varType: ReadonlyMap<string, IrType>;
   /** the compiler behaviors a row is guarded on (`ArithRow.when`); absent ⇒ none holds. */
   compiler?: ArithCompilerFacts;
-  /** the op's result is spelled inside the loads and stores it is the address of, and nowhere else
-   *  (structure.ts: no name holds it and every reader reads it as an access base); absent ⇒ never. */
-  inlinedAccessBase?: (d: Op) => boolean;
+  /** each value's readers (analysis.ts `useSitesOf`); absent ⇒ none. */
+  useSitesOf?: ReadonlyMap<Value, readonly { op: Op }[]>;
+  /** whether a name holds the value — LIVE, read at call time; absent ⇒ none does. */
+  isNamed?: (v: Value) => boolean;
 }
 
 /** The compiler behaviors (target.ts `compilerBehaviors`) the table's rows may be guarded on. A row
@@ -425,9 +427,19 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     wordLoadedGlobals,
     varType,
     compiler = {},
-    inlinedAccessBase = () => false,
+    useSitesOf,
+    isNamed = () => false,
   } = deps;
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
+
+  /** The op's result is spelled inside the loads and stores it is the address of, and nowhere
+   *  else: no name holds it, and it has readers, each a load or store reading it as its base
+   *  (operand 0) and as nothing else. */
+  const inlinedAccessBase = (d: Op): boolean => {
+    const v = d.results[0];
+    const sites = v === undefined || isNamed(v) ? [] : (useSitesOf?.get(v) ?? []);
+    return sites.length > 0 && sites.every(({ op }) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0);
+  };
 
   /** The declared shape of a global as the pointer-value rules read it: the map's, or a pointer
    *  the map declares to a structuring that does not spell from it (`pointerGlobals`). The

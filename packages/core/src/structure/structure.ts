@@ -58,7 +58,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
-import { CAST_WIDTHS, MEM_BASE_OPS, opSig } from '../ir/opcodes';
+import { CAST_WIDTHS, opSig } from '../ir/opcodes';
 import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
 import {
   BinOp,
@@ -2721,13 +2721,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     wordLoadedGlobals,
     varType,
     compiler: opts,
-    inlinedAccessBase: (d) => {
-      const v = d.results[0];
-      const sites = v === undefined || varName.has(v) ? [] : (useSitesOf.get(v) ?? []);
-      return (
-        sites.length > 0 && sites.every(({ op }) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0)
-      );
-    },
+    useSitesOf,
+    isNamed: (v) => varName.has(v),
   });
 
   let fresh = 0;

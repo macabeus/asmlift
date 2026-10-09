@@ -9,11 +9,15 @@
 // (packages/cli/test/matching/pointer-spelling.test.ts).
 import { describe, expect, it } from 'vitest';
 
-import { type Op, mkOp, mkValue } from '../src/ir/core';
+import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { type IrType, T } from '../src/ir/types';
 import type { BinOp, Expr } from '../src/l3/ast';
 import { memoFieldsOf } from '../src/structure/globalaccess';
-import { type ArithCompilerFacts, makePointerSpelling } from '../src/structure/pointer-spelling';
+import {
+  type ArithCompilerFacts,
+  type PointerSpellingDeps,
+  makePointerSpelling,
+} from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
 
 const ptrInfo = (name: string): SymbolInfo => ({ name, kind: 'data', declared: true, shape: 'pointer', size: 4 });
@@ -34,12 +38,12 @@ const bgPtrsInfo: SymbolInfo = {
 // gPtr and gQ are globals no map declares that the IR loads as pointers, gW, gW2, gB2 and gB3
 // ones it loads as words, and gPW one it loads as both; the locals are typed as named.
 const MAP = [ptrInfo('gP'), ptrInfo('gR'), bgPtrsInfo];
-const make = (compiler?: ArithCompilerFacts, inlinedAccessBase?: (d: Op) => boolean) => {
+const make = (compiler?: ArithCompilerFacts, readers?: Pick<PointerSpellingDeps, 'useSitesOf' | 'isNamed'>) => {
   const byName = new Map(MAP.map((si) => [si.name, si]));
   const info = (n: string) => byName.get(n);
   return makePointerSpelling({
     compiler,
-    inlinedAccessBase,
+    ...readers,
     sym: { info, fieldsOf: memoFieldsOf(info) },
     pointerGlobals: undefined,
     pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR', 'gPW']),
@@ -481,10 +485,51 @@ describe('arith: `+` with no rendered pointer', () => {
       );
     });
 
-    it('does not walk it where the sum is spelled only inside the access it addresses', () => {
-      const inlined = make({ keepsPointerSumAddend: true }, () => true);
+    describe('by how the sum is read', () => {
       const offset = bin('+', v('i'), c(1));
-      expect(inlined.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(bytes(bin('+', word(v('gPtr')), offset)));
+      const POINTER_SUM = bin('+', bytes(v('gPtr')), offset);
+      const INTEGER_SUM = bytes(bin('+', word(v('gPtr')), offset));
+      type Reader = (sum: Value) => Op;
+      const load: Reader = (sum) => mkOp('load', { operands: [sum], results: [mkValue(T.u(8))] });
+      const store: Reader = (sum) => mkOp('store', { operands: [sum, mkValue(T.u(8))] });
+      const aload: Reader = (sum) => mkOp('aload', { operands: [sum, mkValue(T.s(32))], results: [mkValue(T.u(8))] });
+      const storeOf: Reader = (sum) => mkOp('store', { operands: [mkValue(U8P), sum] });
+      const storeAtItself: Reader = (sum) => mkOp('store', { operands: [sum, sum] });
+      const astoreIndex: Reader = (sum) => mkOp('astore', { operands: [mkValue(U8P), sum, mkValue(T.u(8))] });
+      const addTo: Reader = (sum) => mkOp('add', { operands: [sum, mkValue(T.u(32))], results: [mkValue(T.u(32))] });
+      /** the sum spelled with these readers of its result, held in a name or not */
+      const spelled = (readers: Reader[], named = false) => {
+        const d = op('add', U8P);
+        const sum = d.results[0]!;
+        const s = make(
+          { keepsPointerSumAddend: true },
+          { useSitesOf: new Map([[sum, readers.map((r) => ({ op: r(sum) }))]]), isNamed: (x) => named && x === sum },
+        );
+        return s.arith(d, v('gPtr'), offset, false);
+      };
+
+      it.each([
+        ['a load', [load]],
+        ['a store', [store]],
+        ['an indexed load', [aload]],
+        ['a load and a store', [load, store]],
+      ])('keeps the integer sum spelled only inside %s it addresses', (_, readers) => {
+        expect(spelled(readers)).toEqual(INTEGER_SUM);
+      });
+
+      it('walks a sum a name holds, even one read only as an access address', () => {
+        expect(spelled([load], true)).toEqual(POINTER_SUM);
+      });
+
+      it.each([
+        ['as an access address and as an operand', [load, addTo]],
+        ['as the value a store writes', [storeOf]],
+        ['as both the address and the value of one store', [storeAtItself]],
+        ['as an index', [astoreIndex]],
+        ['by nothing', []],
+      ])('walks a sum read %s', (_, readers) => {
+        expect(spelled(readers)).toEqual(POINTER_SUM);
+      });
     });
 
     it('does not walk it beside an offset with no constant term, where the two sums are one object', () => {
