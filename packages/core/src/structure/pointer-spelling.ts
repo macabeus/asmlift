@@ -4,13 +4,13 @@
 // rule spells the asm's bytes under every declaration that header may carry; its doc names the
 // declarations it covers and its known gaps.
 //
-// The arithmetic is decided in three steps. Each operand gets a ROLE (`Role`) before anything is
-// printed: an IR constant, a global's address, a bare name with what the declarations and the IR
-// say of it, a member, or a value this rule already spelled, which carries what it is made of.
-// One table (`ARITH_ROWS`) maps the operator, the two roles and the IR result type to a plan:
-// which cast each side takes, and the pointer type the sum goes back to. The plan is printed once.
-// The operand order is decided in the same place: a commutative load pair re-spells in evaluation
-// order only where neither side is one the table spells as a pointer.
+// The arithmetic is decided in three steps. Each operand gets a ROLE (`Role`) before the op is
+// printed, read from the operand as lowered: a constant, a global's address, a bare name with what
+// the declarations and the IR say of it, a member, or a value this rule already spelled, which
+// carries what it is made of. One table (`ARITH_ROWS`) maps the operator, the two roles and the IR
+// result type to a plan: which cast each side takes, and the pointer type the sum goes back to.
+// The plan is printed once. The operand order of a commutative load pair is decided before the
+// table, by its own predicate (`pointerSide`), whose KNOWN GAP says where the two disagree.
 //
 // The factory takes its dependencies EXPLICITLY (`PointerSpellingDeps`), the switch-recover
 // pattern. `varType` is captured as a LIVE reference: the naming pipeline is still declaring
@@ -97,11 +97,13 @@ const NOTHING_MADE: Made = {
   restored: NOT,
 };
 
-/** What an arithmetic operand IS, decided before the op is printed. The leaves are the IR's: an
- *  IR constant (or the immediate of a one-operand op), a `gaddr`, a load the access rules read as
- *  a scalar global's bare name or as a member, a value read through a name (a temp, a parameter),
- *  and anything else, a value typed by the C it renders. A `cast` or a `sum` is one this rule
- *  spelled, and says what it is made of. */
+/** What an arithmetic operand IS, decided before the op is printed. It is read from the operand
+ *  AS LOWERED, by its expression kind: a `const` (an IR constant, or the immediate of a
+ *  one-operand op), an `addr` (a `gaddr`), a `var` (a scalar global's bare name, a temp, a
+ *  parameter), a `field` (a member), and anything else, a `value` typed by the C it renders. A
+ *  `cast` or a `sum` is one this rule spelled, found by the identity of the expression `arith`
+ *  returned: a copy of it reads as a `value`, whose facts are read back out of its C
+ *  (`constantExpr`, `carriesAddress`). */
 export type Role =
   | { readonly k: 'literal'; readonly e: Extract<Expr, { k: 'const' }> }
   | { readonly k: 'address'; readonly e: Expr }
@@ -243,6 +245,13 @@ export interface ArithRow {
  *  A byte sum less an integer sum of globals no declaration types: bare, `gB2 - gB3` is an element
  *  count under a wider pointer declaration of them, where the asm subtracted bytes.
  *
+ *  KNOWN GAP: a global's word no declaration types is left bare wherever no row casts it: beside an
+ *  integer under an op the IR types an integer (`gW + x`, `gW + 4`), left of a pointer it
+ *  subtracts under an integer result or from an address (`gW - (s32)p`), and right of a byte
+ *  pointer (`pb + gW`). That is the asm's integer under an integer declaration, the candidate's
+ *  own world; under a wider pointer declaration C scales the other side or rejects the two
+ *  pointers, and under a float one it is float math.
+ *
  *  C rejects a pointer operand under the non-additive operators (& | ^ << >> * / %), so there the
  *  asm's 32-bit integer math on the address is what is spelled. `&&`/`||` take a pointer operand
  *  legally — a truth test, no arithmetic. A pointer value under a COMPARISON needs nothing here: an
@@ -287,7 +296,7 @@ export const ARITH_ROWS: readonly ArithRow[] = [
   {
     op: '-',
     resultPointer: true,
-    l: { untyped: true, pointerValue: false },
+    l: { untyped: true },
     r: { pointer: true, address: false },
     lSpell: ['bytes'],
     rSpell: ['integer'],
@@ -370,7 +379,7 @@ export interface PointerSpelling {
   /** The integer arithmetic op `d` (ARITH_TO_BIN) over its operands as lowered, spelled for the
    *  address the asm computed. `loadPairReversed`: `d` is commutative and its operands are a load
    *  pair the compiler evaluated right first (structure.ts), which re-spells them in that order
-   *  unless a side is one the table spells as a pointer. */
+   *  unless `pointerSide` keeps them. */
   arith(d: Op, l: Expr, r: Expr, loadPairReversed: boolean): Expr;
   /** What an operand is, by the same reading `arith` makes. */
   roleOf(x: Expr): Role;
@@ -594,9 +603,15 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     };
   };
 
-  /** A side the table spells as a pointer, which the evaluation-order re-spelling may not move: a
-   *  rendered pointer, or a global's value no map declaration types that the IR loads as a pointer,
-   *  or as a word into an op the IR types a pointer. */
+  /** A side the evaluation-order re-spelling may not move: a rendered pointer, or a global's
+   *  value no map declaration types that the IR loads as a pointer, or as a word into an op the IR
+   *  types a pointer.
+   *
+   *  KNOWN GAP: this reads other facts than the table's rows, and disagrees with them twice. A
+   *  pointer global the map declares is moved, though beside an integer the table spells it as a
+   *  pointer, `x + (u8 *)gP`. A global no map declares that the IR loads as
+   *  a pointer stays, and the table then spells it in the integer sum `(u32)gPtr + x`, in the IR's
+   *  operand order where the compiler evaluated `x` first. */
   const pointerSide = (x: Role, resultPointer: boolean): boolean =>
     ctype(x.e)?.kind === 'ptr' ||
     (x.k === 'name' && x.facts.mapUndeclared && (x.facts.pointerLoaded || (resultPointer && x.facts.wordLoaded)));

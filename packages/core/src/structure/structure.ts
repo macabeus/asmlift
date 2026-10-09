@@ -3819,8 +3819,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       // out of source order — an ldmia-fed add reads def-reordered; cross-block positions do not
       // order evaluation), neither stamped `listOrder` (an ldmia-expanded load's own position is
       // LIST order), both operand VALUES un-named (see below), and no effect moves (call, marker).
-      // The arithmetic table keeps a side it spells as a pointer where it is (load-bearing for the
-      // stride rules), so the pair is handed to it rather than swapped here.
+      // Which sides may move is the arithmetic's own decision (structure/pointer-spelling.ts
+      // `pointerSide`, load-bearing for the stride rules), so the pair is handed to it.
       const [da, db] = [defs.get(d.operands[0]), defs.get(d.operands[1])];
       const loadPairReversed =
         COMMUTATIVE_BIN.has(ARITH_TO_BIN[d.opcode]) &&
@@ -3847,7 +3847,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         opBlock.get(da) === opBlock.get(db) &&
         opIndex.get(da)! > opIndex.get(db)!;
       // The operand order, the pointer stride, the integer legalizations and the pointer-value
-      // byte arithmetic: one table (structure/pointer-spelling.ts). (The signedness-carrying pairs
+      // byte arithmetic: structure/pointer-spelling.ts `arith`. (The signedness-carrying pairs
       // stay DISTINCT ops — `>>>`/`>>` and `/u` `%u`/`/` `%`. Which token a language spells each
       // with, and what cast pins the choice, is a BACKEND decision; see l3/ast.ts BinOp and
       // backend/cfamily.ts's C_SPELLING.)

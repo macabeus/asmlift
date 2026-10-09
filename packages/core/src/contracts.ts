@@ -1013,8 +1013,9 @@ export function assertDerefsTyped(sfn: SFn): void {
     if (e.k === 'index' && !structElem.has(e) && !SCALAR_WIDTHS.has(e.width)) {
       bad.push(`index width ${e.width} is not a C scalar width`);
     }
-    // The emitter legalizes pointer operands away from these ops (structure.ts intify); a
-    // pointer surviving here is ill-typed C the compiler will reject.
+    // The emitter legalizes pointer operands away from these ops (structure/pointer-spelling.ts
+    // `ARITH_ROWS`, its `bitwise` row); a pointer surviving here is ill-typed C the compiler will
+    // reject.
     if (e.k === 'bin' && NO_PTR_OPS.has(e.op)) {
       for (const side of [e.l, e.r]) {
         if (ctype(side)?.kind === 'ptr') {
