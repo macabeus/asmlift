@@ -58,7 +58,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
-import { CAST_WIDTHS, opSig } from '../ir/opcodes';
+import { CAST_WIDTHS, MEM_BASE_OPS, opSig } from '../ir/opcodes';
 import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
 import {
   BinOp,
@@ -2707,7 +2707,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   // ── POINTER/INTEGER spelling (structure/pointer-spelling.ts) ────────────────────────────────
   // Whether an operand, a temp's value or a pointer cell's value is written as a pointer or as an
-  // integer, and through which cast. `varType` goes in as a live reference: the naming below is
+  // integer, and through which cast. `varType` and `varName` are read live: the naming below is
   // still declaring temps.
   const {
     needsIntSpelling,
@@ -2721,6 +2721,13 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     wordLoadedGlobals,
     varType,
     compiler: opts,
+    inlinedAccessBase: (d) => {
+      const v = d.results[0];
+      const sites = v === undefined || varName.has(v) ? [] : (useSitesOf.get(v) ?? []);
+      return (
+        sites.length > 0 && sites.every(({ op }) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0)
+      );
+    },
   });
 
   let fresh = 0;

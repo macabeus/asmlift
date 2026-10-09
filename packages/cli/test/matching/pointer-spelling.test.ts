@@ -148,6 +148,28 @@ describe('the pointer sum of an undeclared pointer global and an offset with a c
   }
 });
 
+// The same sum spelled only inside the access it addresses, agbcc: there both sums move the constant
+// into the access, the pointer sum as `(x + gD) + K` and the integer sum as `(gD + x) + K`, so neither
+// is the asm's `gD + (x + K)`, and the integer sum keeps its base-first order.
+const ACCESS_DECLS = 'struct D { u8 buf[16]; u8 st; }; extern struct D *gD; extern u8 gOut;\n';
+const ACCESS_SUM = 'void sum(void) { u8 i = 2 * (gD->st - 1); gOut = gD->buf[i + 1]; }';
+
+describe('the sum of an undeclared pointer global read only as an access address, agbcc', () => {
+  it('keeps the integer sum, whose operand order is closer to the asm than the pointer sum', () => {
+    const project = ACCESS_DECLS + ACCESS_SUM;
+    const { asm, obj } = compileTarget('agbcc', project, 'sum');
+    const { target } = targetFor(ID.agbcc, flags('agbcc'));
+    const [candidate] = enumerateCandidates('sum', asm, target, {
+      prototypes: prototypesFromContext(C_TYPEDEFS + project, 'c'),
+      asmData: extractAsmData(obj, target, 'sum'),
+    });
+    const integer = '(u8 *)((u32)gD + ';
+    expect(candidate.source).toContain(integer);
+    const score = (src: string) => scoreC(ACCESS_DECLS + src, 'sum', obj, flags('agbcc')).score;
+    expect(score(candidate.source)).toBeLessThan(score(candidate.source.replace(integer, '((u8 *)gD + ')));
+  });
+});
+
 // The evaluation-order re-spelling of a commutative load pair (core structure/pointer-spelling.ts
 // `pointerSide`) against IDO 7.1, which evaluated the right side of each pair below first. The table
 // spells the global as its word in an integer sum, and the sum's operand order must stay the IR's:

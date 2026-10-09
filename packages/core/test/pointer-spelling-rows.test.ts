@@ -34,11 +34,12 @@ const bgPtrsInfo: SymbolInfo = {
 // gPtr and gQ are globals no map declares that the IR loads as pointers, gW, gW2, gB2 and gB3
 // ones it loads as words, and gPW one it loads as both; the locals are typed as named.
 const MAP = [ptrInfo('gP'), ptrInfo('gR'), bgPtrsInfo];
-const make = (compiler?: ArithCompilerFacts) => {
+const make = (compiler?: ArithCompilerFacts, inlinedAccessBase?: (d: Op) => boolean) => {
   const byName = new Map(MAP.map((si) => [si.name, si]));
   const info = (n: string) => byName.get(n);
   return makePointerSpelling({
     compiler,
+    inlinedAccessBase,
     sym: { info, fieldsOf: memoFieldsOf(info) },
     pointerGlobals: undefined,
     pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR', 'gPW']),
@@ -478,6 +479,12 @@ describe('arith: `+` with no rendered pointer', () => {
       expect(s.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(
         bin('+', bytes(v('gPtr')), bin('+', untypedWord('gW'), c(4))),
       );
+    });
+
+    it('does not walk it where the sum is spelled only inside the access it addresses', () => {
+      const inlined = make({ keepsPointerSumAddend: true }, () => true);
+      const offset = bin('+', v('i'), c(1));
+      expect(inlined.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(bytes(bin('+', word(v('gPtr')), offset)));
     });
 
     it('does not walk it beside an offset with no constant term, where the two sums are one object', () => {

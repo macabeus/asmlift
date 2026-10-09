@@ -46,6 +46,9 @@ export interface PointerSpellingDeps {
   varType: ReadonlyMap<string, IrType>;
   /** the compiler behaviors a row is guarded on (`ArithRow.when`); absent ⇒ none holds. */
   compiler?: ArithCompilerFacts;
+  /** the op's result is spelled inside the loads and stores it is the address of, and nowhere else
+   *  (structure.ts: no name holds it and every reader reads it as an access base); absent ⇒ never. */
+  inlinedAccessBase?: (d: Op) => boolean;
 }
 
 /** The compiler behaviors (target.ts `compilerBehaviors`) the table's rows may be guarded on. A row
@@ -202,6 +205,9 @@ export interface ArithRow {
   readonly op: '+' | '-' | '±' | 'logical' | 'bitwise';
   /** the row holds only where the compiler has this behavior */
   readonly when?: keyof ArithCompilerFacts;
+  /** the row holds only where the sum is a value: held in a name, or read other than as the
+   *  address of a load or store (`inlinedAccessBase`) */
+  readonly value?: true;
   /** the IR types the op's result a pointer */
   readonly resultPointer?: true;
   readonly l?: Readonly<Partial<Record<SideFact, boolean>>>;
@@ -257,7 +263,11 @@ export interface ArithRow {
  *  agbcc, KMC gcc and IDO only. The partner goes integer with it, or a pointer partner would scale
  *  the sum. Except where the compiler keeps a pointer sum's constant addend and moves an integer
  *  sum's (`keepsPointerSumAddend`) and the offset has a constant term: the gcc family folds `(u32)g + (x + K)` to `(g + K) + x` and
- *  keeps the pointer sum's `g + (x + K)`, so there an integer offset keeps the pointer sum. A
+ *  keeps the pointer sum's `g + (x + K)`, so there an integer offset keeps the pointer sum. Only
+ *  where the sum is a VALUE, a call argument or a temp: spelled inside the load or store it is the
+ *  address of, agbcc moves the constant out of both sums into the access, the pointer sum's as
+ *  `(x + g) + K` and the integer sum's as `(g + x) + K`, so neither is the asm's `g + (x + K)` and
+ *  the integer sum keeps its base-first order. A
  *  constant offset folds into the access and keeps `(u8 *)g + K`. A declared pointer keeps
  *  `x + (u8 *)p`, the operand the element and field spellings read.
  *
@@ -332,6 +342,7 @@ export const ARITH_ROWS: readonly ArithRow[] = [
   {
     op: '+',
     when: 'keepsPointerSumAddend',
+    value: true,
     l: { pointerValue: true, undeclared: true },
     r: { integer: true, addend: true, constant: false },
     lSpell: ['bytes'],
@@ -407,7 +418,15 @@ export interface PointerSpelling {
 const BYTE_PTR = T.ptr(T.u(8));
 
 export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling {
-  const { sym, pointerGlobals, pointerLoadedGlobals, wordLoadedGlobals, varType, compiler = {} } = deps;
+  const {
+    sym,
+    pointerGlobals,
+    pointerLoadedGlobals,
+    wordLoadedGlobals,
+    varType,
+    compiler = {},
+    inlinedAccessBase = () => false,
+  } = deps;
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
 
   /** The declared shape of a global as the pointer-value rules read it: the map's, or a pointer
@@ -656,6 +675,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
       (w) =>
         (w.row.op === opClass || (w.row.op === '±' && (opClass === '+' || opClass === '-'))) &&
         (w.row.when === undefined || compiler[w.row.when] === true) &&
+        (w.row.value === undefined || !inlinedAccessBase(d)) &&
         (w.row.resultPointer === undefined || resultPointer) &&
         w.l.every(([f, v]) => lf[f] === v) &&
         w.r.every(([f, v]) => rf[f] === v),
