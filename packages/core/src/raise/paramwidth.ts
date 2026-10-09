@@ -211,7 +211,7 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
   },
   {
     id: 'not-prologue',
-    why: 'an extension behind body code is where the SOURCE wrote the cast — and on a schedule that interleaves them, the refusing answer',
+    why: 'an extension behind body code may be the source writing the cast, and nothing in the fan referees a narrow signature against the wide one',
     sound: true,
     guardedBy: 'param-width.test.ts: an extension behind a nullary call is body code',
     rejects: (c) => !c.inPrologue,
@@ -250,8 +250,19 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
 
 const byId = (id: string): Gate<NarrowParamCandidate> => PARAM_WIDTH_GATES.find((g) => g.id === id)!;
 
-/** `/narrow-param`'s table (`narrowExtendedParams`): the default's, with the three gates that read
- *  the prologue's evidence replaced by the one that reads the readers. */
+/** `/narrow-param`'s table (`narrowExtendedParams`): a second CONSUMER of the default's rules, not an
+ *  ablation of its table, so it is built by id rather than through `ablateHeuristic`. It leaves out
+ *  the three rules that read the prologue's evidence and adds the one that reads the readers.
+ *  `raw-reader` gives way to `wide-reader`, which is sound for the same reason it is: every reader
+ *  is an extension the pass rewrites. `not-prologue` and `fused-behind-pool` read fields this pass
+ *  does not observe (it fills `inPrologue` and `fusedBehindPool` false). Their `sound` is a claim
+ *  about the DEFAULT, whose narrowing reaches every candidate with no wide sibling, so a wrong width
+ *  there is a signature nothing referees and every prototyped caller pays for. A /narrow-param
+ *  candidate keeps the wide default beside it and loses every tie unless a prototype declares the
+ *  width (rank.ts `guessesParamWidth`), so for it the same question is refereed: a rule sound for a
+ *  declaration is a heuristic for a generated candidate (l3/gates.ts, `ORDER_SHAPE_GATES`).
+ *  param-width.test.ts holds the set left out to exactly these three, so a sound rule added to the
+ *  default is either added here or argued out by name. */
 export const PARAM_READER_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
   byId('entry-is-join'),
   byId('param-typed'),

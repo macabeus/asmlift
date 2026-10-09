@@ -541,6 +541,21 @@ describe('a parameter every reader of which is an extension (/narrow-param)', ()
   });
 });
 
+describe("/narrow-param's gate table", () => {
+  test('leaves out only the rules that read the prologue, and adds only the one that reads the readers', () => {
+    const prologue = PARAM_WIDTH_GATES.map((g) => g.id);
+    const reader = PARAM_READER_WIDTH_GATES.map((g) => g.id);
+    expect(prologue.filter((id) => !reader.includes(id))).toEqual(['raw-reader', 'not-prologue', 'fused-behind-pool']);
+    expect(reader.filter((id) => !prologue.includes(id))).toEqual(['wide-reader']);
+  });
+
+  test('shares every rule it keeps with the default, unchanged', () => {
+    for (const g of PARAM_READER_WIDTH_GATES.filter((x) => x.id !== 'wide-reader')) {
+      expect(PARAM_WIDTH_GATES).toContain(g);
+    }
+  });
+});
+
 describe('a /narrow-param candidate', () => {
   // agbcc's `void f(s32 a, s32 *out) { out[0] = 7; out[1] = (s16)a; }`: the extension is behind body
   // code, so the default pass leaves the parameter wide
