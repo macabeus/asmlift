@@ -769,8 +769,8 @@ export interface TargetDescription {
     // ABSENT ⇒ false. A compiler with a fused multiply-add must opt in; the no-FPU targets never
     // compute on a float at all.
     contractsFloatProducts?: boolean;
-    // Does this compiler compile a pointer global's value plus `x + K` held in a byte-pointer temp
-    // the way the source's pointer sum does, where an integer temp does not? gcc folds an INTEGER
+    // Does this compiler compile a pointer global's value plus `x + K` held in a byte-pointer temp,
+    // read as a value, the way the source's pointer sum does, where an integer temp does not? gcc folds an INTEGER
     // sum's constant addend onto its base (agbcc fold-const.c, `EXPR is ARG0 +- (CON +- VAR)`:
     // `t + (x + K)` compiles as `(t + K) + x`) and keeps a pointer sum's `t + (x + K)`, so on agbcc
     // and KMC gcc the integer temp loses the source's association (pointer-spelling.test.ts in the

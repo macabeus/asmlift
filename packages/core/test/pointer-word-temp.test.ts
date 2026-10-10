@@ -1,7 +1,8 @@
-// A temp that only holds the value of a global the map declares a pointer is declared `u8 *`
-// (structure/structure.ts, pointer-spelling.ts `declaresBytePointer`), where the IR types it an
-// integer because nothing it feeds is a pointer the type recovery could see: here the offsets are
-// `176 << 4` and a pool word, never a constant op. Declared an integer, the sum it feeds is an
+// A temp that only holds the value of a global the map declares a pointer, and is the base of a
+// sum `t + (x + K)`, is declared `u8 *` (structure/structure.ts, pointer-spelling.ts
+// `declaresBytePointer`), where the IR types it an integer because nothing it feeds is a pointer the
+// type recovery could see: here the offsets added to it are `176 << 4` and `(pos << 2) + K`,
+// neither a constant op. Declared an integer, the sum it feeds is an
 // integer sum, which gcc reassociates; on a compiler that does not (`keepsPointerSumAddend`) the
 // temp keeps its integer. The compiled evidence is packages/cli/test/matching/pointer-spelling.test.ts.
 import { describe, expect, test } from 'vitest';
@@ -61,7 +62,7 @@ describe('a temp that keeps its integer', () => {
     expect(src).not.toContain('u8 *v');
   });
 
-  test('when no declaration types the global: it may be an integer cell', () => {
+  test('when no declaration types the global and the IR never loads it as a pointer', () => {
     const src = run(ARMS());
     expect(src).toContain('s32 v2;');
     expect(src).not.toContain('u8 *v');

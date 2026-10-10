@@ -1,5 +1,5 @@
 // asmlift structurer — POINTER/INTEGER SPELLING: whether a value the asm did arithmetic on, or
-// assigned into a temp or a pointer cell, is written as a pointer or as an integer, and through
+// assigned into a temp or a word cell, is written as a pointer or as an integer, and through
 // which cast. A global's C type is the project header's, which this pass cannot read, so each
 // rule spells the asm's bytes under every declaration that header may carry; its doc names the
 // declarations it covers and its known gaps.
@@ -17,6 +17,9 @@
 // pattern. `varType` is captured as a LIVE reference: the naming pipeline is still declaring
 // temps when the factory is created, and every rule types an expression over the declarations
 // that exist at call time.
+//
+// Whether a temp the IR types an integer is declared a byte pointer (`declaresBytePointer`) is
+// decided over the IR, which the factory's dependencies do not carry, so it is a free function.
 import { Op, type Value } from '../ir/core';
 import { MEM_BASE_OPS } from '../ir/opcodes';
 import { type IrType, T, typeEquals } from '../ir/types';
@@ -921,12 +924,11 @@ export function holdsPointerWord(
  *    which C rejects for a pointer index, and two pointers do not add;
  *  - the temp, or such a sum, as a switch selector or an array index, which C rejects for a
  *    pointer;
- *  - the temp itself as a call argument or a word written to a global, a write the byte pointer
- *    buys nothing. The backend casts a pointer into a declared integer local or slot and not into a
- *    callee's parameter (cfamily `legalizePointerWrites`), so the argument would warn where the
- *    integer temp's compiles clean. A SUM keeps the byte pointer there, its association being the
- *    point: `intoIntCell` casts it into a global the map declares an integer, and a call argument
- *    keeps the pointer (`byteSumAsInt`'s KNOWN GAP). */
+ *  - the temp itself as a call argument or a word stored to a global, where the byte pointer buys
+ *    no association and would warn: the backend casts a pointer into a declared integer local or
+ *    slot (cfamily `legalizePointerWrites`), and not into a callee's parameter. A SUM keeps the
+ *    byte pointer there, its association being the point: `intoIntCell` casts it into a global the
+ *    map declares an integer, and a call argument keeps the pointer (`byteSumAsInt`'s KNOWN GAP). */
 export function declaresBytePointer(
   values: readonly Value[],
   ir: PointerWordIr,
