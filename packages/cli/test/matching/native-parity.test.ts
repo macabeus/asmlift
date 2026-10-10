@@ -9,8 +9,10 @@
 //     path in its file symbol, `/tmp/…` on the host and `/host-tmp/…` in the pooled container — a
 //     symbol-table string no scorer reads.
 // A negative control proves the comparison can fail: one source at -O2 and at -O0 must differ.
-// Each case runs only where BOTH paths can (an x86 Linux host with the binaries, and Docker), and
-// says so when it cannot.
+// Collected only on a host that runs i386 ELFs (vitest.matching.config.ts). There every case needs
+// BOTH paths and FAILS, naming the missing one, rather than skipping or passing having compiled
+// nothing: the native binaries come from `pnpm bench setup` (the static wibo) and the sibling
+// toolchain checkouts, the container path from Docker.
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   GCC272_TOOLCHAIN,
@@ -57,11 +59,10 @@ const canNative = (native: () => boolean): boolean => {
   }
 };
 
-const gate = (tag: string, native: boolean, docker: boolean): boolean => {
-  if (!native || !docker) {
-    console.warn(`[native-parity ${tag}] needs both paths here (native: ${native}, docker: ${docker}) — skipping.`);
-  }
-  return native && docker;
+/** Both paths of one compiler are here — or a failure that names the missing one. */
+const requireBoth = (what: string, native: () => boolean, docker: () => boolean): void => {
+  expect(canNative(native), `${what} cannot run natively on this host`).toBe(true);
+  expect(docker(), `${what} cannot run through Docker on this host`).toBe(true);
 };
 
 // A jump table (data relocations), a global read, a call, a float constant: the parts of an object
@@ -110,7 +111,8 @@ function code(objdump: string, obj: string): string {
 }
 
 describe('native and container compiles emit the same code', () => {
-  test.runIf(gate('kmc', canNative(kmcNative), dockerAvailable()))('KMC GCC', () => {
+  test('KMC GCC', () => {
+    requireBoth('KMC GCC', kmcNative, dockerAvailable);
     const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;
     const o = both('asmlift-parity-kmc', (dir) => kmcCompile(dir, 'p.c', 'p.o', flags));
     const native = code(GCC_KMC_TOOLCHAIN.objdump, o.native);
@@ -119,7 +121,8 @@ describe('native and container compiles emit the same code', () => {
     expect(native).toBe(code(GCC_KMC_TOOLCHAIN.objdump, o.docker));
   });
 
-  test.runIf(canNative(kmcNative))('the comparison can fail: -O2 and -O0 differ', () => {
+  test('the comparison can fail: -O2 and -O0 differ', () => {
+    expect(canNative(kmcNative), 'KMC GCC cannot run natively on this host').toBe(true);
     process.env.ASMLIFT_NATIVE = 'on';
     const objs = (['-O2', '-O0'] as const).map((opt) => {
       const dir = mkShareableTmp(`asmlift-parity-neg${opt}-`);
@@ -130,7 +133,8 @@ describe('native and container compiles emit the same code', () => {
     expect(code(GCC_KMC_TOOLCHAIN.objdump, objs[0])).not.toBe(code(GCC_KMC_TOOLCHAIN.objdump, objs[1]));
   });
 
-  test.runIf(gate('gcc272', canNative(gcc272Native), dockerAvailable()))('GCC 2.7.2', () => {
+  test('GCC 2.7.2', () => {
+    requireBoth('GCC 2.7.2', gcc272Native, dockerAvailable);
     const flags = TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags;
     const o = both('asmlift-parity-gcc272', (dir) => gcc272Compile(dir, 'p.c', 'p.o', flags));
     const native = code(GCC272_TOOLCHAIN.objdump, o.native);
@@ -140,15 +144,11 @@ describe('native and container compiles emit the same code', () => {
 
   const mwccFlags = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
   test.each(MWCC_TOOLCHAIN_IDS)('CodeWarrior %s', (mwcc: MwccToolchainId) => {
-    if (
-      !gate(
-        mwcc,
-        canNative(() => mwccNative(mwcc)),
-        ppcDockerAvailable(mwcc),
-      )
-    ) {
-      return;
-    }
+    requireBoth(
+      `CodeWarrior ${mwcc}`,
+      () => mwccNative(mwcc),
+      () => ppcDockerAvailable(mwcc),
+    );
     const o = both(`asmlift-parity-${mwcc}`, (dir) => ppcCompile(mwcc, dir, 'p.c', 'p.o', mwccFlags));
     expect(readFileSync(o.native).length).toBeGreaterThan(0);
     expect(readFileSync(o.native).equals(readFileSync(o.docker))).toBe(true);
