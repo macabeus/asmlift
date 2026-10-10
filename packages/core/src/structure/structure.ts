@@ -6754,6 +6754,18 @@ export function structure(
   return named;
 }
 
+/** Each declared-callee table's own key order, name → position, computed once per table object: the
+ *  ranked pass structures every candidate against the same tables. */
+const keyOrders = new WeakMap<object, ReadonlyMap<string, number>>();
+function keyOrder(table: object): ReadonlyMap<string, number> {
+  let order = keyOrders.get(table);
+  if (order === undefined) {
+    order = new Map(Object.keys(table).map((n, i) => [n, i]));
+    keyOrders.set(table, order);
+  }
+  return order;
+}
+
 /** Of each table of declared callees, the entries this body calls — every tree the ranked pass
  *  structures carries its own, and is keyed by its whole text. A table this body calls nothing in is
  *  absent. */
@@ -6767,9 +6779,17 @@ function calledOnly(
       callees.add(e.fn);
     }
   }
+  // Look up the few names this body calls, not every entry of the table: a project's table holds
+  // every function its ELF declares (thousands for pokeemerald), and this runs on each structuring
+  // of each candidate — the whole-table filter was 80% of a real-tier row's CPU. The result keeps
+  // the TABLE's key order, as the filter did, because the tree is keyed by its whole text.
   const of = <T>(table: Readonly<Record<string, T>> | undefined): Record<string, T> | undefined => {
-    const called = Object.fromEntries(Object.entries(table ?? {}).filter(([n]) => callees.has(n)));
-    return Object.keys(called).length > 0 ? called : undefined;
+    if (table === undefined || callees.size === 0) {
+      return undefined;
+    }
+    const order = keyOrder(table);
+    const names = [...callees].filter((n) => order.has(n)).sort((a, b) => order.get(a)! - order.get(b)!);
+    return names.length > 0 ? Object.fromEntries(names.map((n) => [n, table[n]])) : undefined;
   };
   const declaredArgs = of(tables.declaredArgs);
   const declaredReturns = of(tables.declaredReturns);
