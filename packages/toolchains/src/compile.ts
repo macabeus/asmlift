@@ -17,6 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
+import { gcc272Native, kmcNative, mwccNative } from './native';
 import {
   GCC272_TOOLCHAIN,
   GCC_KMC_TOOLCHAIN,
@@ -83,11 +84,12 @@ const SPAWN_BUFFER = 256 * 1024 * 1024;
 /** Spawn helper shared by every toolchain invocation (asmdata.ts uses it too). Throws the
  *  named setup error above when the binary itself couldn't run; compile failures (nonzero
  *  status, real stderr) still return for the caller to diagnose. */
-export function run(cmd: string, args: string[], env?: Record<string, string>) {
+export function run(cmd: string, args: string[], env?: Record<string, string>, cwd?: string) {
   const r = spawnSync(cmd, args, {
     encoding: 'utf8',
     env: env ? { ...process.env, ...env } : process.env,
     maxBuffer: SPAWN_BUFFER,
+    cwd,
   });
   if (r.error) {
     throw new Error(spawnFailure(cmd, r.error));
@@ -270,6 +272,19 @@ export function compileMipsTarget(
  *  COMPILER_PATH point the old driver at its bundled `cc1` and binutils under the mounted dir. */
 export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: readonly string[]): void {
   const t = GCC272_TOOLCHAIN;
+  if (gcc272Native()) {
+    // the container's command with host paths: same driver, same -B/COMPILER_PATH, run in `dir`
+    const cc = run(
+      join(t.dir, 'gcc'),
+      ['-B', `${t.dir}/`, ...t.harnessFlags, ...flags, '-c', '-o', join(dir, outObj), join(dir, srcC)],
+      { COMPILER_PATH: t.dir },
+      dir,
+    );
+    if (cc.status !== 0) {
+      throw refused('gcc 2.7.2 (native)', cc);
+    }
+    return;
+  }
   const w = hostTmp(dir);
   if (w) {
     const name = poolName('gcc272', `${t.image}|${t.dir}`);
@@ -408,7 +423,12 @@ export function idoAvailable(): boolean {
 }
 
 export function gcc272Available(): boolean {
-  return dockerAvailable() && existsSync(join(GCC272_TOOLCHAIN.dir, 'gcc'));
+  return existsSync(join(GCC272_TOOLCHAIN.dir, 'gcc')) && (gcc272Native() || dockerAvailable());
+}
+
+/** Can KMC GCC compile here — natively, or through Docker? */
+export function kmcAvailable(): boolean {
+  return existsSync(join(GCC_KMC_TOOLCHAIN.dir, 'gcc')) && (kmcNative() || dockerAvailable());
 }
 
 export function mkShareableTmp(prefix: string): string {
@@ -506,6 +526,18 @@ export function poolExec(docker: string, image: string, name: string, mounts: st
  *  (apps/benchmark/src/compile/kmc.ts), so it pools through the same helper. */
 export function kmcCompile(dir: string, srcC: string, outObj: string, flags: readonly string[]): void {
   const t = GCC_KMC_TOOLCHAIN;
+  if (kmcNative()) {
+    const cc = run(
+      join(t.dir, 'gcc'),
+      [...t.harnessFlags, ...flags, '-c', '-o', join(dir, outObj), join(dir, srcC)],
+      { COMPILER_PATH: t.dir },
+      dir,
+    );
+    if (cc.status !== 0) {
+      throw refused('kmc gcc (native)', cc);
+    }
+    return;
+  }
   const w = hostTmp(dir);
   if (w) {
     const name = poolName('kmc', `${t.image}|${t.dir}`);
@@ -701,6 +733,20 @@ export function ppcCompile(
   disasm = false,
 ): string {
   const t = MWCC_PPC_TOOLCHAIN;
+  if (mwccNative(mwcc)) {
+    // the host's wibo over the same mwcceppc.exe, run in `dir` as the container's is in /work;
+    // only the dump, whose objdump ships in the image alone, still goes through Docker
+    const cc = run(
+      t.nativeWibo,
+      [join(mwccDir(mwcc), 'mwcceppc.exe'), ...t.harnessFlags, ...flags, '-o', join(dir, outObj), join(dir, srcC)],
+      undefined,
+      dir,
+    );
+    if (cc.status !== 0) {
+      throw refused('mwcceppc (native)', cc);
+    }
+    return disasm ? ppcDisasmText(mwcc, dir, outObj) : cc.stdout;
+  }
   const { out, via } = ppcExec(
     mwcc,
     dir,

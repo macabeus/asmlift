@@ -21,7 +21,7 @@ import {
 import { GCC_KMC_TOOLCHAIN, IDO_TOOLCHAIN } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
-import { dockerGate, ppcDockerGate } from './docker-gate';
+import { kmcGate, ppcDockerGate } from './docker-gate';
 
 const dense = (n: number) => {
   const cases = Array.from({ length: n }, (_, i) => `case ${i}:return ${i * 2 + 3};`).join('');
@@ -113,7 +113,7 @@ describe('P3 IDO/MIPS — a dense jump-table switch recovers to a matching switc
   });
 });
 
-const HAVE_DOCKER = dockerGate('switch-p3');
+const HAVE_DOCKER = kmcGate('switch-p3');
 describe.runIf(HAVE_DOCKER)('P3 KMC-GCC/MIPS — dense jump-table switch recovers (absolute R_MIPS_32 table)', () => {
   test('8-case dense switch scores 0', () => {
     const c = dense(8);

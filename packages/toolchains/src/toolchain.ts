@@ -48,7 +48,8 @@ export const IDO_TOOLCHAIN = {
 
 /** KMC GCC toolchain — the Kyoto-Microcomputer N64 GCC vendored by the Snowboard Kids 2 decomp
  *  project. The binaries are Linux/i386 ELFs (won't run on Darwin/arm64), so the compile runs
- *  inside a linux/386 Docker container with the compiler dir mounted; disassembly + scoring use
+ *  natively on an x86 Linux host (native.ts) and elsewhere inside a linux/386 Docker container
+ *  with the compiler dir mounted; disassembly + scoring use
  *  the native host binutils/scorer on the produced object. Flags mirror that project's Makefile
  *  (`-mips3 -EB -O2 -G0 -mabi=32 …`). Overridable via ASMLIFT_KMC_DIR / ASMLIFT_KMC_IMAGE /
  *  ASMLIFT_DOCKER / ASMLIFT_MIPS_OBJDUMP. */
@@ -85,6 +86,10 @@ export const MWCC_TOOLCHAIN_IDS = Object.keys(MWCC_BUILDS) as MwccToolchainId[];
 
 export const isMwccToolchainId = (id: string): id is MwccToolchainId => Object.hasOwn(MWCC_BUILDS, id);
 
+// The BENCH-OWNED static wibo: `pnpm bench setup` fetches the pinned release here on an x86 Linux
+// host (gitignored), so the native CodeWarrior path (native.ts) needs nothing on PATH.
+const BENCH_WIBO = join(REPO_ROOT, 'apps/benchmark/toolchains/wibo');
+
 /** CodeWarrior mwcceppc toolchain — runs the Win32 PE `mwcceppc.exe` through `wibo` inside a
  *  linux/386 Docker image (packages/toolchains/ppc-docker), exactly as decomp.me does. The image bundles a
  *  32-bit `wibo` + a PowerPC objdump; the PROPRIETARY CodeWarrior binaries are NOT baked in —
@@ -103,6 +108,11 @@ export const MWCC_PPC_TOOLCHAIN = {
   // The image runs the Win32 PE via the bundled 32-bit wibo — a Win32 API shim, not a CPU
   // emulator; the linux/386 platform layer supplies any x86 emulation the host needs.
   wibo: env('ASMLIFT_WIBO', 'wibo'),
+  // The HOST's wibo, for the native path (native.ts) — a different binary from `wibo` above, which
+  // names the one inside the image. It must be a STATIC build (the release asset is): a dynamic
+  // i386 wibo needs a 32-bit libc the host usually lacks. The bench-owned copy when present, else
+  // PATH; ASMLIFT_NATIVE_WIBO overrides both.
+  nativeWibo: env('ASMLIFT_NATIVE_WIBO', existsSync(BENCH_WIBO) ? BENCH_WIBO : 'wibo'),
   objdump: env('ASMLIFT_PPC_OBJDUMP', 'powerpc-eabi-objdump'),
   // `-r` interleaves relocation lines (`R_PPC_REL24 <sym>`) after each instruction: an unresolved
   // `bl` in a .o encodes offset 0 (a self-referential placeholder), so the callee's NAME lives only

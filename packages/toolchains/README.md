@@ -22,6 +22,25 @@ Paths resolve from env vars with sibling-checkout defaults (`src/toolchain.ts`):
 `ASMLIFT_PPC_OBJDUMP`, `ASMLIFT_WIBO`, `ASMLIFT_DOCKER`. `ASMLIFT_DOCKER_POOL=0` disables the
 persistent container pool (the benchmark's A/B baseline switch).
 
+### Native execution (no Docker for compiles)
+
+KMC GCC, GCC 2.7.2 and CodeWarrior (through wibo) are 32-bit x86 Linux binaries. On a host that can
+run them directly — Linux on x86 — they compile natively, and the container is only the fallback.
+`ASMLIFT_NATIVE` picks ([`src/native.ts`](src/native.ts)):
+
+| Value          | Behaviour                                                                         |
+| -------------- | --------------------------------------------------------------------------------- |
+| unset / `auto` | native wherever a once-per-process probe of the binary succeeds, Docker elsewhere |
+| `0` / `off`    | always Docker — the A/B switch and the escape hatch                               |
+| `1` / `on`     | native, or an error naming the probe that failed                                  |
+
+CodeWarrior needs a STATIC wibo on the host: `pnpm bench setup` fetches the pinned release
+(the tag the image builds) into `apps/benchmark/toolchains/wibo` on x86 Linux, else `wibo` on PATH,
+and `ASMLIFT_NATIVE_WIBO` overrides both. The PowerPC objdump still runs in the image, so PPC dumps
+keep needing it. The emitted code is the same either way: CodeWarrior objects are byte-identical,
+and gcc objects differ only in the absolute source path of their file symbol;
+`packages/cli/test/matching/native-parity.test.ts` pins both, per compiler.
+
 The CodeWarrior Docker image (`asmlift-ppc:latest`) is a **local build** (no registry pull):
 `docker build --platform linux/386 -t asmlift-ppc:latest packages/toolchains/ppc-docker` — 32-bit wibo + PowerPC
 objdump ([`ppc-docker/Dockerfile`](ppc-docker/Dockerfile)); the proprietary CodeWarrior dirs are

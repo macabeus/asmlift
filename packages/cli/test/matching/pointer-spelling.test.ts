@@ -32,7 +32,7 @@ import {
 } from '@asmlift/toolchains';
 import { describe, expect, it } from 'vitest';
 
-import { dockerGate, ppcDockerGate } from './docker-gate';
+import { kmcGate, ppcDockerGate } from './docker-gate';
 
 const DECLS = 'extern u16 *gPtr; void use(u32);\n';
 
@@ -41,7 +41,7 @@ const ID = { agbcc: 'agbcc', ido: 'ido7.1', kmc: 'gcc2.7.2kmc', mwcc: 'mwcc_242_
 const HAVE: Record<Cc, boolean> = {
   agbcc: true,
   ido: true,
-  kmc: dockerGate('pointer-spelling kmc'),
+  kmc: kmcGate('pointer-spelling kmc'),
   mwcc: ppcDockerGate('pointer-spelling mwcc', 'mwcc_242_81'),
 };
 
