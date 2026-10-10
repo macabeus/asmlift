@@ -1410,7 +1410,8 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 //                                    destinations.
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
 // booleans, never a compiler name. So are the arithmetic table's (`ArithCompilerFacts`), which this
-// type extends and hands to `makePointerSpelling` whole.
+// type extends and hands to `makePointerSpelling` whole; the byte-pointer temp step below reads
+// `keepsPointerSumAddend` from it too.
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
 // the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
@@ -1663,11 +1664,6 @@ export interface StructureOptions extends ArithCompilerFacts {
   // compiles to the unfused pair the object holds. A compiler opts in; the target says which
   // (`compilerBehaviors.contractsFloatProducts`).
   contractsFloatProducts?: boolean;
-  // Declare `u8 *` a temp that only holds a pointer global's value and is the base of a
-  // sum with a variable addend plus a constant (pointer-spelling.ts `declaresBytePointer` says
-  // when), where this compiler compiles the byte-pointer sum as the source's
-  // (`compilerBehaviors.keepsPointerSumAddend`).
-  keepsPointerSumAddend?: boolean;
   // How this compiler lays out a function-scope static (`compilerBehaviors.staticLayout`), which
   // decides the definition that puts one where the target has it. Absent ⇒ unmeasured, and a
   // function that defines a static declines.
