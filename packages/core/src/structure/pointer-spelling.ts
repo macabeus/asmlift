@@ -1,5 +1,5 @@
 // asmlift structurer — POINTER/INTEGER SPELLING: whether a value the asm did arithmetic on, or
-// assigned into a temp or a pointer cell, is written as a pointer or as an integer, and through
+// assigned into a temp or a word cell, is written as a pointer or as an integer, and through
 // which cast. A global's C type is the project header's, which this pass cannot read, so each
 // rule spells the asm's bytes under every declaration that header may carry; its doc names the
 // declarations it covers and its known gaps.
@@ -17,16 +17,20 @@
 // pattern. `varType` is captured as a LIVE reference: the naming pipeline is still declaring
 // temps when the factory is created, and every rule types an expression over the declarations
 // that exist at call time.
-import type { Op, Value } from '../ir/core';
+//
+// Whether a temp the IR types an integer is declared a byte pointer (`declaresBytePointer`) is
+// decided over the IR, which the factory's dependencies do not carry, so it is a free function.
+// What it asks of a global it asks of the factory (`pointerGlobal`, `castsIntoGlobal`).
+import { Op, type Value } from '../ir/core';
 import { MEM_BASE_OPS } from '../ir/opcodes';
 import { type IrType, T, typeEquals } from '../ir/types';
 import { type BinOp, Expr } from '../l3/ast';
 import { pointerCellValue } from '../l3/ptrcell';
 import { exprCType, ptrElemBytes } from '../l3/typing';
-import { type SymbolInfo, isScalarCellSize, scalarCellType } from '../symbols';
+import { type SymbolInfo, isBitfieldField, isScalarCellSize, scalarCellType, symbolFieldType } from '../symbols';
 import type { TargetDescription } from '../target';
 import { ARITH_TO_BIN } from './arith-ops';
-import { type MemberLookup, ptrMemberDecl } from './globalaccess';
+import { type MemberLookup, declaredMemberOf, ptrMemberDecl, structMemberAt } from './globalaccess';
 
 /** The slice of structure.ts's symbol-map rendering context these rules read. */
 export interface PointerSpellingSymCtx extends MemberLookup {
@@ -43,6 +47,8 @@ export interface PointerSpellingDeps {
   pointerLoadedGlobals: ReadonlySet<string>;
   /** the scalar globals the IR loads as a word (structure.ts). */
   wordLoadedGlobals: ReadonlySet<string>;
+  /** the globals structure.ts spells bare, `gSym`: each accessed only at offset 0, at one width. */
+  scalarGlobals: ReadonlySet<string>;
   /** each declared variable's type — LIVE, read at call time. */
   varType: ReadonlyMap<string, IrType>;
   /** the compiler behaviors a row is guarded on (`ArithRow.when`); absent ⇒ none holds. */
@@ -172,7 +178,8 @@ export type SideFact =
   /** a global's word no declaration types (`untypedWord`) */
   | 'untyped'
   | 'constant'
-  /** an additive expression with a constant term (`x + K`, `x - K`, `K + x`) */
+  /** an additive expression with a constant term (`x + K`, `x - K`, `K + x`), read off the
+   *  printed expression; `declaresBytePointer`'s `hasAddend` asks it of an IR value, through merges */
   | 'addend'
   /** a global's address is in it */
   | 'address'
@@ -405,6 +412,11 @@ const ROW_TESTS = ARITH_ROWS.map((row) => ({
 }));
 
 export interface PointerSpelling {
+  /** Whether a global's value is a POINTER VALUE, as every rule here reads it (`nameFacts`). */
+  pointerGlobal(name: string): boolean;
+  /** Whether a word stored at byte `byte` of global `name` lands in a cell `intoIntCell` casts a
+   *  pointer into, as structure.ts spells the store: the bare global, or the member at that byte. */
+  castsIntoGlobal(name: string, byte: number): boolean;
   needsIntSpelling(x: Expr): boolean;
   intoDeclaredTemp(name: string, value: Expr): Expr;
   intoPtrCell(lval: Expr, value: Expr): Expr;
@@ -425,21 +437,13 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     pointerGlobals,
     pointerLoadedGlobals,
     wordLoadedGlobals,
+    scalarGlobals,
     varType,
     compiler = {},
     useSitesOf,
     isNamed = () => false,
   } = deps;
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
-
-  /** The op's result is spelled inside the loads and stores it is the address of, and nowhere
-   *  else: no name holds it, and it has readers, each a load or store reading it as its base
-   *  (operand 0) and as nothing else. */
-  const inlinedAccessBase = (d: Op): boolean => {
-    const v = d.results[0];
-    const sites = v === undefined || isNamed(v) ? [] : (useSitesOf?.get(v) ?? []);
-    return sites.length > 0 && sites.every(({ op }) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0);
-  };
 
   /** The declared shape of a global as the pointer-value rules read it: the map's, or a pointer
    *  the map declares to a structuring that does not spell from it (`pointerGlobals`). The
@@ -683,11 +687,14 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     const opClass = op === '+' || op === '-' ? op : op === '&&' || op === '||' ? 'logical' : 'bitwise';
     const lf = sideFacts(l, r);
     const rf = sideFacts(r, l);
+    const result = d.results[0];
+    const readers = result === undefined ? [] : (useSitesOf?.get(result) ?? []).map((u) => u.op);
+    const accessAddress = result !== undefined && inlinedAccessBase(result, readers, isNamed);
     const { row } = ROW_TESTS.find(
       (w) =>
         (w.row.op === opClass || (w.row.op === '±' && (opClass === '+' || opClass === '-'))) &&
         (w.row.when === undefined || compiler[w.row.when] === true) &&
-        (w.row.value === undefined || !inlinedAccessBase(d)) &&
+        (w.row.value === undefined || !accessAddress) &&
         (w.row.resultPointer === undefined || resultPointer) &&
         w.l.every(([f, v]) => lf[f] === v) &&
         w.r.every(([f, v]) => rf[f] === v),
@@ -796,6 +803,29 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return { k: 'cast', to: t, e: value };
   };
 
+  /** The integer type the map declares a word cell: a scalar global, or a member a map
+   *  declaration names (`gT.b`, `gPtr->b`) that is no pointer, bitfield or array. */
+  const intCellType = (lval: Expr): IrType | undefined => {
+    if (lval.k === 'var') {
+      const si = sym?.info(lval.name);
+      return si?.shape === 'scalar' && si.size === 4 ? scalarCellType(4, si.signed) : undefined;
+    }
+    const f = declaredMemberOf(lval, sym);
+    const t = f === null || isBitfieldField(f) ? undefined : symbolFieldType(f);
+    return t?.kind === 'int' && t.width === 32 ? t : undefined;
+  };
+
+  /** The mirror of `intoPtrCell`: a value that is no integer as spelled (`needsIntSpelling`)
+   *  assigned into a word cell the map declares an integer (`intCellType`) takes that cell's type.
+   *  Without it agbcc and KMC gcc warn `assignment makes integer from pointer without a cast` —
+   *  fatal under the project's `-Werror` — and CodeWarrior rejects the write. A conversion of a
+   *  word is no instruction, so the bytes are the uncast write's. A global no declaration types
+   *  keeps the value as spelled: its candidate world may declare it either way. */
+  const intoIntCell = (lval: Expr, value: Expr): Expr => {
+    const t = intCellType(lval);
+    return t !== undefined && needsIntSpelling(value) ? { k: 'cast', to: t, e: value } : value;
+  };
+
   /** A pointer VALUE assigned into a pointer CELL (pointerValue), spelled so the assignment is
    *  legal against ANY pointer declaration of that cell. The arithmetic table renders such a
    *  right-hand side `(u8 *)gS.pBuf + K` — the right ADDRESS in every world, which is the whole
@@ -818,7 +848,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
    *  integer declaration's source, published only at a byte-exact score. */
   const intoPtrCell = (lval: Expr, value: Expr): Expr => {
     if (!pointerValue(roleOf(lval))) {
-      return value;
+      return intoIntCell(lval, value);
     }
     const vt = ctype(value);
     // BOTH ways a pointer value reaches here. `ctype` types params and locals, so it sees the
@@ -829,5 +859,204 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return isPtr ? pointerCellValue(value) : value;
   };
 
-  return { needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
+  const pointerGlobal = (name: string): boolean => nameFacts(name).pointer;
+
+  // A volatile global is none: structure.ts may spell its store through a qualified pointer
+  // (`pinnedAccess`), a cell `intCellType` does not read.
+  const castsIntoGlobal = (name: string, byte: number): boolean => {
+    const si = sym?.info(name);
+    if (si === undefined || si.volatile) {
+      return false;
+    }
+    const member = structMemberAt(si, byte, 4, true);
+    const lval: Expr | undefined =
+      si.shape === 'scalar'
+        ? byte === 0 && scalarGlobals.has(name)
+          ? { k: 'var', name }
+          : undefined
+        : member && { k: 'field', base: { k: 'var', name }, name: member.name, dot: true };
+    return lval !== undefined && intCellType(lval) !== undefined;
+  };
+
+  return { pointerGlobal, castsIntoGlobal, needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
+}
+
+/** The IR around a value that `holdsPointerWord` and `declaresBytePointer` read. */
+export interface PointerWordIr {
+  defOf(v: Value): Op | undefined;
+  /** a block parameter's in-edge values; undefined for any other value */
+  inArgs(v: Value): readonly Value[] | undefined;
+  /** the ops that read `v`, a terminator passing it on an edge included */
+  usesOf(v: Value): readonly Op[];
+  /** whether a name holds `v` */
+  isNamed(v: Value): boolean;
+}
+
+/** Whether `v` is spelled inside the loads and stores it is the address of and nowhere else, so
+ *  is no value: no name holds it, and it has readers, each a load or store, an element access's
+ *  included, reading it as its base (operand 0) and as nothing else. agbcc moves such a sum's
+ *  constant addend into the access under the pointer and the integer sum alike (ARITH_ROWS, THE
+ *  INTEGER SUM). The table's value row and `declaresBytePointer` read it. */
+export function inlinedAccessBase(v: Value, readers: readonly Op[], isNamed: (v: Value) => boolean): boolean {
+  return (
+    !isNamed(v) &&
+    readers.length > 0 &&
+    readers.every((op) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0)
+  );
+}
+
+/** Whether `v` only ever holds a pointer global's value: a whole-word load at offset 0 of a global
+ *  `pointerGlobal` says is a pointer value (`PointerSpelling.pointerGlobal`), or a block parameter
+ *  every in-edge value of which is one.
+ *
+ *  A temp holding such a value may be declared `u8 *` where the IR types it an integer
+ *  (`declaresBytePointer` says when), on a compiler whose integer sum loses the source's
+ *  association and whose pointer sum keeps it (`compilerBehaviors.keepsPointerSumAddend`,
+ *  structure.ts). Byte arithmetic is the asm's address under every pointer declaration of the
+ *  global; a declared pointee would scale it, and `void *` arithmetic is a GNU extension.
+ *  `intoDeclaredTemp` casts the value into the temp, `(u8 *)g`, which is the same word under an
+ *  integer declaration of a global no declaration types.
+ *
+ *  A word the IR never loads as a pointer, of a global no declaration types (`untypedWord`), is
+ *  not one: the table spells it an integer beside an integer, and the temp keeps the integer with
+ *  it. Cast into a `u8 *` temp, it would be the array's address with no diagnostic under an array
+ *  declaration (`intoDeclaredTemp`'s KNOWN GAP), where the integer temp's assignment warns. */
+export function holdsPointerWord(
+  v: Value,
+  ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>,
+  pointerGlobal: (name: string) => boolean,
+  seen: Set<Value> = new Set(),
+): boolean {
+  if (seen.has(v)) {
+    return true;
+  }
+  seen.add(v);
+  const d = ir.defOf(v);
+  if (d !== undefined) {
+    const g = d.opcode === 'load' && d.attrs.off === 0 && d.attrs.width === 4 ? ir.defOf(d.operands[0]) : undefined;
+    return g?.opcode === 'gaddr' && pointerGlobal(g.attrs.sym as string);
+  }
+  const ins = ir.inArgs(v);
+  return ins !== undefined && ins.length > 0 && ins.every((a) => holdsPointerWord(a, ir, pointerGlobal, seen));
+}
+
+/** Whether a temp whose values are `values` is declared `u8 *` where the IR types it an integer.
+ *
+ *  Every value holds a pointer global's word (`holdsPointerWord`), and one of them is the base of a
+ *  sum with a constant addend, `t + (x + K)`, where `x + K` may be merged across arms and `x` is
+ *  not itself a constant, and the sum is a value (not an `inlinedAccessBase`). There the integer
+ *  temp's sum loses the source's association and the byte pointer's keeps it. Without a variable
+ *  addend the two compile alike, so the temp keeps the integer the IR gives it. A sum spelled only
+ *  inside the accesses it addresses is the source's under neither: there agbcc compiles the byte
+ *  pointer's index first, `(x + t) + K`, and which of the two is closer depends on the index, so
+ *  it licenses nothing.
+ *
+ *  A use the byte pointer would print wrong refuses it:
+ *  - a sum, of the temp or of a sum it is the base of, whose other operand comes first: `x + t` is
+ *    a pointer sum the gcc family orders pointer first, the swap of the asm's `x + t` (ARITH_ROWS,
+ *    THE INTEGER SUM);
+ *  - such a sum with a global's address or a pointer: `t + gArr` prints the subscript `gArr[t]`,
+ *    which C rejects for a pointer index, and two pointers do not add;
+ *  - the temp, or such a sum, as a switch selector or an array index, which C rejects for a
+ *    pointer;
+ *  - the temp itself as a call argument, or stored to a global anywhere but a word cell the map
+ *    declares an integer (`castsIntoGlobal`), where the byte pointer buys no association and would
+ *    warn: the backend casts a pointer into a declared integer local or slot (cfamily
+ *    `legalizePointerWrites`) and that cell (`intoIntCell`), and not into a callee's parameter or a
+ *    global no declaration types. A SUM keeps the byte pointer there, its association being the
+ *    point, and a call argument keeps the pointer (`byteSumAsInt`'s KNOWN GAP). */
+export function declaresBytePointer(
+  values: readonly Value[],
+  ir: PointerWordIr,
+  spelling: Pick<PointerSpelling, 'pointerGlobal' | 'castsIntoGlobal'>,
+): boolean {
+  const isGlobal = (x: Value): boolean => ir.defOf(x)?.opcode === 'gaddr';
+  const intoGlobal = (x: Value, u: Op): boolean =>
+    u.opcode === 'store' &&
+    u.operands[1] === x &&
+    isGlobal(u.operands[0]) &&
+    !(
+      u.attrs.width === 4 &&
+      spelling.castsIntoGlobal(ir.defOf(u.operands[0])!.attrs.sym as string, u.attrs.off as number)
+    );
+  const integerOnly = (x: Value, u: Op): boolean =>
+    u.opcode === 'switch_br' || ((u.opcode === 'aload' || u.opcode === 'astore') && u.operands[1] === x);
+  const baseOf = (t: Value, u: Op): boolean => {
+    const [l, r] = u.operands;
+    return l === t && r !== t && !isGlobal(r) && r.type.kind !== 'ptr';
+  };
+  // a sum stays a pointer sum through every sum that reads it, each with it as the base
+  const okSum = (s: Value): boolean =>
+    ir.usesOf(s).every((w) => !integerOnly(s, w) && (w.opcode !== 'add' || (baseOf(s, w) && okSum(w.results[0]))));
+  const okUse = (t: Value, u: Op): boolean =>
+    u.opcode === 'add'
+      ? baseOf(t, u) && okSum(u.results[0])
+      : u.opcode !== 'call' && !integerOnly(t, u) && !intoGlobal(t, u);
+  const constants = new Map<Value, boolean>();
+  // `x + K` with `x` not itself constant, or a merge every in-edge of which passes one: the
+  // arithmetic table's `addend` side fact, asked of an IR value rather than a printed expression
+  const hasAddend = (x: Value, path: Set<Value> = new Set()): boolean => {
+    const d = ir.defOf(x);
+    if (d !== undefined) {
+      const constant = d.operands.map((o) => isConstant(o, ir, constants));
+      return (d.opcode === 'add' || d.opcode === 'sub') && constant.includes(true) && constant.includes(false);
+    }
+    const ins = ir.inArgs(x);
+    if (path.has(x) || ins === undefined || ins.length === 0) {
+      return false;
+    }
+    path.add(x);
+    return ins.every((a) => hasAddend(a, path));
+  };
+  return (
+    values.every((t) => holdsPointerWord(t, ir, spelling.pointerGlobal) && ir.usesOf(t).every((u) => okUse(t, u))) &&
+    values.some((t) =>
+      ir
+        .usesOf(t)
+        .some(
+          (u) =>
+            u.opcode === 'add' &&
+            hasAddend(u.operands[1]) &&
+            !inlinedAccessBase(u.results[0], ir.usesOf(u.results[0]), ir.isNamed),
+        ),
+    )
+  );
+}
+
+/** Ops whose value is a constant when every operand's is. */
+const CONSTANT_FOLDING = new Set(['shl', 'add', 'sub', 'mul', 'or', 'and', 'xor']);
+
+/** Whether `v` is a constant: a `const`, a fold of constants, or a block parameter every in-edge
+ *  of which passes one. A loop back to a parameter is not, as a counter is not.
+ *
+ *  `known` holds the answers already given. A value reached by two paths is answered once, or a
+ *  chain of N merges each of whose arms reads the last is walked 2^N times. An answer does not
+ *  depend on the path it was reached by: a value from which a cycle is reachable is no constant
+ *  from any path. */
+function isConstant(
+  v: Value,
+  ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>,
+  known: Map<Value, boolean>,
+  path: Set<Value> = new Set(),
+): boolean {
+  const answer = known.get(v);
+  if (answer !== undefined) {
+    return answer;
+  }
+  if (path.has(v)) {
+    return false;
+  }
+  const d = ir.defOf(v);
+  if (d?.opcode === 'const') {
+    return true;
+  }
+  const from = d === undefined ? ir.inArgs(v) : CONSTANT_FOLDING.has(d.opcode) ? d.operands : undefined;
+  if (from === undefined || from.length === 0) {
+    return false;
+  }
+  path.add(v);
+  const all = from.every((x) => isConstant(x, ir, known, path));
+  path.delete(v);
+  known.set(v, all);
+  return all;
 }

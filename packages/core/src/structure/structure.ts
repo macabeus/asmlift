@@ -89,9 +89,7 @@ import { collectStructs } from '../raise/structs';
 import {
   type DeclaredField,
   type SymbolInfo,
-  type SymbolStructField,
   declaredArrayShape,
-  declaredFields,
   isArrayField,
   isBitfieldField,
   pointeeFields,
@@ -108,8 +106,10 @@ import {
   elementIndex,
   globalByteBase,
   globalOf,
+  memberQualsAllow,
   memoFieldsOf,
   ptrMemberDecl,
+  structMemberAt,
   subscriptsFromExtents,
 } from './globalaccess';
 import {
@@ -123,7 +123,7 @@ import {
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { type ArithCompilerFacts, makePointerSpelling } from './pointer-spelling';
+import { type ArithCompilerFacts, declaresBytePointer, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
@@ -271,20 +271,6 @@ function laddrType(op: Op): IrType {
   const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
   const count = op.attrs.count as number;
   return count === 1 ? elem : T.array(elem, count);
-}
-
-/** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
- *  The named spelling REPLACES a cast through `(u8 *)`, which carries no qualifier at all, so a
- *  qualifier the name reintroduces changes what the compiler emits:
- *    • `volatile` makes the access observable — the load may no longer be folded or reordered,
- *      which is a different instruction sequence (measured: 6 insns where the cast form was 5);
- *    • `const` under a STORE is a hard error, where the cast form merely cast the qualifier away.
- *  Either way the honest spelling is the cast form, so the member simply is not nameable here. */
-function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefined, isStore: boolean): boolean {
-  if (f.volatile) {
-    return false;
-  }
-  return !(isStore && (f.const || containerConst));
 }
 
 /** A map-declared POINTER MEMBER as the additive lowering renders its VALUE: the bare `gSym.pBuf`,
@@ -732,14 +718,9 @@ function memAccess(
       // THE shared spellability predicate (symbols.ts), the same call declare.ts gates its struct
       // declaration on: a layout it declines whole is a layout with no nameable members, and a
       // union alias it drops for the first view at that offset is a name no declaration carries.
-      // An ARRAY member is excluded for the same reason as in pointeeAccess: `u8 x[1]` would match
-      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width. A
-      // BITFIELD member likewise — a plain read of its bytes is not a read of its bits (the named
-      // bitfield spelling has its own recognizer, on the extract shape: see lowerDef).
-      const fld = declaredFields(si.layout)?.find(
-        (f) => f.offset === gb.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f),
-      );
-      if (fld && memberQualsAllow(fld, si.const, isStore)) {
+      // The named bitfield spelling has its own recognizer, on the extract shape: see lowerDef.
+      const fld = structMemberAt(si, gb.byte, width, isStore);
+      if (fld) {
         return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
       }
     }
@@ -1429,7 +1410,8 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 //                                    destinations.
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
 // booleans, never a compiler name. So are the arithmetic table's (`ArithCompilerFacts`), which this
-// type extends and hands to `makePointerSpelling` whole.
+// type extends and hands to `makePointerSpelling` whole; the byte-pointer temp step below reads
+// `keepsPointerSumAddend` from it too.
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
 // the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
@@ -2055,6 +2037,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     homeEscapingExtensions = false,
     readsStayWhereWritten = false,
     contractsFloatProducts = false,
+    keepsPointerSumAddend = false,
     staticLayout,
     unsignedCompareSpelling = false,
     coalesceMergeNames = false,
@@ -2710,6 +2693,8 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // integer, and through which cast. `varType` and `varName` are read live: the naming below is
   // still declaring temps.
   const {
+    pointerGlobal,
+    castsIntoGlobal,
     needsIntSpelling,
     intoDeclaredTemp,
     intoPtrCell,
@@ -2719,6 +2704,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     pointerGlobals,
     pointerLoadedGlobals,
     wordLoadedGlobals,
+    scalarGlobals,
     varType,
     compiler: opts,
     useSitesOf,
@@ -3429,6 +3415,36 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
         vs.every((v) => !signedEvidence.has(v))
       ) {
         varType.set(n, T.u(32));
+      }
+    }
+  }
+
+  // ── a temp holding a pointer global's value, summed with `x + K`, is a byte pointer ──────────
+  // (pointer-spelling.ts `declaresBytePointer` says when.) Decided over every value under the name
+  // once the names are settled, so a name that also holds anything else keeps its integer.
+  if (keepsPointerSumAddend) {
+    const inArgs = (v: Value): Value[] | undefined => {
+      const b = paramBlock.get(v);
+      if (b === undefined || entryParams.has(v)) {
+        return undefined;
+      }
+      const i = b.params.indexOf(v);
+      return [...inEdgeRecords(preds, b)].map(({ succ }) => succ.args[i]);
+    };
+    const ir = {
+      defOf: (v: Value) => defs.get(v),
+      inArgs,
+      usesOf: (v: Value) => (useSitesOf.get(v) ?? []).map((u) => u.op),
+      isNamed: (v: Value) => varName.has(v),
+    };
+    const holders = new Map<string, Value[]>();
+    for (const [v, n] of [...varName, ...backArgName]) {
+      (holders.get(n) ?? holders.set(n, []).get(n)!).push(v);
+    }
+    for (const [n, vs] of holders) {
+      const t = varType.get(n);
+      if (t?.kind === 'int' && t.width === 32 && declaresBytePointer(vs, ir, { pointerGlobal, castsIntoGlobal })) {
+        varType.set(n, T.ptr(T.u(8)));
       }
     }
   }

@@ -48,6 +48,7 @@ const make = (compiler?: ArithCompilerFacts, readers?: Pick<PointerSpellingDeps,
     pointerGlobals: undefined,
     pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR', 'gPW']),
     wordLoadedGlobals: new Set(['gW', 'gW2', 'gB2', 'gB3', 'gPW']),
+    scalarGlobals: new Set(),
     varType: new Map<string, IrType>([
       ['i', T.s(32)],
       ['j', T.s(32)],
