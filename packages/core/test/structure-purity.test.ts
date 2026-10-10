@@ -113,8 +113,9 @@ test.skipIf(CORPUS.length === 0)('structuring does not mutate the function it re
 // everywhere. rank.ts structures one fn under every setting in turn, and the memo answers a later
 // setting's guard from a reset structured under an earlier one. So after a structuring under ANY
 // setting, the fn must read exactly as the next structuring under the same map reads it: under each
-// structure variation, the anchors and the follow, all of them at once, and under a map that declares
-// globals volatile, whose `declared` stamps every structuring re-derives from the map it is given.
+// structure variation, the anchors and the follow, each branch sense and sense-site mask, each
+// spelling switch, all of them at once, and under a map that declares globals volatile, whose
+// `declared` stamps every structuring re-derives from the map it is given.
 //
 // "Reads" is everything reachable from the fn (`canonical`), side tables included: `print` shows
 // neither `slotHomes`, `paramEvidence` nor `localObjects`, and structure() reads all three.
@@ -192,16 +193,27 @@ function canonical(root: unknown): string {
   return out.join(' ');
 }
 
-const ONE_AT_A_TIME: [string, StructureOptions][] = [
-  ...STRUCTURE_VARIATIONS.map((v): [string, StructureOptions] => [`/${v.name}`, v.options(true) ?? {}]),
-  ['anchorConstCopies', { anchorConstCopies: true }],
-  ['anchorLoopEntryConsts', { anchorLoopEntryConsts: true }],
-  ['followEarlyReturns', { followEarlyReturns: true }],
-];
-const SETTINGS: [string, StructureOptions][] = [
-  ...ONE_AT_A_TIME,
-  ['every setting at once', Object.assign({}, ...ONE_AT_A_TIME.map(([, o]) => o)) as StructureOptions],
-];
+/** Every setting `enumerateCandidates` structures one fn under within one memo, each away from the
+ *  default, with the senses read off the target's default sense as rank.ts reads them. */
+function settingsFor(defSense: boolean): [string, StructureOptions][] {
+  const oneAtATime: [string, StructureOptions][] = [
+    ...STRUCTURE_VARIATIONS.map((v): [string, StructureOptions] => [`/${v.name}`, v.options(true) ?? {}]),
+    ['anchorConstCopies', { anchorConstCopies: true }],
+    ['anchorLoopEntryConsts', { anchorLoopEntryConsts: true }],
+    ['followEarlyReturns', { followEarlyReturns: true }],
+    ['/flip-branch', { preserveDivergentBranchSense: !defSense, negateJoinedBranchSense: defSense }],
+    ['/flip-join', { preserveDivergentBranchSense: defSense, negateJoinedBranchSense: !defSense }],
+    ['/flip-branch/flip-join', { preserveDivergentBranchSense: !defSense, negateJoinedBranchSense: !defSense }],
+    ['/sense-255', { branchSenseFlipSites: new Set([0, 1, 2, 3, 4, 5, 6, 7]) }],
+    ['/no-bitfield', { spellBitfieldMembers: false }],
+    ['/no-ptr-elem', { spellPtrMemberElements: false }],
+    ['/flat-rank', { spellDeclaredSubscripts: false }],
+  ];
+  return [
+    ...oneAtATime,
+    ['every setting at once', Object.assign({}, ...oneAtATime.map(([, o]) => o)) as StructureOptions],
+  ];
+}
 
 test('structuring under any setting leaves the fn as the next structuring under its map reads it', () => {
   const tryStructure = (fn: Fn, o: StructureOptions): void => {
@@ -244,7 +256,7 @@ test('structuring under any setting leaves the fn as the next structuring under 
       stamped++;
     }
     checked.set(target, (checked.get(target) ?? 0) + 1);
-    for (const [label, setting] of SETTINGS) {
+    for (const [label, setting] of settingsFor(opts.preserveDivergentBranchSense ?? true)) {
       tryStructure(fn, { ...mapped, ...setting });
       if (canonical(fn) !== before) {
         defects.push(`${file}: the ${label} run changed the fn`);
