@@ -1827,26 +1827,144 @@ export interface StructureHooks {
  *  It rests on `structure()` not mutating `fn`, which `structure-purity.test.ts` pins.
  *
  *  SCOPE: refusals thrown by `structure()` itself. A decline can also come from `structureChecked`'s
- *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are. */
-function assertDefaultAccepts(fn: Fn, opts: StructureOptions, hooks: StructureHooks): void {
-  structure(
-    fn,
-    {
-      ...opts,
-      coalesceMergeNames: false,
-      freshParamMerge: false,
-      materializeJoinFeeds: false,
-      homeSharedAddresses: false,
-      homeLoopExprs: false,
-      homeDerivedReads: false,
-      homeMergeFeeds: false,
-      homeEscapingExtensions: false,
-      anchorConstCopies: false,
-      anchorLoopEntryConsts: false,
-      followEarlyReturns: false,
-    },
-    hooks,
-  );
+ *  boundary contracts, which run OUTSIDE it — `rank.ts` closes that half, where the contracts are.
+ *
+ *  With a `memo`, a reset already structured for this fn is answered from the memo. */
+function assertDefaultAccepts(
+  fn: Fn,
+  opts: StructureOptions,
+  hooks: StructureHooks,
+  memo: DefaultAcceptsMemo | undefined,
+): void {
+  const reset: StructureOptions = {
+    ...opts,
+    coalesceMergeNames: false,
+    freshParamMerge: false,
+    materializeJoinFeeds: false,
+    homeSharedAddresses: false,
+    homeLoopExprs: false,
+    homeDerivedReads: false,
+    homeMergeFeeds: false,
+    homeEscapingExtensions: false,
+    anchorConstCopies: false,
+    anchorLoopEntryConsts: false,
+    followEarlyReturns: false,
+  };
+  if (memo === undefined) {
+    structure(fn, reset, hooks);
+  } else {
+    memo.check(fn, hooks, reset, () => structure(fn, reset, hooks));
+  }
+}
+
+/** A set or array of at most this many primitives is keyed by its members. Keying costs a pass over
+ *  the members on every structuring, and the maps and sets a project hands every function (`symbols`,
+ *  `pointerGlobals`) are as large as the project, so a bigger one is keyed by identity. */
+const MEMO_CONTENT_KEY_LIMIT = 64;
+
+/** What `assertDefaultAccepts` learned about ONE fn: for each reset it structured, whether
+ *  `structure()` accepted it or the error it threw. Settings that differ only in the flags the
+ *  guard resets share one reset, so an enumeration that structures a fn under many settings asks
+ *  the same question of it many times.
+ *
+ *  VALID WHILE THE FN AND THE OPTIONS' CONTAINERS ARE UNCHANGED. A fn rewritten in place
+ *  (`sinkStoreTails`) needs a new memo, and a `Map`, an object, or a set or array over
+ *  `MEMO_CONTENT_KEY_LIMIT` members is keyed by identity, so one mutated between two calls would
+ *  share a key with its old contents. The `declared` stamps are not a change: `structure()`
+ *  re-derives them from the options' map before it reaches the guard, so the reset run finds them as
+ *  the first run of the same key did.
+ *
+ *  Only a call with no hooks is answered: a hook can change the outcome, or must observe the run.
+ *  An option holding a function or a symbol has no key, and its reset always runs. */
+export class DefaultAcceptsMemo {
+  readonly #outcomes = new Map<string, { error: unknown } | 'accepted'>();
+  readonly #ids = new WeakMap<object, number>();
+  #nextId = 0;
+
+  constructor(readonly fn: Fn) {}
+
+  /** Returns or throws what `run` did for this reset, running it only when the memo has no
+   *  outcome for it yet. */
+  check(fn: Fn, hooks: StructureHooks, reset: StructureOptions, run: () => void): void {
+    if (fn !== this.fn) {
+      throw new Error('DefaultAcceptsMemo: asked about a fn it was not made for');
+    }
+    const key = Object.values(hooks).every((h) => h === undefined) ? this.#keyOf(reset) : undefined;
+    if (key === undefined) {
+      run();
+      return;
+    }
+    const known = this.#outcomes.get(key);
+    if (known === 'accepted') {
+      return;
+    }
+    if (known !== undefined) {
+      throw known.error;
+    }
+    try {
+      run();
+    } catch (error) {
+      this.#outcomes.set(key, { error });
+      throw error;
+    }
+    this.#outcomes.set(key, 'accepted');
+  }
+
+  /** Every option that is set, by name and value; `undefined` when one has no key. */
+  #keyOf(opts: StructureOptions): string | undefined {
+    const parts: string[] = [];
+    for (const name of Object.keys(opts).sort()) {
+      const value: unknown = (opts as Record<string, unknown>)[name];
+      if (value === undefined) {
+        continue;
+      }
+      const part = this.#valueKey(value);
+      if (part === undefined) {
+        return undefined;
+      }
+      parts.push(`${name}=${part}`);
+    }
+    return parts.join(';');
+  }
+
+  /** A prefix-free spelling of one value, so two option sets share a key only when every value
+   *  agrees. */
+  #valueKey(value: unknown): string | undefined {
+    switch (typeof value) {
+      case 'undefined':
+        return 'u';
+      case 'boolean':
+        return value ? 't' : 'f';
+      case 'number':
+        return Object.is(value, -0) ? 'n-0' : `n${value}`;
+      case 'bigint':
+        return `b${value}`;
+      case 'string':
+        return JSON.stringify(value);
+      case 'function':
+      case 'symbol':
+        return undefined;
+    }
+    if (value === null) {
+      return 'null';
+    }
+    const members = value instanceof Set ? [...value] : Array.isArray(value) ? value : undefined;
+    if (
+      members !== undefined &&
+      members.length <= MEMO_CONTENT_KEY_LIMIT &&
+      members.every((m) => m === null || typeof m !== 'object')
+    ) {
+      const keys = members.map((m) => this.#valueKey(m));
+      return keys.every((k) => k !== undefined) ? `${value instanceof Set ? 'S' : 'A'}[${keys.join(',')}]` : undefined;
+    }
+    const container = value as object;
+    let id = this.#ids.get(container);
+    if (id === undefined) {
+      id = this.#nextId++;
+      this.#ids.set(container, id);
+    }
+    return `#${id}`;
+  }
 }
 
 /** What {@link earlyReturnArm} reads beyond its arguments: block dominance and forward
@@ -2002,7 +2120,12 @@ function carrierSign(t: IrType | undefined): boolean | undefined {
   return t?.kind === 'int' && t.width < 32 ? t.signed : undefined;
 }
 
-export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureHooks = {}): SFn {
+export function structure(
+  fn: Fn,
+  opts: StructureOptions = {},
+  hooks: StructureHooks = {},
+  memo?: DefaultAcceptsMemo,
+): SFn {
   const {
     returnsVoid = false,
     coalesceLoopInit = false,
@@ -2129,7 +2252,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     anchorConstCopies ||
     followEarlyReturns
   ) {
-    assertDefaultAccepts(fn, opts, hooks);
+    assertDefaultAccepts(fn, opts, hooks, memo);
   }
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);

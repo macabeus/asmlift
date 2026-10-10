@@ -16,7 +16,9 @@ import { frontendFor } from '../src/frontend/registry';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
-import { structure } from '../src/structure/structure';
+import { STRUCTURE_VARIATIONS } from '../src/rank-variations';
+import { type StructureOptions, structure } from '../src/structure/structure';
+import type { SymbolInfo } from '../src/symbols';
 import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
@@ -104,4 +106,85 @@ test.skipIf(CORPUS.length === 0)('structuring does not mutate the function it re
   expect(defects).toEqual([]);
   // Not vacuous: the test only runs with the corpus present (skipIf above), so it must reach it.
   expect(checked).toBeGreaterThan(20);
+});
+
+// WHAT THE DEFAULT-ACCEPTS MEMO RESTS ON (`DefaultAcceptsMemo`), over the committed corpus so it runs
+// everywhere. rank.ts structures one fn under every setting in turn, and the memo answers a later
+// setting's guard from a reset structured under an earlier one. So after a structuring under ANY
+// setting, the fn must read exactly as the next structuring under the same map reads it: under each
+// structure variation, the anchors and the follow, and under a map that declares globals volatile,
+// whose `declared` stamps every structuring re-derives from the map it is given.
+const COMMITTED = readdirSync(join(__dirname, 'corpus'))
+  .filter((f) => f.startsWith('agbcc-') && f.endsWith('.s'))
+  .map((f) => readFileSync(join(__dirname, 'corpus', f), 'utf8'))
+  .map((asm) => ({ name: /\.globl\s+(\w+)/.exec(asm)?.[1], asm }))
+  .filter((c): c is { name: string; asm: string } => c.name !== undefined);
+
+const SETTINGS: [string, StructureOptions][] = [
+  ...STRUCTURE_VARIATIONS.map((v): [string, StructureOptions] => [`/${v.name}`, v.options(true) ?? {}]),
+  ['anchorConstCopies', { anchorConstCopies: true }],
+  ['anchorLoopEntryConsts', { anchorLoopEntryConsts: true }],
+  ['followEarlyReturns', { followEarlyReturns: true }],
+];
+
+test('structuring under any setting leaves the fn as the next structuring under its map reads it', () => {
+  const opts = structureOptionsFor(ARMV4T_AGBCC, false);
+  const tryStructure = (fn: Parameters<typeof structure>[0], o: StructureOptions): void => {
+    try {
+      structure(fn, o);
+    } catch {
+      /* a decline is a fine outcome; what it leaves on the fn is the subject */
+    }
+  };
+  let checked = 0;
+  let stamped = 0;
+  const defects: string[] = [];
+  for (const { name, asm } of COMMITTED) {
+    let fn;
+    try {
+      fn = frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, undefined);
+      verify(fn);
+      applyIdiomPatterns(fn, ARMV4T_AGBCC);
+      raiseRecovered(fn, ARMV4T_AGBCC);
+    } catch {
+      continue; // a frontend gap is not this file's subject
+    }
+    const unmapped = print(fn);
+    const globals = new Set<string>();
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'gaddr') {
+          globals.add(op.attrs.sym as string);
+        }
+      }
+    }
+    const symbols = new Map<string, SymbolInfo>(
+      [...globals].map((g) => [g, { name: g, kind: 'data', volatile: true }]),
+    );
+    const mapped = { ...opts, symbols };
+    tryStructure(fn, mapped);
+    const before = print(fn);
+    if (before !== unmapped) {
+      stamped++;
+    }
+    checked++;
+    for (const [label, setting] of SETTINGS) {
+      tryStructure(fn, { ...mapped, ...setting });
+      if (print(fn) !== before) {
+        defects.push(`${name}: the ${label} run changed the fn`);
+      }
+    }
+    tryStructure(fn, opts);
+    if (print(fn) !== unmapped) {
+      defects.push(`${name}: a run with no map kept a stamp of the map before it`);
+    }
+    tryStructure(fn, mapped);
+    if (print(fn) !== before) {
+      defects.push(`${name}: a run with the map after one with none changed the fn`);
+    }
+  }
+  expect(defects).toEqual([]);
+  // Not vacuous: most of the corpus lifts, and some of it reads a global the map stamps.
+  expect(checked).toBeGreaterThan(30);
+  expect(stamped).toBeGreaterThan(5);
 });
