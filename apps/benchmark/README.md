@@ -419,7 +419,13 @@ user checkout when present, and each project's preparation recipe runs
 NON-bench-owned checkouts (env override or sibling WORKSPACE) are only ever reported — setup
 never mutates them.
 
-Host prerequisites (macOS; verified empirically):
+Host prerequisites. On Linux (Ubuntu 24.04, verified empirically): `build-essential`, `gmake`
+(Ubuntu's `make` package provides it), `wget`, `libpng-dev` (gbagfx in pokeemerald, sa3 and kleod),
+`gcc-arm-none-eabi` or the Arm GNU Toolchain on PATH, `binutils-mips-linux-gnu`, `python3-venv`
+and `python3-pip` (every venv step dies without `ensurepip`), `ninja`, and Docker with the user in
+the `docker` group — the `asmlift-ppc` image must be built with `--platform linux/386` (see
+`packages/toolchains/README.md`). No wine and no Rosetta: wibo and the x86_64 recomp binaries run
+natively. On macOS (verified empirically):
 
 - Xcode CLT (`/usr/bin/cc` — host tools build with `/usr/bin` ahead of homebrew, several
   projects' host tools miscompile under homebrew gcc), plus homebrew `gmake`, `wget`, `libpng`
@@ -427,7 +433,8 @@ Host prerequisites (macOS; verified empirically):
   its ROM through `arm-none-eabi-cpp` as well: its headers act on `__APPLE__`, which every
   host preprocessor here defines
 - any python3
-- big-endian `mips-linux-gnu` binutils under `/opt/cross` (af), and Rosetta
+- big-endian `mips-linux-gnu` binutils (af): under `/opt/cross` on macOS, or anywhere on PATH on
+  Linux (`apt install binutils-mips-linux-gnu`); and, on Apple silicon only, Rosetta
   (`softwareupdate --install-rosetta` — af's IDO recomp and marioparty3's KMC gcc are x86_64)
 - Docker (snowboardkids2 builds inside a linux/amd64 container; the `asmlift-elf` DWARF
   sidecar targets also fall back to Docker when no host `mips-linux-gnu-gcc` exists)

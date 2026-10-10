@@ -22,7 +22,7 @@ export function ppcDockerGate(tag: string, mwcc: MwccToolchainId): boolean {
   if (!ok) {
     console.warn(
       `[${tag}] Docker/${mwcc} not available — skipping CodeWarrior fixtures. ` +
-        `(image is a local build: docker build -t asmlift-ppc:latest packages/toolchains/ppc-docker; ` +
+        `(image is a local build: docker build --platform linux/386 -t asmlift-ppc:latest packages/toolchains/ppc-docker; ` +
         `compiler dirs: $ASMLIFT_MWCC_ROOT/${mwcc})`,
     );
   }
