@@ -1,7 +1,7 @@
-// A row's candidate compiles on worker threads (src/eval/compile-pool.ts): a thread compiles what the
-// ranked pass's own compiler compiles, a rejection comes back as the rejection it was, and the
-// threads' candidate-cache counters reach this thread's; a thread that dies fails the pool. Real threads and a real agbcc row, so it
-// needs agbcc and skips without it.
+// A row's candidate compiles in worker processes (src/eval/compile-pool.ts): a worker compiles what
+// the ranked pass's own compiler compiles, a rejection comes back as the rejection it was, and the
+// workers' candidate-cache counters reach this process's; a worker that dies fails the pool. Real
+// workers and a real agbcc row, so it needs agbcc and skips without it.
 import { absorbCacheStats, cacheStats } from '@asmlift/cli/candcache';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { agbccAvailable } from '@asmlift/toolchains';
@@ -22,8 +22,8 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     const pool = compilePool({ tier: 'synthetic', id: c.id, sym: 'divc' });
     try {
       const compile = pool.worker();
-      const viaThread = await compile(source, 'divc', 'c');
-      expect(readFileSync(viaThread)).toEqual(readFileSync(await direct(source, 'divc', 'c')));
+      const viaWorker = await compile(source, 'divc', 'c');
+      expect(readFileSync(viaWorker)).toEqual(readFileSync(await direct(source, 'divc', 'c')));
       const refused = await compile('s32 divc(s32 a0) { return a0 +; }\n', 'divc', 'c').catch((e: unknown) => e);
       expect(refused).toBeInstanceOf(CompilerRejection);
       expect((refused as CompilerRejection).diagnostic).toMatch(/error/i);
@@ -32,15 +32,15 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     }
   }, 120_000);
 
-  // The real tier ranks with the project-context compile, so a thread must rebuild the row's own
+  // The real tier ranks with the project-context compile, so a worker must rebuild the row's own
   // compiler rather than the synthetic tier's.
   test('compiles a real row in its project context, as the row compiler does', async () => {
     const [c] = realCases({ only: 'DivideQ8' }).filter((x) => x.id === 'kleod:DivideQ8:agbcc');
     const source = 's32 DivideQ8(s16 a0, u32 a1) {\n    return (s16)((a0 << 8) / (s16)a1);\n}\n';
     const pool = compilePool({ tier: 'real', id: c.id, sym: c.sym });
     try {
-      const viaThread = await pool.worker()(source, c.sym, 'c');
-      expect(readFileSync(viaThread)).toEqual(
+      const viaWorker = await pool.worker()(source, c.sym, 'c');
+      expect(readFileSync(viaWorker)).toEqual(
         readFileSync(await rowCompiler(c.toolchain, c.codegen, c.compile)(source, c.sym, 'c')),
       );
     } finally {
@@ -48,19 +48,19 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     }
   }, 120_000);
 
-  test('a thread that dies fails its compiles and the pool, never a candidate alone', async () => {
+  test('a worker that dies fails its compiles and the pool, never a candidate alone', async () => {
     const pool = compilePool({ tier: 'synthetic', id: 'synthetic:nosuchrow:agbcc', sym: 'nosuchrow' });
     const refused = await pool
       .worker()('int nosuchrow;', 'nosuchrow', 'c')
       .catch((e: unknown) => e);
     expect(refused).not.toBeInstanceOf(CompilerRejection);
-    expect(String(refused)).toMatch(/compile thread for synthetic:nosuchrow:agbcc died/);
+    expect(String(refused)).toMatch(/compile worker for synthetic:nosuchrow:agbcc died/);
     await expect(pool.close()).rejects.toThrow(/died/);
   }, 120_000);
 
   // …and the row fails its evaluation rather than publishing the crash as every candidate's refusal.
-  // dmascope's fan is past PARALLEL_FAN, so its compiles go to threads.
-  test('a big fan whose threads die fails the row instead of publishing a noncompile', async () => {
+  // dmascope's fan is past PARALLEL_FAN, so its compiles go to workers.
+  test('a big fan whose workers die fails the row instead of publishing a noncompile', async () => {
     const [c] = syntheticCases({ only: 'dmascope', toolchain: 'agbcc' }).filter(
       (x) => x.id === 'synthetic:dmascope:agbcc',
     );
@@ -71,13 +71,13 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     );
   }, 300_000);
 
-  test('adds another thread counters to this one', () => {
+  test('adds another worker counters to this one', () => {
     const before = cacheStats().hit ?? 0;
     absorbCacheStats({ hit: 3 });
     expect(cacheStats().hit).toBe(before + 3);
   });
 
-  test('refuses a thread that ended with an audit still withheld', () => {
+  test('refuses a worker that ended with an audit still withheld', () => {
     expect(() => absorbCacheStats({ hit: 1, sampledPending: 2 })).toThrow(/2 sampled audit/);
   });
 });
