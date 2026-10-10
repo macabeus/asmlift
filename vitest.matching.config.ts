@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 
 import { hostRunsI386Elf } from './packages/toolchains/src/native';
 
@@ -20,8 +20,12 @@ export default defineConfig({
     include: ['packages/cli/test/matching/**/*.test.ts'],
     // native-parity compares the native and container paths of the 32-bit toolchains, so it has
     // nothing to compare on a host that runs no i386 ELF — it is not collected there, rather than
-    // collected and skipped, which this suite's gate would rightly count as a failure
-    exclude: hostRunsI386Elf() ? [] : ['packages/cli/test/matching/native-parity.test.ts'],
+    // collected and skipped, which this suite's gate would rightly count as a failure (vitest's own
+    // default exclusions are kept: setting `exclude` replaces them)
+    exclude: [
+      ...configDefaults.exclude,
+      ...(hostRunsI386Elf() ? [] : ['packages/cli/test/matching/native-parity.test.ts']),
+    ],
     // refuse loudly (naming the remedy) when the native agbcc/IDO toolchains are absent,
     // instead of failing cryptically once per fixture — see the file's header comment
     // + candcache-gate.ts: this suite may never be SERVED a cached candidate object, so it forces
