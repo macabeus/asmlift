@@ -1,7 +1,7 @@
 // One compile worker process of a row's ranked pass (compile-pool.ts): it rebuilds the row's case and
 // compiles each candidate it is sent with the compiler the ranked pass itself uses, in its own small
 // process. The pool sends a worker its next candidate only once this one's reply is back.
-import { cacheStats } from '@asmlift/cli/candcache';
+import { cacheStats, neverPrune } from '@asmlift/cli/candcache';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 
 import { realCases } from '../cases/real';
@@ -10,6 +10,9 @@ import { rowCompiler } from './asmlift';
 import type { CompileReply, CompileRequest, RowRef } from './compile-pool';
 
 const row = JSON.parse(process.argv[2]) as RowRef;
+// the shard that started this worker prunes the candidate store; a worker walking it too would pay
+// a whole-store walk per pooled row
+neverPrune();
 const c = (row.tier === 'real' ? realCases({ only: row.sym }) : syntheticCases({ only: row.sym })).find(
   (x) => x.id === row.id,
 );

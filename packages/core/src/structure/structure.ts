@@ -6781,8 +6781,8 @@ function calledOnly(
   }
   // Look up the few names this body calls, not every entry of the table: a project's table holds
   // every function its ELF declares (thousands for pokeemerald), and this runs on each structuring
-  // of each candidate — the whole-table filter was 80% of a real-tier row's CPU. The result keeps
-  // the TABLE's key order, as the filter did, because the tree is keyed by its whole text.
+  // of each candidate. The result keeps the TABLE's key order, as a whole-table filter would,
+  // because the tree is keyed by its whole text.
   const of = <T>(table: Readonly<Record<string, T>> | undefined): Record<string, T> | undefined => {
     if (table === undefined || callees.size === 0) {
       return undefined;

@@ -85,9 +85,11 @@ readers, none of which compiles anything:
   ```
 
   That `rank=` IS what `--only` on that row will cost you, up to target build and process start.
-  A fan of 500 candidates or more compiles on four threads (`PARALLEL_FAN`, `ROW_COMPILE_WORKERS`
-  in `apps/benchmark/src/eval/asmlift.ts`), so its `rank=` is wall over those threads — a quarter
-  of its compile time or more, depending on what else the machine is running.
+  A fan of 500 candidates or more compiles on four worker processes (`PARALLEL_FAN`,
+  `ROW_COMPILE_WORKERS` in `apps/benchmark/src/eval/asmlift.ts`), so its `rank=` is wall over those
+  workers — a quarter of its compile time or more, depending on what else the machine is running.
+  On Linux a fan of 16 or more also leaves the shard, for one worker (`workerFanFor`), so its
+  `rank=` includes that worker's start.
   Use it before you launch a scoped run, not after. A `noncompile` row may carry
   `fanNotCompiled` — its fan was declared stillborn (core `stillborn.ts`) and only each signedness
   half's default and one probe per variation were compiled — and prints as `fan=30240 (35 compiled)`: `fanSize` is

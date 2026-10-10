@@ -3,10 +3,12 @@
 // `ASMLIFT_NATIVE=off` — and compares:
 //   • CodeWarrior: the objects, byte for byte. wibo and mwcceppc.exe are the same files on both
 //     paths, and mwcceppc records no build path.
-//   • the two GCC 2.7.2 builds: `objdump -d -r` of the objects, every instruction and relocation.
-//     Not the bytes: gcc records the absolute source path in the object's file symbol, which is
-//     `/tmp/…` on the host and `/host-tmp/…` in the pooled container — a symbol-table string no
-//     scorer reads.
+//   • the two GCC 2.7.2 builds: every instruction (`objdump -d`), every relocation of every section
+//     (`objdump -r`, the jump table's in `.rodata` included), and the bytes of the data sections
+//     (`objdump -s` of `.rodata` and `.data`). Not the whole object: gcc records the absolute source
+//     path in its file symbol, `/tmp/…` on the host and `/host-tmp/…` in the pooled container — a
+//     symbol-table string no scorer reads.
+// A negative control proves the comparison can fail: one source at -O2 and at -O0 must differ.
 // Each case runs only where BOTH paths can (an x86 Linux host with the binaries, and Docker), and
 // says so when it cannot.
 import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -96,11 +98,15 @@ function both(prefix: string, compile: (dir: string) => void): { native: string;
   return out;
 }
 
-/** `objdump -d -r` without its header, which names the object's own path. */
+/** Code, every relocation, and the data sections' bytes — each dump without its header line, which
+ *  names the object's own path. */
 function code(objdump: string, obj: string): string {
-  const r = run(objdump, ['-d', '-r', obj]);
-  expect(r.status).toBe(0);
-  return r.stdout.replace(/^.*file format.*$/m, '');
+  const dumps = [['-d'], ['-r'], ['-s', '-j', '.rodata', '-j', '.data']].map((args) => {
+    const r = run(objdump, [...args, obj]);
+    expect(r.status).toBe(0);
+    return r.stdout.replace(/^.*file format.*$/m, '');
+  });
+  return dumps.join('\n');
 }
 
 describe('native and container compiles emit the same code', () => {
@@ -109,7 +115,19 @@ describe('native and container compiles emit the same code', () => {
     const o = both('asmlift-parity-kmc', (dir) => kmcCompile(dir, 'p.c', 'p.o', flags));
     const native = code(GCC_KMC_TOOLCHAIN.objdump, o.native);
     expect(native).toContain('<pf>:');
+    expect(native).toContain('RELOCATION RECORDS FOR [.rodata]'); // the jump table is compared
     expect(native).toBe(code(GCC_KMC_TOOLCHAIN.objdump, o.docker));
+  });
+
+  test.runIf(canNative(kmcNative))('the comparison can fail: -O2 and -O0 differ', () => {
+    process.env.ASMLIFT_NATIVE = 'on';
+    const objs = (['-O2', '-O0'] as const).map((opt) => {
+      const dir = mkShareableTmp(`asmlift-parity-neg${opt}-`);
+      writeFileSync(join(dir, 'p.c'), C_TYPEDEFS + SOURCE);
+      kmcCompile(dir, 'p.c', 'p.o', ['-mips3', '-G0', opt]);
+      return join(dir, 'p.o');
+    });
+    expect(code(GCC_KMC_TOOLCHAIN.objdump, objs[0])).not.toBe(code(GCC_KMC_TOOLCHAIN.objdump, objs[1]));
   });
 
   test.runIf(gate('gcc272', canNative(gcc272Native), dockerAvailable()))('GCC 2.7.2', () => {

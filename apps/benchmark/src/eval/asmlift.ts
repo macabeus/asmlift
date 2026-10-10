@@ -124,15 +124,22 @@ export function asmliftFan(
  *  count is what the other shards leave idle once they reach the tier's cheap tail. */
 export const ROW_COMPILE_WORKERS = 4;
 export const PARALLEL_FAN = 500;
-/** How big a fan must be for its compiles to leave the shard at all, into ONE worker process: a
- *  spawn from the shard costs ~50 ms against ~3 ms from a worker (compile-pool.ts), and a worker's
- *  start (~1.5 s: a module load and the row's case rebuilt) is repaid by ~10 candidates. Below it
- *  the shard compiles the row itself, as a one-worker ranking. */
+/** How big a fan must be for its compiles to leave the shard at all, into ONE worker process, on a
+ *  host where that pays: on Linux every spawn forks the shard and costs what the shard weighs, and
+ *  from a small worker it does not (compile-pool.ts), so a worker's start — a module load and the
+ *  row's case rebuilt — is repaid within a few dozen candidates. Below it the shard compiles the row
+ *  itself, as a one-worker ranking. */
 export const WORKER_FAN = 16;
 
+/** WORKER_FAN where the band pays, PARALLEL_FAN elsewhere: macOS libuv starts children with
+ *  posix_spawn, whose cost does not grow with the parent, so a mid-sized fan there would pay a
+ *  worker's start for nothing. Exported so the choice is testable on either host. */
+export const workerFanFor = (platform: string = process.platform): number =>
+  platform === 'linux' ? WORKER_FAN : PARALLEL_FAN;
+
 /** The ranked pass the harness publishes: `asmliftFan`'s ranking, with a big fan's compiles spread
- *  over `ROW_COMPILE_WORKERS` worker processes (compile-pool.ts) and a mid-sized fan's moved into
- *  one. The ranking orders the same memoized scores at any worker count, so every published field
+ *  over `ROW_COMPILE_WORKERS` worker processes (compile-pool.ts) and, on Linux, a mid-sized fan's
+ *  moved into one. The ranking orders the same memoized scores at any worker count, so every published field
  *  is the same; only `rankSeconds` depends on the workers. */
 async function rankRow(
   codegen: ResolvedTarget,
@@ -148,7 +155,7 @@ async function rankRow(
   try {
     return await decompileRankedParallel(sym, asm, codegen.target, obj, {
       ...opts,
-      jobs: (fan) => ((pooled = fan >= WORKER_FAN) && fan >= PARALLEL_FAN ? ROW_COMPILE_WORKERS : 1),
+      jobs: (fan) => ((pooled = fan >= workerFanFor()) && fan >= PARALLEL_FAN ? ROW_COMPILE_WORKERS : 1),
       worker: () =>
         pooled
           ? pool.worker()

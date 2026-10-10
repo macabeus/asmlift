@@ -4,8 +4,7 @@
 //
 // WHY. Those binaries are 32-bit x86 Linux ELFs: statically linked gcc drivers, and the static
 // `wibo` release. An x86 Linux host executes them as they are, so the container adds nothing but
-// its round trip: a pooled `docker exec` costs ~55 ms on a laptop where the compile itself costs
-// ~6 ms, and a candidate fan is hundreds of them. macOS (and any non-x86 host) cannot run a Linux
+// its round trip, which costs several times the compile itself, once per candidate of a fan. macOS (and any non-x86 host) cannot run a Linux
 // ELF at all, which is what the Docker path is for — it stays, as the fallback.
 //
 // WHAT IS EQUAL. The compiler binaries and their inputs are the same files either way, so the

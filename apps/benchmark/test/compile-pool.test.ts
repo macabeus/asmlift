@@ -11,7 +11,7 @@ import { describe, expect, test } from 'vitest';
 import { realCases } from '../src/cases/real';
 import { syntheticCases } from '../src/cases/synthetic';
 import { benchCompilerFor } from '../src/decomp-config';
-import { rowCompiler, runAsmlift } from '../src/eval/asmlift';
+import { PARALLEL_FAN, WORKER_FAN, rowCompiler, runAsmlift, workerFanFor } from '../src/eval/asmlift';
 import { CompilePoolDied, compilePool } from '../src/eval/compile-pool';
 
 describe.skipIf(!agbccAvailable())('a row compile pool', () => {
@@ -58,6 +58,14 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
     await expect(pool.close()).rejects.toThrow(/died/);
   }, 120_000);
 
+  // A worker that dies while `close()` waits for its stats — here it fails at start and no compile
+  // ever waits on it — settles the wait instead of leaving `close()` open forever.
+  test('close() settles when a worker dies with its stats outstanding', async () => {
+    const pool = compilePool({ tier: 'synthetic', id: 'synthetic:nosuchrow:agbcc', sym: 'nosuchrow' });
+    pool.worker();
+    await expect(pool.close()).rejects.toThrow(/died/);
+  }, 60_000);
+
   // …and the row fails its evaluation rather than publishing the crash as every candidate's refusal.
   // dmascope's fan is past PARALLEL_FAN, so its compiles go to workers.
   test('a big fan whose workers die fails the row instead of publishing a noncompile', async () => {
@@ -79,5 +87,17 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
 
   test('refuses a worker that ended with an audit still withheld', () => {
     expect(() => absorbCacheStats({ hit: 1, sampledPending: 2 })).toThrow(/2 sampled audit/);
+  });
+});
+
+// Toolchain-free: which fans leave the shard. On Linux a spawn forks the shard, so a mid-sized fan
+// goes to one worker; on macOS a spawn costs the same from either, so only a big fan does.
+describe('the worker band', () => {
+  test.each([
+    ['linux', WORKER_FAN],
+    ['darwin', PARALLEL_FAN],
+    ['win32', PARALLEL_FAN],
+  ] as const)('%s → fans of %i or more', (platform, fan) => {
+    expect(workerFanFor(platform)).toBe(fan);
   });
 });
