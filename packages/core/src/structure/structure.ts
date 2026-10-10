@@ -1682,7 +1682,7 @@ export interface StructureOptions extends ArithCompilerFacts {
   // compiles to the unfused pair the object holds. A compiler opts in; the target says which
   // (`compilerBehaviors.contractsFloatProducts`).
   contractsFloatProducts?: boolean;
-  // Declare `u8 *` a temp that only holds a declared pointer global's value and is the base of a
+  // Declare `u8 *` a temp that only holds a pointer global's value and is the base of a
   // sum with a variable addend plus a constant (pointer-spelling.ts `declaresBytePointer` says
   // when), where this compiler compiles the byte-pointer sum as the source's
   // (`compilerBehaviors.keepsPointerSumAddend`).
@@ -2716,7 +2716,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // integer, and through which cast. `varType` and `varName` are read live: the naming below is
   // still declaring temps.
   const {
-    declaredShape,
+    pointerGlobal,
     needsIntSpelling,
     intoDeclaredTemp,
     intoPtrCell,
@@ -3440,7 +3440,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
   }
 
-  // ── a temp holding a declared pointer global's value, summed with `x + K`, is a byte pointer ──
+  // ── a temp holding a pointer global's value, summed with `x + K`, is a byte pointer ──────────
   // (pointer-spelling.ts `declaresBytePointer` says when.) Decided over every value under the name
   // once the names are settled, so a name that also holds anything else keeps its integer.
   if (keepsPointerSumAddend) {
@@ -3463,7 +3463,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     for (const [n, vs] of holders) {
       const t = varType.get(n);
-      if (t?.kind === 'int' && t.width === 32 && declaresBytePointer(vs, ir, declaredShape)) {
+      if (t?.kind === 'int' && t.width === 32 && declaresBytePointer(vs, ir, pointerGlobal)) {
         varType.set(n, T.ptr(T.u(8)));
       }
     }

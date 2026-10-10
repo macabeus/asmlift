@@ -516,7 +516,7 @@ describe('arith: a map-declared byte sum right of an integer', () => {
   });
 });
 
-describe('holdsPointerWord: a value that only ever holds a declared pointer global', () => {
+describe('holdsPointerWord: a value that only ever holds a pointer global', () => {
   // The IR around the value: each op's results map back to it, and each block parameter to the
   // values its in-edges pass.
   const defs = new Map<Value, Op>();
@@ -539,12 +539,20 @@ describe('holdsPointerWord: a value that only ever holds a declared pointer glob
     ins.set(p, args);
     return p;
   };
-  const shape = make({ map: [ptrInfo('gP'), u16Info('gS')], pointerGlobals: ['gRaw'] }).declaredShape;
-  const holds = (x: Value) => holdsPointerWord(x, ir, shape);
+  const pointerGlobal = make({
+    map: [ptrInfo('gP'), u16Info('gS')],
+    pointerGlobals: ['gRaw'],
+    pointerLoaded: ['gL', 'gS'],
+  }).pointerGlobal;
+  const holds = (x: Value) => holdsPointerWord(x, ir, pointerGlobal);
 
   test("holds a word load at offset 0 of a global the map declares a pointer, or a `pointerGlobals` one's", () => {
     expect(holds(load('gP'))).toBe(true);
     expect(holds(load('gRaw'))).toBe(true);
+  });
+
+  test('holds a global no declaration types that the IR loads as a pointer', () => {
+    expect(holds(load('gL'))).toBe(true);
   });
 
   test('holds a merge every in-edge of which passes one, through a loop back to itself', () => {
@@ -554,7 +562,7 @@ describe('holdsPointerWord: a value that only ever holds a declared pointer glob
     expect(holds(loop)).toBe(true);
   });
 
-  test('does not hold a global whose declared shape is not a pointer, or one nothing declares', () => {
+  test('does not hold a global whose declared shape is not a pointer, or one nothing declares or loads as a pointer', () => {
     expect(holds(load('gS'))).toBe(false);
     expect(holds(load('gW'))).toBe(false);
   });
@@ -601,8 +609,8 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
   const k = (value: number): Value => op('const', [], { value });
   const x = (): Value => mkValue(T.u(32));
   const plusK = (): Value => op('add', [op('shl', [x()], { imm: 2 }), k(2672)]);
-  const shape = make({ map: [ptrInfo('gP')] }).declaredShape;
-  const declares = (...values: Value[]) => declaresBytePointer(values, ir, shape);
+  const pointerGlobal = make({ map: [ptrInfo('gP')] }).pointerGlobal;
+  const declares = (...values: Value[]) => declaresBytePointer(values, ir, pointerGlobal);
   const scratch = (): Value => op('load', [mkValue(T.ptr(T.s(32)))], { off: 0, width: 4, signed: false });
 
   test('declares the base of a sum with a constant addend, `t + (x + K)`', () => {
@@ -675,7 +683,7 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     op('add', [t, op('add', [op('shl', [x()], { imm: 2 }), n])]);
     let reads = 0;
     const counted = { ...ir, defOf: (v: Value) => (reads++, ir.defOf(v)) };
-    expect(declaresBytePointer([t], counted, shape)).toBe(true);
+    expect(declaresBytePointer([t], counted, pointerGlobal)).toBe(true);
     expect(reads).toBeLessThan(200);
   });
 

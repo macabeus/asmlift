@@ -405,9 +405,8 @@ const ROW_TESTS = ARITH_ROWS.map((row) => ({
 }));
 
 export interface PointerSpelling {
-  /** The declared shape of a global as the pointer-value rules read it: the map's, or `'pointer'`
-   *  for a `pointerGlobals` name. */
-  declaredShape(name: string): SymbolInfo['shape'];
+  /** Whether a global's value is a POINTER VALUE, as every rule here reads it (`nameFacts`). */
+  pointerGlobal(name: string): boolean;
   needsIntSpelling(x: Expr): boolean;
   intoDeclaredTemp(name: string, value: Expr): Expr;
   intoPtrCell(lval: Expr, value: Expr): Expr;
@@ -855,7 +854,9 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return isPtr ? pointerCellValue(value) : value;
   };
 
-  return { declaredShape, needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
+  const pointerGlobal = (name: string): boolean => nameFacts(name).pointer;
+
+  return { pointerGlobal, needsIntSpelling, intoDeclaredTemp, intoPtrCell, arith, roleOf };
 }
 
 /** The IR around a value that `holdsPointerWord` and `declaresBytePointer` read. */
@@ -867,20 +868,26 @@ export interface PointerWordIr {
   usesOf(v: Value): readonly Op[];
 }
 
-/** Whether `v` only ever holds the value of a pointer cell a declaration types: a whole-word load
- *  at offset 0 of a global whose declared shape is `'pointer'`, or a block parameter every in-edge
- *  value of which is one.
+/** Whether `v` only ever holds a pointer global's value: a whole-word load at offset 0 of a global
+ *  `pointerGlobal` says is a pointer value (`PointerSpelling.pointerGlobal`), or a block parameter
+ *  every in-edge value of which is one.
  *
  *  A temp holding such a value may be declared `u8 *` where the IR types it an integer
  *  (`declaresBytePointer` says when), on a compiler whose integer sum loses the source's
  *  association and whose pointer sum keeps it (`compilerBehaviors.keepsPointerSumAddend`,
  *  structure.ts). Byte arithmetic is the asm's address under every pointer declaration of the
- *  global; a declared pointee would scale it, and `void *` arithmetic is a GNU extension. A global
- *  no declaration types may be an integer cell (`/int-cell`), so it is not one. */
+ *  global; a declared pointee would scale it, and `void *` arithmetic is a GNU extension.
+ *  `intoDeclaredTemp` casts the value into the temp, `(u8 *)g`, which is the same word under an
+ *  integer declaration of a global no declaration types.
+ *
+ *  A word the IR never loads as a pointer, of a global no declaration types (`untypedWord`), is
+ *  not one: the table spells it an integer beside an integer, and the temp keeps the integer with
+ *  it. Cast into a `u8 *` temp, it would be the array's address with no diagnostic under an array
+ *  declaration (`intoDeclaredTemp`'s KNOWN GAP), where the integer temp's assignment warns. */
 export function holdsPointerWord(
   v: Value,
   ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>,
-  declaredShape: (name: string) => SymbolInfo['shape'],
+  pointerGlobal: (name: string) => boolean,
   seen: Set<Value> = new Set(),
 ): boolean {
   if (seen.has(v)) {
@@ -890,15 +897,15 @@ export function holdsPointerWord(
   const d = ir.defOf(v);
   if (d !== undefined) {
     const g = d.opcode === 'load' && d.attrs.off === 0 && d.attrs.width === 4 ? ir.defOf(d.operands[0]) : undefined;
-    return g?.opcode === 'gaddr' && declaredShape(g.attrs.sym as string) === 'pointer';
+    return g?.opcode === 'gaddr' && pointerGlobal(g.attrs.sym as string);
   }
   const ins = ir.inArgs(v);
-  return ins !== undefined && ins.length > 0 && ins.every((a) => holdsPointerWord(a, ir, declaredShape, seen));
+  return ins !== undefined && ins.length > 0 && ins.every((a) => holdsPointerWord(a, ir, pointerGlobal, seen));
 }
 
 /** Whether a temp whose values are `values` is declared `u8 *` where the IR types it an integer.
  *
- *  Every value holds a declared pointer word (`holdsPointerWord`), and one of them is the base of a
+ *  Every value holds a pointer global's word (`holdsPointerWord`), and one of them is the base of a
  *  sum with a constant addend, `t + (x + K)`, where `x + K` may be merged across arms and `x` is
  *  not itself a constant, and the sum is read as a value. There the integer temp's sum loses the
  *  source's association and the byte pointer's keeps it. Without a variable addend the two compile
@@ -923,7 +930,7 @@ export function holdsPointerWord(
 export function declaresBytePointer(
   values: readonly Value[],
   ir: PointerWordIr,
-  declaredShape: (name: string) => SymbolInfo['shape'],
+  pointerGlobal: (name: string) => boolean,
 ): boolean {
   const isGlobal = (x: Value): boolean => ir.defOf(x)?.opcode === 'gaddr';
   const intoGlobal = (x: Value, u: Op): boolean =>
@@ -965,7 +972,7 @@ export function declaresBytePointer(
     return ins.every((a) => hasAddend(a, path));
   };
   return (
-    values.every((t) => holdsPointerWord(t, ir, declaredShape) && ir.usesOf(t).every((u) => okUse(t, u))) &&
+    values.every((t) => holdsPointerWord(t, ir, pointerGlobal) && ir.usesOf(t).every((u) => okUse(t, u))) &&
     values.some((t) =>
       ir.usesOf(t).some((u) => u.opcode === 'add' && hasAddend(u.operands[1]) && !addressOnly(u.results[0])),
     )
