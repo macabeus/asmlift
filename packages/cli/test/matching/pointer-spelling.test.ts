@@ -254,6 +254,41 @@ describe('a pointer global read through an integer or a byte-pointer temp, IDO 7
   });
 });
 
+// Whether the temp's sum is a value (core pointer-spelling.ts `inlinedAccessBase`), agbcc. Spelled
+// only inside a load or store it addresses, an indexed one included, the sum's constant moves into
+// the access under the byte-pointer and the integer temp alike, and neither keeps `t + (x + K)`.
+// Held in a name, the byte pointer keeps it, and the integer temp does not.
+const READ_DECLS = 'extern u8 *gP; extern u8 gOut; void use(u32);\n';
+const SUM = '(u8 *)(t + (x + 1))';
+const readThrough = (temp: string, read: string): string =>
+  `void f(u8 x, u32 i) { ${temp}; u8 *s; use((u32)t); ${read} }`;
+const BYTE_TEMP = 'u8 *t = gP';
+const INT_TEMP_OF = 'u32 t = (u32)gP';
+const ACCESS_READS = [
+  ['a load', `gOut = *${SUM};`],
+  ['an indexed load', `gOut = (${SUM})[i];`],
+  ['a store', `*${SUM} = 5;`],
+  ['an indexed store', `(${SUM})[i] = 5;`],
+];
+
+describe('a byte-pointer temp summed with `x + K`, read as an access address or through a name, agbcc', () => {
+  const asm = (temp: string, read: string) => compileTarget('agbcc', READ_DECLS + readThrough(temp, read), 'f').asm;
+  const accessAtK = /\t(ldrb|strb)\t\w+, \[\w+, #0x1\]/;
+
+  it.each(ACCESS_READS)('moves the constant into %s under either temp', (_, read) => {
+    expect(asm(BYTE_TEMP, read)).toMatch(accessAtK);
+    expect(asm(INT_TEMP_OF, read)).toMatch(accessAtK);
+  });
+
+  it('keeps `t + (x + K)` under the byte pointer when a name holds the sum, and not under the integer temp', () => {
+    const read = `s = ${SUM}; gOut = *s;`;
+    const bytes = asm(BYTE_TEMP, read);
+    expect(bytes).not.toMatch(accessAtK);
+    const { obj } = compileTarget('agbcc', READ_DECLS + readThrough(BYTE_TEMP, read), 'f');
+    expect(matches('agbcc', READ_DECLS + readThrough(INT_TEMP_OF, read), 'f', obj)).toBe(false);
+  });
+});
+
 // Each case merges the global's value across two arms and adds it to `(pos << 2) + K`, finds the
 // candidate byte-exact in the project's world, checks it is the pointer sum and byte-exact in its
 // own declared world too, and compiles the integer sum it replaces in one arm, which must not be.

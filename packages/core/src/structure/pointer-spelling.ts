@@ -178,7 +178,8 @@ export type SideFact =
   /** a global's word no declaration types (`untypedWord`) */
   | 'untyped'
   | 'constant'
-  /** an additive expression with a constant term (`x + K`, `x - K`, `K + x`) */
+  /** an additive expression with a constant term (`x + K`, `x - K`, `K + x`), read off the
+   *  printed expression; `declaresBytePointer`'s `hasAddend` asks it of an IR value, through merges */
   | 'addend'
   /** a global's address is in it */
   | 'address'
@@ -444,15 +445,6 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
   } = deps;
   const ctype = (e0: Expr): IrType | undefined => exprCType(e0, (n) => varType.get(n));
 
-  /** The op's result is spelled inside the loads and stores it is the address of, and nowhere
-   *  else: no name holds it, and it has readers, each a load or store reading it as its base
-   *  (operand 0) and as nothing else. */
-  const inlinedAccessBase = (d: Op): boolean => {
-    const v = d.results[0];
-    const sites = v === undefined || isNamed(v) ? [] : (useSitesOf?.get(v) ?? []);
-    return sites.length > 0 && sites.every(({ op }) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0);
-  };
-
   /** The declared shape of a global as the pointer-value rules read it: the map's, or a pointer
    *  the map declares to a structuring that does not spell from it (`pointerGlobals`). The
    *  operand-order rules read `mapUndeclared` instead: a declared pointer keeps `x + (u8 *)p` for
@@ -695,11 +687,14 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     const opClass = op === '+' || op === '-' ? op : op === '&&' || op === '||' ? 'logical' : 'bitwise';
     const lf = sideFacts(l, r);
     const rf = sideFacts(r, l);
+    const result = d.results[0];
+    const readers = result === undefined ? [] : (useSitesOf?.get(result) ?? []).map((u) => u.op);
+    const accessAddress = result !== undefined && inlinedAccessBase(result, readers, isNamed);
     const { row } = ROW_TESTS.find(
       (w) =>
         (w.row.op === opClass || (w.row.op === '±' && (opClass === '+' || opClass === '-'))) &&
         (w.row.when === undefined || compiler[w.row.when] === true) &&
-        (w.row.value === undefined || !inlinedAccessBase(d)) &&
+        (w.row.value === undefined || !accessAddress) &&
         (w.row.resultPointer === undefined || resultPointer) &&
         w.l.every(([f, v]) => lf[f] === v) &&
         w.r.every(([f, v]) => rf[f] === v),
@@ -893,6 +888,21 @@ export interface PointerWordIr {
   inArgs(v: Value): readonly Value[] | undefined;
   /** the ops that read `v`, a terminator passing it on an edge included */
   usesOf(v: Value): readonly Op[];
+  /** whether a name holds `v` */
+  isNamed(v: Value): boolean;
+}
+
+/** Whether `v` is spelled inside the loads and stores it is the address of and nowhere else, so
+ *  is no value: no name holds it, and it has readers, each a load or store, an element access's
+ *  included, reading it as its base (operand 0) and as nothing else. agbcc moves such a sum's
+ *  constant addend into the access under the pointer and the integer sum alike (ARITH_ROWS, THE
+ *  INTEGER SUM). The table's value row and `declaresBytePointer` read it. */
+export function inlinedAccessBase(v: Value, readers: readonly Op[], isNamed: (v: Value) => boolean): boolean {
+  return (
+    !isNamed(v) &&
+    readers.length > 0 &&
+    readers.every((op) => MEM_BASE_OPS.has(op.opcode) && op.operands.lastIndexOf(v) === 0)
+  );
 }
 
 /** Whether `v` only ever holds a pointer global's value: a whole-word load at offset 0 of a global
@@ -934,11 +944,12 @@ export function holdsPointerWord(
  *
  *  Every value holds a pointer global's word (`holdsPointerWord`), and one of them is the base of a
  *  sum with a constant addend, `t + (x + K)`, where `x + K` may be merged across arms and `x` is
- *  not itself a constant, and the sum is read as a value. There the integer temp's sum loses the
- *  source's association and the byte pointer's keeps it. Without a variable addend the two compile
- *  alike, so the temp keeps the integer the IR gives it. A sum read only as a load or store address
- *  is the source's under neither: there agbcc compiles the byte pointer's index first,
- *  `(x + t) + K`, and which of the two is closer depends on the index, so it licenses nothing.
+ *  not itself a constant, and the sum is a value (not an `inlinedAccessBase`). There the integer
+ *  temp's sum loses the source's association and the byte pointer's keeps it. Without a variable
+ *  addend the two compile alike, so the temp keeps the integer the IR gives it. A sum spelled only
+ *  inside the accesses it addresses is the source's under neither: there agbcc compiles the byte
+ *  pointer's index first, `(x + t) + K`, and which of the two is closer depends on the index, so
+ *  it licenses nothing.
  *
  *  A use the byte pointer would print wrong refuses it:
  *  - a sum, of the temp or of a sum it is the base of, whose other operand comes first: `x + t` is
@@ -981,16 +992,9 @@ export function declaresBytePointer(
     u.opcode === 'add'
       ? baseOf(t, u) && okSum(u.results[0])
       : u.opcode !== 'call' && !integerOnly(t, u) && !intoGlobal(t, u);
-  // a sum read only as the address of a load or store
-  const addressOnly = (s: Value): boolean => {
-    const us = ir.usesOf(s);
-    return (
-      us.length > 0 &&
-      us.every((w) => (w.opcode === 'load' || w.opcode === 'store') && w.operands[0] === s && w.operands[1] !== s)
-    );
-  };
   const constants = new Map<Value, boolean>();
-  // `x + K` with `x` not itself constant, or a merge every in-edge of which passes one
+  // `x + K` with `x` not itself constant, or a merge every in-edge of which passes one: the
+  // arithmetic table's `addend` side fact, asked of an IR value rather than a printed expression
   const hasAddend = (x: Value, path: Set<Value> = new Set()): boolean => {
     const d = ir.defOf(x);
     if (d !== undefined) {
@@ -1007,7 +1011,14 @@ export function declaresBytePointer(
   return (
     values.every((t) => holdsPointerWord(t, ir, spelling.pointerGlobal) && ir.usesOf(t).every((u) => okUse(t, u))) &&
     values.some((t) =>
-      ir.usesOf(t).some((u) => u.opcode === 'add' && hasAddend(u.operands[1]) && !addressOnly(u.results[0])),
+      ir
+        .usesOf(t)
+        .some(
+          (u) =>
+            u.opcode === 'add' &&
+            hasAddend(u.operands[1]) &&
+            !inlinedAccessBase(u.results[0], ir.usesOf(u.results[0]), ir.isNamed),
+        ),
     )
   );
 }

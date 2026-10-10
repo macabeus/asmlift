@@ -3435,6 +3435,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
       defOf: (v: Value) => defs.get(v),
       inArgs,
       usesOf: (v: Value) => (useSitesOf.get(v) ?? []).map((u) => u.op),
+      isNamed: (v: Value) => varName.has(v),
     };
     const holders = new Map<string, Value[]>();
     for (const [v, n] of [...varName, ...backArgName]) {

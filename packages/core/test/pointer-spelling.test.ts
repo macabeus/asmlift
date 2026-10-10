@@ -620,10 +620,12 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
   const defs = new Map<Value, Op>();
   const uses = new Map<Value, Op[]>();
   const ins = new Map<Value, Value[]>();
+  const named = new Set<Value>();
   const ir = {
     defOf: (x: Value) => defs.get(x),
     inArgs: (x: Value) => ins.get(x),
     usesOf: (x: Value) => uses.get(x) ?? [],
+    isNamed: (x: Value) => named.has(x),
   };
   const op = (opcode: Opcode, operands: Value[], attrs: Op['attrs'] = {}, result: IrType = T.s(32)): Value => {
     const o = mkOp(opcode, { operands, attrs, results: [mkValue(result)] });
@@ -692,13 +694,24 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     expect(declares(t)).toBe(false);
   });
 
-  test('does not count a sum read only as a load or store address', () => {
+  test('does not count a sum spelled only inside the accesses it addresses', () => {
     const t = word();
     const sum = op('add', [t, plusK()]);
     op('load', [sum], { off: 0, width: 1, signed: false });
     effect('store', [sum, k(255)], { off: 0, width: 1 });
+    op('aload', [sum, x()], { elemSize: 1, signed: false });
+    effect('astore', [sum, x(), k(255)], { elemSize: 1 });
     expect(declares(t)).toBe(false);
     effect('store', [scratch(), sum], { off: 0, width: 4 });
+    expect(declares(t)).toBe(true);
+  });
+
+  test('counts a sum a name holds, though only an access reads it', () => {
+    const t = word();
+    const sum = op('add', [t, plusK()]);
+    op('load', [sum], { off: 0, width: 1, signed: false });
+    expect(declares(t)).toBe(false);
+    named.add(sum);
     expect(declares(t)).toBe(true);
   });
 
