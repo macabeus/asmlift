@@ -179,13 +179,15 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
       // the sentinel is a stamp written only after install.sh RETURNED, not anything the venv or
       // install.sh produce along the way: `python3 -m venv` without ensurepip exits 1 but leaves
       // venv/bin/python3 behind, and install.sh has two pip lines with no `set -e`, so a network
-      // failure on the second leaves `splat` installed and the requirements missing. Either partial
-      // state must run the step again; `python3 -m venv` over a partial venv just completes it, and
-      // pip over an installed package is a no-op.
+      // failure on the second leaves `splat` installed and the requirements missing — and, the
+      // mirror case, a failure on the FIRST line is masked by a successful second (the script's
+      // status is its last line's), hence `bash -e`: either pip line failing throws before the
+      // stamp. Every partial state then runs the step again; `python3 -m venv` over a partial venv
+      // just completes it, and pip over an installed package is a no-op (offline too).
       const stamp = join(dir, 'venv', '.asmlift-installed');
       if (!existsSync(stamp)) {
         sh('python3 -m venv venv', dir);
-        sh('bash install.sh', dir, { ...process.env, PATH: `${join(dir, 'venv', 'bin')}:${process.env.PATH}` });
+        sh('bash -e install.sh', dir, { ...process.env, PATH: `${join(dir, 'venv', 'bin')}:${process.env.PATH}` });
         writeFileSync(stamp, `${new Date().toISOString()}\n`);
       }
       if (!existsSync(join(dir, 'tools', 'gcc_2.7.2', 'mac', 'gcc'))) {

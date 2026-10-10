@@ -32,14 +32,16 @@ const halfVenvCheckout = (name: string): string => {
   return dir;
 };
 
-/** `python3` and `bash` stand-ins that log their argv; the `bash install.sh` one also installs
- *  `splat`, the way the real install.sh's first pip line does. */
-const fakeTools = (log: string): string => {
-  const bin = join(scratch, 'bin');
+/** `python3` and `bash` stand-ins that log their argv; the `bash -e install.sh` one also installs
+ *  `splat`, the way the real install.sh's first pip line does — or, with `failInstall`, exits 1
+ *  the way a pip line failing under `-e` does. */
+const fakeTools = (log: string, opts: { failInstall?: boolean } = {}): string => {
+  const bin = join(scratch, `bin-${opts.failInstall ? 'failing' : 'ok'}`);
   mkdirSync(bin, { recursive: true });
+  const install = opts.failInstall ? 'exit 1\n' : 'mkdir -p venv/bin && : > venv/bin/splat\n';
   for (const [name, body] of [
     ['python3', `echo "python3 $*" >> ${JSON.stringify(log)}\n`],
-    ['bash', `echo "bash $*" >> ${JSON.stringify(log)}\nmkdir -p venv/bin && : > venv/bin/splat\n`],
+    ['bash', `echo "bash $*" >> ${JSON.stringify(log)}\n${install}`],
   ]) {
     writeFileSync(join(bin, name), `#!/bin/sh\n${body}`);
     chmodSync(join(bin, name), 0o755);
@@ -47,7 +49,7 @@ const fakeTools = (log: string): string => {
   return bin;
 };
 
-const STEP = ['python3 -m venv venv', 'bash install.sh'];
+const STEP = ['python3 -m venv venv', 'bash -e install.sh'];
 const calls = (log: string): string[] => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
 
 describe('the marioparty3 venv step', () => {
@@ -72,5 +74,20 @@ describe('the marioparty3 venv step', () => {
 
     PROJECT_RECIPES.marioparty3.prepare?.(dir);
     expect(calls(log)).toEqual(STEP);
+  });
+
+  test('a failed install.sh leaves no stamp, so the next prepare runs the step again', () => {
+    const dir = halfVenvCheckout('failed-install');
+    const log = join(scratch, 'calls-3.log');
+    process.env.PATH = `${fakeTools(log, { failInstall: true })}:${savedPath ?? ''}`;
+
+    expect(() => PROJECT_RECIPES.marioparty3.prepare?.(dir)).toThrow();
+    expect(calls(log)).toEqual(STEP);
+    expect(existsSync(join(dir, 'venv', '.asmlift-installed'))).toBe(false);
+
+    process.env.PATH = `${fakeTools(log)}:${savedPath ?? ''}`; // the network is back
+    PROJECT_RECIPES.marioparty3.prepare?.(dir);
+    expect(calls(log)).toEqual([...STEP, ...STEP]);
+    expect(existsSync(join(dir, 'venv', '.asmlift-installed'))).toBe(true);
   });
 });
