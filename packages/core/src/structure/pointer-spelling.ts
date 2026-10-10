@@ -939,11 +939,12 @@ export function declaresBytePointer(
       us.every((w) => (w.opcode === 'load' || w.opcode === 'store') && w.operands[0] === s && w.operands[1] !== s)
     );
   };
+  const constants = new Map<Value, boolean>();
   // `x + K` with `x` not itself constant, or a merge every in-edge of which passes one
   const hasAddend = (x: Value, path: Set<Value> = new Set()): boolean => {
     const d = ir.defOf(x);
     if (d !== undefined) {
-      const constant = d.operands.map((o) => isConstant(o, ir));
+      const constant = d.operands.map((o) => isConstant(o, ir, constants));
       return (d.opcode === 'add' || d.opcode === 'sub') && constant.includes(true) && constant.includes(false);
     }
     const ins = ir.inArgs(x);
@@ -965,8 +966,22 @@ export function declaresBytePointer(
 const CONSTANT_FOLDING = new Set(['shl', 'add', 'sub', 'mul', 'or', 'and', 'xor']);
 
 /** Whether `v` is a constant: a `const`, a fold of constants, or a block parameter every in-edge
- *  of which passes one. A loop back to a parameter is not, as a counter is not. */
-function isConstant(v: Value, ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>, path: Set<Value> = new Set()): boolean {
+ *  of which passes one. A loop back to a parameter is not, as a counter is not.
+ *
+ *  `known` holds the answers already given. A value reached by two paths is answered once, or a
+ *  chain of N merges each of whose arms reads the last is walked 2^N times. An answer does not
+ *  depend on the path it was reached by: a value from which a cycle is reachable is no constant
+ *  from any path. */
+function isConstant(
+  v: Value,
+  ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>,
+  known: Map<Value, boolean>,
+  path: Set<Value> = new Set(),
+): boolean {
+  const answer = known.get(v);
+  if (answer !== undefined) {
+    return answer;
+  }
   if (path.has(v)) {
     return false;
   }
@@ -979,7 +994,8 @@ function isConstant(v: Value, ir: Pick<PointerWordIr, 'defOf' | 'inArgs'>, path:
     return false;
   }
   path.add(v);
-  const all = from.every((x) => isConstant(x, ir, path));
+  const all = from.every((x) => isConstant(x, ir, known, path));
   path.delete(v);
+  known.set(v, all);
   return all;
 }

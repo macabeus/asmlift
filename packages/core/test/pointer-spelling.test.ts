@@ -656,6 +656,21 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     expect(declares(t)).toBe(false);
   });
 
+  test('reads a chain of constant merges once per value, each arm of which reads the last', () => {
+    let n = k(0);
+    for (let i = 0; i < 20; i++) {
+      const merged = mkValue(T.s(32));
+      ins.set(merged, [n, op('add', [n, k(1)])]);
+      n = merged;
+    }
+    const t = word();
+    op('add', [t, op('add', [op('shl', [x()], { imm: 2 }), n])]);
+    let reads = 0;
+    const counted = { ...ir, defOf: (v: Value) => (reads++, ir.defOf(v)) };
+    expect(declaresBytePointer([t], counted, shape)).toBe(true);
+    expect(reads).toBeLessThan(200);
+  });
+
   test('does not declare the right operand of a sum, which a pointer sum would put first', () => {
     const t = word();
     op('add', [t, plusK()]);
