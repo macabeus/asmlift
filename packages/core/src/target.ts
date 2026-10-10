@@ -667,9 +667,11 @@ export interface TargetDescription {
     // SUM). Two rules read it. True ⇒ the arithmetic table's value row (ARITH_ROWS) spells an
     // undeclared pointer global plus an integer with a constant term as the pointer sum where the
     // sum is a value rather than an access's address; and the structurer declares `u8 *` a temp
-    // holding a declared pointer global's value that is the base of such a sum
-    // (`declaresBytePointer`), which an integer temp would compile as `(t + K) + x`. Absent ⇒ the
-    // integer sum and the integer temp.
+    // holding a pointer global's value that is the base of such a sum (`declaresBytePointer`),
+    // which an integer temp would compile as `(t + K) + x`. Through a temp ido7.1 does build two
+    // objects, the byte pointer's index first where the integer temp and the struct source keep the
+    // base first, and mwcc_242_81 builds one (the cli matching suite's pointer-spelling.test.ts).
+    // Absent ⇒ the integer sum and the integer temp.
     keepsPointerSumAddend?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read

@@ -45,6 +45,34 @@ describe('a temp holding a map-declared pointer global', () => {
   });
 });
 
+// agbcc -O2 of pokeemerald's windowIds read through a merged struct pointer, `ids` at 16587:
+// `if (c) { p = gP; use(1); } else { use(2); p = gP; } w = &p->ids[x];` then
+// `if (*w != 255) { use(*w); *w = 255; }`. Only a load and a store read the sum `p + (x + K)`.
+const NAMED_SUM =
+  'f:\n\tpush\t{r4, r5, lr}\n\tlsl\tr0, r0, #0x18\n\tlsr\tr5, r0, #0x18\n\tcmp\tr1, #0\n\tbeq\t.L3\n' +
+  '\tldr\tr0, .L6\n\tldr\tr4, [r0]\n\tmov\tr0, #0x1\n\tbl\tuse\n\tb\t.L4\n.L6:\n\t.word\tgP\n' +
+  '.L3:\n\tmov\tr0, #0x2\n\tbl\tuse\n\tldr\tr0, .L8\n\tldr\tr4, [r0]\n' +
+  '.L4:\n\tldr\tr1, .L8+0x4\n\tadd\tr0, r5, r1\n\tadd\tr4, r4, r0\n\tldrb\tr0, [r4]\n\tcmp\tr0, #0xff\n' +
+  '\tbeq\t.L5\n\tbl\tuse\n\tmov\tr0, #0xff\n\tstrb\tr0, [r4]\n.L5:\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n' +
+  '.L8:\n\t.word\tgP\n\t.word\t0x40cb\n';
+
+describe('a temp whose sum only accesses read', () => {
+  const candidates = enumerateCandidates('f', NAMED_SUM, ARMV4T_AGBCC, { symbols: mapWith('pointer') });
+
+  test('is declared a byte pointer where a name holds the sum (`/addr-home`)', () => {
+    const home = candidates.find((c) => hasVariation(c.variations, 'addr-home') && c.variations.length === 2);
+    expect(home?.source).toContain('u8 *v0;');
+    expect(home?.source).toContain('v1 = v0 + (a0 + 16587);');
+  });
+
+  test('keeps its integer where the sum is spelled inside each access', () => {
+    const [first] = candidates;
+    expect(first.variations).toHaveLength(1);
+    expect(first.source).toContain('s32 v0;');
+    expect(first.source).toContain('*(u8 *)(v0 + (a0 + 16587))');
+  });
+});
+
 describe('a temp that keeps its integer', () => {
   test("on a compiler whose byte-pointer sum is not the source's", () => {
     const target = {

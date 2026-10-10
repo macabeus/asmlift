@@ -706,6 +706,15 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     expect(declares(t)).toBe(true);
   });
 
+  test('does not count a sum read only as the base of an element load or store', () => {
+    const t = word();
+    op('aload', [op('add', [t, plusK()]), x()], { elemSize: 1, signed: false });
+    expect(declares(t)).toBe(false);
+    const u = word();
+    effect('astore', [op('add', [u, plusK()]), x(), k(255)], { elemSize: 1 });
+    expect(declares(u)).toBe(false);
+  });
+
   test('counts a sum a name holds, though only an access reads it', () => {
     const t = word();
     const sum = op('add', [t, plusK()]);
