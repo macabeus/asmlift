@@ -1857,6 +1857,32 @@ function assertDefaultAccepts(
   }
 }
 
+/** A {@link DefaultAcceptsMemo} asked a question it cannot answer. */
+export class DefaultAcceptsMemoMisuse extends Error {
+  constructor(message: string) {
+    super(`DefaultAcceptsMemo: ${message}`);
+    this.name = 'DefaultAcceptsMemoMisuse';
+  }
+}
+
+/** Every block, block parameter, op, opcode, operand, result, successor and edge argument of `fn`,
+ *  in order and by identity, each list after its length. A pass that rewrites the graph in place
+ *  changes it; attributes and side tables are not in it. */
+function graphShape(fn: Fn): unknown[] {
+  const shape: unknown[] = [fn.blocks.length];
+  for (const b of fn.blocks) {
+    shape.push(b, b.params.length, ...b.params, b.ops.length);
+    for (const op of b.ops) {
+      shape.push(op, op.opcode, op.operands.length, ...op.operands, op.results.length, ...op.results);
+      shape.push(op.successors.length);
+      for (const s of op.successors) {
+        shape.push(s.block, s.args.length, ...s.args);
+      }
+    }
+  }
+  return shape;
+}
+
 /** A set or array of at most this many primitives is keyed by its members. Keying costs a pass over
  *  the members on every structuring, and the maps and sets a project hands every function (`symbols`,
  *  `pointerGlobals`) are as large as the project, so a bigger one is keyed by identity. */
@@ -1874,20 +1900,31 @@ const MEMO_CONTENT_KEY_LIMIT = 64;
  *  re-derives them from the options' map before it reaches the guard, so the reset run finds them as
  *  the first run of the same key did.
  *
+ *  Asked about another fn, or about its own fn once a block, op or value of it was added, removed,
+ *  replaced or reordered (`graphShape`), it throws {@link DefaultAcceptsMemoMisuse} rather than
+ *  answer. That is a wiring defect, not a decline, so `rank.ts` lets it end the enumeration.
+ *
  *  Only a call with no hooks is answered: a hook can change the outcome, or must observe the run.
  *  An option holding a function or a symbol has no key, and its reset always runs. */
 export class DefaultAcceptsMemo {
   readonly #outcomes = new Map<string, { error: unknown } | 'accepted'>();
   readonly #ids = new WeakMap<object, number>();
+  readonly #shape: readonly unknown[];
   #nextId = 0;
 
-  constructor(readonly fn: Fn) {}
+  constructor(readonly fn: Fn) {
+    this.#shape = graphShape(fn);
+  }
 
   /** Returns or throws what `run` did for this reset, running it only when the memo has no
    *  outcome for it yet. */
   check(fn: Fn, hooks: StructureHooks, reset: StructureOptions, run: () => void): void {
     if (fn !== this.fn) {
-      throw new Error('DefaultAcceptsMemo: asked about a fn it was not made for');
+      throw new DefaultAcceptsMemoMisuse('asked about a fn it was not made for');
+    }
+    const shape = graphShape(fn);
+    if (shape.length !== this.#shape.length || shape.some((x, i) => !Object.is(x, this.#shape[i]))) {
+      throw new DefaultAcceptsMemoMisuse(`asked about ${fn.name} after its graph was rewritten`);
     }
     const key = Object.values(hooks).every((h) => h === undefined) ? this.#keyOf(reset) : undefined;
     if (key === undefined) {

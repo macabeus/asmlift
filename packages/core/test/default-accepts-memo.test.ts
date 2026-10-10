@@ -12,8 +12,10 @@ import type { Fn } from '../src/ir/core';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
+import { sinkStoreTails } from '../src/raise/tailsink';
 import {
   DefaultAcceptsMemo,
+  DefaultAcceptsMemoMisuse,
   StructureError,
   type StructureHooks,
   type StructureOptions,
@@ -65,6 +67,24 @@ const VOLATILE_READ = `fn arms {
   ret %6
 }
 `;
+// Both arms branch into the one `store; ret`, which `sinkStoreTails` copies into each of them.
+const STORE_TAIL = `fn tail {
+^bb0(%0: s32):
+  %1: s32* = gaddr {sym="gQ"}
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_slt %0, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: s32 = const {value=7}
+  br ^bb3(%4)
+^bb2():
+  %5: s32 = const {value=9}
+  br ^bb3(%5)
+^bb3(%6: s32):
+  store %1, %6 {off=4, width=4}
+  ret
+}
+`;
 const VOLATILE = new Map<string, SymbolInfo>([['gVolReg', { name: 'gVolReg', kind: 'data', volatile: true }]]);
 
 /** What `structure()` threw. */
@@ -111,11 +131,17 @@ describe('DefaultAcceptsMemo', () => {
       refusal(fn, { coalesceMergeNames: true, branchSenseFlipSites: new Set([1, 2]) }, memo),
       refusal(fn, { coalesceMergeNames: true, symbols: new Map() }, memo),
       refusal(fn, { coalesceMergeNames: true, symbols: new Map() }, memo),
+      // the same value under another name, with no other option between the two names
+      refusal(fn, { coalesceMergeNames: true, spellBitfieldMembers: true }, memo),
+      refusal(fn, { coalesceMergeNames: true, spellDeclaredSubscripts: true }, memo),
+      // `false` is a value, and not this option's default, which is `true`
+      refusal(fn, { coalesceMergeNames: true, preserveDivergentBranchSense: false }, memo),
     ];
     expect(new Set(seen).size).toBe(seen.length);
   });
 
-  test('keys a small set of primitives by its members, and a bigger one or a map by identity', () => {
+  // What is keyed by identity is a cost choice, not a soundness one: an equal copy runs again.
+  test('keys a small set of primitives by its members, and runs again for a copy of a bigger one or a map', () => {
     const fn = fnOf(IRREDUCIBLE);
     const memo = new DefaultAcceptsMemo(fn);
     const symbols = new Map<string, SymbolInfo>();
@@ -129,7 +155,7 @@ describe('DefaultAcceptsMemo', () => {
     expect(refusal(fn, { freshParamMerge: true, branchSenseFlipSites: new Set(sites) }, memo)).not.toBe(bigFirst);
   });
 
-  test('treats an option set to undefined as an option left out', () => {
+  test('answers an option set to undefined from the run that left it out', () => {
     const fn = fnOf(IRREDUCIBLE);
     const memo = new DefaultAcceptsMemo(fn);
     const first = refusal(fn, { coalesceMergeNames: true, symbols: undefined }, memo);
@@ -176,6 +202,21 @@ describe('DefaultAcceptsMemo', () => {
   test('refuses a fn it was not made for', () => {
     const memo = new DefaultAcceptsMemo(fnOf(IRREDUCIBLE));
     const other = fnOf(IRREDUCIBLE);
-    expect(() => structure(other, { coalesceMergeNames: true }, {}, memo)).toThrow(/not made for/);
+    expect(() => structure(other, { coalesceMergeNames: true }, {}, memo)).toThrow(DefaultAcceptsMemoMisuse);
+  });
+
+  test('refuses its fn once a pass rewrote the graph in place', () => {
+    const fn = fnOf(STORE_TAIL);
+    const memo = new DefaultAcceptsMemo(fn);
+    structure(fn, { returnsVoid: true, coalesceMergeNames: true }, {}, memo);
+    expect(sinkStoreTails(fn)).toBe(true);
+    verify(fn);
+    expect(() => structure(fn, { returnsVoid: true, coalesceMergeNames: true }, {}, memo)).toThrow(
+      DefaultAcceptsMemoMisuse,
+    );
+    const renewed = new DefaultAcceptsMemo(fn);
+    expect(cBackend.emit(structure(fn, { returnsVoid: true, coalesceMergeNames: true }, {}, renewed))).toBe(
+      cBackend.emit(structure(fn, { returnsVoid: true, coalesceMergeNames: true })),
+    );
   });
 });

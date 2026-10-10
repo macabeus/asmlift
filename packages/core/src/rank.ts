@@ -91,7 +91,7 @@ import {
   sameBases,
 } from './rank-variations';
 import { type Stillborn, stillbornVerdict } from './stillborn';
-import { DefaultAcceptsMemo, hasDivergentSharedRet } from './structure/structure';
+import { DefaultAcceptsMemo, DefaultAcceptsMemoMisuse, hasDivergentSharedRet } from './structure/structure';
 import {
   type SymbolInfo,
   type SymbolMap,
@@ -2203,6 +2203,9 @@ export function enumerateCandidates(
                 acceptsMemo,
               );
             } catch (e) {
+              if (e instanceof DefaultAcceptsMemoMisuse) {
+                throw e; // a memo wired to the wrong fn is a defect here, never a dropped variation
+              }
               if (abortsRow([...liftVariations, ...symbolSetting.variations], s)) {
                 throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
               }

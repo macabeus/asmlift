@@ -13,13 +13,14 @@ import { expect, test, vi } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { frontendFor } from '../src/frontend/registry';
+import type { Fn } from '../src/ir/core';
 import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import { applyIdiomPatterns, raiseRecovered } from '../src/pipeline';
 import { STRUCTURE_VARIATIONS } from '../src/rank-variations';
 import { type StructureOptions, structure } from '../src/structure/structure';
 import type { SymbolInfo } from '../src/symbols';
-import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription, structureOptionsFor } from '../src/target';
 
 // CORPUS-SIZED WORK IN A PARALLEL WORKER POOL: the 5 s default is a LOAD sensitivity here, not a
 // budget. Solo these tests run in 0.9-1.7 s; inside a full `pnpm test:offline` at loadavg ~26 this
@@ -112,44 +113,119 @@ test.skipIf(CORPUS.length === 0)('structuring does not mutate the function it re
 // everywhere. rank.ts structures one fn under every setting in turn, and the memo answers a later
 // setting's guard from a reset structured under an earlier one. So after a structuring under ANY
 // setting, the fn must read exactly as the next structuring under the same map reads it: under each
-// structure variation, the anchors and the follow, and under a map that declares globals volatile,
-// whose `declared` stamps every structuring re-derives from the map it is given.
-const COMMITTED = readdirSync(join(__dirname, 'corpus'))
-  .filter((f) => f.startsWith('agbcc-') && f.endsWith('.s'))
-  .map((f) => readFileSync(join(__dirname, 'corpus', f), 'utf8'))
-  .map((asm) => ({ name: /\.globl\s+(\w+)/.exec(asm)?.[1], asm }))
-  .filter((c): c is { name: string; asm: string } => c.name !== undefined);
+// structure variation, the anchors and the follow, all of them at once, and under a map that declares
+// globals volatile, whose `declared` stamps every structuring re-derives from the map it is given.
+//
+// "Reads" is everything reachable from the fn (`canonical`), side tables included: `print` shows
+// neither `slotHomes`, `paramEvidence` nor `localObjects`, and structure() reads all three.
+const TARGET_OF: [prefix: string, target: TargetDescription][] = [
+  ['agbcc-', ARMV4T_AGBCC],
+  ['gcc', MIPS_GCC],
+  ['ido-', MIPS_IDO],
+  ['mips-', MIPS_IDO],
+  ['ppc-', PPC_MWCC],
+  ['mwcc-', PPC_MWCC],
+];
 
-const SETTINGS: [string, StructureOptions][] = [
+const COMMITTED = readdirSync(join(__dirname, 'corpus'))
+  .filter((f) => f.endsWith('.s') || f.endsWith('.asm'))
+  .flatMap((f) => {
+    const target = TARGET_OF.find(([prefix]) => f.startsWith(prefix))?.[1];
+    const asm = readFileSync(join(__dirname, 'corpus', f), 'utf8');
+    const name = (f.endsWith('.s') ? /\.globl\s+(\w+)/ : /^[0-9a-f]+ <(\w+)>:/m).exec(asm)?.[1];
+    return target && name ? [{ file: f, name, asm, target }] : [];
+  });
+
+/** Everything reachable from `root` through own enumerable properties, array elements, and map and
+ *  set entries, in order. An object reached again is written as the number of its first visit, so
+ *  two graphs that share differently read differently. */
+function canonical(root: unknown): string {
+  const ids = new Map<object, number>();
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'function') {
+      out.push(`function ${v.name}`);
+      return;
+    }
+    if (v === null || typeof v !== 'object') {
+      out.push(typeof v === 'string' ? JSON.stringify(v) : Object.is(v, -0) ? '-0' : `${typeof v}:${String(v)}`);
+      return;
+    }
+    const seen = ids.get(v);
+    if (seen !== undefined) {
+      out.push(`@${seen}`);
+      return;
+    }
+    ids.set(v, ids.size);
+    if (v instanceof Map) {
+      out.push(`Map(${v.size})`);
+      for (const [k, x] of v) {
+        walk(k);
+        walk(x);
+      }
+    } else if (v instanceof Set) {
+      out.push(`Set(${v.size})`);
+      for (const x of v) {
+        walk(x);
+      }
+    } else if (ArrayBuffer.isView(v)) {
+      out.push(`${v.constructor.name}[${Array.from(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)).join(',')}]`);
+    } else if (Array.isArray(v)) {
+      out.push(`Array(${v.length})`);
+      for (let i = 0; i < v.length; i++) {
+        if (i in v) {
+          walk(v[i]);
+        } else {
+          out.push('hole');
+        }
+      }
+    } else {
+      out.push(`${v.constructor?.name ?? 'null-proto'}{`);
+      for (const k of Object.keys(v)) {
+        out.push(JSON.stringify(k));
+        walk((v as Record<string, unknown>)[k]);
+      }
+      out.push('}');
+    }
+  };
+  walk(root);
+  return out.join(' ');
+}
+
+const ONE_AT_A_TIME: [string, StructureOptions][] = [
   ...STRUCTURE_VARIATIONS.map((v): [string, StructureOptions] => [`/${v.name}`, v.options(true) ?? {}]),
   ['anchorConstCopies', { anchorConstCopies: true }],
   ['anchorLoopEntryConsts', { anchorLoopEntryConsts: true }],
   ['followEarlyReturns', { followEarlyReturns: true }],
 ];
+const SETTINGS: [string, StructureOptions][] = [
+  ...ONE_AT_A_TIME,
+  ['every setting at once', Object.assign({}, ...ONE_AT_A_TIME.map(([, o]) => o)) as StructureOptions],
+];
 
 test('structuring under any setting leaves the fn as the next structuring under its map reads it', () => {
-  const opts = structureOptionsFor(ARMV4T_AGBCC, false);
-  const tryStructure = (fn: Parameters<typeof structure>[0], o: StructureOptions): void => {
+  const tryStructure = (fn: Fn, o: StructureOptions): void => {
     try {
       structure(fn, o);
     } catch {
       /* a decline is a fine outcome; what it leaves on the fn is the subject */
     }
   };
-  let checked = 0;
+  const checked = new Map<TargetDescription, number>();
   let stamped = 0;
   const defects: string[] = [];
-  for (const { name, asm } of COMMITTED) {
-    let fn;
+  for (const { file, name, asm, target } of COMMITTED) {
+    let fn: Fn;
     try {
-      fn = frontendFor(ARMV4T_AGBCC).lift(name, asm, ARMV4T_AGBCC, {}, undefined, undefined);
+      fn = frontendFor(target).lift(name, asm, target, {}, undefined, undefined);
       verify(fn);
-      applyIdiomPatterns(fn, ARMV4T_AGBCC);
-      raiseRecovered(fn, ARMV4T_AGBCC);
+      applyIdiomPatterns(fn, target);
+      raiseRecovered(fn, target);
     } catch {
       continue; // a frontend gap is not this file's subject
     }
-    const unmapped = print(fn);
+    const opts = structureOptionsFor(target, false);
+    const unmapped = canonical(fn);
     const globals = new Set<string>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
@@ -163,28 +239,30 @@ test('structuring under any setting leaves the fn as the next structuring under 
     );
     const mapped = { ...opts, symbols };
     tryStructure(fn, mapped);
-    const before = print(fn);
+    const before = canonical(fn);
     if (before !== unmapped) {
       stamped++;
     }
-    checked++;
+    checked.set(target, (checked.get(target) ?? 0) + 1);
     for (const [label, setting] of SETTINGS) {
       tryStructure(fn, { ...mapped, ...setting });
-      if (print(fn) !== before) {
-        defects.push(`${name}: the ${label} run changed the fn`);
+      if (canonical(fn) !== before) {
+        defects.push(`${file}: the ${label} run changed the fn`);
       }
     }
     tryStructure(fn, opts);
-    if (print(fn) !== unmapped) {
-      defects.push(`${name}: a run with no map kept a stamp of the map before it`);
+    if (canonical(fn) !== unmapped) {
+      defects.push(`${file}: a run with no map kept a stamp of the map before it`);
     }
     tryStructure(fn, mapped);
-    if (print(fn) !== before) {
-      defects.push(`${name}: a run with the map after one with none changed the fn`);
+    if (canonical(fn) !== before) {
+      defects.push(`${file}: a run with the map after one with none changed the fn`);
     }
   }
   expect(defects).toEqual([]);
-  // Not vacuous: most of the corpus lifts, and some of it reads a global the map stamps.
-  expect(checked).toBeGreaterThan(30);
+  // Not vacuous: most of the corpus lifts on every target, and some of it reads a global the map stamps.
+  const byCompiler = Object.fromEntries([...checked].map(([t, n]) => [t.compiler, n]));
+  expect(Object.keys(byCompiler).sort()).toEqual(['agbcc', 'gcc', 'ido', 'mwcc']);
+  expect(Math.min(...Object.values(byCompiler))).toBeGreaterThan(5);
   expect(stamped).toBeGreaterThan(5);
 });
