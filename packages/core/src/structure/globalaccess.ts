@@ -350,7 +350,7 @@ export function memoFieldsOf(info: (name: string) => SymbolInfo | undefined): Me
  *  of a pointee yields `(u8 *)gQ->pInner`, cast and all, pinned in pointer-members.test.ts). So
  *  the arm is live and tested, and the byte-arithmetic rule that reads this answer is correct for
  *  it — where resolving a pointee member to null would reopen the double-scaling hole silently. */
-function declaredMemberOf(x: Expr, sym: MemberLookup | undefined): DeclaredField | null {
+export function declaredMemberOf(x: Expr, sym: MemberLookup | undefined): DeclaredField | null {
   if (x.k !== 'field' || x.base.k !== 'var' || sym === undefined) {
     return null;
   }

@@ -185,6 +185,14 @@ describe('intoPtrCell', () => {
     expect(s.intoPtrCell(v('gOut'), addr('gArr'))).toEqual(cast(T.s(32), addr('gArr')));
   });
 
+  test("a pointer value stored into a member the map declares an integer takes the member's type", () => {
+    const s = make({ map: [ptrInfo('gP'), bgPtrsInfo, outerInfo], varType: { a0: T.ptr(T.u(8)) } });
+    const sum = bin('+', v('a0'), c(4));
+    expect(s.intoPtrCell(dotMember('gBgPtrs', 'count'), sum)).toEqual(cast(T.s(32), sum));
+    expect(s.intoPtrCell(member('gQ', 'n'), v('gP'))).toEqual(cast(T.s(32), v('gP')));
+    expect(s.intoPtrCell(dotMember('gBgPtrs', 'field_8'), sum)).toEqual(sum);
+  });
+
   test('an integer value, a narrower integer cell and a cell no map declares are left alone', () => {
     const s = make({
       map: [u16Info('gOut', { size: 4, signed: true }), u16Info('gHalf')],

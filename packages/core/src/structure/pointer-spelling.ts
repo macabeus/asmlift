@@ -23,10 +23,10 @@ import { type IrType, T, typeEquals } from '../ir/types';
 import { type BinOp, Expr } from '../l3/ast';
 import { pointerCellValue } from '../l3/ptrcell';
 import { exprCType, ptrElemBytes } from '../l3/typing';
-import { type SymbolInfo, isScalarCellSize, scalarCellType } from '../symbols';
+import { type SymbolInfo, isBitfieldField, isScalarCellSize, scalarCellType, symbolFieldType } from '../symbols';
 import type { TargetDescription } from '../target';
 import { ARITH_TO_BIN } from './arith-ops';
-import { type MemberLookup, ptrMemberDecl } from './globalaccess';
+import { type MemberLookup, declaredMemberOf, ptrMemberDecl } from './globalaccess';
 
 /** The slice of structure.ts's symbol-map rendering context these rules read. */
 export interface PointerSpellingSymCtx extends MemberLookup {
@@ -799,17 +799,27 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     return { k: 'cast', to: t, e: value };
   };
 
+  /** The integer type the map declares a word cell: a scalar global, or a member a map
+   *  declaration names (`gT.b`, `gPtr->b`) that is no pointer, bitfield or array. */
+  const intCellType = (lval: Expr): IrType | undefined => {
+    if (lval.k === 'var') {
+      const si = sym?.info(lval.name);
+      return si?.shape === 'scalar' && si.size === 4 ? scalarCellType(4, si.signed) : undefined;
+    }
+    const f = declaredMemberOf(lval, sym);
+    const t = f === null || isBitfieldField(f) ? undefined : symbolFieldType(f);
+    return t?.kind === 'int' && t.width === 32 ? t : undefined;
+  };
+
   /** The mirror of `intoPtrCell`: a value that is no integer as spelled (`needsIntSpelling`)
-   *  assigned into a word cell the map declares an integer takes that cell's type. Without it
-   *  agbcc and KMC gcc warn `assignment makes integer from pointer without a cast` — fatal under
-   *  the project's `-Werror` — and CodeWarrior rejects the write. A conversion of a word is no
-   *  instruction, so the bytes are the uncast write's. A global no declaration types keeps the
-   *  value as spelled: its candidate world may declare it either way. */
+   *  assigned into a word cell the map declares an integer (`intCellType`) takes that cell's type.
+   *  Without it agbcc and KMC gcc warn `assignment makes integer from pointer without a cast` —
+   *  fatal under the project's `-Werror` — and CodeWarrior rejects the write. A conversion of a
+   *  word is no instruction, so the bytes are the uncast write's. A global no declaration types
+   *  keeps the value as spelled: its candidate world may declare it either way. */
   const intoIntCell = (lval: Expr, value: Expr): Expr => {
-    const si = lval.k === 'var' ? sym?.info(lval.name) : undefined;
-    return si?.shape === 'scalar' && si.size === 4 && needsIntSpelling(value)
-      ? { k: 'cast', to: scalarCellType(4, si.signed), e: value }
-      : value;
+    const t = intCellType(lval);
+    return t !== undefined && needsIntSpelling(value) ? { k: 'cast', to: t, e: value } : value;
   };
 
   /** A pointer VALUE assigned into a pointer CELL (pointerValue), spelled so the assignment is
