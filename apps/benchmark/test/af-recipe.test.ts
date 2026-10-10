@@ -1,9 +1,8 @@
 // The af recipe's host checks (cases/project-setup.ts) on a Linux host: the big-endian MIPS
 // binutils may live anywhere on PATH — Ubuntu's binutils-mips-linux-gnu, not only a /opt/cross
 // build — and the Rosetta probe (`arch -x86_64`, a macOS verb that is an invalid option to GNU
-// `arch`) must not run at all. Before this, a Linux host could never prepare af: with binutils on
-// PATH it still failed the /opt/cross existence check, and past that the Rosetta probe.
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+// `arch`) must not run at all.
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, test } from 'vitest';
@@ -31,20 +30,25 @@ const preparedCheckout = (name: string): string => {
 };
 
 describe.runIf(process.platform === 'linux')('the af recipe on a Linux host', () => {
-  test('without mips-linux-gnu-ld anywhere, it names the binutils and the apt remedy', () => {
-    process.env.PATH = join(scratch, 'empty-bin'); // afBuildEnv still prepends /usr/bin and /opt/cross/bin
-    mkdirSync(process.env.PATH, { recursive: true });
-    const dir = preparedCheckout('no-binutils');
-    const run = () => PROJECT_RECIPES.af.prepare?.(dir);
-    // a host with the package installed system-wide (/usr/bin) legitimately passes — only assert
-    // the shape of the refusal when it refuses
-    try {
-      run();
-    } catch (e) {
-      expect(String(e)).toContain('missing host prerequisite — big-endian mips-linux-gnu binutils');
-      expect(String(e)).toContain('apt install binutils-mips-linux-gnu');
-    }
-  });
+  // afBuildEnv always prepends /usr/bin, so a host with the distro package (the README's own
+  // remedy) would pass the check and leave this test with nothing to assert: skip it there, so a
+  // vacuous pass reads as a skip. CI's runner has no mips binutils, so it runs there.
+  test.skipIf(existsSync('/usr/bin/mips-linux-gnu-ld') || existsSync('/opt/cross/bin/mips-linux-gnu-ld'))(
+    'without mips-linux-gnu-ld anywhere, it names the binutils and the apt remedy',
+    () => {
+      process.env.PATH = join(scratch, 'empty-bin');
+      mkdirSync(process.env.PATH, { recursive: true });
+      const dir = preparedCheckout('no-binutils');
+      let refusal = '';
+      try {
+        PROJECT_RECIPES.af.prepare?.(dir);
+      } catch (e) {
+        refusal = String(e);
+      }
+      expect(refusal).toContain('missing host prerequisite — big-endian mips-linux-gnu binutils');
+      expect(refusal).toContain('apt install binutils-mips-linux-gnu');
+    },
+  );
 
   test('with mips-linux-gnu-ld on PATH it passes the host checks and never probes for Rosetta', () => {
     const bin = join(scratch, 'bin');

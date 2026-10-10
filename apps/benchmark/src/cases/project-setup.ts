@@ -89,6 +89,14 @@ function installAgbcc(fork: string, projDir: string): void {
 /** snowboardkids2 builds inside a linux/amd64 container (KMC gcc linux binaries + splat). */
 function sbk2DockerBuild(dir: string): void {
   const script = [
+    // the container runs as root; on a Linux host with a rootful daemon everything it writes stays
+    // root's (Docker Desktop and rootless daemons map it back to the user), and the host-side
+    // `gmake asmlift-elf` below could not write build/asmlift-ctx.c. An EXIT trap hands the tree
+    // back to whoever owns the mount root AS THE CONTAINER SEES IT — the invoking user under a
+    // rootful daemon, root (a no-op) where the daemon maps uids — whether or not the build fails.
+    // `--reference` rather than `$(stat …)`: the script travels through the host shell in double
+    // quotes, where a `$(…)` would expand on the host.
+    "trap 'chown -R --reference=/w /w' EXIT",
     'apt-get update -qq >/dev/null',
     // clang: the project's CC_CHECK advisory pass runs it on every TU
     'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential clang binutils-mips-linux-gnu python3 python3-pip git wget file >/dev/null',
@@ -98,10 +106,6 @@ function sbk2DockerBuild(dir: string): void {
     'make -C tools',
     'make extract',
     `make ${jobs()}`,
-    // the container runs as root, and on a Linux host (unlike Docker Desktop, which maps the bind
-    // mount's ownership to the user) everything it wrote stays root's — so the host-side
-    // `gmake asmlift-elf` below could not write build/asmlift-ctx.c. Hand the tree back.
-    ...(process.platform === 'linux' ? [`chown -R ${process.getuid?.()}:${process.getgid?.()} /w`] : []),
   ].join(' && ');
   sh(
     `docker run --rm --platform linux/amd64 -v "$PWD":/w -w /w debian:bookworm bash -ec ${JSON.stringify(script)}`,
@@ -172,9 +176,11 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
   marioparty3: {
     baseroms: ['baserom.us.z64'],
     prepare: (dir) => {
-      // the interpreter, not the directory: a venv whose creation died half-way (python3 without
-      // ensurepip) leaves `venv/` behind, and a directory test would then skip install.sh for good
-      if (!existsSync(join(dir, 'venv', 'bin', 'python3'))) {
+      // the sentinel is what install.sh PRODUCES (splat64's `splat` entry point), not the venv's
+      // own files: `python3 -m venv` without ensurepip exits 1 but leaves venv/bin/python3 behind,
+      // and a half-run install.sh leaves pip — either would make a directory or interpreter test
+      // skip the install for good. `python3 -m venv` over such a partial venv just completes it.
+      if (!existsSync(join(dir, 'venv', 'bin', 'splat'))) {
         sh('python3 -m venv venv', dir);
         sh('bash install.sh', dir, { ...process.env, PATH: `${join(dir, 'venv', 'bin')}:${process.env.PATH}` });
       }
