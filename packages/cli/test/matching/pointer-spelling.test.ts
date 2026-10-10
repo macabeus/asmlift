@@ -300,3 +300,53 @@ describe('a temp holding a map-declared pointer global, real compilers', () => {
     });
   }
 });
+
+// A byte-pointer temp stored as a word into a global and a member the map declares integers takes
+// their casts there, so it is declared `u8 *` as when it only feeds the sum: the default candidate
+// is byte-exact, also under the project's `-Werror`.
+const CELL_DECLS =
+  'struct S { u8 pad[4000]; }; extern struct S *gP; extern s32 gOut;\n' +
+  'struct T { s32 a; s32 b; }; extern struct T gT; void use(s32);\n';
+const CELL_MAP: SymbolMap = new Map([
+  [0x03001000, [{ name: 'gP', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+  [0x03001004, [{ name: 'gOut', kind: 'data', declared: true, shape: 'scalar', size: 4, signed: true }]],
+  [
+    0x03001008,
+    [
+      {
+        name: 'gT',
+        kind: 'data',
+        declared: true,
+        shape: 'struct',
+        structName: 'T',
+        size: 8,
+        layout: [
+          { name: 'a', offset: 0, size: 4, signed: true },
+          { name: 'b', offset: 4, size: 4, signed: true },
+        ],
+      },
+    ],
+  ],
+]);
+const CELL_BODY = 'void f(u8 x) { u8 *t = (u8 *)gP; use(0); gOut = (s32)(t + ((x << 2) + 2672)); gT.b = (s32)t; }';
+
+describe('a byte-pointer temp also stored into integer cells the map declares, real compilers', () => {
+  for (const cc of ['agbcc', 'kmc'] as const) {
+    it.runIf(HAVE[cc])(`declares it in the default candidate, byte-exact under -Werror on ${cc}`, () => {
+      const project = CELL_DECLS + CELL_BODY;
+      const { asm, obj } = compileTarget(cc, project, 'f');
+      const { target } = targetFor(ID[cc], flags(cc));
+      const [first] = enumerateCandidates('f', asm, target, {
+        symbols: CELL_MAP,
+        prototypes: prototypesFromContext(C_TYPEDEFS + project, 'c'),
+        asmData: extractAsmData(obj, target, 'f'),
+      });
+      expect(first.variations).toEqual(['unsigned']);
+      expect(first.source).toContain('gT.b = (s32)v0;');
+      const werror = [...flags(cc), '-Werror'];
+      const src = CELL_DECLS + first.source;
+      const score = cc === 'agbcc' ? scoreC(src, 'f', obj, werror) : scoreCMipsGcc(src, 'f', obj, werror);
+      expect(score.match).toBe(true);
+    });
+  }
+});

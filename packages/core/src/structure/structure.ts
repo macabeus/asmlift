@@ -89,9 +89,7 @@ import { collectStructs } from '../raise/structs';
 import {
   type DeclaredField,
   type SymbolInfo,
-  type SymbolStructField,
   declaredArrayShape,
-  declaredFields,
   isArrayField,
   isBitfieldField,
   pointeeFields,
@@ -108,8 +106,10 @@ import {
   elementIndex,
   globalByteBase,
   globalOf,
+  memberQualsAllow,
   memoFieldsOf,
   ptrMemberDecl,
+  structMemberAt,
   subscriptsFromExtents,
 } from './globalaccess';
 import {
@@ -271,20 +271,6 @@ function laddrType(op: Op): IrType {
   const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
   const count = op.attrs.count as number;
   return count === 1 ? elem : T.array(elem, count);
-}
-
-/** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
- *  The named spelling REPLACES a cast through `(u8 *)`, which carries no qualifier at all, so a
- *  qualifier the name reintroduces changes what the compiler emits:
- *    • `volatile` makes the access observable — the load may no longer be folded or reordered,
- *      which is a different instruction sequence (measured: 6 insns where the cast form was 5);
- *    • `const` under a STORE is a hard error, where the cast form merely cast the qualifier away.
- *  Either way the honest spelling is the cast form, so the member simply is not nameable here. */
-function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefined, isStore: boolean): boolean {
-  if (f.volatile) {
-    return false;
-  }
-  return !(isStore && (f.const || containerConst));
 }
 
 /** A map-declared POINTER MEMBER as the additive lowering renders its VALUE: the bare `gSym.pBuf`,
@@ -732,14 +718,9 @@ function memAccess(
       // THE shared spellability predicate (symbols.ts), the same call declare.ts gates its struct
       // declaration on: a layout it declines whole is a layout with no nameable members, and a
       // union alias it drops for the first view at that offset is a name no declaration carries.
-      // An ARRAY member is excluded for the same reason as in pointeeAccess: `u8 x[1]` would match
-      // a byte access by (offset, size) and spell `.x`, which is not an lvalue of that width. A
-      // BITFIELD member likewise — a plain read of its bytes is not a read of its bits (the named
-      // bitfield spelling has its own recognizer, on the extract shape: see lowerDef).
-      const fld = declaredFields(si.layout)?.find(
-        (f) => f.offset === gb.byte && f.size === width && !isArrayField(f) && !isBitfieldField(f),
-      );
-      if (fld && memberQualsAllow(fld, si.const, isStore)) {
+      // The named bitfield spelling has its own recognizer, on the extract shape: see lowerDef.
+      const fld = structMemberAt(si, gb.byte, width, isStore);
+      if (fld) {
         return { k: 'field', base: { k: 'var', name: gb.name }, name: fld.name, dot: true };
       }
     }
@@ -2717,6 +2698,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
   // still declaring temps.
   const {
     pointerGlobal,
+    castsIntoGlobal,
     needsIntSpelling,
     intoDeclaredTemp,
     intoPtrCell,
@@ -2726,6 +2708,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     pointerGlobals,
     pointerLoadedGlobals,
     wordLoadedGlobals,
+    scalarGlobals,
     varType,
     compiler: opts,
     useSitesOf,
@@ -3463,7 +3446,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     }
     for (const [n, vs] of holders) {
       const t = varType.get(n);
-      if (t?.kind === 'int' && t.width === 32 && declaresBytePointer(vs, ir, pointerGlobal)) {
+      if (t?.kind === 'int' && t.width === 32 && declaresBytePointer(vs, ir, { pointerGlobal, castsIntoGlobal })) {
         varType.set(n, T.ptr(T.u(8)));
       }
     }

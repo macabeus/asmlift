@@ -13,8 +13,11 @@ import type { Expr } from '../l3/ast';
 import {
   type DeclaredField,
   type SymbolInfo,
+  type SymbolStructField,
   arrayInnerExtents,
   declaredFields,
+  isArrayField,
+  isBitfieldField,
   isPtrField,
   pointeeFields,
 } from '../symbols';
@@ -306,6 +309,39 @@ export function addOffset(idx: Expr, n: number): Expr {
   return idx.k === 'const'
     ? { k: 'const', value: idx.value + n }
     : { k: 'bin', op: '+', l: idx, r: { k: 'const', value: n } };
+}
+
+/** May a member be NAMED by an access of this direction, given the qualifiers on its declaration?
+ *  The named spelling REPLACES a cast through `(u8 *)`, which carries no qualifier at all, so a
+ *  qualifier the name reintroduces changes what the compiler emits:
+ *    • `volatile` makes the access observable — the load may no longer be folded or reordered,
+ *      which is a different instruction sequence (measured: 6 insns where the cast form was 5);
+ *    • `const` under a STORE is a hard error, where the cast form merely cast the qualifier away.
+ *  Either way the honest spelling is the cast form, so the member simply is not nameable here. */
+export function memberQualsAllow(f: SymbolStructField, containerConst: boolean | undefined, isStore: boolean): boolean {
+  if (f.volatile) {
+    return false;
+  }
+  return !(isStore && (f.const || containerConst));
+}
+
+/** The member a `width`-byte access at byte `byte` of a struct global names, `gSym.member`: one at
+ *  that offset and of that size, no array or bitfield, whose qualifiers allow the access. An ARRAY
+ *  member would match a byte access by (offset, size) and spell `.x`, which is not an lvalue of
+ *  that width; a plain read of a BITFIELD's bytes is not a read of its bits. */
+export function structMemberAt(
+  si: SymbolInfo,
+  byte: number,
+  width: number,
+  isStore: boolean,
+): DeclaredField | undefined {
+  if (si.shape !== 'struct') {
+    return undefined;
+  }
+  const f = declaredFields(si.layout)?.find(
+    (x) => x.offset === byte && x.size === width && !isArrayField(x) && !isBitfieldField(x),
+  );
+  return f !== undefined && memberQualsAllow(f, si.const, isStore) ? f : undefined;
 }
 
 /** The members a symbol's declaration seats: a struct global's own, or a pointer global's

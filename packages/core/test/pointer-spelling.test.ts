@@ -20,6 +20,8 @@ interface Fixture {
   pointerGlobals?: string[];
   pointerLoaded?: string[];
   wordLoaded?: string[];
+  /** the globals structure() spells bare */
+  scalar?: string[];
   varType?: Record<string, IrType>;
 }
 // The map lookup as structure() builds it: by name, with its member lookup.
@@ -31,6 +33,7 @@ const make = (f: Fixture = {}) => {
     pointerGlobals: f.pointerGlobals === undefined ? undefined : new Set(f.pointerGlobals),
     pointerLoadedGlobals: new Set(f.pointerLoaded ?? []),
     wordLoadedGlobals: new Set(f.wordLoaded ?? []),
+    scalarGlobals: new Set(f.scalar ?? []),
     varType: new Map(Object.entries(f.varType ?? {})),
   });
 };
@@ -202,6 +205,38 @@ describe('intoPtrCell', () => {
     expect(s.intoPtrCell(v('gHalf'), v('a0'))).toEqual(v('a0'));
     expect(s.intoPtrCell(v('gOther'), v('a0'))).toEqual(v('a0'));
     expect(make({ varType: { a0: T.ptr(T.u(8)) } }).intoPtrCell(v('gOut'), v('a0'))).toEqual(v('a0'));
+  });
+});
+
+describe('castsIntoGlobal', () => {
+  const s = make({
+    map: [
+      u16Info('gOut', { size: 4, signed: true }),
+      u16Info('gHalf'),
+      u16Info('gVol', { size: 4, volatile: true }),
+      bgPtrsInfo,
+      ptrInfo('gP'),
+    ],
+    scalar: ['gOut', 'gHalf', 'gVol', 'gP'],
+  });
+
+  test('casts into a word global the map declares an integer and spelled bare, or an integer member', () => {
+    expect(s.castsIntoGlobal('gOut', 0)).toBe(true);
+    expect(s.castsIntoGlobal('gBgPtrs', 8)).toBe(true);
+  });
+
+  test('does not cast into a global not spelled bare, at another byte, narrower, volatile or no integer', () => {
+    expect(make({ map: [u16Info('gOut', { size: 4, signed: true })] }).castsIntoGlobal('gOut', 0)).toBe(false);
+    expect(s.castsIntoGlobal('gOut', 4)).toBe(false);
+    expect(s.castsIntoGlobal('gHalf', 0)).toBe(false);
+    expect(s.castsIntoGlobal('gVol', 0)).toBe(false);
+    expect(s.castsIntoGlobal('gP', 0)).toBe(false);
+  });
+
+  test('does not cast into a pointer member, a byte no member starts at, or a global no map declares', () => {
+    expect(s.castsIntoGlobal('gBgPtrs', 4)).toBe(false);
+    expect(s.castsIntoGlobal('gBgPtrs', 2)).toBe(false);
+    expect(s.castsIntoGlobal('gOther', 0)).toBe(false);
   });
 });
 
@@ -609,8 +644,11 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
   const k = (value: number): Value => op('const', [], { value });
   const x = (): Value => mkValue(T.u(32));
   const plusK = (): Value => op('add', [op('shl', [x()], { imm: 2 }), k(2672)]);
-  const pointerGlobal = make({ map: [ptrInfo('gP')] }).pointerGlobal;
-  const declares = (...values: Value[]) => declaresBytePointer(values, ir, pointerGlobal);
+  const spelling = make({
+    map: [ptrInfo('gP'), u16Info('gOut', { size: 4, signed: true }), bgPtrsInfo],
+    scalar: ['gOut'],
+  });
+  const declares = (...values: Value[]) => declaresBytePointer(values, ir, spelling);
   const scratch = (): Value => op('load', [mkValue(T.ptr(T.s(32)))], { off: 0, width: 4, signed: false });
 
   test('declares the base of a sum with a constant addend, `t + (x + K)`', () => {
@@ -683,7 +721,7 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     op('add', [t, op('add', [op('shl', [x()], { imm: 2 }), n])]);
     let reads = 0;
     const counted = { ...ir, defOf: (v: Value) => (reads++, ir.defOf(v)) };
-    expect(declaresBytePointer([t], counted, pointerGlobal)).toBe(true);
+    expect(declaresBytePointer([t], counted, spelling)).toBe(true);
     expect(reads).toBeLessThan(200);
   });
 
@@ -738,8 +776,30 @@ describe('declaresBytePointer: when a temp holding a declared pointer word is de
     expect(declares(t)).toBe(false);
     const w = word();
     op('add', [w, plusK()]);
-    effect('store', [gaddr('gOut'), w], { off: 0, width: 4 });
+    effect('store', [gaddr('gNone'), w], { off: 0, width: 4 });
     expect(declares(w)).toBe(false);
+  });
+
+  test('declares a temp stored as a word into a global or member the map declares an integer', () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    effect('store', [gaddr('gOut'), t], { off: 0, width: 4 });
+    expect(declares(t)).toBe(true);
+    const u = word();
+    op('add', [u, plusK()]);
+    effect('store', [gaddr('gBgPtrs'), u], { off: 8, width: 4 });
+    expect(declares(u)).toBe(true);
+  });
+
+  test('does not declare a temp stored narrower, or into a member that takes no cast', () => {
+    const t = word();
+    op('add', [t, plusK()]);
+    effect('store', [gaddr('gOut'), t], { off: 0, width: 2 });
+    expect(declares(t)).toBe(false);
+    const u = word();
+    op('add', [u, plusK()]);
+    effect('store', [gaddr('gBgPtrs'), u], { off: 4, width: 4 });
+    expect(declares(u)).toBe(false);
   });
 
   test('declares a temp whose sum is a call argument or written to a global', () => {
