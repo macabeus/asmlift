@@ -19,7 +19,7 @@
 //     their disc images are never committed: each goes in the checkout's own `orig/<version>/`
 //     (src/cases/dtk-project.ts holds the whole dtk story).
 import { execSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -176,13 +176,17 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
   marioparty3: {
     baseroms: ['baserom.us.z64'],
     prepare: (dir) => {
-      // the sentinel is what install.sh PRODUCES (splat64's `splat` entry point), not the venv's
-      // own files: `python3 -m venv` without ensurepip exits 1 but leaves venv/bin/python3 behind,
-      // and a half-run install.sh leaves pip — either would make a directory or interpreter test
-      // skip the install for good. `python3 -m venv` over such a partial venv just completes it.
-      if (!existsSync(join(dir, 'venv', 'bin', 'splat'))) {
+      // the sentinel is a stamp written only after install.sh RETURNED, not anything the venv or
+      // install.sh produce along the way: `python3 -m venv` without ensurepip exits 1 but leaves
+      // venv/bin/python3 behind, and install.sh has two pip lines with no `set -e`, so a network
+      // failure on the second leaves `splat` installed and the requirements missing. Either partial
+      // state must run the step again; `python3 -m venv` over a partial venv just completes it, and
+      // pip over an installed package is a no-op.
+      const stamp = join(dir, 'venv', '.asmlift-installed');
+      if (!existsSync(stamp)) {
         sh('python3 -m venv venv', dir);
         sh('bash install.sh', dir, { ...process.env, PATH: `${join(dir, 'venv', 'bin')}:${process.env.PATH}` });
+        writeFileSync(stamp, `${new Date().toISOString()}\n`);
       }
       if (!existsSync(join(dir, 'tools', 'gcc_2.7.2', 'mac', 'gcc'))) {
         sh('gmake -C tools', dir, hostToolEnv());
