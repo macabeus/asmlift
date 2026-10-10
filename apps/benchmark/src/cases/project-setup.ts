@@ -55,9 +55,6 @@ const afBuildEnv = (): NodeJS.ProcessEnv => ({
 const haveMipsBinutils = (): boolean =>
   spawnSync('mips-linux-gnu-ld', ['--version'], { stdio: 'ignore', env: afBuildEnv() }).status === 0;
 
-/** The IDO recomp binaries af runs are x86_64: only Apple silicon needs a translation layer. */
-const needsRosetta = (): boolean => process.platform === 'darwin' && process.arch === 'arm64';
-
 const jobs = (): string => `-j${Math.min(8, cpus().length || 4)}`;
 
 /** Missing or contentless — an `mkdir` alone must not satisfy an "already extracted" guard. */
@@ -125,6 +122,46 @@ function requireHost(check: () => boolean, what: string, remedy: string): void {
   }
   if (!ok) {
     throw new Error(`setup: missing host prerequisite — ${what}\n  remedy: ${remedy}`);
+  }
+}
+
+/** What af's host checks read: the host's platform and CPU, and the two probes they run. */
+export interface AfHost {
+  platform: NodeJS.Platform;
+  arch: string;
+  /** `mips-linux-gnu-ld` runs from af's build PATH */
+  mipsBinutils: () => boolean;
+  /** an x86_64 binary runs */
+  runsX86: () => boolean;
+}
+
+const thisAfHost = (): AfHost => ({
+  platform: process.platform,
+  arch: process.arch,
+  mipsBinutils: haveMipsBinutils,
+  runsX86: () => {
+    execSync('arch -x86_64 /usr/bin/true', { stdio: 'ignore' });
+    return true;
+  },
+});
+
+/** af's host prerequisites, refused with the first one missing. The IDO recomp binaries af runs are
+ *  x86_64, so only Apple silicon needs a translation layer, and `arch -x86_64` is a macOS verb (an
+ *  invalid option to GNU `arch`): the probe runs on that host alone. */
+export function requireAfHost(host: AfHost): void {
+  requireHost(
+    host.mipsBinutils,
+    'big-endian mips-linux-gnu binutils (mips-linux-gnu-ld on PATH or under /opt/cross)',
+    host.platform === 'linux'
+      ? 'apt install binutils-mips-linux-gnu (or any mips-linux-gnu binutils on PATH)'
+      : 'build big-endian mips-linux-gnu binutils with --prefix=/opt/cross (af cross toolchain)',
+  );
+  if (host.platform === 'darwin' && host.arch === 'arm64') {
+    requireHost(
+      host.runsX86,
+      'Rosetta (af runs the x86_64 IDO recomp binaries)',
+      'softwareupdate --install-rosetta --agree-to-license',
+    );
   }
 }
 
@@ -249,25 +286,7 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
   af: {
     baseroms: ['baseroms/jp/baserom.z64'],
     prepare: (dir) => {
-      requireHost(
-        haveMipsBinutils,
-        'big-endian mips-linux-gnu binutils (mips-linux-gnu-ld on PATH or under /opt/cross)',
-        process.platform === 'linux'
-          ? 'apt install binutils-mips-linux-gnu (or any mips-linux-gnu binutils on PATH)'
-          : 'build big-endian mips-linux-gnu binutils with --prefix=/opt/cross (af cross toolchain)',
-      );
-      // `arch -x86_64` is a macOS verb — on Linux it is an invalid option, so the probe is gated
-      // on the one host that needs the translation layer rather than run everywhere
-      if (needsRosetta()) {
-        requireHost(
-          () => {
-            execSync('arch -x86_64 /usr/bin/true', { stdio: 'ignore' });
-            return true;
-          },
-          'Rosetta (af runs the x86_64 IDO recomp binaries)',
-          'softwareupdate --install-rosetta --agree-to-license',
-        );
-      }
+      requireAfHost(thisAfHost());
       // the project's own bootstrap chain: venv → setup (tools + baserom decompress) → extract
       if (!existsSync(join(dir, '.venv'))) {
         sh('gmake venv', dir, afBuildEnv());
