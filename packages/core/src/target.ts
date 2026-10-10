@@ -665,8 +665,8 @@ export interface TargetDescription {
     // constant addend and into one where it has none; ido7.1 builds one object every time, and
     // mwcc_242_81 is CodeWarrior's index-first order (structure/pointer-spelling.ts, THE INTEGER
     // SUM). True ⇒ the arithmetic table spells an undeclared pointer global plus an integer with a
-    // constant term as the pointer sum. Absent ⇒ the integer sum, the asm's operand order on every
-    // compiler measured.
+    // constant term as the pointer sum where the sum is a value rather than an access's address.
+    // Absent ⇒ the integer sum.
     keepsPointerSumAddend?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read

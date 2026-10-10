@@ -264,14 +264,14 @@ export interface ArithRow {
  *  sum, where an integer sum keeps the source's order, so `(u8 *)g + x` is the asm's order on
  *  agbcc, KMC gcc and IDO only. The partner goes integer with it, or a pointer partner would scale
  *  the sum. Except where the compiler keeps a pointer sum's constant addend and moves an integer
- *  sum's (`keepsPointerSumAddend`) and the offset has a constant term: the gcc family folds `(u32)g + (x + K)` to `(g + K) + x` and
- *  keeps the pointer sum's `g + (x + K)`, so there an integer offset keeps the pointer sum. Only
- *  where the sum is a VALUE, a call argument or a temp: spelled inside the load or store it is the
- *  address of, agbcc moves the constant out of both sums into the access, the pointer sum's as
- *  `(x + g) + K` and the integer sum's as `(g + x) + K`, so neither is the asm's `g + (x + K)` and
- *  the integer sum keeps its base-first order. A
- *  constant offset folds into the access and keeps `(u8 *)g + K`. A declared pointer keeps
- *  `x + (u8 *)p`, the operand the element and field spellings read.
+ *  sum's (`keepsPointerSumAddend`) and the offset has a constant term: the gcc family folds
+ *  `(u32)g + (x + K)` to `(g + K) + x` and keeps the pointer sum's `g + (x + K)`, so there the
+ *  offset keeps the pointer sum. Only where the sum is a VALUE, a call argument or a temp: spelled
+ *  inside the load or store it is the address of, agbcc moves the constant out of both sums into
+ *  the access, the pointer sum's as `(x + g) + K` and the integer sum's as `(g + x) + K`, so neither
+ *  is the asm's `g + (x + K)` and the integer sum keeps its base-first order. A constant offset
+ *  folds into the access and keeps `(u8 *)g + K`. A declared pointer keeps `x + (u8 *)p`, the
+ *  operand the element and field spellings read.
  *
  *  A byte sum less an integer sum of globals no declaration types: bare, `gB2 - gB3` is an element
  *  count under a wider pointer declaration of them, where the asm subtracted bytes.

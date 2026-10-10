@@ -65,8 +65,8 @@
 //   • a write of a constant that fits neither the signed nor the unsigned type of the narrow width,
 //     which gcc warns of when it converts one implicitly (gcc/c-common.c:849-861, :870-895) and a
 //     `-Werror` build refuses;
-//   • /narrow-decl, /narrow-load: a `u32` local. Its reads stay bare, and a `u32` read is unsigned, so narrowing
-//     it would turn its compares, divisions and shifts into signed ones;
+//   • /narrow-decl, /narrow-load: a `u32` local. Its reads stay bare, and a `u32` read is unsigned,
+//     so narrowing it would turn its compares, divisions and shifts into signed ones;
 //   • /narrow-decl, /narrow-load: a local written more than once, or by `v++`, where a later write
 //     could store a value the narrow declaration would truncate and a bare read would not;
 //   • /narrow-decl: a local whose one write is a `for` loop's init, or that is not an integer

@@ -476,7 +476,7 @@ const subsets = <X>(xs: readonly X[]): X[][] =>
  *  ones (the matching suite compiles that pair both ways). The shapes are not a lattice of their own:
  *  applyStacked's skip-on-decline makes "every shape" each pair of them wherever the third declines,
  *  and a row demanding a strict subset of the shapes while all fire is what would earn one. Fewest
- *  members first, so a tie goes to the smaller set. */
+ *  members first, so where everything else ties the smaller set is enumerated first and wins. */
 export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = subsets(STACKED_WIDTHS)
   .flatMap((widths) =>
     [[], ...STACKED_SHAPES.map((x) => [x]), ...(STACKED_SHAPES.length > 1 ? [STACKED_SHAPES] : [])].map((shapes) => [
