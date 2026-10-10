@@ -82,6 +82,7 @@ import {
   SIGNEDNESS,
   STACKED_SUBSETS,
   STRUCTURE_VARIATIONS,
+  StackedMemberThrew,
   type StructureVariation,
   UNFOLDED_HOISTS,
   applyStacked,
@@ -1120,10 +1121,12 @@ export function enumerateCandidates(
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
             // discard every later one, under that variation's name, which names no shape.
-            const shapeVariations = subset.map((x) => x.name);
+            // A throw past applyStacked is reported under the fired set, the candidate's own name.
+            let shapeVariations: readonly Variation[] = [];
             try {
               const shaped = applyStacked(subset, alt);
               if (shaped !== null && firstFired(firedSets, shaped.variations)) {
+                shapeVariations = shaped.variations;
                 assertResolved(shaped.out);
                 assertDerefsTyped(shaped.out);
                 assertLocalsWritten(shaped.out);
@@ -1140,7 +1143,8 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              reportThrow([...preRespellVariations, ...variations, ...shapeVariations], e);
+              const step = e instanceof StackedMemberThrew ? e.variations : shapeVariations;
+              reportThrow([...preRespellVariations, ...variations, ...step], e);
             }
           }
         }
@@ -1168,8 +1172,9 @@ export function enumerateCandidates(
           respell(shaped.variations, () => shaped.out, true);
         }
       } catch (e) {
-        // the report names the full subset — the fired set is unknown mid-throw
-        reportThrow([...preRespellVariations, ...subset.map((x) => x.name)], e);
+        // `respell` reports its own throws, so only a member can throw here
+        const step = e instanceof StackedMemberThrew ? e.variations : subset.map((x) => x.name);
+        reportThrow([...preRespellVariations, ...step], e);
       }
     }
     respell(['argbase'], () => materializeArgBases(sfn));

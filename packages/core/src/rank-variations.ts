@@ -487,12 +487,25 @@ export const STACKED_SUBSETS: (typeof STACKED_VARIATIONS)[number][][] = subsets(
   .filter((subset) => subset.length > 0)
   .sort((a, b) => a.length - b.length);
 
+/** A stacked member that threw, named by the members that fired before it and then itself: the
+ *  step that threw, which every subset reaching it shares. Reported under that name rather than
+ *  the whole subset's, so a consumer deduping on the step prints one broken member once and not
+ *  once per subset holding it. */
+export class StackedMemberThrew extends Error {
+  constructor(
+    readonly variations: readonly VariationName[],
+    cause: unknown,
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause });
+  }
+}
+
 /** The subset applied in table order, SKIP-ON-DECLINE: a member that declines contributes
  *  nothing rather than killing the combination — the all-shapes candidate is "everything that
  *  fires", so a pair is reachable whenever the third declines. The variations are the members that
  *  actually FIRED, so they never name a variation that declined; a fired set that
  *  duplicates a smaller subset's derives the same tree, which the caller emits once
- *  (`firstFired`). Null when nothing fired. */
+ *  (`firstFired`). Null when nothing fired. A member that throws throws StackedMemberThrew. */
 export const applyStacked = (
   subset: readonly (typeof STACKED_VARIATIONS)[number][],
   from: SFn,
@@ -500,7 +513,12 @@ export const applyStacked = (
   let cur = from;
   const fired: VariationName[] = [];
   for (const sp of subset) {
-    const r = sp.apply(cur);
+    let r: SFn | null;
+    try {
+      r = sp.apply(cur);
+    } catch (e) {
+      throw new StackedMemberThrew([...fired, sp.name], e);
+    }
     if (r) {
       cur = r;
       fired.push(sp.name);

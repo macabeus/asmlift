@@ -13,7 +13,7 @@ import { verify } from '../src/ir/verify';
 import type { Expr, SFn } from '../src/l3/ast';
 import { narrowDeclarations, narrowLoadDeclarations, narrowReadDeclarations } from '../src/l3/narrowdecl';
 import { recoverTypes } from '../src/raise/recover';
-import { STACKED_SUBSETS, STACKED_VARIATIONS, applyStacked } from '../src/rank-variations';
+import { STACKED_SUBSETS, STACKED_VARIATIONS, StackedMemberThrew, applyStacked } from '../src/rank-variations';
 import { structure } from '../src/structure/structure';
 
 // sub_0803E8CC's shape: a byte read, less one, zero-extended once and read twice around a call
@@ -508,5 +508,30 @@ describe('the stacked subsets', () => {
   it('lists fewer members first', () => {
     const sizes = STACKED_SUBSETS.map((subset) => subset.length);
     expect(sizes).toEqual([...sizes].sort((a, b) => a - b));
+  });
+});
+
+describe('applyStacked', () => {
+  const member = (name: string) => STACKED_VARIATIONS.find((x) => x.name === name)!;
+  // no member throws on any known input, so the thrower is a stand-in under a member's name
+  const throwingStandIn = {
+    name: member('narrow-read').name,
+    apply: (): SFn | null => {
+      throw new Error('stand-in failure');
+    },
+  };
+
+  it('names a member that throws by the members that fired before it, then itself', () => {
+    const subset = [member('pollguard'), member('narrow-decl'), throwingStandIn, member('narrow-load')];
+    expect(member('pollguard').apply(structured(BOTH))).toBeNull();
+    let thrown: unknown;
+    try {
+      applyStacked(subset, structured(BOTH));
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(StackedMemberThrew);
+    expect((thrown as StackedMemberThrew).variations).toEqual(['narrow-decl', 'narrow-read']);
+    expect((thrown as StackedMemberThrew).message).toBe('stand-in failure');
   });
 });
