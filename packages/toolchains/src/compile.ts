@@ -76,6 +76,16 @@ export function containerRefused(what: string, r: { status: number | null; stder
     : refused(what, r);
 }
 
+/** Unlink `obj` before a NATIVE compile writes it. Scratch directories outlive a run (the benchmark's
+ *  content-keyed ones under /tmp persist across runs), and a container running as root leaves its
+ *  objects root-owned there: a host compiler cannot overwrite one, but the user who owns the
+ *  directory can unlink it. It also keeps a compile that wrote nothing from leaving a stale object
+ *  behind to be scored. */
+function freshOutput(obj: string): string {
+  rmSync(obj, { force: true });
+  return obj;
+}
+
 /** How much output one spawn may write. Node's default is a mebibyte, and an object carrying a big
  *  data table dumps past it: Pikmin's `system.cpp` includes `bigFont.h`, whose target's
  *  `objdump -s -r -t` is over 1 MiB of hex. */
@@ -276,7 +286,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
     // the container's command with host paths: same driver, same -B/COMPILER_PATH, run in `dir`
     const cc = run(
       join(t.dir, 'gcc'),
-      ['-B', `${t.dir}/`, ...t.harnessFlags, ...flags, '-c', '-o', join(dir, outObj), join(dir, srcC)],
+      ['-B', `${t.dir}/`, ...t.harnessFlags, ...flags, '-c', '-o', freshOutput(join(dir, outObj)), join(dir, srcC)],
       { COMPILER_PATH: t.dir },
       dir,
     );
@@ -529,7 +539,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
   if (kmcNative()) {
     const cc = run(
       join(t.dir, 'gcc'),
-      [...t.harnessFlags, ...flags, '-c', '-o', join(dir, outObj), join(dir, srcC)],
+      [...t.harnessFlags, ...flags, '-c', '-o', freshOutput(join(dir, outObj)), join(dir, srcC)],
       { COMPILER_PATH: t.dir },
       dir,
     );
@@ -738,7 +748,14 @@ export function ppcCompile(
     // only the dump, whose objdump ships in the image alone, still goes through Docker
     const cc = run(
       t.nativeWibo,
-      [join(mwccDir(mwcc), 'mwcceppc.exe'), ...t.harnessFlags, ...flags, '-o', join(dir, outObj), join(dir, srcC)],
+      [
+        join(mwccDir(mwcc), 'mwcceppc.exe'),
+        ...t.harnessFlags,
+        ...flags,
+        '-o',
+        freshOutput(join(dir, outObj)),
+        join(dir, srcC),
+      ],
       undefined,
       dir,
     );
