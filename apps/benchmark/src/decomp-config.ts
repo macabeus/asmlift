@@ -12,8 +12,13 @@
 // the DOCKERIZED pair (KMC GCC, mwcc) the harness STRIPS the compiler before loading: their
 // configs still load and resolve the target (the same "no compile command" user path), while
 // candidate compilation goes to @asmlift/toolchains' own compiler bound at the row's flags — which
-// pools Docker containers, an optimization the one-shot `docker run` template cannot express. The
-// reproduction scripts (`bench target`) get the command intact on every toolchain.
+// pools Docker containers, an optimization the one-shot `docker run` template cannot express, or
+// runs the compiler natively where the host can (@asmlift/toolchains' native.ts). The other three
+// dockerized toolchains (GCC 2.7.2 and two CodeWarrior builds) keep the user-command path, and on a
+// host that runs their 32-bit binaries natively that command is NATIVE_COMMANDS' instead of the
+// committed `docker run` one: the same compiler and words over host paths, so the same code, at
+// the cost of one process instead of one container per candidate. The reproduction scripts
+// (`bench target`) get the committed command intact on every toolchain.
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
@@ -24,10 +29,12 @@ import {
   IDO_TOOLCHAIN,
   MWCC_PPC_TOOLCHAIN,
   TOOLCHAIN,
+  gcc272Native,
   isMwccToolchainId,
   kmcCandidateCompiler,
   mwccCandidateCompiler,
   mwccDir,
+  mwccNative,
 } from '@asmlift/toolchains';
 import { createRunner } from '@match-kit/compiler';
 import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
@@ -70,7 +77,32 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_KMC_IMAGE: GCC_KMC_TOOLCHAIN.image,
   ASMLIFT_PPC_IMAGE: MWCC_PPC_TOOLCHAIN.image,
   ASMLIFT_WIBO: MWCC_PPC_TOOLCHAIN.wibo,
+  ASMLIFT_NATIVE_WIBO: MWCC_PPC_TOOLCHAIN.nativeWibo,
 };
+
+// The committed `docker run` commands of dataset/toolchains/<id>/decomp.yaml with the container
+// taken out: each mounts the candidate's directory at /work and runs there, so the native command
+// runs in that directory too, over the host paths the mounts stood for.
+const MWCC_NATIVE_COMMAND =
+  `cd "$(dirname {{outputPath}})" && "$ASMLIFT_NATIVE_WIBO" "$ASMLIFT_MWCC_DIR"/mwcceppc.exe ` +
+  `'-pragma' 'msg_show_realref off' '-c' '-nostdinc' '-stderr' {{flags}} -o {{outputPath}} {{inputPath}}`;
+
+const NATIVE_COMMANDS: Partial<Record<ToolchainId, { native: () => boolean; command: string }>> = {
+  'gcc2.7.2': {
+    native: gcc272Native,
+    command:
+      `cd "$(dirname {{outputPath}})" && COMPILER_PATH="$ASMLIFT_GCC272_DIR" "$ASMLIFT_GCC272_DIR"/gcc ` +
+      `-B "$ASMLIFT_GCC272_DIR"/ -nostdinc {{flags}} -c -o {{outputPath}} {{inputPath}}`,
+  },
+  mwcc_233_163n: { native: () => mwccNative('mwcc_233_163n'), command: MWCC_NATIVE_COMMAND },
+  mwcc_247_107: { native: () => mwccNative('mwcc_247_107'), command: MWCC_NATIVE_COMMAND },
+};
+
+/** The native command for `id`, materialized, when this host runs it natively; else undefined. */
+export function nativeScoreCommand(id: ToolchainId): string | undefined {
+  const n = NATIVE_COMMANDS[id];
+  return n !== undefined && n.native() ? substitutePlaceholders(n.command, id) : undefined;
+}
 
 /** The pooled pair: candidates compile through @asmlift/toolchains' own compiler (long-lived
  *  containers), bound at the row's flags. */
@@ -139,6 +171,8 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
   if (pooled !== undefined) {
     delete doc.tools.asmlift.compiler;
+  } else {
+    doc.tools.asmlift.compiler = nativeScoreCommand(id) ?? doc.tools.asmlift.compiler;
   }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });

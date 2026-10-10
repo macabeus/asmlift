@@ -15,9 +15,9 @@ import { MIPS_GCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsGccTarget, scoreCMipsGcc } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
-import { dockerGate } from './docker-gate';
+import { kmcGate } from './docker-gate';
 
-const HAVE_DOCKER = dockerGate('mips-gcc');
+const HAVE_DOCKER = kmcGate('mips-gcc');
 
 // KMC-GCC codegen that asmlift reproduces byte-exact — the flow works AND the compiler-specific
 // idioms are handled. Each notes the GCC-vs-IDO divergence it exercises.

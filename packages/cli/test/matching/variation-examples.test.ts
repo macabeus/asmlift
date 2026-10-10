@@ -28,7 +28,7 @@ import {
 import { describe, expect, test } from 'vitest';
 
 import { decompileRanked } from '../../src/rank';
-import { dockerGate, ppcDockerGate } from './docker-gate';
+import { kmcGate, ppcDockerGate } from './docker-gate';
 
 /** The flags an example compiler builds at: its toolchain's canonical flags, the flags every example
  *  and witness claims its two objects under. */
@@ -45,7 +45,7 @@ const uses = (compiler: ExampleCompiler) => entries.some(([, d]) => d.example.co
 const HAVE: { readonly [C in ExampleCompiler]: boolean } = {
   agbcc: true,
   ido: true,
-  gcc: !uses('gcc') || dockerGate('variation-examples'),
+  gcc: !uses('gcc') || kmcGate('variation-examples'),
   mwcc: !uses('mwcc') || ppcDockerGate('variation-examples', 'mwcc_242_81'),
 };
 

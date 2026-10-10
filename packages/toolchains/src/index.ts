@@ -8,6 +8,7 @@
 
 export * from './toolchain';
 export * from './compile';
+export * from './native';
 export * from './score';
 export * from './asmdata';
 // Re-exported so toolchain-bound tests can single-import everything they score with.

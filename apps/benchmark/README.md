@@ -425,7 +425,9 @@ Host prerequisites. On Linux (Ubuntu 24.04, verified empirically): `build-essent
 and `python3-pip` (every venv step dies without `ensurepip`), `ninja`, and Docker with the user in
 the `docker` group — the `asmlift-ppc` image must be built with `--platform linux/386` (see
 `packages/toolchains/README.md`). No wine and no Rosetta: wibo and the x86_64 recomp binaries run
-natively. A shard of `bench run` peaks at 1.3–1.7 GB on the largest candidate fans and the queue
+natively. KMC GCC, GCC 2.7.2 and CodeWarrior also COMPILE natively there, without a container per
+compile (`ASMLIFT_NATIVE`, same README); `bench setup` fetches the static wibo that needs, and Docker
+stays required for the snowboardkids2 build and the PowerPC objdump. A shard of `bench run` peaks at 1.3–1.7 GB on the largest candidate fans and the queue
 runs those rows first, so an 8 GB host wants `pnpm bench run --jobs 2` (the default runs
 `min(8, cpus)` shards). On macOS (verified empirically):
 
