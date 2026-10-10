@@ -1,10 +1,10 @@
 // A SHAPE IS ITS OWN CANDIDATE — and it must fail as its own candidate.
 //
-// `rank.ts`'s `respell` derives the statement shapes (`/initfirst`, `/pollguard`, `/pollread`, and
-// all of them together) onto every respelled tree. Each subset gets its own try, so two facts hold of
+// `rank.ts`'s `respell` derives the stacked subsets (rank-variations.ts `STACKED_SUBSETS`) onto
+// every respelled tree. Each subset gets its own try, so two facts hold of
 // that loop: a throw deriving one subset leaves the later ones in the fan, and the report names
-// the respell variation followed by the shape's variations — the shape that failed, not the respell
-// variation alone.
+// the respell variation followed by the stacked members that fired before the throw and the shape
+// that failed, not the respell variation alone.
 //
 // The shapes are mocked because no committed disassembly fires more than `/initfirst`: the fixture
 // that would exercise this naturally is a compiler fact nobody has, and the isolation is a
@@ -16,6 +16,7 @@ import { describe, expect, test, vi } from 'vitest';
 import { T } from '../src/ir/types';
 import type { SFn } from '../src/l3/ast';
 import { enumerateCandidates } from '../src/rank';
+import { STACKED_VARIATIONS } from '../src/rank-variations';
 import { ARMV4T_AGBCC } from '../src/target';
 import { hasVariation } from '../src/variation-tokens';
 
@@ -46,12 +47,13 @@ describe('one throwing shape does not take the others with it', () => {
     expect(errors.every((e) => e.error.includes('mocked shape failure'))).toBe(true);
   });
 
-  test('…and the report names the STACKED SUBSET, not just the variation it was derived onto', () => {
-    // the subset is the candidate's identity, so that is what a failure is reported under: the
-    // `/initfirst` singleton and the all-shapes subset are two candidates and two reports.
-    expect(errors.every((e) => hasVariation(e.variations, 'initfirst'))).toBe(true);
-    const subsets = new Set(errors.map((e) => e.variations.slice(e.variations.indexOf('initfirst')).join('/')));
-    expect([...subsets].sort()).toEqual(['initfirst', 'initfirst/pollguard/pollread/narrow-decl/narrow-read']);
+  test('…and the report names the STEP THAT THREW, not just the variation it was derived onto', () => {
+    // the members that fired before the throw, then the one that threw: `/initfirst` is the
+    // table's first member, so nothing fires before it and every subset holding it reports that
+    // one step, which a consumer deduping on the step prints once per tree it was derived onto.
+    const stacked = new Set<string>(STACKED_VARIATIONS.map((x) => x.name));
+    expect(errors.every((e) => e.variations.filter((v) => stacked.has(v)).join('/') === 'initfirst')).toBe(true);
+    expect(errors.every((e) => e.variations.at(-1) === 'initfirst')).toBe(true);
   });
 
   test('…while the LATER subsets are still derived ONTO THE RESPELLED TREES', () => {

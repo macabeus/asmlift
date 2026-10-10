@@ -1,8 +1,8 @@
-// The `/narrow-decl` and `/narrow-read` variations (core l3/narrowdecl.ts) against the REAL agbcc
-// toolchain, in both directions. `u8 v; v = x - 1;` and `s32 v; v = (u8)(x - 1);` compute the same
-// value and compile to two different objects, and so do `u8 v; v = f(); … v` and `s32 v; v = f();
-// … (u8)v`, so neither spelling may replace the other: each source must be recovered byte-exact, by
-// the candidate whose declaration it used.
+// The `/narrow-decl`, `/narrow-load` and `/narrow-read` variations (core l3/narrowdecl.ts) against the
+// REAL agbcc toolchain, in both directions. `u8 v; v = x - 1;` and `s32 v; v = (u8)(x - 1);` compute
+// the same value and compile to two different objects, and so do `u8 v; v = p[100];` and `s32 v; v =
+// p[100];`, and `u8 v; v = f(); … v` and `s32 v; v = f(); … (u8)v`, so neither spelling may replace
+// the other: each source must be recovered byte-exact, by the candidate whose declaration it used.
 //
 // Toolchain-gated like the other agbcc tests (compileTargetAsm/decompileRanked use real agbcc).
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
@@ -38,6 +38,72 @@ describe('/narrow-decl, real agbcc, both directions', () => {
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(false);
     expect(r.winner.source).toMatch(/\bs32 v0;/);
+  });
+});
+
+// pokeemerald:LoadMonInfo's shape: two byte reads held across two calls. Under `u8` agbcc loads each
+// as its local is written; under `s32` it moves the loads down to the first call.
+const LOAD_DECLS = 'void f7(u8 *, u8 *, u8, u8, s32, u8, u8);\n';
+
+const rankedLoads = async (decl: string) => {
+  const c =
+    `${LOAD_DECLS}void ld(u8 *p, s32 x) { ${decl} a; ${decl} b; a = p[100]; b = p[101]; ` +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); }';
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('ld', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      ld: { params: ['u8 *', 's32'], returnsVoid: true },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+    },
+    compile: async (source) => compileCandAgbcc(LOAD_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-load, real agbcc, both directions', () => {
+  it('recovers byte locals holding byte reads through the variation', async () => {
+    const r = await rankedLoads('u8');
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(true);
+    expect(r.winner.source).toMatch(/\bu8 v0;/);
+  });
+
+  it('keeps s32 locals holding byte reads, which the variation would lose', async () => {
+    const r = await rankedLoads('s32');
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(false);
+    expect(r.winner.source).toMatch(/\bs32 v0;/);
+  });
+});
+
+// A local narrowed at its cast write beside the two byte reads: either kind must be declared narrow
+// without the other
+const rankedWriteAndLoads = async (written: string, loaded: string) => {
+  const write = written === 'u8' ? 'gA.c - 1' : '(u8)(gA.c - 1)';
+  const c =
+    `${DECLS}${LOAD_DECLS}void nd(u8 *p, s32 x) { ${written} v; ${loaded} a; ${loaded} b; v = ${write}; ` +
+    'gB.d = (1 & v) + rnd() % (5 - v) + 1; a = p[100]; b = p[101]; ' +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); }';
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('nd', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      nd: { params: ['u8 *', 's32'], returnsVoid: true },
+      rnd: { params: [] },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+    },
+    compile: async (source) => compileCandAgbcc(DECLS + LOAD_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-decl and /narrow-load in one function, real agbcc', () => {
+  it.each([
+    ['the cast-written local alone', 'u8', 's32', true, false],
+    ['the load-written locals alone', 's32', 'u8', false, true],
+    ['both kinds', 'u8', 'u8', true, true],
+  ])('narrows %s', async (_, written, loaded, decl, load) => {
+    const r = await rankedWriteAndLoads(written, loaded);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(decl);
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(load);
   });
 });
 
@@ -110,5 +176,88 @@ describe('/narrow-decl and /narrow-read in one function, real agbcc', () => {
     expect(r.winner.score.match).toBe(true);
     expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(false);
     expect(r.winner.source).toMatch(/\bs32 v0;/);
+  });
+});
+
+// All three kinds in one function: a cast-written local, two locals holding byte reads across two
+// calls and two holding call results. Every combination of narrow and wide kinds must be reachable,
+// so each pair is offered while the third kind also fires.
+const TRI_DECLS = DECLS + LOAD_DECLS + CALL_DECLS;
+
+const rankedTri = async (written: string, loaded: string, read: string) => {
+  const write = written === 'u8' ? 'gA.c - 1' : '(u8)(gA.c - 1)';
+  const args = read === 'u8' ? 'y, m' : '(u8)y, (u8)m';
+  const c =
+    `${TRI_DECLS}u16 tri(u8 *p, s32 x) { ${written} v; ${loaded} a; ${loaded} b; ${read} y; ${read} m; ` +
+    `v = ${write}; gB.d = (1 & v) + rnd() % (5 - v) + 1; a = p[100]; b = p[101]; ` +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); ' +
+    `y = cv(p[0]); m = cv(p[1]); return dc(${args}, (u8)cv(p[2])); }`;
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('tri', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      tri: { params: ['u8 *', 's32'], returns: 'u16' },
+      rnd: { params: [] },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+      cv: { params: ['u8'], returns: 'u32' },
+      dc: { params: ['u8', 'u8', 'u8'], returns: 'u16' },
+    },
+    compile: async (source) => compileCandAgbcc(TRI_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('/narrow-decl, /narrow-load and /narrow-read in one function, real agbcc', () => {
+  it.each([
+    ['u8', 's32', 's32'],
+    ['s32', 'u8', 's32'],
+    ['s32', 's32', 'u8'],
+    ['u8', 'u8', 's32'],
+    ['u8', 's32', 'u8'],
+    ['s32', 'u8', 'u8'],
+    ['u8', 'u8', 'u8'],
+    ['s32', 's32', 's32'],
+  ])('matches %s written, %s loaded, %s read locals', async (written, loaded, read) => {
+    const r = await rankedTri(written, loaded, read);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(written === 'u8');
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(loaded === 'u8');
+    expect(hasVariation(r.winner.variations, 'narrow-read')).toBe(read === 'u8');
+  });
+});
+
+// A statement-shape member beside the width members: a loop whose accumulator `/initfirst` moves
+// up, after the cast-written local and the two byte reads. Each width subset must be reachable with
+// the shape as well as without it.
+const LOOP_DECLS = 'struct P { s32 x; s32 y; }; extern struct P gArr[]; extern s32 gN; extern s32 gS;\n';
+const SHAPE_DECLS = DECLS + LOAD_DECLS + LOOP_DECLS;
+
+const rankedShapeAndWidths = async (written: string, loaded: string) => {
+  const write = written === 'u8' ? 'gA.c - 1' : '(u8)(gA.c - 1)';
+  const c =
+    `${SHAPE_DECLS}void sw(u8 *p, s32 x) { ${written} v; ${loaded} a; ${loaded} b; s32 s, i; v = ${write}; ` +
+    'gB.d = (1 & v) + rnd() % (5 - v) + 1; a = p[100]; b = p[101]; ' +
+    'f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4); ' +
+    's = 0; for (i = 0; i < gN; i++) s += gArr[i].x; gS = s; }';
+  const asm = compileTargetAsm(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags);
+  return await decompileRanked('sw', asm, ARMV4T_AGBCC, assembleTarget(asm), {
+    prototypes: {
+      sw: { params: ['u8 *', 's32'], returnsVoid: true },
+      rnd: { params: [] },
+      f7: { params: ['u8 *', 'u8 *', 'u8', 'u8', 's32', 'u8', 'u8'], returnsVoid: true },
+    },
+    compile: async (source) => compileCandAgbcc(SHAPE_DECLS + source, TOOLCHAIN_TARGETS.agbcc.canonicalFlags),
+  });
+};
+
+describe('a statement shape with the width members, real agbcc', () => {
+  it.each([
+    ['u8', 's32'],
+    ['s32', 'u8'],
+    ['u8', 'u8'],
+    ['s32', 's32'],
+  ])('matches %s written and %s loaded locals', async (written, loaded) => {
+    const r = await rankedShapeAndWidths(written, loaded);
+    expect(r.winner.score.match).toBe(true);
+    expect(hasVariation(r.winner.variations, 'narrow-decl')).toBe(written === 'u8');
+    expect(hasVariation(r.winner.variations, 'narrow-load')).toBe(loaded === 'u8');
   });
 });

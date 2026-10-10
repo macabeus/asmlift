@@ -9,11 +9,15 @@
 // (packages/cli/test/matching/pointer-spelling.test.ts).
 import { describe, expect, it } from 'vitest';
 
-import { type Op, mkOp, mkValue } from '../src/ir/core';
+import { type Op, type Value, mkOp, mkValue } from '../src/ir/core';
 import { type IrType, T } from '../src/ir/types';
 import type { BinOp, Expr } from '../src/l3/ast';
 import { memoFieldsOf } from '../src/structure/globalaccess';
-import { makePointerSpelling } from '../src/structure/pointer-spelling';
+import {
+  type ArithCompilerFacts,
+  type PointerSpellingDeps,
+  makePointerSpelling,
+} from '../src/structure/pointer-spelling';
 import type { SymbolInfo } from '../src/symbols';
 
 const ptrInfo = (name: string): SymbolInfo => ({ name, kind: 'data', declared: true, shape: 'pointer', size: 4 });
@@ -34,10 +38,12 @@ const bgPtrsInfo: SymbolInfo = {
 // gPtr and gQ are globals no map declares that the IR loads as pointers, gW, gW2, gB2 and gB3
 // ones it loads as words, and gPW one it loads as both; the locals are typed as named.
 const MAP = [ptrInfo('gP'), ptrInfo('gR'), bgPtrsInfo];
-const make = () => {
+const make = (compiler?: ArithCompilerFacts, readers?: Pick<PointerSpellingDeps, 'useSitesOf' | 'isNamed'>) => {
   const byName = new Map(MAP.map((si) => [si.name, si]));
   const info = (n: string) => byName.get(n);
   return makePointerSpelling({
+    compiler,
+    ...readers,
     sym: { info, fieldsOf: memoFieldsOf(info) },
     pointerGlobals: undefined,
     pointerLoadedGlobals: new Set(['gPtr', 'gQ', 'gP', 'gR', 'gPW']),
@@ -456,6 +462,102 @@ describe('arith: a rendered pointer right of `+`', () => {
 describe('arith: `+` with no rendered pointer', () => {
   it('adds an undeclared pointer global plus a runtime offset as its word, the asm’s order on CodeWarrior too, and restores the byte pointer', () => {
     expect(add(v('gPtr'), v('i'), U8P)).toEqual(bytes(bin('+', word(v('gPtr')), v('i'))));
+  });
+
+  describe('where the compiler reassociates an integer sum’s constant', () => {
+    const gcc = make({ keepsPointerSumAddend: true });
+    const shifted = bin('<<', v('i'), c(13));
+
+    it('walks an undeclared pointer global plus an integer offset with a constant term as bytes, the pointer sum', () => {
+      for (const offset of [bin('+', shifted, c(772)), bin('-', v('i'), c(4)), bin('+', c(4), v('i'))]) {
+        expect(gcc.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(bin('+', bytes(v('gPtr')), offset));
+        expect(gcc.arith(op('add'), v('gPtr'), offset, false)).toEqual(bin('+', bytes(v('gPtr')), offset));
+      }
+      const unfolded = bin('+', shifted, bin('<<', c(193), c(2)));
+      expect(gcc.arith(op('add', U8P), v('gPtr'), unfolded, false)).toEqual(bin('+', bytes(v('gPtr')), unfolded));
+    });
+
+    it('adds an untyped global word in that offset as its word', () => {
+      const s = make({ keepsPointerSumAddend: true });
+      const offset = s.arith(op('add'), v('gW'), c(4), false);
+      expect(s.arith(op('add', U8P), v('gPtr'), offset, false)).toEqual(
+        bin('+', bytes(v('gPtr')), bin('+', untypedWord('gW'), c(4))),
+      );
+    });
+
+    describe('by how the sum is read', () => {
+      const offset = bin('+', v('i'), c(1));
+      const POINTER_SUM = bin('+', bytes(v('gPtr')), offset);
+      const INTEGER_SUM = bytes(bin('+', word(v('gPtr')), offset));
+      type Reader = (sum: Value) => Op;
+      const load: Reader = (sum) => mkOp('load', { operands: [sum], results: [mkValue(T.u(8))] });
+      const store: Reader = (sum) => mkOp('store', { operands: [sum, mkValue(T.u(8))] });
+      const aload: Reader = (sum) => mkOp('aload', { operands: [sum, mkValue(T.s(32))], results: [mkValue(T.u(8))] });
+      const storeOf: Reader = (sum) => mkOp('store', { operands: [mkValue(U8P), sum] });
+      const storeAtItself: Reader = (sum) => mkOp('store', { operands: [sum, sum] });
+      const astoreIndex: Reader = (sum) => mkOp('astore', { operands: [mkValue(U8P), sum, mkValue(T.u(8))] });
+      const addTo: Reader = (sum) => mkOp('add', { operands: [sum, mkValue(T.u(32))], results: [mkValue(T.u(32))] });
+      /** the sum spelled with these readers of its result, held in a name or not */
+      const spelled = (readers: Reader[], named = false) => {
+        const d = op('add', U8P);
+        const sum = d.results[0]!;
+        const s = make(
+          { keepsPointerSumAddend: true },
+          { useSitesOf: new Map([[sum, readers.map((r) => ({ op: r(sum) }))]]), isNamed: (x) => named && x === sum },
+        );
+        return s.arith(d, v('gPtr'), offset, false);
+      };
+
+      it.each([
+        ['a load', [load]],
+        ['a store', [store]],
+        ['an indexed load', [aload]],
+        ['a load and a store', [load, store]],
+      ])('keeps the integer sum spelled only inside %s it addresses', (_, readers) => {
+        expect(spelled(readers)).toEqual(INTEGER_SUM);
+      });
+
+      it('walks a sum a name holds, even one read only as an access address', () => {
+        expect(spelled([load], true)).toEqual(POINTER_SUM);
+      });
+
+      it.each([
+        ['as an access address and as an operand', [load, addTo]],
+        ['as the value a store writes', [storeOf]],
+        ['as both the address and the value of one store', [storeAtItself]],
+        ['as an index', [astoreIndex]],
+        ['by nothing', []],
+      ])('walks a sum read %s', (_, readers) => {
+        expect(spelled(readers)).toEqual(POINTER_SUM);
+      });
+    });
+
+    it('does not walk it beside an offset with no constant term, where the two sums are one object', () => {
+      expect(gcc.arith(op('add', U8P), v('gPtr'), v('i'), false)).toEqual(bytes(bin('+', word(v('gPtr')), v('i'))));
+      const product = bin('*', v('i'), c(24));
+      expect(gcc.arith(op('add', U8P), v('gPtr'), product, false)).toEqual(bytes(bin('+', word(v('gPtr')), product)));
+    });
+
+    it('does not walk it beside a partner that is no integer', () => {
+      const byteSum = gcc.arith(op('add', U8P), v('pb'), c(4), false);
+      expect(gcc.arith(op('add', U8P), v('gPtr'), byteSum, false)).toEqual(
+        bytes(bin('+', word(v('gPtr')), word(bin('+', v('pb'), c(4))))),
+      );
+      const addressSum = bin('+', addr('gArr'), c(4));
+      expect(gcc.arith(op('add', U8P), v('gPtr'), addressSum, false)).toEqual(
+        bytes(bin('+', word(v('gPtr')), addressSum)),
+      );
+    });
+
+    it('does not walk it right of an integer, whose order the pointer sum would swap', () => {
+      const offset = bin('+', shifted, c(772));
+      expect(gcc.arith(op('add', U8P), offset, v('gPtr'), false)).toEqual(bytes(bin('+', offset, word(v('gPtr')))));
+    });
+
+    it('keeps the integer sum where the compiler does not reassociate it', () => {
+      const offset = bin('+', shifted, c(772));
+      expect(add(v('gPtr'), offset, U8P)).toEqual(bytes(bin('+', word(v('gPtr')), offset)));
+    });
   });
 
   it('adds an undeclared pointer global’s partner as its integer: a pointer global’s or member’s word, an untyped global’s word', () => {

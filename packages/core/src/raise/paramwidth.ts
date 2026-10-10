@@ -122,11 +122,28 @@
 // pool load in the benchmark's agbcc references (extscale.ts's header has the census). Only the
 // fold's own extensions are judged this way; a plain cast's extension sits at its right shift,
 // where its position says nothing about its `lsl`'s.
+//
+// EVERY READER AN EXTENSION, the `/narrow-param` lift variation (`narrowExtendedParams`). agbcc does
+// not always widen a narrow declared parameter in the prologue: where every use of it is itself an
+// extension it widens at each use instead, and then the object carries no declaration to read.
+// `pokeemerald:LoadMonInfo` declares `s16 partyId` and reads it as `lsl #16` behind a pool load, an
+// `asr #14` for the scaled index and an `lsr #16` for a `u16` argument, so `raw-reader` refuses it
+// (two readers), and with that ablated `not-prologue` (behind the pool load) and `fused-behind-pool`.
+// Declared `s16` and read `a << 2` and `(u16)a`, or declared `s32` and read `(s16)a << 2` and
+// `(u16)a`, the two are one object in isolation and differ only through the register allocation
+// around them (a sibling `u8` parameter's prologue copy), so nothing in the asm decides it and the
+// differ referees. Declaring the parameter at width w changes no reader's value when every reader is
+// an extension to w' ≤ w: ext_w'(trunc_w x) = ext_w'(x). The width is the widest reader's, its
+// signedness the caller's declaration where that spells one and the first reader of that width's
+// otherwise; each reader of exactly that type becomes the parameter itself. Where no prototype
+// declares the width, the candidate loses every score tie (rank.ts `guessesParamWidth`): without
+// a sibling to separate them the two declarations are often one object, and the narrow one costs
+// each prototyped caller the truncation `proto-width` is about.
 import { type Fn, type Op, type Value, replaceAllUsesWith, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
-import { type FnProto, declaredWidth } from '../proto';
+import { type FnProto, declaredSigned, declaredWidth } from '../proto';
 import type { NarrowParamWitness } from '../target';
 
 /** What the gates below judge: one entry parameter and the extension that reads it. */
@@ -141,6 +158,8 @@ export interface NarrowParamCandidate {
   inPrologue: boolean;
   /** reads of the RAW parameter anywhere in the function */
   uses: number;
+  /** reads of it that are not an extension to `width` or narrower */
+  wideReaders: number;
   /** the width the caller's own prototype declares for this parameter, if it declares one */
   declared: number | undefined;
   /** the extension is one raise/extscale.ts re-split from a fused pair whose `shl` the machine ran
@@ -192,14 +211,14 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
   },
   {
     id: 'not-prologue',
-    why: 'an extension behind body code is where the SOURCE wrote the cast — and on a schedule that interleaves them, the refusing answer',
+    why: 'an extension behind body code may be the source writing the cast, and nothing in the fan referees a narrow signature against the wide one',
     sound: true,
     guardedBy: 'param-width.test.ts: an extension behind a nullary call is body code',
     rejects: (c) => !c.inPrologue,
   },
   {
     id: 'no-declaration-witness',
-    why: 'this compiler spells a narrow declaration and a body cast the same way, so the asm decides nothing',
+    why: 'the compiler spells a narrow declaration and a body cast the same way, so the assembly decides nothing',
     sound: true,
     guardedBy:
       'param-width.test.ts: a compiler whose two spellings are one object refuses the narrowing, measured or not',
@@ -207,14 +226,14 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
   },
   {
     id: 'unhomed-param',
-    why: 'this compiler homes a narrow DECLARED parameter, so the absent home store proves the declaration was wide',
+    why: 'the compiler stores a narrow declared parameter to the stack on entry, so one it did not store was declared wide',
     sound: true,
     guardedBy: 'param-width.test.ts: a homing compiler refuses the parameter it did not home',
     rejects: (c) => c.witness === 'home-store-and-in-place' && !c.homed,
   },
   {
     id: 'widened-elsewhere',
-    why: 'this compiler widens a narrow DECLARED parameter in the argument register itself, so a widening that lands in a scratch register is not a declaration',
+    why: 'the compiler widens a narrow declared parameter in its own argument register, so a widening into another register is no declaration',
     sound: true,
     guardedBy:
       'param-width.test.ts: \u2026and refuses one it homed but widened SOMEWHERE ELSE \u2014 that is a 64-bit half',
@@ -228,6 +247,70 @@ export const PARAM_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
     rejects: (c) => c.fusedBehindPool,
   },
 ];
+
+const byId = (id: string): Gate<NarrowParamCandidate> => PARAM_WIDTH_GATES.find((g) => g.id === id)!;
+
+/** `/narrow-param`'s table (`narrowExtendedParams`): a second CONSUMER of the default's rules, not an
+ *  ablation of its table, so it is built by id rather than through `ablateHeuristic`. It leaves out
+ *  the three rules that read the prologue's evidence and adds the one that reads the readers.
+ *  `raw-reader` gives way to `wide-reader`, which is sound for the same reason it is: every reader
+ *  is an extension the pass rewrites. `not-prologue` and `fused-behind-pool` read fields this pass
+ *  does not observe (it fills `inPrologue` and `fusedBehindPool` false). Their `sound` is a claim
+ *  about the DEFAULT, whose narrowing reaches every candidate with no wide sibling, so a wrong width
+ *  there is a signature nothing referees and every prototyped caller pays for. A /narrow-param
+ *  candidate keeps the wide default beside it and loses every tie unless a prototype declares the
+ *  width (rank.ts `guessesParamWidth`), so for it the same question is refereed: a rule sound for a
+ *  declaration is a heuristic for a generated candidate (l3/gates.ts, `ORDER_SHAPE_GATES`).
+ *  param-width.test.ts holds the set left out to exactly these three, so a sound rule added to the
+ *  default is either added here or argued out by name. */
+export const PARAM_READER_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
+  byId('entry-is-join'),
+  byId('param-typed'),
+  byId('cast-width'),
+  {
+    id: 'wide-reader',
+    why: 'a reader that is not an extension to this width or narrower reads bits a narrow declaration drops',
+    sound: true,
+    guardedBy: 'param-width.test.ts: a reader that is no narrow extension keeps the parameter wide',
+    rejects: (c) => c.wideReaders !== 0,
+  },
+  byId('proto-width'),
+  byId('no-declaration-witness'),
+  byId('unhomed-param'),
+  byId('widened-elsewhere'),
+];
+
+const isExtension = (op: Op): boolean => op.opcode === 'sext' || op.opcode === 'zext';
+
+/** The ops that read `v` and the number of branch arguments that pass it, anywhere in `fn`. */
+function readersOf(fn: Fn, v: Value): { ops: Op[]; edges: number } {
+  const ops: Op[] = [];
+  let edges = 0;
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.operands.includes(v)) {
+        ops.push(op);
+      }
+      for (const s of op.successors) {
+        edges += s.args.filter((a) => a === v).length;
+      }
+    }
+  }
+  return { ops, edges };
+}
+
+/** How many reads of `v` are not an extension of `v` alone to `width` or narrower. */
+function wideReaderCount(fn: Fn, v: Value, width: number): number {
+  const { ops, edges } = readersOf(fn, v);
+  return (
+    edges +
+    ops.reduce(
+      (n, op) =>
+        n + (isExtension(op) && (op.attrs.width as number) <= width ? 0 : op.operands.filter((o) => o === v).length),
+      0,
+    )
+  );
+}
 
 /** How many times `v` is read anywhere in `fn` — op operands and branch arguments alike. */
 function useCount(fn: Fn, v: Value): number {
@@ -298,6 +381,7 @@ export function narrowEntryParams(
       entryIsJoin,
       inPrologue: prologue.has(op),
       uses: useCount(fn, p),
+      wideReaders: wideReaderCount(fn, p, width),
       declared: declared[entry.params.indexOf(p)],
       fusedBehindPool: fusedBehindPool.has(op),
       witness,
@@ -311,6 +395,63 @@ export function narrowEntryParams(
     replaceAllUsesWith(fn, op.results[0], p);
     entry.ops.splice(entry.ops.indexOf(op), 1);
     narrowed++;
+  }
+  return narrowed;
+}
+
+/** `/narrow-param`: type each entry parameter every reader of which is an extension of it at the
+ *  widest reader's width, and drop the readers of exactly that type (EVERY READER AN EXTENSION).
+ *  `apply: false` changes nothing and reports what it would narrow. Returns each parameter it
+ *  narrowed. */
+export function narrowExtendedParams(
+  fn: Fn,
+  witness: NarrowParamWitness,
+  self?: FnProto,
+  gates: readonly Gate<NarrowParamCandidate>[] = PARAM_READER_WIDTH_GATES,
+  apply = true,
+): NarrowParamCandidate[] {
+  const evidence = fn.paramEvidence;
+  const entry = fn.blocks[0];
+  const declaredTypes = Array.isArray(self?.params) ? self.params : [];
+  const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
+  const narrowed: NarrowParamCandidate[] = [];
+  for (const [i, p] of entry.params.entries()) {
+    const extensions = readersOf(fn, p).ops.filter((op) => isExtension(op) && op.operands.length === 1);
+    if (extensions.length === 0) {
+      continue;
+    }
+    const width = Math.max(...extensions.map((op) => op.attrs.width as number));
+    const first = extensions.find((op) => op.attrs.width === width)!;
+    const declared = declaredTypes[i];
+    const c: NarrowParamCandidate = {
+      param: p,
+      width,
+      entryIsJoin,
+      inPrologue: false,
+      uses: useCount(fn, p),
+      wideReaders: wideReaderCount(fn, p, width),
+      declared: declared === undefined ? undefined : declaredWidth(declared),
+      fusedBehindPool: false,
+      witness,
+      homed: evidence?.get(p)?.deadHome ?? false,
+      selfRedefined: evidence?.get(p)?.selfRedefined ?? false,
+    };
+    if (firstRejection(gates, c) !== null) {
+      continue;
+    }
+    narrowed.push(c);
+    if (!apply) {
+      continue;
+    }
+    const signed = (declared === undefined ? undefined : declaredSigned(declared)) ?? first.opcode === 'sext';
+    p.type = T.int(width, signed);
+    for (const op of extensions) {
+      if (op.attrs.width === width && (op.opcode === 'sext') === signed) {
+        replaceAllUsesWith(fn, op.results[0], p);
+        const home = fn.blocks.find((b) => b.ops.includes(op))!;
+        home.ops.splice(home.ops.indexOf(op), 1);
+      }
+    }
   }
   return narrowed;
 }

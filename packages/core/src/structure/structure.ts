@@ -123,7 +123,7 @@ import {
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
 import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
-import { makePointerSpelling } from './pointer-spelling';
+import { type ArithCompilerFacts, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
 import { unspelledEpilogues } from './retspell';
 import { type ArmExit, type SwitchBoundCase, makeSwitchRecovery } from './switch-recover';
@@ -1428,14 +1428,15 @@ export const ENCLOSING_CARRIER_GATES: readonly Gate<EnclosingCarrier>[] = [
 //   orderArgCopiesByWriteOrder     — order edge copies by the order the pred WROTE their
 //                                    destinations.
 // The last three are `compilerBehaviors` (target.ts) — this pass stays target-AGNOSTIC: it reads
-// booleans, never a compiler name.
+// booleans, never a compiler name. So are the arithmetic table's (`ArithCompilerFacts`), which this
+// type extends and hands to `makePointerSpelling` whole.
 //
 // WHAT A FIELD DOC BELOW HOLDS, narrowly: what the option MEANS to `structure()`, and the suffix of
 // the variation that enumerates it. A VARIATION's rationale, and any figure pricing its marginal value, live
 // ONCE at its `STRUCTURE_VARIATIONS` entry in rank-variations.ts — restated here the two copies rot
 // separately, and only that one is the entry the enumeration reads. Figures pricing a
 // DEFAULT this pass owns (the edge-copy ordering, `spellDeclaredSubscripts`) do belong here.
-export interface StructureOptions {
+export interface StructureOptions extends ArithCompilerFacts {
   returnsVoid?: boolean;
   coalesceLoopInit?: boolean;
   preserveDivergentBranchSense?: boolean;
@@ -2706,7 +2707,7 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
 
   // ── POINTER/INTEGER spelling (structure/pointer-spelling.ts) ────────────────────────────────
   // Whether an operand, a temp's value or a pointer cell's value is written as a pointer or as an
-  // integer, and through which cast. `varType` goes in as a live reference: the naming below is
+  // integer, and through which cast. `varType` and `varName` are read live: the naming below is
   // still declaring temps.
   const {
     needsIntSpelling,
@@ -2719,6 +2720,9 @@ export function structure(fn: Fn, opts: StructureOptions = {}, hooks: StructureH
     pointerLoadedGlobals,
     wordLoadedGlobals,
     varType,
+    compiler: opts,
+    useSitesOf,
+    isNamed: (v) => varName.has(v),
   });
 
   let fresh = 0;

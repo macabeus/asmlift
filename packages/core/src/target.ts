@@ -654,6 +654,20 @@ export interface TargetDescription {
     // does not declare it: the matching suite compiles each witness on one compiler. Absent ⇒
     // offered.
     pointerIntConversionIsFree?: boolean;
+    // Does this compiler keep the constant addend of a POINTER sum's offset where the source put it,
+    // and move an INTEGER sum's out to the base? agbcc does: `(u8 *)((u32)g + ((a << 4) + 772))`
+    // computes `(g + 772) + (a << 4)` (fold-const.c:5033-5058, `A + (V + C)` → `(A + C) + V`), while
+    // `(u8 *)g + ((a << 4) + 772)` computes `g + ((a << 4) + 772)` (c-typeck.c:2663-2692 distributes
+    // the constant, fold-const.c:4997-5011 folds it back), which is what the project's own
+    // `g->arr[a]` compiles to. Compiled at each toolchain's canonical flags, with `g` a struct
+    // pointer, a `void *` and a `u32`, as a call argument and under a dereference: agbcc,
+    // gcc2.7.2kmc and gcc2.7.2 build the two spellings into two objects wherever the offset has a
+    // constant addend and into one where it has none; ido7.1 builds one object every time, and
+    // mwcc_242_81 is CodeWarrior's index-first order (structure/pointer-spelling.ts, THE INTEGER
+    // SUM). True ⇒ the arithmetic table spells an undeclared pointer global plus an integer with a
+    // constant term as the pointer sum where the sum is a value rather than an access's address.
+    // Absent ⇒ the integer sum.
+    keepsPointerSumAddend?: boolean;
     // Does this compiler EMIT a memory read in the block the source SPELLED it in? One direction
     // only: the def-block placement rule (StructureOptions.readsStayWhereWritten) re-spells a read
     // at the block the asm performed it in, which reproduces the asm iff nothing sinks a spelled
@@ -885,6 +899,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     foldsConstAddrOffset: true,
     foldsPointerAdvance: true,
     pointerIntConversionIsFree: true,
+    keepsPointerSumAddend: true,
     readsStayWhereWritten: true,
     switchBoundCase: 'taken',
     switchArmsFollowLayout: true,
@@ -1104,6 +1119,8 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
+    // MEASURED on BOTH toolchains this description serves, the pairs at the field.
+    keepsPointerSumAddend: true,
     aggregateBoundary: 1,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and

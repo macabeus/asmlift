@@ -45,7 +45,14 @@ describe('the gate census seam', () => {
     // Not a count for its own sake: `run/gate-census.ts`'s header says which tabled passes have a
     // caller-side seam and what an entry costs, so a further entry has to re-open that paragraph
     // rather than arrive silently.
-    expect(CENSUSABLE_PASSES).toEqual(['unmerge', 'arm-reread', 'truncload', 'offsetnames', 'frame-objects']);
+    expect(CENSUSABLE_PASSES).toEqual([
+      'unmerge',
+      'arm-reread',
+      'truncload',
+      'paramwidth',
+      'offsetnames',
+      'frame-objects',
+    ]);
   });
 
   it('declares the five tables `UnmergeGates` names, in its order', () => {
@@ -102,6 +109,33 @@ describe('the gate census seam', () => {
     expect(entry().run).toBe(before);
     run(ARMV4T_AGBCC);
     expect(wrapped[0].refusals()).toEqual([['read-behind-effect', 1]]);
+  });
+
+  it('routes the parameter-width pass through the WRAPPED table, and the undo restores the entry', () => {
+    // `void f(s16 d, s32 *out)` whose raw register is read beside its extension: `raw-reader`.
+    const site = () =>
+      parse(
+        'fn f {\n^bb0(%0: unk32, %1: s32*):\n  %2: unk32 = sext %0 {width=16}\n' +
+          '  store %1, %2 {off=0, width=4}\n  store %1, %0 {off=4, width=4}\n  ret\n}\n',
+      );
+    const entry = () => PRE_RECOVERY_PASSES.find((p) => p.id === 'paramwidth')!;
+    const run = () =>
+      entry().run(site(), undefined, {}, ARMV4T_AGBCC, {
+        mergeShapes: new Map(),
+        poolOrder: { entryParams: new Set(), afterPoolLoad: new Set() },
+        scales: emptyScaleRecord(),
+      });
+    const pass = PASSES.paramwidth;
+    const wrapped = pass.tables.map(([, t]) => tallying(t));
+    const before = entry().run;
+    const uninstall = pass.install(wrapped.map((w) => w.gates));
+    expect(entry().run).not.toBe(before);
+    expect(run()).toBe(0);
+    expect(wrapped[0].refusals()).toEqual([['raw-reader', 1]]);
+    uninstall();
+    expect(entry().run).toBe(before);
+    run();
+    expect(wrapped[0].refusals()).toEqual([['raw-reader', 1]]);
   });
 
   it('routes the Thumb lift through the WRAPPED escape table, and the undo restores the record', () => {

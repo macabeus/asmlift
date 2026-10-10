@@ -29,6 +29,7 @@ import {
 import { UNREDUCE_GATES } from './l3/unreduce';
 import { VOL_SLOT_GATES } from './l3/volatileval';
 import { VOL_STORE_GATES } from './l3/volstore';
+import { PARAM_READER_WIDTH_GATES } from './raise/paramwidth';
 import { ARM_REREAD_GATES } from './raise/shortcircuit';
 import { NAME_COALESCE_GATES } from './structure/namecoalesce';
 import { FRESH_MERGE_GATES } from './structure/structure';
@@ -59,6 +60,7 @@ export const VARIATION_GATE_TABLES = {
   NAME_COALESCE_GATES,
   OFFMEMBER_GATES,
   ORDERBASE_GATES,
+  PARAM_READER_WIDTH_GATES,
   PTR_FIELD_GATES,
   REGIONBASE_GATES,
   SCOPEBASE_ELIGIBILITY,

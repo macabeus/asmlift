@@ -1,22 +1,25 @@
-// L3 stacked variations `/narrow-decl` and `/narrow-read`: a named narrow value declared at its
-// width. `/narrow-decl` takes the narrowing at the local's one write, `/narrow-read` at every one of
-// its reads:
+// L3 stacked variations `/narrow-decl`, `/narrow-load` and `/narrow-read`: a named narrow value
+// declared at its width. `/narrow-decl` takes the narrowing cast at the local's one write,
+// `/narrow-load` a write that is a narrow memory read, which has no cast to drop, and `/narrow-read`
+// the narrowing at every one of its reads:
 //
 //   s32 v; v = (u8)(x - 1); … v …        becomes   u8 v; v = x - 1; … v …       (/narrow-decl)
+//   s32 v; v = p[3]; … v …               becomes   u8 v; v = p[3]; … v …        (/narrow-load)
 //   s32 v; v = f(); … (u8)v … (u8)v …    becomes   u8 v; v = f(); … v … v …     (/narrow-read)
 //
 // The two spellings compute the same C value at every read. The declaration truncates where the
-// cast did, and a `u8`, `s8`, `u16` or `s16` read is promoted to `int`, which is what an `s32` read
-// already is. They are not the same program to gcc 2.9's front end. `get_narrower`
-// (gcc/tree.c:4516) sees through the promotion of a narrow VARIABLE and not through an `int` that
-// a cast was assigned to, so for an unsigned narrow one `shorten_compare` (gcc/c-common.c:1158)
-// makes a compare against a constant unsigned and folds `>= 0`, `/` and `%` are shortened to their
-// unsigned helpers (gcc/c-typeck.c:2036-2041, :2079-2090), and `>>` becomes a logical shift
-// (gcc/c-typeck.c:2119). Without such an operator the object can still differ: `convert_to_integer`
-// pushes a narrow store's truncation into an AND's operands (gcc/convert.c:278-284), and a `u8`
-// local is a pseudo PROMOTE_MODE already zero-extended (gcc/thumb.h:344, gcc/stmt.c:3318-3323),
-// whose low byte is free to read (gcc/expr.c:830-836), where an `s32` one takes a fresh byte pseudo
-// and a register copy. Compiled with agbcc `-O2 -mthumb-interwork -fhex-asm -fprologue-bugfix`,
+// cast did, or stores a value already of its type, and a `u8`, `s8`, `u16` or `s16` read is
+// promoted to `int`, which is what an `s32` read already is. They are not the same program to gcc
+// 2.9's front end. `get_narrower` (gcc/tree.c:4516) sees through the promotion of a narrow VARIABLE
+// and not through an `int` that a cast was assigned to, so for an unsigned narrow one
+// `shorten_compare` (gcc/c-common.c:1158) makes a compare against a constant unsigned and folds
+// `>= 0`, `/` and `%` are shortened to their unsigned helpers (gcc/c-typeck.c:2036-2041, :2079-2090),
+// and `>>` becomes a logical shift (gcc/c-typeck.c:2119). Without such an operator the object can
+// still differ: `convert_to_integer` pushes a narrow store's truncation into an AND's operands
+// (gcc/convert.c:278-284), and a `u8` local is a pseudo PROMOTE_MODE already zero-extended
+// (gcc/thumb.h:344, gcc/stmt.c:3318-3323), whose low byte is free to read (gcc/expr.c:830-836),
+// where an `s32` one takes a fresh byte pseudo and a register copy. Compiled with agbcc
+// `-O2 -mthumb-interwork -fhex-asm -fprologue-bugfix`,
 //
 //   v = g.c - 1;  h.d = (v & 1) + rnd() % (5 - v) + 1;
 //
@@ -26,7 +29,9 @@
 // IDO, KMC gcc and gcc 2.7.2 each emit different code for that pair as well, and every mwcc
 // build does for a compare of the narrowed value. Which one the
 // source declared is not in the asm, so the differ referees, and the candidate it is derived onto
-// stays in the fan.
+// stays in the fan. A load written to a `u8` local is loaded where it is written, and one written to
+// an `s32` local where it is first read (two byte reads held across two calls, compiled in the
+// matching suite: `pokeemerald:LoadMonInfo`).
 //
 // At the reads, `(u8)(s32)e`, `(u8)(u32)e` and `(u8)e` keep the same low byte of any integer `e`,
 // so dropping each read's cast keeps its value, whichever write stored it. The pair compiles
@@ -34,13 +39,15 @@
 // as it is stored, right after the `bl`, where `(u8)v` extends at the read, after whatever ran in
 // between (`pokeemerald:RtcGetDayCount`, three results passed on as `u8`s).
 //
-// Two STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the width
-// of a declaration is orthogonal to what every respell variation outside that table changes, and
-// the row that needs it needs it on top of `/offmember`. Two, not one, because a function holding a
-// local narrowed at its write and a local narrowed at its reads may need either one narrowed alone.
-// Each rewrites every local it admits. The two do not commute: a cast that is one local's write and
-// another's read is taken by whichever runs first. So each alone is its own candidate, and in the
-// all-together candidate `/narrow-decl` runs first and takes that cast as the write.
+// Three STACKED variations (rank-variations.ts), derived onto every other candidate's tree: the
+// width of a declaration is orthogonal to what every respell variation outside that table changes,
+// and the row that needs it needs it on top of `/offmember`. Three, not one, because a function
+// holding a local narrowed at its cast write, a local written by a narrow load and a local narrowed
+// at its reads may need any combination of the kinds narrowed. Each rewrites every local it admits.
+// They do not commute: a cast that is one local's write and another's read is taken by whichever
+// runs first, and so is a load-written local whose reads are all narrowed. So every subset of the
+// three is its own candidate, and in one holding a write-side member and `/narrow-read` the
+// write side runs first and takes the local.
 //
 // KNOWN GAP, and it is the price of deciding at L3 rather than where the value is named: which
 // spelling a call's result had shows only in where its extension lands, right after its `bl` or
@@ -58,13 +65,16 @@
 //   • a write of a constant that fits neither the signed nor the unsigned type of the narrow width,
 //     which gcc warns of when it converts one implicitly (gcc/c-common.c:849-861, :870-895) and a
 //     `-Werror` build refuses;
-//   • /narrow-decl: a `u32` local. Its reads stay bare, and a `u32` read is unsigned, so narrowing
-//     it would turn its compares, divisions and shifts into signed ones;
-//   • /narrow-decl: a local written more than once, or by `v++`, where a later write could store a
-//     value the narrow declaration would truncate and a bare read would not;
+//   • /narrow-decl, /narrow-load: a `u32` local. Its reads stay bare, and a `u32` read is unsigned,
+//     so narrowing it would turn its compares, divisions and shifts into signed ones;
+//   • /narrow-decl, /narrow-load: a local written more than once, or by `v++`, where a later write
+//     could store a value the narrow declaration would truncate and a bare read would not;
 //   • /narrow-decl: a local whose one write is a `for` loop's init, or that is not an integer
 //     narrowed to a narrower integer. A call's operand is not known to be an integer (its callee
 //     may return a pointer), so `(u8)f()` is refused too;
+//   • /narrow-load: a local whose one write is a `for` loop's init, or is no `p[i]` or member read
+//     of a narrower integer type. A narrow variable (`v = a1` of a `u8 a1`) is refused: no row has
+//     needed it;
 //   • /narrow-read: a read that is not a narrowing cast (a bare `v`, an index base, a `v++`), reads
 //     cast to two widths or two signednesses, a write in a `for` loop's init or step, and a write
 //     whose value is a pointer, a float or of no known type. A call is admitted: its value already
@@ -91,6 +101,16 @@ type Narrowing = Extract<Expr, { k: 'cast' }> & { to: Extract<IrType, { kind: 'i
  *  neither to an integer by assignment alone. */
 const isNarrowing = (e: Expr, env: ReturnType<typeof declaredTypes>): e is Narrowing =>
   e.k === 'cast' && !e.volatile && e.to.kind === 'int' && e.to.width < 32 && exprCType(e.e, env)?.kind === 'int';
+
+/** The narrower integer type a memory read (`p[i]`, `*p`, a member) already has, which a local it is
+ *  assigned to may be declared at with nothing to drop. */
+const narrowLoad = (e: Expr, env: ReturnType<typeof declaredTypes>): Narrowing['to'] | undefined => {
+  if (e.k !== 'index' && e.k !== 'field') {
+    return undefined;
+  }
+  const t = exprCType(e, env);
+  return t?.kind === 'int' && t.width < 32 ? (t as Narrowing['to']) : undefined;
+};
 
 /** `(T)v`, the read of `name` narrowed to the narrower integer T. */
 const isReadNarrowing = (e: Expr, name: string): e is Narrowing =>
@@ -159,8 +179,26 @@ const declared = (sfn: SFn, body: Stmt[], narrowed: Map<string, IrType>): SFn | 
     ? null
     : { ...sfn, body, locals: sfn.locals.map((l) => ({ ...l, type: narrowed.get(l.name) ?? l.type })) };
 
-/** `/narrow-decl`: the tree with every admitted local narrowed at its write, or null when none is. */
-export function narrowDeclarations(sfn: SFn): SFn | null {
+/** What a write-side variation makes of a local's one write: the narrow type to declare the local
+ *  at and the value to store, or undefined when it does not take that write. */
+type WriteNarrowing = (
+  value: Expr,
+  env: ReturnType<typeof declaredTypes>,
+) => { to: Narrowing['to']; value: Expr } | undefined;
+
+/** A narrowing cast, dropped. */
+const castWrite: WriteNarrowing = (value, env) =>
+  isNarrowing(value, env) && storesQuietly(value.e, value.to) ? { to: value.to, value: value.e } : undefined;
+
+/** A narrow memory read, kept as written. */
+const loadWrite: WriteNarrowing = (value, env) => {
+  const to = narrowLoad(value, env);
+  return to === undefined ? undefined : { to, value };
+};
+
+/** The tree with every admitted local whose one write `take` takes narrowed at that write, or null
+ *  when none is. */
+function narrowAtWrite(sfn: SFn, take: WriteNarrowing): SFn | null {
   const mentions = localMentions(sfn);
   const env = declaredTypes(sfn);
   let body = sfn.body;
@@ -173,14 +211,10 @@ export function narrowDeclarations(sfn: SFn): SFn | null {
     let to: IrType | undefined;
     const rewrite = (list: Stmt[]): Stmt[] =>
       list.map((s) => {
-        if (
-          s.k === 'assign' &&
-          s.name === l.name &&
-          isNarrowing(s.value, env) &&
-          storesQuietly(s.value.e, s.value.to)
-        ) {
-          to = s.value.to;
-          return { ...s, value: s.value.e };
+        const taken = s.k === 'assign' && s.name === l.name ? take(s.value, env) : undefined;
+        if (taken !== undefined) {
+          to = taken.to;
+          return { ...s, value: taken.value };
         }
         return mapStmtLists(s, rewrite);
       });
@@ -192,6 +226,13 @@ export function narrowDeclarations(sfn: SFn): SFn | null {
   }
   return declared(sfn, body, narrowed);
 }
+
+/** `/narrow-decl`: the tree with every admitted local narrowed at its cast write, or null when none is. */
+export const narrowDeclarations = (sfn: SFn): SFn | null => narrowAtWrite(sfn, castWrite);
+
+/** `/narrow-load`: the tree with every admitted local written by a narrow memory read declared at that
+ *  read's type, or null when none is. */
+export const narrowLoadDeclarations = (sfn: SFn): SFn | null => narrowAtWrite(sfn, loadWrite);
 
 /** `/narrow-read`: the tree with every admitted local narrowed at its reads, or null when none is. */
 export function narrowReadDeclarations(sfn: SFn): SFn | null {

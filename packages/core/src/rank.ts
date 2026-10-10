@@ -82,10 +82,12 @@ import {
   SIGNEDNESS,
   STACKED_SUBSETS,
   STRUCTURE_VARIATIONS,
+  StackedMemberThrew,
   type StructureVariation,
   UNFOLDED_HOISTS,
   applyStacked,
   createdLocals,
+  firstFired,
   sameBases,
 } from './rank-variations';
 import { type Stillborn, stillbornVerdict } from './stillborn';
@@ -265,6 +267,11 @@ export interface Candidate {
    *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
    *  dropping a value the callee may read. */
   discardsPassedResult?: true;
+  /** This candidate's lift is `/narrow-param` and declares a parameter narrow that no prototype
+   *  declares (raise/pre-recovery.ts `onUndeclaredWidth`). It loses every score tie
+   *  (compareScored): a tie refutes neither declaration, and the narrow one changes the bytes of
+   *  every prototyped caller, which this function's score cannot see. */
+  guessesParamWidth?: true;
 }
 /** A candidate paired with its score `S` (the injected scorer's result shape — must carry `.score`). */
 export interface Scored<S> extends Candidate {
@@ -600,6 +607,7 @@ export function enumerateCandidates(
   // it buys is that a lift-time change which splits them enumerates both settings rather than
   // silently dropping one, the failure nothing reports.
   let sharedLiftTreeOwned = false;
+  let sharedLiftExtendedReaders = false;
   // Shared lift: recover ONCE with no signedness pin, to learn which entry params are
   // pointers/aggregates so they are excluded from the signedness variation (see NO_PIN_KINDS). One
   // extra lift+recover, no compile. (The shared lift deliberately stops after recoverTypes — it only reads the param KINDS, so
@@ -617,6 +625,11 @@ export function enumerateCandidates(
     shortCircuit: {
       onTreeOwned: () => {
         sharedLiftTreeOwned = true;
+      },
+    },
+    paramWidth: {
+      onExtendedReaders: () => {
+        sharedLiftExtendedReaders = true;
       },
     },
   });
@@ -643,17 +656,25 @@ export function enumerateCandidates(
   // shared lift's `onTreeOwned` hook has had its chance to fire. Called any earlier it would report a confident
   // `false` for a function that owns a tree. As a `const` below that call, an early call is a TDZ
   // ReferenceError instead — a wrong answer traded for a loud one.
-  const treeOwnedIn = (symbols: typeof opts.symbols): boolean => {
+  //
+  // `/narrow-param`'s gate is read off the same lift the same way: the width pass reports a
+  // parameter the variation's lift would narrow (raise/pre-recovery.ts `ParamWidthOptions`).
+  const liftReportsIn = (symbols: typeof opts.symbols): { treeOwned: boolean; extendedReaders: boolean } => {
     if (symbols === opts.symbols) {
-      return sharedLiftTreeOwned;
+      return { treeOwned: sharedLiftTreeOwned, extendedReaders: sharedLiftExtendedReaders };
     }
     const p = liftStamped(name, asm, target, prototypes, opts.asmData, symbols);
     applyIdiomPatterns(p, target, opts.patterns);
-    let seen = false;
+    const seen = { treeOwned: false, extendedReaders: false };
     runPreRecovery(p, target, () => verify(p), prototypes[name], {
       shortCircuit: {
         onTreeOwned: () => {
-          seen = true;
+          seen.treeOwned = true;
+        },
+      },
+      paramWidth: {
+        onExtendedReaders: () => {
+          seen.extendedReaders = true;
         },
       },
     });
@@ -1095,14 +1116,17 @@ export function enumerateCandidates(
           // which moves only const or pure-read assigns and so cannot lift a read of a base local
           // above its init.
           const minted = createdLocals(sfn, alt);
+          const firedSets = new Set<string>();
           for (const subset of STACKED_SUBSETS) {
             // ONE TRY PER SHAPE — a shape is its own candidate and fails as its own candidate.
             // Sharing the respell variation's outer try would let a throw deriving one subset
             // discard every later one, under that variation's name, which names no shape.
-            const shapeVariations = subset.map((x) => x.name);
+            // A throw past applyStacked is reported under the fired set, the candidate's own name.
+            let shapeVariations: readonly Variation[] = [];
             try {
               const shaped = applyStacked(subset, alt);
-              if (shaped !== null) {
+              if (shaped !== null && firstFired(firedSets, shaped.variations)) {
+                shapeVariations = shaped.variations;
                 assertResolved(shaped.out);
                 assertDerefsTyped(shaped.out);
                 assertLocalsWritten(shaped.out);
@@ -1119,7 +1143,8 @@ export function enumerateCandidates(
                 });
               }
             } catch (e) {
-              reportThrow([...preRespellVariations, ...variations, ...shapeVariations], e);
+              const step = e instanceof StackedMemberThrew ? e.variations : shapeVariations;
+              reportThrow([...preRespellVariations, ...variations, ...step], e);
             }
           }
         }
@@ -1135,19 +1160,21 @@ export function enumerateCandidates(
     // `/argbase` — name a call's argument bases before the call (l3/argbase.ts). A variation on the
     // same footing as the others: the default inline spelling stays in the list, so the differ
     // referees and this can never cost a match.
+    const firedSets = new Set<string>();
     for (const subset of STACKED_SUBSETS) {
       // the truthful variations need the pass to RUN first, so this bypasses respell's
       // variations-then-thunk shape: same try posture, variations from the fired members
       try {
         const shaped = applyStacked(subset, sfn);
-        if (shaped !== null) {
+        if (shaped !== null && firstFired(firedSets, shaped.variations)) {
           // the ONE call whose variations already name shapes — say so, rather than making `respell`
           // read them back out of the variations it was handed
           respell(shaped.variations, () => shaped.out, true);
         }
       } catch (e) {
-        // the report names the full subset — the fired set is unknown mid-throw
-        reportThrow([...preRespellVariations, ...subset.map((x) => x.name)], e);
+        // `respell` reports its own throws, so only a member can throw here
+        const step = e instanceof StackedMemberThrew ? e.variations : subset.map((x) => x.name);
+        reportThrow([...preRespellVariations, ...step], e);
       }
     }
     respell(['argbase'], () => materializeArgBases(sfn));
@@ -1828,8 +1855,9 @@ export function enumerateCandidates(
     // audit cannot bound. This is the setting's first lift, and every later one is the same lift
     // again.
     let treeOwnedFold: boolean;
+    let extendedReaders: boolean;
     try {
-      treeOwnedFold = treeOwnedIn(symbolSetting.symbols);
+      ({ treeOwned: treeOwnedFold, extendedReaders } = liftReportsIn(symbolSetting.symbols));
     } catch (e) {
       if (abortsRow(symbolSetting.variations)) {
         throw e;
@@ -1918,12 +1946,31 @@ export function enumerateCandidates(
             { variations: ['setup-args'], narrow: true },
           ]
         : [{ variations: [], narrow: false }];
+      // `/narrow-param` — declare a parameter every reader of which is an extension at the widest
+      // reader's width (raise/paramwidth.ts, EVERY READER AN EXTENSION). A lift variation for the
+      // reason `/connective` is: the raise mutates in place, and the parameter's width is what
+      // recovery and every later stage read. Enumerated only where this symbol-map setting's lift
+      // reports such a parameter; crossed with the other two, and the dedup collapses what agrees.
+      const paramSettings: { variations: readonly Variation[]; extendedReaders: boolean }[] = extendedReaders
+        ? [
+            { variations: [], extendedReaders: false },
+            { variations: ['narrow-param'], extendedReaders: true },
+          ]
+        : [{ variations: [], extendedReaders: false }];
       const liftSettings = narrowSettings.flatMap((l) =>
-        connectiveSettings.map((c) => ({ ...l, ...c, variations: [...l.variations, ...c.variations] })),
+        connectiveSettings.flatMap((c) =>
+          paramSettings.map((w) => ({
+            ...l,
+            ...c,
+            ...w,
+            variations: [...l.variations, ...c.variations, ...w.variations],
+          })),
+        ),
       );
       for (const liftSetting of liftSettings) {
         let fn: Fn;
         let discardsPassedResult = false;
+        let guessesParamWidth = false;
         let inferredSymbols = new Map<string, SymbolInfo>();
         let orderLicensed: ReadonlySet<string> = new Set<string>();
         try {
@@ -1992,7 +2039,15 @@ export function enumerateCandidates(
               },
             },
             prototypes[name],
-            { shortCircuit: { foldTreeOwned: liftSetting.connective } },
+            {
+              shortCircuit: { foldTreeOwned: liftSetting.connective },
+              paramWidth: {
+                extendedReaders: liftSetting.extendedReaders,
+                onUndeclaredWidth: () => {
+                  guessesParamWidth = true;
+                },
+              },
+            },
           );
         } catch (e) {
           // THE DEFAULT CARRIES NO VARIATION, by construction: every lift variation appends one, so
@@ -2278,6 +2333,9 @@ export function enumerateCandidates(
                 if (!discardsPassedResult) {
                   delete dup.discardsPassedResult;
                 }
+                if (!guessesParamWidth) {
+                  delete dup.guessesParamWidth;
+                }
                 continue;
               }
               const variations: readonly Variation[] = [
@@ -2301,6 +2359,7 @@ export function enumerateCandidates(
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
                 ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
+                ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
               };
               seen.set(source, made);
               out.push(made);
@@ -2440,7 +2499,8 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *
  *  A DISCARDED PASSED RESULT next (`Candidate.discardsPassedResult`): equal bytes refute neither
  *  reading, so the one that drops a value the callee may read wins only where it scores strictly
- *  better.
+ *  better. A GUESSED PARAMETER WIDTH (`Candidate.guessesParamWidth`) likewise: a narrow declaration
+ *  no prototype supplied changes its callers' bytes, which no score here reads.
  *
  *  PREFERENCE next: a named symbol-map spelling beats its `/raw-globals` sibling at equal bytes.
  *
@@ -2493,6 +2553,7 @@ export function compareScored<S extends { score: number }>(
   return (
     a.score.score - b.score.score ||
     (a.discardsPassedResult ? 1 : 0) - (b.discardsPassedResult ? 1 : 0) ||
+    (a.guessesParamWidth ? 1 : 0) - (b.guessesParamWidth ? 1 : 0) ||
     a.preference - b.preference ||
     (b.deviceVolatile ?? 0) - (a.deviceVolatile ?? 0) ||
     castCount(a.source) - castCount(b.source) ||

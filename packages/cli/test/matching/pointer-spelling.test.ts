@@ -111,6 +111,65 @@ describe('the integer sum of an undeclared pointer global, real compilers', () =
   }
 });
 
+// The pointer sum of an undeclared pointer global plus an offset with a constant addend, on the
+// compilers that reassociate an integer sum (core target.ts `keepsPointerSumAddend`): the
+// integer sum `(u32)gPtr + (x + K)` compiles to `(gPtr + K) + x`, and only the pointer sum keeps the
+// asm's `gPtr + (x + K)`. The project's header declares the global a `u16 *`, so the pointer sum is
+// walked as bytes.
+const SUM_DECLS = 'extern u16 *gPtr; void use(u32); void usep(void *);\n';
+const PTR_SUM_K = 'void sum(s32 x) { use(*gPtr); usep((u8 *)gPtr + ((x << 4) + 772)); }';
+const SUM_K_CASES = [
+  {
+    cc: 'agbcc',
+    spelled: '(u8 *)gPtr + ((a0 << 4) + (193 << 2))',
+    integer: '(u8 *)((u32)gPtr + ((a0 << 4) + (193 << 2)))',
+  },
+  { cc: 'kmc', spelled: '(u8 *)gPtr + ((a0 << 4) + 772)', integer: '(u8 *)((u32)gPtr + ((a0 << 4) + 772))' },
+] as const;
+
+describe('the pointer sum of an undeclared pointer global and an offset with a constant addend, real compilers', () => {
+  for (const { cc, spelled, integer } of SUM_K_CASES) {
+    it.runIf(HAVE[cc])(`keeps the asm's addend on ${cc}, where the integer sum would move it to the base`, () => {
+      const project = SUM_DECLS + PTR_SUM_K;
+      const { asm, obj } = compileTarget(cc, project, 'sum');
+      const { target } = targetFor(ID[cc], flags(cc));
+      const candidate = enumerateCandidates('sum', asm, target, {
+        prototypes: prototypesFromContext(C_TYPEDEFS + project, 'c'),
+        asmData: extractAsmData(obj, target, 'sum'),
+      }).find((c) => matches(cc, SUM_DECLS + c.source, 'sum', obj));
+      expect(candidate?.source).toContain(spelled);
+      if (candidate === undefined) {
+        return;
+      }
+      const self = renderDeclarations(candidate.symbolRefs ?? []) + 'void use(u32); void usep(void *);\n';
+      expect(matches(cc, self + candidate.source, 'sum', obj)).toBe(true);
+      expect(matches(cc, SUM_DECLS + candidate.source.replace(spelled, integer), 'sum', obj)).toBe(false);
+    });
+  }
+});
+
+// The same sum spelled only inside the access it addresses, agbcc: there both sums move the constant
+// into the access, the pointer sum as `(x + gD) + K` and the integer sum as `(gD + x) + K`, so neither
+// is the asm's `gD + (x + K)`, and the integer sum keeps its base-first order.
+const ACCESS_DECLS = 'struct D { u8 buf[16]; u8 st; }; extern struct D *gD; extern u8 gOut;\n';
+const ACCESS_SUM = 'void sum(void) { u8 i = 2 * (gD->st - 1); gOut = gD->buf[i + 1]; }';
+
+describe('the sum of an undeclared pointer global read only as an access address, agbcc', () => {
+  it('keeps the integer sum, whose operand order is closer to the asm than the pointer sum', () => {
+    const project = ACCESS_DECLS + ACCESS_SUM;
+    const { asm, obj } = compileTarget('agbcc', project, 'sum');
+    const { target } = targetFor(ID.agbcc, flags('agbcc'));
+    const [candidate] = enumerateCandidates('sum', asm, target, {
+      prototypes: prototypesFromContext(C_TYPEDEFS + project, 'c'),
+      asmData: extractAsmData(obj, target, 'sum'),
+    });
+    const integer = '(u8 *)((u32)gD + ';
+    expect(candidate.source).toContain(integer);
+    const score = (src: string) => scoreC(ACCESS_DECLS + src, 'sum', obj, flags('agbcc')).score;
+    expect(score(candidate.source)).toBeLessThan(score(candidate.source.replace(integer, '((u8 *)gD + ')));
+  });
+});
+
 // The evaluation-order re-spelling of a commutative load pair (core structure/pointer-spelling.ts
 // `pointerSide`) against IDO 7.1, which evaluated the right side of each pair below first. The table
 // spells the global as its word in an integer sum, and the sum's operand order must stay the IR's:

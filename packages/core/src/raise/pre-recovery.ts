@@ -34,7 +34,7 @@ import { recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
 import { type MergeShape, mergeShapes, narrowBlockLocals } from './narrowlocal';
 import { fuseParamPairs } from './pairparams';
-import { PARAM_WIDTH_GATES, narrowEntryParams } from './paramwidth';
+import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES, narrowEntryParams, narrowExtendedParams } from './paramwidth';
 import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
 import { recognizeStructArrays } from './struct-arrays';
@@ -49,6 +49,17 @@ import { recognizeWideHelpers, refuseUnmodelledHelpers } from './widehelpers';
 export interface PreRecoveryOptions {
   /** raise/shortcircuit.ts `recognizeBranchShortCircuit` — the connective-vs-comparison-tree question. */
   shortCircuit?: BranchShortCircuitOptions;
+  /** raise/paramwidth.ts `narrowExtendedParams` — the `/narrow-param` lift. */
+  paramWidth?: ParamWidthOptions;
+}
+
+export interface ParamWidthOptions {
+  /** also narrow a parameter every reader of which is an extension (`/narrow-param`) */
+  extendedReaders?: boolean;
+  /** called when a lift without `extendedReaders` has a parameter that would narrow with it */
+  onExtendedReaders?: () => void;
+  /** called when the `extendedReaders` lift narrows a parameter whose width no prototype declares */
+  onUndeclaredWidth?: () => void;
 }
 
 /** CFG facts read off the function ONCE, before the first pass below rewrites it.
@@ -278,16 +289,13 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // The `target` argument is read by TWO of this pass's gates, and unlike `narrowlocal`'s single
   // conjunct it is not a tuning knob: `narrowParamWitness` says WHICH fact in the object settles a
   // parameter's declared width on this compiler, and a target that names none refuses outright.
+  //
+  // `opts.paramWidth` adds the `/narrow-param` lift after it, over the parameters it left wide
+  // (raise/paramwidth.ts, EVERY READER AN EXTENSION), or asks whether that lift would narrow any.
   {
     id: 'paramwidth',
-    run: (fn, self, _opts, target, lifted) =>
-      narrowEntryParams(
-        fn,
-        target.compilerBehaviors.narrowParamWitness ?? 'none',
-        self,
-        PARAM_WIDTH_GATES,
-        lifted.scales.behindPool,
-      ),
+    run: (fn, self, opts, target, lifted) =>
+      narrowParamWidths(fn, self, opts.paramWidth, target, lifted, PARAM_WIDTH_GATES, PARAM_READER_WIDTH_GATES),
     dce: false,
   },
   // LAST, after every pass that can CLAIM what `extscale` exposed — the two width passes above take
@@ -301,6 +309,31 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     gate: foldsShiftPairCasts,
   },
 ];
+
+/** The `paramwidth` entry's body, taking both of its tables, so a census can pass wrapped ones. */
+export function narrowParamWidths(
+  fn: Fn,
+  self: FnProto | undefined,
+  opts: ParamWidthOptions | undefined,
+  target: TargetDescription,
+  lifted: PreRecoveryFacts,
+  prologueGates: typeof PARAM_WIDTH_GATES,
+  readerGates: typeof PARAM_READER_WIDTH_GATES,
+): number {
+  const witness = target.compilerBehaviors.narrowParamWitness ?? 'none';
+  const n = narrowEntryParams(fn, witness, self, prologueGates, lifted.scales.behindPool);
+  if (opts?.extendedReaders) {
+    const lifted = narrowExtendedParams(fn, witness, self, readerGates);
+    if (lifted.some((c) => c.declared === undefined)) {
+      opts.onUndeclaredWidth?.();
+    }
+    return n + lifted.length;
+  }
+  if (opts?.onExtendedReaders && narrowExtendedParams(fn, witness, self, readerGates, false).length > 0) {
+    opts.onExtendedReaders();
+  }
+  return n;
+}
 
 /** Run the pre-recovery passes in order. For each pass whose gate passes and that CHANGES the IR, run
  *  `dce` when the pass declares it, then invoke `afterPass(pass, result)` (the caller's verify/trace

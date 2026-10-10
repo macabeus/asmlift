@@ -371,6 +371,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: 'packages/core/src/raise/shortcircuit.ts',
     seeAlso: ['site-sense'],
   },
+  'narrow-param': {
+    title: 'Parameter declared at the width every use extends it to',
+    summary: 'a parameter read only through narrowing casts is declared narrow, though the prologue does not widen it',
+    detail:
+      'A parameter the function only ever reads through narrowing casts can be declared at 32 bits and cast ' +
+      'at each use, or declared at the widest cast and read bare. Every use is the same value either way, ' +
+      'and where the compiler widens it at each use rather than on entry, the assembly does not say which ' +
+      'one the source declared. This lift declares it narrow, and loses a tie when no prototype declares the width.',
+    compilerBehavior:
+      'agbcc widens an `s16` parameter at each use when every use extends it, and then the two declarations ' +
+      'differ only in how the registers around them are allocated: a sibling `u8` parameter is copied ' +
+      'before it is widened under the narrow one.',
+    offeredWhen: {
+      when: 'Some parameter is read only through casts to 8 or 16 bits, and the default lift left it 32 bits wide.',
+      decidedBy: { symbol: 'runPreRecovery', file: 'packages/core/src/raise/pre-recovery.ts' },
+      gates: ['PARAM_READER_WIDTH_GATES'],
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'extern u8 *gM; void f3(u8 *, u16, u8); void f2(u8 *, u8);\n@',
+      before: 'void example(s32 a, u8 b) { u8 *p = gM; f3(p + (s16)a * 4, (u16)a, b); f2(p + b * 8, b); }',
+      after: 'void example(s16 a, u8 b) { u8 *p = gM; f3(p + a * 4, (u16)a, b); f2(p + b * 8, b); }',
+    },
+    implementedIn: 'packages/core/src/raise/paramwidth.ts',
+  },
   'shared-ret': {
     title: 'Shared code after an early return',
     summary: 'code both arms of an `if` reach before returning is written once, after the `if`',
@@ -1630,7 +1655,31 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 'u8 v; v = gA[12] - 1; gB[14] = (v & 1) + f() % (5 - v) + 1;',
     },
     implementedIn: l3('narrowdecl'),
-    seeAlso: ['narrow-read', 'derived-home', 'escape-home'],
+    seeAlso: ['narrow-load', 'narrow-read', 'derived-home', 'escape-home'],
+  },
+  'narrow-load': {
+    title: 'Narrow load declared at its width',
+    summary: 'a local holding one narrow memory read is declared at that width instead of as an `s32`',
+    detail:
+      'A byte or halfword read from memory into a local can be spelled two ways: an `s32` local assigned the ' +
+      "read, or a local declared at the read's width. Every read of the local is the same value either way; " +
+      "which one the source declared is not in the assembly. Applied on top of every other candidate's source.",
+    compilerBehavior:
+      'agbcc loads a narrow local where it is written and an `s32` one where it is first read, so two byte ' +
+      'reads held across two calls are loaded at different points.',
+    offeredWhen: {
+      when: 'An `s32` local written once, outside a `for` init, by an element or member read of a narrower integer, in no memory.',
+      decidedBy: { symbol: 'narrowLoadDeclarations', file: l3('narrowdecl') },
+    },
+    example: {
+      compiler: 'agbcc',
+      unit: 'void f7(u8 *, u8 *, u8, u8, s32, u8, u8);\nvoid example(u8 *p, s32 x) { @ }',
+      before:
+        's32 a; s32 b; a = p[100]; b = p[101]; f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4);',
+      after: 'u8 a; u8 b; a = p[100]; b = p[101]; f7(p + 4, p + 8, a, b, x, 1, 2); f7(p + 8, p + 12, a, b, x, 3, 4);',
+    },
+    implementedIn: l3('narrowdecl'),
+    seeAlso: ['narrow-decl', 'narrow-read'],
   },
   'narrow-read': {
     title: 'Narrow value declared at its width, read bare',
@@ -1653,7 +1702,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 'u8 y; u8 m; y = cv(p[0]); m = cv(p[1]); return dc(y, m, (u8)cv(p[2]));',
     },
     implementedIn: l3('narrowdecl'),
-    seeAlso: ['narrow-decl'],
+    seeAlso: ['narrow-decl', 'narrow-load'],
   },
   'int-cell': {
     title: 'Global stored a pointer, spelled as an integer',
