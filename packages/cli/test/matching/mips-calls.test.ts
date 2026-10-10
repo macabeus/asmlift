@@ -20,7 +20,7 @@ import {
 } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
-import { dockerGate } from './docker-gate';
+import { kmcGate } from './docker-gate';
 
 interface Case {
   name: string;
@@ -81,7 +81,7 @@ describe('a MIPS call recompiles byte-exact', () => {
     expect(scoreCMips(source, sym, obj, flags).score).toBe(0);
   });
 
-  test.runIf(dockerGate('mips-calls-kmc')).each(CASES)(
+  test.runIf(kmcGate('mips-calls-kmc')).each(CASES)(
     'gcc2.7.2kmc: $name',
     ({ sym, c, prototypes, spelled }) => {
       const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;
@@ -118,7 +118,7 @@ describe('a 64-bit conversion declines, naming its helper', () => {
     declines(asm, obj, MIPS_IDO, '__ll_to_d');
   });
 
-  test.runIf(dockerGate('mips-calls-kmc'))(
+  test.runIf(kmcGate('mips-calls-kmc'))(
     'gcc2.7.2kmc: __floatdidf',
     () => {
       const { obj, asm } = compileMipsGccTarget(C, 'tod', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);
@@ -202,7 +202,7 @@ describe('a callee declared with a float declines, naming it', () => {
     expect(() => lift('f', asm, obj, MIPS_IDO, prototypes)).toThrow(message);
   });
 
-  test.runIf(dockerGate('mips-calls-kmc')).each(FLOATS)(
+  test.runIf(kmcGate('mips-calls-kmc')).each(FLOATS)(
     'gcc2.7.2kmc: $name',
     ({ c, prototypes, message }) => {
       const { obj, asm } = compileMipsGccTarget(c, 'f', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags);

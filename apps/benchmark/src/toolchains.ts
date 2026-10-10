@@ -27,9 +27,9 @@ import {
   compilePpcCppTarget,
   compilePpcTarget,
   compileTargetAsm,
-  dockerAvailable,
   gcc272Available,
   idoAvailable,
+  kmcAvailable,
   ppcDockerAvailable,
 } from '@asmlift/toolchains';
 import { statSync } from 'node:fs';
@@ -131,7 +131,7 @@ export const TOOLCHAINS: Record<ToolchainId, Toolchain> = {
     isa: 'mips',
     label: 'KMC GCC / MIPS (N64)',
     asmKind: 'objdump',
-    available: () => dockerAvailable(),
+    available: () => kmcAvailable(),
     buildTarget: (refC, sym, cflags) => compileMipsGccTarget(refC, sym, cflags),
   },
   'gcc2.7.2': {

@@ -13,10 +13,10 @@ import { MIPS_GCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { compileMipsGccTarget, compilePpcTarget, scoreCMipsGcc, scoreCPpc } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
-import { dockerGate, ppcDockerGate } from './docker-gate';
+import { kmcGate, ppcDockerGate } from './docker-gate';
 
 const HAVE_PPC = ppcDockerGate('hw-divide-tier1', 'mwcc_242_81');
-const HAVE_DOCKER = dockerGate('hw-divide-tier1');
+const HAVE_DOCKER = kmcGate('hw-divide-tier1');
 
 describe.runIf(HAVE_PPC)('T1: PowerPC hardware divide (divw/divwu) → a / b, byte-exact', () => {
   const CASES = [

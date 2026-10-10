@@ -26,7 +26,7 @@ import {
 import { describe, expect, test } from 'vitest';
 
 import { decompileRanked } from '../../src/rank';
-import { dockerGate, ppcDockerGate } from './docker-gate';
+import { kmcGate, ppcDockerGate } from './docker-gate';
 
 const ARM = 'p[0] = 1; q[0] = 2; p[1] = 3; q[1] = 4;';
 const src = (op: string) =>
@@ -384,7 +384,7 @@ describe('a local that re-reads the second test costs no load outside agbcc', ()
     ],
     [
       'gcc2.7.2kmc',
-      dockerGate('reread-kmc'),
+      kmcGate('reread-kmc'),
       (c) => compileMipsGccTarget(c, 'f', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags).asm,
       /\blbu\s+\$?\w+,\s*(0x)?1\(\$?\w+\)/,
     ],

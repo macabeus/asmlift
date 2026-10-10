@@ -14,7 +14,7 @@ import {
 } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
-import { dockerGate } from './docker-gate';
+import { kmcGate } from './docker-gate';
 
 const N = 18;
 const C =
@@ -28,7 +28,7 @@ const savesS0ToS5 = (asm: string) =>
   ['s0', 's1', 's2', 's3', 's4', 's5'].every((r) => new RegExp(`\\bsw\\s+${r},\\d+\\(sp\\)`).test(asm));
 
 describe('a call-free function whose s-register saves are no parameters', () => {
-  test.runIf(dockerGate('mips-saves-kmc'))(
+  test.runIf(kmcGate('mips-saves-kmc'))(
     'gcc2.7.2kmc: two parameters, byte-exact',
     () => {
       const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;

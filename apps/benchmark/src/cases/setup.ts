@@ -17,7 +17,7 @@
 // Ends with a per-project status table; nonzero exit when any clone/prepare/build failed or a
 // fresh clone failed verification.
 import { execSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import { WORKSPACE } from '../config';
@@ -180,6 +180,30 @@ const GCC272_URLS = [
 ];
 export const BENCH_GCC272_DIR = join(import.meta.dirname, '..', '..', 'toolchains', 'gcc272-linux');
 
+// The static wibo the native CodeWarrior path runs on an x86 Linux host — the SAME tag the
+// asmlift-ppc image builds from source (packages/toolchains/ppc-docker/Dockerfile), so the two
+// paths shim mwcceppc.exe with one wibo. @asmlift/toolchains prefers this copy over PATH.
+const WIBO_TAG = '0.6.16';
+const WIBO_URL = `https://github.com/decompals/wibo/releases/download/${WIBO_TAG}/wibo`;
+export const BENCH_WIBO = join(import.meta.dirname, '..', '..', 'toolchains', 'wibo');
+
+/** Fetch the bench-owned static wibo on a host that can run it; elsewhere CodeWarrior stays in
+ *  Docker and there is nothing to fetch. */
+export function fetchWibo(): string {
+  if (!(process.platform === 'linux' && (process.arch === 'x64' || process.arch === 'ia32'))) {
+    return `wibo: not fetched — ${process.platform}/${process.arch} runs CodeWarrior through Docker`;
+  }
+  if (existsSync(BENCH_WIBO)) {
+    return `wibo: present at ${BENCH_WIBO}`;
+  }
+  mkdirSync(dirname(BENCH_WIBO), { recursive: true });
+  console.log(`fetching ${WIBO_URL}`);
+  execSync(`curl -fsSL -o ${JSON.stringify(`${BENCH_WIBO}.tmp`)} ${JSON.stringify(WIBO_URL)}`, { stdio: 'inherit' });
+  chmodSync(`${BENCH_WIBO}.tmp`, 0o755);
+  renameSync(`${BENCH_WIBO}.tmp`, BENCH_WIBO);
+  return `wibo ${WIBO_TAG}: fetched into ${BENCH_WIBO}`;
+}
+
 /** Fetch the bench-owned gcc 2.7.2 toolchain unless it is already there. */
 export function fetchGcc272(): string {
   if (existsSync(join(BENCH_GCC272_DIR, 'gcc')) && existsSync(join(BENCH_GCC272_DIR, 'as'))) {
@@ -232,6 +256,7 @@ export async function setup(filterProject?: string, opts: { build?: boolean } = 
   const rows = manifests.map((m) => setupProject(m));
   printTable(rows);
   console.log(`\n${fetchGcc272()}`);
+  console.log(fetchWibo());
   const problems: string[] = [];
   if (opts.build) {
     for (const m of manifests) {
