@@ -23,9 +23,11 @@ Paths resolve from env vars with sibling-checkout defaults (`src/toolchain.ts`):
 persistent container pool (the benchmark's A/B baseline switch).
 
 The CodeWarrior Docker image (`asmlift-ppc:latest`) is a **local build** (no registry pull):
-`docker build -t asmlift-ppc:latest packages/toolchains/ppc-docker` — 32-bit wibo + PowerPC
+`docker build --platform linux/386 -t asmlift-ppc:latest packages/toolchains/ppc-docker` — 32-bit wibo + PowerPC
 objdump ([`ppc-docker/Dockerfile`](ppc-docker/Dockerfile)); the proprietary CodeWarrior dirs are
-bind-mounted at run time, never baked in. `ASMLIFT_MWCC_ROOT` names the directory holding them,
+bind-mounted at run time, never baked in. The `--platform` is load-bearing on a Docker Engine with the
+containerd image store (Docker 29 on Linux): without it the image is recorded as the builder's
+own platform, and every `docker run --platform linux/386` then fails to find it (exit 125). `ASMLIFT_MWCC_ROOT` names the directory holding them,
 one per build (`mwcc_242_81`, `mwcc_233_163n`, `mwcc_247_107`), as decomp.me vendors them.
 
 ## Modules

@@ -132,6 +132,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: packages/toolchains/ppc-docker
+          # explicit: a containerd-backed engine otherwise records the image as the builder's own
+          # platform, and the harness's `docker run --platform linux/386` cannot find it
+          platforms: linux/386
           tags: asmlift-ppc:latest
           load: true
           cache-from: type=gha

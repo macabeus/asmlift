@@ -11,7 +11,8 @@
 //     (homebrew gcc miscompiles some of the projects' host tools);
 //   - kleod's ROM build must preprocess with the CROSS cpp (arm-none-eabi-cpp): every host
 //     preprocessor here defines __APPLE__, which the project's headers act on;
-//   - af needs mips-linux-gnu binutils under /opt/cross and Rosetta (x86_64 IDO recomp);
+//   - af needs big-endian mips-linux-gnu binutils (under /opt/cross on macOS, or anywhere on PATH —
+//     Ubuntu's binutils-mips-linux-gnu) and, on Apple silicon, Rosetta (x86_64 IDO recomp);
 //   - snowboardkids2 builds inside a linux/amd64 Docker container;
 //   - the KMC gcc 2.7.2 mac binaries (marioparty3) are x86_64 → Rosetta as well;
 //   - the GameCube projects build with dtk and ninja rather than gmake, under wine on macOS, and
@@ -42,11 +43,20 @@ const sh = (cmd: string, cwd: string, env: NodeJS.ProcessEnv = process.env): voi
 /** /usr/bin first: host-tool builds must see Apple clang as cc/gcc, not homebrew gcc. */
 const hostToolEnv = (): NodeJS.ProcessEnv => ({ ...process.env, PATH: `/usr/bin:${process.env.PATH}` });
 
-/** af (and mac KMC gcc) additionally need the /opt/cross mips binutils on PATH. */
+/** af (and mac KMC gcc) additionally need the mips binutils on PATH: /opt/cross is where a macOS
+ *  host builds them (homebrew ships none); a Linux host has them wherever its package put them. */
 const afBuildEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
   PATH: `/usr/bin:/opt/cross/bin:${process.env.PATH}`,
 });
+
+/** True when `mips-linux-gnu-ld` runs from af's build PATH (afBuildEnv), so /opt/cross and a
+ *  distro install both qualify. */
+const haveMipsBinutils = (): boolean =>
+  spawnSync('mips-linux-gnu-ld', ['--version'], { stdio: 'ignore', env: afBuildEnv() }).status === 0;
+
+/** The IDO recomp binaries af runs are x86_64: only Apple silicon needs a translation layer. */
+const needsRosetta = (): boolean => process.platform === 'darwin' && process.arch === 'arm64';
 
 const jobs = (): string => `-j${Math.min(8, cpus().length || 4)}`;
 
@@ -79,6 +89,14 @@ function installAgbcc(fork: string, projDir: string): void {
 /** snowboardkids2 builds inside a linux/amd64 container (KMC gcc linux binaries + splat). */
 function sbk2DockerBuild(dir: string): void {
   const script = [
+    // the container runs as root; on a Linux host with a rootful daemon everything it writes stays
+    // root's (Docker Desktop and rootless daemons map it back to the user), and the host-side
+    // `gmake asmlift-elf` below could not write build/asmlift-ctx.c. An EXIT trap hands the tree
+    // back to whoever owns the mount root AS THE CONTAINER SEES IT — the invoking user under a
+    // rootful daemon, root (a no-op) where the daemon maps uids — whether or not the build fails.
+    // `--reference` rather than `$(stat …)`: the script travels through the host shell in double
+    // quotes, where a `$(…)` would expand on the host.
+    "trap 'chown -R --reference=/w /w' EXIT",
     'apt-get update -qq >/dev/null',
     // clang: the project's CC_CHECK advisory pass runs it on every TU
     'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential clang binutils-mips-linux-gnu python3 python3-pip git wget file >/dev/null',
@@ -158,7 +176,11 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
   marioparty3: {
     baseroms: ['baserom.us.z64'],
     prepare: (dir) => {
-      if (!existsSync(join(dir, 'venv'))) {
+      // the sentinel is what install.sh PRODUCES (splat64's `splat` entry point), not the venv's
+      // own files: `python3 -m venv` without ensurepip exits 1 but leaves venv/bin/python3 behind,
+      // and a half-run install.sh leaves pip — either would make a directory or interpreter test
+      // skip the install for good. `python3 -m venv` over such a partial venv just completes it.
+      if (!existsSync(join(dir, 'venv', 'bin', 'splat'))) {
         sh('python3 -m venv venv', dir);
         sh('bash install.sh', dir, { ...process.env, PATH: `${join(dir, 'venv', 'bin')}:${process.env.PATH}` });
       }
@@ -195,7 +217,15 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
   // install stock pret/agbcc, the same fork pokeemerald uses, so it comes from the same cache.
   kleod: {
     baseroms: ['baserom.gba'],
-    prepare: (dir) => installAgbcc('pret/agbcc', dir),
+    prepare: (dir) => {
+      installAgbcc('pret/agbcc', dir);
+      // the INCBIN'd assets live in the git-ignored data/, read out of baserom.gba by
+      // tools/extractor.py (INSTALL.md: `make extract` before `make`) — without them the C data
+      // units have no rule to build and the link dies on the first `src/data/*.o`
+      if (existsSync(join(dir, 'baserom.gba')) && emptyDir(join(dir, 'data'))) {
+        sh('gmake extract', dir, hostToolEnv());
+      }
+    },
     build: (dir) => {
       // CPP=arm-none-eabi-cpp, not the Makefile's default `$(CC) -E`: on macOS every host
       // preprocessor defines __APPLE__, and include/gba/defines.h + include/global.h carry
@@ -214,18 +244,24 @@ export const PROJECT_RECIPES: Record<string, ProjectRecipe> = {
     baseroms: ['baseroms/jp/baserom.z64'],
     prepare: (dir) => {
       requireHost(
-        () => existsSync('/opt/cross/bin/mips-linux-gnu-ld'),
-        'mips-linux-gnu binutils under /opt/cross',
-        'build big-endian mips-linux-gnu binutils with --prefix=/opt/cross (af cross toolchain)',
+        haveMipsBinutils,
+        'big-endian mips-linux-gnu binutils (mips-linux-gnu-ld on PATH or under /opt/cross)',
+        process.platform === 'linux'
+          ? 'apt install binutils-mips-linux-gnu (or any mips-linux-gnu binutils on PATH)'
+          : 'build big-endian mips-linux-gnu binutils with --prefix=/opt/cross (af cross toolchain)',
       );
-      requireHost(
-        () => {
-          execSync('arch -x86_64 /usr/bin/true', { stdio: 'ignore' });
-          return true;
-        },
-        'Rosetta (af runs the x86_64 IDO recomp binaries)',
-        'softwareupdate --install-rosetta --agree-to-license',
-      );
+      // `arch -x86_64` is a macOS verb — on Linux it is an invalid option, so the probe is gated
+      // on the one host that needs the translation layer rather than run everywhere
+      if (needsRosetta()) {
+        requireHost(
+          () => {
+            execSync('arch -x86_64 /usr/bin/true', { stdio: 'ignore' });
+            return true;
+          },
+          'Rosetta (af runs the x86_64 IDO recomp binaries)',
+          'softwareupdate --install-rosetta --agree-to-license',
+        );
+      }
       // the project's own bootstrap chain: venv → setup (tools + baserom decompress) → extract
       if (!existsSync(join(dir, '.venv'))) {
         sh('gmake venv', dir, afBuildEnv());
