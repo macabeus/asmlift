@@ -91,7 +91,7 @@ import {
   sameBases,
 } from './rank-variations';
 import { type Stillborn, stillbornVerdict } from './stillborn';
-import { hasDivergentSharedRet } from './structure/structure';
+import { DefaultAcceptsMemo, hasDivergentSharedRet } from './structure/structure';
 import {
   type SymbolInfo,
   type SymbolMap,
@@ -2104,6 +2104,8 @@ export function enumerateCandidates(
         // `droppedDefault` is the DEFAULT pass's drops. Each shared-tail pass reads it and keeps its
         // own drops in a copy, so one pass's structuring failure never removes the other's candidate.
         const droppedDefault = new Set<string>();
+        // What `assertDefaultAccepts` learned about this fn, shared by every setting structured from it.
+        let acceptsMemo = new DefaultAcceptsMemo(fn);
         for (const pass of ['default', 'follow', 'sink'] as const) {
           if (pass === 'follow' && !hasDivergentSharedRet(fn)) {
             continue;
@@ -2112,6 +2114,8 @@ export function enumerateCandidates(
             let sunk: boolean;
             try {
               sunk = sinkStoreTails(fn);
+              // The sink rewrites fn in place, so nothing the memo learned before it holds after it.
+              acceptsMemo = new DefaultAcceptsMemo(fn);
               if (sunk) {
                 verify(fn);
               }
@@ -2175,24 +2179,29 @@ export function enumerateCandidates(
             // recovered function without re-lifting.
             let sfn: SFn;
             try {
-              sfn = structureChecked(fn, {
-                ...symbolSettingOpts,
-                ...(inferredSymbols.size ? { inferredSymbols } : {}),
-                ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
-                preserveDivergentBranchSense: s.sense,
-                negateJoinedBranchSense: s.join ? !defSense : defSense,
-                ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
-                anchorConstCopies: s.anchor,
-                anchorLoopEntryConsts: s.entry,
-                spellBitfieldMembers: s.bitfields,
-                spellPtrMemberElements: s.ptrElems,
-                spellDeclaredSubscripts: s.declRank,
-                ...STRUCTURE_VARIATIONS.reduce(
-                  (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
-                  {},
-                ),
-                ...(alternative ? { followEarlyReturns: true } : {}),
-              });
+              sfn = structureChecked(
+                fn,
+                {
+                  ...symbolSettingOpts,
+                  ...(inferredSymbols.size ? { inferredSymbols } : {}),
+                  ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
+                  preserveDivergentBranchSense: s.sense,
+                  negateJoinedBranchSense: s.join ? !defSense : defSense,
+                  ...(s.flipSites ? { branchSenseFlipSites: s.flipSites } : {}),
+                  anchorConstCopies: s.anchor,
+                  anchorLoopEntryConsts: s.entry,
+                  spellBitfieldMembers: s.bitfields,
+                  spellPtrMemberElements: s.ptrElems,
+                  spellDeclaredSubscripts: s.declRank,
+                  ...STRUCTURE_VARIATIONS.reduce(
+                    (acc, variation) => ({ ...acc, ...variation.options(s[variation.flag]) }),
+                    {},
+                  ),
+                  ...(alternative ? { followEarlyReturns: true } : {}),
+                },
+                undefined,
+                acceptsMemo,
+              );
             } catch (e) {
               if (abortsRow([...liftVariations, ...symbolSetting.variations], s)) {
                 throw e; // the default lift's default setting keeps its behavior: a failure aborts the row
