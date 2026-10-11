@@ -55,6 +55,38 @@ function bare(e: Expr): Expr {
   return e.k === 'cast' ? bare(e.e) : e;
 }
 
+/** The value of `e` where it is integer arithmetic on constants alone, or null. A copy's count is
+ *  a constant the machine may build in several instructions — agbcc spells 256 and up as an 8-bit
+ *  immediate shifted (`mov r2,#0x80; lsl r2,r2,#1`), which the tree keeps as `128 << 1`. */
+function constantValue(e: Expr): number | null {
+  const b = bare(e);
+  if (b.k === 'const') {
+    return b.value;
+  }
+  if (b.k !== 'bin') {
+    return null;
+  }
+  const l = constantValue(b.l);
+  const r = constantValue(b.r);
+  if (l === null || r === null) {
+    return null;
+  }
+  switch (b.op) {
+    case '+':
+      return l + r;
+    case '-':
+      return l - r;
+    case '*':
+      return l * r;
+    case '<<':
+      return r >= 0 && r < 32 ? l * 2 ** r : null;
+    case '|':
+      return l >= 0 && r >= 0 && l < 2 ** 31 && r < 2 ** 31 ? l | r : null;
+    default:
+      return null;
+  }
+}
+
 /** The object `e` names whole — `x` or `&x` — or null. */
 function wholeObject(e: Expr): string | null {
   const b = bare(e);
@@ -138,8 +170,7 @@ function planCopy(sfn: SFn, image: SImage, at: number): Fold | string {
   const size = byteSize(image.type)!;
   const call = (sfn.body[at] as Extract<Stmt, { k: 'exprstmt' }>).value as Extract<Expr, { k: 'call' }>;
   const roles = BLOCK_COPIES[call.fn as string];
-  const n = bare(call.args[roles.n] ?? { k: 'var', name: '' });
-  if (n.k !== 'const' || n.value !== size) {
+  if (constantValue(call.args[roles.n] ?? { k: 'var', name: '' }) !== size) {
     return `whose copy does not move its whole ${size} bytes`;
   }
   const local = wholeObject(call.args[roles.dst] ?? { k: 'const', value: 0 });

@@ -61,6 +61,18 @@ const CASES: { sym: string; c: string; spelled: RegExp }[] = [
     spelled: /u8 sp0\[9\] = "hi there";/,
   },
   {
+    // a count of 256 and up is an 8-bit immediate shifted (`mov r2,#0x80; lsl r2,r2,#1`): the whole
+    // image all the same, which the tree holds as `128 << 1`
+    sym: 'big256',
+    c: `${USE}void big256(void) { u8 a[256] = {1, 2, 3, [200] = 2}; g(a); }`,
+    spelled: /u8 sp0\[256\] = \{ 1, 2, 3, \[200\] = 2 \};/,
+  },
+  {
+    sym: 'words100',
+    c: `${USE}void words100(void) { u32 a[100] = {1, 2, 3, [50] = 7, [98] = 9}; g(a); }`,
+    spelled: /u32 sp0\[100\] = \{ 1, 2, 3, \[50\] = 7, \[98\] = 9 \};/,
+  },
+  {
     // a brace list of strings shorter than their rows ends in a `.space`: a byte list, copied whole —
     // spelled as one string literal it is shorter than the array, which agbcc copies short and fills
     sym: 'rows8',

@@ -128,6 +128,32 @@ test('one image copied into two locals initializes each', () => {
   );
 });
 
+test('a count built by a shift is the constant it computes', () => {
+  // agbcc spells 256 and up as an 8-bit immediate shifted: `mov r2,#0x80; lsl r2,r2,#1`
+  const shifted: Stmt = {
+    k: 'exprstmt',
+    value: {
+      k: 'call',
+      fn: 'memcpy',
+      args: [v('sp0'), { k: 'addr', name: '.LC0' }, { k: 'bin', op: '<<', l: c(2), r: c(1) }],
+    },
+  };
+  const sfn = fn([shifted, use(v('sp0'))], bytes4);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(cBackend.emit(sfn)).toContain('    u8 sp0[4] = { 1, 2, 3, 4 };\n');
+  const short: Stmt = {
+    k: 'exprstmt',
+    value: {
+      k: 'call',
+      fn: 'memcpy',
+      args: [v('sp0'), { k: 'addr', name: '.LC0' }, { k: 'bin', op: '<<', l: c(1), r: c(1) }],
+    },
+  };
+  expect(constantImageRefusal(fn([short, use(v('sp0'))], bytes4))?.refused).toContain(
+    'does not move its whole 4 bytes',
+  );
+});
+
 test.each<[string, SFn, string]>([
   [
     'read other than by a copy',
