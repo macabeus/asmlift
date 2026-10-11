@@ -28,7 +28,9 @@ import { C_TYPEDEFS, type TargetDescription } from './target';
  *
  *  A symbol never LOADED takes its sign from its stamped stores (raise/storesign.ts); an unstamped
  *  store says nothing, so a cell only ever stored unstamped keeps the unsigned default. A load
- *  still wins, as in raise/structs.ts. The bare `gSym = v` spelling has no cast to carry the
+ *  still wins, as in raise/structs.ts. Stores whose stamps disagree keep the width with the
+ *  unsigned default: dropping the fact would declare `extern u32` under a bare `gSym = v` that
+ *  then compiles to `sw` where the target has `sh`. The bare spelling has no cast to carry the
  *  stamp, so this declaration is the only place the stored constant's view can be written. */
 export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
   const defs = defOpMap(fn);
@@ -74,10 +76,13 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
   }
   const out = new Map<string, { width: number; signed: boolean }>();
   for (const [s, a] of acc) {
-    const signs = a.signs.size > 0 ? a.signs : a.stored;
-    if (!a.interior && a.widths.size === 1 && signs.size <= 1) {
-      out.set(s, { width: [...a.widths][0], signed: signs.has(true) });
+    if (a.interior || a.widths.size !== 1 || a.signs.size > 1) {
+      continue;
     }
+    // Loads decide when there are any. Stores whose stamps disagree pick no view, so the
+    // declaration keeps the width and takes the unsigned default it had before stamps existed.
+    const signed = a.signs.size === 1 ? a.signs.has(true) : a.stored.size === 1 && a.stored.has(true);
+    out.set(s, { width: [...a.widths][0], signed });
   }
   return out;
 }

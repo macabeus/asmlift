@@ -190,6 +190,22 @@ test('a bare global only ever stored is declared at the view its stamped store r
   ).toEqual({ width: 2, signed: false });
 });
 
+test('a bare global whose stamped stores disagree keeps its width at the unsigned default', () => {
+  // `gS = -1; *(u16 *)&gS = 0x8000;` → two `sh` at offset 0, one stamped signed, one unsigned. The
+  // stamps cannot pick one view, but both stores are 2 bytes wide, and dropping the fact would
+  // declare `extern u32 gS;` under a bare `gS = …` spelling that then compiles to `sw`.
+  expect(
+    globalFacts(
+      ['lui\tat,0x0', 'gS'],
+      ['li\tv0,-1', ''],
+      ['sh\tv0,0(at)', 'gS'],
+      ['li\tv1,0x8000', ''],
+      ['jr\tra', ''],
+      ['sh\tv1,0(at)', 'gS'],
+    ).gS,
+  ).toEqual({ width: 2, signed: false });
+});
+
 test('an indexed store carries its stamp into the astore', () => {
   const src = decompile(
     'f',
