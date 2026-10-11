@@ -688,6 +688,43 @@ describe('v3 — expression-base walk', () => {
       expect(cBackend.emit(r!)).toContain('= ((u16 *)((u32)&gH + (a2 << 1)))[i];');
     });
 
+    describe('a symbolic addend is re-read on every pass, so nothing in the loop may write it', () => {
+      // KMC, `u16 *p = (u16 *)(b + gK * 2); for (i = 0; …) { p[i] = 7; g(); }`: the walk read gK
+      // once; `((u16 *)(a0 + (gK << 1)))[i]` reads it after every g(), which may have changed it
+      const gOff = { k: 'bin', op: '<<', l: v('gK'), r: cn(1) } as const;
+      const call: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [] } };
+      const withGlobal = (body: Stmt[]): SFn => {
+        const f = u16Fn(at(gOff), body);
+        f.globals = [{ name: 'gK', type: s32t }];
+        return f;
+      };
+      test('refused: a global addend beside a call in the loop', () => {
+        const body = halfBody();
+        body.splice(1, 0, call);
+        expect(reindexWalks(withGlobal(body))).toBeNull();
+      });
+      test('refused: a global addend beside a store, which may alias it', () => {
+        expect(reindexWalks(withGlobal(halfBody()))).toBeNull();
+      });
+      test('a global addend in a loop that writes no memory re-spells', () => {
+        const body: Stmt[] = [{ k: 'assign', name: 'a1', value: deref16 }, inc('p'), inc('i')];
+        expect(cBackend.emit(reindexWalks(withGlobal(body))!)).toContain('a1 = ((u16 *)(a0 + (gK << 1)))[i];');
+      });
+      test('refused: a local addend whose address escapes, beside a call', () => {
+        const body = halfBody();
+        body.splice(1, 0, { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'k' }] } });
+        const f = u16Fn(at({ k: 'bin', op: '<<', l: v('k'), r: cn(1) }), body);
+        f.locals.push({ name: 'k', type: s32t });
+        expect(reindexWalks(f)).toBeNull();
+      });
+      test('a param addend survives a call: no callee writes it', () => {
+        const body = halfBody();
+        body.splice(1, 0, call);
+        const r = reindexWalks(u16Fn(at({ k: 'bin', op: '<<', l: v('a2'), r: cn(1) }), body));
+        expect(cBackend.emit(r!)).toContain('= ((u16 *)(a0 + (a2 << 1)))[i];');
+      });
+    });
+
     test('refused: a symbolic byte offset beside constants W does not divide', () => {
       const off = { k: 'bin', op: '+', l: v('a2'), r: cn(3) } as const;
       expect(reindexWalks(u16Fn(at(off)))).toBeNull();

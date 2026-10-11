@@ -99,6 +99,7 @@ import {
   rematerializableAddress,
   stmtChildren,
   stmtExprs,
+  walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { takenNames } from './hoist';
@@ -504,6 +505,11 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
   }
 }
 
+/** Whether any statement here, at any depth, writes memory (`store`). */
+function stmtsStore(stmts: Stmt[]): boolean {
+  return stmts.some((s) => s.k === 'store' || stmtsStore(stmtChildren(s)));
+}
+
 /** `e + c`, spelled `e - |c|` for a negative c and `e` alone for 0. */
 function plusConst(e: Expr, c: number): Expr {
   return c === 0 ? e : { k: 'bin', op: c < 0 ? '-' : '+', l: e, r: { k: 'const', value: Math.abs(c) } };
@@ -531,7 +537,8 @@ function plusConst(e: Expr, c: number): Expr {
 //     declines) flattens over `+` into exactly ONE base addend — a bare var declared a non-pointer,
 //     a byte pointer or a pointer to W-byte integers (any other pointer strides a unit no element
 //     index names), or an object's address, `(u32)&g` beside other addends or `&g` alone — plus
-//     pure invariant addends (var/const/mul/shl trees whose vars the body never assigns);
+//     pure invariant addends (var/const/mul/shl trees whose vars the body never assigns, and,
+//     beside a call or a store in the loop, only params and locals whose address never escapes);
 //   • the body's contiguous TAIL is exactly one `p_k = p_k + 1` per walk pointer and one
 //     `i = i + 1` (any order), with `i` read by the do-while condition; each `p_k` is mentioned
 //     nowhere else in the function beyond its init, its step, and derefs AT OFFSET 0 inside this
@@ -557,6 +564,7 @@ function exprWalkSpelling(
   ptrVars: Map<string, IrType>,
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
+  privateNames: ReadonlySet<string>,
 ): ExprWalkSpelling | null {
   const p = init.name;
   const pT = ptrVars.get(p);
@@ -641,9 +649,23 @@ function exprWalkSpelling(
   if (base.k === 'var') {
     restVars.add(base.name);
   }
+  // INVARIANT across the loop, because the indexed spelling re-reads every name on every pass
+  // where the walk read it once, at the init: no `assign` in the body writes it, and — unless it
+  // is a param or a local whose address is never taken — no call and no memory store in the loop
+  // can either. A global (`p = (u16 *)(b + gK * 2)`, `g()` in the body) or an escaped local is
+  // written by a callee or through an aliasing pointer with no `assign` in sight.
+  // (a `postincr` is an assign in expression clothing; a `marker` is an instruction nobody modelled)
+  const loopExprs = [...walkExprs([dw])];
+  const loopWritesMemory = loopExprs.some((e) => e.k === 'call' || e.k === 'marker') || stmtsStore(dw.body);
   if (
     !rest.every(pure) ||
-    [...restVars].some((n) => volatileLocals.has(n) || dw.body.some((st) => stmtAssigns(st, n)))
+    [...restVars].some(
+      (n) =>
+        volatileLocals.has(n) ||
+        dw.body.some((st) => stmtAssigns(st, n)) ||
+        loopExprs.some((e) => e.k === 'postincr' && e.name === n) ||
+        (loopWritesMemory && !privateNames.has(n)),
+    )
   ) {
     return null;
   }
@@ -678,6 +700,7 @@ function tryExprWalk(
   fnBody: Stmt[],
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
+  privateNames: ReadonlySet<string>,
 ): { loop: Stmt; run: number; kept: Stmt[] } | null {
   let nTail = 0;
   while (nTail < dw.body.length && isUnitIncrement(dw.body[dw.body.length - 1 - nTail]) !== null) {
@@ -696,6 +719,7 @@ function tryExprWalk(
       fnBody,
       declTypes,
       volatileLocals,
+      privateNames,
     );
     if (r) {
       return r;
@@ -714,6 +738,7 @@ function tryExprWalkRun(
   fnBody: Stmt[],
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
+  privateNames: ReadonlySet<string>,
 ): { loop: Stmt; run: number; kept: Stmt[] } | null {
   // BOTH kinds of step as the body's contiguous TAIL (any order): every deref then runs with `i`
   // completed steps equal to each `p`'s, which is what `BASE[i + REST]` states. A step anywhere
@@ -759,7 +784,7 @@ function tryExprWalkRun(
   }
   const spellings = new Map<string, ExprWalkSpelling>();
   for (const st of walks) {
-    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals);
+    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals, privateNames);
     if (s === null) {
       return null;
     }
@@ -820,6 +845,10 @@ export function reindexWalks(
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );
   const storage = nameStorage(sfn);
+  // v3's invariant-addend test: the names no callee and no aliasing store can write — a param or a
+  // local whose address the function never takes
+  const addressTaken = new Set([...walkExprs(sfn.body)].flatMap((e) => (e.k === 'addr' ? [e.name] : [])));
+  const privateNames = new Set([...storage].filter(([n, c]) => c !== 'global' && !addressTaken.has(n)).map(([n]) => n));
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -925,7 +954,7 @@ export function reindexWalks(
       // v3 — the up-counting walk with an expression base: `p = (T *)(EXPR)` immediately
       // ahead of a counter-carried do-while (see tryExprWalk)
       if (s.k === 'dowhile') {
-        const v3 = tryExprWalk(out, s, ptrVars, sfn.body, declTypes, volatileLocals);
+        const v3 = tryExprWalk(out, s, ptrVars, sfn.body, declTypes, volatileLocals, privateNames);
         if (v3) {
           // the walk inits are subsumed by the indexed spelling; the counter's init stays
           out.splice(out.length - v3.run, v3.run, ...v3.kept);
