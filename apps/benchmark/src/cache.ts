@@ -323,8 +323,10 @@ export async function cachedM2cResult(
   // and a per-row diff reports the bump inert without having scored anything.
   // `scoring` is derived too. On the real tier the score comes from a closure (compile/real.ts
   // `makeRealScorer`) over the unit model, the manifest's prependC and the row's VENDORED context,
-  // and that context is not `ctx`, which is m2c's own: 43 rows hand m2c a hand-written ctx, and
-  // the rest a separately vendored file. Off the key, an edit to a manifest's prependC, or to the
+  // and that context is not `ctx`, which is m2c's own. The m2cCtx rows hand m2c a separately
+  // vendored file; of the 43 that do not, 1 hands it a hand-written ctx and 42 (pikmin's C++
+  // units) hand it none, so on those `ctx` is empty and nothing else on the key would see their
+  // scoring context. Off the key, an edit to a manifest's prependC, or to the
   // spelling the context-free rungs take from the vendored context (compile/util.ts
   // `bareTypedefs`), replays the old score. The digest covers the closure's ARGUMENTS, not its code:
   // a change to the ladder itself (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.

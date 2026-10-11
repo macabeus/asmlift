@@ -182,7 +182,8 @@ export function ctxTypedefPrelude(ctxI: string): string {
  *  `int` and `long` are both 32 bits on every target here, and still not one type: mwcc compiles
  *  `long *a; unsigned short b; *a &= ~b;` to `clrlwi; not; and` and the same body over `int *a` to
  *  `clrlwi; andc`, because it fuses `x & ~y` only when `~y` already has the `&`'s type. Mario Party
- *  4, Mario Party 3, Pikmin, Animal Crossing and Snowboard Kids 2 all say `typedef signed long s32`,
+ *  4, Mario Party 3, Pikmin, Animal Crossing and Snowboard Kids 2 all declare `s32` as a `long`
+ *  (some spell it `signed long`, some plain `long`; the rung copies whichever the context wrote),
  *  and a candidate their unit refuses fell to a rung where `s32` meant `int` — a world the target
  *  was never compiled in, which scored a byte-identical spelling of the game's source 2/10.
  *
