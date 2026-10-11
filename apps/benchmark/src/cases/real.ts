@@ -14,6 +14,7 @@ import { moduleOf, onlySelects } from '@asmlift/bench-schema';
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
@@ -48,6 +49,9 @@ export function realCases(filter: RealFilter = {}): Case[] {
       const vendored = man.vendored(f.sym);
       const m2cI = f.m2cCtx ? vendored.m2cI : null;
       const ctxProto = m2cI === null ? null : m2cOwnPrototype(f.sym, f.proto, m2cI);
+      // what the row's scorer and compile are built from, in one place, so the m2c cache key's
+      // digest of them (`scoringContext`) cannot name a different set than the closures close over
+      const scoring = [unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language] as const;
       cases.push({
         id,
         tier: 'real',
@@ -87,8 +91,9 @@ export function realCases(filter: RealFilter = {}): Case[] {
             unit.toolchain,
             buildRealTarget(unit.toolchain, f.sym, codegen.cflags, man.vendored(f.sym).tuI, language),
           ),
-        scorer: makeRealScorer(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
-        compile: makeRealCompile(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
+        scorer: makeRealScorer(...scoring),
+        compile: makeRealCompile(...scoring),
+        scoringContext: createHash('sha256').update(JSON.stringify(scoring)).digest('hex'),
       });
     }
   }

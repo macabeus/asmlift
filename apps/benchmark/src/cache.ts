@@ -224,16 +224,19 @@ export interface M2cKeyInputs {
   ctx?: string;
   obj: string; // path; the KEY uses the object's bytes
   lang?: 'c' | 'c++';
+  /** real tier: a digest of every argument the row's scorer was built from (cases/real.ts) —
+   *  absent where the scorer is the toolchain default (synthetic), and the key is what it always was */
+  scoringContext?: string;
 }
 
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
  *  (m2c commit, objdiff-wasm version, toolchain, candidate compile flags, symbol, asm, context,
- *  target-object bytes, and — for c++ — language). */
+ *  target-object bytes, language for c++, and on the real tier what its scorer was built from). */
 export async function cachedM2cResult(
   inputs: M2cKeyInputs,
   compute: () => Promise<DecompilerResult>,
 ): Promise<DecompilerResult> {
-  const { tcId, cflags, sym, asm, ctx, obj, lang } = inputs;
+  const { tcId, cflags, sym, asm, ctx, obj, lang, scoringContext } = inputs;
   const commit = m2cCommit();
   if (!enabled() || !commit) {
     return await compute();
@@ -314,10 +317,23 @@ export async function cachedM2cResult(
   // holds MORE THAN ONE function, and none of the 631 objdump rows published before it does.
   //   sliced 1: a multi-function entry written before the slice fed m2c every function of the
   //      object under the row's one `glabel`.
-  // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
+  // The scorer is one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
+  // `scoring` is derived too. On the real tier the score comes from a closure (compile/real.ts
+  // `makeRealScorer`) over the unit model, the manifest's prependC and the row's VENDORED context.
+  // `ctx`, m2c's own, carries part of that at most. On 295 of the 421 rows m2c's vendored file is
+  // that context byte for byte, and `ctx` is that file plus at most the row's own prototype line
+  // (cases/real.ts `appendCtxProto`), so it equals the context outright on only 194 of them. m2c's
+  // file is a separately vendored one on Mario Party 4's 42 and 41 of ac-decomp's. Pikmin's 42 and 1
+  // ac-decomp row vendor none for m2c: there `ctx` is the row's hand-written context, if it has one
+  // (only the ac-decomp row does), then the callee declarations asmlift's lift read that it does not
+  // already declare (eval/evaluate.ts `m2cDeclarations`) — none on the ac-decomp row, and some on
+  // all 42 of pikmin's. Off the key, an edit to a prependC or to the
+  // typedef spelling the context-free rungs take from the context (compile/util.ts `bareTypedefs`)
+  // replays the old score. The digest covers the closure's ARGUMENTS, not its code: a change to the
+  // ladder itself (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
   const key = sha(
     JSON.stringify({
       v: 20,
@@ -335,6 +351,7 @@ export async function cachedM2cResult(
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
       ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),
+      ...(scoringContext !== undefined && { scoring: scoringContext }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

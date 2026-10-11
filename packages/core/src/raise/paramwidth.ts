@@ -139,7 +139,25 @@
 // declares the width, the candidate loses every score tie (rank.ts `guessesParamWidth`): without
 // a sibling to separate them the two declarations are often one object, and the narrow one costs
 // each prototyped caller the truncation `proto-width` is about.
-import { type Fn, type Op, type Value, replaceAllUsesWith, successorsOf } from '../ir/core';
+//
+// A LOW MASK IS AN EXTENSION READER. mwcc reads a `u16` parameter as `clrlwi rD,rS,16`, which the
+// PPC frontend lifts as `and rS, 0xffff` — as it must, since the same instruction is every other
+// mask too — so a parameter mwcc reads only through it reaches this pass with no `zext` reader at
+// all. `and v, 0xffff` is `zext v {width=16}` value for value, so it counts as one (`extensionOf`),
+// unsigned, and becomes the parameter itself when the parameter is declared `u16`. The two
+// declarations are not one object there: over a `long *a`, mwcc_242_81 compiles
+// `*a = *a & ~b; *a = *a | c;` to `not; and` when `b` and `c` are `unsigned short`, and to `andc` when
+// they are `unsigned long` and the body masks them, at `-O4,p` and at Mario Party 4's unit flags.
+//
+// The rule is about the IR, not the ISA, so it reaches every frontend that lifts a mask as `and`.
+// IDO reads a declared `u16`/`u8` parameter as `sw a0,0(sp); andi a0,a0,0xffff`, and frontend/mips.ts
+// lifts the `andi` as that mask too: `s32 f(u16 a, s32 b){ return a + b; }` scores 3 wide and 0
+// narrowed. The witness gates still decide whether IDO may narrow: a mask applied in place with no
+// home store (`a = a & 0xffff`) is refused by `unhomed-param`. agbcc spells a mask as `and` with a
+// pooled `0xffff` or a `mov #0xff`, so the variation is offered there too, and loses, because agbcc
+// extends a declared narrow parameter with a shift pair: `s32 f(u32 a, s32 b){ return (a & 0xffff)
+// + b; }` scores 0 wide and 6 narrowed.
+import { type Fn, type Op, type Value, defOpMap, replaceAllUsesWith, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Gate, firstRejection } from '../l3/gates';
@@ -282,6 +300,32 @@ export const PARAM_READER_WIDTH_GATES: readonly Gate<NarrowParamCandidate>[] = [
 
 const isExtension = (op: Op): boolean => op.opcode === 'sext' || op.opcode === 'zext';
 
+/** The unsigned extension a MASK spells: `and v, 0xff` is `zext v {width=8}` and `and v, 0xffff` is
+ *  `zext v {width=16}`, value for value. */
+const MASK_WIDTHS: ReadonlyMap<number, number> = new Map([
+  [0xff, 8],
+  [0xffff, 16],
+]);
+
+/** What `op` reads `v` as, when it reads it ONLY through an extension: its width and signedness.
+ *  An `and` with a low mask counts, because that is the extension's spelling where the machine
+ *  has no extension of its own to lift: PPC's `clrlwi rD,rS,16` and MIPS's `andi rD,rS,0xffff`
+ *  (each frontend lifts it as the mask, and must, because every other mask is the same instruction).
+ *  Null for any other reader, including an extension or a mask of something besides `v` alone. */
+function extensionOf(op: Op, v: Value, defs: ReadonlyMap<Value, Op>): { width: number; signed: boolean } | null {
+  if (isExtension(op)) {
+    return op.operands.length === 1 && op.operands[0] === v
+      ? { width: op.attrs.width as number, signed: op.opcode === 'sext' }
+      : null;
+  }
+  if (op.opcode !== 'and' || op.operands.length !== 2 || !op.operands.includes(v)) {
+    return null;
+  }
+  const mask = defs.get(op.operands[op.operands[0] === v ? 1 : 0]);
+  const width = mask?.opcode === 'const' ? MASK_WIDTHS.get(mask.attrs.value as number) : undefined;
+  return width === undefined ? null : { width, signed: false };
+}
+
 /** The ops that read `v` and the number of branch arguments that pass it, anywhere in `fn`. */
 function readersOf(fn: Fn, v: Value): { ops: Op[]; edges: number } {
   const ops: Op[] = [];
@@ -299,14 +343,14 @@ function readersOf(fn: Fn, v: Value): { ops: Op[]; edges: number } {
   return { ops, edges };
 }
 
-/** How many reads of `v` are not an extension of `v` alone to `width` or narrower. */
-function wideReaderCount(fn: Fn, v: Value, width: number): number {
+/** How many reads of `v` are not an extension of `v` alone (`extensionOf`) to `width` or narrower. */
+function wideReaderCount(fn: Fn, v: Value, width: number, defs: ReadonlyMap<Value, Op>): number {
   const { ops, edges } = readersOf(fn, v);
   return (
     edges +
     ops.reduce(
       (n, op) =>
-        n + (isExtension(op) && (op.attrs.width as number) <= width ? 0 : op.operands.filter((o) => o === v).length),
+        n + ((extensionOf(op, v, defs)?.width ?? Infinity) <= width ? 0 : op.operands.filter((o) => o === v).length),
       0,
     )
   );
@@ -365,6 +409,7 @@ export function narrowEntryParams(
     }
     prologue.add(op);
   }
+  const defs = defOpMap(fn);
   let narrowed = 0;
   for (const op of [...entry.ops]) {
     if (op.opcode !== 'sext' && op.opcode !== 'zext') {
@@ -381,7 +426,7 @@ export function narrowEntryParams(
       entryIsJoin,
       inPrologue: prologue.has(op),
       uses: useCount(fn, p),
-      wideReaders: wideReaderCount(fn, p, width),
+      wideReaders: wideReaderCount(fn, p, width, defs),
       declared: declared[entry.params.indexOf(p)],
       fusedBehindPool: fusedBehindPool.has(op),
       witness,
@@ -415,13 +460,17 @@ export function narrowExtendedParams(
   const declaredTypes = Array.isArray(self?.params) ? self.params : [];
   const entryIsJoin = fn.blocks.some((b) => successorsOf(b).includes(entry));
   const narrowed: NarrowParamCandidate[] = [];
+  const defs = defOpMap(fn);
   for (const [i, p] of entry.params.entries()) {
-    const extensions = readersOf(fn, p).ops.filter((op) => isExtension(op) && op.operands.length === 1);
+    const extensions = readersOf(fn, p).ops.flatMap((op) => {
+      const ext = extensionOf(op, p, defs);
+      return ext === null ? [] : [{ op, ...ext }];
+    });
     if (extensions.length === 0) {
       continue;
     }
-    const width = Math.max(...extensions.map((op) => op.attrs.width as number));
-    const first = extensions.find((op) => op.attrs.width === width)!;
+    const width = Math.max(...extensions.map((e) => e.width));
+    const first = extensions.find((e) => e.width === width)!;
     const declared = declaredTypes[i];
     const c: NarrowParamCandidate = {
       param: p,
@@ -429,7 +478,7 @@ export function narrowExtendedParams(
       entryIsJoin,
       inPrologue: false,
       uses: useCount(fn, p),
-      wideReaders: wideReaderCount(fn, p, width),
+      wideReaders: wideReaderCount(fn, p, width, defs),
       declared: declared === undefined ? undefined : declaredWidth(declared),
       fusedBehindPool: false,
       witness,
@@ -443,10 +492,10 @@ export function narrowExtendedParams(
     if (!apply) {
       continue;
     }
-    const signed = (declared === undefined ? undefined : declaredSigned(declared)) ?? first.opcode === 'sext';
+    const signed = (declared === undefined ? undefined : declaredSigned(declared)) ?? first.signed;
     p.type = T.int(width, signed);
-    for (const op of extensions) {
-      if (op.attrs.width === width && (op.opcode === 'sext') === signed) {
+    for (const { op, ...ext } of extensions) {
+      if (ext.width === width && ext.signed === signed) {
         replaceAllUsesWith(fn, op.results[0], p);
         const home = fn.blocks.find((b) => b.ops.includes(op))!;
         home.ops.splice(home.ops.indexOf(op), 1);

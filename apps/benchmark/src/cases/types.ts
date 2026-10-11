@@ -43,6 +43,11 @@ interface CaseFields {
   build: () => BuiltTarget;
   /** Context-aware candidate scorer (real tier); undefined = the toolchain adapter default. */
   scorer?: Scorer;
+  /** real tier: a digest of every argument `scorer` was built from (cases/real.ts). The scorer is a
+   *  closure, and the m2c cache key cannot see into it: the scoring ladder reads the unit model, the
+   *  manifest's prependC and the VENDORED context. m2c's own `ctx` is that context on most rows and
+   *  a different file (or nothing) on the rest, and it never carries the other two. */
+  scoringContext?: string;
   /** Context-aware candidate COMPILE (real tier): asmlift's ranked pass ranks + scores its
    *  candidates through THIS, so asmlift compiles in the same project context (headers, extern
    *  globals) as m2c — symmetric. undefined = the decomp.yaml/registry compiler (synthetic). */

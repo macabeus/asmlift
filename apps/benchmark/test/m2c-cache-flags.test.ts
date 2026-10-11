@@ -79,3 +79,23 @@ test('a byte-identical target at other candidate flags is a miss, not the other 
   expect((await run(MATH_C, -1)).score).toBe(15);
   expect(computed).toEqual([16, 15]);
 });
+
+// The real tier scores m2c's candidate through a closure over the manifest's prependC, the unit
+// model and the VENDORED context (compile/real.ts `makeRealScorer`), which m2c's own `ctx` carries
+// only in part. Two rows that differ only there are two entries, and a row without one keeps its old key.
+test('the same row scored in another context is a miss, not the other context’s result', async () => {
+  const obj = join(scratch, 'fn_1_F4D4.o');
+  writeFileSync(obj, 'the same target object in both scoring contexts');
+  const inputs = { tcId: 'mwcc_242_81', cflags: [], sym: 'fn_1_F4D4', asm: `\tblr # ${scratch}\n`, obj } as const;
+  const computed: number[] = [];
+  const run = (scoringContext: string | undefined, score: number) =>
+    cache.cachedM2cResult({ ...inputs, scoringContext }, async () => (computed.push(score), scored(score)));
+
+  expect((await run('typedef int s32;', 2)).score).toBe(2);
+  expect((await run('typedef signed long s32;', 0)).score).toBe(0);
+  expect((await run(undefined, 5)).score).toBe(5);
+  expect((await run('typedef int s32;', -1)).score).toBe(2);
+  expect((await run('typedef signed long s32;', -1)).score).toBe(0);
+  expect((await run(undefined, -1)).score).toBe(5);
+  expect(computed).toEqual([2, 0, 5]);
+});

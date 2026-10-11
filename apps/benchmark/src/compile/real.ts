@@ -9,7 +9,7 @@ import type { CandidateCompileOptions } from '@asmlift/cli/compile-command';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { type Attempt, CompilerRejection, joinAttempts } from '@asmlift/core/compiler-diagnostics';
 import { macroDefinesOf } from '@asmlift/core/declare';
-import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
 import { type BuiltTarget, type ToolchainId, checkedTarget } from '../toolchains';
 import { agbccReal, stripPrototype } from './agbcc';
@@ -19,7 +19,7 @@ import { idoReal } from './ido';
 import { kmcReal } from './kmc';
 import { mwccReal } from './mwcc';
 import type { RealCompile, RealProjectCfg, TuModel } from './types';
-import { ctxTypedefPrelude } from './util';
+import { bareTypedefs, ctxTypedefPrelude } from './util';
 
 export type { RealProjectCfg } from './types';
 
@@ -144,8 +144,9 @@ export function redeclare(ctxI: string, sym: string, declarator: string): string
  *  world it is scored in. What the ladder is depends on the row's translation unit (`tu`):
  *
  *  ASSEMBLED — cheapest → richest:
- *    1. bare typedefs: C_TYPEDEFS, enough for a candidate that names nothing of the project;
- *    2. + manifest prependC (skipping C_TYPEDEFS when that prelude owns `u8` already);
+ *    1. bare typedefs: asmlift's typedef family, each name spelled as the vendored context spells it
+ *       (bareTypedefs), enough for a candidate that names nothing else of the project;
+ *    2. + manifest prependC (skipping those typedefs when that prelude owns `u8` already);
  *    3. vendored ctx: the function's preprocessed context — its real types + extern globals, with the
  *       prototype of `sym` itself stripped (the candidate's definition must be the only one) and the
  *       typedefs that context does not itself define added back (ctxTypedefPrelude — the SAME helper
@@ -169,7 +170,7 @@ export function redeclare(ctxI: string, sym: string, declarator: string): string
  *       for a candidate rung 1 refused, and it is one rule for both decompilers: m2c reads its signature
  *       from the project's header on 32 of these 42 rows, asmlift is told only whether the row returns
  *       void, and without this rung that difference alone decides noncompile;
- *    3. bare typedefs, for a candidate the unit refuses.
+ *    3. bare typedefs, spelled as the unit spells them, for a candidate the unit refuses.
  *
  *  Every rung re-provides `NULL`: the vendored context is PREPROCESSED, so the standard macro is
  *  expanded away, and a candidate spelling a null check the idiomatic way (`p != NULL`, as m2c
@@ -187,7 +188,10 @@ export function scoringLadder(
    *  caller with no candidate in hand (a declined row's reproduction) gets the ladder without it */
   candC?: string,
 ): ScoringRung[] {
-  const bare = { name: 'bare typedefs', prelude: `${C_TYPEDEFS}\n` };
+  // The typedefs as the project spells them (bareTypedefs): a rung without the context is still the
+  // project's world in its integer types, or it scores a spelling of the game's own source as a miss.
+  const typedefs = bareTypedefs(ctxI);
+  const bare = { name: 'bare typedefs', prelude: `${typedefs}\n` };
   if (tu === 'unit') {
     const own = candC === undefined ? null : candidateDeclarator(candC, sym);
     const redeclared = own === null ? null : redeclare(ctxI, sym, own);
@@ -199,10 +203,15 @@ export function scoringLadder(
       bare,
     ].map(withNull);
   }
+  // All or nothing: a prependC that declares SOME of the family but not `u8` gets the whole family
+  // again. mwcc accepts an identical redeclaration, but ido7.1's cfe rejects even that. So on the 18
+  // af rows whose prependC declares `s32`, `s16` or `s8` without `u8`, this rung never compiles and a
+  // candidate falls through to the vendored ctx. That costs a compile, not a score. Skipping the
+  // family per name (as ctxTypedefPrelude does) would revive the rung and move those rows' scores.
   const proDefsU8 = /typedef\s+unsigned\s+char\s+u8\b/.test(prependC);
   return [
     bare,
-    { name: '+ manifest prependC', prelude: `${proDefsU8 ? '' : C_TYPEDEFS}\n${prependC}\n` },
+    { name: '+ manifest prependC', prelude: `${proDefsU8 ? '' : typedefs}\n${prependC}\n` },
     ...(ctxI ? [{ name: 'vendored ctx', prelude: `${ctxTypedefPrelude(ctxI)}${stripPrototype(ctxI, sym)}\n` }] : []),
   ].map(withNull);
 }

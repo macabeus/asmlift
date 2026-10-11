@@ -223,6 +223,7 @@ export async function runCases(
       symbols: c.symbols,
       codegen: c.codegen,
       note: c.note,
+      scoringContext: c.scoringContext,
     };
     let r: FunctionResult;
     try {

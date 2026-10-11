@@ -8,6 +8,7 @@
 import { readCompilerCommand } from '@asmlift/cli/flags';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import {
+  C_TYPEDEFS,
   type CanonicalToolchainId,
   TOOLCHAIN_TARGETS,
   isCanonicalToolchainId,
@@ -21,7 +22,7 @@ import { describe, expect, test } from 'vitest';
 import YAML from 'yaml';
 
 import { scoringLadder } from '../src/compile/real';
-import { shq } from '../src/compile/util';
+import { bareTypedefs, shq } from '../src/compile/util';
 import { materializeScoringContext, renderScoreCommand, writeScoreConfig } from '../src/decomp-config';
 
 // The toolchains with canonical flags: the ones a committed config can be rendered at without a
@@ -214,6 +215,30 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
       'unit context',
       'bare typedefs',
     ]);
+  });
+
+  // int and long are both 32 bits and still not one type to mwcc (compile/util.ts `bareTypedefs`), and
+  // Mario Party 4 says `typedef signed long s32`.
+  test('the rungs without the context spell the typedefs the way the context does', () => {
+    const ctx = 'typedef signed long s32;\ntypedef unsigned   long u32;\nvoid g(void) { }\n';
+    for (const tu of ['assembled', 'unit'] as const) {
+      const bare = scoringLadder(tu, '', ctx, 'f').find((r) => r.name === 'bare typedefs')!.prelude;
+      expect(bare).toContain('typedef signed long s32;');
+      expect(bare).toContain('typedef unsigned long u32;');
+      expect(bare).not.toContain('typedef int s32;');
+      expect(bare).toContain('typedef unsigned short u16;'); // a name the context does not declare
+      expect(bare).not.toContain('void g(void)'); // and still nothing else of the context
+    }
+    const prepend = scoringLadder('assembled', 'struct S { s32 x; };', ctx, 'f')[1].prelude;
+    expect(prepend).toContain('typedef signed long s32;');
+  });
+
+  test("a spelling that names another type keeps the prelude's: the rung never declares that type", () => {
+    expect(bareTypedefs('typedef uint8_t u8;\ntypedef volatile long s32;\n')).toContain('typedef unsigned char u8;');
+    expect(bareTypedefs('typedef volatile long s32;\n')).toContain('typedef int s32;');
+    // no context, or none of the family: the prelude byte for byte
+    expect(bareTypedefs('')).toBe(C_TYPEDEFS);
+    expect(bareTypedefs('typedef short s16x;\n')).toBe(C_TYPEDEFS);
   });
 
   test("the vendored rung strips the function's own prototype and keeps the rest verbatim", () => {

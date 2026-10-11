@@ -32,7 +32,7 @@ import {
 import { recoverTypes } from '../src/raise/recover';
 import { type Candidate, compareScored, enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, type NarrowParamWitness } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, type NarrowParamWitness, PPC_MWCC } from '../src/target';
 
 // The IR below is agbcc's prologue shape unless a test says otherwise, so the default witness is
 // the one agbcc declares — read OFF the target rather than spelled as a literal, so a round that
@@ -538,6 +538,117 @@ describe('a parameter every reader of which is an extension (/narrow-param)', ()
   test('reports a width no prototype declares', () => {
     expect(runExtended(EXTENDED_AT_USES).narrowed.map((c) => c.declared)).toEqual([undefined]);
     expect(runExtended(EXTENDED_AT_USES, { params: ['s16', 'u8 *'] }).narrowed.map((c) => c.declared)).toEqual([16]);
+  });
+});
+
+// mwcc has no extension for an unsigned narrow value: `u16 b` is read as `clrlwi rD,rS,16`, which
+// frontend/ppc.ts lifts as the mask it is. Mario Party 4's `fn_1_F4D4(unkObjStruct *, u16, u16)`
+// reads each `u16` once that way and never in the prologue.
+const MASKED_AT_USE = `fn f {
+^bb0(%0: s32*, %1: unk32):
+  %2: unk32 = load %0 {off=0, signed=false, width=4}
+  %3: unk32 = const {value=65535}
+  %4: unk32 = and %1, %3
+  %5: unk32 = or %2, %4
+  store %0, %5 {off=0, width=4}
+  ret
+}
+`;
+const MWCC_WITNESS = PPC_MWCC.compilerBehaviors.narrowParamWitness!;
+
+describe('a parameter every reader of which is a low mask (/narrow-param on PPC)', () => {
+  test("is declared unsigned at the mask's width, and the mask becomes the parameter", () => {
+    const { n, fn, ir } = runExtended(MASKED_AT_USE, undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS);
+    expect(n).toBe(1);
+    expect(fn.blocks[0].params[1].type).toEqual(T.int(16, false));
+    expect(ir).toMatch(/or %2, %1/);
+    expect(ir).not.toMatch(/and /);
+  });
+
+  test('the mask on either side, and 0xff as the byte', () => {
+    const flipped = MASKED_AT_USE.replace('and %1, %3', 'and %3, %1').replace('value=65535', 'value=255');
+    const { fn } = runExtended(flipped, undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS);
+    expect(fn.blocks[0].params[1].type).toEqual(T.int(8, false));
+  });
+
+  test('a mask no C type spells is no extension', () => {
+    expect(
+      runExtended(MASKED_AT_USE.replace('value=65535', 'value=4095'), undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS)
+        .n,
+    ).toBe(0);
+  });
+
+  test('a raw reader beside the mask keeps the parameter wide', () => {
+    const raw = MASKED_AT_USE.replace('  ret\n}', '  store %0, %1 {off=4, width=4}\n  ret\n}');
+    expect(runExtended(raw, undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS).n).toBe(0);
+    expect(runExtended(raw, undefined, without(PARAM_READER_WIDTH_GATES, 'wide-reader'), MWCC_WITNESS).n).toBe(1);
+  });
+
+  test('the default pass leaves it wide: a mask is no prologue extension', () => {
+    expect(run(MASKED_AT_USE, undefined, MWCC_WITNESS).n).toBe(0);
+  });
+
+  test('is offered on the mwcc object, and declares both masked parameters u16', () => {
+    const asm = [
+      '00000000 <fn_1_F4D4>:',
+      '   0:\tlwz     r6,0(r3)',
+      '   4:\tclrlwi  r0,r4,16',
+      '   8:\tnot     r0,r0',
+      '   c:\tand     r0,r6,r0',
+      '  10:\tstw     r0,0(r3)',
+      '  14:\tlwz     r6,0(r3)',
+      '  18:\tclrlwi  r0,r5,16',
+      '  1c:\tor      r0,r6,r0',
+      '  20:\tstw     r0,0(r3)',
+      '  24:\tblr',
+      '',
+    ].join('\n');
+    const prototypes = { fn_1_F4D4: { returnsVoid: true } };
+    const all = enumerateCandidates('fn_1_F4D4', asm, PPC_MWCC, { prototypes });
+    const narrow = all.filter((c) => c.variations.includes('narrow-param'));
+    expect(narrow.length).toBeGreaterThan(0);
+    expect(narrow.every((c) => /u16 a1, u16 a2\)/.test(c.source) && !c.source.includes('65535'))).toBe(true);
+    expect(all.some((c) => !c.variations.includes('narrow-param') && c.source.includes('& 65535'))).toBe(true);
+  });
+});
+
+// IDO reads a declared narrow parameter as a home store plus an in-place `andi`, which
+// frontend/mips.ts lifts as the same mask. Without the mask reader no /narrow-param candidate
+// exists here: the default scores 3 on `h1` and 8 on `g2`, and the narrowed spelling scores 0.
+describe('a parameter every reader of which is a low mask (/narrow-param on IDO)', () => {
+  const ido = (sym: string, body: string[]) =>
+    enumerateCandidates(sym, [`00000000 <${sym}>:`, ...body, ''].join('\n'), MIPS_IDO, {});
+
+  test('`s32 h1(u16 a, s32 b){ return a + b; }`: homed, masked in place, declared u16', () => {
+    const all = ido('h1', [
+      '   0:\tsw\ta0,0(sp)',
+      '   4:\tandi\ta0,a0,0xffff',
+      '   8:\tjr\tra',
+      '   c:\taddu\tv0,a0,a1',
+    ]);
+    const narrow = all.filter((c) => c.variations.includes('narrow-param'));
+    expect(narrow.length).toBeGreaterThan(0);
+    expect(narrow.every((c) => /h1\(u16 a0, /.test(c.source) && !c.source.includes('65535'))).toBe(true);
+  });
+
+  test('`void g2(s32 *p, u16 a, u8 b)`: both widths at once', () => {
+    const all = ido('g2', [
+      '   0:\tsw\ta1,4(sp)',
+      '   4:\tandi\ta1,a1,0xffff',
+      '   8:\tsw\ta2,8(sp)',
+      '   c:\tandi\ta2,a2,0xff',
+      '  10:\tnor\tt6,a1,zero',
+      '  14:\tsw\tt6,0(a0)',
+      '  18:\tjr\tra',
+      '  1c:\tsw\ta2,4(a0)',
+    ]);
+    expect(all.some((c) => c.variations.includes('narrow-param') && /u16 a1, u8 a2\)/.test(c.source))).toBe(true);
+  });
+
+  test('a mask applied in place with no home store is a cast assigned back, and stays wide', () => {
+    // `s32 v2(u32 a, s32 b){ a = a & 0xffff; return a + b; }`
+    const all = ido('v2', ['   0:\tandi\ta0,a0,0xffff', '   4:\tjr\tra', '   8:\taddu\tv0,a1,a0', '   c:\tnop']);
+    expect(all.some((c) => c.variations.includes('narrow-param'))).toBe(false);
   });
 });
 

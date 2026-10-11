@@ -43,6 +43,9 @@ interface EvalSpecFields {
   /** the flags this row's target and candidates compile at, and asmlift's description from them */
   codegen: ResolvedTarget;
   note?: string;
+  /** a digest of what the real scorer was built from (cases/types.ts) — a key input of the m2c
+   *  cache, never published */
+  scoringContext?: string;
 }
 
 // m2c's output dialect assumes these typedefs (its normal --context supplies them); the shared
@@ -288,7 +291,16 @@ export async function evaluate(
   // depends on — m2c commit, toolchain, candidate compile flags, inputs, target object (cache.ts).
   // asmlift is NEVER cached.
   const m2c = await cachedM2cResult(
-    { tcId: tc.id, cflags: spec.codegen.cflags, sym: spec.sym, asm, ctx: m2cSpec.ctx, obj, lang: spec.language },
+    {
+      tcId: tc.id,
+      cflags: spec.codegen.cflags,
+      sym: spec.sym,
+      asm,
+      ctx: m2cSpec.ctx,
+      obj,
+      lang: spec.language,
+      scoringContext: spec.scoringContext,
+    },
     () => evaluateM2c(tc, m2cSpec, obj, asm, score, asmDump),
   );
   return {
