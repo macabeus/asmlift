@@ -11,7 +11,11 @@
 // does not see it.
 //
 // The SHARED bodies are the hazard the reader would have if a compiler reused one register for
-// two narrow stores whose types differ: none does. Each store gets its own materialization.
+// two narrow stores whose types differ: none does. Each store gets its own materialization. But the
+// conversion is a fact about a LITERAL: a variable whose value is a known constant is stored
+// unconverted, from the register a wider use of it reads (the NONLITERAL bodies), and a constant
+// stored at two widths looks the same — so sh5's -1, stored as both an s8 and an s16, is not
+// stamped.
 import { defOpMap } from '@asmlift/core/ir/core';
 import { applyIdiomPatterns, decompile, liftStamped, raiseRecovered } from '@asmlift/core/pipeline';
 import { TOOLCHAIN_TARGETS, type TargetDescription } from '@asmlift/core/target';
@@ -47,6 +51,9 @@ const BODIES: [string, string, number[]][] = [
   ['sh5', 'void sh5(u8 *p, s8 *r, s16 *h) { p[1] = -1; r[1] = -1; h[1] = -1; }', [255, -1, -1]],
 ];
 
+/** A constant raise/storesign.ts refuses to read, because its value is stored at another width too. */
+const SHARED_ACROSS_WIDTHS = new Set(['sh5:1', 'sh5:2']);
+
 /** What agbcc's lift leaves at a store whose constant is not one instruction: `null`. */
 const AGBCC_UNFOLDED = new Set(['ss16ffff', 'ss8m1', 'su16min', 'sh3:1', 'sh4:0', 'sh5:1', 'sh5:2']);
 
@@ -70,7 +77,7 @@ const expected = (sym: string, values: number[], agbcc: boolean) =>
     const hidden = agbcc && (AGBCC_UNFOLDED.has(sym) || AGBCC_UNFOLDED.has(`${sym}:${i}`));
     const value = hidden ? null : v;
     // what storesign stamps from that const: bit w-1 clear (32767) says nothing
-    const signed = value === null || value === 32767 ? undefined : value < 0;
+    const signed = value === null || value === 32767 || SHARED_ACROSS_WIDTHS.has(`${sym}:${i}`) ? undefined : value < 0;
     return { value, signed };
   });
 
@@ -136,13 +143,40 @@ describe('a narrow store of a constant materializes the constant converted to th
   }
 });
 
+// Every narrow lvalue here is UNSIGNED, and every stored value is a variable or a chained assignment
+// holding -1: gcc2.7.2 and KMC store it from the register a word store reads (`li v0,-1; sw v0;
+// sh v0`), ido7.1 from a second `li -1`. A signed stamp would declare `s16`/`s8` for a u16/u8 source.
+const NONLITERAL: [string, string][] = [
+  ['nl1', 'typedef struct { s32 a; u16 h; u16 g; } S; void nl1(S *p) { p->h = p->a = -1; p->g = 3; }'],
+  ['nl2', 'void nl2(u16 *p, s32 *q) { s32 v = -1; *q = v; p[1] = v; }'],
+  ['nl3', 'typedef struct { s32 a; u8 b; u8 c; } S; void nl3(S *p) { s32 i = -1; p->a = i; p->b = i; p->c = 1; }'],
+  ['nl4', 'void nl4(u8 *p, s32 *q) { s32 v = -1; *q = v; p[3] = v; p[4] = 0x80; }'],
+];
+
+describe('a narrow store of a variable holding a constant is never stamped signed for an unsigned lvalue', () => {
+  for (const [name, have, compile, target] of probes) {
+    test.runIf(have)(
+      name,
+      () => {
+        for (const [sym, c] of NONLITERAL) {
+          expect({ sym, signed: read(sym, compile(c, sym), target).filter((st) => st.signed === true) }).toEqual({
+            sym,
+            signed: [],
+          });
+        }
+      },
+      BUDGET,
+    );
+  }
+});
+
 // The reader's payoff, byte-exact: a read types `p` first, so before the stamp the signed store was
 // spelled through a cast to the unsigned view (or the reverse) and recompiled to the other constant.
 // rt2 is the unsigned control, which matched without the stamp too.
-const ROUND_TRIP: [string, string, string][] = [
-  ['rt1', 's16 *', 'void rt1(s16 *p, s16 *q) { *q = p[6]; p[6] = -1; }'],
-  ['rt2', 'u16 *', 'void rt2(u16 *p, u16 *q) { *q = p[6]; p[6] = -1; }'],
-  ['rt3', 's8 *', 'void rt3(s8 *p, s8 *q) { *q = p[1]; p[1] = -1; }'],
+const ROUND_TRIP: [string, string[], string][] = [
+  ['rt1', ['s16 *', 's16 *'], 'void rt1(s16 *p, s16 *q) { *q = p[6]; p[6] = -1; }'],
+  ['rt2', ['u16 *', 'u16 *'], 'void rt2(u16 *p, u16 *q) { *q = p[6]; p[6] = -1; }'],
+  ['rt3', ['s8 *', 's8 *'], 'void rt3(s8 *p, s8 *q) { *q = p[1]; p[1] = -1; }'],
 ];
 
 const roundTrips: [string, boolean, (c: string, sym: string) => { obj: string; asm: string }, TargetDescription][] = [
@@ -177,9 +211,9 @@ describe('a narrow store of a constant recompiles byte-exact through the view it
     test.runIf(have)(
       name,
       () => {
-        for (const [sym, ty, c] of ROUND_TRIP) {
+        for (const [sym, params, c] of ROUND_TRIP) {
           const { obj, asm } = compile(c, sym);
-          const r = decompile(sym, asm, target, { prototypes: { [sym]: { params: [ty, ty], returnsVoid: true } } });
+          const r = decompile(sym, asm, target, { prototypes: { [sym]: { params, returnsVoid: true } } });
           expect({ sym, score: scoreObjects(obj, compile(r.source, sym).obj, sym).score }).toEqual({ sym, score: 0 });
         }
       },

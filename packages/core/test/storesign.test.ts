@@ -1,7 +1,6 @@
 // raise/storesign.ts: a narrow store's signedness, read off the constant it stores. The table is the
 // probe behind `compilerBehaviors.narrowStoreConstantTakesLvalueType`
-// (packages/cli/test/matching/narrow-store-constant.test.ts) seen from the reader's side; every
-// refusal is a one-fact edit of the accepted lift below.
+// (packages/cli/test/matching/narrow-store-constant.test.ts) seen from the reader's side.
 import { expect, test } from 'vitest';
 
 import { Fn, defOpMap } from '../src/ir/core';
@@ -38,7 +37,7 @@ const obj = (...lines: string[]) =>
   '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:\n' +
   lines.map((l) => `   ${l}\n`).join('');
 
-/** Lift and raise through every pre-recovery pass (storesign is the last), then read each store's
+/** Lift and raise through every pre-recovery pass, then read each const-offset store's
  *  stamp in program order. */
 const stamps = (asm: string, target: TargetDescription = MIPS_GCC) => {
   const fn: Fn = liftStamped('f', asm, target, {}, undefined, undefined);
@@ -63,6 +62,26 @@ test('refusals: a target without the behavior, bit w-1 clear, a word store, a st
   expect(stamps(obj('0:\tli\tv0,32767', '4:\tjr\tra', '8:\tsh\tv0,12(a0)'))).toEqual([undefined]);
   expect(stamps(obj('0:\tli\tv0,-1', '4:\tjr\tra', '8:\tsw\tv0,12(a0)'))).toEqual([undefined]);
   expect(stamps(obj('0:\tjr\tra', '4:\tsh\ta1,12(a0)'))).toEqual([undefined]);
+});
+
+test('refusals: a constant a wider use reads too, or whose value is stored at another width', () => {
+  // `s32 v = -1; *q = v; p[1] = v;` with `u16 *p`: gcc shares the register with the word store, ido
+  // rematerializes it; either way the register says the variable's sign, not the lvalue's
+  expect(stamps(obj('0:\tli\tv0,-1', '4:\tsw\tv0,0(a1)', '8:\tjr\tra', 'c:\tsh\tv0,2(a0)'))).toEqual([
+    undefined,
+    undefined,
+  ]);
+  expect(stamps(obj('0:\tli\tt6,-1', '4:\tsw\tt6,0(a1)', '8:\tli\tt7,-1', 'c:\tjr\tra', '10:\tsh\tt7,2(a0)'))).toEqual([
+    undefined,
+    undefined,
+  ]);
+  // the same -1 stored as a byte and a half
+  expect(stamps(obj('0:\tli\tv0,-1', '4:\tsb\tv0,1(a0)', '8:\tjr\tra', 'c:\tsh\tv0,2(a1)'))).toEqual([
+    undefined,
+    undefined,
+  ]);
+  // …but not the return register a `ret` reads before the return type is known
+  expect(stamps(obj('0:\tli\tv0,-1', '4:\tjr\tra', '8:\tsh\tv0,12(a0)'))).toEqual([true]);
 });
 
 test('a store that already carries a signedness keeps it, and the pass reports only what it stamped', () => {
