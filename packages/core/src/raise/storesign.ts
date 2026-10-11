@@ -1,22 +1,18 @@
 // asmlift — the signedness of a NARROW store, read off the constant it stores.
 //
 // A store does not say whether its lvalue is signed: `sh` writes the low half of a register either
-// way, so a 1- or 2-byte `store` gets the unsigned view by convention (raise/recover.ts, and the
-// structurer's store branch reads the same rule). But a compiler that converts the constant to the
-// lvalue's type before it materializes it (`compilerBehaviors.narrowStoreConstantTakesLvalueType`)
-// leaves that type in the register's UPPER bits, which the store throws away:
+// way, so a 1- or 2-byte `store` gets the unsigned view by convention (`storeSigned` below). But a
+// compiler that converts the constant to the lvalue's type before it materializes it
+// (`compilerBehaviors.narrowStoreConstantTakesLvalueType`) leaves that type in the register's UPPER
+// bits, which the store throws away:
 //
 //     u16 *p; p[6] = -1;       li v0,0xffff   →  const 65535   →  unsigned
 //     s16 *p; p[6] = 0xFFFF;   li v0,-1       →  const -1      →  signed
 //
 // This pass records that as the store's `signed` attr, the slot an `astore` already carries for a
-// member's recorded signedness. raise/arrays.ts and raise/struct-arrays.ts carry it into the
-// `astore` they make. Every pass that seeds a cell's type from a store reads it through
-// `storeSigned` below, the map-less bare-global declaration (rank-declare.ts) among them, since a
-// bare `gSym = v` has no cast to carry the stamp; raise/struct-arrays.ts types a field only ever
-// stored from it; and the structurer spells a stamped store through a member whose declared sign
-// is not the stamp's as a cast cell instead (structure/structure.ts `stampedStoreLval`). It changes no op and no value:
-// what it moves is which view of the cell the C spells, and both views store the same bytes.
+// member's recorded signedness; raise/arrays.ts and raise/struct-arrays.ts carry it into the
+// `astore` they make. It changes no op and no value: what it moves is which view of the cell the C
+// spells, and both views store the same bytes.
 //
 // It refuses (leaves the attr unset, so the convention stands) for:
 //   - a target that does not declare the behavior;
@@ -38,21 +34,18 @@
 // What it does NOT refuse is such a variable with no wide use: `s32 v = -1; p[6] = v;` (`u16 *p`),
 // or one only returned. Its register is the variable's, not the lvalue's, so the stamp can name a
 // type the source did not declare (`s16 *` there). It is not refused because nothing tells it
-// apart from a literal, and the spelling it gives recompiles to the register the target holds
-// (that body scores 1 → 0 on gcc2.7.2, gcc2.7.2kmc and ido7.1).
+// apart from a literal, and the spelling it gives recompiles to the register the target holds.
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import type { TargetDescription } from '../target';
 
 /** THE view a store's lvalue is seeded at, `width` bytes wide (`width` for a `store`, `elemSize`
- *  for an `astore`): the `signed` a recovery recorded on it — this pass's reading of a stored
- *  constant, or a member array's own declaration (raise/memberarrays.ts) — else the convention,
- *  word ⇒ signed and narrow ⇒ unsigned. Every pass that types a cell from a store seeds it here,
- *  so none of them can come to read the stamp by a rule of its own. What each then does when a
- *  LOAD disagrees, or a member was already declared, is its own: raise/structs.ts and
- *  raise/struct-arrays.ts prefer the load, as does rank-declare.ts's bare-global declaration; the
- *  structurer spells a member that disagrees with the stamp as a cast cell (structure/structure.ts
- *  `stampedStoreLval`), and an unstamped sign-neutral constant through its base's own view
- *  (`storeView`). */
+ *  for an `astore`): the `signed` a recovery recorded on it — this pass's stamp, or a member
+ *  array's own declaration (raise/memberarrays.ts) — else the convention, word ⇒ signed and
+ *  narrow ⇒ unsigned. raise/recover.ts, raise/structs.ts, raise/memberarrays.ts, rank-declare.ts
+ *  and the structurer seed from it; raise/struct-arrays.ts keeps the stamp beside its loads'
+ *  sign instead. What each does when a LOAD disagrees is its own: raise/structs.ts,
+ *  raise/struct-arrays.ts and rank-declare.ts prefer the load, and the structurer spells a member
+ *  that disagrees with the stamp as a cast cell (structure/structure.ts `stampedStoreLval`). */
 export function storeSigned(op: Op, width: number): boolean {
   return (op.attrs.signed as boolean | undefined) ?? width === 4;
 }

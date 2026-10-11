@@ -26,12 +26,10 @@ import { C_TYPEDEFS, type TargetDescription } from './target';
  *  offsets, address arithmetic, width or sign conflicts) records nothing, because those
  *  spellings go through `&gSym` casts where every object decl is address-identical.
  *
- *  A symbol never LOADED takes its sign from the stores that carry one (`signed`, which
- *  raise/storesign.ts reads off the constant a narrow store materialized), seeded through
- *  `storeSigned` like every other store-typed cell; an unstamped store says nothing, so a cell
- *  only ever stored unstamped keeps the unsigned default. A load still wins, as in
- *  raise/structs.ts: the bare `gSym = v` spelling has no cast to carry the stamp, so this
- *  declaration is the only place the stored constant's view can be written. */
+ *  A symbol never LOADED takes its sign from its stamped stores (raise/storesign.ts); an unstamped
+ *  store says nothing, so a cell only ever stored unstamped keeps the unsigned default. A load
+ *  still wins, as in raise/structs.ts. The bare `gSym = v` spelling has no cast to carry the
+ *  stamp, so this declaration is the only place the stored constant's view can be written. */
 export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
   const defs = defOpMap(fn);
   const symOf = (v: Value): string | null => {

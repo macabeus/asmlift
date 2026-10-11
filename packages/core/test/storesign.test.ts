@@ -3,8 +3,8 @@
 // (packages/cli/test/matching/narrow-store-constant.test.ts) seen from the reader's side.
 import { expect, test } from 'vitest';
 
-import { Fn, defOpMap } from '../src/ir/core';
 import type { AsmData } from '../src/frontend/asmdata';
+import { Fn, defOpMap } from '../src/ir/core';
 import { applyIdiomPatterns, decompile, liftStamped, raiseRecovered } from '../src/pipeline';
 import { seedNarrowStoreSigns, storedConstantSign } from '../src/raise/storesign';
 import { bareGlobalAccessFacts } from '../src/rank-declare';

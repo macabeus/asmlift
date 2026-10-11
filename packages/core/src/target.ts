@@ -923,15 +923,12 @@ export const ARMV4T_AGBCC: TargetDescription = {
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
-    // MEASURED: the probe at the field. Only one side of some pairs lifts to a `const` here — `mov #1;
-    // neg` and `mov #0x80; lsl #8` stay a `neg`/`shl` — and the seed reads no other shape.
-    // NOT the lvalue's type in every register, though: agbcc materializes one constant ONCE for
-    // several narrow stores through the same base, whatever their signedness —
-    // `struct { s32 a; s16 b; u16 c; } *p; p->b = -300; p->c = -300;` is `ldr r1,=0xfed4` feeding
-    // both `strh`, either field order, with or without a load first (through two different
-    // pointers they stay apart). The seed then stamps the `s16` store unsigned. That costs no score
-    // today, since unsigned is also the convention, but a stamp on this target that shares its
-    // constant names the type of one of the stores, not necessarily of each.
+    // MEASURED: the probe at the field. A signed constant often lifts as `mov #1; neg` or
+    // `mov #0x80; lsl #8`, a `neg`/`shl` the seed does not read. agbcc also materializes one
+    // constant ONCE for several narrow stores through the same base, whatever their signedness:
+    // `struct { s32 a; s16 b; u16 c; } *p; p->b = -300; p->c = -300;` is one `ldr r1,=0xfed4` for
+    // both `strh`. A stamp here then names one store's type, not necessarily each's (the `s16`
+    // store is stamped unsigned, which is also the convention).
     narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 4,
     largestAlignment: 4,

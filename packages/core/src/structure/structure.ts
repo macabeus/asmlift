@@ -654,20 +654,18 @@ function displacementIndex(off: number, width: number): number {
 }
 
 /** A stamped narrow store (raise/storesign.ts) spelled through a MEMBER — a struct field, a union
- *  member's view, a struct-array element's field — is converted by the compiler to that member's
- *  DECLARED type, so where the declaration's signedness is not the stamp's the stamp is lost:
- *  `a0->field_6 = -104` under `u16 field_6` recompiles to `li 0xff98`, where the stamp read
- *  `li -104`. Such a store is spelled instead as the flat cell `flatBase[off / width]` at the same
- *  address, which the backend casts to the stamp's view: `((s16 *)a0)[3] = -104`, and for an
- *  element `((s16 *)(a0 + a1))[1] = -104`. THE ONE copy of that rule, for the `store` and `astore`
- *  branches alike, and it reads the member's type off the spelled lvalue (`ctype`), so every way a
- *  member gets declared — a load's extension, a stamp, a union's view — is judged the same.
+ *  member's view, a struct-array element's field — is converted by the compiler to the member's
+ *  DECLARED type, so a declaration whose sign is not the stamp's loses it: `a0->field_6 = -104`
+ *  under `u16 field_6` recompiles to `li 0xff98`. Such a store is spelled instead as the flat cell
+ *  at the same address, `((s16 *)a0)[3] = -104`, or `((s16 *)(a0 + a1))[1] = -104` for an
+ *  element. The member's type is read off the spelled lvalue (`ctype`), so a member declared by a
+ *  load, a stamp or a union's view is judged alike.
  *
- *  `width` is the store's, or `undefined` for an `astore`, which does not carry it: raise/struct-arrays.ts
- *  declares every field at the one width its accesses share, so the member's own width is the store's.
+ *  `storeWidth` is `undefined` for an `astore`, which does not carry it: raise/struct-arrays.ts
+ *  declares each field at the one width its accesses share, so the member's width is the store's.
  *
- *  `lval` comes back unchanged for an unstamped store, an lvalue that is not a member, a member
- *  whose type is not a narrow integer of the store's width or agrees with the stamp, no `flatBase`,
+ *  `lval` comes back unchanged for an unstamped store, an lvalue that is not a member, no
+ *  `flatBase`, a member that is not a narrow integer of the store's width or agrees with the stamp,
  *  and an offset that is not a whole number of cells (no flat subscript spells it). */
 function stampedStoreLval(
   lval: Expr,
@@ -2340,20 +2338,17 @@ export function structure(
     return typeof step === 'number' ? step : undefined;
   };
 
-  /** THE view a `store` (`width` bytes) or an `astore` (`elemSize`) lvalue is spelled through, for
-   *  both branches of `sideEffects`, so the rule is decided once. A stamped store, or any store
-   *  other than the case below, takes `storeSigned` (the stamp, else word ⇒ signed and narrow ⇒
-   *  unsigned) — the scalar the recovered pointee was seeded at, so an inserted cast declares the
-   *  same type. An UNSTAMPED narrow store of a constant both views store alike (narrow sign bit
-   *  clear, nothing above it) takes its base's own int pointee instead, and so asks for no cast,
+  /** THE view a `store` (`width` bytes) or `astore` (`elemSize`) lvalue is spelled through, for
+   *  both branches below: `storeSigned`, the scalar the recovered pointee was seeded at, so an
+   *  inserted cast declares the same type. An UNSTAMPED narrow store of a constant both views store
+   *  alike (narrow sign bit clear) takes its base's own int pointee instead and asks for no cast,
    *  since nothing witnessed either type. */
   const storeView = (op: Op, width: number): boolean => {
     const t = op.operands[0].type;
     const own = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === width * 8 ? t.to.signed : undefined;
     const v = defs.get(op.operands[op.opcode === 'astore' ? 2 : 1]);
     const k = v?.opcode === 'const' ? v.attrs.value : undefined;
-    const neutral =
-      typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < 2 ** (width * 8 - 1) && width < 4;
+    const neutral = typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < 2 ** (width * 8 - 1) && width < 4;
     return op.attrs.signed === undefined && neutral && own !== undefined ? own : storeSigned(op, width);
   };
 
@@ -4877,8 +4872,7 @@ export function structure(
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
           continue;
         }
-        // the view is `storeView`'s, shared with the astore branch. A member whose declared sign
-        // is not the stamp's is spelled as the flat cell off the struct pointer (stampedStoreLval).
+        // a member whose declared sign is not the stamp's is spelled as the flat cell (stampedStoreLval)
         const bt = op.operands[0].type;
         const lval = pinnedAccess(
           op,

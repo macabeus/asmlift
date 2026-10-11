@@ -585,11 +585,10 @@ export function recognizeMemberArrays(
       a.op.attrs.memberOff = a.off;
       if (!a.isLoad) {
         // the member's declaration decides how the index node types, so the store spells through
-        // the same declaration the load does — over any sign raise/storesign.ts stamped on it. No
-        // input reaches a member array with a stamp that disagrees: agbcc lifts a signed narrow
-        // constant as `neg`/`shl`, never a `const`, and the MIPS shapes probed (`p->t[i] = -1`,
-        // `-104` beside a u16 read) reach a flat cast instead. Keep the stamp here when one does,
-        // and the index node casts the cell to it.
+        // the same declaration the load does, over any stamp raise/storesign.ts left. No probed
+        // input reaches here with a stamp that disagrees: agbcc lifts a signed narrow constant as
+        // `neg`/`shl`, and the MIPS shapes (`p->t[i] = -1`, `-104` beside a u16 read) take a flat
+        // cast. One that does should keep its stamp, and the index node cast the cell to it.
         a.op.attrs.signed = g.members.find((m) => m.off === a.off)!.signed;
       }
     }

@@ -5,14 +5,14 @@
 //
 // The fact: the compiler converts the constant to the lvalue's type FIRST. `u16 = -1` loads 0xffff
 // and `s16 = 0xFFFF` loads -1, so the upper bits say the type whenever the narrow sign bit is set.
-// Every MIPS and PowerPC compiler lifts all eight bodies to a const. agbcc builds three of them out
-// of two instructions the const fold does not take (`mov #1; neg` for -1, `mov #0x80; lsl #8` for
+// Every MIPS and PowerPC compiler lifts every body to a const. agbcc builds some of them out of two
+// instructions the const fold does not take (`mov #1; neg` for -1, `mov #0x80; lsl #8` for
 // 0x8000), so there the value is not a const and nothing is stamped — the fact holds, the reader
 // does not see it.
 //
-// The SHARED bodies are the hazard the reader would have if a compiler reused one register for
-// two narrow stores whose types differ: none does. Each store gets its own materialization. But the
-// conversion is a fact about a LITERAL: a variable whose value is a known constant is stored
+// The SHARED bodies store through two pointers, and no compiler reuses one register for them: each
+// store gets its own materialization (agbcc does share one through the SAME base — core target.ts).
+// But the conversion is a fact about a LITERAL: a variable whose value is a known constant is stored
 // unconverted, from the register a wider use of it reads (the NONLITERAL bodies), and a constant
 // stored at two widths looks the same — so sh5's -1, stored as both an s8 and an s16, is not
 // stamped.
@@ -172,9 +172,9 @@ describe('a narrow store of a constant a word store also reads is never stamped 
   }
 });
 
-// The reader's payoff, byte-exact: a read types `p` first, so before the stamp the signed store was
-// spelled through a cast to the unsigned view (or the reverse) and recompiled to the other constant.
-// rt2 is the unsigned control, which matched without the stamp too. rt4 and rt5 are the indexed
+// The reader's payoff, byte-exact: a read types `p` first, so without the stamp the signed store is
+// spelled through a cast to the unsigned view (or the reverse) and recompiles to the other constant.
+// rt2 is the unsigned control, which matches without the stamp too. rt4 and rt5 are the indexed
 // stores the stamp rides into (`astore`, scalar and struct element); rt6 is a member whose load
 // declared it unsigned and whose store the stamp spells through the signed cell; rt7 is the same
 // through a struct-ARRAY element (`((s16 *)(a0 + a1))[1] = -104`); rt8 is a union member whose
