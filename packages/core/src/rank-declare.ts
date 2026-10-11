@@ -69,7 +69,10 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
               a.stored.add(storeSigned(op, op.attrs.width as number));
             } else {
               const d = defs.get(op.operands[1]);
-              if (d?.opcode === 'const' && storedConstantSign(d.attrs.value as number, op.attrs.width as number) === false) {
+              if (
+                d?.opcode === 'const' &&
+                storedConstantSign(d.attrs.value as number, op.attrs.width as number) === false
+              ) {
                 a.unsignedLiteral = true;
               }
             }
