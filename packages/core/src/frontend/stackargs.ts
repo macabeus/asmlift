@@ -460,6 +460,14 @@ export function analyzeOutgoingArgs<C>({
   }
   // …and a word an escaped address hands over is read by its receiver, which is a reload for (a):
   // its never being read back HERE is explained by who reads it THERE.
+  //
+  // WHOLE-FUNCTION, unlike the pending sets above: a store after the last escape, or on a path
+  // that never escapes, is excused here too. That is sound because (a) is not what clears a word
+  // for a call. A word that is some call's argument reaches that call pending, and the licence's
+  // equality (a declared callee) or (b) (an undeclared one) refuses it there, per program point:
+  // `qh5`'s fifth `h5` word, staged after its memcpy base escapes, is refused by (b). What this
+  // widening lets through is a store that reaches no call pending with its lower slots supplied,
+  // which by CONTIGUITY (above) no call takes as an argument.
   for (const o of everySlot) {
     if (o >= lowestEscape) {
       reloaded.add(o);

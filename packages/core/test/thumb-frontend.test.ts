@@ -3896,6 +3896,29 @@ describe('a frame address that escapes explains the stores it hands over', () =>
     );
   });
 
+  // THE EVENT READ TWO WAYS (`escapedFrameAddressNamesALocal`). `struct T { int a, b, c; }`:
+  // `t.a = x; t.b = y; t.c = 1; if (x) gt(&t); return t.b;` stores the object on a path that never
+  // escapes, and no call follows those stores there, so condition (a)'s whole-function reading
+  // excuses them and it lifts. `t.a = x; gp = &t; t.b = y; t.c = 2; return hy(x);` stores after the
+  // publish, and those words reach `hy` pending: the per-point reading refuses them there.
+  test('a store no call follows is excused whole-function, and one that reaches a call is not', () => {
+    const T = { gt: { params: ['struct T *'], returns: 's32' }, hy: { params: ['s32'], returns: 's32' } };
+    const e3 =
+      'e3:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr1, #0x1\n' +
+      '\tstr\tr1, [sp, #0x8]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tmov\tr0, sp\n\tbl\tgt\n.L3:\n\tldr\tr0, [sp, #0x4]\n' +
+      '\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('e3', e3, ARMV4T_AGBCC, { prototypes: T }).source).toContain(
+      '    if (a0 != 0) gt(sp0);\n    return ((s32 *)sp0)[1];\n',
+    );
+    const s3 =
+      's3:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tldr\tr2, .L5\n\tmov\tr3, sp\n\tstr\tr3, [r2]\n' +
+      '\tstr\tr1, [sp, #0x4]\n\tmov\tr1, #0x2\n\tstr\tr1, [sp, #0x8]\n\tbl\thy\n\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n' +
+      '\tbx\tr1\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\tgp\n';
+    expect(() => decompile('s3', s3, ARMV4T_AGBCC, { prototypes: T })).toThrow(
+      /the store to \[sp,#4\] reaches `bl hy` unread/,
+    );
+  });
+
   // By-value struct fifth arguments, which no capture stages: `tw2(1, 2, 3, 4, *p)` over
   // `struct W2 { int a, b; }` is two `str`s; over a 6-word struct it is `mov r1, sp` + ldmia/stmia.
   test('a by-value struct argument keeps its decline', () => {

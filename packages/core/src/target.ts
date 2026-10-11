@@ -560,13 +560,24 @@ export interface TargetDescription {
     // staged after it is still pending at the call. The escape ends pending words from its offset
     // UP, so in both cases it ends none of them.
     //
-    // WHICH IS WHY THE EVENT IS FLOW-SENSITIVE although the layout fact is whole-function. A
-    // flow-insensitive reading ("an address escapes somewhere, so every word from there up is a
-    // local's") would set `qh5`'s fifth `h5` word aside, staged at [sp,#0] after the copy, and lift
-    // `h5(1, 2, 3, 4)`. Read per program point, a word a receiver could not have read yet stays
-    // pending, and the cost is a false alarm, never a wrong answer. Those false alarms are a store
-    // on a path that does not escape (`if (x) gt(&s); else h(y);`), a store after the publish, and
-    // an object reached only through a pointer stored in the frame. They decline loud.
+    // WHICH IS WHY THE EVENT ENDS PENDING WORDS PER PROGRAM POINT although the layout fact is
+    // whole-function. A flow-insensitive pending set ("an address escapes somewhere, so no word
+    // from there up reaches any call") would set `qh5`'s fifth `h5` word aside, staged at [sp,#0]
+    // after the copy, and lift `h5(1, 2, 3, 4)`. Read per program point, a word a receiver could
+    // not have read yet stays pending at the call, and the licence (a declared callee) or condition
+    // (b) (an undeclared one) refuses it there.
+    //
+    // THE ANALYSIS ALSO READS THE EVENT WHOLE-FUNCTION, twice, and neither reading can clear a word
+    // that reaches a call. Condition (a) counts every word at or above the lowest escape as
+    // reloaded, because a store no call reads is explained by the receiver reading it — but (a)
+    // only ever refuses a store; a word that is a call's argument reaches that call pending, and
+    // the per-point refusals above are what catch it (`qh5` is refused by (b), not by (a)). The
+    // clash refusal reads the lowest escape the same way, and it only refuses. So the cost of the
+    // per-point reading is false alarms, never a wrong answer: a store on a path that does not
+    // escape and then reaches a call (`if (x) gt(&s); else h(y);`), a store after the publish that
+    // a call follows (`gp = &t; t.b = y; return hy(x);`), and an object reached only through a
+    // pointer stored in the frame. They decline loud. A store no call follows is excused by (a)'s
+    // whole-function reading (`t.b = y; if (x) gt(&t); return t.b;` lifts).
     // `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, and it holds only where
     // no block copy fits: a one-word frame.
     escapedFrameAddressNamesALocal?: boolean;

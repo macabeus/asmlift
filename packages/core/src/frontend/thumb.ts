@@ -3058,10 +3058,12 @@ function measureThumbFrame({
   //   - THIS gate is flow-INSENSITIVE. One escape anywhere, and no word of the frame is any call's
   //     argument, in any block. That is sound only where no block-copy base fits, which is a
   //     one-word frame.
-  //   - THE EVENT is flow-SENSITIVE and works at any frame size. Where an address leaves, it ends
-  //     the stores pending from that offset up, and nothing staged after. Beside a block copy that
-  //     is sound, because agbcc stages outgoing words in ascending offset order
-  //     (`test/corpus/agbcc-escape.s`).
+  //   - THE EVENT is flow-SENSITIVE where it clears a word for a call, and works at any frame size.
+  //     Where an address leaves, it ends the stores pending from that offset up, and nothing staged
+  //     after. Beside a block copy that is sound, because agbcc stages outgoing words in ascending
+  //     offset order (`test/corpus/agbcc-escape.s`). The analysis also reads the lowest escape over
+  //     the whole function, for condition (a) and the clash refusal, but both of those only refuse;
+  //     a word that reaches a call is judged at that call (`escapedFrameAddressNamesALocal`).
   // So what this gate adds over the event is the one-word frame's flow-insensitivity, and nothing
   // else: a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
   // capture in an unreachable block proves nothing"). Every "not widened" above is about THAT
