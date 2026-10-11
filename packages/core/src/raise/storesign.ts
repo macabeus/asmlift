@@ -12,9 +12,10 @@
 // This pass records that as the store's `signed` attr, the slot an `astore` already carries for a
 // member's recorded signedness. raise/arrays.ts and raise/struct-arrays.ts carry it into the
 // `astore` they make. Every pass that seeds a cell's type from a store reads it through
-// `storeSigned` below; raise/struct-arrays.ts types a field only ever stored from it; and the
-// structurer spells a stamped store through a member whose declared sign is not the stamp's as a
-// cast cell instead (structure/structure.ts `stampedStoreLval`). It changes no op and no value:
+// `storeSigned` below, the map-less bare-global declaration (rank-declare.ts) among them, since a
+// bare `gSym = v` has no cast to carry the stamp; raise/struct-arrays.ts types a field only ever
+// stored from it; and the structurer spells a stamped store through a member whose declared sign
+// is not the stamp's as a cast cell instead (structure/structure.ts `stampedStoreLval`). It changes no op and no value:
 // what it moves is which view of the cell the C spells, and both views store the same bytes.
 //
 // It refuses (leaves the attr unset, so the convention stands) for:
@@ -48,8 +49,10 @@ import type { TargetDescription } from '../target';
  *  word ⇒ signed and narrow ⇒ unsigned. Every pass that types a cell from a store seeds it here,
  *  so none of them can come to read the stamp by a rule of its own. What each then does when a
  *  LOAD disagrees, or a member was already declared, is its own: raise/structs.ts and
- *  raise/struct-arrays.ts prefer the load, and the structurer spells a member that disagrees with
- *  the stamp as a cast cell (structure/structure.ts `stampedStoreLval`). */
+ *  raise/struct-arrays.ts prefer the load, as does rank-declare.ts's bare-global declaration; the
+ *  structurer spells a member that disagrees with the stamp as a cast cell (structure/structure.ts
+ *  `stampedStoreLval`), and an unstamped sign-neutral constant through its base's own view
+ *  (`storeView`). */
 export function storeSigned(op: Op, width: number): boolean {
   return (op.attrs.signed as boolean | undefined) ?? width === 4;
 }

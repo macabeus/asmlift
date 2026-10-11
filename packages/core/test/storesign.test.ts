@@ -123,6 +123,28 @@ test("a constant both views store alike is spelled through its base's own view, 
   expect(src).toContain('void f(s16 *a0) {\n    a0[3] = -1;\n    a0[5] = 7;\n');
 });
 
+test("an indexed store of a constant both views store alike takes its base's own view, as a const-offset one does", () => {
+  // `void f(s16 *p, s32 i, s32 j, s32 *q) { *q = p[j]; p[i] = 7; }`: the `lh` types p `s16 *`, and 7
+  // witnesses neither view, so `((u16 *)a0)[a1]` would spell a cast nothing asked for
+  const src = decompile(
+    'f',
+    obj(
+      '0:\tsll\ta2,a2,0x1',
+      '4:\taddu\ta2,a2,a0',
+      '8:\tlh\tv0,0(a2)',
+      'c:\tsll\ta1,a1,0x1',
+      '10:\taddu\ta1,a1,a0',
+      '14:\tsw\tv0,0(a3)',
+      '18:\tli\tv0,7',
+      '1c:\tjr\tra',
+      '20:\tsh\tv0,0(a1)',
+    ),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['void *', 's32', 's32', 'void *'], returnsVoid: true } } },
+  ).source;
+  expect(src).toContain('void f(s16 *a0, s32 a1, s32 a2, s32 *a3) {\n    *a3 = a0[a2];\n    a0[a1] = 7;\n');
+});
+
 // A map-less bare global (rank-declare.ts): `gS = v` has no cast to carry the stamp, so the
 // declaration the ranked run synthesizes is where the stored constant's view is written.
 const globalFacts = (...lines: [string, string][]) => {

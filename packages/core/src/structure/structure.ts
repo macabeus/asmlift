@@ -2340,17 +2340,21 @@ export function structure(
     return typeof step === 'number' ? step : undefined;
   };
 
-  /** The view a narrow store of a constant both views store alike (narrow sign bit clear, nothing
-   *  above it) is spelled through: its base's own pointee, so it asks for no cast, since nothing
-   *  witnessed either type. `undefined` for any other store, which keeps the width convention. */
-  const either = (op: Op, width: number): boolean | undefined => {
-    const v = defs.get(op.operands[1]);
+  /** THE view a `store` (`width` bytes) or an `astore` (`elemSize`) lvalue is spelled through, for
+   *  both branches of `sideEffects`, so the rule is decided once. A stamped store, or any store
+   *  other than the case below, takes `storeSigned` (the stamp, else word ⇒ signed and narrow ⇒
+   *  unsigned) — the scalar the recovered pointee was seeded at, so an inserted cast declares the
+   *  same type. An UNSTAMPED narrow store of a constant both views store alike (narrow sign bit
+   *  clear, nothing above it) takes its base's own int pointee instead, and so asks for no cast,
+   *  since nothing witnessed either type. */
+  const storeView = (op: Op, width: number): boolean => {
     const t = op.operands[0].type;
-    if (width >= 4 || v?.opcode !== 'const' || t.kind !== 'ptr' || t.to.kind !== 'int' || t.to.width !== width * 8) {
-      return undefined;
-    }
-    const k = v.attrs.value;
-    return typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < 2 ** (width * 8 - 1) ? t.to.signed : undefined;
+    const own = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === width * 8 ? t.to.signed : undefined;
+    const v = defs.get(op.operands[op.opcode === 'astore' ? 2 : 1]);
+    const k = v?.opcode === 'const' ? v.attrs.value : undefined;
+    const neutral =
+      typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < 2 ** (width * 8 - 1) && width < 4;
+    return op.attrs.signed === undefined && neutral && own !== undefined ? own : storeSigned(op, width);
   };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
@@ -4861,7 +4865,7 @@ export function structure(
           baseExpr,
           off,
           width,
-          stamp ?? either(op, width) ?? width === 4,
+          storeView(op, width),
           ctype,
           scalarGlobals,
           symCtx,
@@ -4873,11 +4877,8 @@ export function structure(
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
           continue;
         }
-        // signedness mirrors recoverTypes' store seed (a stamped constant's sign, else word ⇒
-        // signed and narrow ⇒ unsigned), so an inserted cast declares the same scalar the
-        // recovered pointee would have; a constant both views store alike takes the pointee's
-        // own view (`either`) and asks for no cast. A member whose declared sign is not the
-        // stamp's is spelled as the flat cell off the struct pointer (stampedStoreLval).
+        // the view is `storeView`'s, shared with the astore branch. A member whose declared sign
+        // is not the stamp's is spelled as the flat cell off the struct pointer (stampedStoreLval).
         const bt = op.operands[0].type;
         const lval = pinnedAccess(
           op,
@@ -4902,7 +4903,7 @@ export function structure(
           fieldOff,
           op.attrs.memberOff as number | undefined,
           elemSize,
-          storeSigned(op, elemSize),
+          storeView(op, elemSize),
           ctype,
           symCtx,
         );
