@@ -520,10 +520,11 @@ function plusConst(e: Expr, c: number): Expr {
 //   • `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum is
 //     BYTE arithmetic, so for W > 1 every REST addend is a constant whose total is a multiple of
 //     W (it is rescaled to elements); a symbolic addend would need dividing, and declines;
-//   • the init `p = EXPR` immediately precedes the `dowhile`; EXPR (casts stripped) flattens
-//     over `+` into exactly ONE base addend — a bare var declared an integer or a byte pointer
-//     (or EXPR's `+` would stride its element), or `(u32)&g` — plus pure invariant addends
-//     (var/const/mul/shl trees whose vars the body never assigns);
+//   • the init `p = EXPR` immediately precedes the `dowhile`; EXPR (its pointer and 32-bit
+//     integer casts stripped; a narrowing cast declines) flattens over `+` into exactly ONE base
+//     addend — a bare var declared an integer or a byte pointer (or EXPR's `+` would stride its
+//     element), or an object's address, `(u32)&g` beside other addends or `&g` alone — plus pure
+//     invariant addends (var/const/mul/shl trees whose vars the body never assigns);
 //   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
 //     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
 //     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition;
@@ -568,10 +569,16 @@ function tryExprWalk(
     }
   };
   flatten(expr);
-  // The base candidates: a bare var, or an object's address under a 32-bit integer cast — the
-  // cast is what makes EXPR's `+` byte arithmetic (a bare `&g + 2` strides g's own size).
+  // The base candidates: a bare var, or an object's address. Beside other addends the address
+  // must sit under a 32-bit integer cast — the cast is what makes EXPR's `+` byte arithmetic (a
+  // bare `&g + 2` strides g's own size). ALONE it needs no cast: there is no `+` to stride, and
+  // the zero-offset init structure prints is `p = (T *)&g`, whose casts the strip above removed.
   const addrOf = (a: Expr): Extract<Expr, { k: 'addr' }> | null =>
-    a.k === 'cast' && a.to.kind === 'int' && a.to.width === 32 && a.e.k === 'addr' ? a.e : null;
+    a.k === 'addr' && addends.length === 1
+      ? a
+      : a.k === 'cast' && a.to.kind === 'int' && a.to.width === 32 && a.e.k === 'addr'
+        ? a.e
+        : null;
   const bases = addends.filter((a) => a.k === 'var' || addrOf(a) !== null);
   if (bases.length !== 1) {
     return null;
@@ -581,8 +588,8 @@ function tryExprWalk(
   // declTypes carries params, locals AND globals: a var base declared nowhere has an unknowable C
   // stride (its project declaration decides), and a wider pointer strides its element in EXPR
   // — both decline. An address needs no declaration: `&g` is g's address whatever g's type, and
-  // the printer casts it to the access width (cfamily.ts legalizedIndexBase) wherever its type
-  // does not already stride W.
+  // the printer always casts it to the access width (cfamily.ts legalizedIndexBase: the type walk
+  // answers nothing for an `addr`, so even a g declared with W-byte elements prints the cast).
   if (base.k === 'var') {
     const baseT = declTypes(base.name);
     if (baseT === undefined) {

@@ -704,6 +704,21 @@ describe('v3 — expression-base walk', () => {
       expect(reindexWalks(addrFn({ k: 'cast', to: T.s(32), e: plus(gAddr(), cn(2)) }))).not.toBeNull();
     });
 
+    test('a LONE address needs no cast: (u16 *)&g from S = 5 reads ((u16 *)&g)[i - 5]', () => {
+      // KMC: for (i = 5; i < 100; i++) gH[i - 5] = 7  lifts  v1 = 5; v0 = (u16 *)&gH; do …
+      const f = addrFn({ k: 'addr', name: 'gH' });
+      (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(5);
+      const r = reindexWalks(f);
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('((u16 *)&gH)[i - 5] = 65535;');
+      // the same under a (u32) the strip removes, and a u16 array g still prints the cast
+      expect(reindexWalks(addrFn(gAddr()))).not.toBeNull();
+      expect(cBackend.emit(reindexWalks(addrFn({ k: 'addr', name: 'gH' }, T.array(T.u(16), 256)))!)).toContain(
+        '((u16 *)gH)[i] = 65535;',
+      );
+    });
+
     test('refused: an address beside a bare var leaves the base ambiguous', () => {
       expect(reindexWalks(addrFn(plus(gAddr(), v('a0'))))).toBeNull();
     });
