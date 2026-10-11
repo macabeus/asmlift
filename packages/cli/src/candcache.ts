@@ -399,7 +399,11 @@ export function candidateCacheRefusal(tu: string): string | undefined {
   t = t.replace(/\\[ \t]*\r?\n/g, '');
   // phase 3: each comment becomes one space, so a comment spanning a newline joins the lines
   t = t.replace(/\/\*[\s\S]*?\*\//g, ' ');
-  if (/(^|[\r\n])[ \t\f\v]*#[ \t\f\v]*(include|include_next|import)\b/.test(t)) {
+  // `%:` is the digraph for `#`, and `__has_include` opens the file it names to answer.
+  if (
+    /(^|[\r\n])[ \t\f\v]*(#|%:)[ \t\f\v]*(include|include_next|import)\b/.test(t) ||
+    /\b__has_include(_next)?\b/.test(t)
+  ) {
     return 'the-TU-reads-a-file';
   }
   // A TU using __FILE__/__DATE__ is not a pure function of its own bytes: the object carries the

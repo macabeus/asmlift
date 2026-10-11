@@ -22,7 +22,7 @@
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
-import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   GCC272_TOOLCHAIN,
   GCC_KMC_TOOLCHAIN,
@@ -49,7 +49,13 @@ import { fileURLToPath } from 'node:url';
 import { threadId } from 'node:worker_threads';
 import YAML from 'yaml';
 
-import { DOCKER_COMPILE_SOURCES, dockerCachedBy, gccRefused, mwccRefused } from './compile/docker-cache';
+import {
+  DOCKER_COMPILE_SOURCES,
+  type DockerCacheSpec,
+  dockerCachedBy,
+  gccRefused,
+  mwccRefused,
+} from './compile/docker-cache';
 import { shq } from './compile/util';
 import type { ToolchainId } from './toolchains';
 
@@ -112,38 +118,35 @@ export function nativeScoreCommand(id: ToolchainId): string | undefined {
 
 /** The pooled pair's C compiles behind the candidate store, keyed as compile/docker-cache.ts says.
  *  A Pascal candidate goes straight to the toolchain's own compiler, which refuses it. */
-const POOLED_SOURCES = [
-  ...DOCKER_COMPILE_SOURCES,
-  join(dirname(fileURLToPath(import.meta.url)), '../../../packages/core/src/target.ts'),
-];
-const pooledKmc = dockerCachedBy(
-  (flags: readonly string[]) => ({
-    label: 'bench-pooled-kmc',
-    native: kmcNative,
-    docker: GCC_KMC_TOOLCHAIN.docker,
-    image: GCC_KMC_TOOLCHAIN.image,
-    pool: kmcPoolCfg().name,
-    dirs: [GCC_KMC_TOOLCHAIN.dir],
-    words: [...GCC_KMC_TOOLCHAIN.harnessFlags, ...flags],
-    hostCommands: [],
-    sources: POOLED_SOURCES,
-    refused: gccRefused,
-  }),
-  (flags: readonly string[]) => (tu) => compileCandKmc(tu, flags),
-);
+export const pooledKmcSpec = (flags: readonly string[]): DockerCacheSpec => ({
+  label: 'bench-pooled-kmc',
+  native: kmcNative,
+  docker: GCC_KMC_TOOLCHAIN.docker,
+  image: GCC_KMC_TOOLCHAIN.image,
+  pool: kmcPoolCfg().name,
+  dirs: [GCC_KMC_TOOLCHAIN.dir],
+  words: [...GCC_KMC_TOOLCHAIN.harnessFlags, ...flags],
+  prelude: C_TYPEDEFS,
+  hostCommands: [],
+  sources: DOCKER_COMPILE_SOURCES,
+  refused: gccRefused,
+});
+export const pooledMwccSpec = (flags: readonly string[]): DockerCacheSpec => ({
+  label: 'bench-pooled-mwcc_242_81',
+  native: () => mwccNative('mwcc_242_81'),
+  docker: MWCC_PPC_TOOLCHAIN.docker,
+  image: MWCC_PPC_TOOLCHAIN.image,
+  pool: ppcPoolCfg('mwcc_242_81').name,
+  dirs: [mwccDir('mwcc_242_81')],
+  words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...flags],
+  prelude: C_TYPEDEFS,
+  hostCommands: mwccNative('mwcc_242_81') ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
+  sources: DOCKER_COMPILE_SOURCES,
+  refused: mwccRefused,
+});
+const pooledKmc = dockerCachedBy(pooledKmcSpec, (flags: readonly string[]) => (tu) => compileCandKmc(tu, flags));
 const pooledMwcc = dockerCachedBy(
-  (flags: readonly string[]) => ({
-    label: 'bench-pooled-mwcc_242_81',
-    native: () => mwccNative('mwcc_242_81'),
-    docker: MWCC_PPC_TOOLCHAIN.docker,
-    image: MWCC_PPC_TOOLCHAIN.image,
-    pool: ppcPoolCfg('mwcc_242_81').name,
-    dirs: [mwccDir('mwcc_242_81')],
-    words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...flags],
-    hostCommands: mwccNative('mwcc_242_81') ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
-    sources: POOLED_SOURCES,
-    refused: mwccRefused,
-  }),
+  pooledMwccSpec,
   (flags: readonly string[]) => (tu) => compileCandPpc('mwcc_242_81', tu, flags),
 );
 const cachedPooled =

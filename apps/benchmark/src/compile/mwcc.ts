@@ -32,7 +32,7 @@ import { unitCompileWrapper } from '../cases/dtk-project';
 import { functionDisassembly } from '../eval/function-scope';
 import type { BuiltTarget } from '../toolchains';
 import { declarationsOnly } from './declarations';
-import { DOCKER_COMPILE_SOURCES, dockerCachedBy, mwccRefused } from './docker-cache';
+import { DOCKER_COMPILE_SOURCES, type DockerCacheSpec, dockerCachedBy, mwccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir, restated } from './util';
 
@@ -124,19 +124,26 @@ export function noPrototypeCalls(output: string, tu: string): string[] {
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/** The candidate store's key for one CodeWarrior build at `cflags` (compile/docker-cache.ts). */
+export const mwccCacheSpec = (
+  mwcc: MwccToolchainId,
+  cflags: readonly string[],
+  language: 'c' | 'c++',
+): DockerCacheSpec => ({
+  label: `bench-${mwcc}`,
+  native: () => mwccNative(mwcc),
+  docker: MWCC_PPC_TOOLCHAIN.docker,
+  image: MWCC_PPC_TOOLCHAIN.image,
+  pool: ppcPoolCfg(mwcc).name,
+  dirs: [mwccDir(mwcc)],
+  words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...cflags, langFlag(language)],
+  prelude: '',
+  hostCommands: mwccNative(mwcc) ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
+  sources: [join(HERE, 'mwcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  refused: mwccRefused,
+});
 const cachedCandidate = dockerCachedBy(
-  (mwcc: MwccToolchainId, cflags: readonly string[], language: 'c' | 'c++') => ({
-    label: `bench-${mwcc}`,
-    native: () => mwccNative(mwcc),
-    docker: MWCC_PPC_TOOLCHAIN.docker,
-    image: MWCC_PPC_TOOLCHAIN.image,
-    pool: ppcPoolCfg(mwcc).name,
-    dirs: [mwccDir(mwcc)],
-    words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...cflags, langFlag(language)],
-    hostCommands: mwccNative(mwcc) ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
-    sources: [join(HERE, 'mwcc.ts'), ...DOCKER_COMPILE_SOURCES],
-    refused: mwccRefused,
-  }),
+  mwccCacheSpec,
   (mwcc: MwccToolchainId, cflags: readonly string[], language: 'c' | 'c++') => (tu) => {
     // ONE DIRECTORY PER CANDIDATE, leak and all — the rule kmc.ts and gcc272.ts follow, for the same
     // measured reason: a path reused across compiles that the container reaches through the shared

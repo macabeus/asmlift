@@ -55,7 +55,15 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
     }
   });
 
-  test.skipIf(!HAVE_AGBCC)('…and the list the namespace hashes ends with exactly those two', () => {
+  test("core's compiler-diagnostics.ts is one: it words the message a stored rejection is served with", () => {
+    const hit = SHAPING_SOURCES.find(
+      (f) => f === join(HARNESS, '../../../../packages/core/src/compiler-diagnostics.ts'),
+    );
+    expect(hit, 'errorsFirst orders the diagnostic lines `stepFailed` keeps').toBeDefined();
+    expect(readFileSync(hit!, 'utf8')).toMatch(/export function errorsFirst\b/);
+  });
+
+  test.skipIf(!HAVE_AGBCC)('…and the list the namespace hashes ends with exactly those', () => {
     expect(candCacheNamespaceFiles().slice(-SHAPING_SOURCES.length)).toEqual([...SHAPING_SOURCES]);
   });
 
@@ -100,17 +108,17 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
     'the assembler and the preprocessor are on the list, resolved or explicitly UNRESOLVED',
     () => {
       const files = candCacheNamespaceFiles();
-      // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO, then the two shaping
+      // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO, then the shaping
       // sources. The count is not the claim (a chain is as long as the toolchain makes it); every
       // entry being a real file or an explicit marker is.
-      expect(files.length).toBeGreaterThanOrEqual(5);
-      for (const entry of files.slice(0, -2)) {
+      expect(files.length).toBeGreaterThanOrEqual(6);
+      for (const entry of files.slice(0, -SHAPING_SOURCES.length)) {
         expect(
           entry.startsWith('/') || entry.startsWith('UNRESOLVED:'),
           `a bare command name must resolve to a file to hash, or say it did not: ${entry}`,
         ).toBe(true);
       }
-      expect(files.slice(-2)).toEqual([join(HARNESS, 'agbcc.ts'), join(HARNESS, 'util.ts')]);
+      expect(files.slice(-SHAPING_SOURCES.length)).toEqual([...SHAPING_SOURCES]);
     },
   );
 

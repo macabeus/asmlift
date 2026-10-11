@@ -321,7 +321,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
       return;
     }
   }
-  const cc = run(t.docker, [
+  const cc = oneShot(t.docker, [
     'run',
     '--rm',
     '--platform',
@@ -476,6 +476,24 @@ export function contentShareableDir(prefix: string, flags: readonly string[], so
 const poolEnabled = () => process.env.ASMLIFT_DOCKER_POOL !== '0';
 const poolReady = new Set<string>(); // container names this process has confirmed running
 
+/** Counts, over this process, of the two things a containerized compile can do besides `docker exec`
+ *  in a pool it already knew: confirm or start a pool container (which runs whatever image its tag
+ *  names at that moment), and compile in a one-shot `docker run` (which writes `/work`, not the
+ *  scratch directory, into an object). A store keyed on one route and one image reads them around
+ *  each compile. */
+export interface ContainerRoutes {
+  poolStarts: number;
+  oneShots: number;
+}
+const routes: ContainerRoutes = { poolStarts: 0, oneShots: 0 };
+export const containerRoutes = (): ContainerRoutes => ({ ...routes });
+
+/** `docker run` for a compile that did not get a pool, counted in `containerRoutes`. */
+function oneShot(docker: string, args: string[]) {
+  routes.oneShots++;
+  return run(docker, args);
+}
+
 function poolName(kind: string, cfg: string): string {
   return `asmlift-pool-${kind}-${createHash('sha256').update(cfg).digest('hex').slice(0, 8)}`;
 }
@@ -512,6 +530,7 @@ function ensurePooled(docker: string, image: string, name: string, mounts: strin
   const ins = run(docker, ['container', 'inspect', '-f', '{{.State.Running}}', name]);
   if (ins.status === 0 && ins.stdout.trim() === 'true') {
     poolReady.add(name);
+    routes.poolStarts++;
     return true;
   }
   if (ins.status === 0) {
@@ -520,6 +539,7 @@ function ensurePooled(docker: string, image: string, name: string, mounts: strin
   const r = run(docker, ['run', '-d', '--name', name, '--platform', 'linux/386', ...mounts, image, 'sleep', '86400']);
   if (r.status === 0 || /already in use/i.test(r.stderr ?? '')) {
     poolReady.add(name);
+    routes.poolStarts++;
     return true;
   }
   return false; // no docker daemon / image → caller cold-runs (surfacing the real error there)
@@ -587,7 +607,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
       return;
     }
   }
-  const cc = run(t.docker, [
+  const cc = oneShot(t.docker, [
     'run',
     '--rm',
     '--platform',
@@ -722,7 +742,7 @@ function ppcExec(
       return done(r, 'pooled');
     }
   }
-  const r = run(t.docker, [
+  const r = oneShot(t.docker, [
     'run',
     '--rm',
     '--platform',

@@ -6,7 +6,8 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** Throws the named setup error when the binary itself couldn't spawn (ENOENT/timeout) —
  *  otherwise `status: null` reaches callers as e.g. "agbcc failed: null". Compile failures
@@ -86,6 +87,13 @@ export function compilerDiagnostics(s: string): string {
     .map((l) => l.replace(ABSOLUTE_PATH, '$1$2').slice(0, 240))
     .join('\n');
 }
+
+/** The files that word a compile's rejection message: this one and core's `errorsFirst`. A candidate
+ *  store serves the message it kept, so its namespace hashes both. */
+export const DIAGNOSTIC_SOURCES = [
+  fileURLToPath(import.meta.url),
+  join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/core/src/compiler-diagnostics.ts'),
+];
 
 /** A toolchain seam's throw, restated with the bounded diagnostic the evaluator publishes and
  *  still the KIND it was: a `CompilerRejection` stays one, its whole diagnostic with it, so the

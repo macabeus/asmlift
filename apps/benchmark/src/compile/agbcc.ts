@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
-import { compilerDiagnostics, contentDir, run, scratchSlot } from './util';
+import { DIAGNOSTIC_SOURCES, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
 /**
  * A failed step, thrown so that a DETERMINISTIC rejection and a TRANSIENT one cannot be confused.
@@ -99,11 +99,12 @@ const vendorScratch = scratchSlot('bench-vendor-');
 // (it owns `run`'s env and timeout, and `scratchSlot`), are hashed in. An unreadable source is a
 // REFUSAL, never a guess.
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** Every harness module whose text shapes what the compiler is handed, or how it is invoked.
+/** Every harness module whose text shapes what the compiler is handed, how it is invoked, or the
+ *  message a stored rejection carries (`DIAGNOSTIC_SOURCES`).
  *  Exported so the dropped-entry guard can be asserted where no toolchain is installed:
  *  `candCacheNamespaceFiles()` below MEASURES the machine's compilers and refuses when it cannot
- *  read one, so the assertion that these two are on the list cannot itself run on a bare runner. */
-export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), join(HERE, 'util.ts')];
+ *  read one, so the assertion that these are on the list cannot itself run on a bare runner. */
+export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), ...DIAGNOSTIC_SOURCES];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
 /** Preprocess a candidate TU: cpp reads it on stdin, so no scratch directory reaches its linemarkers

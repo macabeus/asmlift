@@ -13,7 +13,7 @@ import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-de
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
-import { DOCKER_COMPILE_SOURCES, dockerCachedBy, gccRefused } from './docker-cache';
+import { DOCKER_COMPILE_SOURCES, type DockerCacheSpec, dockerCachedBy, gccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, restated, run } from './util';
 
@@ -57,19 +57,22 @@ function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[])
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/** The candidate store's key for this pipeline at `cflags` (compile/docker-cache.ts). */
+export const gcc272CacheSpec = (cflags: readonly string[]): DockerCacheSpec => ({
+  label: 'bench-gcc272',
+  native: gcc272Native,
+  docker: GCC272_TOOLCHAIN.docker,
+  image: GCC272_TOOLCHAIN.image,
+  pool: gcc272PoolCfg().name,
+  dirs: [GCC272_TOOLCHAIN.dir],
+  words: [...CPP_PREPROCESS_FLAGS, ...GCC272_TOOLCHAIN.harnessFlags, ...cflags],
+  prelude: '',
+  hostCommands: [CPP],
+  sources: [join(HERE, 'gcc272.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  refused: gccRefused,
+});
 const cachedCandidate = dockerCachedBy(
-  (cflags: readonly string[]) => ({
-    label: 'bench-gcc272',
-    native: gcc272Native,
-    docker: GCC272_TOOLCHAIN.docker,
-    image: GCC272_TOOLCHAIN.image,
-    pool: gcc272PoolCfg().name,
-    dirs: [GCC272_TOOLCHAIN.dir],
-    words: [...CPP_PREPROCESS_FLAGS, ...GCC272_TOOLCHAIN.harnessFlags, ...cflags],
-    hostCommands: [CPP],
-    sources: [join(HERE, 'gcc272.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
-    refused: gccRefused,
-  }),
+  gcc272CacheSpec,
   (cflags: readonly string[]) => (tu, sym) => compileCandidateRaw(tu, sym, cflags),
 );
 

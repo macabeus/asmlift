@@ -12,7 +12,7 @@ import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-de
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
-import { DOCKER_COMPILE_SOURCES, dockerCachedBy, gccRefused } from './docker-cache';
+import { DOCKER_COMPILE_SOURCES, type DockerCacheSpec, dockerCachedBy, gccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, restated, run } from './util';
 
@@ -56,19 +56,22 @@ function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[])
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/** The candidate store's key for this pipeline at `cflags` (compile/docker-cache.ts). */
+export const kmcCacheSpec = (cflags: readonly string[]): DockerCacheSpec => ({
+  label: 'bench-kmc',
+  native: kmcNative,
+  docker: GCC_KMC_TOOLCHAIN.docker,
+  image: GCC_KMC_TOOLCHAIN.image,
+  pool: kmcPoolCfg().name,
+  dirs: [GCC_KMC_TOOLCHAIN.dir],
+  words: [...CPP_PREPROCESS_FLAGS, ...GCC_KMC_TOOLCHAIN.harnessFlags, ...cflags],
+  prelude: '',
+  hostCommands: [CPP],
+  sources: [join(HERE, 'kmc.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  refused: gccRefused,
+});
 const cachedCandidate = dockerCachedBy(
-  (cflags: readonly string[]) => ({
-    label: 'bench-kmc',
-    native: kmcNative,
-    docker: GCC_KMC_TOOLCHAIN.docker,
-    image: GCC_KMC_TOOLCHAIN.image,
-    pool: kmcPoolCfg().name,
-    dirs: [GCC_KMC_TOOLCHAIN.dir],
-    words: [...CPP_PREPROCESS_FLAGS, ...GCC_KMC_TOOLCHAIN.harnessFlags, ...cflags],
-    hostCommands: [CPP],
-    sources: [join(HERE, 'kmc.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
-    refused: gccRefused,
-  }),
+  kmcCacheSpec,
   (cflags: readonly string[]) => (tu, sym) => compileCandidateRaw(tu, sym, cflags),
 );
 

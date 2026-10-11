@@ -97,6 +97,12 @@ describe('a TU whose object is not a function of its own bytes is refused PER KE
     // cannot see either.
     ['a comment spanning the newline', '#/*\n*/include "k.h"\nint f(void);\n'],
     ['a comment spanning several newlines', '#/*\n\n*/include "k.h"\nint f(void);\n'],
+    // Measured with `arm-none-eabi-cpp -P -nostdinc -I.` and `cpp-14` alike: the digraph includes
+    // `k.h` (its `#define K 7` reaches `return K;`), and `__has_include` picks the branch by
+    // whether the file is there.
+    ['the digraph for #', '%:include "k.h"\nint f(void);\n'],
+    ['__has_include', '#if __has_include("k.h")\nint f(void);\n#endif\n'],
+    ['__has_include_next', '#if __has_include_next(<k.h>)\nint f(void);\n#endif\n'],
   ])('a TU that reads a file is refused: %s', async (_name, tu) => {
     const r = await load({}, (m) => m.candidateCacheRefusal(tu));
     expect(r, 'the preprocessor resolves this include; the guard must see it too').toBe('the-TU-reads-a-file');
