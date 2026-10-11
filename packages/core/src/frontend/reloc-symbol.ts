@@ -13,13 +13,21 @@
 // name, and every refusing kind gets its own sentence naming what was seen.
 //
 // Consumed by frontend/ppc.ts, which refuses before it recovers, and by frontend/thumb.ts's
-// literal-pool reader. A function-scope static is the one kind neither refuses by name: the
-// function DEFINES it, so both read its definition out of the target (frontend/local-object.ts) and
-// the lift writes it in the body under the name `localStaticName` takes apart, refusing only where
-// the definition cannot be read. Thumb asks about that kind and the predefined names alone rather
-// than taking `unspellableReason`'s answer for every kind, because a pool word is not a relocation:
-// agbcc packs `.L` labels into pools, and this policy calls a leading dot `section-local` — an
-// offset into a section, not an object — which is false about a code label in the same file.
+// literal-pool reader. Two kinds are names a lift may still WRITE, because the object's definition
+// is in hand and the definition is what the source wrote:
+//  • a function-scope static (`local-static`): the function DEFINES it, so both frontends read its
+//    definition out of the target (frontend/local-object.ts) and the lift writes it in the body
+//    under the name `localStaticName` takes apart, refusing only where the definition cannot be read;
+//  • the compiler's anonymous constant (`anon-pool`): no source names it, but the one that placed
+//    it as a local aggregate's initializer image spelled it — as that initializer. Thumb reads its
+//    definition and marks it anonymous (`LocalObject.anonymous`; l3/constinit.ts spells it back or
+//    refuses); ppc still refuses it by name, with the sentence below, because every object it names
+//    there that a lift reaches is a literal no fold spells — a float constant, a string handed out
+//    by address — and mwcc's copy of an initializer image is inline loads and stores into a frame
+//    local its frontend refuses first, so reading the definition would only change which sentence
+//    declines.
+// Thumb asks about those kinds and the predefined names alone rather than taking
+// `unspellableReason`'s answer for every kind, because a pool word is not a relocation.
 //
 // A kind is listed only when it behaves differently: the decomp projects' generated labels
 // (`lbl_1_bss_2464`, `fn_1_458`) are ordinary identifiers that the project's own headers declare
@@ -55,6 +63,9 @@ export type RelocSymbolKind =
  *  {@link classifyRelocSymbol}. */
 const LOCAL_STATIC = /^([A-Za-z_][A-Za-z0-9_]*)[.$](\d+)$/;
 
+/** A GNU assembler local label, `.L` and the rest of an identifier: `.LC0`, `.L5`. */
+const GAS_LOCAL = /^\.L[\w.$]*$/;
+
 /** The identifiers a compiler defines inside every function, whose objects it names like a static. */
 const PREDEFINED = new Set(['__func__', '__FUNCTION__', '__PRETTY_FUNCTION__']);
 
@@ -68,6 +79,13 @@ const PREDEFINED = new Set(['__func__', '__FUNCTION__', '__PRETTY_FUNCTION__']);
 export function classifyRelocSymbol(sym: string): RelocSymbolKind {
   if (sym.startsWith('@')) {
     return 'anon-pool'; // `@193` — mwcc's anonymous string/constant pool entries
+  }
+  // `.LC0` — a GNU assembler LOCAL label (the `.L` prefix keeps it out of the symbol table), which
+  // is how gcc, and so agbcc, names an anonymous constant (varasm.c `output_constant_def`). Asked
+  // before `section-local`, whose leading dot it shares: it labels a datum, not a section. A `.L`
+  // label may label code as well; reading the definition is what tells the two apart.
+  if (GAS_LOCAL.test(sym)) {
+    return 'anon-pool';
   }
   if (sym.startsWith('.')) {
     return 'section-local'; // `...bss.0`, `.rodata` — an offset into a section

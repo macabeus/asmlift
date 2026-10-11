@@ -30,7 +30,7 @@
 //     cannot show a second referrer, and one that ends at this function cannot show a later one.
 import type { LocalObject, LocalObjects } from '../ir/core';
 import type { AsmData } from './asmdata';
-import { localStaticName } from './reloc-symbol';
+import { classifyRelocSymbol, localStaticName } from './reloc-symbol';
 
 /** A definition, or why there is none: the tail of a refusal sentence the caller opens with
  *  "names a function-scope static ('<symbol>')", so every refusal of the kind reads the same. */
@@ -224,9 +224,13 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
  *  local it is copied into (l3/constinit.ts), or refused there.
  *
  *  Read-only data only, with the same refusals as a static's definition: a `.L` label anywhere else
- *  is code, or data this reader has no reason to believe is a constant image. */
+ *  is code, or data this reader has no reason to believe is a constant image. That gate is a fact
+ *  about the compilers that write GNU as text here (agbcc places the image in `.rodata`), not about
+ *  every compiler: IDO 7.1 places the same initializer's image in `.data` (compiled), so a reader
+ *  of its objects asks its own placement. Which names are anonymous at all is reloc-symbol.ts's
+ *  decision (`anon-pool`), asked here rather than re-spelled. */
 export function readGasAnonymousObject(asm: string, label: string): LocalObjectRead {
-  if (!/^\.L[\w.$]*$/.test(label)) {
+  if (classifyRelocSymbol(label) !== 'anon-pool') {
     return refused('whose label is not a compiler-generated `.L` label');
   }
   const read = readGasDefinition(asm, label);

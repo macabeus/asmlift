@@ -2134,9 +2134,10 @@ function poolRef(
     };
   }
   // A bare `.L` label in a pool word is the address of something the compiler placed and the
-  // source never named: agbcc's `.LC0` is the constant image a local aggregate's initializer is
-  // copied from. The caller reads it as an anonymous object, or refuses naming why it is not one.
-  if (/^\.L[\w.$]*$/.test(w)) {
+  // source never named (reloc-symbol.ts `anon-pool`): agbcc's `.LC0` is the constant image a local
+  // aggregate's initializer is copied from. The caller reads it as an anonymous object, or refuses
+  // naming why it is not one.
+  if (classifyRelocSymbol(w) === 'anon-pool') {
     return { kind: 'anonymous', label: w };
   }
   return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
