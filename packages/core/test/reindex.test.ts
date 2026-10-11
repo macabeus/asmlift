@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
+import type { IrType } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { COUNTDOWN_GATES, reindexWalks } from '../src/l3/reindex';
@@ -606,6 +607,51 @@ describe('v3 — expression-base walk', () => {
     test('refused: a deref narrower than the walk element', () => {
       const narrow: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 1, signed: false };
       expect(reindexWalks(u16Fn(at(cn(2)), halfBody(narrow)))).toBeNull();
+    });
+  });
+
+  describe('an address base: `(u32)&g` is the index base, declared or not', () => {
+    const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+    const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
+    const gAddr = (to: IrType = T.u(32)): Expr => ({ k: 'cast', to, e: { k: 'addr', name: 'gH' } });
+    const addrFn = (e: Expr, globalType?: IrType): SFn => {
+      const f = mkFn({ k: 'cast', to: u16p as never, e }, [
+        { k: 'store', lval: deref16, value: cn(0xffff) },
+        inc('p'),
+        inc('i'),
+      ]);
+      f.locals[0] = { name: 'p', type: u16p as never };
+      if (globalType) {
+        f.globals = [{ name: 'gH', type: globalType }];
+      }
+      return f;
+    };
+    const plus = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '+', l, r });
+
+    test('(u32)&g + 4 over a u16 walk reads ((u16 *)&g)[i + 2], undeclared g included', () => {
+      const r = reindexWalks(addrFn(plus(gAddr(), cn(4))));
+      expect(r).not.toBeNull();
+      const src = JSON.stringify(r!.body);
+      expect(src).not.toContain('"name":"p"');
+      expect(src).toContain(
+        '{"k":"index","base":{"k":"addr","name":"gH"},"idx":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"const","value":2}},"width":2,"signed":false}',
+      );
+      expect(cBackend.emit(r!)).toContain('((u16 *)&gH)[i + 2] = 65535;');
+    });
+
+    test('a g declared with another element still reads W-byte elements through the printed cast', () => {
+      const r = reindexWalks(addrFn(plus(gAddr(), cn(4)), T.array(T.u(8), 64)));
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('((u16 *)gH)[i + 2] = 65535;'); // the array's own address
+    });
+
+    test('refused: an uncast address (its `+` strides g, not bytes) or a narrowing cast', () => {
+      expect(reindexWalks(addrFn(plus({ k: 'addr', name: 'gH' }, cn(4))))).toBeNull();
+      expect(reindexWalks(addrFn(plus(gAddr(T.u(16)), cn(4))))).toBeNull();
+    });
+
+    test('refused: an address beside a bare var leaves the base ambiguous', () => {
+      expect(reindexWalks(addrFn(plus(gAddr(), v('a0'))))).toBeNull();
     });
   });
 

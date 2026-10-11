@@ -515,15 +515,15 @@ function plusConst(e: Expr, c: number): Expr {
 //
 // The loop already carries its own integer counter, so the walk pointer is pure strength
 // reduction: deleting its init and step and spelling the deref as BASE[i + REST/W] — the sole
-// bare-var addend of EXPR as the index base, the counter FIRST in the index sum — is the
+// base addend of EXPR as the index base, the counter FIRST in the index sum — is the
 // indexed source the compiler reduces back. v3 SCOPE (decline over approximate):
 //   • `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum is
 //     BYTE arithmetic, so for W > 1 every REST addend is a constant whose total is a multiple of
 //     W (it is rescaled to elements); a symbolic addend would need dividing, and declines;
 //   • the init `p = EXPR` immediately precedes the `dowhile`; EXPR (casts stripped) flattens
-//     over `+` into exactly ONE bare-var addend (the base — an integer or a byte pointer, or
-//     EXPR's `+` would stride its element) plus pure invariant addends (var/const/mul/shl trees
-//     whose vars the body never assigns);
+//     over `+` into exactly ONE base addend — a bare var declared an integer or a byte pointer
+//     (or EXPR's `+` would stride its element), or `(u32)&g` — plus pure invariant addends
+//     (var/const/mul/shl trees whose vars the body never assigns);
 //   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
 //     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
 //     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition.
@@ -563,21 +563,29 @@ function tryExprWalk(
     }
   };
   flatten(expr);
-  const bare = addends.filter((a): a is Extract<Expr, { k: 'var' }> => a.k === 'var');
-  const rest = addends.filter((a) => a.k !== 'var');
-  if (bare.length !== 1) {
+  // The base candidates: a bare var, or an object's address under a 32-bit integer cast — the
+  // cast is what makes EXPR's `+` byte arithmetic (a bare `&g + 2` strides g's own size).
+  const addrOf = (a: Expr): Extract<Expr, { k: 'addr' }> | null =>
+    a.k === 'cast' && a.to.kind === 'int' && a.to.width === 32 && a.e.k === 'addr' ? a.e : null;
+  const bases = addends.filter((a) => a.k === 'var' || addrOf(a) !== null);
+  if (bases.length !== 1) {
     return null;
   }
-  const base = bare[0] as Extract<Expr, { k: 'var' }>;
-  // declTypes carries params, locals AND globals: a base declared nowhere has an unknowable C
+  const rest = addends.filter((a) => a !== bases[0]);
+  const base: Extract<Expr, { k: 'var' | 'addr' }> = bases[0].k === 'var' ? bases[0] : addrOf(bases[0])!;
+  // declTypes carries params, locals AND globals: a var base declared nowhere has an unknowable C
   // stride (its project declaration decides), and a wider pointer strides its element in EXPR
-  // — both decline.
-  const baseT = declTypes(base.name);
-  if (baseT === undefined) {
-    return null;
-  }
-  if (baseT.kind === 'ptr' && !(baseT.to.kind === 'int' && baseT.to.width === 8)) {
-    return null;
+  // — both decline. An address needs no declaration: `&g` is g's address whatever g's type, and
+  // the printer casts it to the access width (cfamily.ts legalizedIndexBase) wherever its type
+  // does not already stride W.
+  if (base.k === 'var') {
+    const baseT = declTypes(base.name);
+    if (baseT === undefined) {
+      return null;
+    }
+    if (baseT.kind === 'ptr' && !(baseT.to.kind === 'int' && baseT.to.width === 8)) {
+      return null;
+    }
   }
   const pure = (e: Expr): boolean =>
     e.k === 'var' || e.k === 'const'
@@ -599,7 +607,9 @@ function tryExprWalk(
     });
   };
   rest.forEach(collectVars);
-  restVars.add(base.name);
+  if (base.k === 'var') {
+    restVars.add(base.name);
+  }
   if (!rest.every(pure) || [...restVars].some((n) => assignedIn(dw.body, n))) {
     return null;
   }
@@ -665,7 +675,7 @@ function tryExprWalk(
         respelled = false;
         return m;
       }
-      return { ...m, base: { k: 'var', name: base.name }, idx: idxOf() };
+      return { ...m, base: { ...base }, idx: idxOf() };
     }
     return m;
   };
