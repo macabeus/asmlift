@@ -30,7 +30,11 @@ process.on('message', async (m: CompileRequest) => {
     reply = { kind: 'stats', stats: cacheStats() };
   } else {
     try {
-      reply = { kind: 'object', seq: m.seq, obj: await compile(m.source, m.symbol, m.backendId, m.declarations) };
+      reply = {
+        kind: 'object',
+        seq: m.seq,
+        obj: await compile(m.source, m.symbol, m.backendId, m.declarations, { attemptsUnread: m.attemptsUnread }),
+      };
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
       reply = {

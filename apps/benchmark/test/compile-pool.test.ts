@@ -3,7 +3,7 @@
 // workers' candidate-cache counters reach this process's; a worker that dies fails the pool. Real
 // workers and a real agbcc row, so it needs agbcc and skips without it.
 import { absorbCacheStats, cacheStats } from '@asmlift/cli/candcache';
-import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
+import { CompilerRejection, attemptsOf } from '@asmlift/core/compiler-diagnostics';
 import { agbccAvailable } from '@asmlift/toolchains';
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
@@ -43,6 +43,24 @@ describe.skipIf(!agbccAvailable())('a row compile pool', () => {
       expect(readFileSync(viaWorker)).toEqual(
         readFileSync(await rowCompiler(c.toolchain, c.codegen, c.compile)(source, c.sym, 'c')),
       );
+    } finally {
+      await pool.close();
+    }
+  }, 120_000);
+
+  // A compile whose attempts are unread reaches the worker's ladder as one: BootScreenHandler's
+  // manifest rung includes a header the candidate compile cannot open, so the worker skips it.
+  test('passes on a compile whose attempts are unread', async () => {
+    const [c] = realCases({ only: 'BootScreenHandler' }).filter((x) => x.id === 'kleod:BootScreenHandler:agbcc');
+    const pool = compilePool({ tier: 'real', id: c.id, sym: c.sym });
+    const labels = (e: unknown) => attemptsOf((e as CompilerRejection).diagnostic).map((a) => a.label);
+    try {
+      const compile = pool.worker();
+      const refused = 'void BootScreenHandler(void) { int x = ; }\n';
+      const read = await compile(refused, c.sym, 'c').catch((e: unknown) => e);
+      const unread = await compile(refused, c.sym, 'c', undefined, { attemptsUnread: true }).catch((e: unknown) => e);
+      expect(labels(read)).toContain('+ manifest prependC (c)');
+      expect(labels(unread)).toEqual(labels(read).filter((l) => l !== '+ manifest prependC (c)'));
     } finally {
       await pool.close();
     }

@@ -72,13 +72,23 @@ const PROBE_DECLS = renderDeclarations([
  *  self-declaring candidates): joined to the typedef prelude in the self-declared world,
  *  dropped with it in the headers world (the probe below arbitrates). Compilers that inject
  *  their own context (the benchmark's vendored-ctx real-tier compile, @asmlift/toolchains)
- *  simply ignore the argument — their context IS the headers world. */
+ *  simply ignore the argument — their context IS the headers world.
+ *
+ *  `options.attemptsUnread` (docs/vocabulary.md) marks a compile whose rejection's attempts nothing
+ *  reads. A compiler that tries several preludes may then skip one that cannot accept any
+ *  candidate, as long as the error it throws keeps its message and its class. */
 export type CandidateCompiler = (
   source: string,
   symbol: string,
   backendId: string,
   declarations?: string,
+  options?: CandidateCompileOptions,
 ) => Promise<string>;
+
+export interface CandidateCompileOptions {
+  /** the ranked driver's compiles after the stillborn verdict (rank.ts) */
+  attemptsUnread?: boolean;
+}
 
 /** One compiler instance: `worker()` mints an INDEPENDENT compiler — call it once per pool
  *  worker. A worker's object survives until that worker's next compile, so its caller consumes it
