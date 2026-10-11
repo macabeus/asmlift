@@ -156,10 +156,7 @@ async function rankRow(
     return await decompileRankedParallel(sym, asm, codegen.target, obj, {
       ...opts,
       jobs: (fan) => ((pooled = fan >= workerFanFor()) && fan >= PARALLEL_FAN ? ROW_COMPILE_WORKERS : 1),
-      worker: () =>
-        pooled
-          ? pool.worker()
-          : async (source, symbol, backendId, declarations) => compile(source, symbol, backendId, declarations),
+      worker: () => (pooled ? pool.worker() : compile),
     });
   } finally {
     await pool.close();

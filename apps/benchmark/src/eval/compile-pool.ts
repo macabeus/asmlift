@@ -32,7 +32,15 @@ export interface RowRef {
 }
 
 export type CompileRequest =
-  | { kind: 'compile'; seq: number; source: string; symbol: string; backendId: string; declarations?: string }
+  | {
+      kind: 'compile';
+      seq: number;
+      source: string;
+      symbol: string;
+      backendId: string;
+      declarations?: string;
+      attemptsUnread?: true;
+    }
   | { kind: 'stats' };
 
 export type CompileReply =
@@ -89,7 +97,7 @@ export function compilePool(row: RowRef): { worker: () => CandidateCompiler; clo
         die(new Error(`exited with ${signal ?? `code ${code}`}`));
       }
     });
-    return (source, symbol, backendId, declarations) =>
+    return (source, symbol, backendId, declarations, options) =>
       new Promise<string>((resolve, reject) => {
         if (died !== undefined) {
           reject(failure);
@@ -104,6 +112,7 @@ export function compilePool(row: RowRef): { worker: () => CandidateCompiler; clo
           symbol,
           backendId,
           ...(declarations === undefined ? {} : { declarations }),
+          ...(options?.attemptsUnread === true ? { attemptsUnread: true as const } : {}),
         };
         t.send(req);
       });

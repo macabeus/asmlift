@@ -178,14 +178,14 @@ export async function decompileRankedParallel(
   // `rankBy` records every throw as a dropped candidate; a dead engine fails every later score, so
   // it ends the ranking instead.
   let engineFailure: unknown;
-  const score = async (cand: Candidate, compile: CandidateCompiler): Promise<void> => {
+  const score = async (cand: Candidate, compile: CandidateCompiler, attemptsUnread: boolean): Promise<void> => {
     if (engineFailure) {
       return;
     }
     let result: MatchScore | Error;
     try {
       const obj = await timedAsync(clock, 'compile', () =>
-        compile(cand.source, name, backend.id, declarationsOf(cand)),
+        compile(cand.source, name, backend.id, declarationsOf(cand), { attemptsUnread }),
       );
       result = timed(clock, 'score', () => scoreObjects(targetObj, obj, name));
       best = best === undefined || result.score < best.score ? result : best;
@@ -202,7 +202,7 @@ export async function decompileRankedParallel(
     opts.onProgress?.(++done, candidates.length, best);
   };
   /** every worker takes the next unclaimed index until `indices` is spent */
-  const pool = async (indices: readonly number[]): Promise<void> => {
+  const pool = async (indices: readonly number[], attemptsUnread = false): Promise<void> => {
     let next = 0;
     await Promise.all(
       workers.map(async (compile) => {
@@ -211,7 +211,7 @@ export async function decompileRankedParallel(
           if (i >= indices.length) {
             return;
           }
-          await score(candidates[indices[i]], compile);
+          await score(candidates[indices[i]], compile, attemptsUnread);
         }
       }),
     );
@@ -241,7 +241,9 @@ export async function decompileRankedParallel(
         opts.onProgress?.(done, done, best);
       }
     }
-    await pool(rest);
+    // ATTEMPTS UNREAD: the rule reads only the default and the probes, and `rest` holds a probe only
+    // when the default is no readable rejection, where the rule reads nothing past the default.
+    await pool(rest, true);
   }
   return timed(clock, 'rank', () =>
     rankBy(candidates, name, (source) => {

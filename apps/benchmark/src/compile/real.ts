@@ -5,6 +5,7 @@
 // Design: the dataset VENDORS each function's preprocessed translation unit (cases/vendor.ts) —
 // the compiler's actual input, frozen — so the runner needs no project checkouts. The target and every
 // candidate compile at the row's codegen flags (`Case.codegen`).
+import type { CandidateCompileOptions } from '@asmlift/cli/compile-command';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
 import { type Attempt, CompilerRejection, joinAttempts } from '@asmlift/core/compiler-diagnostics';
 import { macroDefinesOf } from '@asmlift/core/declare';
@@ -267,7 +268,28 @@ export function ladderCompile(
   ctxI: string,
   language: 'c' | 'c++',
 ) {
-  return async (candC: string, sym: string, _backendId?: string, declarations?: string): Promise<string> => {
+  // `deadPrelude`'s answer per dialect and prelude, which is all it depends on
+  const deadPreludes = new Map<string, DeadRung | null>();
+  /** Whether a compile whose attempts are unread may skip `ladder[i]`: a rung that cannot accept any
+   *  candidate. Null for a rung that has to run. */
+  const deadRung = (ladder: readonly ScoringRung[], i: number, dialect: 'c' | 'c++'): DeadRung | null => {
+    const rung = ladder[i];
+    if (i === 0 || rung === richestRung(tu, ladder) || includesOf(rung.prelude).length === 0) {
+      return null;
+    }
+    const key = `${dialect}\0${rung.prelude}`;
+    if (!deadPreludes.has(key)) {
+      deadPreludes.set(key, deadPrelude(rc, rung.prelude, cflags, dialect));
+    }
+    return deadPreludes.get(key)!;
+  };
+  return async (
+    candC: string,
+    sym: string,
+    _backendId?: string,
+    declarations?: string,
+    options?: CandidateCompileOptions,
+  ): Promise<string> => {
     // The candidate's ADDRESS-CAST MACRO defines ride every rung. Every rung here is a headers
     // world — rungs 1/2 are asmlift's own prelude, rung 3 the project's PREPROCESSED context —
     // and none of them can contain a macro, so a macro-named candidate is `undeclared identifier`
@@ -285,7 +307,8 @@ export function ladderCompile(
     // is cpp's `global.h: No such file or directory` — every candidate carries its one sentence, the
     // fan reads as rejected "for the same reason", and the product of two variations that each cure
     // one of the poorer rung's errors is never compiled. The rule reads the attempts apart, so a
-    // dead rung stops no fan that another rung still tells apart.
+    // dead rung stops no fan that another rung still tells apart. A compile whose attempts are unread
+    // (`CandidateCompiler`) skips the rungs `deadRung` names.
     const rejections: Attempt[] = [];
     let transient = false;
     const ladder = scoringLadder(tu, prependC, ctxI, sym, candC);
@@ -295,7 +318,12 @@ export function ladderCompile(
     // fallback first would double every C++ row's compiles to answer a rarer question.
     for (const dialect of candidateDialects(language)) {
       const body = candidateLinkage(dialect, candC);
-      for (const rung of ladder) {
+      for (const [i, rung] of ladder.entries()) {
+        const dead = options?.attemptsUnread === true ? deadRung(ladder, i, dialect) : null;
+        if (dead !== null) {
+          transient ||= !dead.rejection;
+          continue;
+        }
         try {
           return rc.compileCandidate(`${rung.prelude}${macros}${body}`, sym, cflags, dialect);
         } catch (e) {
@@ -324,6 +352,61 @@ export function ladderCompile(
     }
     throw new CompilerRejection(lastErr.message, joinAttempts(rejections));
   };
+}
+
+/** A rung that cannot accept a candidate. `rejection` is whether running it would have thrown a
+ *  `CompilerRejection` or a plain `Error`, which the ladder's thrown error keeps. */
+interface DeadRung {
+  rejection: boolean;
+}
+
+/** Each `#include` of a prelude: the header it names, and its line counted from 1. A rung's prelude
+ *  opens the candidate's translation unit, so that is the line a compiler reports the include at. */
+function includesOf(prelude: string): { header: string; line: number }[] {
+  return prelude.split('\n').flatMap((text, k) => {
+    const m = /^\s*#\s*include\s*(?:"([^"\n]+)"|<([^>\n]+)>)/.exec(text);
+    return m === null ? [] : [{ header: m[1] ?? m[2], line: k + 1 }];
+  });
+}
+
+/** A missing include, reported where it is included: gcc's cpp at `<file>:<line>:<column>:`, and
+ *  mwcc in a record that echoes the line before the message. A message with no line (`cc1: fatal
+ *  error: …/c.i: No such file or directory`, a compile whose own input went missing) names no
+ *  include. */
+const MISSING_INCLUDE: readonly RegExp[] = [
+  /:(?<line>\d+):(?:\d+:)? fatal error: (?<header>[^\r\n]+): No such file or directory\r?$/gm,
+  /^#\s+(?<line>\d+): [^\r\n]*\r?\n#\s+Error:[^\r\n]*\r?\n#\s+the file '(?<header>[^'\r\n]+)' cannot be opened/gm,
+];
+
+/** Whether a compile of `prelude` failed on one of the prelude's own includes: a diagnostic that
+ *  names the header an `#include` of the prelude names, at that include's line. */
+export function failsOnOwnInclude(prelude: string, diagnostic: string): boolean {
+  const includes = includesOf(prelude);
+  return MISSING_INCLUDE.some((re) =>
+    [...diagnostic.matchAll(re)].some((m) =>
+      includes.some((inc) => inc.header === m.groups!.header && inc.line === Number(m.groups!.line)),
+    ),
+  );
+}
+
+/** The prelude compiled with nothing after it: dead when it fails on one of its own includes. The
+ *  preprocessor reaches that include before anything appended to the prelude and fails it the same
+ *  way, and a reported error fails the compile, so the prelude refuses every candidate. Null when
+ *  it compiles or fails for anything else: an error a candidate might not hit, or a failure of
+ *  this one compile. */
+function deadPrelude(
+  rc: RealCompile,
+  prelude: string,
+  cflags: readonly string[],
+  dialect: 'c' | 'c++',
+): DeadRung | null {
+  try {
+    rc.compileCandidate(prelude, 'asmlift_dead_rung_probe', cflags, dialect);
+    return null;
+  } catch (e) {
+    const text = `${e instanceof Error ? e.message : String(e)}\n${e instanceof CompilerRejection ? e.diagnostic : ''}`;
+    return failsOnOwnInclude(prelude, text) ? { rejection: e instanceof CompilerRejection } : null;
+  }
 }
 
 /** Which rung of the ladder a KNOWN source actually compiles in — i.e. the world the harness
