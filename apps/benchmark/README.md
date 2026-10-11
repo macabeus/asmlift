@@ -355,20 +355,22 @@ store.
 (`ASMLIFT_CANDCACHE_DIR=<empty> ASMLIFT_CANDCACHE_TRACE=1 pnpm bench run --tier … --toolchain … --serial`),
 because the answer is not what the `decomp.yaml` files suggest:
 
-| tier      | toolchain                           | reaches the cache?                                    | why                                                                                                |
-| --------- | ----------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| synthetic | `agbcc`                             | **yes** — `label=command`, 1 namespace / 15 keys      | the generated `decomp.yaml` command, through `compileFromCommand`                                  |
-| synthetic | `ido7.1`                            | reaches it and is **REFUSED**, 0 keys stored          | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in) |
-| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`        | **no** — no `[candcache]` line at all                 | POOLED: `decomp-config.ts` deletes `compiler` from the doc, so `compileFromCommand` is never built |
-| synthetic | `mwcc_233_163n`, `mwcc_247_107`     | n/a                                                   | no synthetic rows                                                                                  |
-| synthetic | `gcc2.7.2`                          | n/a                                                   | no synthetic rows                                                                                  |
-| real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
-| real      | `ido7.1`, `gcc2.7.2`, `gcc2.7.2kmc` | **no** — no `[candcache]` line at all                 | `REAL_COMPILERS`; only `compile/agbcc.ts` wires the cache                                          |
+| tier      | toolchain                           | reaches the cache?                                                | why                                                                                                |
+| --------- | ----------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| synthetic | `agbcc`                             | **yes** — `label=command`, 1 namespace / 15 keys                  | the generated `decomp.yaml` command, through `compileFromCommand`                                  |
+| synthetic | `ido7.1`                            | reaches it and is **REFUSED**, 0 keys stored                      | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in) |
+| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`        | **yes** — `label=bench-pooled-<toolchain>`                        | POOLED: `decomp-config.ts` compiles through `compile/docker-cache.ts`, never `compileFromCommand`  |
+| synthetic | `mwcc_233_163n`, `mwcc_247_107`     | n/a                                                               | no synthetic rows                                                                                  |
+| synthetic | `gcc2.7.2`                          | n/a                                                               | no synthetic rows                                                                                  |
+| real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair             | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
+| real      | `gcc2.7.2`, `gcc2.7.2kmc`, `mwcc_*` | **yes** — `label=bench-gcc272`, `bench-kmc`, `bench-<mwcc build>` | `compile/docker-cache.ts`, keyed by the image's content ID and the mounted compiler by content     |
+| real      | `ido7.1`                            | **no** — no `[candcache]` line at all                             | IDO writes its input's path into the object, so nothing wires the cache for it                     |
 
 One consequence worth stating plainly: the real-tier agbcc path is reached under
-`label=bench-agbcc`, and `ASMLIFT_CANDCACHE=0` is the only switch over it. What keeps the dockerized
-configs off the cache is `containerRuntimeNamedBy` — their command names `docker`, so the namespace
-stamp refuses and `candCache` reports `REFUSED reason=stamp-threw`, once per run.
+`label=bench-agbcc`, the containerized toolchains under their own labels, and `ASMLIFT_CANDCACHE=0`
+is the only switch over them. A dockerized `decomp.yaml` COMMAND (what `bench target` hands a
+reproduction script) stays off the cache through `containerRuntimeNamedBy` — it names `docker`, so
+the namespace stamp refuses and `candCache` reports `REFUSED reason=stamp-threw`, once per run.
 
 **`bench fidelity` runs both of every row's scripts — m2c's and asmlift's — with
 `ASMLIFT_CANDCACHE=0`**, pinned in `runScript`. That gate exists to prove a READER who copies a published script reproduces the
