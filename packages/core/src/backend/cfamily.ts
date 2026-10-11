@@ -759,8 +759,8 @@ function staticDefinition(st: SStatic): string[] {
 
 /** A declaration `head` of `type` with its initializer: a string literal, one scalar, or an
  *  array's elements laid out eight to a line. An element left out (null) is skipped and the next
- *  one spelled by designator, `[k] = v` — or, where the language has none (C++), spelled as the
- *  zero it is. */
+ *  one spelled by designator, `[k] = v` — or, where the compiler cannot parse one (`SFn.designators`
+ *  absent: IDO, mwcc) or the language has none (C++), spelled as the zero it is. */
 function initialized(
   head: string,
   type: IrType,
@@ -801,7 +801,9 @@ function structDecls(fn: SFn): string[] {
 }
 
 /** Assemble a full C-family function from a caller-supplied signature line and the shared body.
- *  `designators`: the language spells an array element by index in an initializer (C, not C++). */
+ *  `designators`: the LANGUAGE spells an array element by index in an initializer (C, not C++).
+ *  Whether the compiler's dialect parses one is the function's own fact (`SFn.designators`); an
+ *  initializer is spelled by index only where both say yes. */
 export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook, designators = true): string {
   // The declaration list is put into the target's own frame order, and a pointer cell's integer
   // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from
@@ -812,7 +814,11 @@ export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook, design
   const fn = orderSlotLocals(legalizePointerCells(foldConstantImages(fn0)));
   const decls = structDecls(fn);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';
-  return preamble + [`${signature} {`, ...cFamilyBody(fn, leaf, designators), '}'].join('\n') + '\n';
+  return (
+    preamble +
+    [`${signature} {`, ...cFamilyBody(fn, leaf, designators && fn.designators === true), '}'].join('\n') +
+    '\n'
+  );
 }
 
 // One C-family comment spelling, shared by the C and C++ backends. A `*` followed by `/`

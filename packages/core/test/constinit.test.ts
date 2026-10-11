@@ -12,7 +12,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, SImage, Stmt } from '../src/l3/ast';
 import { constantImageRefusal, foldConstantImages } from '../src/l3/constinit';
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription, structureOptionsFor } from '../src/target';
 
 const v = (name: string): Expr => ({ k: 'var', name });
 const c = (value: number): Expr => ({ k: 'const', value });
@@ -112,10 +112,18 @@ test('an element the source left out is a hole, and the next one is spelled by d
   // .space 1`. Spelled as zeros, most of the constructor is zero and agbcc clears and stores instead
   const holed = image([null, null, 1, 2, null, null, 3], 1, false, { type: T.array(T.u(8), 8) });
   const wide = [{ name: 'sp0', type: T.array(T.u(8), 8) }];
-  const sfn = fn([copy('sp0', '.LC0', 8), use(v('sp0'))], wide, holed);
+  const sfn = { ...fn([copy('sp0', '.LC0', 8), use(v('sp0'))], wide, holed), designators: true as const };
   expect(cBackend.emit(sfn)).toContain('    u8 sp0[8] = { [2] = 1, 2, [6] = 3 };\n');
   // C++ has no array designator: the holes are the zeros they hold
   expect(emitCFamily('void f()', sfn, undefined, false)).toContain('    u8 sp0[8] = { 0, 0, 1, 2, 0, 0, 3 };\n');
+  // …and neither does a C compiler whose front end cannot parse one (IDO's cfe, mwcc)
+  const { designators: _, ...plain } = sfn;
+  expect(cBackend.emit(plain)).toContain('    u8 sp0[8] = { 0, 0, 1, 2, 0, 0, 3 };\n');
+});
+
+test('which compilers parse a designated initializer is a fact of each target, not of C', () => {
+  const opts = (t: TargetDescription) => structureOptionsFor(t, true).designatedInitializers === true;
+  expect([ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC].map(opts)).toEqual([true, true, false, false]);
 });
 
 test('one image copied into two locals initializes each', () => {

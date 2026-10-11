@@ -447,6 +447,11 @@ export interface SFn {
   declaredReturns?: Readonly<Record<string, string>>;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
+  /** The compiler parses a designated element in an initializer (`[8] = 2`) — a fact of its
+   *  dialect, carried from `compilerBehaviors.designatedInitializers`. An emission policy: the
+   *  C-family printer spells an initializer's left-out run by index where present, as zeros where
+   *  not. */
+  designators?: true;
 }
 
 /** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is

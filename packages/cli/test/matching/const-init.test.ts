@@ -4,10 +4,22 @@
 // initializer again → compiled → scored, and the candidate's `.rodata` compared with the target's
 // byte for byte, because a score cannot see what the image holds: the code only names its address.
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
-import { assembleTarget, compileCandAgbcc, compileTargetAsm, scoreC } from '@asmlift/toolchains';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, type ToolchainId } from '@asmlift/core/target';
+import {
+  assembleTarget,
+  compileCandAgbcc,
+  compileCandIdoC,
+  compileCandKmc,
+  compileCandPpc,
+  compileMipsGcc272Target,
+  compileTargetAsm,
+  gcc272Available,
+  scoreC,
+} from '@asmlift/toolchains';
 import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'vitest';
+
+import { kmcGate, ppcDockerGate } from './docker-gate';
 
 /** An ELF32 little-endian object's `.rodata` contents and alignment. */
 function rodata(obj: string): { align: number; bytes: number[] } | undefined {
@@ -188,4 +200,47 @@ describe('local aggregate initializers — real agbcc: the candidate copies the 
       /cannot (lift|structure) 'tail'/,
     );
   });
+});
+
+// `compilerBehaviors.designatedInitializers` is a fact about each compiler's front end, read where an
+// image leaves elements out: spelled by index where the compiler parses it, as zeros where it does not
+describe('a designated initializer element parses exactly where the target says it does', () => {
+  const DESIGNATED = 'extern void g(void *);\nvoid des(void) { u8 a[16] = { 1, [8] = 2 }; g(a); }\n';
+  const says = (id: ToolchainId): boolean =>
+    TOOLCHAIN_TARGETS[id].description.compilerBehaviors.designatedInitializers === true;
+  const parses = (compile: () => unknown): boolean => {
+    try {
+      compile();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  test('agbcc', () => {
+    expect(parses(() => compileCandAgbcc(DESIGNATED, TOOLCHAIN_TARGETS.agbcc.canonicalFlags))).toBe(says('agbcc'));
+  });
+  test('ido7.1', () => {
+    const flags = TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags;
+    expect(parses(() => compileCandIdoC(DESIGNATED, flags))).toBe(says('ido7.1'));
+  });
+  test.runIf(gcc272Available())('gcc2.7.2', () => {
+    const flags = TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags;
+    expect(parses(() => compileMipsGcc272Target(DESIGNATED, 'des', flags))).toBe(says('gcc2.7.2'));
+  });
+  test.runIf(kmcGate('const-init'))(
+    'gcc2.7.2kmc',
+    () => {
+      const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;
+      expect(parses(() => compileCandKmc(DESIGNATED, flags))).toBe(says('gcc2.7.2kmc'));
+    },
+    60_000,
+  );
+  test.runIf(ppcDockerGate('const-init', 'mwcc_242_81'))(
+    'mwcc_242_81',
+    () => {
+      const flags = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
+      expect(parses(() => compileCandPpc('mwcc_242_81', DESIGNATED, flags))).toBe(says('mwcc_242_81'));
+    },
+    60_000,
+  );
 });

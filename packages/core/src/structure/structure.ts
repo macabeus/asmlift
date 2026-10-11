@@ -1578,6 +1578,9 @@ export interface StructureOptions extends ArithCompilerFacts {
   declaredReturns?: Readonly<Record<string, string>>;
   // The emitted C is compiled as C++ (`SFn.dialect`).
   dialect?: 'c++';
+  // The compiler parses a designated initializer element (`SFn.designators`; the compiler behavior
+  // of the same name says which do).
+  designatedInitializers?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -2216,6 +2219,7 @@ export function structure(
     declaredArgs,
     declaredReturns,
     dialect,
+    designatedInitializers = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -6816,6 +6820,7 @@ export function structure(
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
     ...calledOnly({ declaredArgs, declaredReturns }, body),
     ...(dialect !== undefined ? { dialect } : {}),
+    ...(designatedInitializers ? { designators: true as const } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;
