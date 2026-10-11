@@ -907,14 +907,37 @@ describe('v3 — expression-base walk', () => {
       expect(cBackend.emit(r!)).toContain('((s32 *)&gW)[i] = 8;');
     });
 
-    test('refused: one pointer out of scope declines the WHOLE loop (no half-deleted walk)', () => {
-      // q read at offset 1: no `BASE[i + REST]` names it here, so neither walk re-spells
+    test('one pointer out of scope keeps walking beside the one that re-spells', () => {
+      // q read at offset 1: no `BASE[i + REST]` names it here, so q keeps its init and step
       const r = reindexWalks(
         twoWalks((_, body) => {
           body[1] = { k: 'store', lval: { ...at0('q', 4), idx: cn(1) } as Expr, value: cn(8) };
         }),
       );
-      expect(r).toBeNull();
+      const src = cBackend.emit(r!);
+      expect(src).toContain('((u16 *)&gH)[i] = 7;');
+      expect(src).toContain('q[1] = 8;');
+      expect(src).toContain('q = q + 1;');
+      expect(src).toMatch(/q = \(s32 \*\)\(\(u32\)&gW \+ 4\);/);
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+    });
+
+    test('which pointers re-spell does not depend on the order of the tail steps', () => {
+      // q escapes (returned after the loop), so only p re-spells — in every tail order
+      const escaped = (order: string[]): SFn => {
+        const f = twoWalks((_, body) => body.splice(2, 3, ...order.map(inc)));
+        f.body.push({ k: 'return', value: v('q') } as Stmt);
+        return f;
+      };
+      const outs = [
+        ['q', 'p', 'i'],
+        ['p', 'q', 'i'],
+        ['i', 'q', 'p'],
+      ].map((o) => cBackend.emit(reindexWalks(escaped(o))!));
+      for (const src of outs) {
+        expect(src).toContain('((u16 *)&gH)[i] = 7;');
+        expect(src).toContain('*q = 8;');
+      }
     });
 
     test('refused: a walk pointer whose step sits outside the tail', () => {

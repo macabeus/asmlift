@@ -524,8 +524,8 @@ function plusConst(e: Expr, c: number): Expr {
 // elements — the sole base addend of EXPR as the index base, the counter FIRST in the index sum —
 // is the indexed source the compiler reduces back. One counter may carry SEVERAL walk pointers
 // (KMC reduces `for (i = 1; …) { gH[i] = 7; gW[i] = 8; }` to one pointer per array): each keeps
-// its own base and unit, and all of them re-spell or none does. v3 SCOPE (decline over
-// approximate):
+// its own base and unit, and each re-spells on its own merits — one out of scope keeps walking,
+// whatever the order of the steps. v3 SCOPE (decline over approximate):
 //   • each `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum
 //     counts in its BASE's unit. Over a W-element pointer base that is already elements, and REST
 //     stays verbatim, symbolic addends included. Over a byte base (a non-pointer var, a byte
@@ -760,8 +760,7 @@ function tryExprWalkRun(
   }
   const ivInit = counters[0];
   const iv = ivInit.name;
-  const walks = inits.filter((st) => st !== ivInit);
-  if (!mentionsVar(dw.cond, iv) || walks.some((st) => mentionsVar(dw.cond, st.name))) {
+  if (!mentionsVar(dw.cond, iv)) {
     return null;
   }
   // The counter starts at a CONSTANT S and its ONLY write anywhere in the body is the tail step:
@@ -782,45 +781,57 @@ function tryExprWalkRun(
   if (dw.body.slice(0, -n).some((st) => stmtAssigns(st, iv))) {
     return null;
   }
+  // Each walk pointer re-spells on its OWN merits: one out of scope (its init, an off-0 deref, a
+  // mention outside the walk, a mention in the condition) keeps walking, init and step in place,
+  // beside the ones that re-spell — each `p` is its own address, so deleting one walk changes no
+  // other. Which pointers re-spell is therefore a property of each, not of the tail's step order.
+  // Dropping one can only remove rewrites, so the loop below shrinks the set to a fixpoint.
   const spellings = new Map<string, ExprWalkSpelling>();
-  for (const st of walks) {
-    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals, privateNames);
-    if (s === null) {
-      return null;
+  for (const st of inits) {
+    if (st === ivInit || mentionsVar(dw.cond, st.name)) {
+      continue;
     }
-    spellings.set(s.p, s);
+    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals, privateNames);
+    if (s !== null) {
+      spellings.set(s.p, s);
+    }
   }
-  // rewrite the derefs, then verify nothing of any `p` survives
   const idxOf = (s: ExprWalkSpelling): Expr =>
     plusConst(
       s.idx.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv }),
       (s.elems - start) | 0,
     );
-  let respelled = true;
-  const rewriteExpr = (e: Expr): Expr => {
-    const m = mapExprChildren(e, rewriteExpr);
-    const s = m.k === 'index' && m.base.k === 'var' ? spellings.get(m.base.name) : undefined;
-    if (m.k === 'index' && s !== undefined) {
-      if (m.idx.k !== 'const' || m.idx.value !== 0) {
-        respelled = false;
-        return m;
+  while (spellings.size > 0) {
+    // rewrite the derefs, then verify nothing of any re-spelled `p` survives
+    const offsetDerefs = new Set<string>();
+    const rewriteExpr = (e: Expr): Expr => {
+      const m = mapExprChildren(e, rewriteExpr);
+      const s = m.k === 'index' && m.base.k === 'var' ? spellings.get(m.base.name) : undefined;
+      if (m.k === 'index' && s !== undefined) {
+        if (m.idx.k !== 'const' || m.idx.value !== 0) {
+          offsetDerefs.add(s.p);
+          return m;
+        }
+        return { ...m, base: { ...s.base }, idx: idxOf(s) };
       }
-      return { ...m, base: { ...s.base }, idx: idxOf(s) };
+      return m;
+    };
+    const steps = new Set(tail.filter((st) => spellings.has(isUnitIncrement(st)!)));
+    const body = dw.body.filter((st) => !steps.has(st)).map((st) => mapStmtExprs(st, rewriteExpr));
+    const dw2: Stmt = { ...dw, body };
+    const failed = inits.filter(
+      (st) =>
+        spellings.has(st.name) &&
+        (offsetDerefs.has(st.name) ||
+          !confinedToWalk(fnBody, st.name, countMentions([st], st.name), dw) ||
+          countMentions([dw2], st.name) !== 0),
+    );
+    if (failed.length === 0) {
+      return { loop: dw2, run: n, kept: inits.filter((st) => !spellings.has(st.name)) };
     }
-    return m;
-  };
-  const steps = new Set(tail.filter((st) => spellings.has(isUnitIncrement(st)!)));
-  const body = dw.body.filter((st) => !steps.has(st)).map((st) => mapStmtExprs(st, rewriteExpr));
-  const dw2: Stmt = { ...dw, body };
-  if (!respelled) {
-    return null;
+    failed.forEach((st) => spellings.delete(st.name));
   }
-  for (const st of walks) {
-    if (!confinedToWalk(fnBody, st.name, countMentions([st], st.name), dw) || countMentions([dw2], st.name) !== 0) {
-      return null;
-    }
-  }
-  return { loop: dw2, run: n, kept: [ivInit] };
+  return null;
 }
 
 /** Try the walk→index re-spelling on one function. Returns the transformed COPY when at least
