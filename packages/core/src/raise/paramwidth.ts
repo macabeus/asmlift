@@ -144,23 +144,19 @@
 // PPC frontend lifts as `and rS, 0xffff` — as it must, since the same instruction is every other
 // mask too — so a parameter mwcc reads only through it reaches this pass with no `zext` reader at
 // all. `and v, 0xffff` is `zext v {width=16}` value for value, so it counts as one (`extensionOf`),
-// unsigned, and becomes the parameter itself when the parameter is declared `u16`. Measured, the
-// two declarations are not one object there. Over a `long *a`, mwcc_242_81 compiles
+// unsigned, and becomes the parameter itself when the parameter is declared `u16`. The two
+// declarations are not one object there: over a `long *a`, mwcc_242_81 compiles
 // `*a = *a & ~b; *a = *a | c;` to `not; and` when `b` and `c` are `unsigned short`, and to `andc` when
-// they are `unsigned long` and the body masks them (`~(b & 0xffff)`, `c & 0xffff`). That holds at its
-// canonical `-O4,p` and at Mario Party 4's unit flags, whose trailing `-O0,p` wins. The one-statement
-// `*a &= ~b` separates the two only at the unit's flags; at `-O4,p` both fuse to `andc`.
+// they are `unsigned long` and the body masks them, at `-O4,p` and at Mario Party 4's unit flags.
 //
 // The rule is about the IR, not the ISA, so it reaches every frontend that lifts a mask as `and`.
 // IDO reads a declared `u16`/`u8` parameter as `sw a0,0(sp); andi a0,a0,0xffff`, and frontend/mips.ts
-// lifts the `andi` as that mask too: `s32 f(u16 a, s32 b){ return a + b; }` scored 3 before this rule
-// and matches with it, and `s32 f(u8 a, s32 *p){ return p[a]; }` went from 5 to 0. The witness gates
-// still decide whether IDO may narrow: a mask applied in place with no home store
-// (`a = a & 0xffff`) is refused, and so is a varargs home. agbcc spells a mask as `and` with a
-// pooled `0xffff` or a `mov #0xff`, so the variation is offered there too. It loses there, because
-// agbcc extends a declared narrow parameter with a shift pair, not with a mask:
-// `s32 f(u32 a, s32 b){ return (a & 0xffff) + b; }` scores 0 by default and 6 narrowed. The
-// param-width tests pin the mwcc object and the IDO object.
+// lifts the `andi` as that mask too: `s32 f(u16 a, s32 b){ return a + b; }` scores 3 wide and 0
+// narrowed. The witness gates still decide whether IDO may narrow: a mask applied in place with no
+// home store (`a = a & 0xffff`) is refused by `unhomed-param`. agbcc spells a mask as `and` with a
+// pooled `0xffff` or a `mov #0xff`, so the variation is offered there too, and loses, because agbcc
+// extends a declared narrow parameter with a shift pair: `s32 f(u32 a, s32 b){ return (a & 0xffff)
+// + b; }` scores 0 wide and 6 narrowed.
 import { type Fn, type Op, type Value, defOpMap, replaceAllUsesWith, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';

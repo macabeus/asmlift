@@ -217,10 +217,8 @@ describe('real-row scoring context (ctx.i + wrapped compile command)', () => {
     ]);
   });
 
-  // int and long are both 32 bits and still not one type: mwcc_242_81 compiles `*a = *a & ~b; *a =
-  // *a | c;` (u16 b, c) over a `long *a` to `not; and` and over an `int *a` to `andc`, at -O4,p and at
-  // Mario Party 4's unit flags alike. Mario Party 4 says `typedef signed long s32`, and a candidate
-  // its unit refuses was scored where `s32` meant `int`.
+  // int and long are both 32 bits and still not one type to mwcc (compile/util.ts `bareTypedefs`), and
+  // Mario Party 4 says `typedef signed long s32`.
   test('the rungs without the context spell the typedefs the way the context does', () => {
     const ctx = 'typedef signed long s32;\ntypedef unsigned   long u32;\nvoid g(void) { }\n';
     for (const tu of ['assembled', 'unit'] as const) {

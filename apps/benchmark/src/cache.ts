@@ -322,17 +322,13 @@ export async function cachedM2cResult(
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
   // `scoring` is derived too. On the real tier the score comes from a closure (compile/real.ts
-  // `makeRealScorer`) over the unit model, the manifest's prependC and the row's VENDORED context,
-  // and `ctx` (m2c's own) carries only part of that. On 295 of the 421 rows (af, kleod, Mario
-  // Party 3, pokeemerald, sa3, Snowboard Kids 2) m2c's vendored file IS the scoring context byte for
-  // byte, so `ctx` covers the context and still not the unit model, the prependC or the typedef
-  // spelling below. Mario Party 4's 42 rows and 41 of ac-decomp's hand m2c a separately vendored
-  // file. Of the 43 m2cCtx=false rows, 1 hands it a hand-written ctx and 42 (pikmin's C++ units)
-  // hand it none, so on those `ctx` is empty and nothing else on the key would see their scoring
-  // context. Off the key, an edit to a manifest's prependC, or to the spelling the context-free
-  // rungs take from the vendored context (compile/util.ts
-  // `bareTypedefs`), replays the old score. The digest covers the closure's ARGUMENTS, not its code:
-  // a change to the ladder itself (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
+  // `makeRealScorer`) over the unit model, the manifest's prependC and the row's VENDORED context.
+  // `ctx`, m2c's own, carries part of that at most: it is that context byte for byte on 295 of the
+  // 421 rows, a separately vendored file on Mario Party 4's 42 and 41 of ac-decomp's, a hand-written
+  // one on 1, and empty on pikmin's 42. Off the key, an edit to a prependC or to the typedef spelling
+  // the context-free rungs take from the context (compile/util.ts `bareTypedefs`) replays the old
+  // score. The digest covers the closure's ARGUMENTS, not its code: a change to the ladder itself
+  // (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
   const key = sha(
     JSON.stringify({
       v: 20,

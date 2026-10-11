@@ -142,8 +142,8 @@ export const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;
  *  per name, in the prelude's order: whether it declares the name at all (`owned`), and the
  *  spelling of its first declaration made only of C keywords (`keywords`, null where it has none).
  *
- *  ONE parse of the context, deliberately: the two preludes built from it (`ctxTypedefPrelude`,
- *  `bareTypedefs`) answer different questions about one fact, and two readers of a fact can drift. */
+ *  Both preludes built from it (`ctxTypedefPrelude`, `bareTypedefs`) read this one parse, so they
+ *  cannot disagree about what the context declares. */
 function contextTypedefs(ctxI: string): { name: string; base: string; owned: boolean; keywords: string | null }[] {
   const keyword = '(?:signed|unsigned|char|short|int|long)';
   return [...PRELUDE_TYPEDEFS].map(([name, base]) => {
@@ -181,19 +181,16 @@ export function ctxTypedefPrelude(ctxI: string): string {
  *
  *  `int` and `long` are both 32 bits on every target here, and still not one type: with `unsigned
  *  short b, c`, mwcc_242_81 compiles `*a = *a & ~b; *a = *a | c;` over a `long *a` to `not; and` and
- *  the same body over an `int *a` to `andc`. That was measured at its canonical `-O4,p` and at Mario
- *  Party 4's unit flags, whose trailing `-O0,p` wins. The one-statement `*a &= ~b` splits that way
- *  only at the unit's flags; at `-O4,p` it fuses to `andc` over a `long` too. Mario Party
- *  4, Mario Party 3, Pikmin, Animal Crossing and Snowboard Kids 2 all declare `s32` as a `long`
- *  (some spell it `signed long`, some plain `long`; the rung copies whichever the context wrote),
- *  and a candidate their unit refuses fell to a rung where `s32` meant `int` — a world the target
- *  was never compiled in, which scored a byte-identical spelling of the game's source 2/10.
+ *  over an `int *a` to `andc`, at its canonical `-O4,p` and at Mario Party 4's unit flags (the
+ *  one-statement `*a &= ~b` splits that way only at the unit's trailing `-O0,p`). Mario Party 4,
+ *  Mario Party 3, Pikmin, Animal Crossing and Snowboard Kids 2 declare `s32` as a `long`, so where
+ *  this rung said `int` it scored a byte-identical spelling of the game's source as a miss.
  *
  *  A name takes the context's spelling only when that spelling is made of C keywords (`signed long`,
  *  `unsigned short int`): such a rung carries no other line of the context, so a typedef over a
  *  project type (`typedef uint8_t u8;`) would name a type the rung never declares — that name keeps
- *  the prelude's spelling. The first declaration wins where a context repeats one. With no context,
- *  or one that declares none of the family, this is `C_TYPEDEFS` byte for byte. */
+ *  the prelude's spelling. Where a context repeats a name, its first keyword-only declaration wins.
+ *  With no context, or one that declares none of the family, this is `C_TYPEDEFS` byte for byte. */
 export function bareTypedefs(ctxI: string): string {
   return `${contextTypedefs(ctxI)
     .map((t) => `typedef ${t.keywords ?? t.base} ${t.name};`)

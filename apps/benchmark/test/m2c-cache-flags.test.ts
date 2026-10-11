@@ -81,8 +81,8 @@ test('a byte-identical target at other candidate flags is a miss, not the other 
 });
 
 // The real tier scores m2c's candidate through a closure over the manifest's prependC, the unit
-// model and the VENDORED context (compile/real.ts `makeRealScorer`), none of which is m2c's own
-// `ctx`. Two rows that differ only there are two entries, and a row without one keeps its old key.
+// model and the VENDORED context (compile/real.ts `makeRealScorer`), which m2c's own `ctx` carries
+// only in part. Two rows that differ only there are two entries, and a row without one keeps its old key.
 test('the same row scored in another context is a miss, not the other context’s result', async () => {
   const obj = join(scratch, 'fn_1_F4D4.o');
   writeFileSync(obj, 'the same target object in both scoring contexts');
