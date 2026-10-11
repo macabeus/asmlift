@@ -106,12 +106,15 @@ author, tree and assumptions are gone, and a reader cannot tell a live fact from
    a failure from.
 6. **Seed `board/facts/` and `board/traps/` before any round is launched.** A fact posted at launch
    is free to every round; the same fact posted once a round has already hit it was paid for by
-   whoever was blocked. Read them from
-   `~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory/` — at minimum
+   whoever was blocked. Read them from the project's memory directory — the main checkout's
+   absolute path with every `/` turned into `-`, so never a literal:
+   `~/.claude/projects/$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)" | tr / -)/memory/`
+   (`-Users-…` on macOS, `-home-…` on Linux) — at minimum
    `asmlift-parallel-worktree-harness.md` for the traps that make a run report success with wrong
-   numbers, and the compiler-facts file for whichever toolchains the targets use. Restate each as a
-   post; do not post a path to the memory file, because the round agents are told not to read
-   outside their worktree for specs.
+   numbers, and the compiler-facts file for whichever toolchains the targets use. **A missing
+   directory or file is not "nothing to seed"**: `ls` it first, and post the absence as a trap.
+   Restate each as a post; do not post a path to the memory file, because the round agents are
+   told not to read outside their worktree for specs.
 7. **Write `env.sh`**: the `export`s every lane sources — `PATH` with the directories `node`,
    `pnpm` and the `cpp` shim resolve from, and every `ASMLIFT_*` toolchain variable. Take them from a
    shell where `which cpp` is the shim and a scoped `pnpm bench run` works, and verify the file by
@@ -439,7 +442,8 @@ green.
 
 1. **Promote what outlived the run.** Do this **per merge**, not as a final sweep: when a branch
    lands, its `board/facts/` and `board/traps/` posts are promoted to
-   `~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory/` or to `docs/`,
+   the memory directory Phase 1 step 6 derives (check it exists — a write to a guessed path
+   lands where Claude Code never loads it) or to `docs/`,
    restated for a reader who was not here. A final sweep runs at the fullest context with the user
    waiting, and an interruption before it loses everything; per-merge promotion loses only the
    lanes that had not landed.
