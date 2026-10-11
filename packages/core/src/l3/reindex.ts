@@ -523,8 +523,9 @@ function plusConst(e: Expr, c: number): Expr {
 //   • each `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum
 //     counts in its BASE's unit. Over a W-element pointer base that is already elements, and REST
 //     stays verbatim, symbolic addends included. Over a byte base (an integer var, a byte pointer,
-//     `(u32)&g`) a wider walk needs every REST addend constant with a total W divides (it is
-//     rescaled to elements); a symbolic addend would need dividing, and declines;
+//     `(u32)&g`) a wider walk needs a constant total W divides (it is rescaled to elements), and
+//     a symbolic addend, which would need dividing, stays in the BYTE sum instead: the index base
+//     is `(T *)(BASE + SYM)`, the spelling `p = b + k; … p[i]` reduces back to;
 //   • the inits `i = S` and `p_k = EXPR_k` are the run of assignments immediately ahead of the
 //     `dowhile` (any order); EXPR (its pointer and 32-bit integer casts stripped; a narrowing cast
 //     declines) flattens over `+` into exactly ONE base addend — a bare var declared an integer, a
@@ -651,18 +652,23 @@ function exprWalkSpelling(
   }
   // REST in ELEMENTS. Counted in the walk's own unit (a byte walk, or a W-element pointer base)
   // it is already elements: the symbolic addends stay verbatim and the constants fold into one.
-  // Counted in bytes under a wider walk it must be all constants whose total W divides — a
-  // symbolic addend would need dividing, and declines.
+  // Counted in bytes under a wider walk, the constants must total a multiple of W (rescaled to
+  // elements), and the symbolic addends would need dividing — so they stay in the BYTE sum, which
+  // becomes the index base: `(T *)(a0 + (a1 << 1))`, every non-constant addend in EXPR's order,
+  // the address keeping its `(u32)` (the printer casts the sum to the access width).
   const consts = rest.filter((a): a is Extract<Expr, { k: 'const' }> => a.k === 'const');
   const symbolic = rest.filter((a) => a.k !== 'const');
   const restUnits = consts.reduce((acc, c) => acc + c.value, 0) | 0; // the 32-bit sum, signed
   if (unit === W) {
     return { p, base: { ...base }, idx: symbolic, elems: restUnits };
   }
-  if (symbolic.length !== 0 || restUnits % W !== 0) {
+  if (restUnits % W !== 0) {
     return null;
   }
-  return { p, base: { ...base }, idx: [], elems: restUnits / W };
+  const byteSum = addends
+    .filter((a) => a.k !== 'const')
+    .reduce<Expr | null>((acc, a) => (acc === null ? a : { k: 'bin', op: '+', l: acc, r: a }), null)!;
+  return { p, base: symbolic.length === 0 ? { ...base } : byteSum, idx: [], elems: restUnits / W };
 }
 
 /** v3 on one do-while: `out` is the statement list already walked ahead of it. Returns the

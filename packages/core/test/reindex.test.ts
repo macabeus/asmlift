@@ -663,8 +663,34 @@ describe('v3 — expression-base walk', () => {
       expect(reindexWalks(u16Fn(at(cn(3))))).toBeNull();
     });
 
-    test('refused: a symbolic byte offset (rescaling it would need a division)', () => {
-      expect(reindexWalks(u16Fn(at({ k: 'bin', op: '*', l: v('a2'), r: cn(2) })))).toBeNull();
+    test('a symbolic byte offset stays in the byte sum the index base casts: ((u16 *)(a0 + a2 * 2))[i + 3]', () => {
+      // KMC: `u16 *p = b + k; for (i = 3; …) p[i] = 7` lifts `p = (u16 *)(a0 + (a1 << 1) + 6)` from i = 3
+      const off = { k: 'bin', op: '+', l: { k: 'bin', op: '*', l: v('a2'), r: cn(2) }, r: cn(6) } as const;
+      const r = reindexWalks(u16Fn(at(off)));
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('((u16 *)a1)[i] = ((u16 *)(a0 + a2 * 2))[i + 3];');
+    });
+
+    test('over a (u32)&g base the address keeps its cast inside the byte sum', () => {
+      const f = u16Fn({
+        k: 'cast',
+        to: u16p as never,
+        e: {
+          k: 'bin',
+          op: '+',
+          l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gH' } },
+          r: { k: 'bin', op: '<<', l: v('a2'), r: cn(1) },
+        },
+      });
+      const r = reindexWalks(f);
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('= ((u16 *)((u32)&gH + (a2 << 1)))[i];');
+    });
+
+    test('refused: a symbolic byte offset beside constants W does not divide', () => {
+      const off = { k: 'bin', op: '+', l: v('a2'), r: cn(3) } as const;
+      expect(reindexWalks(u16Fn(at(off)))).toBeNull();
     });
 
     test('refused: a deref narrower than the walk element', () => {
