@@ -1,7 +1,6 @@
 // Shared helpers for the per-toolchain compile modules.
 import { CompilerRejection, errorsFirst } from '@asmlift/core/compiler-diagnostics';
 import { PRELUDE_TYPEDEFS } from '@asmlift/core/proto';
-import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -139,6 +138,25 @@ export function scratchSlot(prefix: string): () => string {
 
 export const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;
 
+/** What a VENDORED context declares of asmlift's typedef family (`PRELUDE_TYPEDEFS`), one entry
+ *  per name, in the prelude's order: whether it declares the name at all (`owned`), and the
+ *  spelling of its first declaration made only of C keywords (`keywords`, null where it has none).
+ *
+ *  ONE parse of the context, deliberately: the two preludes built from it (`ctxTypedefPrelude`,
+ *  `bareTypedefs`) answer different questions about one fact, and two readers of a fact can drift. */
+function contextTypedefs(ctxI: string): { name: string; base: string; owned: boolean; keywords: string | null }[] {
+  const keyword = '(?:signed|unsigned|char|short|int|long)';
+  return [...PRELUDE_TYPEDEFS].map(([name, base]) => {
+    const own = new RegExp(`typedef\\s+(${keyword}(?:\\s+${keyword})*)\\s+${name}\\s*;`).exec(ctxI);
+    return {
+      name,
+      base,
+      owned: new RegExp(`typedef\\s+[^;]*\\b${name}\\s*;`).test(ctxI),
+      keywords: own === null ? null : own[1].replace(/\s+/g, ' '),
+    };
+  });
+}
+
 /** asmlift's typedef prelude, reduced to the names a VENDORED context does not already define.
  *
  *  Per-NAME, not all-or-nothing: a context can own SOME of the family (af's header-less
@@ -152,14 +170,9 @@ export const shq = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`;
  *  drift between them means the published script grades in a different world than the harness
  *  did. Returns '' when the context already owns the whole family. */
 export function ctxTypedefPrelude(ctxI: string): string {
-  const kept = C_TYPEDEFS.trim()
-    .split(';')
-    .filter((d) => d.trim())
-    .map((d) => `${d.trim()};`)
-    .filter((d) => {
-      const name = d.match(/(\w+);$/)?.[1];
-      return name ? !new RegExp(`typedef\\s+[^;]*\\b${name}\\s*;`).test(ctxI) : false;
-    });
+  const kept = contextTypedefs(ctxI)
+    .filter((t) => !t.owned)
+    .map((t) => `typedef ${t.base} ${t.name};`);
   return kept.length > 0 ? `${kept.join('')}\n` : '';
 }
 
@@ -179,11 +192,7 @@ export function ctxTypedefPrelude(ctxI: string): string {
  *  the prelude's spelling. The first declaration wins where a context repeats one. With no context,
  *  or one that declares none of the family, this is `C_TYPEDEFS` byte for byte. */
 export function bareTypedefs(ctxI: string): string {
-  const keywords = '(?:signed|unsigned|char|short|int|long)';
-  return `${[...PRELUDE_TYPEDEFS]
-    .map(([name, base]) => {
-      const own = new RegExp(`typedef\\s+(${keywords}(?:\\s+${keywords})*)\\s+${name}\\s*;`).exec(ctxI);
-      return `typedef ${own === null ? base : own[1].replace(/\s+/g, ' ')} ${name};`;
-    })
+  return `${contextTypedefs(ctxI)
+    .map((t) => `typedef ${t.keywords ?? t.base} ${t.name};`)
     .join('')}\n`;
 }
