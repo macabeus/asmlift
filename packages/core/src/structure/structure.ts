@@ -79,6 +79,7 @@ import {
   stmtsEqual,
   walkExprs,
 } from '../l3/ast';
+import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, renderedIntSignedness } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
@@ -2266,15 +2267,13 @@ export function structure(
   //
   // A function-scope static is asked by its linker name, which no map holds, and comes FIRST: its
   // shape is its definition's, never the one raise/globalshape.ts infers from its accesses.
-  const anonymous = [...(fn.localObjects?.values() ?? [])].find((o) => o.anonymous);
-  if (anonymous !== undefined) {
-    throw new StructureError(
-      `cannot structure '${fn.name}': reads the compiler's anonymous constant '${anonymous.symbol}', ` +
-        `which no declaration spells — not modelled`,
-    );
-  }
   const localStatics = localStaticShapes(fn, staticLayout);
   if ('refused' in localStatics) {
+    if (fn.localObjects?.get(localStatics.symbol)?.anonymous) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': reads the compiler's anonymous constant ('${localStatics.symbol}') ${localStatics.refused}`,
+      );
+    }
     throw new StructureError(
       `cannot structure '${fn.name}': names a function-scope static ('${localStatics.symbol}') ${localStatics.refused}`,
     );
@@ -6824,6 +6823,15 @@ export function structure(
   if ('refused' in named) {
     throw new StructureError(
       `cannot structure '${fn.name}': names a function-scope static ('${named.symbol}') ${named.refused}`,
+    );
+  }
+  // The compiler's anonymous constant is spelled only as the initializer of the local its one copy
+  // fills, which the emitter folds (l3/constinit.ts says why there). Asked here, so a function
+  // whose image cannot fold declines loudly rather than reaching an emitter that cannot print it.
+  const image = constantImageRefusal(named);
+  if (image !== null) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': reads the compiler's anonymous constant ('${image.image}') ${image.refused}`,
     );
   }
   return named;

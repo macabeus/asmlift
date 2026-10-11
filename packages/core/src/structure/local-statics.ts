@@ -262,6 +262,39 @@ export function localStaticShapes(
   // it places in the order it first uses them: the candidate's code decides that, no declaration.
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
+    if (obj.anonymous) {
+      // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
+      // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
+      // folds it into the local the copy fills, which is the declaration that placed it.
+      const unit = obj.directives?.unit;
+      if (unit === undefined || obj.bytes === undefined) {
+        return say('whose image writes no one element width — a struct, or padding alone');
+      }
+      if (![1, 2, 4].includes(unit) || obj.size % unit !== 0) {
+        return say(`whose ${unit}-byte elements are no integer array of its ${obj.size} bytes`);
+      }
+      const signed = obj.directives!.negative;
+      const count = obj.size / unit;
+      infos.set(obj.symbol, {
+        name: obj.symbol,
+        kind: 'data',
+        size: obj.size,
+        shape: 'array',
+        elemSize: unit,
+        elemSigned: signed,
+        dims: [count],
+        const: true,
+      });
+      statics.push({
+        name: obj.symbol,
+        type: T.array(T.int(unit * 8, signed), count),
+        const: true,
+        init: elements(obj, unit, signed),
+        anonymous: true,
+        ...(obj.directives!.string && unit === 1 ? { string: true as const } : {}),
+      });
+      continue;
+    }
     const accesses = access.get(obj.symbol) ?? [];
     const dir = obj.directives;
     // the alignment the target shows
@@ -342,6 +375,9 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   const rename = new Map<string, string>();
   const bySource = new Map<string, string>();
   for (const obj of objs.values()) {
+    if (obj.anonymous) {
+      continue; // no source name: folded into a local's initializer at emission (l3/constinit.ts)
+    }
     const say = (why: string) => ({ symbol: obj.symbol, refused: `whose source name '${obj.name}' ${why}` });
     const other = bySource.get(obj.name);
     if (other !== undefined) {

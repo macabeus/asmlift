@@ -1,0 +1,92 @@
+// A LOCAL AGGREGATE'S CONSTANT INITIALIZER, end to end through decompile() and the real agbcc:
+// reference C declaring `T a[N] = {…}` inside the function → target (agbcc copies the image from an
+// anonymous `.LC` constant with `memcpy`) → lift → the candidate declares the local with that
+// initializer again → compiled → scored, and the candidate's `.rodata` compared with the target's
+// byte for byte, because a score cannot see what the image holds: the code only names its address.
+import { decompile } from '@asmlift/core/pipeline';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { assembleTarget, compileCandAgbcc, compileTargetAsm, scoreC } from '@asmlift/toolchains';
+import { readFileSync } from 'node:fs';
+import { describe, expect, test } from 'vitest';
+
+/** An ELF32 little-endian object's `.rodata` contents and alignment. */
+function rodata(obj: string): { align: number; bytes: number[] } | undefined {
+  const b = readFileSync(obj);
+  const shoff = b.readUInt32LE(0x20);
+  const size = b.readUInt16LE(0x2e);
+  const shstr = b.readUInt32LE(shoff + b.readUInt16LE(0x32) * size + 16);
+  for (let i = 0; i < b.readUInt16LE(0x30); i++) {
+    const h = shoff + i * size;
+    const at = shstr + b.readUInt32LE(h);
+    if (b.toString('latin1', at, b.indexOf(0, at)) === '.rodata') {
+      const off = b.readUInt32LE(h + 16);
+      return { align: b.readUInt32LE(h + 32), bytes: [...b.subarray(off, off + b.readUInt32LE(h + 20))] };
+    }
+  }
+  return undefined;
+}
+
+const USE = 'extern void g(void *);\n';
+const PROTOS = { g: { params: ['void *'], returnsVoid: true } };
+
+const CASES: { sym: string; c: string; spelled: RegExp }[] = [
+  {
+    // kleod:sub_0804C898's shape: nothing reads the array, and agbcc copies it anyway
+    sym: 'dead16',
+    c: 'void dead16(void) { u8 a[16] = {0, 1, 2, 4, 6, 4, 2, 1, 0, -1, -2, -4, -6, -4, -2, -1}; }',
+    spelled:
+      /u8 sp0\[16\] = \{\n {8}0, 1, 2, 4, 6, 4, 2, 1,\n {8}0, 0xff, 0xfe, 0xfc, 0xfa, 0xfc, 0xfe, 0xff,\n {4}\};/,
+  },
+  {
+    // a signed element writes its negatives, and the address handed on says nothing of the type
+    sym: 'bytes8',
+    c: `${USE}void bytes8(void) { s8 a[8] = {0, 1, -1, -2, 3, 4, 5, -6}; g(a); }`,
+    spelled: /s8 sp0\[8\] = \{ 0, 1, -1, -2, 3, 4, 5, -6 \};/,
+  },
+  {
+    // a halfword image in a reservation the frame rounds to 8
+    sym: 'halves3',
+    c: `${USE}void halves3(void) { u16 a[3] = {1, 0xffff, 3}; g(a); }`,
+    spelled: /u16 sp0\[3\] = \{ 1, 0xffff, 3 \};/,
+  },
+  {
+    sym: 'shalves3',
+    c: `${USE}void shalves3(void) { s16 a[3] = {1, -1, 3}; g(a); }`,
+    spelled: /s16 sp0\[3\] = \{ 1, -1, 3 \};/,
+  },
+  {
+    // a string literal's image is spelled as one, which is what word-aligns it
+    sym: 'text9',
+    c: `${USE}void text9(void) { char a[] = "hi there"; g(a); }`,
+    spelled: /u8 sp0\[9\] = "hi there";/,
+  },
+  {
+    // read back by element: the local keeps the element the read was spelled against
+    sym: 'pick',
+    c: 'u8 pick(s32 i) { u8 a[6] = {9, 8, 7, 6, 5, 4}; return a[i]; }',
+    spelled: /u8 sp0\[6\] = \{ 9, 8, 7, 6, 5, 4 \};/,
+  },
+];
+
+describe('local aggregate initializers — real agbcc: the candidate copies the target’s image', () => {
+  const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
+  test.each(CASES)('$sym', ({ sym, c, spelled }) => {
+    const asm = compileTargetAsm(c, FLAGS);
+    const target = assembleTarget(asm);
+    const r = decompile(sym, asm, ARMV4T_AGBCC, { prototypes: PROTOS });
+    expect(r.source).toMatch(spelled);
+    expect(r.source).not.toContain('memcpy');
+    const context = c.startsWith(USE) ? USE : '';
+    const cand = compileCandAgbcc(context + r.source, FLAGS);
+    expect(rodata(cand)).toEqual(rodata(target));
+    expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(0);
+  });
+
+  test('an initializer shorter than its string array is a copy and a fill, and declines', () => {
+    // `char a[8] = "hello"` copies the 6-byte literal and memsets the tail: no one copy fills `a`
+    const asm = compileTargetAsm(`${USE}void tail(void) { char a[8] = "hello"; g(a); }`, FLAGS);
+    expect(() => decompile('tail', asm, ARMV4T_AGBCC, { prototypes: PROTOS })).toThrow(
+      /cannot (lift|structure) 'tail'/,
+    );
+  });
+});

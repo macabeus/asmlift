@@ -399,6 +399,12 @@ export interface SFn {
      *  one are deliberately left unstamped even where the offset is in hand — see the refusal at
      *  the structurer's build site for the measurement that decided it. */
     slots?: number[];
+    /** The declaration's initializer, element by element — present only on the copy the C-family
+     *  emitter prints, where l3/constinit.ts folded the block copy of the compiler's anonymous
+     *  constant image into it (`u8 sp0[16] = { … };`). Never on a tree a pass sees. */
+    init?: number[];
+    /** that initializer is spelled as a string literal — the image was written as one */
+    initString?: true;
   }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
@@ -449,6 +455,11 @@ export interface SStatic {
   /** the initializer is spelled as a string literal — a byte array the compiler aligns as a
    *  string (structure/local-statics.ts) */
   string?: true;
+  /** The compiler's own constant image under a label the source never wrote (ir/core.ts
+   *  `LocalObject.anonymous`), named by that label. No declaration spells it: the one block copy
+   *  that reads it is folded into the initializer of the local it fills (l3/constinit.ts), and a
+   *  backend that cannot do that refuses. */
+  anonymous?: true;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct
