@@ -114,21 +114,33 @@ export function asmliftFan(
   return decompileRanked(sym, asm, codegen.target, obj, opts);
 }
 
-/** How many threads compile a big fan's candidates, and how big a fan must be to get them.
+/** How many worker processes compile a big fan's candidates, and how big a fan must be to get them.
  *
  *  The tier's queue hands out its costliest rows first (run/queue.ts `claimOrder`), so a tier ends
- *  no sooner than its costliest row does, however many shards drain the rest. Threads shorten
+ *  no sooner than its costliest row does, however many shards drain the rest. Workers shorten
  *  exactly those rows and add no compile: the same candidates compile, spread over more cores for
- *  the minutes the other shards are still busy with cheap rows. The size is where a thread's start
+ *  the minutes the other shards are still busy with cheap rows. The size is where a worker's start
  *  (a module load and the row's case rebuilt) stops mattering beside the compiles it takes over; the
  *  count is what the other shards leave idle once they reach the tier's cheap tail. */
 export const ROW_COMPILE_WORKERS = 4;
 export const PARALLEL_FAN = 500;
+/** How big a fan must be for its compiles to leave the shard at all, into ONE worker process, on a
+ *  host where that pays: on Linux every spawn forks the shard and costs what the shard weighs, and
+ *  from a small worker it does not (compile-pool.ts), so a worker's start — a module load and the
+ *  row's case rebuilt — is repaid within a few dozen candidates. Below it the shard compiles the row
+ *  itself, as a one-worker ranking. */
+export const WORKER_FAN = 16;
+
+/** WORKER_FAN where the band pays, PARALLEL_FAN elsewhere: macOS libuv starts children with
+ *  posix_spawn, whose cost does not grow with the parent, so a mid-sized fan there would pay a
+ *  worker's start for nothing. Exported so the choice is testable on either host. */
+export const workerFanFor = (platform: string = process.platform): number =>
+  platform === 'linux' ? WORKER_FAN : PARALLEL_FAN;
 
 /** The ranked pass the harness publishes: `asmliftFan`'s ranking, with a big fan's compiles spread
- *  over `ROW_COMPILE_WORKERS` threads (compile-pool.ts). The ranking orders the same memoized scores
- *  at any worker count, so every published field is the same; only `rankSeconds` depends on the
- *  threads. */
+ *  over `ROW_COMPILE_WORKERS` worker processes (compile-pool.ts) and, on Linux, a mid-sized fan's
+ *  moved into one. The ranking orders the same memoized scores at any worker count, so every published field
+ *  is the same; only `rankSeconds` depends on the workers. */
 async function rankRow(
   codegen: ResolvedTarget,
   sym: string,
@@ -138,14 +150,14 @@ async function rankRow(
   row: RowRef,
 ): Promise<RankedResult> {
   const compile = opts.compile!;
-  let threads = false;
+  let pooled = false;
   const pool = compilePool(row);
   try {
     return await decompileRankedParallel(sym, asm, codegen.target, obj, {
       ...opts,
-      jobs: (fan) => ((threads = fan >= PARALLEL_FAN) ? ROW_COMPILE_WORKERS : 1),
+      jobs: (fan) => ((pooled = fan >= workerFanFor()) && fan >= PARALLEL_FAN ? ROW_COMPILE_WORKERS : 1),
       worker: () =>
-        threads
+        pooled
           ? pool.worker()
           : async (source, symbol, backendId, declarations) => compile(source, symbol, backendId, declarations),
     });

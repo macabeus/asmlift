@@ -63,6 +63,8 @@ jobs:
       ASMLIFT_GCC272_DIR: ${{ github.workspace }}/.deps/gcc272
       ASMLIFT_MWCC_ROOT: ${{ github.workspace }}/.deps/mwcc
       ASMLIFT_M2C_DIR: ${{ github.workspace }}/.deps/m2c
+      # the static wibo the native CodeWarrior path runs (packages/toolchains/src/native.ts)
+      ASMLIFT_NATIVE_WIBO: ${{ github.workspace }}/.deps/wibo
     steps:
       - uses: actions/checkout@v4
       - name: Read the m2c pin (apps/benchmark/M2C_COMMIT — the one source of truth)
@@ -84,7 +86,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .deps
-          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v6
+          key: bench-deps-${{ env.COMPILERS_TAG }}-${{ env.M2C_COMMIT }}-v7
 
       - name: Fetch toolchains + m2c (pinned)
         if: steps.deps.outputs.cache-hit != 'true'
@@ -122,6 +124,11 @@ jobs:
           mv "/tmp/compilers/GC/1.2.5n" "$DEPS/mwcc/mwcc_233_163n"
           mv /tmp/compilers/GC/2.6 "$DEPS/mwcc/mwcc_247_107"
           rm -rf /tmp/compilers.zip /tmp/compilers
+
+          # wibo — static, the tag the asmlift-ppc image builds: CodeWarrior compiles natively on this
+          # x86 runner, and native-parity.test.ts compares that path with the image's
+          curl -fsSL https://github.com/decompals/wibo/releases/download/0.6.16/wibo -o "$DEPS/wibo"
+          chmod +x "$DEPS/wibo"
 
           # m2c — the pinned baseline
           git clone https://github.com/matt-kempster/m2c "$DEPS/m2c"

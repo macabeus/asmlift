@@ -1037,9 +1037,16 @@ function keysOf(nsDir: string): { path: string; at: number }[] {
 // the window), and a cap that provably cannot fire is the silent half of a loud-failure rule. What
 // makes eviction safe is not age: it is that no OTHER process holds this namespace, that `get` is
 // miss-on-race, and that `reapUnlinked` leaves objects younger than its own grace window alone.
-// A worker thread never prunes: it runs beside sibling threads serving compiles from the store, and
-// the process's main thread is where a prune belongs.
+// A compile worker never prunes: it runs beside sibling workers serving compiles from the store,
+// and the process that started them is where a prune belongs. A worker THREAD is told by
+// `isMainThread`; a worker PROCESS (the benchmark's row compile pool) is a main thread of its own,
+// so it says so with `neverPrune()` before its first compile.
 let pruned = !isMainThread;
+
+/** This process never prunes the store: it is a compile worker started by a process that does. */
+export function neverPrune(): void {
+  pruned = true;
+}
 function pruneOnce(keepNs: string): void {
   if (pruned) {
     return;

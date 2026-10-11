@@ -54,7 +54,9 @@ type PricedRow = Pick<FunctionResult, 'toolchain' | 'tier' | 'asmlift'>;
  *  Whole fans only because a stillborn row's `rankSeconds` is mostly enumeration and the stop's own
  *  checks over a handful of compiles, so it prices a compile neither per candidate enumerated nor
  *  per candidate compiled. One compiler only because a fan past `PARALLEL_FAN` is wall over
- *  `ROW_COMPILE_WORKERS` threads, which prices a compile at a fraction of what it costs. */
+ *  `ROW_COMPILE_WORKERS` worker processes, which prices a compile at a fraction of what it costs. A
+ *  fan in the Linux worker band (asmlift.ts `workerFanFor`) compiles on one worker and its rate
+ *  carries that worker's start, spread over the fan. */
 export function rankRates(recorded: readonly PricedRow[]): Map<string, number> {
   const sums = new Map<string, { n: number; s: number }>();
   const add = (k: string, n: number, s: number): void => {
