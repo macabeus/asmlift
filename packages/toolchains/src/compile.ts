@@ -7,6 +7,7 @@
 // already evaluated this module. (An index-only side effect would be bypassed by subpath
 // imports, silently leaving @asmlift/cli's registry empty — and the benchmark's gcc/mwcc
 // rows would record "noncompile" instead of failing loud.)
+import { type PreprocessorReport, cppReport } from '@asmlift/cli/candcache-reads';
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { type CandidateCompiler, registerCandidateCompiler } from '@asmlift/cli/score';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
@@ -568,9 +569,10 @@ export function poolExec(docker: string, image: string, name: string, mounts: st
 
 /** Compile `srcC` (a basename in `dir`) at `flags` to the object `outObj` with KMC GCC inside the
  *  container — pooled `docker exec` when `dir` is under /tmp, single-shot `docker run` otherwise.
- *  Throws on failure. Exported for the benchmark's real-tier compile
- *  (apps/benchmark/src/compile/kmc.ts), so it pools through the same helper. */
-export function kmcCompile(dir: string, srcC: string, outObj: string, flags: readonly string[]): void {
+ *  Returns the source's path as the compiler was handed it; throws on failure. Exported for the
+ *  benchmark's real-tier compile (apps/benchmark/src/compile/kmc.ts), so it pools through the same
+ *  helper. */
+export function kmcCompile(dir: string, srcC: string, outObj: string, flags: readonly string[]): string {
   const t = GCC_KMC_TOOLCHAIN;
   if (kmcNative()) {
     const cc = run(
@@ -582,7 +584,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
     if (cc.status !== 0) {
       throw refused('kmc gcc (native)', cc);
     }
-    return;
+    return join(dir, srcC);
   }
   const w = hostTmp(dir);
   if (w) {
@@ -605,7 +607,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
       if (cc.status !== 0) {
         throw containerRefused('kmc gcc (docker)', cc);
       }
-      return;
+      return `${w}/${srcC}`;
     }
   }
   const cc = oneShot(t.docker, [
@@ -633,6 +635,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
   if (cc.status !== 0) {
     throw containerRefused('kmc gcc (docker)', cc);
   }
+  return `/work/${srcC}`;
 }
 
 /** Compile reference C with KMC GCC at `flags` → {obj (scoring target), asm (disassembly, frontend
@@ -660,6 +663,25 @@ export function compileCandKmc(cSource: string, flags: readonly string[]): strin
   writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
   kmcCompile(dir, 'cand.c', 'cand.o', flags);
   return join(dir, 'cand.o');
+}
+
+/** The words that make KMC GCC's driver report what its preprocessor read. */
+export const KMC_REPORT_FLAGS = ['-MD', '-save-temps'] as const;
+
+/** `compileCandKmc`'s object, with what KMC GCC's own preprocessor read: `-MD`'s dependency list and
+ *  the text `-save-temps` keeps, both beside the object (MEASURED: the object is byte for byte the
+ *  one the plain compile writes). A compile that failed throws, with no report. */
+export function compileCandKmcReported(
+  cSource: string,
+  flags: readonly string[],
+): { obj: string; report: PreprocessorReport } {
+  const dir = mkShareableTmp('asmlift-mgcc-score-');
+  writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
+  const source = kmcCompile(dir, 'cand.c', 'cand.o', [...flags, ...KMC_REPORT_FLAGS]);
+  return {
+    obj: join(dir, 'cand.o'),
+    report: cppReport(join(dir, 'cand.d'), join(dir, 'cand.i'), source, 'cand.o'),
+  };
 }
 
 /** KMC GCC's candidate compiler at `flags`. The registry holds it at gcc2.7.2kmc's canonical flags. */

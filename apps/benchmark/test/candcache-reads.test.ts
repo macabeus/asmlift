@@ -1,9 +1,11 @@
-// Which compiled answers the candidate store keeps, through the real tier's own pipelines: agbcc on
-// the host, GCC 2.7.2 and KMC GCC behind the host cpp in their containers, CodeWarrior with its own
-// preprocessor. A TU that reads a file is compiled afresh on every run; each case compiles it, edits
-// the file, and compiles it again in a new process over the same store, and the edit must reach the
-// object. Every spelling here was served the old file's object before the store read the compile's
-// own dependency list.
+// Which compiled answers the candidate store keeps, through the bench's own pipelines: the real
+// tier's agbcc on the host, GCC 2.7.2 and KMC GCC behind the host cpp in their containers,
+// CodeWarrior with its own preprocessor; the synthetic tier's pooled KMC GCC, whose own preprocessor
+// reports, and its agbcc `decomp.yaml` command, which reports nothing. A TU that reads a file is
+// compiled afresh on every run; each case compiles it, edits the file, and compiles it again in a
+// new process over the same store, and the edit must reach the object. Every spelling here was
+// served the old file's object before the store read the compile's own dependency list, or, where
+// there is none, before it refused the TU's text.
 import {
   agbccAvailable,
   gcc272Available,
@@ -37,13 +39,23 @@ const scratch = (prefix: string, under = tmpdir()): string => {
   return d;
 };
 
-type Pipeline = 'agbcc' | 'gcc272' | 'kmc' | 'mwcc';
+type Pipeline = 'agbcc' | 'gcc272' | 'kmc' | 'mwcc' | 'pooled-kmc' | 'command-agbcc';
 type Stats = Record<string, number>;
 
-/** One process's worth of modules over `store` with the audit off: `tu` through `pipeline`, as the
- *  object's bytes (scratch suffix aside) or the rejection's message. */
-async function compileIn(store: string, pipeline: Pipeline, tu: string): Promise<{ out: string; stats: Stats }> {
-  const env = { ASMLIFT_CANDCACHE: 'on', ASMLIFT_CANDCACHE_DIR: store, ASMLIFT_CANDCACHE_SAMPLE: '0' };
+/** One process's worth of modules over `store` with the audit off (or with the store off): `tu`
+ *  through `pipeline`, as the object's bytes (scratch suffix aside) or the rejection's message and
+ *  whole diagnostic. */
+async function compileIn(
+  store: string,
+  pipeline: Pipeline,
+  tu: string,
+  mode: 'on' | 'off' = 'on',
+): Promise<{ out: string; stats: Stats }> {
+  const env = {
+    ASMLIFT_CANDCACHE: mode === 'on' ? 'on' : '0',
+    ASMLIFT_CANDCACHE_DIR: store,
+    ASMLIFT_CANDCACHE_SAMPLE: '0',
+  };
   const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
   Object.assign(process.env, env);
   vi.resetModules();
@@ -75,13 +87,21 @@ async function compileIn(store: string, pipeline: Pipeline, tu: string): Promise
           return (await import('../src/compile/mwcc'))
             .mwccReal('mwcc_242_81')
             .compileCandidate(tu, 'f', canonicalCodegen('mwcc_242_81').cflags, 'c');
+        case 'pooled-kmc':
+        case 'command-agbcc': {
+          const id = pipeline === 'pooled-kmc' ? 'gcc2.7.2kmc' : 'agbcc';
+          const compiler = (await import('../src/decomp-config')).benchCompilerFor(id, canonicalCodegen(id).cflags);
+          return (await compiler(tu, 'f', 'c')) as string;
+        }
       }
     };
     let out: string;
     try {
       out = scrubScratchDir(await compile()).toString('hex');
     } catch (e) {
-      out = `threw ${(e as Error).message}`;
+      // A fresh module graph has a fresh `CompilerRejection` class, so the diagnostic is read by name.
+      const { diagnostic } = e as { diagnostic?: string };
+      out = `threw ${(e as Error).message}${diagnostic === undefined ? '' : `\n${diagnostic}`}`;
     }
     return { out, stats: (await import('@asmlift/cli/candcache')).cacheStats() };
   } finally {
@@ -101,14 +121,27 @@ const HAVE: Record<Pipeline, boolean> = {
   gcc272: gcc272Available(),
   kmc: kmcAvailable(),
   mwcc: ppcDockerAvailable('mwcc_242_81'),
+  'pooled-kmc': kmcAvailable(),
+  'command-agbcc': agbccAvailable(),
 };
 
 /** `path` as the compile running in `pipeline`'s container (or natively) sees it. */
 const inside = (pipeline: Pipeline, path: string): string => {
-  const native = pipeline === 'gcc272' ? gcc272Native() : pipeline === 'kmc' ? kmcNative() : mwccNative('mwcc_242_81');
-  const p = pipeline === 'agbcc' || native ? path : hostTmp(path)!;
+  if (pipeline === 'agbcc' || pipeline === 'command-agbcc') {
+    return path;
+  }
+  const native = pipeline === 'gcc272' ? gcc272Native() : pipeline === 'mwcc' ? mwccNative('mwcc_242_81') : kmcNative();
+  const p = native ? path : hostTmp(path)!;
   return pipeline === 'mwcc' ? `Z:${p}` : p;
 };
+
+/** A TU whose `x` lives in a section named `name` (C source): the compiler writes the name into its
+ *  assembly unquoted, so a newline in it starts a directive of its own. */
+const inSection = (name: string): string =>
+  `int x __attribute__((section(${name}))) = 1;\nint f(int i) { return x + i; }\n`;
+/** A section name holding `.include "<path>"`, its directive split across adjacent literals. */
+const splitInclude = (path: string, dot = '"."'): string =>
+  `".data\\n" ${dot} "inc" "lude \\"${path}\\"\\n.section .data.x"`;
 
 const HEADER = ['#define K 3\n', '#define K 5\n'];
 const WORD = ['.word 0x11111111\n', '.word 0x22222222\n'];
@@ -183,9 +216,35 @@ const CASES: [string, Pipeline, (p: string) => string, (string | null)[]][] = [
     (p) => `// see data/*.bin\n#include "${p}"\n// */\nint f(int x) { return x * K; }\n`,
     [null, HEADER[1]],
   ],
+  ['#include', 'pooled-kmc', (p) => `#include "${inside('pooled-kmc', p)}"\nint f(void) { return K; }\n`, HEADER],
+  [
+    "the assembler's .include, split in adjacent literals of a section name",
+    'pooled-kmc',
+    (p) => inSection(splitInclude(inside('pooled-kmc', p))),
+    WORD,
+  ],
+  [
+    "the assembler's .include, its dot from a macro",
+    'pooled-kmc',
+    (p) => `#define D "."\n${inSection(splitInclude(inside('pooled-kmc', p), 'D'))}`,
+    WORD,
+  ],
+  [
+    "the assembler's .include, under a macro only KMC GCC defines",
+    'pooled-kmc',
+    (p) =>
+      `#ifdef __mips__\n#define S ${splitInclude(inside('pooled-kmc', p))}\n#else\n#define S ".data"\n#endif\n${inSection('S')}`,
+    WORD,
+  ],
+  [
+    "the assembler's .include, split in adjacent literals of a section name",
+    'command-agbcc',
+    (p) => inSection(splitInclude(p)),
+    WORD,
+  ],
 ];
 
-describe.each(['agbcc', 'gcc272', 'kmc', 'mwcc'] as const)('%s', (pipeline) => {
+describe.each(['agbcc', 'gcc272', 'kmc', 'mwcc', 'pooled-kmc', 'command-agbcc'] as const)('%s', (pipeline) => {
   const cases = CASES.filter(([, p]) => p === pipeline);
   test.runIf(HAVE[pipeline]).each(cases.map(([what, , tuFor, contents]) => [what, tuFor, contents] as const))(
     'compiles a TU that reads a file afresh on every run: %s',
@@ -209,8 +268,9 @@ describe.each(['agbcc', 'gcc272', 'kmc', 'mwcc'] as const)('%s', (pipeline) => {
   );
 });
 
-// CodeWarrior preprocesses inside its own compile, so its TU's text is read instead.
-describe.each(['agbcc', 'gcc272', 'kmc'] as const)('%s', (pipeline) => {
+// CodeWarrior preprocesses inside its own compile and a command's preprocessor reports nothing, so
+// their TU's text is read instead.
+describe.each(['agbcc', 'gcc272', 'kmc', 'pooled-kmc'] as const)('%s', (pipeline) => {
   test.runIf(HAVE[pipeline])(
     'keeps a TU whose prose names a header: the compile says it read none',
     async () => {
@@ -221,6 +281,53 @@ describe.each(['agbcc', 'gcc272', 'kmc'] as const)('%s', (pipeline) => {
       const warm = await compileIn(store, pipeline, tu);
       expect(warm.stats).toMatchObject({ hit: 1 });
       expect(warm.out).toBe(cold.out);
+    },
+    BUDGET,
+  );
+});
+
+// A stored rejection carries the compiler's whole diagnostic, which the stillborn rule reads. A GCC
+// that quotes the source line an error is on reads that line from the file the line is NAMED after:
+// agbcc's cpp reads the TU on stdin under the name `c.c`, so with no `-fno-diagnostics-show-caret`
+// it quoted whatever `./c.c` held in the process's working directory, a file no key holds.
+describe('agbcc', () => {
+  test.runIf(HAVE.agbcc)(
+    "serves a cpp rejection as a fresh compile words it, whatever the working directory's c.c holds",
+    async () => {
+      const store = scratch('candcache-reads-store-');
+      const cwd = scratch('candcache-reads-cwd-');
+      const tu = 'int f(int x) { return x; }\n#error boom\n';
+      const home = process.cwd();
+      process.chdir(cwd);
+      try {
+        const cold = await compileIn(store, 'agbcc', tu);
+        expect(cold.stats).toMatchObject({ failStored: 1 });
+        writeFileSync(join(cwd, 'c.c'), 'int f(int x) { return x; }\nTHIS LINE IS FROM ./c.c\n');
+        const warm = await compileIn(store, 'agbcc', tu);
+        expect(warm.stats).toMatchObject({ failHit: 1 });
+        const off = await compileIn(store, 'agbcc', tu, 'off');
+        expect(off.out).toMatch(/^threw cpp failed: .*#error boom/);
+        expect(warm.out).toBe(off.out);
+      } finally {
+        process.chdir(home);
+      }
+    },
+    BUDGET,
+  );
+
+  test.runIf(HAVE.agbcc)(
+    'compiles a cpp rejection under a #line naming a file afresh on every run',
+    async () => {
+      const store = scratch('candcache-reads-store-');
+      const file = join(scratch('candcache-reads-file-', '/tmp'), 'x.c');
+      const tu = `#line 1 "${file}"\nint f(int x) { return x; }\n#error boom\n`;
+      writeFileSync(file, 'line one\nOLD LINE TWO\n');
+      const cold = await compileIn(store, 'agbcc', tu);
+      expect(cold.stats.failStored, 'the first run kept a rejection').toBeUndefined();
+      writeFileSync(file, 'line one\nToo many errors... goodbye\n');
+      const warm = await compileIn(store, 'agbcc', tu);
+      expect(warm.stats).toMatchObject({ refusedKeys: 1 });
+      expect(warm.out).toBe((await compileIn(store, 'agbcc', tu, 'off')).out);
     },
     BUDGET,
   );

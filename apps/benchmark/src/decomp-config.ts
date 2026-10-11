@@ -27,9 +27,10 @@ import {
   GCC272_TOOLCHAIN,
   GCC_KMC_TOOLCHAIN,
   IDO_TOOLCHAIN,
+  KMC_REPORT_FLAGS,
   MWCC_PPC_TOOLCHAIN,
   TOOLCHAIN,
-  compileCandKmc,
+  compileCandKmcReported,
   compileCandPpc,
   gcc272Native,
   isMwccToolchainId,
@@ -117,7 +118,8 @@ export function nativeScoreCommand(id: ToolchainId): string | undefined {
 }
 
 /** The pooled pair's C compiles behind the candidate store, keyed as compile/docker-cache.ts says.
- *  A Pascal candidate goes straight to the toolchain's own compiler, which refuses it. */
+ *  A Pascal candidate goes straight to the toolchain's own compiler, which refuses it. KMC GCC's
+ *  own preprocessor reports what it read; CodeWarrior's reports nothing, so its TU's text is read. */
 export const pooledKmcSpec = (flags: readonly string[]): DockerCacheSpec => ({
   label: 'bench-pooled-kmc',
   native: kmcNative,
@@ -125,7 +127,7 @@ export const pooledKmcSpec = (flags: readonly string[]): DockerCacheSpec => ({
   image: GCC_KMC_TOOLCHAIN.image,
   pool: kmcPoolCfg().name,
   dirs: [GCC_KMC_TOOLCHAIN.dir],
-  words: [...GCC_KMC_TOOLCHAIN.harnessFlags, ...flags],
+  words: [...GCC_KMC_TOOLCHAIN.harnessFlags, ...flags, ...KMC_REPORT_FLAGS],
   prelude: C_TYPEDEFS,
   hostCommands: [],
   sources: DOCKER_COMPILE_SOURCES,
@@ -146,7 +148,11 @@ export const pooledMwccSpec = (flags: readonly string[]): DockerCacheSpec => ({
   refused: mwccRefused,
   gnuAs: false,
 });
-const pooledKmc = dockerCachedBy(pooledKmcSpec, (flags: readonly string[]) => (tu) => compileCandKmc(tu, flags));
+const pooledKmc = dockerCachedBy(pooledKmcSpec, (flags: readonly string[]) => (tu, _sym, seen) => {
+  const { obj, report } = compileCandKmcReported(tu, flags);
+  seen.report = report;
+  return obj;
+});
 const pooledMwcc = dockerCachedBy(
   pooledMwccSpec,
   (flags: readonly string[]) => (tu) => compileCandPpc('mwcc_242_81', tu, flags),

@@ -1,9 +1,17 @@
 // What a candidate TU reads besides its own bytes (src/candcache-reads.ts), read off its text: the
 // half a preprocessor's dependency list cannot show, and the whole answer where there is no list.
 // The real compiles that pin the list half are apps/benchmark/test/candcache-reads.test.ts.
-import { describe, expect, test } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, describe, expect, test } from 'vitest';
 
-import { type PreprocessorReport, candidateCacheRefusal, candidateReadsRefusal } from '../../src/candcache-reads';
+import {
+  type PreprocessorReport,
+  candidateCacheRefusal,
+  candidateReadsRefusal,
+  cppReport,
+} from '../../src/candcache-reads';
 
 const H = '/tmp/h/k.h';
 const unreported = (tu: string): string | undefined => candidateReadsRefusal(tu, { gnuAs: true });
@@ -49,10 +57,80 @@ describe('a TU with no preprocessor report', () => {
     expect(unreported(tu)).toBeUndefined();
   });
 
+  test.each([
+    ['#line', `#line 1 "${H}"\n#error boom\n`],
+    ['a linemarker', `# 1 "${H}"\n#error boom\n`],
+    ['a linemarker with no space', `#12 "${H}"\n`],
+    ['a comment before line', `#/* c */line 3 "${H}"\n`],
+    ['a backslash-newline after the #', `#\\\nline 3 "${H}"\n`],
+    ['the digraph for #', `%:line 3 "${H}"\n`],
+    ['the trigraph for #', `??=line 3 "${H}"\n`],
+  ])('is refused when it names its lines after a file a diagnostic may quote: %s', (_name, tu) => {
+    expect(unreported(tu)).toBe('the-TU-may-read-a-file');
+  });
+
+  test('is kept when `line` is only an identifier', () => {
+    expect(unreported('int line, lines; int f(int line) { return line; }\n#if 1\n#endif\n')).toBeUndefined();
+  });
+
   test('refuses a directive name written in prose, which costs that key only', () => {
     expect(unreported('/* a comment mentioning\n#include "k.h"\nspanning lines */\nint f(void);\n')).toBe(
       'the-TU-may-read-a-file',
     );
+  });
+});
+
+describe("a GNU cpp's report", () => {
+  const roots: string[] = [];
+  afterAll(() => {
+    for (const r of roots.splice(0)) {
+      rmSync(r, { recursive: true, force: true });
+    }
+  });
+  /** A directory holding a preprocessor's output `c.i` and, unless null, its dependency list `c.d`. */
+  const written = (list: string | null): { d: string; i: string } => {
+    const dir = mkdtempSync(join(tmpdir(), 'candcache-report-'));
+    roots.push(dir);
+    const out = { d: join(dir, 'c.d'), i: join(dir, 'c.i') };
+    writeFileSync(out.i, 'int f(int x) { return x; }\n');
+    if (list !== null) {
+      writeFileSync(out.d, list);
+    }
+    return out;
+  };
+  const refusalOf = (report: PreprocessorReport): string | undefined =>
+    candidateReadsRefusal('int f(int x) { return x; }\n', { report, gnuAs: true });
+
+  test('names no file when the list holds only the TU, given as the compiler named it', () => {
+    const { d, i } = written('cand.o: /host-tmp/x/cand.c\n');
+    expect(cppReport(d, i, '/host-tmp/x/cand.c', 'cand.o').files).toEqual([]);
+    expect(refusalOf(cppReport(d, i, '/host-tmp/x/cand.c', 'cand.o'))).toBeUndefined();
+  });
+
+  test('names no file for an empty list, which a cpp reading stdin writes', () => {
+    const { d, i } = written('');
+    expect(refusalOf(cppReport(d, i))).toBeUndefined();
+  });
+
+  test.each([
+    ['a missing list', null],
+    ['a list for another target', 'c.o: /tmp/h/k.h\n'],
+    ['a list naming a header', 'tu: /tmp/h/k.h\n'],
+    ['a list naming a file split by a backslash-newline', 'tu: \\\n /tmp/h/k.h\n'],
+  ])('keeps %s as a file read', (_name, list) => {
+    const { d, i } = written(list);
+    expect(refusalOf(cppReport(d, i))).toBe('the-TU-reads-a-file');
+  });
+
+  test('keeps a missing output as a file read', () => {
+    const { d, i } = written('tu:\n');
+    rmSync(i);
+    expect(refusalOf(cppReport(d, i))).toBe('the-TU-reads-a-file');
+  });
+
+  test('names the TU itself only by the path the compiler was handed', () => {
+    const { d, i } = written('cand.o: /host-tmp/x/cand.c /host-tmp/y/cand.c\n');
+    expect(cppReport(d, i, '/host-tmp/x/cand.c', 'cand.o').files).toEqual(['/host-tmp/y/cand.c']);
   });
 });
 
@@ -127,8 +205,42 @@ describe('what a GNU assembler reads', () => {
     ['a macro', 'int x __attribute__((section(".data\\n.macro m a\\n.endm\\n"))) = 1;\n'],
     ['an .irpc', 'int x __attribute__((section(".data\\n.irpc c,ab\\n.endr\\n"))) = 1;\n'],
     ['MRI mode', 'int x __attribute__((section(".data\\n.mri 1\\n"))) = 1;\n'],
+    // GAS takes a directive in either case.
+    ['an upper-case .INCBIN', 'int x __attribute__((section(".data\\n.INCBIN \\"/tmp/h/e.bin\\"\\n"))) = 1;\n'],
+    ['a hex-escaped dot', 'int x __attribute__((section(".data\\n\\x2eincbin \\"/tmp/h/e.bin\\"\\n"))) = 1;\n'],
+    [
+      'a dot in a literal of its own',
+      'int x __attribute__((section(".data\\n." "inc" "lude \\"/tmp/h/a.s\\""))) = 1;\n',
+    ],
   ])('refuses a string that names a file directive, as a section name copies it out: %s', (_name, text) => {
     expect(reported(text, NOTHING_READ(text))).toBe('the-TU-hands-its-assembler-text');
+  });
+
+  // With no preprocessor output, the pieces of a string can sit apart in the text: a macro holds
+  // one, or `#` stringizes another out of tokens.
+  test.each([
+    ['adjacent literals', 'int x __attribute__((section(".data\\n." "inc" "lude \\"/tmp/h/a.s\\""))) = 1;\n'],
+    [
+      'a macro holding the dot',
+      '#define D "."\nint x __attribute__((section(".data\\n" D "inc" "lude \\"/tmp/h/a.s\\""))) = 1;\n',
+    ],
+    [
+      'a stringized section name',
+      '#define S(t) #t\n#define N(t) S(t)\nint x __attribute__((section(N(.data)))) = 1;\n',
+    ],
+    ['a C23 attribute', 'int x [[gnu::section(".data.x")]] = 1;\n'],
+    ['a C23 attribute in digraphs', 'int x <:<:gnu::section(".data.x"):>:> = 1;\n'],
+    ['_Pragma', '_Pragma("GCC visibility push(default)")\n'],
+    ['#ident', '#ident "x"\n'],
+  ])('refuses a TU with no report that copies a string into the assembly: %s', (_name, tu) => {
+    expect(unreported(tu)).toBe('the-TU-hands-its-assembler-text');
+  });
+
+  test.each([
+    ['an attribute and no string text', 'int x __attribute__((aligned(4))) = 1;\n#define T 3\n'],
+    ['string text and nothing that copies it out', 'const char *s = "a.out\\n";\n'],
+  ])('keeps a TU with no report: %s', (_name, tu) => {
+    expect(unreported(tu)).toBeUndefined();
   });
 
   test.each([

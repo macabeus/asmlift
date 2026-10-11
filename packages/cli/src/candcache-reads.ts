@@ -13,13 +13,17 @@
 //     out of pieces;
 //   - with no list (a preprocessor inside the compiler, or one that stopped on an error), any
 //     directive that can name a file. A directive's name is never macro-expanded or pasted, so it
-//     is in the text as a whole word, at most broken by line splices or spelled with a UCN;
+//     is in the text as a whole word, at most broken by line splices or spelled with a UCN. That
+//     includes `#line` and a linemarker: a GCC-family compiler quoting a source line in a
+//     diagnostic reads it from the file the line's NAME names;
 //   - what a GNU assembler reads: `.include` and `.incbin` open files, and its macros, an asm
 //     operand, a string escape or a string concatenation can each build those names, so inline
 //     asm with any template text is refused. A string the compiler copies into its assembly
 //     unquoted (a section name, MEASURED on agbcc and GCC 2.7.2: `section(".data\n.incbin …")`
 //     puts the `.incbin` on a line of its own) is refused when, decoded and joined, it names a
-//     directive that reads a file or builds one.
+//     directive that reads a file or builds one. Only preprocessed text holds every string whole:
+//     in raw text a macro can put the pieces apart, so there any construct that copies a string
+//     into the assembly refuses the TU when the TU has string text at all.
 import { existsSync, readFileSync } from 'node:fs';
 
 /** What a compile's preprocessor reported about a TU it ran to the end on. */
@@ -49,6 +53,9 @@ const word = (w: string): string => `(?<![A-Za-z0-9_])${[...w].join(`(?:${SPLICE
 const words = (ws: readonly string[]): RegExp => new RegExp(ws.map(word).join('|'));
 
 const HASH = String.raw`(?:#|%(?:${SPLICE})*:|\?\?=)`;
+/** A block comment, which may sit between a directive's `#` and its name. */
+const COMMENT = String.raw`/(?:${SPLICE})*\*[\s\S]*?\*(?:${SPLICE})*/`;
+const GAP = String.raw`(?:[ \t\f\v]|${SPLICE}|${COMMENT})*`;
 const PASTE = new RegExp(`${HASH}(?:${SPLICE})*${HASH}`);
 const PROBE = words(['__has_include', '__has_include_next', '__has_embed']);
 const PATH_OR_CLOCK = words([
@@ -63,12 +70,23 @@ const PATH_OR_CLOCK = words([
 /** The directives that open a file — `include`, `include_next`, `import`, `embed` — and GCC's
  *  `#pragma GCC dependency`, whose diagnostics depend on one. */
 const FILE_DIRECTIVE = words(['include', 'include_next', 'import', 'embed', 'dependency']);
+/** `#line` or a GNU linemarker (`# 12 "name"`): what follows is named after a file the compile may
+ *  read to quote a line of it. */
+const LINE_DIRECTIVE = new RegExp(`${HASH}${GAP}(?:${word('line')}|[0-9])`);
 const UCN = new RegExp(String.raw`(?:\\|\?\?/)(?:${SPLICE})*[uU]`);
 const ASM = words(['asm', '__asm', '__asm__']);
 /** An asm statement whose template is empty: `asm("")`, `__asm__ volatile("" ::: "memory")`. */
 const EMPTY_ASM =
   /(?<![A-Za-z0-9_])(?:__asm__|__asm|asm)\s*(?:(?:__volatile__|__volatile|volatile|inline|goto)\s*)*\(\s*""\s*(?=[:)])/g;
 
+/** What copies a string into the assembly besides inline asm: an attribute (a section or alias
+ *  name; GNU, Microsoft or C23 spelling), a pragma, `#ident` and `#sccs`. */
+const AS_STRING_CONSTRUCT = new RegExp(
+  [
+    words(['__attribute__', '__attribute', '__declspec', '_Pragma', 'pragma', 'ident', 'sccs']).source,
+    `(?:\\[|<:)${GAP}(?:\\[|<:)`,
+  ].join('|'),
+);
 /** A directive that reads a file, or a GNU assembler macro, loop or mode that can build one. */
 const AS_FILE_DIRECTIVE = /\.\s*(?:inc|macro|irp|mri)/i;
 const C_ESCAPE = /\\(?:x([0-9a-fA-F]+)|([0-7]{1,3})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|([\s\S]))/g;
@@ -96,15 +114,35 @@ const decoded = (s: string): string =>
 const stringText = (text: string): string =>
   [...text.matchAll(/'(?:\\.|[^'\\\n])*'|"((?:\\.|[^"\\\n])*)"/g)].map((m) => decoded(m[1] ?? '')).join('');
 
+/** Whether raw text can make string text: a string literal, or a `#` that is not the first token of
+ *  its line, which a macro body stringizes with. */
+function hasStringText(text: string): boolean {
+  if (text.includes('"')) {
+    return true;
+  }
+  const directive = new RegExp(`^[ \\t\\f\\v]*${HASH}`);
+  const hash = new RegExp(HASH);
+  return text
+    .replace(new RegExp(SPLICE, 'g'), '')
+    .split(/\r\n|\r|\n/)
+    .some((l) => hash.test(l.replace(directive, '')));
+}
+
 /** Whether a GNU assembler fed `text`'s compile may read a file: inline asm with a template, or a
- *  string naming a file directive. `preprocessed` text holds no comment or splice, so its strings are
- *  read alone; raw text is read whole, splices joined. */
+ *  string naming a file directive. `preprocessed` text holds no comment or splice, and every string
+ *  in it is whole, so its strings are read decoded and joined; raw text is read whole, splices
+ *  joined, and refused outright when it copies a string into the assembly and has string text. */
 function assemblerMayReadFile(text: string, preprocessed: boolean): boolean {
   if (ASM.test(text.replace(EMPTY_ASM, ''))) {
     return true;
   }
-  const strings = preprocessed ? stringText(text) : decoded(text.replace(new RegExp(SPLICE, 'g'), ''));
-  return AS_FILE_DIRECTIVE.test(strings);
+  if (preprocessed) {
+    return AS_FILE_DIRECTIVE.test(stringText(text));
+  }
+  return (
+    (AS_STRING_CONSTRUCT.test(text) && hasStringText(text)) ||
+    AS_FILE_DIRECTIVE.test(decoded(text.replace(new RegExp(SPLICE, 'g'), '')))
+  );
 }
 
 /** The reason no answer for `tu` may be stored, whatever its compile reports, or undefined: what a
@@ -132,7 +170,7 @@ export function candidateReadsRefusal(tu: string, { report, gnuAs }: ReadsCheck)
     return before;
   }
   if (report === undefined) {
-    if (FILE_DIRECTIVE.test(tu) || UCN.test(tu)) {
+    if (FILE_DIRECTIVE.test(tu) || LINE_DIRECTIVE.test(tu) || UCN.test(tu)) {
       return 'the-TU-may-read-a-file';
     }
   } else if (report.files.length > 0) {
@@ -146,13 +184,26 @@ export function candidateReadsRefusal(tu: string, { report, gnuAs }: ReadsCheck)
 
 const DEP_TARGET = 'tu';
 
-/** The flags that make a GNU cpp write its dependency list to `depPath`. */
-export const cppReportFlags = (depPath: string): string[] => ['-MD', '-MF', depPath, '-MT', DEP_TARGET];
+/** The flags under which a GNU cpp reports everything it read: its dependency list, written to
+ *  `depPath`, and messages that quote no source line, since a quote is read from the file a line's
+ *  name names, which no list shows. */
+export const cppReportFlags = (depPath: string): string[] => [
+  '-MD',
+  '-MF',
+  depPath,
+  '-MT',
+  DEP_TARGET,
+  '-fno-diagnostics-show-caret',
+];
 
-/** The report of a GNU cpp that ran to the end with `cppReportFlags(depPath)`, writing `iPath` from
- *  `tuPath` (undefined: from stdin, which its list leaves out). A list in any other shape names a
- *  file this cannot read, and is kept as one. */
-export function cppReport(depPath: string, iPath: string, tuPath?: string): PreprocessorReport {
+/** The report of a GNU cpp that ran to the end writing its dependency list for `target` to
+ *  `depPath` (`cppReportFlags`) and its text to `iPath`, from `tuPath` (undefined: from stdin, which
+ *  its list leaves out). A list in any other shape names a file this cannot read, and is kept as
+ *  one. */
+export function cppReport(depPath: string, iPath: string, tuPath?: string, target = DEP_TARGET): PreprocessorReport {
+  if (!existsSync(iPath)) {
+    return { files: ['<no preprocessor output>'], text: '' };
+  }
   const text = readFileSync(iPath, 'utf8');
   if (!existsSync(depPath)) {
     return { files: ['<no dependency list>'], text };
@@ -163,10 +214,10 @@ export function cppReport(depPath: string, iPath: string, tuPath?: string): Prep
   if (list === '') {
     return { files: [], text };
   }
-  if (!list.startsWith(`${DEP_TARGET}:`)) {
+  if (!list.startsWith(`${target}:`)) {
     return { files: [list], text };
   }
-  const files = (list.slice(DEP_TARGET.length + 1).match(/(?:\\.|[^\s\\])+/g) ?? [])
+  const files = (list.slice(target.length + 1).match(/(?:\\.|[^\s\\])+/g) ?? [])
     .map((f) => f.replace(/\\(.)/g, '$1').replaceAll('$$', '$'))
     .filter((f) => f !== tuPath);
   return { files, text };

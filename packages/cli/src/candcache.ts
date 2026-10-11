@@ -388,8 +388,10 @@ export function noteKeyRefused(label: string, reason: string): void {
 /** The compile ENVIRONMENT gcc/cpp read whether or not a command line names it. `CPATH` and
  *  `C_INCLUDE_PATH` are honoured even under `-nostdinc` (MEASURED: `CPATH=inc arm-none-eabi-cpp
  *  -nostdinc` resolves `#include "g0.h"` and its value reaches the object), so every one of these
- *  is an input to every candidate compile. ONE list: both pipelines compile with the same
- *  compilers, and two copies of the answer is how the tenth variable gets added to one of them. */
+ *  is an input to every candidate compile. The rest word a stored rejection: the locale picks a
+ *  message's language and its quote marks, and the others its colours, links, fix-it lines and the
+ *  width of a quoted source line. ONE list: both pipelines compile with the same compilers, and two
+ *  copies of the answer is how the tenth variable gets added to one of them. */
 export const COMPILE_ENV = [
   'CPATH',
   'C_INCLUDE_PATH',
@@ -400,6 +402,16 @@ export const COMPILE_ENV = [
   'SOURCE_DATE_EPOCH',
   'DEPENDENCIES_OUTPUT',
   'SUNPRO_DEPENDENCIES',
+  'LANG',
+  'LANGUAGE',
+  'LC_ALL',
+  'LC_CTYPE',
+  'LC_MESSAGES',
+  'GCC_COLORS',
+  'GCC_URLS',
+  'TERM_URLS',
+  'GCC_EXTRA_DIAGNOSTIC_OUTPUT',
+  'COLUMNS',
 ];
 
 /** The fixed TU every pipeline's stamp probe compiles — twice, in two different directories, so

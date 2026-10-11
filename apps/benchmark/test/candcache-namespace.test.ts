@@ -260,6 +260,14 @@ describe('hole 5 — the compile environment is an input to every candidate comp
     }
   });
 
+  test('the locale moves the digest — it words the rejections the store keeps', () => {
+    for (const v of ['LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES']) {
+      const c = withEnv(v, 'C', () => candCacheStaticStamp(CANONICAL, []));
+      const de = withEnv(v, 'de_DE.UTF-8', () => candCacheStaticStamp(CANONICAL, []));
+      expect(de, `${v} picks a message's language`).not.toBe(c);
+    }
+  });
+
   test('an unrelated variable does NOT move it — the list is the claim, not "the whole environment"', () => {
     const bare = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', undefined, () => candCacheStaticStamp(CANONICAL, []));
     const set = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', 'x', () => candCacheStaticStamp(CANONICAL, []));
