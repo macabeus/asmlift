@@ -68,6 +68,19 @@ const CASES: { sym: string; c: string; spelled: RegExp }[] = [
     spelled: /u32 sp0\[20\] = \{ 1, 2, 3 \};/,
   },
   {
+    // every run the initializer left out is a `.space`, ahead of the first value and between two
+    // too: spelled by designator, not as zeros, or the constructor is mostly zero (as `tail20`)
+    sym: 'gaps64',
+    c: `${USE}void gaps64(void) { u8 a[64] = {[3] = 1, [40] = 2, 3}; g(a); }`,
+    spelled: /u8 sp0\[64\] = \{ \[3\] = 1, \[40\] = 2, 3 \};/,
+  },
+  {
+    // a nested brace's short rows are interior runs as well
+    sym: 'rows',
+    c: `${USE}void rows(void) { u16 a[4][6] = {{1}, {2, 3}, {4}, {5}}; g(a); }`,
+    spelled: /u16 sp0\[24\] = \{ 1, \[6\] = 2, 3, \[12\] = 4, \[18\] = 5 \};/,
+  },
+  {
     // …while zeros the source spelled are `.word 0x0` in the image, and are spelled again
     sym: 'zeros20',
     c: `${USE}void zeros20(void) { u32 a[20] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 0, 0}; g(a); }`,

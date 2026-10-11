@@ -399,10 +399,11 @@ export interface SFn {
      *  one are deliberately left unstamped even where the offset is in hand — see the refusal at
      *  the structurer's build site for the measurement that decided it. */
     slots?: number[];
-    /** The declaration's initializer, element by element — present only on the copy the C-family
-     *  emitter prints, where l3/constinit.ts folded the block copy of the compiler's anonymous
-     *  constant image into it (`u8 sp0[16] = { … };`). Never on a tree a pass sees. */
-    init?: number[];
+    /** The declaration's initializer, element by element, null where the source left one out
+     *  (`SImage.init`) — present only on the copy the C-family emitter prints, where
+     *  l3/constinit.ts folded the block copy of the compiler's anonymous constant image into it
+     *  (`u8 sp0[16] = { … };`). Never on a tree a pass sees. */
+    init?: (number | null)[];
     /** that initializer is spelled as a string literal — the image was written as one */
     initString?: true;
   }[];
@@ -463,12 +464,13 @@ export interface SStatic {
 }
 
 /** One constant image of the compiler's own (ir/core.ts `LocalObject.anonymous`), named by its
- *  label: an integer array typed by the directives that wrote it, and the elements the source
- *  spelled — the padding after them is the zero tail C supplies, and may be shorter than `type`. */
+ *  label: an integer array typed by the directives that wrote it, and its initializer element by
+ *  element — null where the source left one out (padding in the image, which C supplies as zero),
+ *  and ending at the last one it spelled, so it may be shorter than `type`. */
 export interface SImage {
   name: string;
   type: IrType;
-  init: number[];
+  init: (number | null)[];
   /** the image was written as a string literal (`.ascii`) */
   string?: true;
 }

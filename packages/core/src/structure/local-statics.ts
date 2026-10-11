@@ -289,15 +289,25 @@ export function localStaticShapes(
         dims: [count],
         const: true,
       });
-      // Only the elements the source spelled: a zero tail spelled out is a different initializer to
-      // the compiler, which clears and stores where most of one is zero rather than copy an image
-      // (expr.c `mostly_zeros_p`) — and C supplies the rest.
-      const spelled = (obj.size - (obj.directives!.tail ?? 0)) / unit;
+      // Only the elements the source spelled: an element it left out is a hole, and the holes after
+      // the last value are dropped. Spelled out as zeros, the initializer is a different one to the
+      // compiler, which clears and stores where most of one is zero rather than copy an image
+      // (expr.c `mostly_zeros_p`) — so the printer spells the elements after a hole by designator.
+      const init: (number | null)[] = elements(obj, unit, signed);
+      for (const [from, n] of obj.directives!.gaps ?? []) {
+        if (from % unit !== 0 || n % unit !== 0) {
+          return say(`whose padding at byte ${from} does not fall on its ${unit}-byte elements`);
+        }
+        init.fill(null, from / unit, (from + n) / unit);
+      }
+      while (init.length > 0 && init[init.length - 1] === null) {
+        init.pop();
+      }
       images.push({
         name: obj.symbol,
         type: T.array(T.int(unit * 8, signed), count),
-        init: elements(obj, unit, signed).slice(0, spelled),
-        ...(obj.directives!.string && unit === 1 ? { string: true as const } : {}),
+        init,
+        ...(obj.directives!.string && unit === 1 && !init.includes(null) ? { string: true as const } : {}),
       });
       continue;
     }

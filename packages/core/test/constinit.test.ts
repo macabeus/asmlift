@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
+import { emitCFamily } from '../src/backend/cfamily';
 import { pascalBackend } from '../src/backend/pascal';
 import { T } from '../src/ir/types';
 import type { Expr, SFn, SImage, Stmt } from '../src/l3/ast';
@@ -19,7 +20,7 @@ const copy = (dst: string, src: string, n: number): Stmt => ({
   k: 'exprstmt',
   value: { k: 'call', fn: 'memcpy', args: [v(dst), { k: 'addr', name: src }, c(n)] },
 });
-const image = (init: number[], width = 1, signed = false, extra: Partial<SImage> = {}): SImage => ({
+const image = (init: (number | null)[], width = 1, signed = false, extra: Partial<SImage> = {}): SImage => ({
   name: '.LC0',
   type: T.array(T.int(8 * width, signed), init.length),
   init,
@@ -104,6 +105,17 @@ test('an image written as a string literal is spelled as one', () => {
   expect(
     cBackend.emit(fn([copy('sp0', '.LC0', 3), use(v('sp0'))], [{ name: 'sp0', type: T.array(T.u(8), 4) }], str)),
   ).toContain('    u8 sp0[3] = "hi";\n');
+});
+
+test('an element the source left out is a hole, and the next one is spelled by designator', () => {
+  // `u8 a[8] = {[2] = 1, 2, [6] = 3}`: agbcc writes `.space 2; .byte 1; .byte 2; .space 3; .byte 3;
+  // .space 1`. Spelled as zeros, most of the constructor is zero and agbcc clears and stores instead
+  const holed = image([null, null, 1, 2, null, null, 3], 1, false, { type: T.array(T.u(8), 8) });
+  const wide = [{ name: 'sp0', type: T.array(T.u(8), 8) }];
+  const sfn = fn([copy('sp0', '.LC0', 8), use(v('sp0'))], wide, holed);
+  expect(cBackend.emit(sfn)).toContain('    u8 sp0[8] = { [2] = 1, 2, [6] = 3 };\n');
+  // C++ has no array designator: the holes are the zeros they hold
+  expect(emitCFamily('void f()', sfn, undefined, false)).toContain('    u8 sp0[8] = { 0, 0, 1, 2, 0, 0, 3 };\n');
 });
 
 test.each<[string, SFn, string]>([

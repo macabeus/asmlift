@@ -91,7 +91,7 @@ interface Fold {
   at: number;
   local: string;
   type: IrType;
-  init: number[];
+  init: (number | null)[];
   string: boolean;
 }
 
@@ -191,7 +191,7 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
     at,
     local,
     type: { kind: 'array', elem: own, count },
-    init: image.init.map((v) => resign(v, elem.width / 8, own.signed)),
+    init: image.init.map((v) => (v === null ? null : resign(v, elem.width / 8, own.signed))),
     string: image.string === true && elem.width === 8,
   };
 }

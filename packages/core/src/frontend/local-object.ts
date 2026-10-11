@@ -287,7 +287,7 @@ function readGasDefinition(
   const widths = new Set<number>();
   let negative = false;
   const strings = new Set<boolean>();
-  let valued = 0;
+  const gaps: [number, number][] = [];
   const first = lines[at].replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
   for (let i = at; i < lines.length; i++) {
     const line = i === at ? first : lines[i];
@@ -311,9 +311,16 @@ function readGasDefinition(
     if ('address' in b) {
       return refused(`whose initializer holds the address '${b.address}' — a relocation inside the object`);
     }
+    if (b.width === null && b.bytes.length > 0 && b.bytes.every((x) => x === 0)) {
+      const last = gaps[gaps.length - 1];
+      if (last !== undefined && last[0] + last[1] === bytes.length) {
+        last[1] += b.bytes.length;
+      } else {
+        gaps.push([bytes.length, b.bytes.length]);
+      }
+    }
     bytes.push(...b.bytes);
     if (b.width !== null) {
-      valued = bytes.length;
       widths.add(b.width);
       negative ||= b.negative && b.width < 4;
       strings.add(b.string);
@@ -350,7 +357,7 @@ function readGasDefinition(
       ...(unit !== undefined ? { unit } : {}),
       negative: unit !== undefined && negative,
       string: strings.size === 1 && strings.has(true),
-      ...(valued > 0 && valued < bytes.length ? { tail: bytes.length - valued } : {}),
+      ...(widths.size > 0 && gaps.length > 0 ? { gaps } : {}),
     },
   };
 }

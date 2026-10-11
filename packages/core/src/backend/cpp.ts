@@ -223,7 +223,7 @@ export function cppBackend(spec: CppFnSpec, floatSlots: FloatSlots | undefined):
       const paramList = spec.params.map((p) => declareCpp(p.type, p.name)).join(', ');
       const decls = classDecls(spec, paramList);
       const signature = `${spellType(spec.retType)} ${spec.cls ? spec.cls + '::' : ''}${spec.method}(${paramList})`;
-      return (decls ? decls + '\n' : '') + emitCFamily(signature, fn, leaf);
+      return (decls ? decls + '\n' : '') + emitCFamily(signature, fn, leaf, false);
     },
     comment: cComment, // C++ shares C's block-comment spelling
   };

@@ -693,7 +693,7 @@ function legalizePointerWrites(fn: SFn): SFn {
 /** The body of a C-family function: local declarations + statements, one string per line. The
  *  SIGNATURE (return type + name + params, plus any C++ scope/`this`/mangling) is the caller's —
  *  that is the language-divergent part each backend owns. */
-function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
+function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean): string[] {
   const fn = legalizePointerWrites(fn0);
   // The legalization env: every printed var's declared type and pointee volatility, from the SAME
   // params/locals the emitted declarations come from — so the printer judges exactly the C the
@@ -712,7 +712,9 @@ function cFamilyBody(fn0: SFn, leaf?: LeafHook): string[] {
     // placement every declaration position in this backend uses: a local can carry an array type
     // — the storage extent a frame object pins — and C puts those extents after the name.
     const head = `    ${l.volatile || l.pointeeVolatile ? 'volatile ' : ''}${cDeclare(l.type, l.name)}`;
-    lines.push(...(l.init === undefined ? [`${head};`] : initialized(head, l.type, l.init, l.initString === true)));
+    lines.push(
+      ...(l.init === undefined ? [`${head};`] : initialized(head, l.type, l.init, l.initString === true, designators)),
+    );
   }
   for (const s of fn.body) {
     lines.push(...printStmt(s, '    ', vt, leaf));
@@ -752,29 +754,39 @@ function stringLiteral(init: readonly number[]): string {
 function staticDefinition(st: SStatic): string[] {
   const aligned = st.align === undefined ? '' : ` __attribute__((aligned(${st.align})))`;
   const head = `    static ${st.const ? 'const ' : ''}${cDeclare(st.type, st.name)}${aligned}`;
-  return st.init === undefined ? [`${head};`] : initialized(head, st.type, st.init, st.string === true);
+  return st.init === undefined ? [`${head};`] : initialized(head, st.type, st.init, st.string === true, false);
 }
 
 /** A declaration `head` of `type` with its initializer: a string literal, one scalar, or an
- *  array's elements laid out eight to a line. */
-function initialized(head: string, type: IrType, init: readonly number[], string: boolean): string[] {
+ *  array's elements laid out eight to a line. An element left out (null) is skipped and the next
+ *  one spelled by designator, `[k] = v` — or, where the language has none (C++), spelled as the
+ *  zero it is. */
+function initialized(
+  head: string,
+  type: IrType,
+  init: readonly (number | null)[],
+  string: boolean,
+  designators: boolean,
+): string[] {
+  const whole = init.map((v) => v ?? 0);
   if (string) {
-    return [`${head} = ${stringLiteral(init)};`];
+    return [`${head} = ${stringLiteral(whole)};`];
   }
   if (type.kind !== 'array') {
-    return [`${head} = ${initElement(init[0])};`];
+    return [`${head} = ${initElement(whole[0])};`];
   }
-  if (init.length <= 8) {
-    return [`${head} = { ${init.map(initElement).join(', ')} };`];
+  const items: string[] = [];
+  init.forEach((v, i) => {
+    if (v !== null || !designators) {
+      items.push(init[i - 1] === null && designators ? `[${i}] = ${initElement(v!)}` : initElement(v ?? 0));
+    }
+  });
+  if (items.length <= 8) {
+    return [`${head} = { ${items.join(', ')} };`];
   }
   const rows: string[] = [];
-  for (let i = 0; i < init.length; i += 8) {
-    rows.push(
-      `        ${init
-        .slice(i, i + 8)
-        .map(initElement)
-        .join(', ')},`,
-    );
+  for (let i = 0; i < items.length; i += 8) {
+    rows.push(`        ${items.slice(i, i + 8).join(', ')},`);
   }
   return [`${head} = {`, ...rows, '    };'];
 }
@@ -788,8 +800,9 @@ function structDecls(fn: SFn): string[] {
   return (fn.structs ?? []).map((s) => renderStructDecl(s.name, s.fields));
 }
 
-/** Assemble a full C-family function from a caller-supplied signature line and the shared body. */
-export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook): string {
+/** Assemble a full C-family function from a caller-supplied signature line and the shared body.
+ *  `designators`: the language spells an array element by index in an initializer (C, not C++). */
+export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook, designators = true): string {
   // The declaration list is put into the target's own frame order, and a pointer cell's integer
   // uses converted (l3/ptrcell.ts), HERE — in the shared C-family assembler, reached only from
   // `cBackend.emit` and `cppBackend(...).emit`, so both C-family backends print them and no `.emit(`
@@ -799,7 +812,7 @@ export function emitCFamily(signature: string, fn0: SFn, leaf?: LeafHook): strin
   const fn = orderSlotLocals(legalizePointerCells(foldConstantImages(fn0)));
   const decls = structDecls(fn);
   const preamble = decls.length ? decls.join('\n') + '\n' : '';
-  return preamble + [`${signature} {`, ...cFamilyBody(fn, leaf), '}'].join('\n') + '\n';
+  return preamble + [`${signature} {`, ...cFamilyBody(fn, leaf, designators), '}'].join('\n') + '\n';
 }
 
 // One C-family comment spelling, shared by the C and C++ backends. A `*` followed by `/`
