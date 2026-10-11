@@ -117,6 +117,10 @@ export interface LocalObjectDirectives {
   /** every value directive writes a string (`.ascii`), as the compiler writes a string literal —
    *  whole, or as the elements of an array or struct of strings */
   string: boolean;
+  /** the bytes of padding after the last value directive, when there are any: in an array, the
+   *  elements its brace initializer left out — the compiler writes every element the source spelled,
+   *  zero or not, as a value, and the rest as one `.space` (varasm.c `output_constructor`) */
+  tail?: number;
 }
 
 /** The function-scope statics a function DEFINES, keyed by {@link LocalObject.symbol} — the object a

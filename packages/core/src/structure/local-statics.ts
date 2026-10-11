@@ -289,10 +289,14 @@ export function localStaticShapes(
         dims: [count],
         const: true,
       });
+      // Only the elements the source spelled: a zero tail spelled out is a different initializer to
+      // the compiler, which clears and stores where most of one is zero rather than copy an image
+      // (expr.c `mostly_zeros_p`) — and C supplies the rest.
+      const spelled = (obj.size - (obj.directives!.tail ?? 0)) / unit;
       images.push({
         name: obj.symbol,
         type: T.array(T.int(unit * 8, signed), count),
-        init: elements(obj, unit, signed),
+        init: elements(obj, unit, signed).slice(0, spelled),
         ...(obj.directives!.string && unit === 1 ? { string: true as const } : {}),
       });
       continue;

@@ -287,6 +287,7 @@ function readGasDefinition(
   const widths = new Set<number>();
   let negative = false;
   const strings = new Set<boolean>();
+  let valued = 0;
   const first = lines[at].replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
   for (let i = at; i < lines.length; i++) {
     const line = i === at ? first : lines[i];
@@ -312,6 +313,7 @@ function readGasDefinition(
     }
     bytes.push(...b.bytes);
     if (b.width !== null) {
+      valued = bytes.length;
       widths.add(b.width);
       negative ||= b.negative && b.width < 4;
       strings.add(b.string);
@@ -348,6 +350,7 @@ function readGasDefinition(
       ...(unit !== undefined ? { unit } : {}),
       negative: unit !== undefined && negative,
       string: strings.size === 1 && strings.has(true),
+      ...(valued > 0 && valued < bytes.length ? { tail: bytes.length - valued } : {}),
     },
   };
 }

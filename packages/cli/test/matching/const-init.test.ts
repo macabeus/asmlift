@@ -61,6 +61,19 @@ const CASES: { sym: string; c: string; spelled: RegExp }[] = [
     spelled: /u8 sp0\[9\] = "hi there";/,
   },
   {
+    // the elements the initializer left out are a `.space` in the image, and stay left out: spelled
+    // as seventeen zeros, the constructor is mostly zero and agbcc clears and stores instead
+    sym: 'tail20',
+    c: `${USE}void tail20(void) { u32 a[20] = {1, 2, 3}; g(a); }`,
+    spelled: /u32 sp0\[20\] = \{ 1, 2, 3 \};/,
+  },
+  {
+    // …while zeros the source spelled are `.word 0x0` in the image, and are spelled again
+    sym: 'zeros20',
+    c: `${USE}void zeros20(void) { u32 a[20] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 0, 0, 0}; g(a); }`,
+    spelled: /u32 sp0\[20\] = \{\n {8}1, 2, 3, 4, 5, 6, 7, 8,\n {8}9, 0, 0, 0,\n {4}\};/,
+  },
+  {
     // read back by element: the local keeps the element the read was spelled against
     sym: 'pick',
     c: 'u8 pick(s32 i) { u8 a[6] = {9, 8, 7, 6, 5, 4}; return a[i]; }',

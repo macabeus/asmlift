@@ -96,7 +96,8 @@ test('agbcc: the directives say the element width, a narrow negative says signed
   expect(dir('w.19')).toEqual({ align: 4, unit: 4, negative: false, string: false });
   expect(dir('str.31')).toEqual({ align: 4, unit: 1, negative: false, string: true }); // a string is word-aligned
   expect(dir('st.35')).toEqual({ align: 4, negative: false, string: false }); // `.byte`, `.space`, `.word`: no one width
-  expect(dir('big.39')).toEqual({ align: 2, unit: 2, negative: false, string: false }); // the `.space` tail is padding
+  // the `.space` tail is padding: the 38 elements the initializer left out
+  expect(dir('big.39')).toEqual({ align: 2, unit: 2, negative: false, string: false, tail: 76 });
   expect(readGasLocalObject('.data\n\t.balign 4\nx.1:\n\t.word 1\n', 'x.1')).toMatchObject({
     refused: 'whose alignment directive this reader does not read',
   });

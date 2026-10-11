@@ -463,7 +463,8 @@ export interface SStatic {
 }
 
 /** One constant image of the compiler's own (ir/core.ts `LocalObject.anonymous`), named by its
- *  label: an integer array typed by the directives that wrote it, and its elements. */
+ *  label: an integer array typed by the directives that wrote it, and the elements the source
+ *  spelled — the padding after them is the zero tail C supplies, and may be shorter than `type`. */
 export interface SImage {
   name: string;
   type: IrType;
