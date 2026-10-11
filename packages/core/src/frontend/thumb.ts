@@ -2838,15 +2838,19 @@ function measureThumbFrame({
   // feeds (`capturedObjectIsTheWholeFrame`, below `localArea`), not here.
   //
   // ARGUMENT registers only: the frame base merely live across a call is not evidence that it was
-  // passed to one, and for `blx rN` the TARGET register is not an argument either.
+  // passed to one, and for `blx rN` the TARGET register is not an argument either. Which registers
+  // a call reads, and which stores send a word outside the frame, are ONE rule for every escape
+  // this function asks about — `frameAddressReceivers` — so the three walks that ask differ only
+  // in the kill rule, and `heldFrameWalk` says why that one differs.
+  const mayHoldFrameAddress = registersThatMayHoldAFrameAddress(asmBlocks, entryReachable);
+  const handedOutRegs = (ins: Instr): readonly string[] =>
+    frameAddressReceivers(ins, target, calls, mayHoldFrameAddress);
   const frameBasePassedToCallee = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
     }
-    // A call through a register is no argument of it: `mov r3, sp; blx r3` branches THROUGH the
-    // frame base, it does not pass it.
-    const targetReg = calleeRegister(ins, target);
-    return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
+    const handed = handedOutRegs(ins);
+    return [...held].some(([r, off]) => off === 0 && handed.includes(r));
   });
 
   // THE FRAME BASE PUBLISHED TO MEMORY — the other way an agbcc frame address escapes, and the
@@ -2919,18 +2923,18 @@ function measureThumbFrame({
   // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
   // clause without a row is decoration until an input says otherwise.
   //
-  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, and the one place they part is worth
-  // knowing: this walk is BLOCK-LOCAL while `taint` is whole-function, so a base captured in an
-  // earlier block is excluded there and not here. The containment still holds — whole-function
-  // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
-  // and more — and the difference therefore lands on the refusing side. Pinned as a row.
-  const frameBasePublishedToMemory = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
-    if (ins.mnemonic !== 'str' || held.get(reg(ins.ops[0] ?? '')) !== 0) {
-      return false;
-    }
-    const { base } = parseAddr(ins.ops[1] ?? '');
-    return !isSpReg(base) && !held.has(reg(base));
-  });
+  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, but its BASE clause is now the same
+  // whole-function fact on both sides. The stored VALUE must be held here (block-local); the BASE
+  // must be no register that holds a frame address ANYWHERE in the function
+  // (`registersThatMayHoldAFrameAddress`), the audit's whole-function `taint` read off the
+  // instructions. So a base captured in an earlier block is refused by the licence itself, before
+  // the audit sees it. Pinned as a row.
+  const frameBasePublishedToMemory = heldFrameWalk(
+    asmBlocks,
+    entryReachable,
+    mentionsReg,
+    (ins, held) => ins.mnemonic === 'str' && handedOutRegs(ins).some((r) => held.get(r) === 0),
+  );
 
   const localArea = reservedLocalArea(asmBlocks[0]);
   const savedRegs = prologueSavedRegs(asmBlocks[0]);
@@ -3055,21 +3059,12 @@ function measureThumbFrame({
   // it), or stored as a word to memory outside the frame — the two escapes above, at any offset.
   // This walk keeps a capture addressed through (`mov r0, sp / strb r3, [r0, #8] / bl use`, sa3's
   // `sub_8060940`), because the question here is what the receiver CAN read, and the outgoing-
-  // argument analysis only lets it end a word's pending store (`escapeEvent`, below).
-  const handedOutRegs = (ins: Instr, held: ReadonlyMap<string, number>): readonly string[] => {
-    if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-      const targetReg = calleeRegister(ins, target);
-      const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
-      const words = declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? target.argRegs.length;
-      return target.argRegs.slice(0, words).filter((r) => r !== targetReg);
-    }
-    const { base } = parseAddr(ins.ops[1] ?? '');
-    return ins.mnemonic === 'str' && !isSpReg(base) && !held.has(reg(base)) ? [reg(ins.ops[0] ?? '')] : [];
-  };
+  // argument analysis only lets it end a word's pending store (`escapeEvent`, below). Its receivers
+  // are `handedOutRegs`, the rule the two licences above read too.
   const captureOffsetOf = new Map<Instr, number>();
   const escapedOffsetOf = new Map<Instr, number>();
   heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
-    const handed = handedOutRegs(ins, held);
+    const handed = handedOutRegs(ins);
     const offs = [...held].filter(([r, off]) => handed.includes(r) && off >= 0).map(([, off]) => off);
     if (offs.length > 0) {
       escapedOffsetOf.set(ins, Math.min(...offs));
@@ -3293,6 +3288,13 @@ function measureThumbFrame({
 // question, and there the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy
 // addressed through and still live at a call is an addressing copy, not an argument —
 // `EReader_Reset` is `mov r1, sp / strh r0, [r1] / … / bl` into callees that take nothing.
+// WHAT THE RECEIVER CAN READ is the third question, the outgoing-argument analysis's `escape`
+// event, and it reads the first rule: sa3's `sub_8060940` fills its object through the very copy it
+// passes (`mov r0, sp / strb r3, [r0, #8] / bl use`). What keeps `EReader_Reset` out there is the
+// receiver rule both share (`frameAddressReceivers`): a callee declared to take nothing is handed
+// no register. And an undeclared callee that took a stack word needs all four argument registers
+// written for it first, which the write rule sees, so a capture still held in one at the `bl` is
+// passed to it.
 //
 // A `bl` CLEARS EVERY HELD REGISTER, and for the callee escape that is the ABI — the argument
 // registers are the only ones it tests and the callee clobbers them. The publish escape can hold
@@ -3353,6 +3355,65 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
     return from === undefined ? null : [reg(d), from + imm(by)];
   }
   return null;
+}
+
+// Every register that holds a frame address at some instruction of live code — the shapes
+// `frameAddressDefined` carries, closed over every block at once rather than along one. So it is
+// a SUPERSET of every block's `held`, and what it EXCLUDES is the only thing it is used for: a
+// store through one of these is not a store outside the frame. A frame address reloaded from
+// memory is not followed; the store through it then counts as leaving the frame, which is the
+// imprecision `frameAddressReceivers` states.
+function registersThatMayHoldAFrameAddress(
+  asmBlocks: readonly AsmBlock[],
+  entryReachable: ReadonlySet<number>,
+): ReadonlySet<string> {
+  const held = new Map<string, number>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const b of entryReachable) {
+      for (const ins of asmBlocks[b].instrs) {
+        const defined = frameAddressDefined(ins, held);
+        if (defined !== null && !held.has(defined[0])) {
+          held.set(defined[0], 0); // the offset is not the question here, only the register
+          grew = true;
+        }
+      }
+    }
+  }
+  return new Set(held.keys());
+}
+
+// THE REGISTERS AN INSTRUCTION HANDS TO CODE OUTSIDE THIS FUNCTION — the one definition of a frame
+// address escaping, which every escape walk in `measureThumbFrame` reads, so which registers a
+// callee reads and which stores leave the frame are decided once.
+//
+// A CALL hands over the argument registers its callee's DECLARATION reads — one per 32-bit word,
+// so `g(void)` is handed nothing — and every argument register where nothing declares it. A call
+// through a register (`blx r3`, a `_call_via_r3` thunk) branches THROUGH that register; it does not
+// pass it.
+//
+// A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
+// sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
+// function): then the address is written INTO this frame, and nothing outside has been handed it.
+// A frame address the base reached through memory is the one this misses, and it counts as
+// leaving. A `strh`/`strb` hands over part of an address, which no reader can follow.
+function frameAddressReceivers(
+  ins: Instr,
+  target: TargetDescription,
+  calls: CallDeclarations,
+  mayHoldFrameAddress: ReadonlySet<string>,
+): readonly string[] {
+  if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+    const targetReg = calleeRegister(ins, target);
+    const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
+    const words = declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? target.argRegs.length;
+    return target.argRegs.slice(0, words).filter((r) => r !== targetReg);
+  }
+  if (ins.mnemonic !== 'str') {
+    return [];
+  }
+  const { base } = parseAddr(ins.ops[1] ?? '');
+  return isSpReg(base) || mayHoldFrameAddress.has(reg(base)) ? [] : [reg(ins.ops[0] ?? '')];
 }
 
 // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`

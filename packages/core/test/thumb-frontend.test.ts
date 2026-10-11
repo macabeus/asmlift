@@ -2343,21 +2343,30 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         );
       });
 
-      // THE TWO PREDICATES ARE NOT THE SAME PREDICATE, and this pins the direction their
-      // difference falls in. The pre-lift walk is BLOCK-LOCAL, so a capture taken in the entry
-      // block is not held when a later block stores through it; the audit's `taint` is
-      // whole-function, so it knows. Here the licence's publish arm ACCEPTS (`r2` is neither sp
-      // nor held in `.L2`) and the audit REFUSES (`r2` carries a frame address) — a decline, which
-      // is the only direction a containment can fail in without producing a wrong answer, and it
-      // is not luck: whole-function taint is a superset of block-local held-ness, so the audit
-      // excludes every base the licence excludes and more.
-      test('a base captured in an earlier block is refused by the audit, not the licence', () => {
+      // THE BASE CLAUSE IS WHOLE-FUNCTION, as the audit's `taint` is. A capture taken in the entry
+      // block is not HELD when a later block stores through it, and a block-local base test let
+      // the licence's publish arm accept here (`r2` neither sp nor held in `.L2`) for the audit to
+      // refuse. The base is now tested against every register that holds a frame address anywhere
+      // (`registersThatMayHoldAFrameAddress`), so the licence refuses it itself: the address is
+      // written into this frame, and nothing outside it has been handed it.
+      test('a base captured in an earlier block is the frame, and publishes nothing', () => {
         const crossBlock =
           'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
           '.L2:\n\tmov\tr1, sp\n\tstr\tr1, [r2]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-        expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(
-          /no call takes it and no word store publishes it outside this frame/,
-        );
+        expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(TWO_MODELS);
+      });
+
+      // …and the outgoing-argument analysis's `escape` event reads the same clause: the address
+      // stored through a base captured in an EARLIER block is no escape, so it ends no pending
+      // word. Read block-locally it did, and a store to [sp,#0] on every path to `five` was
+      // reported as "not stored on every path to the call" — a false fact in the decline.
+      test('…and the escape event reads the same whole-function base clause', () => {
+        const intoFrame =
+          'f:\n\tpush\t{r5, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr5, sp, #0x8\n\tcmp\tr0, #0\n\tbeq\t.L1\n' +
+          '\tmov\tr1, #0\n.L1:\n\tstr\tr1, [sp]\n\tmov\tr0, sp\n\tstr\tr0, [r5]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n' +
+          '\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n\tadd\tsp, sp, #0x10\n\tpop\t{r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+        const five = { five: { params: ['s32', 's32', 's32', 's32', 's32'], returns: 's32' } };
+        expect(() => decompile('f', intoFrame, ARMV4T_AGBCC, { prototypes: five })).toThrow(TWO_MODELS);
       });
 
       // …and the evidence is an agbcc compile table, exactly as for the callee escape: a second
@@ -2656,11 +2665,19 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const POOL = '.L5:\n\t.align\t2, 0\n.L4:\n\t.word\t0x40000d4\n';
 
     test('the acceptance is refused when the lifted function does not pass the address to a call', () => {
-      // a declared arity DROPS the address: the licence claimed `use` receives the frame base and
-      // the emitted call takes nothing — which also loses `five`'s fifth outgoing argument
+      // a declared arity DROPS the address, and the licence reads the declaration too
+      // (`frameAddressReceivers`): `use` taking nothing is handed nothing, so no licence is granted
+      // and the store keeps the outgoing-argument refusal
       const captureAndCall = `${PROLOGUE}\tmov\tr0, sp\n\tbl\tuse\n`;
       expect(() =>
         decompile('f', captureAndCall + FIVE_ARG_CALL + EPILOGUE, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }),
+      ).toThrow(/the store to \[sp,#0\] is never reloaded/);
+      // …and where NOTHING declares the callee the licence reads every argument register, while
+      // the lift passes `use` only what it infers — not `r3`. That is the gap the audit closes: the
+      // licence claimed `use` receives the frame base, the emitted call takes nothing, and `five`'s
+      // fifth outgoing argument would be lost with it.
+      expect(() =>
+        decompile('f', `${PROLOGUE}\tmov\tr3, sp\n\tbl\tuse\n${FIVE_ARG_CALL}${EPILOGUE}`, ARMV4T_AGBCC),
       ).toThrow(/no call takes it and no word store publishes it outside this frame/);
       // CONTROL: the same function with `use` taking its argument is the shape this capability is
       // for, and lifts.
@@ -2670,9 +2687,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // THE RE-CHECK IS A CONTAINMENT, and a re-proof weaker than the licence it re-proves is a
-    // second, wider door into the same acceptance. Each input below is `droppedByArity` — the
-    // licence granted by the callee scan, the address then dropped by the declared arity — with
-    // ONE store added that the pre-lift publish scan refuses BY NAME. Read off the wide
+    // second, wider door into the same acceptance. Each input below is the undeclared row above —
+    // the licence granted by the callee scan on `r3`, the address then not passed by the lift —
+    // with ONE store added that the pre-lift publish scan refuses BY NAME. Read off the wide
     // `published` set the audit accepted all three, and `five`'s fifth outgoing argument, really
     // staged at [sp,#0], was dropped from a compiling, plausible, wrong program.
     test.each([
@@ -2681,21 +2698,17 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       ['a store through ANOTHER held capture is the same frame', '\tmov\tr2, sp\n\tstr\tr1, [r2]\n'],
     ])('the premise re-check refuses what the licence refuses: %s', (_why, publish) => {
       const build = (store: string, fiveArgCall: string) =>
-        `${PROLOGUE}\tmov\tr1, sp\n${store}\tmov\tr0, sp\n\tbl\tuse\n${fiveArgCall}${EPILOGUE}` +
+        `${PROLOGUE}\tmov\tr1, sp\n${store}\tmov\tr3, sp\n\tbl\tuse\n${fiveArgCall}${EPILOGUE}` +
         (store.includes('.L4') ? POOL : '');
-      expect(() =>
-        decompile('f', build(publish, FIVE_ARG_CALL), ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }),
-      ).toThrow(/no call takes it and no word store publishes it outside this frame/);
+      expect(() => decompile('f', build(publish, FIVE_ARG_CALL), ARMV4T_AGBCC)).toThrow(
+        /no call takes it and no word store publishes it outside this frame/,
+      );
       // CONTROL, and it is what makes each row a witness rather than a blanket: the same function
       // with the store widened to a word through a pool address — the one shape the licence does
       // admit — lifts, so the refusal is about the store and not about the surrounding frame. The
       // five-argument call is dropped from it for the reason stated above the fixture: a control
       // is an ACCEPTING assertion, and that tail has no declared callee to referee it.
-      expect(
-        decompile('f', build('\tldr\tr2, .L4\n\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC, {
-          prototypes: { use: { params: 0 } },
-        }).source,
-      ).toContain('&sp0');
+      expect(decompile('f', build('\tldr\tr2, .L4\n\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC).source).toContain('&sp0');
     });
 
     // A SPELLING IS NOT A FACT. The scan that licenses the acceptance drops a register the moment an
