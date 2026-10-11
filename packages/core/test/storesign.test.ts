@@ -5,7 +5,7 @@
 import { expect, test } from 'vitest';
 
 import { Fn, defOpMap } from '../src/ir/core';
-import { applyIdiomPatterns, liftStamped, raiseRecovered } from '../src/pipeline';
+import { applyIdiomPatterns, decompile, liftStamped, raiseRecovered } from '../src/pipeline';
 import { seedNarrowStoreSigns, storedConstantSign } from '../src/raise/storesign';
 import { MIPS_GCC, TargetDescription } from '../src/target';
 
@@ -75,4 +75,19 @@ test('a store that already carries a signedness keeps it, and the pass reports o
   const defs = defOpMap(fn);
   const values = fn.blocks[0].ops.filter((o) => o.opcode === 'store').map((o) => defs.get(o.operands[1])!.attrs.value);
   expect(values).toEqual([-1, 0xffff]);
+});
+
+// `*q = p[6]; p[6] = <k>;` with `p` typed by its sign-extending read: the store spells through the
+// same `s16 *` when its constant says signed, and keeps the cast to the unsigned view otherwise
+const copyThenStore = (k: string) =>
+  decompile(
+    'f',
+    obj('0:\tlh\tv0,12(a0)', '4:\tsh\tv0,0(a1)', `8:\tli\tv0,${k}`, 'c:\tjr\tra', '10:\tsh\tv0,12(a0)'),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['s16 *', 's16 *'], returnsVoid: true } } },
+  ).source;
+
+test('the structurer spells a stamped store through the view its constant witnessed', () => {
+  expect(copyThenStore('-1')).toContain('    a0[6] = -1;\n');
+  expect(copyThenStore('0xffff')).toContain('    ((u16 *)a0)[6] = 65535;\n');
 });

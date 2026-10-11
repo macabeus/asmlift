@@ -4809,7 +4809,7 @@ export function structure(
           expr(op.operands[0]),
           op.attrs.off as number,
           width,
-          width === 4,
+          (op.attrs.signed as boolean | undefined) ?? width === 4,
           ctype,
           scalarGlobals,
           symCtx,
@@ -4821,8 +4821,9 @@ export function structure(
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
           continue;
         }
-        // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
-        // inserted cast declares the same scalar the recovered pointee would have.
+        // signedness mirrors recoverTypes' store seed (a stamped constant's sign, else word ⇒
+        // signed and narrow ⇒ unsigned), so an inserted cast declares the same scalar the
+        // recovered pointee would have.
         const lval = pinnedAccess(op, lval0);
         out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {

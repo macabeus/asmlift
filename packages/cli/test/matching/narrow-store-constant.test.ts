@@ -13,7 +13,7 @@
 // The SHARED bodies are the hazard the reader would have if a compiler reused one register for
 // two narrow stores whose types differ: none does. Each store gets its own materialization.
 import { defOpMap } from '@asmlift/core/ir/core';
-import { applyIdiomPatterns, liftStamped, raiseRecovered } from '@asmlift/core/pipeline';
+import { applyIdiomPatterns, decompile, liftStamped, raiseRecovered } from '@asmlift/core/pipeline';
 import { TOOLCHAIN_TARGETS, type TargetDescription } from '@asmlift/core/target';
 import {
   type MwccToolchainId,
@@ -23,6 +23,7 @@ import {
   compilePpcTarget,
   compileTargetAsm,
   gcc272Available,
+  scoreObjects,
 } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
 
@@ -128,6 +129,58 @@ describe('a narrow store of a constant materializes the constant converted to th
             sym,
             stores: expected(sym, values, name === 'agbcc'),
           });
+        }
+      },
+      BUDGET,
+    );
+  }
+});
+
+// The reader's payoff, byte-exact: a read types `p` first, so before the stamp the signed store was
+// spelled through a cast to the unsigned view (or the reverse) and recompiled to the other constant.
+// rt2 is the unsigned control, which matched without the stamp too.
+const ROUND_TRIP: [string, string, string][] = [
+  ['rt1', 's16 *', 'void rt1(s16 *p, s16 *q) { *q = p[6]; p[6] = -1; }'],
+  ['rt2', 'u16 *', 'void rt2(u16 *p, u16 *q) { *q = p[6]; p[6] = -1; }'],
+  ['rt3', 's8 *', 'void rt3(s8 *p, s8 *q) { *q = p[1]; p[1] = -1; }'],
+];
+
+const roundTrips: [string, boolean, (c: string, sym: string) => { obj: string; asm: string }, TargetDescription][] = [
+  [
+    'gcc2.7.2',
+    gcc272Available(),
+    (c, s) => compileMipsGcc272Target(c, s, TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags),
+    TOOLCHAIN_TARGETS['gcc2.7.2'].description,
+  ],
+  [
+    'gcc2.7.2kmc',
+    kmcGate('narrow-store-constant'),
+    (c, s) => compileMipsGccTarget(c, s, TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
+    TOOLCHAIN_TARGETS['gcc2.7.2kmc'].description,
+  ],
+  [
+    'ido7.1',
+    true,
+    (c, s) => compileMipsTarget(c, s, TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
+    TOOLCHAIN_TARGETS['ido7.1'].description,
+  ],
+  [
+    'mwcc_242_81',
+    ppcDockerGate('narrow-store-constant', 'mwcc_242_81'),
+    (c, s) => compilePpcTarget('mwcc_242_81', c, s, PPC_FLAGS),
+    TOOLCHAIN_TARGETS.mwcc_242_81.description,
+  ],
+];
+
+describe('a narrow store of a constant recompiles byte-exact through the view its constant witnessed', () => {
+  for (const [name, have, compile, target] of roundTrips) {
+    test.runIf(have)(
+      name,
+      () => {
+        for (const [sym, ty, c] of ROUND_TRIP) {
+          const { obj, asm } = compile(c, sym);
+          const r = decompile(sym, asm, target, { prototypes: { [sym]: { params: [ty, ty], returnsVoid: true } } });
+          expect({ sym, score: scoreObjects(obj, compile(r.source, sym).obj, sym).score }).toEqual({ sym, score: 0 });
         }
       },
       BUDGET,

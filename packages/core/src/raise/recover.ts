@@ -87,7 +87,9 @@ function typeDerefBases(fn: Fn): void {
           break;
         case 'store':
           width = op.attrs.width as number;
-          signed = width === 4;
+          // the signedness raise/storesign.ts read off a stored constant, else word ⇒ signed and
+          // narrow ⇒ unsigned; structure.ts reads it by the same rule
+          signed = (op.attrs.signed as boolean | undefined) ?? width === 4;
           break;
         case 'aload':
           width = op.attrs.elemSize as number;
