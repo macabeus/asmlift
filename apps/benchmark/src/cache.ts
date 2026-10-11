@@ -323,12 +323,14 @@ export async function cachedM2cResult(
   // and a per-row diff reports the bump inert without having scored anything.
   // `scoring` is derived too. On the real tier the score comes from a closure (compile/real.ts
   // `makeRealScorer`) over the unit model, the manifest's prependC and the row's VENDORED context.
-  // `ctx`, m2c's own, carries part of that at most: it is that context byte for byte on 295 of the
-  // 421 rows, a separately vendored file on Mario Party 4's 42 and 41 of ac-decomp's, a hand-written
-  // one on 1, and empty on pikmin's 42. Off the key, an edit to a prependC or to the typedef spelling
-  // the context-free rungs take from the context (compile/util.ts `bareTypedefs`) replays the old
-  // score. The digest covers the closure's ARGUMENTS, not its code: a change to the ladder itself
-  // (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
+  // `ctx`, m2c's own, carries part of that at most. On 295 of the 421 rows m2c's vendored file is
+  // that context byte for byte, and `ctx` is that file plus at most the row's own prototype line
+  // (cases/real.ts `appendCtxProto`), so it equals the context outright on only 194 of them. m2c's
+  // file is a separately vendored one on Mario Party 4's 42 and 41 of ac-decomp's; `ctx` is a
+  // hand-written one on 1, and empty on pikmin's 42. Off the key, an edit to a prependC or to the
+  // typedef spelling the context-free rungs take from the context (compile/util.ts `bareTypedefs`)
+  // replays the old score. The digest covers the closure's ARGUMENTS, not its code: a change to the
+  // ladder itself (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
   const key = sha(
     JSON.stringify({
       v: 20,
