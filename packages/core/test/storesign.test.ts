@@ -111,6 +111,16 @@ test('the structurer spells a stamped store through the view its constant witnes
   expect(copyThenStore('0xffff')).toContain('    ((u16 *)a0)[6] = 65535;\n');
 });
 
+test("a constant both views store alike is spelled through its base's own view, with no cast", () => {
+  const src = decompile(
+    'f',
+    obj('0:\tli\tv0,-1', '4:\tsh\tv0,6(a0)', '8:\tli\tv0,7', 'c:\tjr\tra', '10:\tsh\tv0,10(a0)'),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['void *'], returnsVoid: true } } },
+  ).source;
+  expect(src).toContain('void f(s16 *a0) {\n    a0[3] = -1;\n    a0[5] = 7;\n');
+});
+
 test('an indexed store carries its stamp into the astore', () => {
   const src = decompile(
     'f',

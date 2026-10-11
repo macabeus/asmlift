@@ -2315,6 +2315,19 @@ export function structure(
     return typeof step === 'number' ? step : undefined;
   };
 
+  /** The view a narrow store of a constant both views store alike (narrow sign bit clear, nothing
+   *  above it) is spelled through: its base's own pointee, so it asks for no cast, since nothing
+   *  witnessed either type. `undefined` for any other store, which keeps the width convention. */
+  const either = (op: Op, width: number): boolean | undefined => {
+    const v = defs.get(op.operands[1]);
+    const t = op.operands[0].type;
+    if (width >= 4 || v?.opcode !== 'const' || t.kind !== 'ptr' || t.to.kind !== 'int' || t.to.width !== width * 8) {
+      return undefined;
+    }
+    const k = v.attrs.value;
+    return typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < 2 ** (width * 8 - 1) ? t.to.signed : undefined;
+  };
+
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
   const { useSitesOf, opIndex, opBlock, liveIn, materialize, preUpdateHomes, reachFrom, emitPos, memWriteBetween } =
     analyze(fn, returnsVoid, {
@@ -4823,7 +4836,7 @@ export function structure(
           baseExpr,
           off,
           width,
-          stamp ?? width === 4,
+          stamp ?? either(op, width) ?? width === 4,
           ctype,
           scalarGlobals,
           symCtx,
@@ -4837,7 +4850,8 @@ export function structure(
         }
         // signedness mirrors recoverTypes' store seed (a stamped constant's sign, else word ⇒
         // signed and narrow ⇒ unsigned), so an inserted cast declares the same scalar the
-        // recovered pointee would have. A member is spelled through its declared type, so a
+        // recovered pointee would have; a constant both views store alike takes the pointee's
+        // own view (`either`) and asks for no cast. A member is spelled through its declared type, so a
         // stamped store whose sign that type does not share is spelled as the flat cell instead,
         // which the backend casts: `a0->field_6 = -104` under `u16 field_6` recompiles to
         // `li 0xff98`, and `((s16 *)a0)[3] = -104` to the `li -104` the stamp read.
