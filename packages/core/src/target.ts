@@ -536,6 +536,23 @@ export interface TargetDescription {
     // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
     // which the post-lift audit settles per call rather than by size.
     oneWordFrameIsTheCapturedObject?: boolean;
+    // A frame address this function hands out — in an argument register at a call, or stored to
+    // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
+    // word from there up is a call's outgoing argument. Its one reader is the outgoing-argument
+    // analysis (`frontend/stackargs.ts`, the `escape` event), where it explains a store that is
+    // never reloaded HERE: the receiver reads it THERE.
+    //
+    // Absent ⇒ a handed-out frame address explains nothing, and the code-reading refusals weigh
+    // every stored word as before.
+    //
+    // Set on agbcc, compiled at 2.9-arm-000512 and the corpus's flags: an address-taken local sits
+    // ABOVE the outgoing area (`add rD, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when
+    // no call in the function takes a stack word. Its RESIDUE is the other producer of a handed-out
+    // frame address, a by-value struct argument's block copy (`mov r0, sp; bl memcpy`), whose base
+    // IS the outgoing area: agbcc stages the call's remaining stack words AFTER the copy, so the
+    // escape clears nothing they leave pending, and a declared callee whose block meets the escape
+    // refuses outright.
+    escapedFrameAddressNamesALocal?: boolean;
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
     // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
@@ -985,6 +1002,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
+    // compiled: `f0`/`f1`/`r1`/`r2` in the frame-base tests (`thumb-frontend.test.ts`)
+    escapedFrameAddressNamesALocal: true,
     // agbcc's `*call_indirect` and `*call_value_indirect` emit `bl _call_via_%0` (gcc/thumb.md:997-1021),
     // and libgcc defines `_call_via_<reg>` as `bx <reg>` for r0-r9, sl, fp, ip, sp and lr
     // (libgcc/lib1thumb.asm:595-633). Neither `sp` (the frame) nor `lr` (which the `bl` itself

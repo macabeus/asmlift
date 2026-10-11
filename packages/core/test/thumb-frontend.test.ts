@@ -1973,7 +1973,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // to be DECLARED — `compilerBehaviors.oneWordFrameIsTheCapturedObject`, a field and not a
     // `compiler ==` branch. `armv4t` has one compiler entry today; a second one free to overlay a
     // dead one-word local with a one-word outgoing area has to run the tables and say so.
-    const { oneWordFrameIsTheCapturedObject: _unprobed, ...unprobedBehaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    // (and so must the escape premise, which explains the same store on its own)
+    const {
+      oneWordFrameIsTheCapturedObject: _unprobed,
+      escapedFrameAddressNamesALocal: _unprobedEscape,
+      ...unprobedBehaviors
+    } = ARMV4T_AGBCC.compilerBehaviors;
     const undeclared = { ...ARMV4T_AGBCC, compiler: 'sdt', compilerBehaviors: unprobedBehaviors };
 
     test('an armv4t compiler that has not declared the layout does not get the proof', () => {
@@ -2495,7 +2500,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\ttakesH\n' +
         '\tstr\tr5, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tfive\n' +
         '\tadd\tsp, sp, #0x90\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('g3', blockCopyBase, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      expect(() => decompile('g3', blockCopyBase, ARMV4T_AGBCC)).toThrow(
+        /the store to \[sp,#0\] reaches `bl five` unread/,
+      );
       // ORDER IS NOT THE DISCRIMINATOR. The same source with the five-argument call FIRST puts the
       // argument store before the copy, and it must decline just the same.
       const argFirst =
@@ -2504,7 +2511,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tadd\tr1, r4, #0\n\tadd\tr1, r1, #0x10\n\tmov\tr0, sp\n\tmov\tr2, #0x90\n\tbl\tmemcpy\n' +
         '\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\ttakesH\n' +
         '\tadd\tsp, sp, #0x90\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('g4', argFirst, ARMV4T_AGBCC)).toThrow(/never reloaded/);
+      expect(() => decompile('g4', argFirst, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\] reaches `bl five` unread/);
     });
 
     // …and the other block-copy base: a STRUCT-RETURN TEMP, where `mov r0, sp` is the hidden return
@@ -3799,5 +3806,85 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const later =
       '\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tmov\tr0, #1\n\tbx\tlr\n.L1:\n\tldr\tr0, [sp, #8]\n\tbx\tlr\n';
     expect(() => dc('f', later)).toThrow(spAsData);
+  });
+});
+
+// A FRAME ADDRESS HANDED OUT IS READ BY ITS RECEIVER, at any frame size. Every fixture is agbcc
+// 2.9-arm-000512's own output at `-mthumb-interwork -O2 -fhex-asm`, for
+// `struct S { int a; int b; unsigned char c; unsigned short d; }`.
+describe('a frame address that escapes explains the stores it hands over', () => {
+  const G = { g: { params: ['struct S *'], returns: 's32' } };
+  const H5 = { h5: { params: ['s32', 's32', 's32', 's32', 's32'], returns: 's32' } };
+  // `int f0(int x, int y){ struct S s; s.a = 0; s.b = x; s.c = 0; s.d = y; return g(&s); }`
+  const f0 =
+    'f0:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr2, #0x0\n\tstr\tr2, [sp]\n\tstr\tr0, [sp, #0x4]\n' +
+    '\tmov\tr0, sp\n\tstrb\tr2, [r0, #0x8]\n\tstrh\tr1, [r0, #0xa]\n\tbl\tg\n\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n\tbx\tr1\n';
+  // …the same, then `return h5(1, 2, 3, 4, x);`: the object moves above the outgoing word
+  const f1 =
+    'f1:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr4, r0, #0\n\tmov\tr2, #0x0\n\tstr\tr2, [sp, #0x4]\n' +
+    '\tstr\tr4, [sp, #0x8]\n\tadd\tr0, sp, #0x4\n\tstrb\tr2, [r0, #0x8]\n\tstrh\tr1, [r0, #0xa]\n\tbl\tg\n' +
+    '\tstr\tr4, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\th5\n' +
+    '\tadd\tsp, sp, #0x10\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('a wide frame-base object filled for its callee lifts with every store', () => {
+    expect(decompile('f0', f0, ARMV4T_AGBCC, { prototypes: G }).source).toBe(
+      'struct Struct0 { s32 field_0; s32 field_4; u8 field_8; u16 field_10; };\n' +
+        's32 f0(s32 a0, s32 a1) {\n    u8 sp0[12];\n    s32 *p0;\n    p0 = (s32 *)sp0;\n    *p0 = 0;\n' +
+        '    p0[1] = a0;\n    ((u8 *)sp0)[8] = 0;\n    ((u16 *)sp0)[5] = a1;\n    return g(sp0);\n}\n',
+    );
+  });
+
+  test('…and an object above a declared outgoing word is the object, not a sixth argument', () => {
+    expect(decompile('f1', f1, ARMV4T_AGBCC, { prototypes: { ...G, ...H5 } }).source).toContain(
+      '    g(sp4);\n    return h5(1, 2, 3, 4, a0);\n',
+    );
+  });
+
+  // The register carries the address only where the callee's declaration reads it: `g` declared
+  // with no parameter is handed nothing, so the store keeps its old reading.
+  test('a register past the declared arity hands nothing over', () => {
+    expect(() => decompile('f0', f0, ARMV4T_AGBCC, { prototypes: { g: { params: [], returns: 's32' } } })).toThrow(
+      /the store to \[sp,#0\] is never reloaded/,
+    );
+  });
+
+  test('an armv4t compiler that has not declared the premise does not get it', () => {
+    const { escapedFrameAddressNamesALocal: _unprobed, ...behaviors } = ARMV4T_AGBCC.compilerBehaviors;
+    const undeclared = { ...ARMV4T_AGBCC, compiler: 'sdt', compilerBehaviors: behaviors };
+    expect(() => decompile('f0', f0, undeclared, { prototypes: G })).toThrow(
+      /the store to \[sp,#0\] is never reloaded/,
+    );
+  });
+
+  // THE OTHER PRODUCER OF A HANDED-OUT FRAME BASE: `void qh5(struct H *p, int x){ th(*p);
+  // h5(1, 2, 3, 4, x); }` with `struct H { int a[17]; }` — `mov r0, sp` is memcpy's destination,
+  // the block copy of `th`'s stack words, and `h5`'s fifth is staged after it.
+  const qh5 =
+    'qh5:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x34\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tadd\tr1, r4, #0\n' +
+    '\tadd\tr1, r1, #0x10\n\tmov\tr0, sp\n\tmov\tr2, #0x34\n\tbl\tmemcpy\n\tldr\tr0, [r4]\n\tldr\tr1, [r4, #0x4]\n' +
+    '\tldr\tr2, [r4, #0x8]\n\tldr\tr3, [r4, #0xc]\n\tbl\tth\n\tstr\tr5, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n' +
+    '\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\th5\n\tadd\tsp, sp, #0x34\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
+
+  test('a block-copy base handed to memcpy still leaves the later staged word declining', () => {
+    expect(() => decompile('qh5', qh5, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\] reaches `bl h5` unread/);
+    expect(() => decompile('qh5', qh5, ARMV4T_AGBCC, { prototypes: H5 })).toThrow(
+      /the frame address \[sp,#0\] escapes this function, so the words from there up are an object's, and the two name the same word/,
+    );
+  });
+
+  // By-value struct fifth arguments, which no capture stages: `tw2(1, 2, 3, 4, *p)` over
+  // `struct W2 { int a, b; }` is two `str`s; over a 6-word struct it is `mov r1, sp` + ldmia/stmia.
+  test('a by-value struct argument keeps its decline', () => {
+    const q2 =
+      'q2:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tldr\tr1, [r0, #0x4]\n\tldr\tr0, [r0]\n\tstr\tr0, [sp]\n' +
+      '\tstr\tr1, [sp, #0x4]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\ttw2\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('q2', q2, ARMV4T_AGBCC)).toThrow(/the store to \[sp,#0\] is never reloaded/);
+    const q6 =
+      'q6:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x18\n\tmov\tr1, sp\n\tldmia\tr0!, {r2, r3, r4}\n' +
+      '\tstmia\tr1!, {r2, r3, r4}\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n\tmov\tr0, #0x1\n' +
+      '\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\ttw6\n\tadd\tsp, sp, #0x18\n\tpop\t{r4}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('q6', q6, ARMV4T_AGBCC)).toThrow(/a store at \[\+4\] through the captured address/);
   });
 });

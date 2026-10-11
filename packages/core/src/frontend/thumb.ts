@@ -3042,8 +3042,31 @@ function measureThumbFrame({
   // What the walk cannot follow (a move in another block than the capture) the lift does not
   // fold either; the audit folds it from the IR, and refuses it by that name where the object
   // lands on a word this left keyed as a slot.
+  //
+  // …AND THE LOWEST FRAME ADDRESS EACH INSTRUCTION HANDS OUT, off the same walk: one held in an
+  // argument register the callee's declaration reads at a call (every one, where nothing declares
+  // it), or stored as a word to memory outside the frame — the two escapes above, at any offset.
+  // This walk keeps a capture addressed through (`mov r0, sp / strb r3, [r0, #8] / bl use`, sa3's
+  // `sub_8060940`), because the question here is what the receiver CAN read, and the outgoing-
+  // argument analysis only lets it end a word's pending store (`escapeEvent`, below).
+  const handedOutRegs = (ins: Instr, held: ReadonlyMap<string, number>): readonly string[] => {
+    if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+      const targetReg = calleeRegister(ins, target);
+      const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
+      const words = declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? target.argRegs.length;
+      return target.argRegs.slice(0, words).filter((r) => r !== targetReg);
+    }
+    const { base } = parseAddr(ins.ops[1] ?? '');
+    return ins.mnemonic === 'str' && !isSpReg(base) && !held.has(reg(base)) ? [reg(ins.ops[0] ?? '')] : [];
+  };
   const captureOffsetOf = new Map<Instr, number>();
+  const escapedOffsetOf = new Map<Instr, number>();
   heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
+    const handed = handedOutRegs(ins, held);
+    const offs = [...held].filter(([r, off]) => handed.includes(r) && off >= 0).map(([, off]) => off);
+    if (offs.length > 0) {
+      escapedOffsetOf.set(ins, Math.min(...offs));
+    }
     const defined = frameAddressDefined(ins, held);
     if (defined !== null) {
       captureOffsetOf.set(ins, defined[1]);
@@ -3069,9 +3092,22 @@ function measureThumbFrame({
     const a = spMemAccess(ins);
     return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea ? a.off : null;
   };
+  //
+  // AN ESCAPED FRAME ADDRESS IS READ BY ITS RECEIVER, and the event says so just before the call or
+  // the store that hands it over — but only where the target declares the layout premise that
+  // makes the words from that address up a local's (`escapedFrameAddressNamesALocal`).
+  const escapesHere = target.compilerBehaviors.escapedFrameAddressNamesALocal === true;
+  const escapeEvent = (ins: Instr): StackArgsEvent<Instr>[] => {
+    const off = escapedOffsetOf.get(ins);
+    return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
+  };
   const outgoingArgs = analyzeOutgoingArgs<Instr>({
     blocks: asmBlocks.map((ab) => ({
       events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
+        const escaped = escapeEvent(ins);
+        if (escaped.length > 0 && ins.mnemonic === 'str') {
+          return escaped;
+        }
         const off = slotAcc(ins);
         if (off !== null && !constantCaptureOffsets.has(off)) {
           return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
@@ -3080,6 +3116,7 @@ function measureThumbFrame({
           const callee = ins.ops[0] ?? '?';
           const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
           return [
+            ...escaped,
             {
               kind: 'call',
               call: ins,
