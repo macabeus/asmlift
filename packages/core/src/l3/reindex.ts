@@ -70,7 +70,7 @@
 // Past the table, the counter's DECLARATION is retired with its writes: nothing mentions it any
 // more, and a declared-but-untouched local reads as the deliberate `uninit` slot it is not.
 //
-// v3 SCOPE — the up-counting BYTE walk with an EXPRESSION base (`p = (u8 *)(EXPR)` ahead of a
+// v3 SCOPE — the up-counting walk with an EXPRESSION base (`p = (T *)(EXPR)` ahead of a
 // counter-carried do-while): full rules at `tryExprWalk` below.
 //
 // v4 SCOPE — the UNGUARDED countdown, the shape agbcc emits for `for(i=0;i<C;i++) a[i]` with a
@@ -99,6 +99,7 @@ import {
   rematerializableAddress,
   stmtChildren,
   stmtExprs,
+  walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
 import { takenNames } from './hoist';
@@ -504,46 +505,81 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
   }
 }
 
-// ── v3: the up-counting BYTE walk with an EXPRESSION base ────────────────────────────────────
+/** Whether any statement here, at any depth, writes memory (`store`). */
+function stmtsStore(stmts: Stmt[]): boolean {
+  return stmts.some((s) => s.k === 'store' || stmtsStore(stmtChildren(s)));
+}
+
+/** `e + c`, spelled `e - |c|` for a negative c and `e` alone for 0. */
+function plusConst(e: Expr, c: number): Expr {
+  return c === 0 ? e : { k: 'bin', op: c < 0 ? '-' : '+', l: e, r: { k: 'const', value: Math.abs(c) } };
+}
+
+// ── v3: the up-counting walk with an EXPRESSION base ─────────────────────────────────────────
 //
-//     p = (u8 *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
+//     i = S; p = (T *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
 //
 // The loop already carries its own integer counter, so the walk pointer is pure strength
-// reduction: deleting its init and step and spelling the deref as BASE[i + REST] — the sole
-// bare-var addend of EXPR as the index base, the counter FIRST in the index sum — is the
-// indexed source the compiler reduces back. v3 SCOPE (decline over approximate):
-//   • `p` is a `u8 *` (byte walk: the index and the byte arithmetic agree by construction —
-//     a wider element would need the REST addends rescaled from bytes to elements);
-//   • the init `p = EXPR` immediately precedes the `dowhile`; EXPR (casts stripped) flattens
-//     over `+` into exactly ONE bare-var addend (the base — itself not a non-byte pointer, or
-//     `base[i]` would stride its element) plus pure invariant addends (var/const/mul/shl trees
-//     whose vars the body never assigns);
-//   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
-//     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
-//     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition.
-function tryExprWalk(
-  prev2: Stmt | undefined,
-  prev: Stmt | undefined,
+// reduction: deleting its init and step and spelling the deref as BASE[i - S + REST], REST in
+// elements — the sole base addend of EXPR as the index base, the counter FIRST in the index sum —
+// is the indexed source the compiler reduces back. One counter may carry SEVERAL walk pointers
+// (KMC reduces `for (i = 1; …) { gH[i] = 7; gW[i] = 8; }` to one pointer per array): each keeps
+// its own base and unit, and each re-spells on its own merits — one out of scope keeps walking,
+// whatever the order of the steps. v3 SCOPE (decline over approximate):
+//   • each `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum
+//     counts in its BASE's unit. Over a W-element pointer base that is already elements, and REST
+//     stays verbatim, symbolic addends included. Over a byte base (a non-pointer var, a byte
+//     pointer, `(u32)&g`) a wider walk needs a constant total W divides (it is rescaled to
+//     elements), and a symbolic addend, which would need dividing, stays in the BYTE sum instead:
+//     the index base is `(T *)(BASE + SYM)`, the spelling `p = b + k; … p[i]` reduces back to;
+//   • the inits `i = S` and `p_k = EXPR_k` are the run of assignments immediately ahead of the
+//     `dowhile` (any order); EXPR (its pointer and 32-bit integer casts stripped; a narrowing cast
+//     declines) flattens over `+` into exactly ONE base addend — a bare var declared a non-pointer,
+//     a byte pointer or a pointer to W-byte integers (any other pointer strides a unit no element
+//     index names), or an object's address, `(u32)&g` beside other addends or `&g` alone — plus
+//     pure invariant addends (var/const/mul/shl trees whose vars the body never assigns, and,
+//     beside a call or a store in the loop, only params and locals whose address never escapes);
+//   • the body's contiguous TAIL is exactly one `p_k = p_k + 1` per walk pointer and one
+//     `i = i + 1` (any order), with `i` read by the do-while condition; each `p_k` is mentioned
+//     nowhere else in the function beyond its init, its step, and derefs AT OFFSET 0 inside this
+//     body, and not by the condition;
+//   • S is a constant and `i` a declared integer: any S at 32 bits, only S = 0 when narrower and
+//     unsigned, never when narrower and signed. The index is `i - S + REST` in elements, which is
+//     plain `i` for the init KMC folds from `for (i = S; …) base[i]`: `p = (u32)&g + S*W` over an
+//     object, `p = a0 + S` over a W-element pointer.
+
+/** One v3 walk pointer's re-spelling: its deref `*p` becomes `base[i - S + idx… + elems]`. */
+interface ExprWalkSpelling {
+  readonly p: string;
+  readonly base: Expr;
+  readonly idx: readonly Expr[];
+  readonly elems: number;
+}
+
+/** The per-pointer half of v3: `init` (`p = EXPR`) decomposed into the index base and REST in
+ *  elements, or null when `p`'s walk is out of scope. The loop-wide half is `tryExprWalkRun`. */
+function exprWalkSpelling(
+  init: Stmt & { k: 'assign' },
   dw: Stmt & { k: 'dowhile' },
   ptrVars: Map<string, IrType>,
-  fnBody: Stmt[],
   declTypes: VarTypes,
   volatileLocals: ReadonlySet<string>,
-): Stmt | null {
-  if (prev?.k !== 'assign' || !ptrVars.has(prev.name) || volatileLocals.has(prev.name)) {
+  privateNames: ReadonlySet<string>,
+): ExprWalkSpelling | null {
+  const p = init.name;
+  const pT = ptrVars.get(p);
+  if (pT?.kind !== 'ptr' || pT.to.kind !== 'int' || pT.to.width % 8 !== 0 || volatileLocals.has(p)) {
     return null;
   }
-  const p = prev.name;
-  const pT = ptrVars.get(p)!;
-  if (pT.kind !== 'ptr' || pT.to.kind !== 'int' || pT.to.width !== 8) {
+  const W = pT.to.width / 8;
+  if (!derefWidths([dw], p).every((w) => w === W)) {
     return null;
   }
-  if (!derefWidths([dw], p).every((w) => w === 1)) {
-    return null;
-  }
-  // EXPR decomposition
-  let expr: Expr = prev.value;
-  while (expr.k === 'cast') {
+  // EXPR decomposition. Only casts that keep all 32 bits are stripped — a pointer cast, or an
+  // integer cast at 32 bits. A narrowing cast over EXPR (`(u16 *)(s16)((u32)&g + 2)`) truncates the
+  // address, which no index off the untruncated base reproduces, so it stays and the walk declines.
+  let expr: Expr = init.value;
+  while (expr.k === 'cast' && (expr.to.kind === 'ptr' || (expr.to.kind === 'int' && expr.to.width === 32))) {
     expr = expr.e;
   }
   const addends: Expr[] = [];
@@ -556,21 +592,40 @@ function tryExprWalk(
     }
   };
   flatten(expr);
-  const bare = addends.filter((a): a is Extract<Expr, { k: 'var' }> => a.k === 'var');
-  const rest = addends.filter((a) => a.k !== 'var');
-  if (bare.length !== 1) {
+  // The base candidates: a bare var, or an object's address. Beside other addends the address
+  // must sit under a 32-bit integer cast — the cast is what makes EXPR's `+` byte arithmetic (a
+  // bare `&g + 2` strides g's own size). ALONE it needs no cast: there is no `+` to stride, and
+  // the zero-offset init structure prints is `p = (T *)&g`, whose casts the strip above removed.
+  const addrOf = (a: Expr): Extract<Expr, { k: 'addr' }> | null =>
+    a.k === 'addr' && addends.length === 1
+      ? a
+      : a.k === 'cast' && a.to.kind === 'int' && a.to.width === 32 && a.e.k === 'addr'
+        ? a.e
+        : null;
+  const bases = addends.filter((a) => a.k === 'var' || addrOf(a) !== null);
+  if (bases.length !== 1) {
     return null;
   }
-  const base = bare[0] as Extract<Expr, { k: 'var' }>;
-  // declTypes carries params, locals AND globals: a base declared nowhere has an unknowable C
-  // stride (its project declaration decides), and a wider pointer strides its element under [i]
-  // — both decline.
-  const baseT = declTypes(base.name);
-  if (baseT === undefined) {
-    return null;
-  }
-  if (baseT.kind === 'ptr' && !(baseT.to.kind === 'int' && baseT.to.width === 8)) {
-    return null;
+  const rest = addends.filter((a) => a !== bases[0]);
+  const base: Extract<Expr, { k: 'var' | 'addr' }> = bases[0].k === 'var' ? bases[0] : addrOf(bases[0])!;
+  // The UNIT EXPR's `+` counts in is the base's own stride (declTypes carries params, locals AND
+  // globals). KMC folds `for (i = S; …) a0[i]` over a `u16 *a0` to `p = a0 + S`, element
+  // arithmetic. A var declared nowhere has an unknowable stride (its project declaration decides).
+  // An address needs no declaration: `&g` is g's address whatever g's type, and the printer always
+  // casts it to the access width (cfamily.ts legalizedIndexBase: the type walk answers nothing for
+  // an `addr`, so even a g declared with W-byte elements prints the cast).
+  let unit = 1;
+  if (base.k === 'var') {
+    const baseT = declTypes(base.name);
+    if (baseT === undefined) {
+      return null;
+    }
+    if (baseT.kind === 'ptr') {
+      if (baseT.to.kind !== 'int' || (baseT.to.width !== 8 && baseT.to.width !== W * 8)) {
+        return null;
+      }
+      unit = baseT.to.width / 8;
+    }
   }
   const pure = (e: Expr): boolean =>
     e.k === 'var' || e.k === 'const'
@@ -580,7 +635,6 @@ function tryExprWalk(
         : e.k === 'cast'
           ? pure(e.e)
           : false;
-  const assignedIn = (stmts: Stmt[], name: string): boolean => stmts.some((st) => stmtAssigns(st, name));
   const restVars = new Set<string>();
   const collectVars = (e: Expr): void => {
     if (e.k === 'var') {
@@ -592,69 +646,192 @@ function tryExprWalk(
     });
   };
   rest.forEach(collectVars);
-  restVars.add(base.name);
-  if (!rest.every(pure) || [...restVars].some((n) => assignedIn(dw.body, n))) {
+  if (base.k === 'var') {
+    restVars.add(base.name);
+  }
+  // INVARIANT across the loop, because the indexed spelling re-reads every name on every pass
+  // where the walk read it once, at the init: no `assign` in the body writes it, and — unless it
+  // is a param or a local whose address is never taken — no call and no memory store in the loop
+  // can either. A global (`p = (u16 *)(b + gK * 2)`, `g()` in the body) or an escaped local is
+  // written by a callee or through an aliasing pointer with no `assign` in sight.
+  // (a `postincr` is an assign in expression clothing; a `marker` is an instruction nobody modelled)
+  const loopExprs = [...walkExprs([dw])];
+  const loopWritesMemory = loopExprs.some((e) => e.k === 'call' || e.k === 'marker') || stmtsStore(dw.body);
+  if (
+    !rest.every(pure) ||
+    [...restVars].some(
+      (n) =>
+        volatileLocals.has(n) ||
+        dw.body.some((st) => stmtAssigns(st, n)) ||
+        loopExprs.some((e) => e.k === 'postincr' && e.name === n) ||
+        (loopWritesMemory && !privateNames.has(n)),
+    )
+  ) {
     return null;
   }
-  // the steps and the counter
-  const isIncOf = (st: Stmt, name?: string): string | null => {
-    const n = isUnitIncrement(st);
-    return n !== null && (name === undefined || n === name) ? n : null;
-  };
-  // BOTH steps as the body's contiguous TAIL (either order): every deref then runs with `i`
-  // completed steps equal to `p`'s, which is what `BASE[i + REST]` states. A step anywhere
-  // earlier (the `*++p` walk, a deref straddling the step) reads a different address.
-  const tail = dw.body.slice(-2);
-  const tailIncs = tail.map((st) => isIncOf(st)).filter((n): n is string => n !== null);
-  if (tailIncs.length !== 2 || !tailIncs.includes(p)) {
+  // REST in ELEMENTS. Counted in the walk's own unit (a byte walk, or a W-element pointer base)
+  // it is already elements: the symbolic addends stay verbatim and the constants fold into one.
+  // Counted in bytes under a wider walk, the constants must total a multiple of W (rescaled to
+  // elements), and the symbolic addends would need dividing — so they stay in the BYTE sum, which
+  // becomes the index base: `(T *)(a0 + (a1 << 1))`, every non-constant addend in EXPR's order,
+  // the address keeping its `(u32)` (the printer casts the sum to the access width).
+  const consts = rest.filter((a): a is Extract<Expr, { k: 'const' }> => a.k === 'const');
+  const symbolic = rest.filter((a) => a.k !== 'const');
+  const restUnits = consts.reduce((acc, c) => acc + c.value, 0) | 0; // the 32-bit sum, signed
+  if (unit === W) {
+    return { p, base: { ...base }, idx: symbolic, elems: restUnits };
+  }
+  if (restUnits % W !== 0) {
     return null;
   }
-  const iv = tailIncs.find((n) => n !== p);
-  if (iv === undefined) {
-    return null;
+  const byteSum = addends
+    .filter((a) => a.k !== 'const')
+    .reduce<Expr | null>((acc, a) => (acc === null ? a : { k: 'bin', op: '+', l: acc, r: a }), null)!;
+  return { p, base: symbolic.length === 0 ? { ...base } : byteSum, idx: [], elems: restUnits / W };
+}
+
+/** v3 on one do-while: `out` is the statement list already walked ahead of it. Returns the
+ *  re-spelled loop and the statements that replace `out`'s trailing init run (the counter's init
+ *  kept, the walk pointers' deleted), or null. Tries the longest init run first. */
+function tryExprWalk(
+  out: readonly Stmt[],
+  dw: Stmt & { k: 'dowhile' },
+  ptrVars: Map<string, IrType>,
+  fnBody: Stmt[],
+  declTypes: VarTypes,
+  volatileLocals: ReadonlySet<string>,
+  privateNames: ReadonlySet<string>,
+): { loop: Stmt; run: number; kept: Stmt[] } | null {
+  let nTail = 0;
+  while (nTail < dw.body.length && isUnitIncrement(dw.body[dw.body.length - 1 - nTail]) !== null) {
+    nTail++;
   }
-  const pStepIdx = dw.body.length - 2 + tail.findIndex((st) => isIncOf(st, p) !== null);
-  const ivT = declTypes(iv);
-  if (ivT !== undefined && ivT.kind !== 'int') {
-    return null;
+  let nInit = 0;
+  while (nInit < out.length && out[out.length - 1 - nInit].k === 'assign') {
+    nInit++;
   }
-  if (!mentionsVar(dw.cond, iv) || mentionsVar(dw.cond, p)) {
-    return null;
-  }
-  // The counter STARTS AT ZERO (the adjacent `i = 0` init — `BASE[i + REST]` counts completed
-  // steps from the walk's own start) and its ONLY write anywhere in the body is the tail step.
-  if (prev2?.k !== 'assign' || prev2.name !== iv || prev2.value.k !== 'const' || prev2.value.value !== 0) {
-    return null;
-  }
-  if (dw.body.slice(0, -2).some((st) => stmtAssigns(st, iv)) || tail.filter((st) => isIncOf(st, iv)).length !== 1) {
-    return null;
-  }
-  if (volatileLocals.has(iv) || [...restVars].some((n) => volatileLocals.has(n))) {
-    return null;
-  }
-  // rewrite the derefs, then verify nothing of `p` survives
-  const idxOf = (): Expr => rest.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv });
-  let respelled = true;
-  const rewriteExpr = (e: Expr): Expr => {
-    const m = mapExprChildren(e, rewriteExpr);
-    if (m.k === 'index' && m.base.k === 'var' && m.base.name === p) {
-      if (m.idx.k !== 'const' || m.idx.value !== 0) {
-        respelled = false;
-        return m;
-      }
-      return { ...m, base: { k: 'var', name: base.name }, idx: idxOf() };
+  for (let n = Math.min(nTail, nInit); n >= 2; n--) {
+    const r = tryExprWalkRun(
+      out.slice(-n) as (Stmt & { k: 'assign' })[],
+      n,
+      dw,
+      ptrVars,
+      fnBody,
+      declTypes,
+      volatileLocals,
+      privateNames,
+    );
+    if (r) {
+      return r;
     }
-    return m;
-  };
-  const body = dw.body.filter((_, k) => k !== pStepIdx).map((st) => mapStmtExprs(st, rewriteExpr));
-  const dw2: Stmt = { ...dw, body };
-  if (!respelled || !confinedToWalk(fnBody, p, countMentions([prev], p), dw)) {
+  }
+  return null;
+}
+
+/** v3 with the last `n` statements of the body as the step tail and `inits` (the last `n` ahead
+ *  of the loop) as their inits: one counter, n - 1 walk pointers. */
+function tryExprWalkRun(
+  inits: (Stmt & { k: 'assign' })[],
+  n: number,
+  dw: Stmt & { k: 'dowhile' },
+  ptrVars: Map<string, IrType>,
+  fnBody: Stmt[],
+  declTypes: VarTypes,
+  volatileLocals: ReadonlySet<string>,
+  privateNames: ReadonlySet<string>,
+): { loop: Stmt; run: number; kept: Stmt[] } | null {
+  // BOTH kinds of step as the body's contiguous TAIL (any order): every deref then runs with `i`
+  // completed steps equal to each `p`'s, which is what `BASE[i + REST]` states. A step anywhere
+  // earlier (the `*++p` walk, a deref straddling the step) reads a different address. The tail
+  // and the init run name the same variables, each once.
+  const tail = dw.body.slice(-n);
+  const tailNames = tail.map((st) => isUnitIncrement(st)!);
+  const initNames = inits.map((st) => st.name);
+  if (
+    new Set(tailNames).size !== n ||
+    new Set(initNames).size !== n ||
+    !initNames.every((x) => tailNames.includes(x))
+  ) {
     return null;
   }
-  if (countMentions([dw2], p) !== 0) {
+  const counters = inits.filter((st) => !ptrVars.has(st.name));
+  if (counters.length !== 1) {
     return null;
   }
-  return dw2;
+  const ivInit = counters[0];
+  const iv = ivInit.name;
+  if (!mentionsVar(dw.cond, iv)) {
+    return null;
+  }
+  // The counter starts at a CONSTANT S and its ONLY write anywhere in the body is the tail step:
+  // k completed steps put each `p` at EXPR + k*W and `i` at S + k, so the deref is
+  // BASE[i - S + REST]. That holds while `i` takes the values S + k, which a DECLARED integer
+  // counter does: at 32 bits always (it wraps with the address), and narrower only from S = 0 and
+  // unsigned, where it names elements 0 … 2^w - 1 before it wraps. A signed narrow counter wraps
+  // at 2^(w-1) (an s8 goes 127 -> -128 and names an element 256 behind the walk), and from a
+  // nonzero S `i - S` wraps sooner still; an undeclared one has no width to argue from.
+  if (ivInit.value.k !== 'const') {
+    return null;
+  }
+  const start = ivInit.value.value | 0;
+  const ivT = declTypes(iv);
+  if (ivT?.kind !== 'int' || !(ivT.width === 32 || (start === 0 && !ivT.signed)) || volatileLocals.has(iv)) {
+    return null;
+  }
+  if (dw.body.slice(0, -n).some((st) => stmtAssigns(st, iv))) {
+    return null;
+  }
+  // Each walk pointer re-spells on its OWN merits: one out of scope (its init, an off-0 deref, a
+  // mention outside the walk, a mention in the condition) keeps walking, init and step in place,
+  // beside the ones that re-spell — each `p` is its own address, so deleting one walk changes no
+  // other. Which pointers re-spell is therefore a property of each, not of the tail's step order.
+  // Dropping one can only remove rewrites, so the loop below shrinks the set to a fixpoint.
+  const spellings = new Map<string, ExprWalkSpelling>();
+  for (const st of inits) {
+    if (st === ivInit || mentionsVar(dw.cond, st.name)) {
+      continue;
+    }
+    const s = exprWalkSpelling(st, dw, ptrVars, declTypes, volatileLocals, privateNames);
+    if (s !== null) {
+      spellings.set(s.p, s);
+    }
+  }
+  const idxOf = (s: ExprWalkSpelling): Expr =>
+    plusConst(
+      s.idx.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv }),
+      (s.elems - start) | 0,
+    );
+  while (spellings.size > 0) {
+    // rewrite the derefs, then verify nothing of any re-spelled `p` survives
+    const offsetDerefs = new Set<string>();
+    const rewriteExpr = (e: Expr): Expr => {
+      const m = mapExprChildren(e, rewriteExpr);
+      const s = m.k === 'index' && m.base.k === 'var' ? spellings.get(m.base.name) : undefined;
+      if (m.k === 'index' && s !== undefined) {
+        if (m.idx.k !== 'const' || m.idx.value !== 0) {
+          offsetDerefs.add(s.p);
+          return m;
+        }
+        return { ...m, base: { ...s.base }, idx: idxOf(s) };
+      }
+      return m;
+    };
+    const steps = new Set(tail.filter((st) => spellings.has(isUnitIncrement(st)!)));
+    const body = dw.body.filter((st) => !steps.has(st)).map((st) => mapStmtExprs(st, rewriteExpr));
+    const dw2: Stmt = { ...dw, body };
+    const failed = inits.filter(
+      (st) =>
+        spellings.has(st.name) &&
+        (offsetDerefs.has(st.name) ||
+          !confinedToWalk(fnBody, st.name, countMentions([st], st.name), dw) ||
+          countMentions([dw2], st.name) !== 0),
+    );
+    if (failed.length === 0) {
+      return { loop: dw2, run: n, kept: inits.filter((st) => !spellings.has(st.name)) };
+    }
+    failed.forEach((st) => spellings.delete(st.name));
+  }
+  return null;
 }
 
 /** Try the walk→index re-spelling on one function. Returns the transformed COPY when at least
@@ -679,6 +856,10 @@ export function reindexWalks(
     sfn.locals.filter((l) => l.volatile === true || l.pointeeVolatile === true).map((l) => l.name),
   );
   const storage = nameStorage(sfn);
+  // v3's invariant-addend test: the names no callee and no aliasing store can write — a param or a
+  // local whose address the function never takes
+  const addressTaken = new Set([...walkExprs(sfn.body)].flatMap((e) => (e.k === 'addr' ? [e.name] : [])));
+  const privateNames = new Set([...storage].filter(([n, c]) => c !== 'global' && !addressTaken.has(n)).map(([n]) => n));
   for (const v of [...sfn.params, ...sfn.locals]) {
     if (v.type.kind === 'ptr') {
       ptrVars.set(v.name, v.type);
@@ -781,15 +962,14 @@ export function reindexWalks(
           }
         }
       }
-      // v3 — the up-counting byte walk with an expression base: `p = (u8 *)(EXPR)` immediately
+      // v3 — the up-counting walk with an expression base: `p = (T *)(EXPR)` immediately
       // ahead of a counter-carried do-while (see tryExprWalk)
       if (s.k === 'dowhile') {
-        const prev = out[out.length - 1];
-        const prev2 = out[out.length - 2];
-        const dw2 = tryExprWalk(prev2, prev, s, ptrVars, sfn.body, declTypes, volatileLocals);
-        if (dw2) {
-          out.pop(); // the walk init is subsumed by the indexed spelling
-          out.push(recurse(dw2));
+        const v3 = tryExprWalk(out, s, ptrVars, sfn.body, declTypes, volatileLocals, privateNames);
+        if (v3) {
+          // the walk inits are subsumed by the indexed spelling; the counter's init stays
+          out.splice(out.length - v3.run, v3.run, ...v3.kept);
+          out.push(recurse(v3.loop));
           fired++;
           continue;
         }

@@ -5,6 +5,7 @@ import { describe, expect, test } from 'vitest';
 
 import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
+import type { IrType } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { without } from '../src/l3/gates';
 import { COUNTDOWN_GATES, reindexWalks } from '../src/l3/reindex';
@@ -443,8 +444,8 @@ test('keptWalks collects the v1 while-walk base (here a param — harmless to th
   expect(kept).toEqual(new Set(['a0']));
 });
 
-// ── v3: the up-counting byte walk with an expression base ─────────────────────────────────────
-describe('v3 — expression-base byte walk', () => {
+// ── v3: the up-counting walk with an expression base ──────────────────────────────────────────
+describe('v3 — expression-base walk', () => {
   const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
   const s32t = { kind: 'int', width: 32, signed: true } as const;
   const cn = (value: number): Expr => ({ k: 'const', value });
@@ -495,10 +496,73 @@ describe('v3 — expression-base byte walk', () => {
     );
   });
 
-  test('refused: a counter starting anywhere but 0 (the index counts completed steps)', () => {
-    const f = mkFn(init, walkBody());
-    (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(5);
-    expect(reindexWalks(f)).toBeNull();
+  describe('a counter starting at a constant S indexes BASE[i - S + REST/W]', () => {
+    const startAt = (f: SFn, start: Expr): SFn => {
+      (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = start;
+      return f;
+    };
+    const idxJson = (r: SFn | null): string => JSON.stringify((r!.body[1] as Extract<Stmt, { k: 'dowhile' }>).body[0]);
+
+    test('S = 5 over a bare base reads a0[i - 5]', () => {
+      const r = reindexWalks(startAt(mkFn({ k: 'cast', to: u8p as never, e: v('a0') }, walkBody()), cn(5)));
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('((u8 *)a1)[i] = ((u8 *)a0)[i - 5];');
+    });
+
+    test('S = 5 keeps a symbolic REST and subtracts S last', () => {
+      const r = reindexWalks(startAt(mkFn(init, walkBody()), cn(5)));
+      expect(r).not.toBeNull();
+      expect(idxJson(r)).toContain(
+        '"idx":{"k":"bin","op":"-","l":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"bin","op":"*","l":{"k":"var","name":"a2"},"r":{"k":"var","name":"a1"}}},"r":{"k":"const","value":5}}',
+      );
+    });
+
+    test('S = 1 over the folded init &g + W reads g[i] (KMC: for (i = 1; …) g[i])', () => {
+      const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+      const f = mkFn(
+        {
+          k: 'cast',
+          to: u16p as never,
+          e: { k: 'bin', op: '+', l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gH' } }, r: cn(2) },
+        },
+        [
+          { k: 'store', lval: { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false }, value: cn(0xffff) },
+          inc('p'),
+          inc('i'),
+        ],
+      );
+      f.locals[0] = { name: 'p', type: u16p as never };
+      const r = reindexWalks(startAt(f, cn(1)));
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('((u16 *)&gH)[i] = 65535;');
+    });
+
+    test('refused: a symbolic start (no constant to subtract)', () => {
+      expect(reindexWalks(startAt(mkFn(init, walkBody()), v('a1')))).toBeNull();
+    });
+
+    test('refused: a nonzero start on a narrow counter, which wraps where the walk does not', () => {
+      const f = startAt(mkFn(init, walkBody()), cn(5));
+      f.locals[1] = { name: 'i', type: T.u(8) };
+      expect(reindexWalks(f)).toBeNull();
+    });
+
+    test('from S = 0 a narrow counter must be UNSIGNED: an s8 wraps 127 -> -128 while the walk goes on', () => {
+      const narrow = (type: IrType | undefined): SFn => {
+        const f = mkFn(init, walkBody());
+        if (type) {
+          f.locals[1] = { name: 'i', type };
+        } else {
+          f.locals.splice(1, 1); // the counter declared nowhere: no width to argue from
+        }
+        return f;
+      };
+      expect(reindexWalks(narrow(T.u(8)))).not.toBeNull();
+      expect(reindexWalks(narrow(T.s(8)))).toBeNull();
+      expect(reindexWalks(narrow(T.s(16)))).toBeNull();
+      expect(reindexWalks(narrow(undefined))).toBeNull();
+    });
   });
 
   test('refused: a step ahead of a deref (the *++p walk reads the NEXT element)', () => {
@@ -563,6 +627,322 @@ describe('v3 — expression-base byte walk', () => {
       mkFn(init, walkBody(), [{ k: 'return', value: { k: 'cast', to: s32t as never, e: v('p') } }]),
     );
     expect(r).toBeNull();
+  });
+
+  describe('a wider element (W bytes): the constant byte REST is rescaled to elements', () => {
+    const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+    const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
+    const halfBody = (val: Expr = deref16): Stmt[] => [
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 2, signed: false }, value: val },
+      inc('p'),
+      inc('i'),
+    ];
+    const u16Fn = (init16: Expr, body: Stmt[] = halfBody()): SFn => {
+      const f = mkFn(init16, body);
+      f.locals[0] = { name: 'p', type: u16p as never };
+      return f;
+    };
+    const at = (off: Expr): Expr => ({
+      k: 'cast',
+      to: u16p as never,
+      e: { k: 'bin', op: '+', l: v('a0'), r: off },
+    });
+
+    test('a u16 walk from byte offset 2k reads BASE[i + k]', () => {
+      const r = reindexWalks(u16Fn(at(cn(6))));
+      expect(r).not.toBeNull();
+      const src = JSON.stringify(r!.body);
+      expect(src).not.toContain('"name":"p"');
+      expect(src).toContain(
+        '{"k":"index","base":{"k":"var","name":"a0"},"idx":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"const","value":3}},"width":2,"signed":false}',
+      );
+      expect(cBackend.emit(r!)).toContain('((u16 *)a0)[i + 3]');
+    });
+
+    test('refused: a byte offset that is not a multiple of the element (no element index names it)', () => {
+      expect(reindexWalks(u16Fn(at(cn(3))))).toBeNull();
+    });
+
+    test('a symbolic byte offset stays in the byte sum the index base casts: ((u16 *)(a0 + a2 * 2))[i + 3]', () => {
+      // KMC: `u16 *p = b + k; for (i = 3; …) p[i] = 7` lifts `p = (u16 *)(a0 + (a1 << 1) + 6)` from i = 3
+      const off = { k: 'bin', op: '+', l: { k: 'bin', op: '*', l: v('a2'), r: cn(2) }, r: cn(6) } as const;
+      const r = reindexWalks(u16Fn(at(off)));
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('((u16 *)a1)[i] = ((u16 *)(a0 + a2 * 2))[i + 3];');
+    });
+
+    test('over a (u32)&g base the address keeps its cast inside the byte sum', () => {
+      const f = u16Fn({
+        k: 'cast',
+        to: u16p as never,
+        e: {
+          k: 'bin',
+          op: '+',
+          l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gH' } },
+          r: { k: 'bin', op: '<<', l: v('a2'), r: cn(1) },
+        },
+      });
+      const r = reindexWalks(f);
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('= ((u16 *)((u32)&gH + (a2 << 1)))[i];');
+    });
+
+    describe('a symbolic addend is re-read on every pass, so nothing in the loop may write it', () => {
+      // KMC, `u16 *p = (u16 *)(b + gK * 2); for (i = 0; …) { p[i] = 7; g(); }`: the walk read gK
+      // once; `((u16 *)(a0 + (gK << 1)))[i]` reads it after every g(), which may have changed it
+      const gOff = { k: 'bin', op: '<<', l: v('gK'), r: cn(1) } as const;
+      const call: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [] } };
+      const withGlobal = (body: Stmt[]): SFn => {
+        const f = u16Fn(at(gOff), body);
+        f.globals = [{ name: 'gK', type: s32t }];
+        return f;
+      };
+      test('refused: a global addend beside a call in the loop', () => {
+        const body = halfBody();
+        body.splice(1, 0, call);
+        expect(reindexWalks(withGlobal(body))).toBeNull();
+      });
+      test('refused: a global addend beside a store, which may alias it', () => {
+        expect(reindexWalks(withGlobal(halfBody()))).toBeNull();
+      });
+      test('a global addend in a loop that writes no memory re-spells', () => {
+        const body: Stmt[] = [{ k: 'assign', name: 'a1', value: deref16 }, inc('p'), inc('i')];
+        expect(cBackend.emit(reindexWalks(withGlobal(body))!)).toContain('a1 = ((u16 *)(a0 + (gK << 1)))[i];');
+      });
+      test('refused: a local addend whose address escapes, beside a call', () => {
+        const body = halfBody();
+        body.splice(1, 0, { k: 'exprstmt', value: { k: 'call', fn: 'g', args: [{ k: 'addr', name: 'k' }] } });
+        const f = u16Fn(at({ k: 'bin', op: '<<', l: v('k'), r: cn(1) }), body);
+        f.locals.push({ name: 'k', type: s32t });
+        expect(reindexWalks(f)).toBeNull();
+      });
+      test('a param addend survives a call: no callee writes it', () => {
+        const body = halfBody();
+        body.splice(1, 0, call);
+        const r = reindexWalks(u16Fn(at({ k: 'bin', op: '<<', l: v('a2'), r: cn(1) }), body));
+        expect(cBackend.emit(r!)).toContain('= ((u16 *)(a0 + (a2 << 1)))[i];');
+      });
+    });
+
+    test('refused: a symbolic byte offset beside constants W does not divide', () => {
+      const off = { k: 'bin', op: '+', l: v('a2'), r: cn(3) } as const;
+      expect(reindexWalks(u16Fn(at(off)))).toBeNull();
+    });
+
+    test('refused: a deref narrower than the walk element', () => {
+      const narrow: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 1, signed: false };
+      expect(reindexWalks(u16Fn(at(cn(2)), halfBody(narrow)))).toBeNull();
+    });
+  });
+
+  describe('a W-element pointer base: EXPR counts in elements, so REST stays verbatim', () => {
+    const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+    const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
+    const elemFn = (e: Expr, baseType: IrType, start = 0): SFn => {
+      const f = mkFn(e, [{ k: 'store', lval: deref16, value: cn(7) }, inc('p'), inc('i')]);
+      f.locals[0] = { name: 'p', type: u16p as never };
+      f.params[0] = { name: 'a0', type: baseType };
+      (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(start);
+      return f;
+    };
+    const plus = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '+', l, r });
+
+    test('KMC folds for (i = 3; …) a0[i] over a u16 *a0 to p = a0 + 3: it reads a0[i]', () => {
+      const r = reindexWalks(elemFn(plus(v('a0'), cn(3)), u16p as never, 3));
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('a0[i] = 7;');
+    });
+
+    test('a symbolic addend stays verbatim, the constants fold after it', () => {
+      const r = reindexWalks(
+        elemFn(
+          plus(plus(v('a0'), cn(1)), plus({ k: 'bin', op: '*', l: v('a2'), r: v('a1') }, cn(2))),
+          u16p as never,
+          5,
+        ),
+      );
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('a0[i + a2 * a1 - 2] = 7;');
+    });
+
+    test('a pointer to a signed element of the same width counts the same unit', () => {
+      const s16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: true } } as const;
+      expect(reindexWalks(elemFn(plus(v('a0'), cn(3)), s16p as never, 3))).not.toBeNull();
+    });
+
+    test('refused: a pointer base of another element width strides a unit no u16 index names', () => {
+      const u32p = { kind: 'ptr', to: { kind: 'int', width: 32, signed: false } } as const;
+      expect(reindexWalks(elemFn(plus(v('a0'), cn(3)), u32p as never, 3))).toBeNull();
+      expect(reindexWalks(elemFn(plus(v('a0'), cn(3)), T.ptr(T.ptr(T.u(16))), 3))).toBeNull();
+    });
+  });
+
+  describe('an address base: `(u32)&g` is the index base, declared or not', () => {
+    const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+    const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
+    const gAddr = (to: IrType = T.u(32)): Expr => ({ k: 'cast', to, e: { k: 'addr', name: 'gH' } });
+    const addrFn = (e: Expr, globalType?: IrType): SFn => {
+      const f = mkFn({ k: 'cast', to: u16p as never, e }, [
+        { k: 'store', lval: deref16, value: cn(0xffff) },
+        inc('p'),
+        inc('i'),
+      ]);
+      f.locals[0] = { name: 'p', type: u16p as never };
+      if (globalType) {
+        f.globals = [{ name: 'gH', type: globalType }];
+      }
+      return f;
+    };
+    const plus = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '+', l, r });
+
+    test('(u32)&g + 4 over a u16 walk reads ((u16 *)&g)[i + 2], undeclared g included', () => {
+      const r = reindexWalks(addrFn(plus(gAddr(), cn(4))));
+      expect(r).not.toBeNull();
+      const src = JSON.stringify(r!.body);
+      expect(src).not.toContain('"name":"p"');
+      expect(src).toContain(
+        '{"k":"index","base":{"k":"addr","name":"gH"},"idx":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"const","value":2}},"width":2,"signed":false}',
+      );
+      expect(cBackend.emit(r!)).toContain('((u16 *)&gH)[i + 2] = 65535;');
+    });
+
+    test('a g declared with another element still reads W-byte elements through the printed cast', () => {
+      const r = reindexWalks(addrFn(plus(gAddr(), cn(4)), T.array(T.u(8), 64)));
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('((u16 *)gH)[i + 2] = 65535;'); // the array's own address
+    });
+
+    test('refused: an uncast address (its `+` strides g, not bytes) or a narrowing cast on the addend', () => {
+      expect(reindexWalks(addrFn(plus({ k: 'addr', name: 'gH' }, cn(4))))).toBeNull();
+      expect(reindexWalks(addrFn(plus(gAddr(T.u(16)), cn(4))))).toBeNull();
+    });
+
+    test('refused: a narrowing cast over the WHOLE init truncates the address (KMC sll/sra 16)', () => {
+      // `u16 *p = (u16 *)(s16)((u32)gH + 2)` lifts so: g[i] would drop the truncation
+      expect(reindexWalks(addrFn({ k: 'cast', to: T.s(16), e: plus(gAddr(), cn(2)) }))).toBeNull();
+      // a same-width integer cast keeps every bit, and is stripped like the pointer cast
+      expect(reindexWalks(addrFn({ k: 'cast', to: T.s(32), e: plus(gAddr(), cn(2)) }))).not.toBeNull();
+    });
+
+    test('a LONE address needs no cast: (u16 *)&g from S = 5 reads ((u16 *)&g)[i - 5]', () => {
+      // KMC: for (i = 5; i < 100; i++) gH[i - 5] = 7  lifts  v1 = 5; v0 = (u16 *)&gH; do …
+      const f = addrFn({ k: 'addr', name: 'gH' });
+      (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(5);
+      const r = reindexWalks(f);
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('((u16 *)&gH)[i - 5] = 65535;');
+      // the same under a (u32) the strip removes, and a u16 array g still prints the cast
+      expect(reindexWalks(addrFn(gAddr()))).not.toBeNull();
+      expect(cBackend.emit(reindexWalks(addrFn({ k: 'addr', name: 'gH' }, T.array(T.u(16), 256)))!)).toContain(
+        '((u16 *)gH)[i] = 65535;',
+      );
+    });
+
+    test('refused: an address beside a bare var leaves the base ambiguous', () => {
+      expect(reindexWalks(addrFn(plus(gAddr(), v('a0'))))).toBeNull();
+    });
+  });
+
+  describe('one counter carrying SEVERAL walk pointers: each re-spells off its own base', () => {
+    const u16p = T.ptr(T.u(16));
+    const s32p = T.ptr(T.s(32));
+    const castAddr = (to: IrType, g: string, off: number): Expr => ({
+      k: 'cast',
+      to,
+      e: { k: 'bin', op: '+', l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: g } }, r: cn(off) },
+    });
+    const at0 = (name: string, width: number): Expr => ({
+      k: 'index',
+      base: v(name),
+      idx: cn(0),
+      width,
+      signed: false,
+    });
+    /** KMC, `for (i = 1; i < 64; i++) { gH[i] = 7; gW[i] = 8; }`:
+     *  `i = 1; q = (s32 *)((u32)&gW + 4); p = (u16 *)((u32)&gH + 2);
+     *   do { *p = 7; *q = 8; q = q + 1; i = i + 1; p = p + 1; } while (i < 64);` */
+    const twoWalks = (mut?: (inits: Stmt[], body: Stmt[]) => void): SFn => {
+      const inits: Stmt[] = [
+        { k: 'assign', name: 'i', value: cn(1) },
+        { k: 'assign', name: 'q', value: castAddr(s32p, 'gW', 4) },
+        { k: 'assign', name: 'p', value: castAddr(u16p, 'gH', 2) },
+      ];
+      const body: Stmt[] = [
+        { k: 'store', lval: at0('p', 2), value: cn(7) },
+        { k: 'store', lval: at0('q', 4), value: cn(8) },
+        inc('q'),
+        inc('i'),
+        inc('p'),
+      ];
+      mut?.(inits, body);
+      return {
+        name: 't1',
+        params: [],
+        locals: [
+          { name: 'p', type: u16p },
+          { name: 'q', type: s32p },
+          { name: 'i', type: s32t },
+        ],
+        retType: s32t,
+        body: [...inits, { k: 'dowhile', cond: { k: 'bin', op: '<', l: v('i'), r: cn(64) }, body }],
+      };
+    };
+
+    test('two arrays of different widths, counter from 1: gH[i] and gW[i], both walks deleted', () => {
+      const r = reindexWalks(twoWalks());
+      expect(r).not.toBeNull();
+      const src = cBackend.emit(r!);
+      expect(src).toContain('((u16 *)&gH)[i] = 7;');
+      expect(src).toContain('((s32 *)&gW)[i] = 8;');
+      expect(src).toContain('i = 1;');
+      expect(JSON.stringify(r!.body)).not.toMatch(/"name":"[pq]"/);
+    });
+
+    test('the counter init may sit anywhere in the run', () => {
+      const r = reindexWalks(twoWalks((inits) => inits.splice(0, 2, inits[1], inits[0])));
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('((s32 *)&gW)[i] = 8;');
+    });
+
+    test('one pointer out of scope keeps walking beside the one that re-spells', () => {
+      // q read at offset 1: no `BASE[i + REST]` names it here, so q keeps its init and step
+      const r = reindexWalks(
+        twoWalks((_, body) => {
+          body[1] = { k: 'store', lval: { ...at0('q', 4), idx: cn(1) } as Expr, value: cn(8) };
+        }),
+      );
+      const src = cBackend.emit(r!);
+      expect(src).toContain('((u16 *)&gH)[i] = 7;');
+      expect(src).toContain('q[1] = 8;');
+      expect(src).toContain('q = q + 1;');
+      expect(src).toMatch(/q = \(s32 \*\)\(\(u32\)&gW \+ 4\);/);
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+    });
+
+    test('which pointers re-spell does not depend on the order of the tail steps', () => {
+      // q escapes (returned after the loop), so only p re-spells — in every tail order
+      const escaped = (order: string[]): SFn => {
+        const f = twoWalks((_, body) => body.splice(2, 3, ...order.map(inc)));
+        f.body.push({ k: 'return', value: v('q') } as Stmt);
+        return f;
+      };
+      const outs = [
+        ['q', 'p', 'i'],
+        ['p', 'q', 'i'],
+        ['i', 'q', 'p'],
+      ].map((o) => cBackend.emit(reindexWalks(escaped(o))!));
+      for (const src of outs) {
+        expect(src).toContain('((u16 *)&gH)[i] = 7;');
+        expect(src).toContain('*q = 8;');
+      }
+    });
+
+    test('refused: a walk pointer whose step sits outside the tail', () => {
+      expect(reindexWalks(twoWalks((_, body) => body.splice(0, 0, body.splice(2, 1)[0])))).toBeNull();
+    });
   });
 
   test('refused: a wider deref would stride differently', () => {
