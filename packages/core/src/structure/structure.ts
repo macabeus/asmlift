@@ -2266,6 +2266,13 @@ export function structure(
   //
   // A function-scope static is asked by its linker name, which no map holds, and comes FIRST: its
   // shape is its definition's, never the one raise/globalshape.ts infers from its accesses.
+  const anonymous = [...(fn.localObjects?.values() ?? [])].find((o) => o.anonymous);
+  if (anonymous !== undefined) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': reads the compiler's anonymous constant '${anonymous.symbol}', ` +
+        `which no declaration spells — not modelled`,
+    );
+  }
   const localStatics = localStaticShapes(fn, staticLayout);
   if ('refused' in localStatics) {
     throw new StructureError(

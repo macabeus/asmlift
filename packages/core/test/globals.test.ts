@@ -85,9 +85,15 @@ describe('global-variable recovery', () => {
   // no-op; these two fixtures are what a mutant widening the class would kill.
   test('a pool word the parser cannot decide still declines loudly', () => {
     const word = (w: string) => () => thumb('back', `\tldr\tr0, .L1\n\tbx\tlr\n.L1:\n\t.word\t${w}\n`);
-    for (const w of ['gTab+gOther', 'gTab+0x4+0x8', 'gTab*0x8', 'gTab+0x8y', 'gTab+', '.Ltab', '.Ltab+0x4']) {
+    for (const w of ['gTab+gOther', 'gTab+0x4+0x8', 'gTab*0x8', 'gTab+0x8y', 'gTab+', '.Ltab+0x4']) {
       expect(word(w), w).toThrow(`pool word '${w}' is not a symbol, symbol±offset, or number`);
     }
+    // A bare `.L` word is read as the compiler's anonymous data (agbcc's `.LC0` image), and a label
+    // that is not read-only data in this asm — absent, or a code label — still declines, saying so.
+    expect(word('.Ltab')).toThrow(
+      "names the compiler's anonymous data ('.Ltab') whose definition this asm does not carry",
+    );
+    expect(word('.L1')).toThrow("names the compiler's anonymous data ('.L1') defined in section '(none)'");
   });
 
   // The magnitude, from the other direction. `Number()` answers for digit strings the assembler

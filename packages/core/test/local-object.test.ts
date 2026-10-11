@@ -59,6 +59,7 @@ import {
   readGasLocalObject,
   readObjectLocalObject,
 } from '../src/frontend/local-object';
+import { lift as liftThumb } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
@@ -570,4 +571,18 @@ test('agbcc: an anonymous label that is not read-only data, or not a `.L` label,
 test('agbcc: a string literal two functions pass shares one image, and both pools name it', () => {
   // void flit(void) { g("abc"); }  void flit2(void) { g("abc"); }
   expect([...gasPoolReferrers(constInit, '.LC16')].sort()).toEqual(['flit', 'flit2']);
+});
+
+test('agbcc: a pool word naming a `.LC` image lifts to the address of an anonymous object the Fn carries', () => {
+  const fn = liftThumb('dead16', constInit, ARMV4T_AGBCC);
+  expect([...(fn.localObjects?.values() ?? [])]).toMatchObject([{ symbol: '.LC0', anonymous: true, size: 16 }]);
+  const gaddrs = fn.blocks.flatMap((b) => b.ops).filter((op) => op.opcode === 'gaddr');
+  expect(gaddrs.map((op) => op.attrs.sym)).toEqual(['.LC0']);
+});
+
+test('agbcc: a `.LC` image another function names too refuses, naming that function', () => {
+  // flit and flit2 both pass "abc": agbcc emits the literal once
+  expect(() => liftThumb('flit', constInit, ARMV4T_AGBCC)).toThrow(
+    "names the compiler's anonymous data ('.LC16') that flit2 also names — it is not this function's alone",
+  );
 });
