@@ -144,9 +144,10 @@ test('a field only ever stored declares the view its stamped stores agree on', (
   expect(storedStruct('-104')).toContain('    a0->field_6 = -104;\n');
   expect(storedStruct('0xff98')).toContain(' u16 field_6;');
   // no stamp (bit 15 clear): the unsigned view; two stamps that disagree: the signed one, as two
-  // loads that disagree would
+  // loads that disagree would, and the other store is spelled through a cast to the view it read
   expect(storedStruct('104')).toContain(' u16 field_6;');
   expect(storedStruct('-104', '0xff98')).toContain(' s16 field_6;');
+  expect(storedStruct('-104', '0xff98')).toContain('    a0->field_6 = -104;\n    ((u16 *)a0)[3] = 65432;\n');
 });
 
 test("a load's signedness wins over a stamped store's at the same field", () => {
@@ -166,4 +167,7 @@ test("a load's signedness wins over a stamped store's at the same field", () => 
     ).source;
   expect(src('lhu')).toContain(' u16 field_6;');
   expect(src('lh')).toContain(' s16 field_6;');
+  // the field keeps its load's type, and the stamped store is spelled through the signed cell
+  expect(src('lhu')).toContain('    ((s16 *)a0)[3] = -104;\n');
+  expect(src('lh')).toContain('    a0->field_6 = -104;\n');
 });

@@ -652,6 +652,17 @@ function displacementIndex(off: number, width: number): number {
   return off / width;
 }
 
+/** Whether `lval`, a `p->field_K` member access through a recovered struct pointer, names a
+ *  narrow integer member whose signedness is not `signed`. False for anything else, and for a
+ *  displacement that is not a whole number of `width`-byte elements (no flat subscript spells it). */
+function memberSignDisagrees(baseType: IrType, lval: Expr, off: number, width: number, signed: boolean): boolean {
+  if (lval.k !== 'field' || lval.dot || baseType.kind !== 'ptr' || baseType.to.kind !== 'struct' || off % width) {
+    return false;
+  }
+  const f = baseType.to.fields.find((m) => m.name === lval.name && m.off === off);
+  return f?.type.kind === 'int' && f.type.width === width * 8 && f.type.signed !== signed;
+}
+
 function memAccess(
   base: Value,
   baseExpr: Expr,
@@ -4804,12 +4815,15 @@ export function structure(
         // A store whose lvalue is a bare global (`gSym = v`, from an `&gSym` base at off 0) emits
         // as an ASSIGN, not a store — memAccess returns a `var` node for that case.
         const width = op.attrs.width as number;
+        const off = op.attrs.off as number;
+        const stamp = op.attrs.signed as boolean | undefined;
+        const baseExpr = expr(op.operands[0]);
         const lval0 = memAccess(
           op.operands[0],
-          expr(op.operands[0]),
-          op.attrs.off as number,
+          baseExpr,
+          off,
           width,
-          (op.attrs.signed as boolean | undefined) ?? width === 4,
+          stamp ?? width === 4,
           ctype,
           scalarGlobals,
           symCtx,
@@ -4823,8 +4837,16 @@ export function structure(
         }
         // signedness mirrors recoverTypes' store seed (a stamped constant's sign, else word ⇒
         // signed and narrow ⇒ unsigned), so an inserted cast declares the same scalar the
-        // recovered pointee would have.
-        const lval = pinnedAccess(op, lval0);
+        // recovered pointee would have. A member is spelled through its declared type, so a
+        // stamped store whose sign that type does not share is spelled as the flat cell instead,
+        // which the backend casts: `a0->field_6 = -104` under `u16 field_6` recompiles to
+        // `li 0xff98`, and `((s16 *)a0)[3] = -104` to the `li -104` the stamp read.
+        const lval = pinnedAccess(
+          op,
+          stamp !== undefined && memberSignDisagrees(op.operands[0].type, lval0, off, width, stamp)
+            ? { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed: stamp }
+            : lval0,
+        );
         out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;

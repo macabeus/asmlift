@@ -173,7 +173,8 @@ describe('a narrow store of a variable holding a constant is never stamped signe
 // The reader's payoff, byte-exact: a read types `p` first, so before the stamp the signed store was
 // spelled through a cast to the unsigned view (or the reverse) and recompiled to the other constant.
 // rt2 is the unsigned control, which matched without the stamp too. rt4 and rt5 are the indexed
-// stores the stamp rides into (`astore`, scalar and struct element).
+// stores the stamp rides into (`astore`, scalar and struct element); rt6 is a member whose load
+// declared it unsigned and whose store the stamp spells through the signed cell.
 const ROUND_TRIP: [string, string[], string][] = [
   ['rt1', ['s16 *', 's16 *'], 'void rt1(s16 *p, s16 *q) { *q = p[6]; p[6] = -1; }'],
   ['rt2', ['u16 *', 'u16 *'], 'void rt2(u16 *p, u16 *q) { *q = p[6]; p[6] = -1; }'],
@@ -183,6 +184,12 @@ const ROUND_TRIP: [string, string[], string][] = [
     'rt5',
     ['void *', 's32'],
     'typedef struct { s16 a; s16 b; s32 c; } E; void rt5(E *p, s32 i) { p[i].b = -1; p[i].c = 0; }',
+  ],
+  [
+    'rt6',
+    ['void *', 'u16 *'],
+    'typedef struct { u16 a; u16 b; u16 c; s16 h; s32 d; s32 z; } S;\n' +
+      'void rt6(S *p, u16 *q) { u16 t = (u16)p->h; p->h = -104; p->z = 0; *q = t; }',
   ],
 ];
 
