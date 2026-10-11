@@ -545,13 +545,30 @@ export interface TargetDescription {
     // Absent ⇒ a handed-out frame address explains nothing, and the code-reading refusals weigh
     // every stored word as before.
     //
-    // Set on agbcc, compiled at 2.9-arm-000512 and the corpus's flags: an address-taken local sits
-    // ABOVE the outgoing area (`add rD, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when
-    // no call in the function takes a stack word. Its RESIDUE is the other producer of a handed-out
-    // frame address, a by-value struct argument's block copy (`mov r0, sp; bl memcpy`), whose base
-    // IS the outgoing area: agbcc stages the call's remaining stack words AFTER the copy, so the
-    // escape clears nothing they leave pending, and a declared callee whose block meets the escape
-    // refuses outright.
+    // Set on agbcc, compiled at 2.9-arm-000512 and its canonical flags, and re-measurable from the
+    // committed probe (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-escape.s`, read
+    // by `frame-escape-probes.test.ts`). An address-taken local sits ABOVE the outgoing area
+    // (`f1`: `add r0, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when no call in the
+    // function takes a stack word (`f0`).
+    //
+    // Its RESIDUE is the other producer of a handed-out frame address, a by-value struct argument's
+    // block copy (`mov r0, sp` / `add r0, sp, #4`, then `bl memcpy`), whose base IS the outgoing
+    // area. Two things keep that residue from clearing a real argument. A declared callee whose
+    // block meets the escape refuses outright. And agbcc stages a call's outgoing words in
+    // ASCENDING offset order, the copy included (`qh5`, `a2`, `a3`), so a word staged before a copy
+    // lies BELOW its base (`a2`: `str r0, [sp]`, then `add r0, sp, #4; bl memcpy`) and a word
+    // staged after it is still pending at the call. The escape ends pending words from its offset
+    // UP, so in both cases it ends none of them.
+    //
+    // WHICH IS WHY THE EVENT IS FLOW-SENSITIVE although the layout fact is whole-function. A
+    // flow-insensitive reading ("an address escapes somewhere, so every word from there up is a
+    // local's") would set `qh5`'s fifth `h5` word aside, staged at [sp,#0] after the copy, and lift
+    // `h5(1, 2, 3, 4)`. Read per program point, a word a receiver could not have read yet stays
+    // pending, and the cost is a false alarm, never a wrong answer. Those false alarms are a store
+    // on a path that does not escape (`if (x) gt(&s); else h(y);`), a store after the publish, and
+    // an object reached only through a pointer stored in the frame. They decline loud.
+    // `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, and it holds only where
+    // no block copy fits: a one-word frame.
     escapedFrameAddressNamesALocal?: boolean;
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
@@ -1002,7 +1019,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
-    // compiled: `f0`/`f1`/`r1`/`r2` in the frame-base tests (`thumb-frontend.test.ts`)
+    // compiled: the committed probe `test/corpus/agbcc-escape.s` (`scripts/regen-outgoing-area-probes.ts`)
     escapedFrameAddressNamesALocal: true,
     // agbcc's `*call_indirect` and `*call_value_indirect` emit `bl _call_via_%0` (gcc/thumb.md:997-1021),
     // and libgcc defines `_call_via_<reg>` as `bx <reg>` for r0-r9, sl, fp, ip, sp and lr

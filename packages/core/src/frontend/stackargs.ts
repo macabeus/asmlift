@@ -28,7 +28,9 @@ export interface StackArgsSlot {
  *  a word there that this function stored and never reloads has been read, by the receiver.
  *
  *  Emitted only under `compilerBehaviors.escapedFrameAddressNamesALocal`: that premise is what
- *  makes the words from `off` up a local's rather than an argument area's (see the frontend). */
+ *  makes the words from `off` up a local's rather than an argument area's. It ends only what is
+ *  pending WHERE it fires, never a word staged after it, and the field says why that is the safe
+ *  reading of a whole-function layout fact (a block copy's base escapes too). */
 export interface StackArgsEscape {
   readonly kind: 'escape';
   readonly off: number;
