@@ -306,11 +306,13 @@ export const pascalBackend: LanguageBackend = {
     // spelling of one (a typed constant, or a unit-level var) has not been measured — loud. So is
     // the compiler's anonymous constant a local's initializer is copied from (l3/constinit.ts).
     if (fn.statics?.length) {
-      const st = fn.statics[0];
       throw new Error(
-        st.anonymous
-          ? `pascal backend: the compiler's anonymous constant '${st.name}' a local is initialized from has no IDO Pascal spelling yet`
-          : `pascal backend: the function-scope static '${st.name}' has no IDO Pascal spelling yet`,
+        `pascal backend: the function-scope static '${fn.statics[0].name}' has no IDO Pascal spelling yet`,
+      );
+    }
+    if (fn.images?.length) {
+      throw new Error(
+        `pascal backend: the compiler's anonymous constant '${fn.images[0].name}' a local is initialized from has no IDO Pascal spelling yet`,
       );
     }
     // Same env discipline as the C family (cfamily.ts cFamilyBody): the printer judges derefs

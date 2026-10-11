@@ -6807,6 +6807,7 @@ export function structure(
         }
       : {}),
     ...(localStatics.statics.length ? { statics: localStatics.statics } : {}),
+    ...(localStatics.images.length ? { images: localStatics.images } : {}),
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),

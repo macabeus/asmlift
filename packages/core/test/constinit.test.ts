@@ -8,7 +8,7 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { pascalBackend } from '../src/backend/pascal';
 import { T } from '../src/ir/types';
-import type { Expr, SFn, SStatic, Stmt } from '../src/l3/ast';
+import type { Expr, SFn, SImage, Stmt } from '../src/l3/ast';
 import { constantImageRefusal, foldConstantImages } from '../src/l3/constinit';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -19,19 +19,17 @@ const copy = (dst: string, src: string, n: number): Stmt => ({
   k: 'exprstmt',
   value: { k: 'call', fn: 'memcpy', args: [v(dst), { k: 'addr', name: src }, c(n)] },
 });
-const image = (init: number[], width = 1, signed = false, extra: Partial<SStatic> = {}): SStatic => ({
+const image = (init: number[], width = 1, signed = false, extra: Partial<SImage> = {}): SImage => ({
   name: '.LC0',
   type: T.array(T.int(8 * width, signed), init.length),
-  const: true,
   init,
-  anonymous: true,
   ...extra,
 });
-const fn = (body: Stmt[], locals: SFn['locals'], img: SStatic = image([1, 2, 3, 4])): SFn => ({
+const fn = (body: Stmt[], locals: SFn['locals'], img: SImage = image([1, 2, 3, 4])): SFn => ({
   name: 'f',
   params: [],
   locals,
-  statics: [img],
+  images: [img],
   retType: T.void(),
   body,
 });
@@ -42,7 +40,7 @@ test('the copy folds into the declaration, and the image and the copy are gone',
   const sfn = fn([copy('sp0', '.LC0', 4), use(v('sp0'))], bytes4);
   expect(constantImageRefusal(sfn)).toBeNull();
   const out = foldConstantImages(sfn);
-  expect(out.statics).toBeUndefined();
+  expect(out.images).toBeUndefined();
   expect(out.body).toEqual([use(v('sp0'))]);
   expect(cBackend.emit(sfn)).toBe('void f(void) {\n    u8 sp0[4] = { 1, 2, 3, 4 };\n    g(sp0);\n}\n');
 });

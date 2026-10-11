@@ -43,6 +43,7 @@ import { type IrType, T } from '../ir/types';
 import {
   type Expr,
   type SFn,
+  type SImage,
   type SStatic,
   type Stmt,
   mapExprChildren,
@@ -123,6 +124,8 @@ function zeroInitialized(
 export interface LocalStaticShapes {
   infos: Map<string, SymbolInfo>;
   statics: SStatic[];
+  /** the compiler's anonymous constant images, which no declaration spells (l3/constinit.ts) */
+  images: SImage[];
 }
 
 /** One access through a static's address: the width it reads or writes, and a load's extension. */
@@ -234,8 +237,9 @@ export function localStaticShapes(
   const objs = fn.localObjects;
   const infos = new Map<string, SymbolInfo>();
   const statics: SStatic[] = [];
+  const images: SImage[] = [];
   if (objs === undefined) {
-    return { infos, statics };
+    return { infos, statics, images };
   }
   if (layout === undefined) {
     const [first] = objs.keys();
@@ -285,12 +289,10 @@ export function localStaticShapes(
         dims: [count],
         const: true,
       });
-      statics.push({
+      images.push({
         name: obj.symbol,
         type: T.array(T.int(unit * 8, signed), count),
-        const: true,
         init: elements(obj, unit, signed),
-        anonymous: true,
         ...(obj.directives!.string && unit === 1 ? { string: true as const } : {}),
       });
       continue;
@@ -353,7 +355,7 @@ export function localStaticShapes(
       ...(string ? { string: true as const } : {}),
     });
   }
-  return { infos, statics };
+  return { infos, statics, images };
 }
 
 /** `sfn` with each static's linker name replaced by its source name — every reference, assignment

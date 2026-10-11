@@ -414,6 +414,11 @@ export interface SFn {
    *  the top of its body ahead of the locals. Unlike `globals`, the backend declares these: no
    *  header does, because the source defined them here. */
   statics?: SStatic[];
+  /** The compiler's own constant images this function copies a local's initializer from
+   *  (structure/local-statics.ts), under labels the source never wrote. Not statics: no declaration
+   *  may spell one, so the C-family emitter folds each into the initializer of the local its copy
+   *  fills (l3/constinit.ts), and a backend that cannot refuses. */
+  images?: SImage[];
   retType: IrType;
   body: Stmt[];
   /** Struct types this function's fields reference, declared above it by the backend. Empty
@@ -455,11 +460,16 @@ export interface SStatic {
   /** the initializer is spelled as a string literal — a byte array the compiler aligns as a
    *  string (structure/local-statics.ts) */
   string?: true;
-  /** The compiler's own constant image under a label the source never wrote (ir/core.ts
-   *  `LocalObject.anonymous`), named by that label. No declaration spells it: the one block copy
-   *  that reads it is folded into the initializer of the local it fills (l3/constinit.ts), and a
-   *  backend that cannot do that refuses. */
-  anonymous?: true;
+}
+
+/** One constant image of the compiler's own (ir/core.ts `LocalObject.anonymous`), named by its
+ *  label: an integer array typed by the directives that wrote it, and its elements. */
+export interface SImage {
+  name: string;
+  type: IrType;
+  init: number[];
+  /** the image was written as a string literal (`.ascii`) */
+  string?: true;
 }
 
 /** A struct declaration surfaced to the backend (name + field list). Mirrors the IR struct

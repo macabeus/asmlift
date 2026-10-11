@@ -6,7 +6,7 @@
 // `ldr r1,=.LC0; mov r0,sp; mov r2,#16; bl memcpy` (varasm.c `output_constant_def`, expr.c
 // `store_constructor` → `emit_block_move`). The lift reads that image as an ANONYMOUS object
 // (ir/core.ts `LocalObject.anonymous`), so the tree holds the copy as written —
-// `memcpy(sp0, .LC0, 16)` — and the image as an `SStatic` no declaration can spell. This pass
+// `memcpy(sp0, .LC0, 16)` — and the image in `SFn.images`, which no declaration spells. This pass
 // spells the pair back as the declaration it came from: the local's initializer, and no copy.
 //
 // IT RUNS AT EMISSION, NOT IN STRUCTURE. Between the two the tree belongs to the contracts and the
@@ -37,7 +37,7 @@
 // for any compiler: IDO, KMC GCC, gcc 2.7.2 and mwcc copy a local aggregate's initializer from an
 // anonymous read-only constant too, and their frontends refuse the address-taken frame local first.
 import { type IrType, typeToString } from '../ir/types';
-import { type Expr, type SFn, type SStatic, type Stmt, mentionedName, walkExprs } from './ast';
+import { type Expr, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
 import { mentionsAnyLocal } from './mentions';
 
 /** The block copies a compiler emits for an aggregate initializer, by callee: which argument is
@@ -87,7 +87,7 @@ function resign(v: number, width: number, signed: boolean): number {
 
 /** One image's fold: the copy statement's index, the local and its declaration. */
 interface Fold {
-  image: SStatic;
+  image: SImage;
   at: number;
   local: string;
   type: IrType;
@@ -96,8 +96,8 @@ interface Fold {
 }
 
 /** Why `image` cannot fold, as the tail of a sentence naming it, or its fold. */
-function planFold(sfn: SFn, image: SStatic): Fold | string {
-  if (image.type.kind !== 'array' || image.type.elem.kind !== 'int' || image.init === undefined) {
+function planFold(sfn: SFn, image: SImage): Fold | string {
+  if (image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
     return 'whose image writes no one element width — a struct, or padding alone';
   }
   const elem = image.type.elem;
@@ -208,12 +208,10 @@ function uses(body: readonly Stmt[], local: string): { indexed: number; extents:
 /** Whether every anonymous image `sfn` holds folds into a local's initializer: null when it does,
  *  else the image's name and the tail of the sentence that refuses it. */
 export function constantImageRefusal(sfn: SFn): { image: string; refused: string } | null {
-  for (const image of sfn.statics ?? []) {
-    if (image.anonymous) {
-      const plan = planFold(sfn, image);
-      if (typeof plan === 'string') {
-        return { image: image.name, refused: plan };
-      }
+  for (const image of sfn.images ?? []) {
+    const plan = planFold(sfn, image);
+    if (typeof plan === 'string') {
+      return { image: image.name, refused: plan };
     }
   }
   return null;
@@ -223,12 +221,12 @@ export function constantImageRefusal(sfn: SFn): { image: string; refused: string
  *  copy gone and the image with it. Throws where one does not fold: structure() refused that
  *  function already, so a tree that reaches here unfoldable was made so by a later pass. */
 export function foldConstantImages(sfn: SFn): SFn {
-  const images = (sfn.statics ?? []).filter((s) => s.anonymous);
-  if (images.length === 0) {
+  if (sfn.images === undefined) {
     return sfn;
   }
-  let out = sfn;
-  for (const image of images) {
+  let out: SFn = { ...sfn };
+  delete out.images;
+  for (const image of sfn.images) {
     const plan = planFold(out, image);
     if (typeof plan === 'string') {
       throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan}`);
@@ -241,11 +239,7 @@ export function foldConstantImages(sfn: SFn): SFn {
           ? { ...l, type: plan.type, init: plan.init, ...(plan.string ? { initString: true as const } : {}) }
           : l,
       ),
-      statics: (out.statics ?? []).filter((s) => s !== image),
     };
-  }
-  if (out.statics?.length === 0) {
-    delete out.statics;
   }
   return out;
 }
