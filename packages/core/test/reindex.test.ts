@@ -783,6 +783,82 @@ describe('v3 — expression-base walk', () => {
     });
   });
 
+  describe('one counter carrying SEVERAL walk pointers: each re-spells off its own base', () => {
+    const u16p = T.ptr(T.u(16));
+    const s32p = T.ptr(T.s(32));
+    const castAddr = (to: IrType, g: string, off: number): Expr => ({
+      k: 'cast',
+      to,
+      e: { k: 'bin', op: '+', l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: g } }, r: cn(off) },
+    });
+    const at0 = (name: string, width: number): Expr => ({
+      k: 'index',
+      base: v(name),
+      idx: cn(0),
+      width,
+      signed: false,
+    });
+    /** KMC, `for (i = 1; i < 64; i++) { gH[i] = 7; gW[i] = 8; }`:
+     *  `i = 1; q = (s32 *)((u32)&gW + 4); p = (u16 *)((u32)&gH + 2);
+     *   do { *p = 7; *q = 8; q = q + 1; i = i + 1; p = p + 1; } while (i < 64);` */
+    const twoWalks = (mut?: (inits: Stmt[], body: Stmt[]) => void): SFn => {
+      const inits: Stmt[] = [
+        { k: 'assign', name: 'i', value: cn(1) },
+        { k: 'assign', name: 'q', value: castAddr(s32p, 'gW', 4) },
+        { k: 'assign', name: 'p', value: castAddr(u16p, 'gH', 2) },
+      ];
+      const body: Stmt[] = [
+        { k: 'store', lval: at0('p', 2), value: cn(7) },
+        { k: 'store', lval: at0('q', 4), value: cn(8) },
+        inc('q'),
+        inc('i'),
+        inc('p'),
+      ];
+      mut?.(inits, body);
+      return {
+        name: 't1',
+        params: [],
+        locals: [
+          { name: 'p', type: u16p },
+          { name: 'q', type: s32p },
+          { name: 'i', type: s32t },
+        ],
+        retType: s32t,
+        body: [...inits, { k: 'dowhile', cond: { k: 'bin', op: '<', l: v('i'), r: cn(64) }, body }],
+      };
+    };
+
+    test('two arrays of different widths, counter from 1: gH[i] and gW[i], both walks deleted', () => {
+      const r = reindexWalks(twoWalks());
+      expect(r).not.toBeNull();
+      const src = cBackend.emit(r!);
+      expect(src).toContain('((u16 *)&gH)[i] = 7;');
+      expect(src).toContain('((s32 *)&gW)[i] = 8;');
+      expect(src).toContain('i = 1;');
+      expect(JSON.stringify(r!.body)).not.toMatch(/"name":"[pq]"/);
+    });
+
+    test('the counter init may sit anywhere in the run', () => {
+      const r = reindexWalks(twoWalks((inits) => inits.splice(0, 2, inits[1], inits[0])));
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('((s32 *)&gW)[i] = 8;');
+    });
+
+    test('refused: one pointer out of scope declines the WHOLE loop (no half-deleted walk)', () => {
+      // q read at offset 1: no `BASE[i + REST]` names it here, so neither walk re-spells
+      const r = reindexWalks(
+        twoWalks((_, body) => {
+          body[1] = { k: 'store', lval: { ...at0('q', 4), idx: cn(1) } as Expr, value: cn(8) };
+        }),
+      );
+      expect(r).toBeNull();
+    });
+
+    test('refused: a walk pointer whose step sits outside the tail', () => {
+      expect(reindexWalks(twoWalks((_, body) => body.splice(0, 0, body.splice(2, 1)[0])))).toBeNull();
+    });
+  });
+
   test('refused: a wider deref would stride differently', () => {
     const wide: Stmt[] = [
       {
