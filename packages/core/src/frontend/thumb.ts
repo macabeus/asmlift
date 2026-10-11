@@ -2907,7 +2907,9 @@ function measureThumbFrame({
   // (u32)&b;` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy / ldr r0,.L9+4 /
   // mov r1,sp / str r1,[r0]` — a block-copy base that IS published to memory (measured). At a
   // wider frame the publish escape admits exactly the shape the callee escape's table warns
-  // about; at one word it cannot occur.
+  // about; at one word it cannot occur. A wider frame's publish is read by the outgoing-argument
+  // `escape` event instead (below), per program point, which is the reading that survives a block
+  // copy: see "ONE DECISION, TWO LICENCES" above `capturedObjectIsTheWholeFrame`.
   //
   // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
   // question is the same one and only the consuming event differs. Here that event is a WORD store
@@ -2975,7 +2977,8 @@ function measureThumbFrame({
   // block-copy base — each needs two frame words before agbcc names its base with a register at
   // all — and the two-word struct returns with them. Any larger frame has bytes this model does not
   // describe, and they are either the rest of a wider object the callee writes or another call's
-  // argument slots; neither is provable here, so the answer stays the decline.
+  // argument slots. Neither is provable from the frame alone, so THIS licence stays at one word,
+  // and a larger frame is left to the `escape` event, which does not have to decide it.
   //
   // What the frame size does NOT exclude is the one-word struct return in the table above, which is
   // instruction-for-instruction an out-parameter call. That one is settled after the lift, by the
@@ -2987,7 +2990,9 @@ function measureThumbFrame({
   // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
   // its extent is the audit's frame-accounting rule rather than anything here.
   //
-  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next change. Three shapes,
+  // WHY THIS FLOW-INSENSITIVE LICENCE IS NOT WIDENED, since a wider frame is the obvious next
+  // change (a wider frame is no longer refused for want of it: the `escape` event reads it). Three
+  // shapes,
   // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
   // -fprologue-bugfix`, and only the first is about extent at all:
   //
@@ -3042,6 +3047,23 @@ function measureThumbFrame({
   // modelled as `volatile u16 sp0`, and its lift is byte-identical with this conjunct widened to
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
+  //
+  // ONE DECISION, TWO LICENCES. This gate and the outgoing-argument analysis's `escape` event (fed
+  // below, under `compilerBehaviors.escapedFrameAddressNamesALocal`) both stop the outgoing-
+  // argument refusals from reading an escaped object's words as a call's arguments. They read the
+  // same escapes (`frameAddressReceivers`) and differ in ONE way, and the difference is the
+  // block-copy base.
+  //   - THIS gate is flow-INSENSITIVE. One escape anywhere, and no word of the frame is any call's
+  //     argument, in any block. That is sound only where no block-copy base fits, which is a
+  //     one-word frame.
+  //   - THE EVENT is flow-SENSITIVE and works at any frame size. Where an address leaves, it ends
+  //     the stores pending from that offset up, and nothing staged after. Beside a block copy that
+  //     is sound, because agbcc stages outgoing words in ascending offset order
+  //     (`test/corpus/agbcc-escape.s`).
+  // So what this gate adds over the event is the one-word frame's flow-insensitivity, and nothing
+  // else: a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
+  // capture in an unreachable block proves nothing"). Every "not widened" above is about THAT
+  // reading. A wider frame is read by the event, which does not decide its layout.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&

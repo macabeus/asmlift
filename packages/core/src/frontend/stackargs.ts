@@ -258,6 +258,9 @@ export function analyzeOutgoingArgs<C>({
   // that computes it owns which escapes qualify. A declared fifth argument says [sp,#0] is a
   // DIFFERENT callee's argument slot. Two contradictory claims about the same word, and nothing
   // here can decide which to believe, so the honest answer is the decline it has always been.
+  // This is the flow-INSENSITIVE reading of an escape, sound only at one word; the `escape` event
+  // is the per-program-point reading of the same escapes at any frame size, and its contradiction
+  // with a declared block is the "ESCAPED ADDRESS AT OR BELOW A LICENSED WORD" refusal below.
   if (capturedWholeFrame) {
     for (const ev of calls) {
       const offs = ev.declared;
