@@ -14,9 +14,11 @@ import { moduleOf, onlySelects } from '@asmlift/bench-schema';
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import type { Prototypes } from '@asmlift/core/proto';
 import { asIfUndecompiled } from '@asmlift/core/symbols';
+import { C_TYPEDEFS } from '@asmlift/core/target';
 import { readFileSync } from 'node:fs';
 
 import { buildRealTarget, makeRealCompile, makeRealScorer } from '../compile/real';
+import { bareTypedefs } from '../compile/util';
 import { type BuiltTarget, TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
 import { rowPrototypes } from './context-proto';
 import { type RealFunction, loadManifests } from './manifests';
@@ -46,6 +48,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
       const id = `${man.project}:${f.sym}:${unit.toolchain}`;
       // read once: every field below that needs the unit's context shares this one copy
       const vendored = man.vendored(f.sym);
+      const typedefs = bareTypedefs(vendored.ctxI);
       const m2cI = f.m2cCtx ? vendored.m2cI : null;
       const ctxProto = m2cI === null ? null : m2cOwnPrototype(f.sym, f.proto, m2cI);
       cases.push({
@@ -89,6 +92,7 @@ export function realCases(filter: RealFilter = {}): Case[] {
           ),
         scorer: makeRealScorer(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
         compile: makeRealCompile(unit.toolchain, codegen.cflags, man.tu, f.prependC ?? '', vendored.ctxI, language),
+        ...(typedefs !== C_TYPEDEFS && { scoringTypedefs: typedefs }),
       });
     }
   }

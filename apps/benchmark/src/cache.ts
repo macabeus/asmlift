@@ -224,6 +224,9 @@ export interface M2cKeyInputs {
   ctx?: string;
   obj: string; // path; the KEY uses the object's bytes
   lang?: 'c' | 'c++';
+  /** the typedefs the real scorer spells where its rungs carry no context, when they are not
+   *  `C_TYPEDEFS` (compile/util.ts `bareTypedefs`) — absent, the key is what it always was */
+  typedefs?: string;
 }
 
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
@@ -233,7 +236,7 @@ export async function cachedM2cResult(
   inputs: M2cKeyInputs,
   compute: () => Promise<DecompilerResult>,
 ): Promise<DecompilerResult> {
-  const { tcId, cflags, sym, asm, ctx, obj, lang } = inputs;
+  const { tcId, cflags, sym, asm, ctx, obj, lang, typedefs } = inputs;
   const commit = m2cCommit();
   if (!enabled() || !commit) {
     return await compute();
@@ -314,10 +317,14 @@ export async function cachedM2cResult(
   // holds MORE THAN ONE function, and none of the 631 objdump rows published before it does.
   //   sliced 1: a multi-function entry written before the slice fed m2c every function of the
   //      object under the row's one `glabel`.
-  // The scorer is the one such input that is DERIVED rather than bumped by hand: the value cached
+  // The scorer is one such input that is DERIVED rather than bumped by hand: the value cached
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
+  // `typedefs` is derived too: the real tier's rungs that carry no context spell the typedef family as
+  // the row's VENDORED context does (compile/util.ts `bareTypedefs`), and that context is not `ctx`,
+  // which is m2c's own. Present only where the spelling is not `C_TYPEDEFS`, so every other entry
+  // keeps its identity and only the rows whose scoring world changed are recomputed.
   const key = sha(
     JSON.stringify({
       v: 20,
@@ -335,6 +342,7 @@ export async function cachedM2cResult(
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
       ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),
+      ...(typedefs !== undefined && { typedefs }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);

@@ -1,5 +1,6 @@
 // Shared helpers for the per-toolchain compile modules.
 import { CompilerRejection, errorsFirst } from '@asmlift/core/compiler-diagnostics';
+import { PRELUDE_TYPEDEFS } from '@asmlift/core/proto';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { spawnFailure } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
@@ -160,4 +161,29 @@ export function ctxTypedefPrelude(ctxI: string): string {
       return name ? !new RegExp(`typedef\\s+[^;]*\\b${name}\\s*;`).test(ctxI) : false;
     });
   return kept.length > 0 ? `${kept.join('')}\n` : '';
+}
+
+/** asmlift's typedef prelude, each name SPELLED THE WAY THE VENDORED CONTEXT SPELLS IT — the
+ *  typedefs of the ladder's rungs that do not carry the context itself (compile/real.ts).
+ *
+ *  `int` and `long` are both 32 bits on every target here, and still not one type: mwcc compiles
+ *  `long *a; unsigned short b; *a &= ~b;` to `clrlwi; not; and` and the same body over `int *a` to
+ *  `clrlwi; andc`, because it fuses `x & ~y` only when `~y` already has the `&`'s type. Mario Party
+ *  4, Mario Party 3, Pikmin, Animal Crossing and Snowboard Kids 2 all say `typedef signed long s32`,
+ *  and a candidate their unit refuses fell to a rung where `s32` meant `int` — a world the target
+ *  was never compiled in, which scored a byte-identical spelling of the game's source 2/10.
+ *
+ *  A name takes the context's spelling only when that spelling is made of C keywords (`signed long`,
+ *  `unsigned short int`): such a rung carries no other line of the context, so a typedef over a
+ *  project type (`typedef uint8_t u8;`) would name a type the rung never declares — that name keeps
+ *  the prelude's spelling. The first declaration wins where a context repeats one. With no context,
+ *  or one that declares none of the family, this is `C_TYPEDEFS` byte for byte. */
+export function bareTypedefs(ctxI: string): string {
+  const keywords = '(?:signed|unsigned|char|short|int|long)';
+  return `${[...PRELUDE_TYPEDEFS]
+    .map(([name, base]) => {
+      const own = new RegExp(`typedef\\s+(${keywords}(?:\\s+${keywords})*)\\s+${name}\\s*;`).exec(ctxI);
+      return `typedef ${own === null ? base : own[1].replace(/\s+/g, ' ')} ${name};`;
+    })
+    .join('')}\n`;
 }

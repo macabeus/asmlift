@@ -43,6 +43,10 @@ interface CaseFields {
   build: () => BuiltTarget;
   /** Context-aware candidate scorer (real tier); undefined = the toolchain adapter default. */
   scorer?: Scorer;
+  /** real tier, only where they differ from `C_TYPEDEFS`: the typedefs the scorer's context-free rungs
+   *  spell (compile/util.ts `bareTypedefs`). The scorer is a closure, and this is the one thing it
+   *  closes over that the m2c cache key cannot otherwise see. */
+  scoringTypedefs?: string;
   /** Context-aware candidate COMPILE (real tier): asmlift's ranked pass ranks + scores its
    *  candidates through THIS, so asmlift compiles in the same project context (headers, extern
    *  globals) as m2c — symmetric. undefined = the decomp.yaml/registry compiler (synthetic). */
