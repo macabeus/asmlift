@@ -135,6 +135,12 @@ export interface CallSite {
     /** refuses a guess of `argc` words this ABI's outgoing area could extend */
     refuse(argc: number): void;
   };
+  /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
+   *  past a guessed count, or past the bound of a call through an argument register — and the ones
+   *  it passes, to refuse where the frontend knows a left-out one is an argument all the same. What
+   *  those registers hold is then no part of the call, so a frontend that reads one as handed over
+   *  refuses here instead. */
+  readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
 }
 
 /** A call through a register. It names no callee, so no declaration plans it: an argument
@@ -496,6 +502,19 @@ export function callDeclarations(
         : wordsOf(widths);
     if (widths === null) {
       guess?.refuse(argc);
+    }
+    // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
+    // count, or past the bound a call through an argument register sets, that a value reaches.
+    // Where the frontend states `guess`, the gap refusal has already fired on any such register
+    // past a guess; otherwise the register leaves the call silently, and the frontend says whether
+    // it knows that one to be an argument all the same.
+    if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
+      site.leftOut(
+        target.argRegs
+          .slice(argc)
+          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => !highHalves?.has(v))),
+        target.argRegs.slice(0, argc),
+      );
     }
     // ARGUMENT WORD `k`: a register, or past the registers the word the frontend's ABI places
     // there. A guess never exceeds `argRegs.length`, so a stack word can only come from a stated

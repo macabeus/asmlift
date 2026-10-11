@@ -2673,12 +2673,16 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         decompile('f', captureAndCall + FIVE_ARG_CALL + EPILOGUE, ARMV4T_AGBCC, { prototypes: { use: { params: 0 } } }),
       ).toThrow(/the store to \[sp,#0\] is never reloaded/);
       // …and where NOTHING declares the callee the licence reads every argument register, while
-      // the lift passes `use` only what it infers — not `r3`. That is the gap the audit closes: the
-      // licence claimed `use` receives the frame base, the emitted call takes nothing, and `five`'s
-      // fifth outgoing argument would be lost with it.
+      // the guessed arity passes `use` only what it infers — not `r3`. The licence claimed `use`
+      // receives the frame base, the emitted call would take nothing, and `five`'s fifth outgoing
+      // argument would be lost with it. The audit's re-check was built to close that gap; the call
+      // lowering now refuses it first, because a guessed arity may not leave out a register that
+      // may hold a frame address (`lowerCall`'s `leftOut`), and the re-check stays as the backstop.
       expect(() =>
         decompile('f', `${PROLOGUE}\tmov\tr3, sp\n\tbl\tuse\n${FIVE_ARG_CALL}${EPILOGUE}`, ARMV4T_AGBCC),
-      ).toThrow(/no call takes it and no word store publishes it outside this frame/);
+      ).toThrow(
+        /the call 'bl use' has no prototype, and the arity lifted without one leaves out r3, which may hold a frame address/,
+      );
       // CONTROL: the same function with `use` taking its argument is the shape this capability is
       // for, and lifts.
       expect(
@@ -2691,7 +2695,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // the licence granted by the callee scan on `r3`, the address then not passed by the lift —
     // with ONE store added that the pre-lift publish scan refuses BY NAME. Read off the wide
     // `published` set the audit accepted all three, and `five`'s fifth outgoing argument, really
-    // staged at [sp,#0], was dropped from a compiling, plausible, wrong program.
+    // staged at [sp,#0], was dropped from a compiling, plausible, wrong program. Undeclared, the
+    // call lowering now refuses each before the re-check (the guess leaves out r1, which holds the
+    // frame base); with `use` declared to take nothing, no callee licenses it and the publish scan
+    // refuses the store by name.
+    const USE_NOTHING = { use: { params: [], returns: 's32' } };
     test.each([
       ['a HALFWORD of the address is not the address', '\tldr\tr2, .L4\n\tstrh\tr1, [r2]\n'],
       ['a store back into the object’s own bytes publishes to nobody', '\tstr\tr1, [sp]\n'],
@@ -2701,14 +2709,20 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         `${PROLOGUE}\tmov\tr1, sp\n${store}\tmov\tr3, sp\n\tbl\tuse\n${fiveArgCall}${EPILOGUE}` +
         (store.includes('.L4') ? POOL : '');
       expect(() => decompile('f', build(publish, FIVE_ARG_CALL), ARMV4T_AGBCC)).toThrow(
-        /no call takes it and no word store publishes it outside this frame/,
+        /the call 'bl use' has no prototype, and the arity lifted without one leaves out r1, which may hold a frame address/,
+      );
+      expect(() => decompile('f', build(publish, FIVE_ARG_CALL), ARMV4T_AGBCC, { prototypes: USE_NOTHING })).toThrow(
+        /the store to \[sp,#0\] is never reloaded/,
       );
       // CONTROL, and it is what makes each row a witness rather than a blanket: the same function
       // with the store widened to a word through a pool address — the one shape the licence does
       // admit — lifts, so the refusal is about the store and not about the surrounding frame. The
       // five-argument call is dropped from it for the reason stated above the fixture: a control
       // is an ACCEPTING assertion, and that tail has no declared callee to referee it.
-      expect(decompile('f', build('\tldr\tr2, .L4\n\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC).source).toContain('&sp0');
+      expect(
+        decompile('f', build('\tldr\tr2, .L4\n\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC, { prototypes: USE_NOTHING })
+          .source,
+      ).toContain('&sp0');
     });
 
     // A SPELLING IS NOT A FACT. The scan that licenses the acceptance drops a register the moment an
@@ -3942,5 +3956,73 @@ describe('an incoming stack argument re-read in a loop is the parameter', () => 
       'again:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.L12\n\tldr\tr0, [sp, #0x8]\n' +
       '\tsub\tr0, r0, #1\n\tb\tagain\n.L12:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('again', again, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+});
+
+// A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT. The guessed count stops at the first argument
+// register this function did not write, and an incoming argument passed on unchanged is one, so a
+// capture behind it fell outside the call — and the object it addresses was then read as a local
+// nothing wrote. agbcc's own output for `typedef int (*F)(int, int, int, unsigned char *);
+// int r1(int p0, int p1, int p2, int p3, unsigned char *data, F func) { unsigned char d[4];
+// unsigned char *d1 = &d[1]; int res; if (data == 0) data = d; res = func(p0, p1, p2, d1);
+// if (res != 0) *data = *d1; return res; }` lifted as `func()` and `*data = sp1`; sa3's
+// `sa2__sub_801F07C` is that shape.
+describe('a frame address an undeclared arity leaves out refuses', () => {
+  const body = (setup: string) =>
+    '\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr4, [sp, #0x14]\n\tldr\tr6, [sp, #0x18]\n' +
+    '\tmov\tr5, sp\n\tadd\tr5, r5, #0x1\n\tcmp\tr4, #0\n\tbne\t.L3\n\tmov\tr4, sp\n' +
+    `.L3:\n${setup}\tadd\tr3, r5, #0\n\tbl\t_call_via_r6\n\tadd\tr1, r0, #0\n\tcmp\tr1, #0\n\tbeq\t.L4\n` +
+    '\tldrb\tr0, [r5]\n\tstrb\tr0, [r4]\n.L4:\n\tadd\tr0, r1, #0\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5, r6}\n' +
+    '\tpop\t{r1}\n\tbx\tr1\n';
+
+  test('a capture made in an earlier block and left behind passed-on arguments declines', () => {
+    expect(() => decompile('r1', `r1:\n${body('')}`, ARMV4T_AGBCC)).toThrow(
+      /the call 'bl _call_via_r6' has no prototype, and the arity lifted without one leaves out r3, which may hold a frame address/,
+    );
+  });
+
+  // CONTROL: `func(p0 + 1, p1 + 1, p2 + 1, d1)` writes every register below the capture, so the
+  // count reaches it and the object is passed.
+  test('…and the same capture behind written registers is passed', () => {
+    const setup = '\tadd\tr0, r0, #0x1\n\tadd\tr1, r1, #0x1\n\tadd\tr2, r2, #0x1\n';
+    expect(decompile('r2', `r2:\n${body(setup)}`, ARMV4T_AGBCC).source).toContain(
+      '    v0 = ((s32 (*)())a5)(a0 + 1, a1 + 1, a2 + 1, (u32)sp0 + 1);\n    if (v0 != 0) *a4 = ((u8 *)sp0)[1];\n',
+    );
+  });
+
+  // pokeemerald's `GetMonNickname2`: `GetMonData3(mon, MON_DATA_NICKNAME, nickname)` with `mon`
+  // still in r0, which lifted as `GetMonData3()`. A declaration states the arity.
+  const gn =
+    'gn:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x2\n\tmov\tr2, sp\n' +
+    '\tbl\tGetMonData3\n\tadd\tr0, r4, #0\n\tmov\tr1, sp\n\tbl\tStringCopy_Nickname\n\tadd\tsp, sp, #0x14\n' +
+    '\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+  test('a capture in the calling block left out declines, and a declaration passes it', () => {
+    expect(() => decompile('gn', gn, ARMV4T_AGBCC)).toThrow(
+      /'bl GetMonData3' has no prototype, and the arity lifted without one leaves out r2/,
+    );
+    const declared = { GetMonData3: { params: ['void *', 's32', 'u8 *'], returns: 'u32' } };
+    expect(decompile('gn', gn, ARMV4T_AGBCC, { prototypes: declared }).source).toContain(
+      '    GetMonData3(a0, 2, sp0);\n',
+    );
+  });
+
+  // A call through r1 passes r0 alone (`argRegisterBoundsArity`), which is only a bound.
+  test('a capture above the bound of a call through an argument register declines', () => {
+    const bnd =
+      'bnd:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr4, sp\n\tadd\tr2, r4, #0\n\tmov\tr0, #0x1\n' +
+      '\tbl\t_call_via_r1\n\tldrb\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('bnd', bnd, ARMV4T_AGBCC)).toThrow(
+      /'bl _call_via_r1' has no prototype, and the arity lifted without one leaves out r2/,
+    );
+  });
+
+  // r1 is captured into AFTER the first call, so at that call it still holds the caller's value —
+  // the flow-insensitive closure (`registersThatMayHoldAFrameAddress`) would say otherwise.
+  test('an incoming argument register a later capture reuses does not decline', () => {
+    const later =
+      'later:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r1, #0\n\tbl\talloc\n\tmov\tr1, sp\n' +
+      '\tmov\tr2, #0x0\n\tstrb\tr2, [r1]\n\tadd\tr0, r4, #0\n\tbl\tfill2\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('later', later, ARMV4T_AGBCC).source).toContain('    return fill2(a1, &sp0, 0);\n');
   });
 });

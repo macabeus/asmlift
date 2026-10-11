@@ -123,9 +123,15 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     const moved = (move: string) =>
       `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tmov\tr2, sp\n${move}\tstrh\tr0, [r2]\n\tbl\tg\n` +
       `\tmov\tr2, sp\n${move}\tldrh\tr0, [r2]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    // `g` is declared: the capture is still in r2 at the `bl`, past a guessed arity that stops at
+    // r1, and an undeclared `g` might be handed it (`lowerCall`'s `leftOut` refuses that).
+    const G1 = { prototypes: { g: { params: 1 } } };
     const want = 's32 f(s32 a0) {\n    u16 sp4;\n    sp4 = a0;\n    g(a0);\n    return sp4;\n}\n';
-    expect(lift(moved('\tadd\tr2, r2, #0x4\n')).source).toBe(want);
-    expect(lift(moved('\tadd\tr2, #0x4\n')).source).toBe(want);
+    expect(decompile('f', moved('\tadd\tr2, r2, #0x4\n'), ARMV4T_AGBCC, G1).source).toBe(want);
+    expect(decompile('f', moved('\tadd\tr2, #0x4\n'), ARMV4T_AGBCC, G1).source).toBe(want);
+    expect(() => lift(moved('\tadd\tr2, #0x4\n'))).toThrow(
+      /'bl g' has no prototype, and the arity lifted without one leaves out r2, which may hold a frame address/,
+    );
     // a move DOWN is not one: nothing spells a negative frame offset, and `sub` stays arithmetic
     expect(() => lift(moved('\tsub\tr2, #0x4\n'))).toThrow(/the captured address flows into `sub`/);
   });
@@ -203,7 +209,11 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
 
   test('a capture that ESCAPES keeps the frame base', () => {
     expect(() => lift(SPILL)).not.toThrow();
-    expect(() => lift(edit('\tldr\tr3, [r0, #0x4]\n', '\tstr\tr3, [r0, #0x4]\n'))).toThrow(CAPTURE);
+    // `g` declared to take `a0` alone, so the capture still in r3 at the call is not handed to it
+    // and the escape is the store's (undeclared, `lowerCall`'s `leftOut` refuses first)
+    const escaped = edit('\tldr\tr3, [r0, #0x4]\n', '\tstr\tr3, [r0, #0x4]\n');
+    expect(() => decompile('f', escaped, ARMV4T_AGBCC, { prototypes: { g: { params: 1 } } })).toThrow(CAPTURE);
+    expect(() => lift(escaped)).toThrow(/'bl g' has no prototype, and the arity lifted without one leaves out r3/);
   });
 
   test('a REGISTER-offset access through a capture keeps the frame base', () => {

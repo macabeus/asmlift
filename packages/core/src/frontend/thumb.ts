@@ -2767,6 +2767,8 @@ interface ThumbFrame {
   readonly capturedObjectIsTheWholeFrame: boolean;
   /** the frame offset each instruction leaves a register holding, where `heldFrameWalk` follows it */
   readonly captureOffsetOf: ReadonlyMap<Instr, number>;
+  /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAtCalls`) */
+  readonly frameAddressesAtCall: ReadonlyMap<Instr, FrameAddressesAtCall>;
   readonly outgoingArgs: OutgoingArgs<Instr>;
   /** why the word-slot model is off, or null when it is on (`slotModelBlocker`) */
   readonly slotsOffReason: string | null;
@@ -3276,6 +3278,7 @@ function measureThumbFrame({
     savedRegs,
     capturedObjectIsTheWholeFrame,
     captureOffsetOf,
+    frameAddressesAtCall: frameAddressesAtCalls(asmBlocks, preds, entryReachable, calls.callClobbers),
     outgoingArgs,
     slotsOffReason,
     slotsOk,
@@ -3405,6 +3408,77 @@ function registersThatMayHoldAFrameAddress(
   return new Set(held.keys());
 }
 
+// THE FRAME ADDRESSES ARGUMENT REGISTERS HOLD AT EACH CALL, two ways. The shapes carried are
+// `frameAddressDefined`'s, and a write of anything else ends one, as in `heldFrameWalk`.
+//   - `may`: on SOME path from the entry, ACROSS blocks, joined by union — the question is a
+//     refusal's, so a capture made in one block and handed over in the next (`mov r5, sp` / … /
+//     `.L3: add r3, r5, #0` / `bl`) must count, and a call ends only what it clobbers, because a
+//     capture in r4-r7 outlives it. Two paths that disagree on the offset leave it unknown (NaN).
+//     The entry block starts empty, which keeps an incoming argument register from counting:
+//     nothing arrives in it but the caller's value.
+//   - `must`: defined in the call's own block, which every path to the call runs.
+interface FrameAddressesAtCall {
+  readonly may: ReadonlyMap<string, number>;
+  readonly must: ReadonlyMap<string, number>;
+}
+function frameAddressesAtCalls(
+  asmBlocks: readonly AsmBlock[],
+  preds: readonly (readonly number[])[],
+  entryReachable: ReadonlySet<number>,
+  clobbers: readonly string[],
+): ReadonlyMap<Instr, FrameAddressesAtCall> {
+  const atCall = new Map<Instr, FrameAddressesAtCall>();
+  const out = asmBlocks.map(() => new Map<string, number>());
+  const step = (ins: Instr, held: Map<string, number>): void => {
+    if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+      clobbers.forEach((r) => held.delete(r));
+      return;
+    }
+    const carried = frameAddressDefined(ins, held);
+    for (const r of [...held.keys()]) {
+      if (mayWriteReg(ins, r)) {
+        held.delete(r);
+      }
+    }
+    if (carried !== null) {
+      held.set(carried[0], carried[1]);
+    }
+  };
+  const flow = (b: number, record: boolean): Map<string, number> => {
+    const may = new Map<string, number>();
+    for (const p of preds[b] ?? []) {
+      for (const [r, off] of out[p]) {
+        may.set(r, !may.has(r) || may.get(r) === off ? off : NaN);
+      }
+    }
+    const must = new Map<string, number>();
+    for (const ins of asmBlocks[b].instrs) {
+      if (record && (ins.mnemonic === 'bl' || ins.mnemonic === 'blx')) {
+        atCall.set(ins, { may: new Map(may), must: new Map(must) });
+      }
+      step(ins, may);
+      step(ins, must);
+    }
+    return may;
+  };
+  const same = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) =>
+    a.size === b.size && [...a].every(([r, off]) => b.has(r) && Object.is(b.get(r), off));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const b of entryReachable) {
+      const next = flow(b, false);
+      if (!same(next, out[b])) {
+        out[b] = next;
+        changed = true;
+      }
+    }
+  }
+  for (const b of entryReachable) {
+    flow(b, true);
+  }
+  return atCall;
+}
+
 // THE REGISTERS AN INSTRUCTION HANDS TO CODE OUTSIDE THIS FUNCTION — the one definition of a frame
 // address escaping, which every escape walk in `measureThumbFrame` reads, so which registers a
 // callee reads and which stores leave the frame are decided once.
@@ -3412,7 +3486,10 @@ function registersThatMayHoldAFrameAddress(
 // A CALL hands over the argument registers its callee's DECLARATION reads — one per 32-bit word,
 // so `g(void)` is handed nothing — and every argument register where nothing declares it. A call
 // through a register (`blx r3`, a `_call_via_r3` thunk) branches THROUGH that register; it does not
-// pass it.
+// pass it. "Every register" is wider than what the lift passes an undeclared callee — a guessed
+// count, or the bound of a call through an argument register — and the two agree on a frame address
+// only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
+// `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
@@ -5089,6 +5166,33 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       }
       usedSlotOffsets.add(off);
       return ssa.readVar(stackSlotKey(off), bi);
+    },
+    // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT IS AN ARGUMENT ALL THE SAME. The frame walks
+    // read the call as handed every argument register it holds (`frameAddressReceivers`), and the
+    // lift reads the object as written by that receiver (`isFrameObjectAccess`, with no reaching-
+    // definition test). The guessed count stops at the first register this function did not write,
+    // which is also an incoming argument passed on unchanged, so a capture in r3 behind r1 and r2
+    // left at their incoming values falls outside it: the call is lifted without the address, and
+    // the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])` as `func()`,
+    // then `*data = sp1`). A call through r1 stops at the bound r1 sets and leaves r2 out the same
+    // way (`CallDeclarations.lower`'s KNOWN GAP). Which count is right the register file cannot
+    // say, so this refuses.
+    //
+    //
+    // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
+    // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside
+    // the copy it passes in r0 (`mov r3, sp / str r0, [r3] / mov r0, sp / bl g`).
+    leftOut: (regs, passed) => {
+      const at = frame.frameAddressesAtCall.get(ins);
+      const handed = new Set(passed.flatMap((p) => (at?.must.has(p) ? [at.must.get(p)] : [])));
+      const r = regs.find((r) => at?.may.has(r) && !handed.has(at.may.get(r)!));
+      if (r !== undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the call '${ins.mnemonic} ${callee}' has no prototype, and the arity lifted ` +
+            `without one leaves out ${r}, which may hold a frame address — so whether the callee is handed the ` +
+            `object is not decidable`,
+        );
+      }
     },
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
