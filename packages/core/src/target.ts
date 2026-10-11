@@ -539,11 +539,8 @@ export interface TargetDescription {
     // A frame address this function hands out — in an argument register at a call, or stored to
     // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
     // word from there up is a call's outgoing argument. Its one reader is the outgoing-argument
-    // analysis (`frontend/stackargs.ts`, the `escape` event), where it explains a store that is
-    // never reloaded HERE: the receiver reads it THERE.
-    //
-    // Absent ⇒ a handed-out frame address explains nothing, and the code-reading refusals weigh
-    // every stored word as before.
+    // analysis (`frontend/stackargs.ts`, the `escape` event): a store never reloaded HERE is read
+    // THERE. Absent ⇒ a handed-out frame address explains nothing.
     //
     // Set on agbcc, compiled at 2.9-arm-000512 and its canonical flags, and re-measurable from the
     // committed probe (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-escape.s`, read
@@ -551,35 +548,16 @@ export interface TargetDescription {
     // (`f1`: `add r0, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when no call in the
     // function takes a stack word (`f0`).
     //
-    // Its RESIDUE is the other producer of a handed-out frame address, a by-value struct argument's
-    // block copy (`mov r0, sp` / `add r0, sp, #4`, then `bl memcpy`), whose base IS the outgoing
-    // area. Two things keep that residue from clearing a real argument. A declared callee whose
-    // block meets the escape refuses outright. And agbcc stages a call's outgoing words in
-    // ASCENDING offset order, the copy included (`qh5`, `a2`, `a3`), so a word staged before a copy
-    // lies BELOW its base (`a2`: `str r0, [sp]`, then `add r0, sp, #4; bl memcpy`) and a word
-    // staged after it is still pending at the call. The escape ends pending words from its offset
-    // UP, so in both cases it ends none of them.
-    //
-    // WHICH IS WHY THE EVENT ENDS PENDING WORDS PER PROGRAM POINT although the layout fact is
-    // whole-function. A flow-insensitive pending set ("an address escapes somewhere, so no word
-    // from there up reaches any call") would set `qh5`'s fifth `h5` word aside, staged at [sp,#0]
-    // after the copy, and lift `h5(1, 2, 3, 4)`. Read per program point, a word a receiver could
-    // not have read yet stays pending at the call, and the licence (a declared callee) or condition
-    // (b) (an undeclared one) refuses it there.
-    //
-    // THE ANALYSIS ALSO READS THE EVENT WHOLE-FUNCTION, twice, and neither reading can clear a word
-    // that reaches a call. Condition (a) counts every word at or above the lowest escape as
-    // reloaded, because a store no call reads is explained by the receiver reading it — but (a)
-    // only ever refuses a store; a word that is a call's argument reaches that call pending, and
-    // the per-point refusals above are what catch it (`qh5` is refused by (b), not by (a)). The
-    // clash refusal reads the lowest escape the same way, and it only refuses. So the cost of the
-    // per-point reading is false alarms, never a wrong answer: a store on a path that does not
-    // escape and then reaches a call (`if (x) gt(&s); else h(y);`), a store after the publish that
-    // a call follows (`gp = &t; t.b = y; return hy(x);`), and an object reached only through a
-    // pointer stored in the frame. They decline loud. A store no call follows is excused by (a)'s
-    // whole-function reading (`t.b = y; if (x) gt(&t); return t.b;` lifts).
-    // `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, and it holds only where
-    // no block copy fits: a one-word frame.
+    // Its RESIDUE is a by-value struct argument's block copy (`mov r0, sp` / `add r0, sp, #4`, then
+    // `bl memcpy`), whose base IS the outgoing area. agbcc stages a call's outgoing words in
+    // ASCENDING offset order, the copy included (`qh5`, `a2`, `a3`): a word staged before the copy
+    // lies below its base, and one staged after it is still pending at the call. That is why the
+    // event ends pending words PER PROGRAM POINT and only from its offset up — read
+    // flow-insensitively, it would set aside `qh5`'s fifth `h5` word and lift `h5(1, 2, 3, 4)`. The
+    // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
+    // reads the event whole-function, it only refuses or excuses a word no call takes
+    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, sound only
+    // where no block copy fits.
     escapedFrameAddressNamesALocal?: boolean;
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is

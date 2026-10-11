@@ -2931,7 +2931,7 @@ function measureThumbFrame({
   // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
   // clause without a row is decoration until an input says otherwise.
   //
-  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, but its BASE clause is now the same
+  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, but its BASE clause is the same
   // whole-function fact on both sides. The stored VALUE must be held here (block-local); the BASE
   // must be no register that holds a frame address ANYWHERE in the function
   // (`registersThatMayHoldAFrameAddress`), the audit's whole-function `taint` read off the
@@ -2997,9 +2997,7 @@ function measureThumbFrame({
   // its extent is the audit's frame-accounting rule rather than anything here.
   //
   // WHY THIS FLOW-INSENSITIVE LICENCE IS NOT WIDENED, since a wider frame is the obvious next
-  // change (a wider frame is no longer refused for want of it: the `escape` event reads it). Three
-  // shapes,
-  // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+  // change (the `escape` event reads a wider frame instead). Three shapes, each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
   // -fprologue-bugfix`, and only the first is about extent at all:
   //
   // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
@@ -3054,24 +3052,14 @@ function measureThumbFrame({
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
   //
-  // ONE DECISION, TWO LICENCES. This gate and the outgoing-argument analysis's `escape` event (fed
-  // below, under `compilerBehaviors.escapedFrameAddressNamesALocal`) both stop the outgoing-
-  // argument refusals from reading an escaped object's words as a call's arguments. They read the
-  // same escapes (`frameAddressReceivers`) and differ in ONE way, and the difference is the
-  // block-copy base.
-  //   - THIS gate is flow-INSENSITIVE. One escape anywhere, and no word of the frame is any call's
-  //     argument, in any block. That is sound only where no block-copy base fits, which is a
-  //     one-word frame.
-  //   - THE EVENT is flow-SENSITIVE where it clears a word for a call, and works at any frame size.
-  //     Where an address leaves, it ends the stores pending from that offset up, and nothing staged
-  //     after. Beside a block copy that is sound, because agbcc stages outgoing words in ascending
-  //     offset order (`test/corpus/agbcc-escape.s`). The analysis also reads the lowest escape over
-  //     the whole function, for condition (a) and the clash refusal, but both of those only refuse;
-  //     a word that reaches a call is judged at that call (`escapedFrameAddressNamesALocal`).
-  // So what this gate adds over the event is the one-word frame's flow-insensitivity, and nothing
-  // else: a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
-  // capture in an unreachable block proves nothing"). Every "not widened" above is about THAT
-  // reading. A wider frame is read by the event, which does not decide its layout.
+  // ONE DECISION, TWO LICENCES. This gate and the outgoing-argument `escape` event (fed below,
+  // under `compilerBehaviors.escapedFrameAddressNamesALocal`) read the same escapes
+  // (`frameAddressReceivers`) and differ only in flow-sensitivity. This gate is flow-INSENSITIVE —
+  // one escape anywhere and no frame word is any call's argument — which is sound only where no
+  // block-copy base fits, a one-word frame. The event ends only the stores pending where the address
+  // leaves, at any frame size; that field says why that survives a block copy. So what this gate
+  // adds is a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
+  // capture in an unreachable block proves nothing"), and every "not widened" above is about it.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3392,8 +3380,8 @@ function heldFrameWalk(
 // register plus a runtime index, `add r2, r2, sp` — agbcc's `&buf[i]` — or `mov r1, sp / add r0,
 // r1, r4`. It names no one word, so no walk that asks for an offset can credit it (NaN equals
 // none, and an escape at NaN is no escape); what it is carried for is the "may hold a frame
-// address" questions, where leaving it out let an undeclared call's guessed arity drop
-// `&buf[i]` with no refusal (`g3(a, b, &buf[i])` as `g3()`).
+// address" questions: without it an undeclared call's guessed arity drops `&buf[i]` with no
+// refusal (`g3(a, b, &buf[i])` as `g3()`).
 function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null {
   const [d, s1, s2] = ins.ops;
   if (d === undefined || isSpReg(d)) {
@@ -5222,7 +5210,6 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // then `*data = sp1`). A call through r1 stops at the bound r1 sets and leaves r2 out the same
     // way (`CallDeclarations.lower`'s KNOWN GAP). Which count is right the register file cannot
     // say, so this refuses.
-    //
     //
     // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
     // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside

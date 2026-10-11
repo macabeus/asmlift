@@ -1071,13 +1071,10 @@ export interface GuessedCallSite {
   /** which earlier callee's result in the return register is an argument here, not a leftover:
    *  the site's lowering says so ({@link SsaBuilder.recordGuessedCall}). Absent where none is. */
   passesCalleeResult?: (result: Value) => boolean;
-  /** handed the argument registers the trim CUTS from this site's guess, and the ones it keeps —
-   *  the same question the lowering asks of the registers its guess left out
-   *  (`CallSite.leftOut`), asked again where the arity shrinks a second time. Only the cut
-   *  registers that are FRESH here: an unfresh one is the trim's proof that no correct caller set
-   *  it up, but a fresh register above a hole goes with the hole (see {@link
-   *  trimClobberedCallArgs}), which is no proof, so a frontend that knows one to be an argument all
-   *  the same refuses here. Absent where nothing is asked. */
+  /** handed the FRESH argument registers the trim cuts from this site's guess, and the ones it
+   *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
+   *  second time. An unfresh cut is the trim's own proof; a fresh one went with a hole below it
+   *  (see {@link trimClobberedCallArgs}), which proves nothing. Absent where nothing is asked. */
   trimmed?: (cut: readonly string[], kept: readonly string[]) => void;
 }
 

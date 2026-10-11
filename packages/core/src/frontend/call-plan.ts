@@ -137,9 +137,8 @@ export interface CallSite {
   };
   /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
    *  past a guessed count, or past the bound of a call through an argument register — and the ones
-   *  it passes, to refuse where the frontend knows a left-out one is an argument all the same. What
-   *  those registers hold is then no part of the call, so a frontend that reads one as handed over
-   *  refuses here instead. */
+   *  it passes. The call drops what the left-out ones hold, so a frontend that knows one to be an
+   *  argument all the same refuses here. */
   readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
 }
 

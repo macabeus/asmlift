@@ -1369,10 +1369,9 @@ function recheckWholeFramePremise({
  *  the pending stores from its offset up (`StackArgsEscape`), reading the escape off what a
  *  REGISTER holds at a `bl` or a word `str`. Where its verdict leans on that (it would refuse
  *  without the escapes), each offset it read must reach a call operand or a word store outside the
- *  frame in the lifted function too. An arity that shrinks after the event was read is what this
- *  catches: the lowering asks the frontend of every register a guess leaves out or the trim cuts
- *  (`CallSite.leftOut`), and this is the containment that does not rest on every such shrink being
- *  routed through that question. Same two arms, same width as the licence they re-prove. */
+ *  frame in the lifted function too. It catches an arity that shrinks after the event was read
+ *  without passing the lowering's `CallSite.leftOut` question. Same two arms, same width as the
+ *  licence they re-prove. */
 function recheckEscapesReliedOn(offsets: ReadonlySet<number>, uses: FrameUses | undefined, fail: Refuse): void {
   for (const off of offsets) {
     if (uses === undefined || (!uses.passedToCallee.has(off) && !uses.publishedOutward.has(off))) {

@@ -122,10 +122,10 @@ describe('agbcc stages every outgoing word in ascending offset order, a block co
     );
   });
 
-  // `a3` with `tt3` UNDECLARED lifts with every stack word dropped. That predates the escape event,
-  // which does not change it: the copied words are written by `memcpy`, not by a `str`, so the
-  // contiguity filter never sees a supplied lower slot. An accepting assertion would freeze that
-  // answer, so only the declared refusal is pinned here.
+  // KNOWN GAP: `a3` with `tt3` UNDECLARED lifts with every stack word dropped, escape event or
+  // not: the copied words are written by `memcpy`, not by a `str`, so the contiguity filter never
+  // sees a supplied lower slot. An accepting assertion would freeze that answer, so only the
+  // declared refusal is pinned here.
   test('a3, declared, declines', () => {
     const tt3 = { tt3: { params: words(4 + 17 + 1 + 17), returns: 's32' } };
     expect(() => decompile('a3', source('a3'), ARMV4T_AGBCC, { prototypes: tt3 })).toThrow(

@@ -2344,11 +2344,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       });
 
       // THE BASE CLAUSE IS WHOLE-FUNCTION, as the audit's `taint` is. A capture taken in the entry
-      // block is not HELD when a later block stores through it, and a block-local base test let
-      // the licence's publish arm accept here (`r2` neither sp nor held in `.L2`) for the audit to
-      // refuse. The base is now tested against every register that holds a frame address anywhere
-      // (`registersThatMayHoldAFrameAddress`), so the licence refuses it itself: the address is
-      // written into this frame, and nothing outside it has been handed it.
+      // block is not HELD when a later block stores through it, so a block-local base test would
+      // accept here (`r2` neither sp nor held in `.L2`). The base is tested against every register
+      // that holds a frame address anywhere (`registersThatMayHoldAFrameAddress`), so the licence
+      // refuses it itself: the address is written into this frame, and nothing outside it has been
+      // handed it.
       test('a base captured in an earlier block is the frame, and publishes nothing', () => {
         const crossBlock =
           'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr4, [sp]\n\tmov\tr2, sp\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
@@ -2358,8 +2358,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
       // …and the outgoing-argument analysis's `escape` event reads the same clause: the address
       // stored through a base captured in an EARLIER block is no escape, so it ends no pending
-      // word. Read block-locally it did, and a store to [sp,#0] on every path to `five` was
-      // reported as "not stored on every path to the call" — a false fact in the decline.
+      // word. Read block-locally it would, and the decline would say the store to [sp,#0] on every
+      // path to `five` is "not stored on every path to the call" — a false fact.
       test('…and the escape event reads the same whole-function base clause', () => {
         const intoFrame =
           'f:\n\tpush\t{r5, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr5, sp, #0x8\n\tcmp\tr0, #0\n\tbeq\t.L1\n' +
@@ -2675,9 +2675,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // …and where NOTHING declares the callee the licence reads every argument register, while
       // the guessed arity passes `use` only what it infers — not `r3`. The licence claimed `use`
       // receives the frame base, the emitted call would take nothing, and `five`'s fifth outgoing
-      // argument would be lost with it. The audit's re-check was built to close that gap; the call
-      // lowering now refuses it first, because a guessed arity may not leave out a register that
-      // may hold a frame address (`lowerCall`'s `leftOut`), and the re-check stays as the backstop.
+      // argument would be lost with it. The call lowering refuses that, because a guessed arity may
+      // not leave out a register that may hold a frame address (`lowerCall`'s `leftOut`); the
+      // audit's re-check is the backstop.
       expect(() =>
         decompile('f', `${PROLOGUE}\tmov\tr3, sp\n\tbl\tuse\n${FIVE_ARG_CALL}${EPILOGUE}`, ARMV4T_AGBCC),
       ).toThrow(
@@ -2691,14 +2691,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     // THE RE-CHECK IS A CONTAINMENT, and a re-proof weaker than the licence it re-proves is a
-    // second, wider door into the same acceptance. Each input below is the undeclared row above —
-    // the licence granted by the callee scan on `r3`, the address then not passed by the lift —
-    // with ONE store added that the pre-lift publish scan refuses BY NAME. Read off the wide
-    // `published` set the audit accepted all three, and `five`'s fifth outgoing argument, really
-    // staged at [sp,#0], was dropped from a compiling, plausible, wrong program. Undeclared, the
-    // call lowering now refuses each before the re-check (the guess leaves out r1, which holds the
-    // frame base); with `use` declared to take nothing, no callee licenses it and the publish scan
-    // refuses the store by name.
+    // second, wider door into the same acceptance. Each input below is the row above with ONE store
+    // added that the pre-lift publish scan refuses BY NAME; a re-check read off the wide
+    // `published` set would accept all three and drop `five`'s fifth outgoing argument, staged at
+    // [sp,#0], from a compiling, plausible, wrong program. Undeclared, the call lowering refuses
+    // each first (the guess leaves out r1, which holds the frame base); with `use` declared to take
+    // nothing, no callee licenses it and the publish scan refuses the store by name.
     const USE_NOTHING = { use: { params: [], returns: 's32' } };
     test.each([
       ['a HALFWORD of the address is not the address', '\tldr\tr2, .L4\n\tstrh\tr1, [r2]\n'],
@@ -3984,11 +3982,11 @@ describe('an incoming stack argument re-read in a loop is the parameter', () => 
 
 // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT. The guessed count stops at the first argument
 // register this function did not write, and an incoming argument passed on unchanged is one, so a
-// capture behind it fell outside the call — and the object it addresses was then read as a local
-// nothing wrote. agbcc's own output for `typedef int (*F)(int, int, int, unsigned char *);
+// capture behind it falls outside the call — and the object it addresses reads as a local nothing
+// wrote. agbcc's own output for `typedef int (*F)(int, int, int, unsigned char *);
 // int r1(int p0, int p1, int p2, int p3, unsigned char *data, F func) { unsigned char d[4];
 // unsigned char *d1 = &d[1]; int res; if (data == 0) data = d; res = func(p0, p1, p2, d1);
-// if (res != 0) *data = *d1; return res; }` lifted as `func()` and `*data = sp1`; sa3's
+// if (res != 0) *data = *d1; return res; }` would lift as `func()` and `*data = sp1`; sa3's
 // `sa2__sub_801F07C` is that shape.
 describe('a frame address an undeclared arity leaves out refuses', () => {
   const body = (setup: string) =>
@@ -4014,7 +4012,7 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   });
 
   // pokeemerald's `GetMonNickname2`: `GetMonData3(mon, MON_DATA_NICKNAME, nickname)` with `mon`
-  // still in r0, which lifted as `GetMonData3()`. A declaration states the arity.
+  // still in r0, which would lift as `GetMonData3()`. A declaration states the arity.
   const gn =
     'gn:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr4, r1, #0\n\tmov\tr1, #0x2\n\tmov\tr2, sp\n' +
     '\tbl\tGetMonData3\n\tadd\tr0, r4, #0\n\tmov\tr1, sp\n\tbl\tStringCopy_Nickname\n\tadd\tsp, sp, #0x14\n' +
@@ -4054,7 +4052,7 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   // void n1(int x, int y) { struct S s; long long v = foo(); s.a = 0; s.b = x; s.c = 0; s.d = y;
   // g(v, &s); }`: the guess reads four (r1 reaches the call through `foo`'s high half), and the trim
   // cuts it to the run below that unfresh r1, taking `&s` in r2 with it — `g(v0)`, every store to
-  // `s` dropped, where main declined. With both declared it lifts whole.
+  // `s` dropped. With both declared it lifts whole.
   const n1 =
     'n1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tfoo\n' +
     '\tmov\tr3, #0x0\n\tstr\tr3, [sp]\n\tstr\tr4, [sp, #0x4]\n\tmov\tr2, sp\n\tstrb\tr3, [r2, #0x8]\n' +
@@ -4073,7 +4071,7 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   // A FRAME ADDRESS MOVED BY A REGISTER is one too, at an offset nothing knows. agbcc's own output
   // for `extern void g3(); extern unsigned char gb[]; void r5(int a, int b, int i, int j) {
   // unsigned char buf[8]; g3(a, b, &buf[i]); gb[0] = buf[j]; }` builds `&buf[i]` as
-  // `add r2, r2, sp`, and lifted as `g3(); gb = sp0[a3];` on main too.
+  // `add r2, r2, sp`, which would lift as `g3(); gb = sp0[a3];`.
   test('an indexed frame address left out of a guessed arity declines', () => {
     const r5 =
       'r5:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r3, #0\n\tadd\tr2, r2, sp\n\tbl\tg3\n' +
@@ -4088,7 +4086,7 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
   // return register holds the callee's result after a call, which is no setup (sa3's
   // `ClearCameraStruct`: `mov r0, sp / bl CpuSet / bl sub_80026BC`); and a register a path reaches
   // the call with a call since its last write is the trim's proof, not a hole (sa3's `sub_805DADC`,
-  // `mov r3, sp` left behind an optional call). Both declined when every cut register was asked.
+  // `mov r3, sp` left behind an optional call). Asking every cut register falsely declines both.
   test('a result over the captured return register, and an unfresh capture, do not decline', () => {
     const ccs =
       'ccs:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, #0x0\n\tstr\tr0, [sp]\n\tldr\tr1, .L5\n' +
