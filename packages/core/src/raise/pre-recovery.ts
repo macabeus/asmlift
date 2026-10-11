@@ -193,7 +193,7 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // BEFORE `arrays` and `struct-arrays`, which carry the stamp into the `astore` they make (and
   // struct-arrays types a field only ever stored from it), and before `structs`, which does the
   // same for a constant-offset field. `member-arrays` overwrites an astore's `signed` with its
-  // member's. `dce: false` — it changes no op.
+  // member's (raise/memberarrays.ts says why). `dce: false` — it changes no op.
   { id: 'storesign', run: (fn, _self, _opts, target) => seedNarrowStoreSigns(fn, target), dce: false },
   { id: 'arrays', run: recognizeArrays, dce: true },
   // BEFORE the three struct synthesizers, and that is what the pass is FOR: `raise/structs.ts` is

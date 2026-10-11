@@ -11,10 +11,11 @@
 //
 // This pass records that as the store's `signed` attr, the slot an `astore` already carries for a
 // member's recorded signedness. raise/arrays.ts and raise/struct-arrays.ts carry it into the
-// `astore` they make; recoverTypes, the structurer's store branches (which spell a member whose
-// declared sign is not the stamp's as a cast cell, structure/structure.ts `stampedStoreLval`), and
-// raise/structs.ts and raise/struct-arrays.ts (a field only ever stored) read it. It changes no op and no value: what it
-// moves is which view of the cell the C spells, and both views store the same bytes.
+// `astore` they make. Every pass that seeds a cell's type from a store reads it through
+// `storeSigned` below; raise/struct-arrays.ts types a field only ever stored from it; and the
+// structurer spells a stamped store through a member whose declared sign is not the stamp's as a
+// cast cell instead (structure/structure.ts `stampedStoreLval`). It changes no op and no value:
+// what it moves is which view of the cell the C spells, and both views store the same bytes.
 //
 // It refuses (leaves the attr unset, so the convention stands) for:
 //   - a target that does not declare the behavior;
@@ -27,13 +28,31 @@
 //   - a constant some OTHER use reads too, or whose 32-bit value another store writes at another
 //     width. The conversion is a fact about a LITERAL on the right of the store. A variable or a
 //     chained assignment whose value is a known constant is stored unconverted, in the register
-//     the wider use reads: `s32 v = -1; *q = v; p[1] = v;` with `u16 *p` is `li v0,-1; sw v0;
+//     a wider use reads: `s32 v = -1; *q = v; p[1] = v;` with `u16 *p` is `li v0,-1; sw v0;
 //     sh v0` on gcc2.7.2 and gcc2.7.2kmc, and `li t6,-1; sw t6; li t7,-1; sh t7` on ido7.1, which
-//     rematerializes it. Either way a wide use of the same value is there, and the register says
-//     the wider type's sign, not the lvalue's (the NONLITERAL bodies of
+//     rematerializes it. When that wide use is there, the register says the wider type's sign,
+//     not the lvalue's (the NONLITERAL bodies of
 //     packages/cli/test/matching/narrow-store-constant.test.ts).
+//
+// What it does NOT refuse is such a variable with no wide use: `s32 v = -1; p[6] = v;` (`u16 *p`),
+// or one only returned. Its register is the variable's, not the lvalue's, so the stamp can name a
+// type the source did not declare (`s16 *` there). It is not refused because nothing tells it
+// apart from a literal, and the spelling it gives recompiles to the register the target holds
+// (that body scores 1 → 0 on gcc2.7.2, gcc2.7.2kmc and ido7.1).
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import type { TargetDescription } from '../target';
+
+/** THE view a store's lvalue is seeded at, `width` bytes wide (`width` for a `store`, `elemSize`
+ *  for an `astore`): the `signed` a recovery recorded on it — this pass's reading of a stored
+ *  constant, or a member array's own declaration (raise/memberarrays.ts) — else the convention,
+ *  word ⇒ signed and narrow ⇒ unsigned. Every pass that types a cell from a store seeds it here,
+ *  so none of them can come to read the stamp by a rule of its own. What each then does when a
+ *  LOAD disagrees, or a member was already declared, is its own: raise/structs.ts and
+ *  raise/struct-arrays.ts prefer the load, and the structurer spells a member that disagrees with
+ *  the stamp as a cast cell (structure/structure.ts `stampedStoreLval`). */
+export function storeSigned(op: Op, width: number): boolean {
+  return (op.attrs.signed as boolean | undefined) ?? width === 4;
+}
 
 /** The lvalue signedness a constant stored at `width` bytes witnesses, read off the 32-bit register
  *  it was materialized into: `true` sign-extended, `false` zero-extended, `null` when it says

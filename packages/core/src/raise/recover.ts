@@ -4,6 +4,7 @@
 // types onto the SSA values in place.
 import { Fn, Value, defOpMap } from '../ir/core';
 import { IrType, T, scalarTypeForAccess, typeEquals } from '../ir/types';
+import { storeSigned } from './storesign';
 
 const SIGNED_CMP = new Set(['icmp_slt', 'icmp_sle', 'icmp_sgt', 'icmp_sge']);
 const UNSIGNED_CMP = new Set(['icmp_ult', 'icmp_ule', 'icmp_ugt', 'icmp_uge']);
@@ -87,9 +88,7 @@ function typeDerefBases(fn: Fn): void {
           break;
         case 'store':
           width = op.attrs.width as number;
-          // the signedness raise/storesign.ts read off a stored constant, else word ⇒ signed and
-          // narrow ⇒ unsigned; structure.ts reads it by the same rule
-          signed = (op.attrs.signed as boolean | undefined) ?? width === 4;
+          signed = storeSigned(op, width);
           break;
         case 'aload':
           width = op.attrs.elemSize as number;
@@ -97,9 +96,7 @@ function typeDerefBases(fn: Fn): void {
           break;
         case 'astore':
           width = op.attrs.elemSize as number;
-          // an astore carries no signedness of its own unless a recovery recorded the member's or
-          // raise/storesign.ts read one off a stored constant; structure.ts reads it by the same rule
-          signed = (op.attrs.signed as boolean | undefined) ?? width === 4;
+          signed = storeSigned(op, width);
           break;
         default:
           continue;

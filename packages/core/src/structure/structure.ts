@@ -85,6 +85,7 @@ import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
+import { storeSigned } from '../raise/storesign';
 import { collectStructs } from '../raise/structs';
 import {
   type DeclaredField,
@@ -4901,9 +4902,7 @@ export function structure(
           fieldOff,
           op.attrs.memberOff as number | undefined,
           elemSize,
-          // the signedness a recovery recorded (a member array's declaration, or the sign
-          // raise/storesign.ts read off a stored constant), else the width===4 convention
-          stamp ?? elemSize === 4,
+          storeSigned(op, elemSize),
           ctype,
           symCtx,
         );

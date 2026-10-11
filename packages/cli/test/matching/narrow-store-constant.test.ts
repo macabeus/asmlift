@@ -144,8 +144,10 @@ describe('a narrow store of a constant materializes the constant converted to th
 });
 
 // Every narrow lvalue here is UNSIGNED, and every stored value is a variable or a chained assignment
-// holding -1: gcc2.7.2 and KMC store it from the register a word store reads (`li v0,-1; sw v0;
-// sh v0`), ido7.1 from a second `li -1`. A signed stamp would declare `s16`/`s8` for a u16/u8 source.
+// holding -1 that a WORD store also reads: gcc2.7.2 and KMC store it from the register the word
+// store reads (`li v0,-1; sw v0; sh v0`), ido7.1 from a second `li -1`. A signed stamp would
+// declare `s16`/`s8` for a u16/u8 source. Without the word store (`s32 v = -1; p[6] = v;`) the
+// variable IS stamped, from the register it holds — raise/storesign.ts says why that stands.
 const NONLITERAL: [string, string][] = [
   ['nl1', 'typedef struct { s32 a; u16 h; u16 g; } S; void nl1(S *p) { p->h = p->a = -1; p->g = 3; }'],
   ['nl2', 'void nl2(u16 *p, s32 *q) { s32 v = -1; *q = v; p[1] = v; }'],
@@ -153,7 +155,7 @@ const NONLITERAL: [string, string][] = [
   ['nl4', 'void nl4(u8 *p, s32 *q) { s32 v = -1; *q = v; p[3] = v; p[4] = 0x80; }'],
 ];
 
-describe('a narrow store of a variable holding a constant is never stamped signed for an unsigned lvalue', () => {
+describe('a narrow store of a constant a word store also reads is never stamped signed for an unsigned lvalue', () => {
   for (const [name, have, compile, target] of probes) {
     test.runIf(have)(
       name,

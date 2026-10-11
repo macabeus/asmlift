@@ -53,6 +53,7 @@ import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
+import { storeSigned } from './storesign';
 
 /** A single observed constant-offset access to a base: the op itself and its program point, its
  *  byte offset, its access width (bytes), and the signedness a recovered field would take from it.
@@ -128,7 +129,7 @@ export function constOffsetAccesses(fn: Fn): ConstOffsetAccesses {
             at,
             off: op.attrs.off as number,
             width: op.attrs.width as number,
-            signed: (op.attrs.signed as boolean | undefined) ?? (op.attrs.width as number) === 4,
+            signed: storeSigned(op, op.attrs.width as number),
             isLoad: false,
           });
           break;
