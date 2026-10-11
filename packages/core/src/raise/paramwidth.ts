@@ -148,6 +148,17 @@
 // two declarations are not one object there: mwcc_242_81 compiles `long *a; unsigned short b; *a &= ~b;`
 // to `clrlwi; not; and` and `long *a; unsigned long b; *a &= ~(b & 0xffff);` to `clrlwi; andc`, because it fuses
 // `x & ~y` only when `~y` already has the `&`'s type.
+//
+// The rule is about the IR, not the ISA, so it reaches every frontend that lifts a mask as `and`.
+// IDO reads a declared `u16`/`u8` parameter as `sw a0,0(sp); andi a0,a0,0xffff`, and frontend/mips.ts
+// lifts the `andi` as that mask too: `s32 f(u16 a, s32 b){ return a + b; }` scored 3 before this rule
+// and matches with it, and `s32 f(u8 a, s32 *p){ return p[a]; }` went from 5 to 0. The witness gates
+// still decide whether IDO may narrow: a mask applied in place with no home store
+// (`a = a & 0xffff`) is refused, and so is a varargs home. agbcc spells a mask as `and` with a
+// pooled `0xffff` or a `mov #0xff`, so the variation is offered there too. It loses there, because
+// agbcc extends a declared narrow parameter with a shift pair, not with a mask:
+// `s32 f(u32 a, s32 b){ return (a & 0xffff) + b; }` scores 0 by default and 6 narrowed. The
+// param-width tests pin the mwcc object and the IDO object.
 import { type Fn, type Op, type Value, defOpMap, replaceAllUsesWith, successorsOf } from '../ir/core';
 import { CAST_WIDTHS, MATERIALIZING_OPS } from '../ir/opcodes';
 import { T } from '../ir/types';
@@ -300,9 +311,9 @@ const MASK_WIDTHS: ReadonlyMap<number, number> = new Map([
 
 /** What `op` reads `v` as, when it reads it ONLY through an extension: its width and signedness.
  *  An `and` with a low mask counts, because that is the extension's spelling where the machine
- *  has no extension of its own to lift: PPC's `clrlwi rD,rS,16` (frontend/ppc.ts lifts it as the
- *  mask, and must — every other mask is the same instruction). Null for any other
- *  reader, including an extension or a mask of something besides `v` alone. */
+ *  has no extension of its own to lift: PPC's `clrlwi rD,rS,16` and MIPS's `andi rD,rS,0xffff`
+ *  (each frontend lifts it as the mask, and must, because every other mask is the same instruction).
+ *  Null for any other reader, including an extension or a mask of something besides `v` alone. */
 function extensionOf(op: Op, v: Value, defs: ReadonlyMap<Value, Op>): { width: number; signed: boolean } | null {
   if (isExtension(op)) {
     return op.operands.length === 1 && op.operands[0] === v

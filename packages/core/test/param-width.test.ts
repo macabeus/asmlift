@@ -612,6 +612,46 @@ describe('a parameter every reader of which is a low mask (/narrow-param on PPC)
   });
 });
 
+// IDO reads a declared narrow parameter as a home store plus an in-place `andi`, which
+// frontend/mips.ts lifts as the same mask. Without the mask reader no /narrow-param candidate
+// exists here: the default scores 3 on `h1` and 8 on `g2`, and the narrowed spelling scores 0.
+describe('a parameter every reader of which is a low mask (/narrow-param on IDO)', () => {
+  const ido = (sym: string, body: string[]) =>
+    enumerateCandidates(sym, [`00000000 <${sym}>:`, ...body, ''].join('\n'), MIPS_IDO, {});
+
+  test('`s32 h1(u16 a, s32 b){ return a + b; }`: homed, masked in place, declared u16', () => {
+    const all = ido('h1', [
+      '   0:\tsw\ta0,0(sp)',
+      '   4:\tandi\ta0,a0,0xffff',
+      '   8:\tjr\tra',
+      '   c:\taddu\tv0,a0,a1',
+    ]);
+    const narrow = all.filter((c) => c.variations.includes('narrow-param'));
+    expect(narrow.length).toBeGreaterThan(0);
+    expect(narrow.every((c) => /h1\(u16 a0, /.test(c.source) && !c.source.includes('65535'))).toBe(true);
+  });
+
+  test('`void g2(s32 *p, u16 a, u8 b)`: both widths at once', () => {
+    const all = ido('g2', [
+      '   0:\tsw\ta1,4(sp)',
+      '   4:\tandi\ta1,a1,0xffff',
+      '   8:\tsw\ta2,8(sp)',
+      '   c:\tandi\ta2,a2,0xff',
+      '  10:\tnor\tt6,a1,zero',
+      '  14:\tsw\tt6,0(a0)',
+      '  18:\tjr\tra',
+      '  1c:\tsw\ta2,4(a0)',
+    ]);
+    expect(all.some((c) => c.variations.includes('narrow-param') && /u16 a1, u8 a2\)/.test(c.source))).toBe(true);
+  });
+
+  test('a mask applied in place with no home store is a cast assigned back, and stays wide', () => {
+    // `s32 v2(u32 a, s32 b){ a = a & 0xffff; return a + b; }`
+    const all = ido('v2', ['   0:\tandi\ta0,a0,0xffff', '   4:\tjr\tra', '   8:\taddu\tv0,a1,a0', '   c:\tnop']);
+    expect(all.some((c) => c.variations.includes('narrow-param'))).toBe(false);
+  });
+});
+
 describe("/narrow-param's gate table", () => {
   test('leaves out only the rules that read the prologue, and adds only the one that reads the readers', () => {
     const prologue = PARAM_WIDTH_GATES.map((g) => g.id);
