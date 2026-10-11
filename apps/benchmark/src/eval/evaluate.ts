@@ -43,9 +43,9 @@ interface EvalSpecFields {
   /** the flags this row's target and candidates compile at, and asmlift's description from them */
   codegen: ResolvedTarget;
   note?: string;
-  /** the typedefs the real scorer's context-free rungs spell, where they differ from `C_TYPEDEFS`
-   *  (cases/types.ts) — a key input of the m2c cache, never published */
-  scoringTypedefs?: string;
+  /** a digest of what the real scorer was built from (cases/types.ts) — a key input of the m2c
+   *  cache, never published */
+  scoringContext?: string;
 }
 
 // m2c's output dialect assumes these typedefs (its normal --context supplies them); the shared
@@ -299,7 +299,7 @@ export async function evaluate(
       ctx: m2cSpec.ctx,
       obj,
       lang: spec.language,
-      typedefs: spec.scoringTypedefs,
+      scoringContext: spec.scoringContext,
     },
     () => evaluateM2c(tc, m2cSpec, obj, asm, score, asmDump),
   );

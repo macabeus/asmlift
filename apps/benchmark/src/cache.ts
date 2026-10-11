@@ -224,19 +224,19 @@ export interface M2cKeyInputs {
   ctx?: string;
   obj: string; // path; the KEY uses the object's bytes
   lang?: 'c' | 'c++';
-  /** the typedefs the real scorer spells where its rungs carry no context, when they are not
-   *  `C_TYPEDEFS` (compile/util.ts `bareTypedefs`) — absent, the key is what it always was */
-  typedefs?: string;
+  /** real tier: a digest of every argument the row's scorer was built from (cases/real.ts) —
+   *  absent where the scorer is the toolchain default (synthetic), and the key is what it always was */
+  scoringContext?: string;
 }
 
 /** The full m2c half of one row (decompile + compile + objdiff score), cached by
  *  (m2c commit, objdiff-wasm version, toolchain, candidate compile flags, symbol, asm, context,
- *  target-object bytes, and — for c++ — language). */
+ *  target-object bytes, language for c++, and on the real tier what its scorer was built from). */
 export async function cachedM2cResult(
   inputs: M2cKeyInputs,
   compute: () => Promise<DecompilerResult>,
 ): Promise<DecompilerResult> {
-  const { tcId, cflags, sym, asm, ctx, obj, lang, typedefs } = inputs;
+  const { tcId, cflags, sym, asm, ctx, obj, lang, scoringContext } = inputs;
   const commit = m2cCommit();
   if (!enabled() || !commit) {
     return await compute();
@@ -321,10 +321,13 @@ export async function cachedM2cResult(
   // here holds `score`, which objdiff computes, and two objdiff versions can score one pair
   // differently. Off the key, a scorer bump replays the old engine's numbers out of a warm cache
   // and a per-row diff reports the bump inert without having scored anything.
-  // `typedefs` is derived too: the real tier's rungs that carry no context spell the typedef family as
-  // the row's VENDORED context does (compile/util.ts `bareTypedefs`), and that context is not `ctx`,
-  // which is m2c's own. Present only where the spelling is not `C_TYPEDEFS`, so every other entry
-  // keeps its identity and only the rows whose scoring world changed are recomputed.
+  // `scoring` is derived too. On the real tier the score comes from a closure (compile/real.ts
+  // `makeRealScorer`) over the unit model, the manifest's prependC and the row's VENDORED context,
+  // and that context is not `ctx`, which is m2c's own: 43 rows hand m2c a hand-written ctx, and
+  // the rest a separately vendored file. Off the key, an edit to a manifest's prependC, or to the
+  // spelling the context-free rungs take from the vendored context (compile/util.ts
+  // `bareTypedefs`), replays the old score. The digest covers the closure's ARGUMENTS, not its code:
+  // a change to the ladder itself (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
   const key = sha(
     JSON.stringify({
       v: 20,
@@ -342,7 +345,7 @@ export async function cachedM2cResult(
       ...(functionStart(asm) !== 0 && { placed: 1 }),
       ...(/R_PPC_EMB_SDA21\s+[^@\s]/.test(asm) && { sda: 1 }),
       ...((asm.match(/^[0-9a-f]+\s+<[^>]+>:\s*$/gim)?.length ?? 0) > 1 && { sliced: 1 }),
-      ...(typedefs !== undefined && { typedefs }),
+      ...(scoringContext !== undefined && { scoring: scoringContext }),
     }),
   );
   const path = join(CACHE_DIR, `m2c-${key}.json`);
