@@ -32,6 +32,9 @@ export interface FrameObjectAudit {
   declaredLocals: NonNullable<LiveInModel['declaredLocals']>;
   usedSlotOffsets: ReadonlySet<number>;
   capturedObjectIsTheWholeFrame: boolean;
+  /** the frame offsets whose escape the frontend's outgoing-argument verdict leans on — each one
+   *  re-proven here (`recheckEscapesReliedOn`). Absent or empty where it leans on none. */
+  escapesReliedOn?: ReadonlySet<number>;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
   /** whether a callee's declaration rules out a struct returned through a hidden pointer at
@@ -280,6 +283,7 @@ export function auditFrameObjects({
   declaredLocals: declared,
   usedSlotOffsets,
   capturedObjectIsTheWholeFrame,
+  escapesReliedOn = new Set(),
   movedCaptures,
   returnsWithoutHiddenPointer,
   symbols,
@@ -290,10 +294,13 @@ export function auditFrameObjects({
   const { laddrs: captures, foldedHere } = foldMovedCaptures(irBlocks, movedCaptures);
   // …and the audit runs for a licensed acceptance with no object at all, so the premise re-check
   // is total rather than resting on "the capture always survives into the IR".
-  if (captures.length === 0 && !capturedObjectIsTheWholeFrame) {
+  if (captures.length === 0 && !capturedObjectIsTheWholeFrame && escapesReliedOn.size === 0) {
     return undefined;
   }
   const fail = frameRefusal(name);
+  if (captures.length === 0 && escapesReliedOn.size > 0) {
+    recheckEscapesReliedOn(escapesReliedOn, undefined, fail);
+  }
   const facts = frameAddressFacts(irBlocks, symbols, target);
   const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere);
   const objects = frameObjects(laddrs, owned, fail);
@@ -304,6 +311,7 @@ export function auditFrameObjects({
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
+  recheckEscapesReliedOn(escapesReliedOn, uses, fail);
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
@@ -1353,6 +1361,27 @@ function recheckWholeFramePremise({
   const whyItStands = writtenHere ? null : hiddenReturnPointerStands(0, uses.arg0Callees, returnsWithoutHiddenPointer);
   if (whyItStands !== null) {
     fail(`the one-word frame is never written here, and ${whyItStands}`);
+  }
+}
+
+/** THE ESCAPE EVENT'S PREMISE, RE-ASKED OF THE IR — `recheckWholeFramePremise`'s first half at
+ *  any frame size. The outgoing-argument analysis lets a frame address leaving this function end
+ *  the pending stores from its offset up (`StackArgsEscape`), reading the escape off what a
+ *  REGISTER holds at a `bl` or a word `str`. Where its verdict leans on that (it would refuse
+ *  without the escapes), each offset it read must reach a call operand or a word store outside the
+ *  frame in the lifted function too. An arity that shrinks after the event was read is what this
+ *  catches: the lowering asks the frontend of every register a guess leaves out or the trim cuts
+ *  (`CallSite.leftOut`), and this is the containment that does not rest on every such shrink being
+ *  routed through that question. Same two arms, same width as the licence they re-prove. */
+function recheckEscapesReliedOn(offsets: ReadonlySet<number>, uses: FrameUses | undefined, fail: Refuse): void {
+  for (const off of offsets) {
+    if (uses === undefined || (!uses.passedToCallee.has(off) && !uses.publishedOutward.has(off))) {
+      fail(
+        `the outgoing-argument analysis set aside the stores from [sp,#${off}] up on that address escaping, and in the ` +
+          'lifted function no call takes it and no word store publishes it outside this frame — so nothing rules out ' +
+          'an outgoing stack argument there',
+      );
+    }
   }
 }
 

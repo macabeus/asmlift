@@ -621,8 +621,26 @@ export function callDeclarations(
     // to an unprototyped type, so a dropped argument would never be refused, and `p(g())` would lift
     // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
     // the machine passes — unless `g` is declared void, and its result names nothing.
+    //
+    // …AND WHAT THE TRIM CUTS IS LEFT OUT TOO, so the frontend is asked the `leftOut` question of it
+    // as well: a guess of four the check above passed can still lose a frame address in r2 when
+    // the trim cuts it back to the run below an unfresh r1 (`v = f64(); g(v, &s)` with neither
+    // declared, which otherwise lifts as `g(v)`).
     if (widths === null) {
-      ssa.recordGuessedCall(call, bi, target, indirect === undefined ? undefined : (r) => !voidResults.has(r));
+      const leftOut = site.leftOut;
+      ssa.recordGuessedCall(
+        call,
+        bi,
+        target,
+        indirect === undefined ? undefined : (r) => !voidResults.has(r),
+        leftOut === undefined
+          ? undefined
+          : (cut, kept) =>
+              leftOut(
+                cut.filter((r) => r !== indirect?.reg),
+                kept,
+              ),
+      );
     }
     if (p.declaredVoid) {
       voidResults.add(res);

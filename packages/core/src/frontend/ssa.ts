@@ -124,12 +124,13 @@ export interface SsaBuilder {
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
    *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
-   *  `passesCalleeResult`: see {@link GuessedCallSite}. */
+   *  `passesCalleeResult` and `trimmed`: see {@link GuessedCallSite}. */
   recordGuessedCall(
     op: Op,
     b: number,
     abi: { argRegs: string[]; returnReg: string },
     passesCalleeResult?: (result: Value) => boolean,
+    trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
   ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -866,12 +867,14 @@ export function makeSsaBuilder(
       b: number,
       abi: { argRegs: string[]; returnReg: string },
       passesCalleeResult?: (result: Value) => boolean,
+      trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
         block: b,
         op,
         passesCalleeResult,
+        trimmed,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -1068,6 +1071,14 @@ export interface GuessedCallSite {
   /** which earlier callee's result in the return register is an argument here, not a leftover:
    *  the site's lowering says so ({@link SsaBuilder.recordGuessedCall}). Absent where none is. */
   passesCalleeResult?: (result: Value) => boolean;
+  /** handed the argument registers the trim CUTS from this site's guess, and the ones it keeps —
+   *  the same question the lowering asks of the registers its guess left out
+   *  (`CallSite.leftOut`), asked again where the arity shrinks a second time. Only the cut
+   *  registers that are FRESH here: an unfresh one is the trim's proof that no correct caller set
+   *  it up, but a fresh register above a hole goes with the hole (see {@link
+   *  trimClobberedCallArgs}), which is no proof, so a frontend that knows one to be an argument all
+   *  the same refuses here. Absent where nothing is asked. */
+  trimmed?: (cut: readonly string[], kept: readonly string[]) => void;
 }
 
 export interface CallArgTrim {
@@ -1315,6 +1326,12 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
     const n = argcAt(s, fresh);
     if (n < callArgs(s.op).length) {
+      // only the FRESH ones: an unfresh register is the trim's proof (a path reaches here with
+      // nothing set up in it since a call), a fresh one went with a hole below it
+      s.trimmed?.(
+        argRegs.slice(n, callArgs(s.op).length).filter((r) => fresh.has(r)),
+        argRegs.slice(0, n),
+      );
       truncateCallArgs(s.op, n);
     }
     // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the

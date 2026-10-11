@@ -50,7 +50,7 @@ import {
   mintArgSlotHoles,
   stackSlotKey,
 } from './ssa';
-import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
+import { type OutgoingArgs, type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -2488,6 +2488,7 @@ function liftOnce(
     ...frame.partition,
     usedSlotOffsets: fill.frameUses.usedSlotOffsets,
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
+    escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
     returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
     symbols,
@@ -2765,6 +2766,9 @@ interface ThumbFrame {
   readonly localArea: number;
   readonly savedRegs: ReadonlySet<string>;
   readonly capturedObjectIsTheWholeFrame: boolean;
+  /** the offsets of the escaped frame addresses the outgoing-argument verdict leans on, which the
+   *  audit re-proves of the lifted IR; empty where the verdict leans on none */
+  readonly escapesReliedOn: ReadonlySet<number>;
   /** the frame offset each instruction leaves a register holding, where `heldFrameWalk` follows it */
   readonly captureOffsetOf: ReadonlyMap<Instr, number>;
   /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAtCalls`) */
@@ -3096,7 +3100,7 @@ function measureThumbFrame({
       escapedOffsetOf.set(ins, Math.min(...offs));
     }
     const defined = frameAddressDefined(ins, held);
-    if (defined !== null) {
+    if (defined !== null && Number.isFinite(defined[1])) {
       captureOffsetOf.set(ins, defined[1]);
     }
     return false;
@@ -3129,41 +3133,61 @@ function measureThumbFrame({
     const off = escapedOffsetOf.get(ins);
     return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
   };
-  const outgoingArgs = analyzeOutgoingArgs<Instr>({
-    blocks: asmBlocks.map((ab) => ({
-      events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
-        const escaped = escapeEvent(ins);
-        if (escaped.length > 0 && ins.mnemonic === 'str') {
-          return escaped;
-        }
-        const off = slotAcc(ins);
-        if (off !== null && !constantCaptureOffsets.has(off)) {
-          return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
-        }
-        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          const callee = ins.ops[0] ?? '?';
-          const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
-          return [
-            ...escaped,
-            {
-              kind: 'call',
-              call: ins,
-              callee,
-              declared: declared === null ? null : outgoingBlock(declared.widths, target),
-              params: declared?.params,
-            },
-          ];
-        }
-        return [];
-      }),
-    })),
-    preds,
-    live: entryReachable,
-    localArea,
-    argRegs: target.argRegs.length,
-    capturedWholeFrame: capturedObjectIsTheWholeFrame,
-    localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
-  });
+  const eventBlocks = asmBlocks.map((ab) => ({
+    events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
+      const escaped = escapeEvent(ins);
+      if (escaped.length > 0 && ins.mnemonic === 'str') {
+        return escaped;
+      }
+      const off = slotAcc(ins);
+      if (off !== null && !constantCaptureOffsets.has(off)) {
+        return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
+      }
+      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+        const callee = ins.ops[0] ?? '?';
+        const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
+        return [
+          ...escaped,
+          {
+            kind: 'call',
+            call: ins,
+            callee,
+            declared: declared === null ? null : outgoingBlock(declared.widths, target),
+            params: declared?.params,
+          },
+        ];
+      }
+      return [];
+    }),
+  }));
+  const outgoingArgsOver = (blocks: readonly StackArgsBlock<Instr>[]): OutgoingArgs<Instr> =>
+    analyzeOutgoingArgs<Instr>({
+      blocks,
+      preds,
+      live: entryReachable,
+      localArea,
+      argRegs: target.argRegs.length,
+      capturedWholeFrame: capturedObjectIsTheWholeFrame,
+      localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
+    });
+  const outgoingArgs = outgoingArgsOver(eventBlocks);
+  // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
+  // `escapesReliedOn`). The `escape` event is read off what a REGISTER holds at a `bl` or a `str`,
+  // and it switches refusals OFF; the lift then decides what the call is really handed, and an
+  // arity that shrinks after the event was read (a guess, then the trim) can leave the address out
+  // of the call while its stores stay excused. The one-word licence has this re-check
+  // (`recheckWholeFramePremise`); this is the same one at any frame size. Only where the analysis
+  // would refuse WITHOUT the escapes, so an escape that excused nothing asks nothing of the IR.
+  const escapeOffsets = new Set(
+    [...entryReachable].flatMap((b) => eventBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : []))),
+  );
+  const escapesReliedOn: ReadonlySet<number> =
+    outgoingArgs.blocker === null &&
+    escapeOffsets.size > 0 &&
+    outgoingArgsOver(eventBlocks.map((b) => ({ events: b.events.filter((ev) => ev.kind !== 'escape') }))).blocker !==
+      null
+      ? escapeOffsets
+      : new Set();
 
   const slotsOffReason = slotModelBlocker(asmBlocks, localArea, outgoingArgs);
   const slotsOk = slotsOffReason === null;
@@ -3279,6 +3303,7 @@ function measureThumbFrame({
     localArea,
     savedRegs,
     capturedObjectIsTheWholeFrame,
+    escapesReliedOn,
     captureOffsetOf,
     frameAddressesAtCall: frameAddressesAtCalls(asmBlocks, preds, entryReachable, calls.callClobbers),
     outgoingArgs,
@@ -3362,6 +3387,13 @@ function heldFrameWalk(
 // null. The shapes that carry one: the capture itself (`mov rD, sp`, `add rD, sp, #k`), a copy
 // of a held register (`mov rD, rS`, and agbcc's `add rD, rS, #0`), and a held register moved by
 // a constant (`add rD, rS, #c`, `add rD, #c`). Everything else only kills.
+//
+// …AND A FRAME ADDRESS MOVED BY A REGISTER, at an offset nothing here knows (NaN): sp or a held
+// register plus a runtime index, `add r2, r2, sp` — agbcc's `&buf[i]` — or `mov r1, sp / add r0,
+// r1, r4`. It names no one word, so no walk that asks for an offset can credit it (NaN equals
+// none, and an escape at NaN is no escape); what it is carried for is the "may hold a frame
+// address" questions, where leaving it out let an undeclared call's guessed arity drop
+// `&buf[i]` with no refusal (`g3(a, b, &buf[i])` as `g3()`).
 function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null {
   const [d, s1, s2] = ins.ops;
   if (d === undefined || isSpReg(d)) {
@@ -3375,10 +3407,14 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
   }
   if (/^adds?$/.test(ins.mnemonic)) {
     const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
-    if (src === undefined || by === undefined || !IMM_LITERAL.test(by)) {
+    if (src === undefined || by === undefined) {
       return null;
     }
-    const from = isSpReg(src) ? 0 : held.get(reg(src));
+    const at = (r: string): number | undefined => (isSpReg(r) ? 0 : held.get(reg(r)));
+    if (!IMM_LITERAL.test(by)) {
+      return at(src) !== undefined || at(by) !== undefined ? [reg(d), NaN] : null;
+    }
+    const from = at(src);
     return from === undefined ? null : [reg(d), from + imm(by)];
   }
   return null;
@@ -3399,8 +3435,12 @@ function registersThatMayHoldAFrameAddress(
     grew = false;
     for (const b of entryReachable) {
       for (const ins of asmBlocks[b].instrs) {
+        // CONSTANT OFFSETS ONLY. Closed over every block at once, an index sum (NaN) would carry
+        // the frame base through every `add rD, rS, rT` in the function — measured: klonoa's
+        // `DmaControllerInit` then held its DMA register's base, and its publish stopped counting
+        // as one. A store through `&buf[i]` stays the counted-as-leaving imprecision stated above.
         const defined = frameAddressDefined(ins, held);
-        if (defined !== null && !held.has(defined[0])) {
+        if (defined !== null && Number.isFinite(defined[1]) && !held.has(defined[0])) {
           held.set(defined[0], 0); // the offset is not the question here, only the register
           grew = true;
         }
@@ -3491,7 +3531,10 @@ function frameAddressesAtCalls(
 // pass it. "Every register" is wider than what the lift passes an undeclared callee — a guessed
 // count, or the bound of a call through an argument register — and the two agree on a frame address
 // only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
-// `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold).
+// `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold) — of
+// the registers its guess leaves out AND of those the trim cuts afterwards (`GuessedCallSite.
+// trimmed`). Where the outgoing-argument verdict leans on an escape, the audit re-proves it of the
+// lifted IR as well (`escapesReliedOn`), so a shrink that bypassed both still declines.
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
@@ -5186,7 +5229,10 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // the copy it passes in r0 (`mov r3, sp / str r0, [r3] / mov r0, sp / bl g`).
     leftOut: (regs, passed) => {
       const at = frame.frameAddressesAtCall.get(ins);
-      const handed = new Set(passed.flatMap((p) => (at?.must.has(p) ? [at.must.get(p)] : [])));
+      // …and an address at an offset nothing knows (NaN, `&buf[i]`) is the same as no other one
+      const handed = new Set(
+        passed.flatMap((p) => (at?.must.has(p) && Number.isFinite(at.must.get(p)) ? [at.must.get(p)] : [])),
+      );
       const r = regs.find((r) => at?.may.has(r) && !handed.has(at.may.get(r)!));
       if (r !== undefined) {
         throw new FrontendUnsupportedError(

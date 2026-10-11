@@ -4048,4 +4048,68 @@ describe('a frame address an undeclared arity leaves out refuses', () => {
       '\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('later', later, ARMV4T_AGBCC).source).toContain('    return fill2(a1, &sp0, 0);\n');
   });
+
+  // THE TRIM SHRINKS A GUESS A SECOND TIME, after the lowering asked. agbcc's own output for
+  // `struct S { int a; int b; unsigned char c; unsigned short d; }; long long foo(void); void g();
+  // void n1(int x, int y) { struct S s; long long v = foo(); s.a = 0; s.b = x; s.c = 0; s.d = y;
+  // g(v, &s); }`: the guess reads four (r1 reaches the call through `foo`'s high half), and the trim
+  // cuts it to the run below that unfresh r1, taking `&s` in r2 with it — `g(v0)`, every store to
+  // `s` dropped, where main declined. With both declared it lifts whole.
+  const n1 =
+    'n1:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0xc\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tfoo\n' +
+    '\tmov\tr3, #0x0\n\tstr\tr3, [sp]\n\tstr\tr4, [sp, #0x4]\n\tmov\tr2, sp\n\tstrb\tr3, [r2, #0x8]\n' +
+    '\tstrh\tr5, [r2, #0xa]\n\tbl\tg\n\tadd\tsp, sp, #0xc\n\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n';
+  test('a capture the trim cuts from a guessed arity declines, and declarations pass it', () => {
+    expect(() => decompile('n1', n1, ARMV4T_AGBCC)).toThrow(
+      /'bl g' has no prototype, and the arity lifted without one leaves out r2, which may hold a frame address/,
+    );
+    const declared = {
+      foo: { params: [], returns: 's64' },
+      g: { params: ['s64', 'struct S *'], returns: 'void' },
+    };
+    expect(decompile('n1', n1, ARMV4T_AGBCC, { prototypes: declared }).source).toContain('    g(v0, sp0);\n');
+  });
+
+  // A FRAME ADDRESS MOVED BY A REGISTER is one too, at an offset nothing knows. agbcc's own output
+  // for `extern void g3(); extern unsigned char gb[]; void r5(int a, int b, int i, int j) {
+  // unsigned char buf[8]; g3(a, b, &buf[i]); gb[0] = buf[j]; }` builds `&buf[i]` as
+  // `add r2, r2, sp`, and lifted as `g3(); gb = sp0[a3];` on main too.
+  test('an indexed frame address left out of a guessed arity declines', () => {
+    const r5 =
+      'r5:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r3, #0\n\tadd\tr2, r2, sp\n\tbl\tg3\n' +
+      '\tldr\tr1, .L3\n\tmov\tr2, sp\n\tadd\tr0, r2, r4\n\tldrb\tr0, [r0]\n\tstrb\tr0, [r1]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgb\n';
+    expect(() => decompile('r5', r5, ARMV4T_AGBCC)).toThrow(
+      /'bl g3' has no prototype, and the arity lifted without one leaves out r2, which may hold a frame address/,
+    );
+  });
+
+  // CONTROLS for the trim's question: it asks only of the registers it cuts that are FRESH. The
+  // return register holds the callee's result after a call, which is no setup (sa3's
+  // `ClearCameraStruct`: `mov r0, sp / bl CpuSet / bl sub_80026BC`); and a register a path reaches
+  // the call with a call since its last write is the trim's proof, not a hole (sa3's `sub_805DADC`,
+  // `mov r3, sp` left behind an optional call). Both declined when every cut register was asked.
+  test('a result over the captured return register, and an unfresh capture, do not decline', () => {
+    const ccs =
+      'ccs:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr0, #0x0\n\tstr\tr0, [sp]\n\tldr\tr1, .L5\n' +
+      '\tldr\tr2, .L5+0x4\n\tmov\tr0, sp\n\tbl\tCpuSet\n\tbl\tsub_80026BC\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n' +
+      '\tbx\tr0\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\tgCamera\n\t.word\t0x500001b\n';
+    expect(decompile('ccs', ccs, ARMV4T_AGBCC).source).toContain('    sub_80026BC();\n');
+    const unfresh =
+      'unfresh:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tmov\tr3, sp\n\tstrh\tr1, [r3]\n\tmov\tr2, #0x2\n' +
+      '\tcmp\tr1, #0\n\tbeq\t.L2\n\tadd\tr0, r4, #0\n\tmov\tr3, #0x3\n\tbl\tTransform\n.L2:\n\tadd\tr0, r4, #0\n\tbl\tUpdate\n' +
+      '\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('unfresh', unfresh, ARMV4T_AGBCC).source).toContain('Update(a0);\n');
+  });
+
+  // …and two indexed addresses are not the same one: a pass of `&buf[j]` in r0 does not excuse
+  // leaving `&buf[i]` out in r2.
+  test('an indexed frame address passed does not excuse another left out', () => {
+    const two =
+      'two:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r2, sp\n\tadd\tr0, r3, sp\n\tbl\tg3\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('two', two, ARMV4T_AGBCC)).toThrow(
+      /'bl g3' has no prototype, and the arity lifted without one leaves out r2, which may hold a frame address/,
+    );
+  });
 });
