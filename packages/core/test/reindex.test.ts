@@ -444,7 +444,7 @@ test('keptWalks collects the v1 while-walk base (here a param — harmless to th
   expect(kept).toEqual(new Set(['a0']));
 });
 
-// ── v3: the up-counting byte walk with an expression base ─────────────────────────────────────
+// ── v3: the up-counting walk with an expression base ──────────────────────────────────────────
 describe('v3 — expression-base walk', () => {
   const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
   const s32t = { kind: 'int', width: 32, signed: true } as const;
