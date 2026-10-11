@@ -12,7 +12,7 @@ import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import type { Prototypes } from './proto';
-import { storeSigned } from './raise/storesign';
+import { storeSigned, storedConstantSign } from './raise/storesign';
 import { type SymbolInfo, accessSignedness } from './symbols';
 import { C_TYPEDEFS, type TargetDescription } from './target';
 
@@ -31,16 +31,28 @@ import { C_TYPEDEFS, type TargetDescription } from './target';
  *  still wins, as in raise/structs.ts. Stores whose stamps disagree keep the width with the
  *  unsigned default: dropping the fact would declare `extern u32` under a bare `gSym = v` that
  *  then compiles to `sw` where the target has `sh`. The bare spelling has no cast to carry the
- *  stamp, so this declaration is the only place the stored constant's view can be written. */
+ *  stamp, so this declaration is the only place the stored constant's view can be written.
+ *
+ *  An UNSTAMPED store of a constant zero-extended from its narrow sign bit vetoes a signed
+ *  declaration. storesign.ts leaves such a store unstamped when a wider use shares the constant,
+ *  and the structurer spells it as the literal (`gS = 65535; gW = 65535;`). Under `extern s16 gS`,
+ *  that literal converts to -1, and the shared register splits in two. The veto only ever chooses
+ *  the unsigned default, which is what the declaration was before stamps existed. */
 export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
   const defs = defOpMap(fn);
   const symOf = (v: Value): string | null => {
     const d = defs.get(v);
     return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
   };
-  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; stored: Set<boolean>; interior: boolean }>();
+  const acc = new Map<
+    string,
+    { widths: Set<number>; signs: Set<boolean>; stored: Set<boolean>; unsignedLiteral: boolean; interior: boolean }
+  >();
   const get = (s: string) =>
-    acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), stored: new Set(), interior: false }).get(s)!;
+    acc.get(s) ??
+    acc
+      .set(s, { widths: new Set(), signs: new Set(), stored: new Set(), unsignedLiteral: false, interior: false })
+      .get(s)!;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode === 'load' || op.opcode === 'store') {
@@ -55,6 +67,11 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
               a.signs.add(accessSignedness(op.attrs.width as number, op.attrs.signed as boolean | undefined));
             } else if (op.attrs.signed !== undefined) {
               a.stored.add(storeSigned(op, op.attrs.width as number));
+            } else {
+              const d = defs.get(op.operands[1]);
+              if (d?.opcode === 'const' && storedConstantSign(d.attrs.value as number, op.attrs.width as number) === false) {
+                a.unsignedLiteral = true;
+              }
             }
           }
         }
@@ -79,9 +96,11 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
     if (a.interior || a.widths.size !== 1 || a.signs.size > 1) {
       continue;
     }
-    // Loads decide when there are any. Stores whose stamps disagree pick no view, so the
-    // declaration keeps the width and takes the unsigned default it had before stamps existed.
-    const signed = a.signs.size === 1 ? a.signs.has(true) : a.stored.size === 1 && a.stored.has(true);
+    // Loads decide when there are any. Stores whose stamps disagree pick no view, nor does a signed
+    // stamp beside an unstamped zero-extended literal: the declaration keeps the width and takes
+    // the unsigned default it had before stamps existed.
+    const signed =
+      a.signs.size === 1 ? a.signs.has(true) : a.stored.size === 1 && a.stored.has(true) && !a.unsignedLiteral;
     out.set(s, { width: [...a.widths][0], signed });
   }
   return out;

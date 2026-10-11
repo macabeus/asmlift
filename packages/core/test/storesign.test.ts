@@ -206,6 +206,24 @@ test('a bare global whose stamped stores disagree keeps its width at the unsigne
   ).toEqual({ width: 2, signed: false });
 });
 
+test('an unstamped zero-extended literal vetoes the signed stamp of a bare global', () => {
+  // `if (gC) gS = -1; else { s32 v = 0xffff; gS = v; gW = v; }` with `extern s16 gS` → the 0xffff
+  // store is unstamped (gW reads the same register), and the structurer spells it `gS = 65535`.
+  // Declared `s16`, that literal converts to -1 and no longer shares 0xffff with gW, so the
+  // declaration keeps the unsigned default.
+  expect(
+    globalFacts(
+      ['lui\tat,0x0', 'gS'],
+      ['li\tv0,-1', ''],
+      ['sh\tv0,0(at)', 'gS'],
+      ['li\tv1,0xffff', ''],
+      ['sw\tv1,0(a0)', ''],
+      ['jr\tra', ''],
+      ['sh\tv1,0(at)', 'gS'],
+    ).gS,
+  ).toEqual({ width: 2, signed: false });
+});
+
 test('an indexed store carries its stamp into the astore', () => {
   const src = decompile(
     'f',
