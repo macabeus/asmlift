@@ -522,14 +522,14 @@ function plusConst(e: Expr, c: number): Expr {
 // approximate):
 //   • each `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum
 //     counts in its BASE's unit. Over a W-element pointer base that is already elements, and REST
-//     stays verbatim, symbolic addends included. Over a byte base (an integer var, a byte pointer,
-//     `(u32)&g`) a wider walk needs a constant total W divides (it is rescaled to elements), and
-//     a symbolic addend, which would need dividing, stays in the BYTE sum instead: the index base
-//     is `(T *)(BASE + SYM)`, the spelling `p = b + k; … p[i]` reduces back to;
+//     stays verbatim, symbolic addends included. Over a byte base (a non-pointer var, a byte
+//     pointer, `(u32)&g`) a wider walk needs a constant total W divides (it is rescaled to
+//     elements), and a symbolic addend, which would need dividing, stays in the BYTE sum instead:
+//     the index base is `(T *)(BASE + SYM)`, the spelling `p = b + k; … p[i]` reduces back to;
 //   • the inits `i = S` and `p_k = EXPR_k` are the run of assignments immediately ahead of the
 //     `dowhile` (any order); EXPR (its pointer and 32-bit integer casts stripped; a narrowing cast
-//     declines) flattens over `+` into exactly ONE base addend — a bare var declared an integer, a
-//     byte pointer or a pointer to W-byte integers (any other pointer strides a unit no element
+//     declines) flattens over `+` into exactly ONE base addend — a bare var declared a non-pointer,
+//     a byte pointer or a pointer to W-byte integers (any other pointer strides a unit no element
 //     index names), or an object's address, `(u32)&g` beside other addends or `&g` alone — plus
 //     pure invariant addends (var/const/mul/shl trees whose vars the body never assigns);
 //   • the body's contiguous TAIL is exactly one `p_k = p_k + 1` per walk pointer and one
@@ -550,7 +550,7 @@ interface ExprWalkSpelling {
 }
 
 /** The per-pointer half of v3: `init` (`p = EXPR`) decomposed into the index base and REST in
- *  elements, or null when `p`'s walk is out of scope. The loop-wide half is `tryExprWalk`. */
+ *  elements, or null when `p`'s walk is out of scope. The loop-wide half is `tryExprWalkRun`. */
 function exprWalkSpelling(
   init: Stmt & { k: 'assign' },
   dw: Stmt & { k: 'dowhile' },
@@ -600,15 +600,12 @@ function exprWalkSpelling(
   }
   const rest = addends.filter((a) => a !== bases[0]);
   const base: Extract<Expr, { k: 'var' | 'addr' }> = bases[0].k === 'var' ? bases[0] : addrOf(bases[0])!;
-  // The UNIT EXPR's `+` counts in is the base's own stride. declTypes carries params, locals AND
-  // globals. An integer var, a byte pointer, or a `(u32)&g` count BYTES. A pointer to W-byte
-  // integers counts ELEMENTS of the walk's own width — KMC folds `for (i = S; …) a0[i]` over a
-  // `u16 *a0` to `p = a0 + S`, element arithmetic. Any other pointer strides a unit no element
-  // index names, and a var declared nowhere has an unknowable stride (its project declaration
-  // decides) — both decline. An address needs no declaration: `&g` is g's address whatever g's
-  // type, and the printer always casts it to the access width (cfamily.ts legalizedIndexBase: the
-  // type walk answers nothing for an `addr`, so even a g declared with W-byte elements prints the
-  // cast); a lone one has no `+`, so its unit never applies.
+  // The UNIT EXPR's `+` counts in is the base's own stride (declTypes carries params, locals AND
+  // globals). KMC folds `for (i = S; …) a0[i]` over a `u16 *a0` to `p = a0 + S`, element
+  // arithmetic. A var declared nowhere has an unknowable stride (its project declaration decides).
+  // An address needs no declaration: `&g` is g's address whatever g's type, and the printer always
+  // casts it to the access width (cfamily.ts legalizedIndexBase: the type walk answers nothing for
+  // an `addr`, so even a g declared with W-byte elements prints the cast).
   let unit = 1;
   if (base.k === 'var') {
     const baseT = declTypes(base.name);
@@ -743,8 +740,8 @@ function tryExprWalkRun(
     return null;
   }
   // The counter starts at a CONSTANT S and its ONLY write anywhere in the body is the tail step:
-  // n completed steps put each `p` at EXPR + n*W and `i` at S + n, so the deref is
-  // BASE[i - S + REST]. That holds while `i` takes the values S + n, which a DECLARED integer
+  // k completed steps put each `p` at EXPR + k*W and `i` at S + k, so the deref is
+  // BASE[i - S + REST]. That holds while `i` takes the values S + k, which a DECLARED integer
   // counter does: at 32 bits always (it wraps with the address), and narrower only from S = 0 and
   // unsigned, where it names elements 0 … 2^w - 1 before it wraps. A signed narrow counter wraps
   // at 2^(w-1) (an s8 goes 127 -> -128 and names an element 256 behind the walk), and from a
