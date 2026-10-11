@@ -209,6 +209,30 @@ describe.runIf(ppcDockerAvailable('mwcc_242_81'))('a CodeWarrior ladder whose at
     expect(counts).toEqual([0, 1]);
     expect(runs[0]).toEqual(runs[1]);
   }, 120_000);
+
+  test("skips a rung only in the dialect it is dead in: a C++ row's C fallback compiles it", async () => {
+    // the include is dead in C++ and absent in C, where the prelude compiles
+    const cflags = canonicalCodegen('mwcc_242_81').cflags;
+    const prependC = `#ifdef __cplusplus\n${MISSING}#endif\n`;
+    const runs: Outcome[] = [];
+    const counts: { 'c++': number; c: number }[] = [];
+    for (const unread of [true, false]) {
+      const o = observed(realCompilerFor('mwcc_242_81'));
+      runs.push(await outcome(ladderCompile(o.rc, cflags, 'assembled', prependC, CTX, 'c++'), REFUSED, unread));
+      const inManifestRung = o.compiled.filter((tu) => tu.includes(prependC) && tu.includes('void f('));
+      const asCpp = inManifestRung.filter((tu) => tu.includes('extern "C"')).length;
+      counts.push({ 'c++': asCpp, c: inManifestRung.length - asCpp });
+    }
+    expect(counts).toEqual([
+      { 'c++': 0, c: 1 },
+      { 'c++': 1, c: 1 },
+    ]);
+    expect(runs[1]).toMatchObject({ rejection: true });
+    expect(runs[0]).toEqual({
+      ...runs[1],
+      labels: (runs[1] as { labels: string[] }).labels.filter((l) => l !== '+ manifest prependC (c++)'),
+    });
+  }, 120_000);
 });
 
 // IDO's lane preprocesses with the host's cpp, which throws a plain Error, so a dead rung there is a
