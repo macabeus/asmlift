@@ -121,7 +121,7 @@ test.each<[string, SFn, string]>([
       bytes4,
       image([1, 2, 3]),
     ),
-    'indexes past the 3 elements copied',
+    'indexes past the 3 bytes copied',
   ],
 ])('%s: refuses, and the emitter will not print it', (_, sfn, why) => {
   expect(constantImageRefusal(sfn)?.refused).toContain(why);
@@ -151,4 +151,11 @@ test('agbcc: kleod sub_0804C898 — a dead local array keeps its initializer', (
     'void dead16(void) {\n    u8 sp0[16] = {\n        0, 1, 2, 4, 6, 4, 2, 1,\n' +
       '        0, 0xff, 0xfe, 0xfc, 0xfa, 0xfc, 0xfe, 0xff,\n    };\n}\n',
   );
+});
+
+test('agbcc: an element read through the local’s address keeps the image inside the copy', () => {
+  // int fread(int i) { u8 a[6] = {9, 8, 7, 6, 5, 4}; return a[i]; } — the frame rounds the 6
+  // bytes to 8, and the read is an index off `&sp0`, which carries its own width
+  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-const-init.s'), 'utf8');
+  expect(decompile('fread', asm, ARMV4T_AGBCC).source).toContain('    u8 sp0[6] = { 9, 8, 7, 6, 5, 4 };\n');
 });

@@ -158,15 +158,15 @@ function planFold(sfn: SFn, image: SStatic): Fold | string {
   if (use.other && byteSize(decl.type) !== size) {
     return `whose copy fills '${local}', a ${typeToString(decl.type)} the body reaches past the ${size} bytes copied`;
   }
-  if (use.other || use.indices.length > 0) {
+  if (use.other || use.indexed > 0) {
     if (declElem.width !== elem.width) {
       return `whose ${elem.width / 8}-byte elements are not the ${declElem.width / 8}-byte elements the body reaches '${local}' by`;
     }
-    if (use.indices.some((k) => k < 0 || k >= count)) {
-      return `whose copy fills '${local}', which the body indexes past the ${count} elements copied`;
+    if (use.extents.some(([from, to]) => from < 0 || to > size)) {
+      return `whose copy fills '${local}', which the body indexes past the ${size} bytes copied`;
     }
   }
-  const own = use.other || use.indices.length > 0 ? declElem : elem;
+  const own = use.other || use.indexed > 0 ? declElem : elem;
   return {
     image,
     at,
@@ -177,26 +177,32 @@ function planFold(sfn: SFn, image: SStatic): Fold | string {
   };
 }
 
-/** How `body` reaches `local`: the constant indices of its direct element accesses, and whether
- *  anything reaches it other than as a whole call argument or a direct element access. */
-function uses(body: readonly Stmt[], local: string): { indices: number[]; other: boolean } {
+/** How `body` reaches `local`: the byte extent of each direct element access with a constant
+ *  index (`sp0[k]`, `((u8 *)sp0)[k]` — the index node carries its own width), how many of those
+ *  there are in all, and whether anything reaches it other than as a whole call argument or a
+ *  direct element access. */
+function uses(body: readonly Stmt[], local: string): { indexed: number; extents: [number, number][]; other: boolean } {
   let total = 0;
   let accounted = 0;
-  const indices: number[] = [];
+  let indexed = 0;
+  const extents: [number, number][] = [];
   for (const e of walkExprs(body as Stmt[])) {
     if (mentionedName(e) === local) {
       total++;
     }
-    if (e.k === 'call' && e.args.some((a) => wholeObject(a) === local)) {
+    if (e.k === 'call') {
       accounted += e.args.filter((a) => wholeObject(a) === local).length;
     }
-    if (e.k === 'index' && bare(e.base).k === 'var' && wholeObject(e.base) === local) {
+    if (e.k === 'index' && wholeObject(e.base) === local) {
       accounted++;
+      indexed++;
       const k = bare(e.idx);
-      indices.push(k.k === 'const' ? k.value : 0);
+      if (k.k === 'const') {
+        extents.push([k.value * e.width, (k.value + 1) * e.width]);
+      }
     }
   }
-  return { indices, other: total !== accounted };
+  return { indexed, extents, other: total !== accounted };
 }
 
 /** Whether every anonymous image `sfn` holds folds into a local's initializer: null when it does,
