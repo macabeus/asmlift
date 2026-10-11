@@ -29,9 +29,9 @@
 //   • its source is the whole image, which nothing else mentions, and whose size is the count;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
 //     element type this pass could declare).
-// The local keeps its own element type where the body reads or writes it — the accesses were
-// spelled against it, so its width must be the image's — and takes the image's where nothing
-// else touches it, which is then the only witness of the source's element type.
+// The local keeps its own element type where the body reaches it by an offset or a cast — those
+// were spelled against it, so its width must be the image's — and takes the image's where only
+// its whole address and element accesses, which each print their own width, reach it.
 //
 // Thumb is the only frontend that reads an anonymous image today. The rule is asked of the tree,
 // for any compiler: IDO, KMC GCC, gcc 2.7.2 and mwcc copy a local aggregate's initializer from an
@@ -156,10 +156,6 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
   ) {
     return `whose copy into '${local}' is not the first thing the body does with it`;
   }
-  // Where the body reaches the local by anything but its whole address handed to a call — an
-  // element, an offset, a cast — that spelling was made against the local's own element, so the
-  // image's must be the same width, and the local keeps its type. Where it does not, the image's
-  // directives are the only witness of the source's element type, and the local takes it.
   const use = uses(kept, reach);
   const count = size / (elem.width / 8);
   // Reached as anything but elements, the local may be reached past the bytes copied — the tail a
@@ -167,15 +163,32 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
   if (use.other && byteSize(decl.type) !== size) {
     return `whose copy fills '${local}', a ${typeToString(decl.type)} the body reaches past the ${size} bytes copied`;
   }
-  if (use.other || use.indexed > 0) {
+  if (use.extents.some(([from, to]) => from < 0 || to > size)) {
+    return `whose copy fills '${local}', which the body indexes past the ${size} bytes copied`;
+  }
+  // Where the body reaches the local by anything but its whole address handed to a call or an
+  // element access — an offset, a cast — that spelling was made against the local's own element,
+  // so the image's must be the same width, and the local keeps its type. Where it does not, each
+  // element access carries and prints its own width, so the declaration — which the frame audit
+  // may have typed by bytes alone — witnesses nothing: the image's directives say the element, and
+  // the reads of that width its signedness, which a signed array of non-negative values does not
+  // write.
+  let own: Extract<IrType, { kind: 'int' }>;
+  if (use.other) {
     if (declElem.width !== elem.width) {
       return `whose ${elem.width / 8}-byte elements are not the ${declElem.width / 8}-byte elements the body reaches '${local}' by`;
     }
-    if (use.extents.some(([from, to]) => from < 0 || to > size)) {
-      return `whose copy fills '${local}', which the body indexes past the ${size} bytes copied`;
-    }
+    own = declElem;
+  } else {
+    const signs = new Set(use.reads.filter((r) => r.width * 8 === elem.width).map((r) => r.signed));
+    const signed =
+      signs.size === 1
+        ? [...signs][0]
+        : declElem.width === elem.width && use.indexed > 0
+          ? declElem.signed
+          : elem.signed;
+    own = { ...elem, signed };
   }
-  const own = use.other || use.indexed > 0 ? declElem : elem;
   return {
     image,
     at,
@@ -213,11 +226,12 @@ function aliasesOf(sfn: SFn, local: string): Map<string, number> {
 function uses(
   body: readonly Stmt[],
   reach: ReadonlySet<string>,
-): { indexed: number; extents: [number, number][]; other: boolean } {
+): { indexed: number; extents: [number, number][]; reads: { width: number; signed: boolean }[]; other: boolean } {
   let total = 0;
   let accounted = 0;
   let indexed = 0;
   const extents: [number, number][] = [];
+  const reads: { width: number; signed: boolean }[] = [];
   const reaches = (e: Expr): boolean => {
     const n = wholeObject(e);
     return n !== null && reach.has(n);
@@ -233,13 +247,14 @@ function uses(
     if (e.k === 'index' && reaches(e.base)) {
       accounted++;
       indexed++;
+      reads.push({ width: e.width, signed: e.signed });
       const k = bare(e.idx);
       if (k.k === 'const') {
         extents.push([k.value * e.width, (k.value + 1) * e.width]);
       }
     }
   }
-  return { indexed, extents, other: total !== accounted };
+  return { indexed, extents, reads, other: total !== accounted };
 }
 
 /** Whether every anonymous image `sfn` holds folds into a local's initializer: null when it does,

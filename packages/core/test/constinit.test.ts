@@ -87,6 +87,15 @@ test('a local holding only the address, assigned ahead of the copy, is the local
   );
 });
 
+test('a local reached only by elements takes the image’s element, and the signedness its reads say', () => {
+  // the frame audit types an untyped reservation by bytes (`u8[4]`); the reads carry their own width
+  const halves = image([1, 0xffff], 2, false);
+  const read = (k: number): Expr => ({ k: 'index', base: v('sp0'), idx: c(k), width: 2, signed: true });
+  const sfn = { ...fn([copy('sp0', '.LC0', 4), use(v('sp0')), { k: 'return', value: read(1) }], bytes4, halves) };
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(cBackend.emit({ ...sfn, retType: T.s(16) })).toContain('    s16 sp0[2] = { 1, -1 };\n');
+});
+
 test('an image written as a string literal is spelled as one', () => {
   const str = image([0x68, 0x69, 0], 1, false, { string: true });
   expect(
@@ -119,12 +128,9 @@ test.each<[string, SFn, string]>([
     'not the first thing the body does with it',
   ],
   [
-    'into a local read by another element',
+    'into a local reached by an offset of another element',
     fn(
-      [
-        copy('sp0', '.LC0', 4),
-        { k: 'return', value: { k: 'index', base: v('sp0'), idx: c(0), width: 2, signed: false } },
-      ],
+      [copy('sp0', '.LC0', 4), use({ k: 'bin', op: '+', l: v('sp0'), r: c(1) })],
       [{ name: 'sp0', type: T.array(T.u(16), 2) }],
     ),
     'are not the 2-byte elements the body reaches',

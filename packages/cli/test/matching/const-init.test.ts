@@ -74,6 +74,24 @@ const CASES: { sym: string; c: string; spelled: RegExp }[] = [
     spelled: /u32 sp0\[20\] = \{\n {8}1, 2, 3, 4, 5, 6, 7, 8,\n {8}9, 0, 0, 0,\n {4}\};/,
   },
   {
+    // the frame audit types the reservation by bytes; the halfword read says the element is wider
+    sym: 'halfread',
+    c: `${USE}u16 halfread(void) { u16 a[4] = {1, 2, 3, 0xffff}; g(a); return a[3]; }`,
+    spelled: /u16 sp0\[4\] = \{ 1, 2, 3, 0xffff \};/,
+  },
+  {
+    // …and a signed read the signedness, which an array of non-negative values does not write
+    sym: 'shalfread',
+    c: `${USE}s16 shalfread(void) { s16 a[4] = {1, 2, 3, 4}; g(a); return a[2]; }`,
+    spelled: /s16 sp0\[4\] = \{ 1, 2, 3, 4 \};/,
+  },
+  {
+    // a byte read off a halfword array goes through a cast, and says nothing of the element
+    sym: 'byteoff',
+    c: `${USE}u8 byteoff(void) { u16 a[4] = {0x102, 0x304, 5, 6}; g(a); return ((u8 *)a)[1]; }`,
+    spelled: /u16 sp0\[4\] = \{ 0x102, 0x304, 5, 6 \};/,
+  },
+  {
     // read back by element: the local keeps the element the read was spelled against
     sym: 'pick',
     c: 'u8 pick(s32 i) { u8 a[6] = {9, 8, 7, 6, 5, 4}; return a[i]; }',
