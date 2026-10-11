@@ -551,9 +551,11 @@ function tryExprWalk(
   if (!derefWidths([dw], p).every((w) => w === W)) {
     return null;
   }
-  // EXPR decomposition
+  // EXPR decomposition. Only casts that keep all 32 bits are stripped — a pointer cast, or an
+  // integer cast at 32 bits. A narrowing cast over EXPR (`(u16 *)(s16)(&g + 2)`) truncates the
+  // address, which no index off the untruncated base reproduces, so it stays and the walk declines.
   let expr: Expr = prev.value;
-  while (expr.k === 'cast') {
+  while (expr.k === 'cast' && (expr.to.kind === 'ptr' || (expr.to.kind === 'int' && expr.to.width === 32))) {
     expr = expr.e;
   }
   const addends: Expr[] = [];

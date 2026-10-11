@@ -692,9 +692,16 @@ describe('v3 — expression-base walk', () => {
       expect(cBackend.emit(r!)).toContain('((u16 *)gH)[i + 2] = 65535;'); // the array's own address
     });
 
-    test('refused: an uncast address (its `+` strides g, not bytes) or a narrowing cast', () => {
+    test('refused: an uncast address (its `+` strides g, not bytes) or a narrowing cast on the addend', () => {
       expect(reindexWalks(addrFn(plus({ k: 'addr', name: 'gH' }, cn(4))))).toBeNull();
       expect(reindexWalks(addrFn(plus(gAddr(T.u(16)), cn(4))))).toBeNull();
+    });
+
+    test('refused: a narrowing cast over the WHOLE init truncates the address (KMC sll/sra 16)', () => {
+      // `u16 *p = (u16 *)(s16)((u32)gH + 2)` lifts so: g[i] would drop the truncation
+      expect(reindexWalks(addrFn({ k: 'cast', to: T.s(16), e: plus(gAddr(), cn(2)) }))).toBeNull();
+      // a same-width integer cast keeps every bit, and is stripped like the pointer cast
+      expect(reindexWalks(addrFn({ k: 'cast', to: T.s(32), e: plus(gAddr(), cn(2)) }))).not.toBeNull();
     });
 
     test('refused: an address beside a bare var leaves the base ambiguous', () => {
