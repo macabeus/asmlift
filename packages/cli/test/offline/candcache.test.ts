@@ -168,7 +168,7 @@ describe('hole 2 — an input the namespace cannot see', () => {
     expect(storedKeys(p.store).length).toBeGreaterThan(0);
   });
 
-  test('a project command that reads a directory it never names is not keyed, so an edit there reaches the compile', async () => {
+  test('a project command that reads a directory it never names never reaches the store, so an edit there reaches the compile', async () => {
     const p = project();
     const seen = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
       const first = readFileSync(await m.compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
@@ -179,7 +179,7 @@ describe('hole 2 — an input the namespace cannot see', () => {
     });
     expect(seen.first).toContain('#define K 3');
     expect(seen.second, 'the directory moved; no stored object may answer').toContain('#define K 999');
-    expect(seen.stats).toMatchObject({ refusedKeys: 2 });
+    expect(seen.stats, 'a command without `bench` is never asked about').toEqual({});
     expect(existsSync(join(p.store, 'ns')), 'a command the store does not key is never stamped').toBe(false);
   });
 

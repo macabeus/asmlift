@@ -465,8 +465,7 @@ describe('a store this process cannot prepare is a COLD store, never a dropped c
   // `stamp()`, so the throw escaped `get`/`put`/`warm` into the candidate compile — where
   // compile-command.ts and compile/agbcc.ts read ANY exception as "this spelling does not compile"
   // and delete it from the fan. MEASURED end to end against a read-only store: `1 dropped`, the
-  // published winner moved `unsigned` -> `signed` on the one line docs/ranked-repro.md tells
-  // readers to quote, and the `[candcache]` line still read a clean `{"hit":1}`.
+  // published winner moved `unsigned` -> `signed`, and the `[candcache]` line still read a clean `{"hit":1}`.
   const captureAll = async (
     env: Record<string, string | undefined>,
     fn: (m: CandCacheModule) => void,
@@ -528,7 +527,7 @@ describe('the matching gate upgrades to verify off ONE list of off-words, never 
   // runs have filled, so its globalSetup forces `verify`. It decided that with
   // `asked !== '0' && asked !== 'off'` — a two-element copy of a list candcache.ts already owns —
   // and therefore forced `verify` for `false`, `no`, `disable` and the SET-AND-EMPTY state, every
-  // one of which the module calls OFF and docs/ranked-repro.md describes as "touches no disk".
+  // one of which the module calls OFF and apps/benchmark/README.md describes as "touches no disk".
   // Under a forced `verify` such a run stores every key and appends to the SHARED
   // `MISMATCHES.log`, which a neighbour worktree's lines can then fail the teardown on.
   //

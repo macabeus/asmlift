@@ -18,10 +18,11 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
-  COMPILE_ENV,
+  type CandCache,
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
+  compileEnvironment,
   isChainMeasurement,
   noteKeyRefused,
   refuseUnkeyedEnv,
@@ -267,11 +268,9 @@ const FLAG_FILE_FLAGS = new Set(['-specs']);
  *      on the command line and IS hashed by content; what is not named is the runtime it executes
  *      against, which is part of the compiler for these purposes: wine's prefix and DLL overrides,
  *      the guest libraries a qemu/box64 run resolves. Neither is a token, and a `WINEPREFIX`
- *      rebuilt in place moves neither the template nor any file this stamp reaches.
- *      SAY THE REACH COST, because it lands on the projects this cache is for: a GC/Wii or PS1 decomp
- *      running mwcc or psyq under wine gets no candidate cache and one `REFUSED` line per run.
- *      The native shim this repo uses for the same job — `wibo` — is measured, cached, and not on
- *      this list.
+ *      rebuilt in place moves neither the template nor any file this stamp reaches. The native
+ *      shim the benchmark uses for the same job — `wibo` — is measured, cached, and not on this
+ *      list.
  *
  *  SAID PLAINLY, because it is the one place this file uses a list where it should use a
  *  measurement: this is a DENY-LIST, and a deny-list's miss is on the STALE-OBJECT side of the
@@ -344,8 +343,11 @@ export function containerRuntimeNamedBy(template: string, env: NodeJS.ProcessEnv
   }
   const word = (w: string): string | undefined => (isOpaqueRuntime(basename(w.trim())) ? w.trim() : undefined);
   for (const tok of scanTokens(template)) {
-    const m = /^\$\{?([A-Za-z_]\w*)\}?$/.exec(tok);
-    const hit = m ? word(assigned.get(m[1]) ?? env[m[1]] ?? '') : word(tok);
+    const hit =
+      word(tok) ??
+      [...tok.matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)]
+        .map((m) => word(assigned.get(m[1]) ?? env[m[1]] ?? ''))
+        .find((h) => h !== undefined);
     if (hit !== undefined) {
       return hit;
     }
@@ -355,11 +357,15 @@ export function containerRuntimeNamedBy(template: string, env: NodeJS.ProcessEnv
 
 /** Every token of a compile template that a path flag could be attached to, IN ARGV ORDER — the
  *  list `templatePathOperands` walks positionally, so nothing derived may be interleaved into it.
- *  A comma list (`-Wa,-Iinc`, `-Wp,-I,inc`) is a nested argv the driver forwards, so its pieces
- *  are tokens too; a token is kept as well as split, because `--sysroot=a,b` is one path. */
+ *  A token is a word as the shell reads it, quotes removed and the quoted and unquoted parts of one
+ *  word joined (`"$DIR"/` is the one word `<dir>/`, never a `/` of its own). A comma list
+ *  (`-Wa,-Iinc`, `-Wp,-I,inc`) is a nested argv the driver forwards, so its pieces are tokens too;
+ *  a token is kept as well as split, because `--sysroot=a,b` is one path. */
 function flagScanTokens(template: string): string[] {
   const out: string[] = [];
-  for (const tok of stripShellComments(template).split(/[\s"'<>|;()]+/)) {
+  for (const tok of stripShellComments(template)
+    .replace(/["']/g, '')
+    .split(/[\s<>|;()]+/)) {
     if (!tok || tok.startsWith('{{') || tok.length > TOKEN_MAX) {
       continue;
     }
@@ -802,6 +808,11 @@ export function commandStaticStamp(template: string, cwd: string): string {
   h.update('command/v1');
   h.update(template);
   h.update(cwd);
+  // The shell every template runs under (candcache-bench.ts admits a command only while the `sh`
+  // a spawn finds on PATH is this one).
+  for (const f of toolchainFileChain('/bin/sh')) {
+    hashChain(budget, h, 'sh', f);
+  }
   // THIS MODULE'S OWN BYTES. The bench pipeline hashes its harness code (`compile/agbcc.ts`,
   // `compile/util.ts`) because that code shapes what the compiler is handed; this one shapes it
   // too, and it shapes something the probe object structurally cannot see — most of what a warm
@@ -909,11 +920,9 @@ export function commandStaticStamp(template: string, cwd: string): string {
       hashOnce('flag:' + basename(operand), p);
     }
   }
-  // (3b) the compile ENVIRONMENT a compile reads by value whether or not the template mentions it —
-  // the one list, shared with the bench's own pipelines (candcache.ts `COMPILE_ENV`).
-  for (const v of COMPILE_ENV) {
-    h.update(`compileenv:${v}=${process.env[v] ?? ''}`);
-  }
+  // (3b) the compile ENVIRONMENT a compile reads by value whether or not the template mentions it,
+  // and the host — shared with the bench's own pipelines (candcache.ts `compileEnvironment`).
+  h.update(compileEnvironment());
   for (const m of stripShellComments(template).matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
     const v = m[1];
     if (assigned.has(v) || seenEnv.has(v)) {
@@ -991,18 +1000,21 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     }
     return createHash('sha256').update(staticStamp).update(b1).digest('hex');
   };
-  // ON unless ASMLIFT_CANDCACHE says otherwise, and only for the benchmark's own commands
-  // (candcache-bench.ts): every other command refuses every key, and is never stamped.
+  // The store serves the benchmark's own commands (candcache-bench.ts) and is never built for any
+  // other: a command without `bench` compiles every candidate.
   //
   // The stamp compiles, so `warmCache` measures it once, before the first candidate, and the cache
   // reads the measurement. A stamp that threw reaches the cache as a throw, which refuses it.
   let stamped: string | Error = new Error('the namespace was read before it was measured');
-  const cache = candCache('command', () => {
-    if (stamped instanceof Error) {
-      throw stamped;
-    }
-    return stamped;
-  });
+  const cache =
+    opts.bench === undefined
+      ? undefined
+      : candCache('command', () => {
+          if (stamped instanceof Error) {
+            throw stamped;
+          }
+          return stamped;
+        });
   /** Why no key of this command may be stored, or undefined: read once. */
   let commandRefusal: { reason: string | undefined } | undefined;
   const refusedCommand = (): string | undefined =>
@@ -1013,8 +1025,8 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   // cache on for every other candidate (candcache-reads.ts, shared with the bench pipelines). No
   // preprocessor reports what the TU read on this path: its text and the command's are read,
   // fail-closed, and its inline asm is taken to reach a GNU assembler.
-  const cacheable = (content: string): boolean => {
-    if (cache.mode === 'off') {
+  const cacheable = (c: CandCache, content: string): boolean => {
+    if (c.mode === 'off') {
       return false;
     }
     const reason = refusedCommand() ?? candidateReadsRefusal(content, { gnuAs: true, command: template });
@@ -1029,11 +1041,11 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
    *  at each check in `recordAnswer` rather than captured once: it is a getter over a `refused`
    *  flag the namespace can set MID-CALL, and a captured copy would go on serving a store that has
    *  since refused itself. */
-  const servedAnswer = (key: string, symbol: string): Verdict | undefined => {
-    if (cache.mode !== 'on') {
+  const servedAnswer = (c: CandCache, key: string, symbol: string): Verdict | undefined => {
+    if (c.mode !== 'on') {
       return undefined;
     }
-    const hit = cache.get(key, symbol);
+    const hit = c.get(key, symbol);
     if (typeof hit === 'string') {
       return { ok: true, objPath: hit };
     }
@@ -1044,26 +1056,26 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   };
 
   /** What the store makes of a FRESH verdict, and what the caller gets back for it. */
-  const recordAnswer = (key: string, symbol: string, r: Verdict): Verdict => {
+  const recordAnswer = (c: CandCache, key: string, symbol: string, r: Verdict): Verdict => {
     if (r.ok) {
-      cache.verify(key, symbol, r.objPath);
-      return { ok: true, objPath: cache.put(key, symbol, r.objPath) };
+      c.verify(key, symbol, r.objPath);
+      return { ok: true, objPath: c.put(key, symbol, r.objPath) };
     }
-    if (cache.mode !== 'off' && !r.transient) {
+    if (c.mode !== 'off' && !r.transient) {
       // verifyFail FIRST: a STORED OBJECT for a TU that no longer compiles is a mismatch, and it
       // is the direction that nothing audited — 84% of a warm bench store's served answers are
       // rejections and verify mode never looked at one.
       const rejection = new CompilerRejection(r.err, r.output);
-      cache.verifyFail(key, symbol, rejection);
-      cache.putFail(key, symbol, rejection);
+      c.verifyFail(key, symbol, rejection);
+      c.putFail(key, symbol, rejection);
       return r;
     }
     // NO FRESH ANSWER AT ALL — a spawn failure, a signal. If the sampled audit
     // WITHHELD this key, there is now nothing to compare against, and the withholding has done
     // pure harm: a warm run had zero exposure to a transient because it never compiled. Take the
     // answer back rather than letting the audit delete a spelling from the fan.
-    if (cache.mode !== 'off') {
-      const held = cache.abandonAudit(key, symbol);
+    if (c.mode !== 'off') {
+      const held = c.abandonAudit(key, symbol);
       if (typeof held === 'string') {
         return { ok: true, objPath: held };
       }
@@ -1083,18 +1095,18 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     symbol: string,
     ext: 'c' | 'p',
   ): Promise<Verdict> => {
-    if (!cacheable(content)) {
+    if (cache === undefined || !cacheable(cache, content)) {
       return compile(content, symbol, ext);
     }
     const key = ext + ' ' + content;
-    return servedAnswer(key, symbol) ?? recordAnswer(key, symbol, await compile(content, symbol, ext));
+    return servedAnswer(cache, key, symbol) ?? recordAnswer(cache, key, symbol, await compile(content, symbol, ext));
   };
   /** Measure and resolve the namespace EAGERLY, before any candidate compiles. Memoized as a
    *  PROMISE, so workers starting together measure it once. */
   let warming: Promise<void> | undefined;
   const warmCache = (): Promise<void> =>
     (warming ??= (async () => {
-      if (cache.mode === 'off' || refusedCommand() !== undefined) {
+      if (cache === undefined || cache.mode === 'off' || refusedCommand() !== undefined) {
         return;
       }
       stamped = await stamp().catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));

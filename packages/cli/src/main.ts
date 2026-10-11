@@ -10,8 +10,7 @@
 // absent symbol declines loud). Scoring (--score-against) compiles candidates with the
 // project's own decomp.yaml `compiler` command — never with a bundled toolchain.
 //
-// Exit codes: `EXIT` below, plus `CACHE_MISMATCH_EXIT` from candcache.ts — one table, so a status
-// this file returns and a status the README documents cannot drift apart.
+// Exit codes: `EXIT` below.
 import { cBackend } from '@asmlift/core/backend/c';
 import { pascalBackend } from '@asmlift/core/backend/pascal';
 import { errorsFirst } from '@asmlift/core/compiler-diagnostics';
@@ -30,14 +29,6 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { guessedArityNote } from './callees';
-import {
-  CACHE_MISMATCH_EXIT,
-  MISMATCH_LOG,
-  cacheMismatches,
-  cacheMode,
-  cacheSampleNote,
-  cacheStats,
-} from './candcache';
 import { type CommandCompilers, compilersFromCommand } from './compile-command';
 import { type AsmliftToolConfig, type UnitCompiler, asmliftBlock, resolveTarget } from './config';
 import { declaredBlock, indentedDeclarations } from './declare';
@@ -68,45 +59,8 @@ import { rankedSummaryLine, scoreOf, threwLine, threwStep } from './score-format
 
 export { scoreOf } from './score-format';
 
-/** Every status this CLI returns, named. `CACHE_MISMATCH_EXIT` (3) is candcache.ts's and is
- *  imported rather than restated, because the code that DETECTS a mismatch is what should own the
- *  number for it. */
+/** Every status this CLI returns, named. */
 const EXIT = { clean: 0, gaps: 1, usage: 64, unreadable: 66 } as const;
-
-// A cache mismatch has to reach the EXIT STATUS, not merely the log. A counter that only prints
-// cannot stop anything: a verify pass writes one line among sixteen shard logs. The same is true
-// of an `on` run, whose sampled audit fails the run exactly as verify's does.
-
-/**
- * The exit status of a ranked run, ON EITHER OF ITS TWO RETURNS — and both is the point.
- *
- * A cache mismatch outranks what the run would otherwise say, a decline included: a store that
- * lied invalidates the fan, while a decline is an ordinary outcome. The failure return needs it
- * because a mismatch is REACHABLE behind one — the audit runs inside the candidate compiles, so a
- * run that declines after them has already reported — and a 1 there is indistinguishable from the
- * decline every wrapper keying on the status expects. Which reason it was is not lost: `[declined]`
- * / `[internal error]` and the `[candcache]` lines are both in the stderr returned beside the code.
- */
-export const rankedExitCode = (match: boolean): number =>
-  cacheMismatches() > 0 ? CACHE_MISMATCH_EXIT : match ? EXIT.clean : EXIT.gaps;
-/** The run's `[candcache]` line, and — when a stored answer disagreed with a fresh compile — the
- *  loud second line that says the store is serving objects this toolchain no longer produces.
- *
- *  `cacheSampleNote()` carries the sampling RATE and the run's SEED, so a reader can tell an
- *  audited serve from an unaudited one and replay the exact selection
- *  (ASMLIFT_CANDCACHE_SAMPLE_SEED). Without it a run with the audit switched off would print the
- *  same line as one with it on. */
-const candCacheLine = (): string => {
-  if (cacheMode() === 'off') {
-    return '';
-  }
-  const line = `asmlift: [candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(cacheStats())}\n`;
-  return cacheMismatches() === 0
-    ? line
-    : line +
-        `asmlift: [candcache] ${cacheMismatches()} STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE — ` +
-        `the store is serving objects this toolchain no longer produces. See ${MISMATCH_LOG}\n`;
-};
 
 export { detectName };
 
@@ -289,29 +243,15 @@ function rankedStderr(a: {
   })}\n`;
   // …and where the time went, ABOVE the line readers paste, so `[ranked]` and its `[proto]`
   // tail stay adjacent.
-  return (
-    a.targetTrace +
-    a.warn +
-    table +
-    threw +
-    drops +
-    held +
-    declared +
-    a.phaseReport +
-    summary +
-    a.protoNote +
-    candCacheLine()
-  );
+  return a.targetTrace + a.warn + table + threw + drops + held + declared + a.phaseReport + summary + a.protoNote;
 }
 
-/** A run that THREW, as its result. The stderr prefix is what separates a principled decline from
- *  a bug, and `tail` is the ranked path's `[candcache]` line — which belongs on a failure too,
- *  because a decline drops out before the success-path stderr is assembled and a reader would
- *  otherwise not learn that the store had disagreed. */
 /** How many lines of a failure reach the terminal before it is summarised. */
 const MAX_PRINTED_LINES = 40;
 
-const failureResult = (e: unknown, targetTrace: string, warn: string, code: number, tail = ''): CliResult => {
+/** A run that THREW, as its result. The stderr prefix is what separates a principled decline from
+ *  a bug. */
+const failureResult = (e: unknown, targetTrace: string, warn: string, code: number): CliResult => {
   // A failing compile carries the compiler's whole output, which is what makes the error useful
   // to a reader and what a compiler with no error cap (agbcc has none) can turn into megabytes.
   // Bounded HERE, at the terminal, and nowhere earlier: the error text is also what the benchmark
@@ -332,7 +272,7 @@ const failureResult = (e: unknown, targetTrace: string, warn: string, code: numb
   return {
     code,
     stdout: '',
-    stderr: `${targetTrace}${warn}asmlift: [${kind}] ${forTerminal(e instanceof Error ? e.message : String(e))}\n${tail}`,
+    stderr: `${targetTrace}${warn}asmlift: [${kind}] ${forTerminal(e instanceof Error ? e.message : String(e))}\n`,
   };
 };
 
@@ -895,7 +835,7 @@ export async function runCli(
       // Read AFTER the tree sample, which is work this run did and the clock should have charged.
       const phaseReport = clock?.report() ?? '';
       return {
-        code: rankedExitCode(ranked.winner.score.match),
+        code: ranked.winner.score.match ? EXIT.clean : EXIT.gaps,
         stdout: ranked.winner.source,
         stderr: rankedStderr({
           targetTrace: runTrace,
@@ -909,7 +849,7 @@ export async function runCli(
         }),
       };
     } catch (e) {
-      return failureResult(e, runTrace, warn, rankedExitCode(false), candCacheLine());
+      return failureResult(e, runTrace, warn, EXIT.gaps);
     }
   }
 

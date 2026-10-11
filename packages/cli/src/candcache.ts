@@ -16,11 +16,6 @@
 //      command names, the harness code that shapes the compiler's input, and the object bytes the
 //      pipeline produces for one fixed probe TU). Anything the stamp does not see is a hole;
 //      `stamp()` may answer NOT_CACHEABLE and this module then refuses, loudly, for the process.
-//      It OVER-measures, measurably: the file the CLI hashes for its own code is the shipped
-//      BUNDLE, whose bytes carry the build's commit and dirty flag, so a doc-only commit and the
-//      dirty-to-clean transition both move the namespace as surely as an emitter change does.
-//      That is the cold-start direction and sound — but it is why the first run after ANY commit
-//      or rebuild is cold, and why a warm store cannot be carried across one.
 //   2. A per-KEY refusal for a TU whose object is not a function of its own bytes —
 //      candcache-reads.ts: a TU that reads a file, hands its assembler one, or bakes its own path
 //      or the wall clock into the object.
@@ -56,8 +51,8 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
+import { platform, release, tmpdir, version } from 'node:os';
+import { basename, delimiter, dirname, isAbsolute, join, resolve } from 'node:path';
 import { isMainThread, threadId } from 'node:worker_threads';
 
 import { shellProgramText } from './shell-text';
@@ -71,6 +66,17 @@ export type CandCacheMode = 'off' | 'on' | 'verify';
 
 const say = (msg: string): void => {
   process.stderr.write(`[candcache] ${msg}\n`);
+};
+/** What this module says about its own configuration, held until a cache is first asked for: a
+ *  process that never builds one prints none of it. */
+const configNotes: string[] = [];
+const sayOnUse = (msg: string): void => {
+  configNotes.push(msg);
+};
+const sayConfigNotes = (): void => {
+  for (const msg of configNotes.splice(0)) {
+    say(msg);
+  }
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -119,14 +125,14 @@ const MODE: CandCacheMode = ((): CandCacheMode => {
   if (ON_WORDS.has(LOWER)) {
     return BENCH_CACHE_OFF ? 'off' : 'on';
   }
-  say(
+  sayOnUse(
     `REFUSED reason=unrecognised-mode ASMLIFT_CANDCACHE=${JSON.stringify(RAW)} — the cache is OFF. ` +
       `Say 0/off to disable, 1/on to serve, verify to audit.`,
   );
   return 'off';
 })();
 if (!UNSET && LOWER === '') {
-  say(
+  sayOnUse(
     `ASMLIFT_CANDCACHE is SET AND EMPTY — the cache is OFF. Unset now means ON, so "set to nothing" ` +
       `is no longer the same state as "not set"; say 1/on to serve, verify to audit.`,
   );
@@ -137,7 +143,7 @@ if (!UNSET && LOWER === '') {
 // bypass for it prints a second, WRONG cause beside the true one, and the wrong one is the
 // actionable-looking one: unsetting ASMLIFT_BENCH_CACHE will not turn that cache on.
 if (BENCH_CACHE_OFF && (UNSET || LOWER === 'verify' || ON_WORDS.has(LOWER))) {
-  say(
+  sayOnUse(
     `OFF because ASMLIFT_BENCH_CACHE=0 bypasses every cache in the harness, ` +
       `ASMLIFT_CANDCACHE=${UNSET ? '<unset, which means on>' : RAW} included`,
   );
@@ -145,7 +151,10 @@ if (BENCH_CACHE_OFF && (UNSET || LOWER === 'verify' || ON_WORDS.has(LOWER))) {
 
 /** The mode this process is running in — `on` unless ASMLIFT_CANDCACHE (or ASMLIFT_BENCH_CACHE=0)
  *  says otherwise. */
-export const cacheMode = (): CandCacheMode => MODE;
+export const cacheMode = (): CandCacheMode => {
+  sayConfigNotes();
+  return MODE;
+};
 
 const STATS: Record<string, number> = Object.create(null) as Record<string, number>;
 const bump = (k: string, n = 1): void => {
@@ -185,6 +194,7 @@ const pendingAudits = new Set<Set<string>>();
  *  it is a disagreement (`cacheMismatches()` counts it, and the run fails) but it is not an audit
  *  of a withheld key. */
 export const cacheStats = (): Record<string, number> => {
+  sayConfigNotes();
   let pending = 0;
   for (const set of pendingAudits) {
     pending += set.size;
@@ -212,19 +222,15 @@ export const cacheSampleSeed = (): string => SAMPLE_SEED;
  *  gate that reads this must FAIL rather than print; they are counted apart because only the first
  *  is an audit, and `sampled` reconciles against the audits alone. */
 export const cacheMismatches = (): number => (STATS.mismatch ?? 0) + (STATS.objectCorrupt ?? 0);
-/** The exit status a stored-vs-fresh disagreement gets, on EVERY path that can produce one: the
- *  ranked CLI (both its success and its failure return), a `bench run` shard, and the orchestrator
- *  over those shards. It needs a code of its own because `match && mismatches === 0 ? 0 : 1` is a
- *  NON-DISCRIMINATOR on the runs this project publishes — a ranked run that does not match exits 1
- *  already, and LoadBGTilemapData has been a nonmatch at 386 for twenty rounds, so a clean run and
- *  a poisoned run of it were measured exiting 1 with byte-identical `[ranked]` lines. */
+/** The exit status a stored-vs-fresh disagreement gets, from a `bench run` shard and from the
+ *  orchestrator over those shards: a code of its own, so a run the store failed reads apart from a
+ *  run that failed for any other reason. */
 export const CACHE_MISMATCH_EXIT = 3;
 
 // WHERE THE STORE LIVES. `??` catches only `undefined`, and an empty string is a PATH — a relative
 // one, meaning the CURRENT DIRECTORY. Taken at face value `ASMLIFT_CANDCACHE_DIR=` puts `ns/`,
-// `objects/` and `MISMATCHES.log` wherever the process happens to be standing, which
-// `docs/ranked-repro.md` tells the reader is their decomp checkout; the pruner then walks and
-// DELETES from a two-level `objects/<dir>/<file>` layout that is a very ordinary build-output
+// `objects/` and `MISMATCHES.log` wherever the process happens to be standing; the pruner then
+// walks and DELETES from a two-level `objects/<dir>/<file>` layout that is a very ordinary build-output
 // shape (measured: a planted 200 KB build artifact removed by one `prunedObjects`). It is the same
 // unexpanded-`$SOMETHING` shape `ASMLIFT_CANDCACHE=` is guarded against, and it is live whenever
 // the mode serves — which, unset, it does. A non-empty value is resolved ONCE, here, so a relative
@@ -236,7 +242,7 @@ const ROOT = ((): string => {
     return DEFAULT_ROOT;
   }
   if (RAW_ROOT.trim() === '') {
-    say(
+    sayOnUse(
       `ASMLIFT_CANDCACHE_DIR is SET AND EMPTY — an empty path is the CURRENT DIRECTORY, which is ` +
         `never what that means. Using the default store ${DEFAULT_ROOT}; say a path to move it.`,
     );
@@ -253,8 +259,8 @@ export const mismatchLogFor = (root: string): string => join(root, 'MISMATCHES.l
 export const MISMATCH_LOG = mismatchLogFor(ROOT);
 
 /** A stored answer disagreed with the truth, in any direction. The loudest thing this module can
- *  say, and the only record that reaches a GATE IN ANOTHER PROCESS: it bumps `mismatch` (the CLI
- *  and every bench shard turn a nonzero one into a failing run), writes the stderr line for
+ *  say, and the only record that reaches a GATE IN ANOTHER PROCESS: it bumps `mismatch` (every bench
+ *  shard turns a nonzero one into a failing run), writes the stderr line for
  *  whoever is watching, and appends to `MISMATCH_LOG` for `pnpm test:matching`'s teardown.
  *
  *  Module-level rather than per-instance because `linkInto` is the other caller: a
@@ -287,7 +293,9 @@ const CAP_MB = ((): number => {
   if (!Number.isFinite(n) || n < 0) {
     // NaN silently disabled BOTH the prune and its own over-cap warning: the store then grew
     // without bound with no output at all.
-    say(`ignoring ASMLIFT_CANDCACHE_MAX_MB=${JSON.stringify(RAW_CAP)} — want a non-negative number of MB; using 4096`);
+    sayOnUse(
+      `ignoring ASMLIFT_CANDCACHE_MAX_MB=${JSON.stringify(RAW_CAP)} — want a non-negative number of MB; using 4096`,
+    );
     return 4096;
   }
   return n;
@@ -308,7 +316,7 @@ export const sha = (b: Buffer | string): string => createHash('sha256').update(b
 // comparing can, and that is `verify` mode — which costs the entire speedup.
 //
 // So `on` mode does it for a FRACTION of the keys it serves, every run, forever. That does not
-// eliminate the residual `docs/ranked-repro.md` publishes (a driver's built-in search
+// eliminate the residual `apps/benchmark/README.md` publishes (a driver's built-in search
 // directories); it bounds how long one survives. A staleness that touches every key is caught
 // in the FIRST run that serves more than a handful; a staleness that touches exactly one key
 // survives on average 1/rate runs.
@@ -332,7 +340,7 @@ const SAMPLE_PCT = ((): number => {
   if (!Number.isFinite(n) || n < 0 || n > 100) {
     // Same shape as the cap's malformed-value guard, and for the same reason: a NaN threshold
     // compares false against everything, which would disable the audit with no output at all.
-    say(
+    sayOnUse(
       `ignoring ASMLIFT_CANDCACHE_SAMPLE=${JSON.stringify(RAW_SAMPLE)} — want a percentage in [0,100]; ` +
         `using ${DEFAULT_SAMPLE_PCT}`,
     );
@@ -355,7 +363,7 @@ const SAMPLE_SEED = RAW_SEED === undefined || SEED_IS_EMPTY ? randomBytes(8).toS
 const SAMPLE_THRESHOLD = Math.round((SAMPLE_PCT / 100) * 2 ** 32);
 // Only where it CHANGED the answer: with the audit off there is no selection for a seed to pin.
 if (SEED_IS_EMPTY && MODE === 'on' && SAMPLE_THRESHOLD > 0) {
-  say(
+  sayOnUse(
     `ASMLIFT_CANDCACHE_SAMPLE_SEED is SET AND EMPTY — an empty seed pins the audit to one fixed ` +
       `subset of every store forever. Using a fresh random seed ${SAMPLE_SEED}.`,
   );
@@ -366,8 +374,10 @@ const isSampled = (id: string): boolean =>
 /** What the `[candcache]` line says about the audit, so an AUDITED run is distinguishable from an
  *  unaudited one at a glance — including the run that deliberately turned the audit off. Empty
  *  outside `on` mode: `verify` audits every key and `off` serves nothing. */
-export const cacheSampleNote = (): string =>
-  MODE !== 'on' ? '' : SAMPLE_THRESHOLD > 0 ? ` sample=${SAMPLE_PCT}%/seed=${SAMPLE_SEED}` : ' sample=off';
+export const cacheSampleNote = (): string => {
+  sayConfigNotes();
+  return MODE !== 'on' ? '' : SAMPLE_THRESHOLD > 0 ? ` sample=${SAMPLE_PCT}%/seed=${SAMPLE_SEED}` : ' sample=off';
+};
 
 const saidKeyRefusals = new Set<string>();
 /** Say a per-key refusal ONCE per reason and COUNT every one. The reason is a fact about the
@@ -386,10 +396,12 @@ export function noteKeyRefused(label: string, reason: string): void {
 
 /** The compile ENVIRONMENT a compile reads by value whether or not a command line names it: the
  *  locale picks a message's language and its quote marks, the others its colours, links, fix-it
- *  lines and the width of a quoted source line, and `SOURCE_DATE_EPOCH` the date a compile may
- *  write. Each value is hashed. ONE list: every pipeline compiles with the same compilers, and two
- *  copies of the answer is how the tenth variable gets added to one of them. */
-export const COMPILE_ENV = [
+ *  lines and the width of a quoted source line, `SOURCE_DATE_EPOCH` the date a compile may write,
+ *  and `MACOSX_DEPLOYMENT_TARGET` the version a macOS preprocessor predefines
+ *  (`__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__`). ONE list: every pipeline compiles with the
+ *  same compilers, and two copies of the answer is how the tenth variable gets added to one of
+ *  them. */
+const COMPILE_ENV = [
   'LIBRARY_PATH',
   'SOURCE_DATE_EPOCH',
   'LANG',
@@ -402,22 +414,58 @@ export const COMPILE_ENV = [
   'TERM_URLS',
   'GCC_EXTRA_DIAGNOSTIC_OUTPUT',
   'COLUMNS',
+  'MACOSX_DEPLOYMENT_TARGET',
 ];
+
+/** Variable prefixes read by value too: the C library allocator's settings, which decide what a
+ *  compiler reading memory it never wrote finds there. */
+const COMPILE_ENV_PREFIXES = ['MALLOC_', 'Malloc', 'GLIBC_TUNABLES'];
+
+/** What a stamp hashes for the environment a compile runs in: each `COMPILE_ENV` value, each
+ *  variable of a `COMPILE_ENV_PREFIXES` prefix, and the host's operating system and release. A
+ *  host preprocessor predefines macros from the release (macOS: the major version, where
+ *  `MACOSX_DEPLOYMENT_TARGET` is unset), and the macOS system libraries every program loads ship
+ *  in the OS (the dyld shared cache), with no file of theirs on disk to hash. */
+export function compileEnvironment(env: NodeJS.ProcessEnv = process.env): string {
+  const prefixed = Object.keys(env)
+    .filter((v) => env[v] !== undefined && COMPILE_ENV_PREFIXES.some((p) => v.startsWith(p)))
+    .sort();
+  return [
+    ...COMPILE_ENV.map((v) => `env:${v}=${env[v] ?? ''}`),
+    ...prefixed.map((v) => `env:${v}=${env[v]}`),
+    `host:${platform()} ${release()} ${version()} ${process.arch}`,
+  ].join('\n');
+}
 
 /** The variables that change what a compile runs or reads with a value that names none of it:
  *  - an exported shell function (`BASH_FUNC_<name>%%`, any variable of that prefix) replaces the
  *    program `<name>` in every shell a compile starts;
- *  - `BASH_ENV` and `ENV` name a file a shell may read before it runs a script;
+ *  - `BASH_ENV` and `ENV` name a file a shell may read before it runs a script, `SHELLOPTS` and
+ *    `BASHOPTS` set a bash's options when it starts (`xtrace` runs `PS4`, command substitutions
+ *    included, before every command; `BASH_XTRACEFD` says where its trace goes), `BASH_COMPAT`
+ *    and `POSIXLY_CORRECT` change how it reads the command (and `POSIXLY_CORRECT` how every GNU
+ *    program parses its options), `EXECIGNORE` which file a name runs, `GLOBIGNORE` what a
+ *    pattern expands to and `CDPATH` where a `cd` goes;
+ *  - `DYLD_*` (macOS) and `LD_*` (Linux) load libraries into a program, or move where it finds
+ *    them;
  *  - `CCC_OVERRIDE_OPTIONS` edits every clang command line;
  *  - `GCC_EXEC_PREFIX` and `COMPILER_PATH` move where a GCC driver finds its `cc1`, `as` and
- *    `specs` (MEASURED: a `specs` file under `GCC_EXEC_PREFIX` holding `*cpp: -DK=7` reached the
- *    object);
+ *    `specs`;
  *  - `CPATH`, `C_INCLUDE_PATH`, `CPLUS_INCLUDE_PATH` and `OBJC_INCLUDE_PATH` add directories a
  *    preprocessor searches, even under `-nostdinc`, and `DEPENDENCIES_OUTPUT` and
  *    `SUNPRO_DEPENDENCIES` make it write a file. */
 const UNKEYED_ENV = [
   'BASH_ENV',
   'ENV',
+  'SHELLOPTS',
+  'BASHOPTS',
+  'PS4',
+  'BASH_XTRACEFD',
+  'BASH_COMPAT',
+  'POSIXLY_CORRECT',
+  'EXECIGNORE',
+  'GLOBIGNORE',
+  'CDPATH',
   'CCC_OVERRIDE_OPTIONS',
   'GCC_EXEC_PREFIX',
   'COMPILER_PATH',
@@ -428,12 +476,15 @@ const UNKEYED_ENV = [
   'DEPENDENCIES_OUTPUT',
   'SUNPRO_DEPENDENCIES',
 ];
+const UNKEYED_ENV_PREFIXES = ['BASH_FUNC_', 'DYLD_', 'LD_'];
 
-/** Throws while any `UNKEYED_ENV` variable, or an exported shell function, is set — even empty: a
- *  namespace stamp calls it first, and `candCache` refuses a stamp that threw. */
+/** Throws while any `UNKEYED_ENV` variable, or one of an `UNKEYED_ENV_PREFIXES` prefix, is set —
+ *  even empty: a namespace stamp calls it first, and `candCache` refuses a stamp that threw. */
 export function refuseUnkeyedEnv(env: NodeJS.ProcessEnv = process.env): void {
   const set = Object.keys(env)
-    .filter((v) => env[v] !== undefined && (UNKEYED_ENV.includes(v) || v.startsWith('BASH_FUNC_')))
+    .filter(
+      (v) => env[v] !== undefined && (UNKEYED_ENV.includes(v) || UNKEYED_ENV_PREFIXES.some((p) => v.startsWith(p))),
+    )
     .sort();
   if (set.length > 0) {
     throw new Error(
@@ -441,6 +492,48 @@ export function refuseUnkeyedEnv(env: NodeJS.ProcessEnv = process.env): void {
         `reads through a value that names none of it, so nothing is cached`,
     );
   }
+}
+
+const isExecutableFile = (p: string): boolean => {
+  try {
+    const st = statSync(p);
+    return st.isFile() && (st.mode & 0o111) !== 0;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * The file a spawn of the bare name `name` runs under `env`: the first executable regular file of
+ * that name in a PATH directory, or undefined. A relative PATH entry (an empty one is `.`) is
+ * searched from the working directory of whoever spawns, so it is looked in from each place a
+ * compile or a lookup starts — this process's working directory, the root (the bench's agbcc runs
+ * there) and `cwds`; a compile's own scratch directory holds only the files the compile writes.
+ * Throws when a relative entry ahead of the answer holds `name` from one of them: which program the
+ * name runs then depends on where it is started.
+ */
+export function findOnPath(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+  cwds: readonly string[] = [],
+): string | undefined {
+  for (const dir of (env.PATH ?? '').split(delimiter)) {
+    if (isAbsolute(dir)) {
+      const p = join(dir, name);
+      if (isExecutableFile(p)) {
+        return p;
+      }
+      continue;
+    }
+    const held = [process.cwd(), '/', ...cwds].map((cwd) => join(resolve(cwd, dir), name)).find(isExecutableFile);
+    if (held !== undefined) {
+      throw new Error(
+        `PATH's relative entry ${dir === '' ? '(empty)' : dir} holds ${name} at ${held}: which ${name} runs ` +
+          `depends on where it is started, so nothing is cached`,
+      );
+    }
+  }
+  return undefined;
 }
 
 /** The fixed TU every pipeline's stamp probe compiles — twice, in two different directories, so
@@ -553,11 +646,81 @@ const looksBinary = (p: string): boolean => {
   }
 };
 
+/** The file `/bin/sh` runs for the command name `cmd`, or undefined for a builtin, a keyword or a
+ *  name on no PATH directory. Throws as `findOnPath` does. */
 const resolveOnPath = (cmd: string): string | undefined => {
-  const r = spawnSync('sh', ['-c', `command -v ${JSON.stringify(cmd)}`], { encoding: 'utf8' });
+  findOnPath(cmd);
+  const r = spawnSync('/bin/sh', ['-c', `command -v '${cmd.replaceAll("'", `'\\''`)}'`], { encoding: 'utf8' });
   const p = (r.stdout ?? '').trim();
   return p !== '' && isAbsolute(p) && existsSync(p) ? p : undefined;
 };
+
+/** Where macOS's `/bin/sh` finds the shell it runs. */
+const SH_SELECTION = '/private/var/select/sh';
+
+/** Where a library's path names no file: the macOS system libraries, which live in the dyld shared
+ *  cache and are keyed through the OS release (`compileEnvironment`). */
+const OS_LIBRARY = /^\/(?:usr\/lib|System)\//;
+
+/**
+ * The libraries the native program `p` loads, as the dynamic linker finds them: `otool -L` on macOS
+ * (a path that starts at `@loader_path` or `@executable_path` is the program's directory, and
+ * `@rpath` is a refusal), `ldd` on Linux (a library it cannot find is the measurement
+ * `UNRESOLVED:<name>`). A statically linked program loads none. Throws where the libraries cannot
+ * be listed.
+ */
+function loadedLibraries(p: string): string[] {
+  if (process.platform === 'darwin') {
+    const r = spawnSync('/usr/bin/otool', ['-L', p], { encoding: 'utf8', timeout: 20_000 });
+    if (r.status !== 0) {
+      throw new Error(`cannot list the libraries ${p} loads: otool -L ${r.error?.message ?? r.stderr}`);
+    }
+    const out: string[] = [];
+    for (const m of r.stdout.matchAll(/^\t(.+?) \(compatibility version /gm)) {
+      const name = m[1];
+      if (OS_LIBRARY.test(name)) {
+        continue;
+      }
+      if (name.startsWith('@rpath/')) {
+        throw new Error(`${p} loads ${name} through its run path, which this does not follow`);
+      }
+      const lib = name.replace(/^@(?:loader|executable)_path(?=\/)/, dirname(p));
+      out.push(existsSync(lib) ? lib : `UNRESOLVED:${name}`);
+    }
+    return out;
+  }
+  if (process.platform === 'linux') {
+    const r = spawnSync('ldd', [p], { encoding: 'utf8', timeout: 20_000, env: { PATH: process.env.PATH } });
+    const text = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    if (/not a dynamic executable|statically linked/.test(text)) {
+      return [];
+    }
+    if (r.status !== 0) {
+      throw new Error(`cannot list the libraries ${p} loads: ldd ${r.error?.message ?? text.trim()}`);
+    }
+    return lddLibraries(text);
+  }
+  throw new Error(`cannot list the libraries ${p} loads on ${process.platform}`);
+}
+
+/** The libraries an `ldd` listing names: each resolved path, and `UNRESOLVED:<name>` for one the
+ *  dynamic linker did not find. The kernel's vDSO is no file. */
+export function lddLibraries(listing: string): string[] {
+  const out: string[] = [];
+  for (const line of listing.split('\n')) {
+    const found = /^\s*(\S+) => (\S+) \(0x[0-9a-f]+\)\s*$/.exec(line);
+    const missing = /^\s*(\S+) => not found\s*$/.exec(line);
+    const direct = /^\s*(\/\S+) \(0x[0-9a-f]+\)\s*$/.exec(line);
+    if (found !== null) {
+      out.push(found[2]);
+    } else if (missing !== null) {
+      out.push(`UNRESOLVED:${missing[1]}`);
+    } else if (direct !== null) {
+      out.push(direct[1]);
+    }
+  }
+  return out;
+}
 
 /**
  * Ask a gcc-style driver where its COMPILER PROPER lives. `arm-none-eabi-cpp` is a driver binary
@@ -573,9 +736,7 @@ const resolveOnPath = (cmd: string): string | undefined => {
  * template that assembles THROUGH the driver (`gcc -c x.c -o x.o`) reaches an assembler this
  * chain does not name — unless a `-B` operand names a DIRECTORY, which the compile template's
  * token scan then hashes by content. `-B /opt/tc/arm-` used as a filename PREFIX names nothing
- * that exists, so it contributes nothing and the residual stands. THAT `-B` CLAUSE is the sentence
- * `docs/ranked-repro.md` publishes, and the two must not drift apart; the assemble-through-the-
- * driver residual around it is stated here and not there.
+ * that exists, so it contributes nothing and the residual stands.
  *
  * An answer that names no file here is the measurement `UNRESOLVED:<answer>`; only names that look
  * like a driver are asked at all (agbcc IS a cc1 and takes no such flag), stdin is closed and the
@@ -621,7 +782,10 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
     throw new Error(`namespace delegate chain wider than ${CHAIN_MAX_FILES} files at ${real}`);
   }
   if (looksBinary(real)) {
-    for (const sub of driverSubprograms(real)) {
+    if (real === realpathSync('/bin/sh') && existsSync(SH_SELECTION)) {
+      expandExecutable(SH_SELECTION, out, depth + 1);
+    }
+    for (const sub of [...driverSubprograms(real), ...loadedLibraries(real)]) {
       if (isChainMeasurement(sub)) {
         out.add(sub);
       } else {
@@ -864,7 +1028,7 @@ const PRUNE_BUDGET_MS = ((): number => {
   }
   const n = Number(RAW_PRUNE_MS);
   if (!Number.isFinite(n) || n < 0) {
-    say(
+    sayOnUse(
       `ignoring ASMLIFT_CANDCACHE_PRUNE_MS=${JSON.stringify(RAW_PRUNE_MS)} — want a non-negative number of ms; using 30000`,
     );
     return 30 * 1000;
@@ -1228,6 +1392,7 @@ type AuditVerdict = 'absent' | 'sound' | 'unrepaired';
  * and must return a hex digest over every input the object depends on — or NOT_CACHEABLE.
  */
 export function candCache(label: string, stamp: () => string): CandCache {
+  sayConfigNotes();
   if (MODE === 'off') {
     return OFF;
   }
@@ -1261,16 +1426,11 @@ export function candCache(label: string, stamp: () => string): CandCache {
     if (process.env.ASMLIFT_CANDCACHE_TRACE) {
       say(`ns label=${label} ns=${resolved}`);
     }
-    // A STORE THIS PROCESS CANNOT PREPARE IS A COLD STORE, never a compile failure. `putFail` and
-    // `pruneOnce` both already say that in so many words; this function did not, and the throw
-    // escaped `get`/`put`/`warm` into the candidate compile, where `compile-command.ts` and
-    // `compile/agbcc.ts` read any exception as "this spelling does not compile" and DELETE IT FROM
-    // THE FAN. MEASURED on a read-only store: `1 dropped` and the published winner moved from
-    // `unsigned` to `signed`, on the one line `docs/ranked-repro.md` tells readers to quote, while
-    // the `[candcache]` line still read a clean `{"hit":1}`. The flip is what makes it reachable
-    // for everyone: unset now means the default ROOT under `$TMPDIR`, which on a shared `/tmp` or
-    // a CI runner belongs to whoever ran first — and ENOSPC, a read-only mount and a store copied
-    // with `cp -a` all land here.
+    // A STORE THIS PROCESS CANNOT PREPARE IS A COLD STORE, never a compile failure: a throw out of
+    // `get`/`put`/`warm` reaches the candidate compile, whose callers read any exception as "this
+    // spelling does not compile" and drop it from the fan. The default ROOT under `$TMPDIR`, on a
+    // shared `/tmp` or a CI runner, belongs to whoever ran first — and ENOSPC, a read-only mount
+    // and a store copied with `cp -a` all land here too.
     try {
       const nsDir = join(ROOT, 'ns', resolved);
       mkdirSync(nsDir, { recursive: true });

@@ -337,8 +337,8 @@ the variations accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) by
 `ASMLIFT_BENCH_CACHE=0`; `ASMLIFT_CANDCACHE=verify` compiles everything anyway and audits the store
 against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 2% of
 the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, and a shard that finds a
-disagreement FAILS. The flag table, the cold-vs-warm rule and why a project's own `decomp.yaml`
-command is never cached are in `docs/ranked-repro.md`.
+disagreement FAILS. The modes, what the store keys and refuses, and its limits are below
+("Modes, refusals and limits"); the CLI never uses it.
 
 **What that audit is worth here, measured 2026-08-31 on a full run of the then-948-row corpus**
 (warm store, 16 shards, nothing planted): the shards served **10,221 objects and 50,583
@@ -355,16 +355,17 @@ store.
 (`ASMLIFT_CANDCACHE_DIR=<empty> ASMLIFT_CANDCACHE_TRACE=1 pnpm bench run --tier … --toolchain … --serial`),
 because the answer is not what the `decomp.yaml` files suggest:
 
-| tier      | toolchain                           | reaches the cache?                                                | why                                                                                                |
-| --------- | ----------------------------------- | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| synthetic | `agbcc`                             | **yes** — `label=command`, 1 namespace / 15 keys                  | the generated `decomp.yaml` command, through `compileFromCommand`                                  |
-| synthetic | `ido7.1`                            | reaches it and is **REFUSED**, 0 keys stored                      | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in) |
-| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`        | **yes** — `label=bench-pooled-<toolchain>`                        | POOLED: `decomp-config.ts` compiles through `compile/docker-cache.ts`, never `compileFromCommand`  |
-| synthetic | `mwcc_233_163n`, `mwcc_247_107`     | n/a                                                               | no synthetic rows                                                                                  |
-| synthetic | `gcc2.7.2`                          | n/a                                                               | no synthetic rows                                                                                  |
-| real      | `agbcc`                             | **yes** — `label=bench-agbcc`, 9 keys on one row pair             | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                     |
-| real      | `gcc2.7.2`, `gcc2.7.2kmc`, `mwcc_*` | **yes** — `label=bench-gcc272`, `bench-kmc`, `bench-<mwcc build>` | `compile/docker-cache.ts`, keyed by the image's content ID and the mounted compiler by content     |
-| real      | `ido7.1`                            | **no** — no `[candcache]` line at all                             | IDO writes its input's path into the object, so nothing wires the cache for it                     |
+| tier      | toolchain                                          | reaches the cache?                                                | why                                                                                                                                                                             |
+| --------- | -------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| synthetic | `agbcc`                                            | **yes** — `label=command`, 1 namespace / 15 keys                  | the generated `decomp.yaml` command, through `compileFromCommand`                                                                                                               |
+| synthetic | `ido7.1`                                           | reaches it and is **REFUSED**, 0 keys stored                      | the stamp probe finds the object is not a pure function of its input (IDO bakes the input path in)                                                                              |
+| synthetic | `gcc2.7.2kmc`, `mwcc_242_81`                       | **yes** — `label=bench-pooled-<toolchain>`                        | POOLED: `decomp-config.ts` compiles through `compile/docker-cache.ts`, never `compileFromCommand`                                                                               |
+| synthetic | `mwcc_233_163n`, `mwcc_247_107`                    | n/a                                                               | no synthetic rows                                                                                                                                                               |
+| synthetic | `gcc2.7.2`                                         | n/a                                                               | no synthetic rows                                                                                                                                                               |
+| any       | native `gcc2.7.2`, `mwcc_233_163n`, `mwcc_247_107` | **yes** — `label=command`                                         | a host that runs them natively compiles a row without a compile of its own (`bench smoke`) through `dataset/toolchains/native-commands.yaml`, keyed like the committed commands |
+| real      | `agbcc`                                            | **yes** — `label=bench-agbcc`, 9 keys on one row pair             | `compile/agbcc.ts`, the harness's own pipeline — NOT the `decomp.yaml` command                                                                                                  |
+| real      | `gcc2.7.2`, `gcc2.7.2kmc`, `mwcc_*`                | **yes** — `label=bench-gcc272`, `bench-kmc`, `bench-<mwcc build>` | `compile/docker-cache.ts`, keyed by the image's content ID and the mounted compiler by content                                                                                  |
+| real      | `ido7.1`                                           | **no** — no `[candcache]` line at all                             | IDO writes its input's path into the object, so nothing wires the cache for it                                                                                                  |
 
 One consequence worth stating plainly: the real-tier agbcc path is reached under
 `label=bench-agbcc`, the containerized toolchains under their own labels, and `ASMLIFT_CANDCACHE=0`
@@ -397,6 +398,82 @@ an audit that compiled something anyway. `bench regression` and `bench diff` com
 outcome against the BASE ARTIFACT's, and both sides come off the same developer's store — a
 staleness already present when the base artifact was measured is served identically on both, so
 neither gate can see it.
+
+#### Modes, refusals and limits
+
+| `ASMLIFT_CANDCACHE`                         | what a run does                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| unset, `1`, `on`, `true`, `yes`             | serves any candidate this toolchain already compiled, and audits a sampled 2% by compiling them anyway |
+| `0`, `off`, `false`, `no`, or SET-AND-EMPTY | compiles every candidate; touches no disk                                                              |
+| `verify` (any capitalisation)               | compiles every candidate AND audits the store against it                                               |
+| anything else                               | OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr                                     |
+
+`ASMLIFT_CANDCACHE_DIR` moves the store (default `$TMPDIR/asmlift-candcache`; deleting it makes the
+next run cold), `ASMLIFT_CANDCACHE_MAX_MB` caps it (default 4096), `ASMLIFT_CANDCACHE_SAMPLE` sets the
+audit's percentage (`0` turns it off), `ASMLIFT_CANDCACHE_SAMPLE_SEED` replays a run's selection,
+`ASMLIFT_CANDCACHE_PRUNE_MS` bounds one prune, and `ASMLIFT_CANDCACHE_TRACE` prints each namespace a
+run resolves. A SET-AND-EMPTY value of any of them is said on stderr and falls back to the default:
+an empty directory would be the working directory, and an empty seed would audit one fixed subset
+of every store forever.
+
+- **What a namespace measures.** Every pipeline's namespace hashes the compiler binaries and what
+  they run (a `#!/bin/sh` shim is followed to its program, a GCC driver to its `cc1`), the
+  libraries those programs load (`otool -L` on macOS, `ldd` on Linux; the macOS system libraries
+  live in the OS and are keyed by its release), the words of the command, the harness code that
+  shapes the compiler's input, the compile environment (`LANG`/`LC_*`, `SOURCE_DATE_EPOCH`,
+  `MACOSX_DEPLOYMENT_TARGET`, the allocator's settings and the rest of `compileEnvironment` in
+  `packages/cli/src/candcache.ts`), the host's OS release, and the object one fixed probe TU
+  compiles to — twice, in two directories, so the compiler itself answers whether its object is a
+  pure function of its input.
+- **What the command path keys.** Only the benchmark's own command — a committed
+  `dataset/toolchains/<id>/decomp.yaml` template, or a toolchain's entry in
+  `dataset/toolchains/native-commands.yaml`, under the values the benchmark puts in its
+  placeholders — run by the `/bin/sh` a spawn finds as `sh` on PATH, every program it runs a native
+  executable or a flagless `#!/bin/sh` script whose whole program is `exec <program> "$@"`, and no
+  assignment in it but GCC 2.7.2's native `COMPILER_PATH`. Anything else refuses every key
+  (`REFUSED-KEY label=command reason=the-command-is-not-a-bench-template` or
+  `reason=the-bench-command-runs-what-the-store-cannot-key: …`).
+- **What refuses a whole namespace** (`REFUSED label=… reason=…`): an object that is not a pure
+  function of its input (`ido7.1`, which writes its input's path into the object); a relative
+  PATH entry (`./node_modules/.bin`, as `pnpm` adds it) that holds a program the pipeline runs, from
+  a directory a compile starts in; and any variable that changes what a compile runs or reads without naming
+  it — an exported shell function (`BASH_FUNC_*`), `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`,
+  `PS4`, `BASH_XTRACEFD`, `BASH_COMPAT`, `POSIXLY_CORRECT`, `EXECIGNORE`, `GLOBIGNORE`, `CDPATH`,
+  any `DYLD_*` or `LD_*`, `CCC_OVERRIDE_OPTIONS`, `GCC_EXEC_PREFIX`, `COMPILER_PATH`, `CPATH` and the
+  other include-path variables — even set to nothing.
+- **What refuses one key** (`REFUSED-KEY`, said once per reason and counted in `refusedKeys`): a
+  candidate whose compile may read past its own bytes. The TU's text and the command's are read,
+  and each test matches more spellings than any compiler honours: a directive that can name a file,
+  `#line` or a linemarker, a UCN, `__has_include`/`__has_embed`, token pasting, the path and clock
+  macros, any string text a GNU assembler could be handed (a `"`, any `??`, a `#` that is not the
+  first token of its line), and a command word that hands every TU text it never spelled.
+- **What is still not measured:** the compiler's own built-in search directories, which the
+  benchmark's commands put out of reach with `-nostdinc`. The sampled audit bounds how long a miss
+  survives; it does not remove one.
+- **COLD or WARM is a property of the store.** The first run after a change to a toolchain, a flag,
+  the harness code a namespace hashes or the OS is cold. Never compare a warm wall with a cold one
+  and call the difference a code change; say which with any wall you quote, and paste the
+  `[candcache]` lines with it.
+- **The store changes throughput and never a result.** If an outcome moves between a cold run and
+  a warm one, the store is wrong: run with `ASMLIFT_CANDCACHE=0` and report it.
+- **`verify`, and the sampled audit, compare OUTCOMES in both directions.** A stored object whose TU
+  no longer compiles and a stored rejection whose TU now does are both mismatches, and so is an
+  `objects/` entry whose bytes are not the ones it is named after (`OBJECT STORE CORRUPT`, found
+  when a fresh object dedups onto it; the repair is written through the inode, so every key linked
+  to it is repaired). Any mismatch goes to `MISMATCHES.log` in the store and fails the shard with
+  exit **3**; the orchestrator exits 3 only when every failed shard says so.
+- **A withholding accounts for itself.** `sampled` counts the keys the audit withheld, and
+  `sampled = verified + verifiedFail + mismatch + sampledStale + sampledAbandoned + sampledPending`:
+  a withheld key whose compile gave no verdict is handed its stored answer back
+  (`sampledAbandoned`), which is what an unaudited run would have been served.
+- **The store is bounded between runs.** The cap counts the distinct object bytes plus one
+  allocation block per stored key, and is enforced once per process before any candidate compiles:
+  whole namespaces no live process holds go first, then the oldest keys of the namespace this run
+  uses. A namespace another process holds is never touched.
+- **Test runs are fenced.** `vitest.config.ts` pins `ASMLIFT_CANDCACHE=0`, `ASMLIFT_CANDCACHE_SAMPLE=0`
+  and a throwaway `ASMLIFT_CANDCACHE_DIR` for every suite it runs; the store's own suites set the
+  mode themselves. `pnpm test:matching` is the exception: it forces `verify` and audits the shared
+  store, the only thing in the repo that does.
 
 ### Environment
 

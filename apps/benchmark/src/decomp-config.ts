@@ -15,11 +15,12 @@
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express, or
 // runs the compiler natively where the host can (@asmlift/toolchains' native.ts). The other three
 // dockerized toolchains (GCC 2.7.2 and two CodeWarrior builds) keep the user-command path, and on a
-// host that runs their 32-bit binaries natively that command is NATIVE_COMMANDS' instead of the
-// committed `docker run` one: the same compiler and words over host paths, so the same code, at
-// the cost of one process instead of one container per candidate. The reproduction scripts
-// (`bench target`) get the committed command intact on every toolchain.
-import { renderBenchPlaceholders } from '@asmlift/cli/candcache-bench';
+// host that runs their 32-bit binaries natively that command is the toolchain's entry in
+// dataset/toolchains/native-commands.yaml instead of the committed `docker run` one: the same
+// compiler and words over host paths, so the same code, at the cost of one process instead of one
+// container per candidate. The reproduction scripts (`bench target`) get the committed command
+// intact on every toolchain.
+import { type BenchCommand, benchCommand, renderBenchPlaceholders } from '@asmlift/cli/candcache-bench';
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
@@ -93,28 +94,39 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_NATIVE_WIBO: MWCC_PPC_TOOLCHAIN.nativeWibo,
 };
 
-// The committed `docker run` commands of dataset/toolchains/<id>/decomp.yaml with the container
-// taken out: each mounts the candidate's directory at /work and runs there, so the native command
-// runs in that directory too, over the host paths the mounts stood for.
-const MWCC_NATIVE_COMMAND =
-  `cd "$(dirname {{outputPath}})" && "$ASMLIFT_NATIVE_WIBO" "$ASMLIFT_MWCC_DIR"/mwcceppc.exe ` +
-  `'-pragma' 'msg_show_realref off' '-c' '-nostdinc' '-stderr' {{flags}} -o {{outputPath}} {{inputPath}}`;
-
-const NATIVE_COMMANDS: Partial<Record<ToolchainId, { native: () => boolean; command: string }>> = {
-  'gcc2.7.2': {
-    native: gcc272Native,
-    command:
-      `cd "$(dirname {{outputPath}})" && COMPILER_PATH="$ASMLIFT_GCC272_DIR" "$ASMLIFT_GCC272_DIR"/gcc ` +
-      `-B "$ASMLIFT_GCC272_DIR"/ -nostdinc {{flags}} -c -o {{outputPath}} {{inputPath}}`,
-  },
-  mwcc_233_163n: { native: () => mwccNative('mwcc_233_163n'), command: MWCC_NATIVE_COMMAND },
-  mwcc_247_107: { native: () => mwccNative('mwcc_247_107'), command: MWCC_NATIVE_COMMAND },
+/** Whether this host runs a toolchain natively, for each toolchain that has a native command. */
+const NATIVE: Partial<Record<ToolchainId, () => boolean>> = {
+  'gcc2.7.2': gcc272Native,
+  mwcc_233_163n: () => mwccNative('mwcc_233_163n'),
+  mwcc_247_107: () => mwccNative('mwcc_247_107'),
 };
 
-/** The native command for `id`, materialized, when this host runs it natively; else undefined. */
-export function nativeScoreCommand(id: ToolchainId): string | undefined {
-  const n = NATIVE_COMMANDS[id];
-  return n !== undefined && n.native() ? substitutePlaceholders(n.command, id) : undefined;
+/** What decides the command a toolchain's candidates compile with: whether the host runs the
+ *  toolchain natively, and the value of each `$ASMLIFT_*` placeholder. */
+export interface BenchHost {
+  native: (id: ToolchainId) => boolean;
+  placeholders: (id: ToolchainId) => Record<string, string>;
+}
+
+const THIS_HOST: BenchHost = { native: (id) => NATIVE[id]?.() ?? false, placeholders: placeholderValues };
+
+/** The command `id`'s candidates compile with on `host`, placeholders rendered, and the name the
+ *  candidate store knows it by: the toolchain's native command where the host runs it natively,
+ *  else its committed decomp.yaml command. */
+export function benchCommandFor(
+  id: ToolchainId,
+  host: BenchHost = THIS_HOST,
+): { command: string; bench: BenchCommand } {
+  const bench: BenchCommand = {
+    toolchain: id,
+    placeholders: host.placeholders(id),
+    ...(host.native(id) ? { native: true } : {}),
+  };
+  try {
+    return { command: benchCommand(bench), bench };
+  } catch (e) {
+    throw new Error(`${(e as Error).message} (dataset/toolchains)`);
+  }
 }
 
 /** The pooled pair's C compiles behind the candidate store, keyed as compile/docker-cache.ts says.
@@ -232,11 +244,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
 
   const pooled = POOLED[id];
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
-  const native = pooled === undefined ? nativeScoreCommand(id) : undefined;
-  if (pooled !== undefined) {
+  const scored = pooled === undefined ? benchCommandFor(id) : undefined;
+  if (scored === undefined) {
     delete doc.tools.asmlift.compiler;
   } else {
-    doc.tools.asmlift.compiler = native ?? doc.tools.asmlift.compiler;
+    doc.tools.asmlift.compiler = scored.command;
   }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
@@ -254,11 +266,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   if ('error' in res || res.targetKey !== id) {
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
-  // The committed command names its toolchain to the candidate store, which keys no other; a native
-  // command is not a committed template, and compiles uncached.
-  const bench = native === undefined ? { bench: { toolchain: id, placeholders: placeholderValues(id) } } : {};
+  // The command names itself to the candidate store, which keys no command but the benchmark's own.
   const compile =
-    pooled !== undefined ? pooled(cflags) : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags, ...bench });
+    pooled !== undefined
+      ? pooled(cflags)
+      : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags, bench: scored!.bench });
   memo.set(memoKey, compile);
   return compile;
 }

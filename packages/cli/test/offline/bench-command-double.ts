@@ -1,6 +1,7 @@
 // The benchmark's own agbcc command (apps/benchmark/dataset/toolchains/agbcc/decomp.yaml), runnable
 // offline. Its compiler and assembler slots need an ARM toolchain no CI runner has, so both hold a
-// TEST DOUBLE: a native program built here from the C below. Its `cpp` is the host's. The candidate
+// TEST DOUBLE: a native program built here from the C below, one file per slot. Its `cpp` is the
+// host's. The candidate
 // store keys this command because it is the benchmark's own (src/candcache-bench.ts), so a store
 // test driven through it runs the path the benchmark takes.
 //
@@ -14,7 +15,7 @@
 //   BENCH_DOUBLE=bake          appends its input's path, as `ido7.1` writes its into the object;
 //   BENCH_DOUBLE=reject-probe  rejects the store's stamp probe TU only.
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -81,15 +82,16 @@ int main(int argc, char **argv) {
 }
 `;
 
-let built: string | undefined;
-/** The double, built once per process with the host's `cc`. */
-function double(): string {
+let built: { compiler: string; assembler: string } | undefined;
+/** The double, built once per process with the host's `cc`, and a copy of it for the assembler slot. */
+function doubles(): { compiler: string; assembler: string } {
   if (built === undefined) {
     const dir = mkdtempSync(join(tmpdir(), 'bench-double-'));
     process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(join(dir, 'double.c'), SOURCE);
     execFileSync('cc', ['-O1', '-o', join(dir, 'bench-double'), join(dir, 'double.c')]);
-    built = join(dir, 'bench-double');
+    copyFileSync(join(dir, 'bench-double'), join(dir, 'bench-double-as'));
+    built = { compiler: join(dir, 'bench-double'), assembler: join(dir, 'bench-double-as') };
   }
   return built;
 }
@@ -97,6 +99,7 @@ function double(): string {
 /** The benchmark's agbcc command with the double in its compiler and assembler slots, and the
  *  `bench` option that names it to the store. It takes `{{flags}}`. */
 export function benchAgbcc(): { command: string; bench: BenchCommand } {
-  const bench = { toolchain: 'agbcc', placeholders: { ASMLIFT_AGBCC: double(), ASMLIFT_ARM_AS: double() } };
+  const { compiler, assembler } = doubles();
+  const bench = { toolchain: 'agbcc', placeholders: { ASMLIFT_AGBCC: compiler, ASMLIFT_ARM_AS: assembler } };
   return { command: benchCommand(bench), bench };
 }

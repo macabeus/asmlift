@@ -252,7 +252,7 @@ function reportCandCache(): void {
     if (Object.keys(stats).length > 0) {
       console.log(`[candcache] ${cacheMode()}${cacheSampleNote()} ${JSON.stringify(stats)}`);
     }
-    // A mismatch FAILS THE SHARD, with the CLI's own code for it. Printing is not enough: one
+    // A mismatch FAILS THE SHARD, with a code of its own. Printing is not enough: one
     // line among sixteen shard logs and a zero exit makes a "0 differing" result rest on a
     // human's grep — and a throw here would exit 1, which on this path is also what an
     // ordinary build failure exits, so the status would carry no more than the grep did.

@@ -19,11 +19,11 @@
 // And per key, what the TU reads besides its own bytes (@asmlift/cli/candcache-reads): what its text
 // decides before the store is asked, and what the compile's preprocessor reports once it has run.
 import {
-  COMPILE_ENV,
   type CandCache,
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
+  compileEnvironment,
   isChainMeasurement,
   noteKeyRefused,
   refuseUnkeyedEnv,
@@ -156,9 +156,7 @@ export function dockerStaticStamp(spec: DockerCacheSpec, runs = runsOn(spec)): s
   }
   h.update(`words:${JSON.stringify(spec.words)}`);
   h.update(`prelude:${JSON.stringify(spec.prelude)}`);
-  for (const v of COMPILE_ENV) {
-    h.update(`env:${v}=${process.env[v] ?? ''}`);
-  }
+  h.update(compileEnvironment());
   // Files by BASENAME and content, as agbcc.ts's namespace hashes them, so two worktrees holding the
   // same bytes share a store.
   for (const p of [...spec.hostCommands.flatMap((c) => toolchainFileChain(c)), ...spec.sources]) {

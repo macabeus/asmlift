@@ -330,7 +330,7 @@ describe('the whole mechanism is inside the module — neither call site changes
     // found by the repair's own store write). The second names a different set of victims, so it
     // is reported rather than swallowed as "already known".
     expect(said).toContain('OBJECT STORE CORRUPT');
-    expect(mismatches, 'nonzero is what makes the run exit CACHE_MISMATCH_EXIT in main.ts and cli.ts').toBe(2);
+    expect(mismatches, 'nonzero is what makes a bench shard exit CACHE_MISMATCH_EXIT (apps/benchmark cli.ts)').toBe(2);
     // and the candidate the row is scored on is the TRUTH, not the poison
     expect(readFileSync(served, 'utf8')).toContain('a0 + 1');
   });
@@ -742,106 +742,5 @@ describe('an audit whose REPAIR did not land must not be served — sampling may
       (m) => m.candCache('t', () => NS_A).get('k', 'f'),
     );
     expect(next, 'a miss recompiles, which is always correct').toBeUndefined();
-  });
-});
-
-describe('a reported mismatch reaches the EXIT STATUS, which is the only thing a wrapper reads', () => {
-  // `[candcache]` lines and MISMATCHES.log are for whoever is watching. A published reproduction
-  // script, an orchestration loop and `bench fidelity` read the status, and `match && mismatches
-  // === 0 ? 0 : 1` carried no signal for the case this repo publishes: LoadBGTilemapData has been
-  // a nonmatch at 386 for twenty rounds, so a clean run and a poisoned run of it both exit 1.
-  const poison = async (root: string): Promise<void> => {
-    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('WRONG-BYTES')));
-  };
-
-  test('BOTH ranked returns carry it: a match, and the decline a total cache defect produces', async () => {
-    const root = scratch();
-    await poison(root);
-    const saved = { ...process.env };
-    Object.assign(process.env, {
-      ASMLIFT_CANDCACHE: '1',
-      ASMLIFT_CANDCACHE_SAMPLE: '100',
-      ASMLIFT_CANDCACHE_DIR: root,
-    });
-    vi.resetModules();
-    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    try {
-      const m = await import('../../src/candcache');
-      compileAndStore(
-        m.candCache('t', () => NS_A),
-        'k',
-        'THE-TRUTH',
-      );
-      expect(m.cacheMismatches()).toBeGreaterThan(0);
-      const { rankedExitCode } = await import('../../src/main');
-      expect(rankedExitCode(false), 'the failure return — serving stale objects is WHY nothing scored').toBe(
-        m.CACHE_MISMATCH_EXIT,
-      );
-      expect(rankedExitCode(true), 'and a MATCH published off a store that lied is not a 0').toBe(
-        m.CACHE_MISMATCH_EXIT,
-      );
-    } finally {
-      spy.mockRestore();
-      for (const k of ['ASMLIFT_CANDCACHE', 'ASMLIFT_CANDCACHE_SAMPLE', 'ASMLIFT_CANDCACHE_DIR']) {
-        if (saved[k] === undefined) {
-          delete process.env[k];
-        } else {
-          process.env[k] = saved[k];
-        }
-      }
-    }
-  });
-
-  test('END TO END through runCli: a project’s own command is not keyed, so no run of it can be served', async () => {
-    // The CLI hands the store a project's `decomp.yaml` command, which is never the benchmark's own
-    // (src/candcache-bench.ts): every key is refused, so there is no stored answer to disagree with
-    // and the status is what the run itself says.
-    const fixture = (f: string): string => join(import.meta.dirname, 'fixtures', 'objdiff', f);
-    const root = scratch();
-    const store = scratch();
-    const asm = join(root, 'add_one.s');
-    writeFileSync(asm, '\t.text\n\t.code\t16\n\t.globl\tadd_one\n\t.thumb_func\nadd_one:\n\tadd\tr0, #1\n\tbx\tlr\n');
-    const template = `cat {{inputPath}} > /dev/null && cp ${fixture('candidate-diff.o')} {{outputPath}}`;
-    writeFileSync(
-      join(root, 'decomp.yaml'),
-      `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(template)}\n`,
-    );
-    const saved = { ...process.env };
-    Object.assign(process.env, { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store });
-    vi.resetModules();
-    let run: { code: number; stderr: string };
-    try {
-      run = await (
-        await import('../../src/main')
-      ).runCli([
-        asm,
-        '--name',
-        'add_one',
-        '--score-against',
-        fixture('target.o'),
-        '--config',
-        join(root, 'decomp.yaml'),
-      ]);
-    } finally {
-      for (const k of ['ASMLIFT_CANDCACHE', 'ASMLIFT_CANDCACHE_SAMPLE', 'ASMLIFT_CANDCACHE_DIR']) {
-        if (saved[k] === undefined) {
-          delete process.env[k];
-        } else {
-          process.env[k] = saved[k];
-        }
-      }
-    }
-    expect(run.stderr).toMatch(/\[candcache\] on sample=off \{"refusedKeys":\d+\}/);
-    expect(run.code, 'a nonmatching ranked run: the status this project publishes').toBe(1);
-    expect(existsSync(join(store, 'ns')), 'nothing stored, nothing stamped').toBe(false);
-  });
-
-  test('and a clean run still says match-or-not, which is what every other reader depends on', async () => {
-    vi.resetModules();
-    const m = await import('../../src/candcache');
-    expect(m.cacheMismatches()).toBe(0);
-    const { rankedExitCode } = await import('../../src/main');
-    expect(rankedExitCode(true)).toBe(0);
-    expect(rankedExitCode(false)).toBe(1);
   });
 });

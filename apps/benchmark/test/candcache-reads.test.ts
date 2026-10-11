@@ -398,7 +398,7 @@ describe('a GNU compile command', () => {
       writeFileSync(file, 'CD');
       const warm = await compileIn(store, cmd, tu);
       expect(warm.stats.hit).toBeUndefined();
-      expect(warm.stats).toMatchObject({ refusedKeys: 1 });
+      expect(warm.stats, 'a project command never reaches the store').toEqual({});
       expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
       expect(warm.out).not.toMatch(/^threw /);
       expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
@@ -422,7 +422,7 @@ describe('a GNU compile command', () => {
         expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
         writeFileSync(file, 'CD');
         const warm = await compileIn(store, cmd, tu);
-        expect(warm.stats).toMatchObject({ refusedKeys: 1 });
+        expect(warm.stats, 'a project command never reaches the store').toEqual({});
         expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
         expect(warm.out).not.toMatch(/^threw /);
         expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
@@ -470,7 +470,8 @@ async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Pr
 }
 
 // A program the command runs can read more than the command's words show, and each spelling below
-// was served the old file's object through arm-none-eabi-gcc: the store keys no project's command.
+// was served the old file's object through arm-none-eabi-gcc: a project's command never reaches the
+// store.
 describe('a command whose program reads what its words do not show', () => {
   const SECTION = `'-DS=".data\\n.incbin \\"f.bin\\"\\n.section .data.x"'`;
   /** [what, the command, the TU, the file it reads and that file's two contents, extra env] */
@@ -526,7 +527,7 @@ describe('a command whose program reads what its words do not show', () => {
         writeFileSync(join(cwd, read), before);
         const cold = await compileIn(store, cmd, tu);
         expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
-        expect(cold.stats).toMatchObject({ refusedKeys: 1 });
+        expect(cold.stats, 'a project command never reaches the store').toEqual({});
         writeFileSync(join(cwd, read), after);
         const warm = await compileIn(store, cmd, tu);
         expect(warm.stats.hit).toBeUndefined();

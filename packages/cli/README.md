@@ -80,8 +80,6 @@ directory, so a template that writes to a fixed path inside the project races it
 
 Exit codes: `0` clean (or byte-exact match when scoring) · `1` gaps, declined, or nonmatch —
 the stderr tag says which (`[declined]` = principled refusal, `[internal error]` = bug) ·
-`3` the candidate-object cache served bytes a fresh compile disagrees with, which outranks every
-other status because a store that lied invalidates the whole fan ·
 `64` usage error · `66` unreadable input.
 
 ## `decomp.yaml` reference
@@ -294,24 +292,10 @@ cannot derive.
 
 ## Environment
 
-| Variable                        | Meaning                                                                                                                                                                                                                                                                          |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ASMLIFT_CANDCACHE`             | The candidate-object cache, **on when unset**. `1`/`on`/`true`/`yes` also serve; `0`/`off`/`false`/`no` — and a set-but-empty value — bypass it; `verify` compiles everything anyway and audits the store against it. Anything else is refused out loud rather than read as "on" |
-| `ASMLIFT_BENCH_CACHE=0`         | Bypasses that cache too, so bisecting a suspect result does not leave half the caching on                                                                                                                                                                                        |
-| `ASMLIFT_CANDCACHE_DIR`         | Where the store lives                                                                                                                                                                                                                                                            |
-| `ASMLIFT_CANDCACHE_MAX_MB`      | Its size budget, above which it prunes                                                                                                                                                                                                                                           |
-| `ASMLIFT_CANDCACHE_SAMPLE`      | What percentage of served answers are re-compiled and compared. A disagreement FAILS the run — see exit `3`                                                                                                                                                                      |
-| `ASMLIFT_CANDCACHE_SAMPLE_SEED` | Replays an exact sampling selection; the `[candcache]` line prints the seed it used                                                                                                                                                                                              |
-| `ASMLIFT_CANDCACHE_PRUNE_MS`    | How often it may prune                                                                                                                                                                                                                                                           |
-| `ASMLIFT_CANDCACHE_TRACE`       | Prints every store decision, which is how you tell whether a run reaches the cache at all                                                                                                                                                                                        |
-| `ASMLIFT_MIPS_OBJDUMP`          | The objdump for MIPS object input, where `tools.asmlift.objdump` does not name one                                                                                                                                                                                               |
-| `ASMLIFT_PPC_OBJDUMP`           | The same for PowerPC                                                                                                                                                                                                                                                             |
-
-The store keys only the asmlift benchmark's own compile commands: a project's `decomp.yaml` command
-compiles every candidate, because it can read inputs its words do not name
-([why](../../docs/ranked-repro.md#the-cache-state-is-part-of-the-number)). Every run that touched
-the store ends with a one-line `asmlift: [candcache] …` summary carrying the mode, the sample rate
-and seed, and the hit/miss counts.
+| Variable               | Meaning                                                                            |
+| ---------------------- | ---------------------------------------------------------------------------------- |
+| `ASMLIFT_MIPS_OBJDUMP` | The objdump for MIPS object input, where `tools.asmlift.objdump` does not name one |
+| `ASMLIFT_PPC_OBJDUMP`  | The same for PowerPC                                                               |
 
 ## Using it as a library
 

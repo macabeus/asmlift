@@ -645,8 +645,7 @@ describe('EXISTENCE IS NOT CONTENT: a corrupt objects/<sha> entry is caught wher
 describe('ASMLIFT_CANDCACHE_DIR: set-and-empty is a PATH, and the path it is is the current directory', () => {
   // `??` catches only `undefined`. `ASMLIFT_CANDCACHE_DIR=` — an unexpanded `$SOMETHING`, or a
   // half-typed one-shot override — therefore put `ns/`, `objects/` and `MISMATCHES.log` wherever
-  // the process was standing, which docs/ranked-repro.md tells the reader is their decomp
-  // checkout. MEASURED: with the store in a CWD holding `objects/aa/build-artifact.o`, one
+  // the process was standing. MEASURED: with the store in a CWD holding `objects/aa/build-artifact.o`, one
   // over-cap prune reported `{"prunedObjects":1}` and the file was gone. This is the same
   // unexpanded-variable shape `ASMLIFT_CANDCACHE=` is guarded against, and the flip is what armed
   // it: before it, an empty DIR was inert because the mode was off.
@@ -675,6 +674,7 @@ describe('ASMLIFT_CANDCACHE_DIR: set-and-empty is a PATH, and the path it is is 
         expect(m.MISMATCH_LOG, 'the loud line must name a path a reader can find').toBe(
           join(tmpdir(), 'asmlift-candcache', 'MISMATCHES.log'),
         );
+        m.cacheMode(); // the configuration is said once the cache is used
       });
       expect(said).toContain('ASMLIFT_CANDCACHE_DIR is SET AND EMPTY');
       expect(readdirSync(cwd), 'nothing lands in the current directory').toEqual([]);

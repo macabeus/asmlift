@@ -3,11 +3,11 @@
 // words from @asmlift/toolchains, then the row's codegen flags; the decomp.yaml candidate command
 // lives in dataset/toolchains/agbcc/decomp.yaml.
 import {
-  COMPILE_ENV,
   type CandCache,
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
+  compileEnvironment,
   isChainMeasurement,
   noteKeyRefused,
   refuseUnkeyedEnv,
@@ -195,9 +195,7 @@ export function candCacheStaticStamp(
   h.update([...TOOLCHAIN.harnessFlags, ...cflags].join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
   h.update('cpp ' + [...CAND_CPP_FLAGS, ...cppReportFlags('c.d')].join(' '));
-  for (const v of COMPILE_ENV) {
-    h.update(`env:${v}=${process.env[v] ?? ''}`);
-  }
+  h.update(compileEnvironment());
   for (const p of files) {
     // A measurement entry (`UNRESOLVED:` — the command is on no $PATH here; `ENV:` — a wrapper in
     // the chain chooses its delegate through that variable) IS the answer, and is hashed as text.

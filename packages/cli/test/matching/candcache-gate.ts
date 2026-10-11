@@ -50,7 +50,7 @@ import { MISMATCH_LOG, OFF_WORDS, ON_WORDS } from '../../src/candcache';
 export default function setup(): () => void {
   // ASK THE MODULE'S OWN LIST, not a two-element copy of it. `asked !== '0' && asked !== 'off'`
   // forced `verify` for `false`, `no`, `disable`, and the SET-AND-EMPTY state — every one of which
-  // candcache.ts calls OFF and docs/ranked-repro.md describes as "touches no disk". Under a forced
+  // candcache.ts calls OFF and apps/benchmark/README.md describes as "touches no disk". Under a forced
   // `verify` such a run stores every key and appends to the SHARED `MISMATCHES.log`, so a
   // neighbour worktree's lines could then fail the teardown below. UNSET is deliberately NOT off
   // here: `process.env.ASMLIFT_CANDCACHE` being undefined means the module's default, which is
