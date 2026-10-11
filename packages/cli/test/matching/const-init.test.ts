@@ -61,6 +61,14 @@ const CASES: { sym: string; c: string; spelled: RegExp }[] = [
     spelled: /u8 sp0\[9\] = "hi there";/,
   },
   {
+    // a brace list of strings shorter than their rows ends in a `.space`: a byte list, copied whole —
+    // spelled as one string literal it is shorter than the array, which agbcc copies short and fills
+    sym: 'rows8',
+    c: `${USE}void rows8(void) { char a[2][8] = {"abcdefg", "hijklm"}; g(a); }`,
+    spelled:
+      /u8 sp0\[16\] = \{\n {8}0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0,\n {8}0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0,\n {4}\};/,
+  },
+  {
     // the elements the initializer left out are a `.space` in the image, and stay left out: spelled
     // as seventeen zeros, the constructor is mostly zero and agbcc clears and stores instead
     sym: 'tail20',

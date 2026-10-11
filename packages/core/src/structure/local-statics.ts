@@ -300,6 +300,12 @@ export function localStaticShapes(
         }
         init.fill(null, from / unit, (from + n) / unit);
       }
+      // A string literal is an image with no padding run at all: one shorter than its array is a
+      // STRING_CST to agbcc, which it copies at the literal's length and clears the tail of
+      // (`char a[16] = "abc…hijklm"` is memcpy 15 + memset 1), where a `.space` after the `.ascii`
+      // says the source was a brace list of strings whose image is copied whole. So the test is
+      // asked before the trailing holes are dropped, not after.
+      const string = obj.directives!.string === true && unit === 1 && !init.includes(null);
       while (init.length > 0 && init[init.length - 1] === null) {
         init.pop();
       }
@@ -307,7 +313,7 @@ export function localStaticShapes(
         name: obj.symbol,
         type: T.array(T.int(unit * 8, signed), count),
         init,
-        ...(obj.directives!.string && unit === 1 && !init.includes(null) ? { string: true as const } : {}),
+        ...(string ? { string: true as const } : {}),
       });
       continue;
     }
