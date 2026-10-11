@@ -16,7 +16,8 @@
 #      — `cpp` because a login shell puts Apple clang's first, and Apple's ignores `-o` (round
 #      protocol trap #6). Either way the environment is checked before anything is created: at
 #      least one `ASMLIFT_*`, since a worktree's sibling defaults resolve to nothing, and a `cpp`
-#      that is not /usr/bin/cpp. Nothing sources the file for you.
+#      (or `$ASMLIFT_CPP`) that writes to `-o` — the probe `bench run` makes, so a GNU /usr/bin/cpp
+#      on Linux passes and Apple's does not. Nothing sources the file for you.
 #   4. `pnpm install --frozen-lockfile --prefer-offline` in the worktree.
 #   5. with `--board`, `--handle` and `--args`: writes the Workflow args to
 #      <board>/args/<handle>.json BEFORE the launch. A resume needs the exact args of the run it
@@ -66,7 +67,15 @@ else
 fi
 vars=$(lane_env env | grep -E '^ASMLIFT_[A-Z0-9_]+=' | sort || true)
 [ -n "$vars" ] || die "no ASMLIFT_* in ${env_file:-this shell}; a worktree's sibling defaults resolve to nothing (round protocol trap #6)"
-[ "$(lane_env sh -c 'command -v cpp')" != /usr/bin/cpp ] || die "\`cpp\` resolves to Apple clang's /usr/bin/cpp in ${env_file:-this shell} — put the shim first (round protocol trap #6)"
+# The same probe `bench run` makes (apps/benchmark/src/run/preflight.ts probeCpp): what matters is
+# that `cpp` writes to `-o`, not where it lives — /usr/bin/cpp is Apple clang on macOS, GNU on Linux.
+probe=$(mktemp -d)
+echo 'int probe;' >"$probe/probe.c"
+lane_env sh -c '"${ASMLIFT_CPP:-cpp}" -P -nostdinc "$1/probe.c" -o "$1/probe.i"' sh "$probe" >/dev/null 2>&1 || true
+cpp_ok=no
+[ ! -f "$probe/probe.i" ] || cpp_ok=yes
+rm -rf "$probe"
+[ "$cpp_ok" = yes ] || die "\`${ASMLIFT_CPP:-cpp}\` in ${env_file:-this shell} does not preprocess to \`-o\` — usually Apple clang's /usr/bin/cpp ahead of the shim; put the shim first (round protocol trap #6)"
 
 # The main checkout: the repository this script sits in, or — run from a copy elsewhere — the one
 # this shell is in. Resolved to an absolute path or refused: the links below are made from it.

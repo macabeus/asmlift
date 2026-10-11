@@ -122,7 +122,7 @@ git fetch origin && git worktree add <dir> -b <branch> origin/main && (cd <dir> 
 
 `scripts/lane-setup.sh <dir> <branch>` does that, links the main checkout's bench-owned
 `checkouts/` and `toolchains/` into it, and writes its `.envrc.local` from this shell's `ASMLIFT_*`
-(or from `--env <file>`) — refusing first when there is none, or when `cpp` is Apple's. Its header
+(or from `--env <file>`) — refusing first when there is none, or when `cpp` does not write to `-o` (Apple's). Its header
 says what the shared checkouts cost.
 
 Then give it the projects the real tier compiles. `pnpm bench setup` materializes the bench-owned
