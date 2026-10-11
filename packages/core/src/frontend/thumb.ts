@@ -651,9 +651,11 @@ const stackArgIndex = (key: string): number | null => {
 // so the callee reads them at `[sp, #N]` where N is at or above its own frame. Those are
 // PARAMETERS, not locals — declining them as "sp used as data" refuses a calling convention.
 //
-// The frame depth is tracked by a linear walk of the ENTRY BLOCK only, which is
-// why the gate is what it is: within one straight-line block the depth at each instruction is
-// exact and needs no CFG reasoning. Every case that would need more declines.
+// The frame depth is tracked by a linear walk of ONE BLOCK, from a depth that is exact where the
+// block starts: 0 at the entry block (when nothing branches back to it), and for every other block
+// the depth the entry block leaves, but only where the function is proven never to move sp outside
+// its prologue and its returning tails (`frameDepthBlocker`). Within a straight-line block the depth
+// at each instruction is then exact. Every case that would need more declines.
 //
 // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
 //
@@ -666,12 +668,12 @@ const stackArgIndex = (key: string): number | null => {
 // preserve is written next to the state it is about.
 //
 // `deps` carries the only two things about the FUNCTION this needs — the ABI's argument-register
-// count, and whether the entry block has predecessors — so the walk itself reads nothing but the
-// instructions it is stepped over.
-const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolean }) => {
+// count, and the depth this block starts at (null where none is proven) — so the walk itself reads
+// nothing but the instructions it is stepped over.
+const makeFrameWalk = (deps: { argRegs: readonly string[]; start: number | null }) => {
   // Bytes the frame has grown since function entry, along this block's linear order only.
-  let depth = 0;
-  let depthKnown = true;
+  let depth = deps.start ?? 0;
+  let depthKnown = deps.start !== null;
 
   // Returns null whenever the depth cannot be computed exactly — including for any write to sp
   // this does not model. The capability rests on the depth being EXACT, so an approximation is
@@ -736,6 +738,11 @@ const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolea
       }
     },
 
+    /** The depth the instructions stepped so far leave, or null where it is not exact. */
+    depthNow(): number | null {
+      return depthKnown ? depth : null;
+    },
+
     // Is `[sp, #off]` an incoming stack argument, and which one? `null` means NO — and every null is
     // a DECLINE, because the caller falls through to readData's sp guard.
     //
@@ -759,19 +766,16 @@ const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolea
     // reads. `step` enforces it, and never un-poisons: once sp has been above the line, a push during
     // the excursion may have written the later slots too. This is a PREMISE, not a detail — leaving
     // it unstated is what let the first version hand back a callee-saved register as an argument.
-    argIndex(addr: { base: string; off: number; regOff?: string }, width: number, bi: number): number | null {
+    argIndex(addr: { base: string; off: number; regOff?: string }, width: number): number | null {
       const { base, off, regOff } = addr;
       if (!isSpReg(base) || regOff !== undefined) {
         return null; // not sp, or `[sp, rX]` — not a fixed argument slot
       }
-      if (bi !== 0 || deps.entryHasPreds) {
-        return null; // depth is exact only along the ENTRY block's linear order, and only when its
-        // params are parameters rather than phis
-      }
       if (!depthKnown || depth <= 0) {
-        return null; // an unmeasurable frame, or none established: a headerless FRAGMENT whose
-        // prologue was sliced off looks identical to a frameless function, and there the slots are
-        // locals — minting one would be the silent-wrong trade this frontend refuses
+        return null; // no exact start (`start`), an unmeasurable frame, or none established: a
+        // headerless FRAGMENT whose prologue was sliced off looks identical to a frameless
+        // function, and there the slots are locals — minting one would be the silent-wrong trade
+        // this frontend refuses
       }
       if (width !== 4 || off < depth || (off - depth) % 4 !== 0) {
         return null; // the argument area is word-granular; BELOW the top is a local, which is the
@@ -2767,6 +2771,9 @@ interface ThumbFrame {
   /** why the word-slot model is off, or null when it is on (`slotModelBlocker`) */
   readonly slotsOffReason: string | null;
   readonly slotsOk: boolean;
+  /** the frame depth at every instruction outside the entry block, or null where it is not proven
+   *  one number (`frameDepthBlocker`) */
+  readonly settledDepth: number | null;
   readonly partition: Readonly<Pick<FrameObjectAudit, 'ownedLocals' | 'declaredLocals'>>;
   isFrameObjectAccess(base: string, off: number, regOff: string | undefined, width: number): boolean;
   isOwnFrameWordSlot(base: string, off: number, regOff: string | undefined, width: number): boolean;
@@ -3140,6 +3147,24 @@ function measureThumbFrame({
   const slotsOffReason = slotModelBlocker(asmBlocks, localArea, outgoingArgs);
   const slotsOk = slotsOffReason === null;
 
+  // THE DEPTH EVERY OTHER BLOCK RUNS AT: what the entry block leaves, where `frameDepthBlocker`
+  // proves no block but a returning one moves sp again. Not where the entry is itself a loop
+  // target (its prologue would run twice) or returns (no block runs after it).
+  const entry = asmBlocks[0];
+  const entryWalk = makeFrameWalk({ argRegs: target.argRegs, start: 0 });
+  for (const ins of entry.instrs) {
+    if (!classifyXfer(ins)) {
+      entryWalk.step(ins);
+    }
+  }
+  const entryEnd = entry.instrs[entry.instrs.length - 1];
+  const settledDepth =
+    frameDepthBlocker(asmBlocks) === null &&
+    preds[0].length === 0 &&
+    !(entryEnd !== undefined && classifyXfer(entryEnd) === 'return')
+      ? entryWalk.depthNow()
+      : null;
+
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
   // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
   // to THAT OBJECT — provisionally, since the audit is what proves the object is a local at all. Keying it as an SSA slot instead moves the value into a
@@ -3237,6 +3262,7 @@ function measureThumbFrame({
     outgoingArgs,
     slotsOffReason,
     slotsOk,
+    settledDepth,
     partition,
     isFrameObjectAccess,
     isOwnFrameWordSlot,
@@ -3360,13 +3386,54 @@ function slotModelBlocker(
       // frameless function taking sp's address has nothing to model and refuses in those arms.
     }
   }
-  // sp must be CONSTANT wherever a slot is keyed, because the key IS the raw offset. Two shapes
-  // are legitimate and everything else refuses: a PROLOGUE (sp moves before the block touches the
-  // frame) and an EPILOGUE (sp moves after it has finished touching it, and the block returns, so
-  // nothing downstream can key a slot against the changed sp). A modification BETWEEN two
-  // accesses moves the frame under a slot already keyed, and only the entry block may deepen —
-  // elsewhere a pre-access modification would put the block at a different depth from the one the
-  // prologue established.
+  const depthBlocker = frameDepthBlocker(asmBlocks);
+  if (depthBlocker !== null) {
+    return depthBlocker;
+  }
+  // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
+  // decides per call whether the words staged at the bottom of the frame are a callee's
+  // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
+  // function still declines loud.
+  if (outgoing.blocker !== null) {
+    return outgoing.blocker;
+  }
+  // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
+  // taken while the local area is still reserved reads a slot this model has retargeted into SSA
+  // — the load simply disagrees with the store. A real epilogue releases the locals first
+  // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
+  for (const ab of asmBlocks) {
+    let released = 0;
+    for (const ins of ab.instrs) {
+      if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
+        const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
+        if (isSpReg(base)) {
+          return 'a pop reads the frame while the local area is still reserved';
+        }
+      }
+      if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
+        const d = spAdjust(ins);
+        if (d !== null && d > 0) {
+          released += d;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Is sp ONE VALUE at every frame access of this function, the one its prologue leaves? Null when it
+// is, else why not. The slot model needs it because a slot's key IS the raw offset, and an incoming
+// stack argument read outside the entry block needs it because its index is the offset less the
+// depth (`makeFrameWalk`).
+//
+// Two shapes are legitimate and everything else refuses: a PROLOGUE (sp moves before the block
+// touches the frame) and an EPILOGUE (sp moves after it has finished touching it, and the block
+// returns, so nothing downstream can key a slot against the changed sp). A modification BETWEEN two
+// accesses moves the frame under a slot already keyed, and only the entry block may deepen —
+// elsewhere a pre-access modification would put the block at a different depth from the one the
+// prologue established. So every block but the entry starts at the depth the entry leaves, and
+// only a block that returns moves sp.
+function frameDepthBlocker(asmBlocks: readonly AsmBlock[]): string | null {
   for (let bi = 0; bi < asmBlocks.length; bi++) {
     const ins = asmBlocks[bi].instrs;
     const mems = ins.map((x, i) => (touchesFrame(x) ? i : -1)).filter((i) => i >= 0);
@@ -3394,34 +3461,6 @@ function slotModelBlocker(
         }
       } else {
         return 'the frame moves between two accesses that keyed slots against it';
-      }
-    }
-  }
-  // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
-  // decides per call whether the words staged at the bottom of the frame are a callee's
-  // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
-  // function still declines loud.
-  if (outgoing.blocker !== null) {
-    return outgoing.blocker;
-  }
-  // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
-  // taken while the local area is still reserved reads a slot this model has retargeted into SSA
-  // — the load simply disagrees with the store. A real epilogue releases the locals first
-  // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
-  for (const ab of asmBlocks) {
-    let released = 0;
-    for (const ins of ab.instrs) {
-      if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
-        const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
-        if (isSpReg(base)) {
-          return 'a pop reads the frame while the local area is still reserved';
-        }
-      }
-      if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
-        const d = spAdjust(ins);
-        if (d !== null && d > 0) {
-          released += d;
-        }
       }
     }
   }
@@ -4055,7 +4094,7 @@ interface BlockCursor {
   consumed: Instr | null;
 }
 
-function openBlockCursor({ target, cfg, ssa, flags }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
+function openBlockCursor({ target, cfg, ssa, flags, frame }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
   const irb = ssa.irBlocks[bi];
   // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
   // judged by the in-block clear (`retireFlags`) exactly as one this block made itself would be: a
@@ -4066,12 +4105,12 @@ function openBlockCursor({ target, cfg, ssa, flags }: ThumbFill, ab: AsmBlock, b
   // that made a compare and then overwrote it is a different gap from one that never had a
   // compare at all, and a single message for both makes two gaps read as one.
   const noCmpWhy = typeof inherited === 'string' ? inherited : '';
-  // Tracks the frame through this block's linear instruction order. Meaningful for the entry
-  // block; elsewhere a `[sp,#N]` access declines. Both dependencies are read HERE rather than
-  // closed over: `preds` is final long before the first `fillThumbBlock` runs, so the boolean is the
-  // same for every block, and passing it in makes that a property of this line instead of a
-  // property of wherever the walk happens to be declared.
-  const walk = makeFrameWalk({ argRegs: target.argRegs, entryHasPreds: cfg.preds[0].length > 0 });
+  // Tracks the frame through this block's linear instruction order, from the depth the block starts
+  // at: 0 for an entry block nothing branches back to (its params are parameters, not phis), and
+  // the depth the entry leaves for every other block where the frame is proven settled
+  // (`ThumbFrame.settledDepth`). Elsewhere a `[sp,#N]` access declines.
+  const start = bi === 0 ? (cfg.preds[0].length > 0 ? null : 0) : frame.settledDepth;
+  const walk = makeFrameWalk({ argRegs: target.argRegs, start });
   return { ab, bi, irb, walk, pendingCmp, noCmpWhy, consumed: null };
 }
 
@@ -4841,7 +4880,7 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // `argIndex` can make, and the soundness proof that each one is needed for, lives on the
   // predicate itself — restating them here is how the two copies drifted.
   {
-    const index = walk.argIndex({ base, off, regOff }, width, bi);
+    const index = walk.argIndex({ base, off, regOff }, width);
     if (index !== null) {
       writeData(reg(a), bi, readVar(stackArgKey(index), bi));
       return;

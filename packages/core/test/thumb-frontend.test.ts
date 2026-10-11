@@ -3802,10 +3802,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => dc('f', '\tpush\t{r4, lr}\n\tldr\tr0, [sp, r1]\n\tbx\tlr\n')).toThrow(spAsData);
     // a WRITE to the argument area is not a parameter read
     expect(() => dc('f', '\tpush\t{r4, lr}\n\tstr\tr0, [sp, #8]\n\tbx\tlr\n')).toThrow(spAsData);
-    // outside the entry block the depth is not established by a linear walk, so it declines
-    const later =
-      '\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tmov\tr0, #1\n\tbx\tlr\n.L1:\n\tldr\tr0, [sp, #8]\n\tbx\tlr\n';
-    expect(() => dc('f', later)).toThrow(spAsData);
+    // (outside the entry block: `an incoming stack argument re-read in a loop is the parameter`)
   });
 });
 
@@ -3886,5 +3883,51 @@ describe('a frame address that escapes explains the stores it hands over', () =>
       '\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\ttw6\n\tadd\tsp, sp, #0x18\n\tpop\t{r4}\n' +
       '\tpop\t{r0}\n\tbx\tr0\n';
     expect(() => decompile('q6', q6, ARMV4T_AGBCC)).toThrow(/a store at \[\+4\] through the captured address/);
+  });
+});
+
+// AN INCOMING STACK ARGUMENT READ OUTSIDE THE ENTRY BLOCK. Its index is the offset less the frame
+// depth, and the depth there is one number only where nothing but the prologue and a returning
+// tail moves sp (`frameDepthBlocker`).
+describe('an incoming stack argument re-read in a loop is the parameter', () => {
+  const put = { put: { params: ['s32', 's32'], returnsVoid: true } };
+  // agbcc's own output for `void sum5(int a, int b, int c, int d, const unsigned char *e, int n)
+  // { int i; for (i = 0; i < n; i++) put(a + e[i], b + c + d); }`: `e` is re-read in the loop.
+  const sum5 = (loopHead: string, loopTail: string) =>
+    'sum5:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tmov\tr8, r0\n\tadd\tr7, r3, #0\n' +
+    '\tldr\tr6, [sp, #0x1c]\n\tmov\tr4, #0x0\n\tcmp\tr4, r6\n\tbge\t.L4\n\tadd\tr5, r1, r2\n' +
+    `.L6:\n${loopHead}\tldr\tr1, [sp, #0x18]\n\tadd\tr0, r1, r4\n\tldrb\tr0, [r0]\n\tadd\tr0, r0, r8\n` +
+    `\tadd\tr1, r5, r7\n\tbl\tput\n${loopTail}\tadd\tr4, r4, #0x1\n\tcmp\tr4, r6\n\tblt\t.L6\n` +
+    '.L4:\n\tpop\t{r3}\n\tmov\tr8, r3\n\tpop\t{r4, r5, r6, r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+
+  test('the read in the loop block is argument 5', () => {
+    expect(decompile('sum5', sum5('', ''), ARMV4T_AGBCC, { prototypes: put }).source).toBe(
+      'void sum5(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n    s32 v0;\n' +
+        '    for (v0 = 0; v0 < a5; v0 = v0 + 1) {\n        put(*(u8 *)(a4 + v0) + a0, a1 + a2 + a3);\n    }\n}\n',
+    );
+  });
+
+  test('…and so is a read in any block after a settled prologue', () => {
+    const later =
+      '\tpush\t{r4, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tmov\tr0, #1\n\tbx\tlr\n.L1:\n\tldr\tr0, [sp, #8]\n\tbx\tlr\n';
+    expect(dc('f', later).source).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    if (a0 != 0) {\n        return 1;\n    } else {\n        return a4;\n    }\n}\n',
+    );
+  });
+
+  test('a loop block that moves sp itself declines', () => {
+    const moved = sum5('\tadd\tsp, sp, #-0x8\n', '\tadd\tsp, sp, #0x8\n');
+    expect(() => decompile('sum5', moved, ARMV4T_AGBCC, { prototypes: put })).toThrow(
+      /stack pointer used as data — a non-entry block establishes its own frame depth/,
+    );
+  });
+
+  // A branch back to the first instruction runs the prologue's `push` again, so no block after it
+  // has one depth.
+  test('a function whose entry is a loop target declines', () => {
+    const again =
+      'again:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0\n\tbeq\t.L12\n\tldr\tr0, [sp, #0x8]\n' +
+      '\tsub\tr0, r0, #1\n\tb\tagain\n.L12:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('again', again, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
   });
 });
