@@ -652,15 +652,39 @@ function displacementIndex(off: number, width: number): number {
   return off / width;
 }
 
-/** Whether `lval`, a `p->field_K` member access through a recovered struct pointer, names a
- *  narrow integer member whose signedness is not `signed`. False for anything else, and for a
- *  displacement that is not a whole number of `width`-byte elements (no flat subscript spells it). */
-function memberSignDisagrees(baseType: IrType, lval: Expr, off: number, width: number, signed: boolean): boolean {
-  if (lval.k !== 'field' || lval.dot || baseType.kind !== 'ptr' || baseType.to.kind !== 'struct' || off % width) {
-    return false;
+/** A stamped narrow store (raise/storesign.ts) spelled through a MEMBER — a struct field, a union
+ *  member's view, a struct-array element's field — is converted by the compiler to that member's
+ *  DECLARED type, so where the declaration's signedness is not the stamp's the stamp is lost:
+ *  `a0->field_6 = -104` under `u16 field_6` recompiles to `li 0xff98`, where the stamp read
+ *  `li -104`. Such a store is spelled instead as the flat cell `flatBase[off / width]` at the same
+ *  address, which the backend casts to the stamp's view: `((s16 *)a0)[3] = -104`, and for an
+ *  element `((s16 *)(a0 + a1))[1] = -104`. THE ONE copy of that rule, for the `store` and `astore`
+ *  branches alike, and it reads the member's type off the spelled lvalue (`ctype`), so every way a
+ *  member gets declared — a load's extension, a stamp, a union's view — is judged the same.
+ *
+ *  `width` is the store's, or `undefined` for an `astore`, which does not carry it: raise/struct-arrays.ts
+ *  declares every field at the one width its accesses share, so the member's own width is the store's.
+ *
+ *  `lval` comes back unchanged for an unstamped store, an lvalue that is not a member, a member
+ *  whose type is not a narrow integer of the store's width or agrees with the stamp, no `flatBase`,
+ *  and an offset that is not a whole number of cells (no flat subscript spells it). */
+function stampedStoreLval(
+  lval: Expr,
+  stamp: boolean | undefined,
+  storeWidth: number | undefined,
+  flatBase: Expr | null,
+  off: number,
+  ctype: (e: Expr) => IrType | undefined,
+): Expr {
+  if (stamp === undefined || lval.k !== 'field' || flatBase === null) {
+    return lval;
   }
-  const f = baseType.to.fields.find((m) => m.name === lval.name && m.off === off);
-  return f?.type.kind === 'int' && f.type.width === width * 8 && f.type.signed !== signed;
+  const t = ctype(lval);
+  const width = storeWidth ?? (t?.kind === 'int' ? t.width / 8 : 0);
+  if (t?.kind !== 'int' || (width !== 1 && width !== 2) || t.width !== width * 8 || t.signed === stamp || off % width) {
+    return lval;
+  }
+  return { k: 'index', base: flatBase, idx: { k: 'const', value: off / width }, width, signed: stamp };
 }
 
 function memAccess(
@@ -4851,32 +4875,45 @@ export function structure(
         // signedness mirrors recoverTypes' store seed (a stamped constant's sign, else word ⇒
         // signed and narrow ⇒ unsigned), so an inserted cast declares the same scalar the
         // recovered pointee would have; a constant both views store alike takes the pointee's
-        // own view (`either`) and asks for no cast. A member is spelled through its declared type, so a
-        // stamped store whose sign that type does not share is spelled as the flat cell instead,
-        // which the backend casts: `a0->field_6 = -104` under `u16 field_6` recompiles to
-        // `li 0xff98`, and `((s16 *)a0)[3] = -104` to the `li -104` the stamp read.
+        // own view (`either`) and asks for no cast. A member whose declared sign is not the
+        // stamp's is spelled as the flat cell off the struct pointer (stampedStoreLval).
+        const bt = op.operands[0].type;
         const lval = pinnedAccess(
           op,
-          stamp !== undefined && memberSignDisagrees(op.operands[0].type, lval0, off, width, stamp)
-            ? { k: 'index', base: baseExpr, idx: { k: 'const', value: off / width }, width, signed: stamp }
-            : lval0,
+          stampedStoreLval(
+            lval0,
+            stamp,
+            width,
+            bt.kind === 'ptr' && bt.to.kind === 'struct' ? baseExpr : null,
+            off,
+            ctype,
+          ),
         );
         out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
-        const lval = arrayAccess(
+        const fieldOff = op.attrs.fieldOff as number | undefined;
+        const stamp = op.attrs.signed as boolean | undefined;
+        const lval0 = arrayAccess(
           op.operands[0],
           expr(op.operands[0]),
           expr(op.operands[1]),
-          op.attrs.fieldOff as number | undefined,
+          fieldOff,
           op.attrs.memberOff as number | undefined,
           elemSize,
-          // a member array's store spells through the member's OWN declaration, which the
-          // recognizer records; every other astore keeps the width===4 convention
-          (op.attrs.signed as boolean | undefined) ?? elemSize === 4,
+          // the signedness a recovery recorded (a member array's declaration, or the sign
+          // raise/storesign.ts read off a stored constant), else the width===4 convention
+          stamp ?? elemSize === 4,
           ctype,
           symCtx,
         );
+        // a struct-array element's field: `base[i].field_K`, whose flat cell is
+        // `(base + i)[K / width]` — C scales `base + i` by the element, exactly as `base[i]` does
+        const el = lval0.k === 'field' && lval0.base.k === 'index' ? lval0.base : null;
+        const lval =
+          el === null || fieldOff === undefined
+            ? lval0
+            : stampedStoreLval(lval0, stamp, undefined, { k: 'bin', op: '+', l: el.base, r: el.idx }, fieldOff, ctype);
         out.push({
           k: 'store',
           lval: pinnedAccess(op, lval),

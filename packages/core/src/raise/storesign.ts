@@ -11,8 +11,9 @@
 //
 // This pass records that as the store's `signed` attr, the slot an `astore` already carries for a
 // member's recorded signedness. raise/arrays.ts and raise/struct-arrays.ts carry it into the
-// `astore` they make; recoverTypes, the structurer's store branches, and raise/structs.ts and
-// raise/struct-arrays.ts (a field only ever stored) read it. It changes no op and no value: what it
+// `astore` they make; recoverTypes, the structurer's store branches (which spell a member whose
+// declared sign is not the stamp's as a cast cell, structure/structure.ts `stampedStoreLval`), and
+// raise/structs.ts and raise/struct-arrays.ts (a field only ever stored) read it. It changes no op and no value: what it
 // moves is which view of the cell the C spells, and both views store the same bytes.
 //
 // It refuses (leaves the attr unset, so the convention stands) for:
@@ -64,12 +65,16 @@ export function seedNarrowStoreSigns(fn: Fn, target: TargetDescription): number 
   // the values read other than as the value a store stores. Not a `ret`'s: before the return
   // type is known it reads the return register whether the function returns it or not, and gcc
   // stores a constant from that register in its delay slot (`li v0,-1; jr ra; sh v0,12(a0)`).
+  // Nor an edge's into a block param only a `ret` reads, directly or through more such params:
+  // that is the same register live out of a branch, `beqz a1,L; ...; li v0,0x8000; sh v0,4(a0);
+  // L: jr ra`.
+  const retOnly = retOnlyParams(fn);
   const otherUses = new Set<Value>();
   const bump = (v: Value) => otherUses.add(v);
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       op.operands.forEach((v, i) => ((op.opcode === 'store' && i === 1) || op.opcode === 'ret' ? undefined : bump(v)));
-      op.successors.forEach((s) => s.args.forEach(bump));
+      op.successors.forEach((s) => s.args.forEach((v, i) => (retOnly.has(s.block.params[i]) ? undefined : bump(v))));
     }
   }
   // a stored constant's 32-bit register → the widths it is stored at, across every const op
@@ -99,4 +104,35 @@ export function seedNarrowStoreSigns(fn: Fn, target: TargetDescription): number 
     }
   }
   return n;
+}
+
+/** The block params (not the entry's: those are the function's parameters) that nothing reads but
+ *  a `ret` and the edges into other such params. */
+function retOnlyParams(fn: Fn): Set<Value> {
+  const read = new Set<Value>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if (op.opcode !== 'ret') {
+        op.operands.forEach((v) => read.add(v));
+      }
+    }
+  }
+  const out = new Set(fn.blocks.slice(1).flatMap((b) => b.params.filter((p) => !read.has(p))));
+  // an edge into a param that is not ret-only reads its argument: drop arguments until none moves
+  for (let moved = true; moved;) {
+    moved = false;
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        for (const s of op.successors) {
+          s.args.forEach((v, i) => {
+            if (out.has(v) && !out.has(s.block.params[i])) {
+              out.delete(v);
+              moved = true;
+            }
+          });
+        }
+      }
+    }
+  }
+  return out;
 }

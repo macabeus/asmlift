@@ -174,8 +174,15 @@ describe('a narrow store of a variable holding a constant is never stamped signe
 // spelled through a cast to the unsigned view (or the reverse) and recompiled to the other constant.
 // rt2 is the unsigned control, which matched without the stamp too. rt4 and rt5 are the indexed
 // stores the stamp rides into (`astore`, scalar and struct element); rt6 is a member whose load
-// declared it unsigned and whose store the stamp spells through the signed cell.
-const ROUND_TRIP: [string, string[], string][] = [
+// declared it unsigned and whose store the stamp spells through the signed cell; rt7 is the same
+// through a struct-ARRAY element (`((s16 *)(a0 + a1))[1] = -104`); rt8 is a union member whose
+// view one store's stamp declared signed and whose other store, stamped unsigned and reaching the
+// return register's join, is spelled through the unsigned cell.
+//
+// The fourth entry names a toolchain a body does not round-trip on FOR A REASON OTHER THAN SIGN, and
+// what that reason is. rt7 on ido7.1: the store is spelled `li -104` under `s16 field_2`, but ido
+// schedules the two stores in the opposite order to the C whichever order the C writes them.
+const ROUND_TRIP: [string, string[], string, Record<string, string>?][] = [
   ['rt1', ['s16 *', 's16 *'], 'void rt1(s16 *p, s16 *q) { *q = p[6]; p[6] = -1; }'],
   ['rt2', ['u16 *', 'u16 *'], 'void rt2(u16 *p, u16 *q) { *q = p[6]; p[6] = -1; }'],
   ['rt3', ['s8 *', 's8 *'], 'void rt3(s8 *p, s8 *q) { *q = p[1]; p[1] = -1; }'],
@@ -190,6 +197,19 @@ const ROUND_TRIP: [string, string[], string][] = [
     ['void *', 'u16 *'],
     'typedef struct { u16 a; u16 b; u16 c; s16 h; s32 d; s32 z; } S;\n' +
       'void rt6(S *p, u16 *q) { u16 t = (u16)p->h; p->h = -104; p->z = 0; *q = t; }',
+  ],
+  [
+    'rt7',
+    ['void *', 's32', 'void *'],
+    'typedef struct { u16 a; s16 h; s32 c; } E;\n' +
+      'void rt7(E *p, s32 i, u16 *q) { *q = (u16)p[i].h; p[i].h = -104; p[i].c = 0; }',
+    { 'ido7.1': 'statement order: ido swaps the two stores' },
+  ],
+  [
+    'rt8',
+    ['void *', 's32'],
+    'typedef struct { s32 a; union { s16 h; u8 b[2]; } u; s16 z; } S;\n' +
+      'void rt8(S *p, s32 c) { p->u.h = -1; p->u.b[1] = 3; if (c) *(u16 *)&p->u = 0x8000; }',
   ],
 ];
 
@@ -225,7 +245,10 @@ describe('a narrow store of a constant recompiles byte-exact through the view it
     test.runIf(have)(
       name,
       () => {
-        for (const [sym, params, c] of ROUND_TRIP) {
+        for (const [sym, params, c, notOn] of ROUND_TRIP) {
+          if (notOn?.[name] !== undefined) {
+            continue;
+          }
           const { obj, asm } = compile(c, sym);
           const r = decompile(sym, asm, target, { prototypes: { [sym]: { params, returnsVoid: true } } });
           expect({ sym, score: scoreObjects(obj, compile(r.source, sym).obj, sym).score }).toEqual({ sym, score: 0 });

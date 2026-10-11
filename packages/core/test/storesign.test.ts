@@ -181,3 +181,53 @@ test("a load's signedness wins over a stamped store's at the same field", () => 
   expect(src('lhu')).toContain('    ((s16 *)a0)[3] = -104;\n');
   expect(src('lh')).toContain('    a0->field_6 = -104;\n');
 });
+
+// `p->u.h = -1; p->u.b[1] = 3; if (c) *(u16 *)&p->u = 0x8000;` as gcc2.7.2 leaves it: the last
+// constant reaches the join `jr ra` reads v0 at
+const JOIN = ['0:\tli\tv0,-1', '4:\tsh\tv0,4(a0)', '8:\tli\tv0,3', 'c:\tbeqz\ta1,1c <f+0x1c>', '10:\tsb\tv0,5(a0)'];
+
+test('a constant that reaches a join only the return reads is stamped, as one the `ret` reads is', () => {
+  expect(stamps(obj(...JOIN, '14:\tli\tv0,0x8000', '18:\tsh\tv0,4(a0)', '1c:\tjr\tra', '20:\tnop'))).toEqual([
+    true,
+    undefined,
+    false,
+  ]);
+  // …and not when anything else reads the join: the word store reads the value the half stored
+  expect(
+    stamps(obj(...JOIN, '14:\tli\tv0,0x8000', '18:\tsh\tv0,4(a0)', '1c:\tsw\tv0,0(a2)', '20:\tjr\tra', '24:\tnop')),
+  ).toEqual([true, undefined, undefined, undefined]);
+});
+
+test("a union member's view one stamp declared is not spelled for a store the other stamp read", () => {
+  const src = decompile(
+    'f',
+    obj(...JOIN, '14:\tli\tv0,0x8000', '18:\tsh\tv0,4(a0)', '1c:\tjr\tra', '20:\tnop'),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['void *', 's32'], returnsVoid: true } } },
+  ).source;
+  expect(src).toContain('union { s16 half; u8 byte[2]; } field_4;');
+  expect(src).toContain('    a0->field_4.half = -1;\n');
+  expect(src).toContain('((u16 *)a0)[2] = 32768;');
+});
+
+test("a struct-array element's field its load declared is not spelled for a store the other stamp read", () => {
+  // `*q = (u16)p[i].h; p[i].h = -104; p[i].c = 0;` over `struct { u16 a; s16 h; s32 c; } *p`
+  const src = decompile(
+    'f',
+    obj(
+      '0:\tsll\ta1,a1,0x3',
+      '4:\taddu\ta1,a1,a0',
+      '8:\tlhu\tv0,2(a1)',
+      'c:\tsh\tv0,0(a2)',
+      '10:\tli\tv0,-104',
+      '14:\tsh\tv0,2(a1)',
+      '18:\tjr\tra',
+      '1c:\tsw\tzero,4(a1)',
+    ),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['void *', 's32', 'void *'], returnsVoid: true } } },
+  ).source;
+  expect(src).toContain(' u16 field_2;');
+  expect(src).toContain('    ((s16 *)(a0 + a1))[1] = -104;\n');
+  expect(src).toContain('    a0[a1].field_4 = 0;\n');
+});
