@@ -476,21 +476,21 @@ export function contentShareableDir(prefix: string, flags: readonly string[], so
 const poolEnabled = () => process.env.ASMLIFT_DOCKER_POOL !== '0';
 const poolReady = new Set<string>(); // container names this process has confirmed running
 
-/** Counts, over this process, of the two things a containerized compile can do besides `docker exec`
- *  in a pool it already knew: confirm or start a pool container (which runs whatever image its tag
- *  names at that moment), and compile in a one-shot `docker run` (which writes `/work`, not the
- *  scratch directory, into an object). A store keyed on one route and one image reads them around
- *  each compile. */
-export interface ContainerRoutes {
-  poolStarts: number;
-  oneShots: number;
-}
-const routes: ContainerRoutes = { poolStarts: 0, oneShots: 0 };
-export const containerRoutes = (): ContainerRoutes => ({ ...routes });
+// Counts, over this process, of the two things a containerized compile can do besides `docker exec`
+// in a pool it already knew: confirm or start a pool container (which runs whatever image its tag
+// names at that moment), and compile in a one-shot `docker run` (which runs whatever image the tag
+// names at that moment, and writes `/work`, not the scratch directory, into an object). A store
+// keyed on one route and one image reads them around each compile.
+const poolStartCounts = new Map<string, number>();
+let oneShotCount = 0;
+/** How many times this process confirmed or started the pool container `name`. */
+export const poolStarts = (name: string): number => poolStartCounts.get(name) ?? 0;
+/** How many compiles this process ran in a one-shot `docker run`. */
+export const oneShots = (): number => oneShotCount;
 
-/** `docker run` for a compile that did not get a pool, counted in `containerRoutes`. */
+/** `docker run` for a compile that did not get a pool, counted in `oneShots`. */
 function oneShot(docker: string, args: string[]) {
-  routes.oneShots++;
+  oneShotCount++;
   return run(docker, args);
 }
 
@@ -527,22 +527,23 @@ function ensurePooled(docker: string, image: string, name: string, mounts: strin
   if (poolReady.has(name)) {
     return true;
   }
-  const ins = run(docker, ['container', 'inspect', '-f', '{{.State.Running}}', name]);
-  if (ins.status === 0 && ins.stdout.trim() === 'true') {
-    poolReady.add(name);
-    routes.poolStarts++;
-    return true;
+  const running = (): boolean => {
+    const ins = run(docker, ['container', 'inspect', '-f', '{{.State.Running}}', name]);
+    if (ins.status === 0 && ins.stdout.trim() === 'true') {
+      return true;
+    }
+    if (ins.status === 0) {
+      run(docker, ['rm', '-f', name]);
+    } // exists but exited (expired sleep)
+    const r = run(docker, ['run', '-d', '--name', name, '--platform', 'linux/386', ...mounts, image, 'sleep', '86400']);
+    return r.status === 0 || /already in use/i.test(r.stderr ?? '');
+  };
+  if (!running()) {
+    return false; // no docker daemon / image → caller cold-runs (surfacing the real error there)
   }
-  if (ins.status === 0) {
-    run(docker, ['rm', '-f', name]);
-  } // exists but exited (expired sleep)
-  const r = run(docker, ['run', '-d', '--name', name, '--platform', 'linux/386', ...mounts, image, 'sleep', '86400']);
-  if (r.status === 0 || /already in use/i.test(r.stderr ?? '')) {
-    poolReady.add(name);
-    routes.poolStarts++;
-    return true;
-  }
-  return false; // no docker daemon / image → caller cold-runs (surfacing the real error there)
+  poolReady.add(name);
+  poolStartCounts.set(name, poolStarts(name) + 1);
+  return true;
 }
 
 /** `docker exec` in the pool. Returns null when the pool itself is unusable (caller cold-runs);

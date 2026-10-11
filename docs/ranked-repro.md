@@ -606,9 +606,7 @@ find nothing to disagree with and go green having audited nothing.
   `-B /opt/tc/arm-` used as a filename PREFIX rather than a
   directory (the operand is measured as a path, so the prefix spelling names nothing that exists
   and contributes nothing);
-  a candidate's assembler `.include`/`.incbin` (the per-key refusal tests the C preprocessor's
-  `#include`, and asmlift's emitter emits object-like `#define` only — measured 0 of 66,816 on
-  LoadBGTilemapData); the compiler's own built-in search directories, which every corpus
+  the compiler's own built-in search directories, which every corpus
   template puts out of reach with `-nostdinc`; and an opaque runtime this build has never heard of
   — the refusal above is a deny-list of process names, and a deny-list's miss is on the
   stale-object side.
@@ -770,11 +768,8 @@ find nothing to disagree with and go green having audited nothing.
     staleness touches. At 2%: C = 700 is certain, C = 100 is 87%, C = 9 is 17%, C = 1 is 2%
     (mean 50 runs, 87% within 100). Most of the residuals listed above are "the namespace does
     not measure input X" where X is read by a whole CLASS — a directory, a wrapper's config, the
-    runtime — and those are caught in the first run that serves a few hundred keys. **One is not:**
-    a candidate's own assembler `.include`/`.incbin` is per-CANDIDATE, and the same list measures
-    it at 0 of 68,352 on LoadBGTilemapData — the sparse regime, where the honest number is the
-    50-run figure, not "the first run".
-    **And the BENCH path is sparser than the ranked one, though the rate is the same.** One whole
+    runtime — and those are caught in the first run that serves a few hundred keys.
+    **The BENCH path is sparser than the ranked one, though the rate is the same.** One whole
     `pnpm bench run` serves ~60,800 answers and audits ~1,280 of them (2.1%), so a staleness
     confined to ONE ROW's keys (~9 objects on the agbcc real tier) is caught with probability 17%
     per bench run — a mean of about 6. The bench is where every published score comes from, so that

@@ -22,12 +22,12 @@ import {
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
-  candidateCacheRefusal,
   isChainMeasurement,
   noteKeyRefused,
   sha,
   toolchainFileChain,
 } from './candcache';
+import { candidateReadsRefusal } from './candcache-reads';
 import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
 import { stripShellComments } from './shell-text';
 
@@ -975,15 +975,14 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     return stamped;
   });
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
-  // cache on for every other candidate. Two shapes, both in `candidateCacheRefusal` (shared with
-  // the bench pipeline, because a predicate copied into two files is a predicate fixed in one):
-  // a TU that READS A FILE — the path lives in the TU, not in the template's tokens, and no probe
-  // exercises it — and a TU that bakes its own path or the clock in via `__FILE__` / `__DATE__`.
+  // cache on for every other candidate (candcache-reads.ts, shared with the bench pipelines). The
+  // template's compiler is unknown, so no preprocessor reports what the TU read: its text is read,
+  // fail-closed, and its inline asm is taken to reach a GNU assembler.
   const cacheable = (content: string): boolean => {
     if (cache.mode === 'off') {
       return false;
     }
-    const reason = candidateCacheRefusal(content);
+    const reason = candidateReadsRefusal(content, { gnuAs: true });
     if (reason === undefined) {
       return true;
     }

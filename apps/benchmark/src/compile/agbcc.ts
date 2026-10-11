@@ -8,11 +8,17 @@ import {
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
-  candidateCacheRefusal,
   isChainMeasurement,
   noteKeyRefused,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
+import {
+  type PreprocessorReport,
+  candidateCacheRefusal,
+  candidateReadsRefusal,
+  cppReport,
+  cppReportFlags,
+} from '@asmlift/cli/candcache-reads';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { TOOLCHAIN } from '@asmlift/toolchains';
@@ -25,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import type { BuiltTarget } from '../toolchains';
 import type { RealCompile, RealProjectCfg } from './types';
-import { DIAGNOSTIC_SOURCES, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
+import { DIAGNOSTIC_SOURCES, READS_SOURCE, compilerDiagnostics, contentDir, run, scratchSlot } from './util';
 
 /**
  * A failed step, thrown so that a DETERMINISTIC rejection and a TRANSIENT one cannot be confused.
@@ -99,19 +105,23 @@ const vendorScratch = scratchSlot('bench-vendor-');
 // (it owns `run`'s env and timeout, and `scratchSlot`), are hashed in. An unreadable source is a
 // REFUSAL, never a guess.
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** Every harness module whose text shapes what the compiler is handed, how it is invoked, or the
- *  message a stored rejection carries (`DIAGNOSTIC_SOURCES`).
+/** Every harness module whose text shapes what the compiler is handed, how it is invoked, the
+ *  message a stored rejection carries (`DIAGNOSTIC_SOURCES`), or which answers are kept
+ *  (`READS_SOURCE`).
  *  Exported so the dropped-entry guard can be asserted where no toolchain is installed:
  *  `candCacheNamespaceFiles()` below MEASURES the machine's compilers and refuses when it cannot
  *  read one, so the assertion that these are on the list cannot itself run on a bare runner. */
-export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), ...DIAGNOSTIC_SOURCES];
+export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), ...DIAGNOSTIC_SOURCES, READS_SOURCE];
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
 /** Preprocess a candidate TU: cpp reads it on stdin, so no scratch directory reaches its linemarkers
  *  (see `assemble`), under a leading linemarker that names it `c.c`. agbcc's diagnostics, which a row
- *  publishes as `errorMarkers`, and a `-g` listing's debug rows then name that constant file. */
-function preprocessCandidate(tu: string, iPath: string): ReturnType<typeof run> {
-  return run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, '-', '-o', iPath], { input: `# 1 "c.c"\n${tu}` });
+ *  publishes as `errorMarkers`, and a `-g` listing's debug rows then name that constant file. cpp
+ *  writes the files it entered to `dPath`. */
+function preprocessCandidate(tu: string, iPath: string, dPath: string): ReturnType<typeof run> {
+  return run('arm-none-eabi-cpp', [...CAND_CPP_FLAGS, ...cppReportFlags(dPath), '-', '-o', iPath], {
+    input: `# 1 "c.c"\n${tu}`,
+  });
 }
 
 /** Run the candidate pipeline on a fixed probe TU in `dir`, returning the object's sha256 — or
@@ -122,7 +132,7 @@ function stampProbeIn(dir: string, cflags: readonly string[]): string | null {
     sPath = join(dir, 'p.s'),
     oPath = join(dir, 'p.o');
   try {
-    if (preprocessCandidate(STAMP_PROBE, iPath).status !== 0) {
+    if (preprocessCandidate(STAMP_PROBE, iPath, join(dir, 'p.d')).status !== 0) {
       return null;
     }
     assemble(stripPrototype(readFileSync(iPath, 'utf8'), 'asmlift_candcache_stamp'), sPath, oPath, cflags);
@@ -183,7 +193,7 @@ export function candCacheStaticStamp(
   h.update('bench-agbcc/v2');
   h.update([...TOOLCHAIN.harnessFlags, ...cflags].join(' '));
   h.update(TOOLCHAIN.as + ' ' + TOOLCHAIN.asFlags.join(' '));
-  h.update('cpp ' + CAND_CPP_FLAGS.join(' '));
+  h.update('cpp ' + [...CAND_CPP_FLAGS, ...cppReportFlags('c.d')].join(' '));
   for (const v of COMPILE_ENV) {
     h.update(`env:${v}=${process.env[v] ?? ''}`);
   }
@@ -254,18 +264,17 @@ export const agbccReal: RealCompile = {
   compileCandidate(tu, sym, cflags): string {
     const cache = cacheFor(cflags);
     // A candidate TU whose object is not a function of its own bytes is refused PER KEY, and the
-    // reason is said once. Two shapes: a TU that reads a file (the path is in the TU, not in any
-    // flag, and no probe exercises it — MEASURED: with `CPATH` pointing at a directory, editing
-    // the included header between two cache-on runs served 7143fac350d6311b where the truth is
-    // 7430abf1c6ff95bc), and a TU that bakes its own path or the clock in through `__FILE__` /
-    // `__DATE__`. Today no candidate carries either (0 of 65,281 LBG sources), so the refusal
-    // costs nothing and stops the day an emitter change arms it.
+    // reason is said once: a TU that reads a file (the path is in the TU, not in any flag, and no
+    // probe exercises it — MEASURED: with `CPATH` pointing at a directory, editing the included
+    // header between two cache-on runs served 7143fac350d6311b where the truth is
+    // 7430abf1c6ff95bc), that hands its assembler one, or that bakes its own path or the clock in.
+    // What the text alone decides is refused here; what cpp reports, once the compile has run.
     const refusal = candidateCacheRefusal(tu);
     if (refusal) {
       if (cache.mode !== 'off') {
         noteKeyRefused('bench-agbcc', refusal);
       }
-      return compileCandidateRaw(tu, sym, cflags);
+      return compileCandidateRaw(tu, sym, cflags, {});
     }
     if (cache.mode === 'on') {
       const hit = cache.get(tu, sym);
@@ -277,30 +286,47 @@ export const agbccReal: RealCompile = {
       }
     }
     cache.warm();
-    try {
-      const o = compileCandidateRaw(tu, sym, cflags);
-      if (cache.mode !== 'off') {
-        cache.verify(tu, sym, o);
-        return cache.put(tu, sym, o);
+    const seen: { report?: PreprocessorReport } = {};
+    const reads = (): string | undefined => {
+      const reason = candidateReadsRefusal(tu, { report: seen.report, gnuAs: true });
+      if (reason !== undefined) {
+        noteKeyRefused('bench-agbcc', reason);
       }
-      return o;
+      return reason;
+    };
+    try {
+      const o = compileCandidateRaw(tu, sym, cflags, seen);
+      if (cache.mode === 'off') {
+        return o;
+      }
+      if (reads() !== undefined) {
+        cache.abandonAudit(tu, sym);
+        return o;
+      }
+      cache.verify(tu, sym, o);
+      return cache.put(tu, sym, o);
     } catch (e) {
       // A negative entry is only sound for a DETERMINISTIC rejection — the compiler ran, exited
       // nonzero AND diagnosed something (`stepFailed` above is where that is decided, off the
       // spawn result rather than off the message). `util.ts run()` throws `spawnFailure` for a
       // missing binary or the 120 s timeout. Caching any of those would silently drop a candidate
       // on every future run, the failure mode this repo calls a silent wrong answer.
-      if (cache.mode !== 'off' && e instanceof CompilerRejection && DETERMINISTIC_REJECTION.test(e.message)) {
+      if (
+        cache.mode !== 'off' &&
+        e instanceof CompilerRejection &&
+        DETERMINISTIC_REJECTION.test(e.message) &&
+        reads() === undefined
+      ) {
         // verifyFail FIRST: under `verify` a stored OBJECT for a TU that no longer compiles is a
         // mismatch, and it is the direction that was audited by nothing at all.
         cache.verifyFail(tu, sym, e);
         cache.putFail(tu, sym, e);
         throw e;
       }
-      // A TRANSIENT — exactly the failures the guard above refuses to store. If the sampled audit
-      // withheld this key there is no fresh answer to compare, so the audit is abandoned and the
-      // withheld answer comes back: sampling must never cost a candidate that an unaudited run
-      // would have been served straight off disk.
+      // A TRANSIENT, or a rejection of a TU that read a file — the failures the guard above refuses
+      // to store. If the sampled audit withheld this key there is no fresh answer to compare, so the
+      // audit is abandoned and the withheld answer comes back: sampling must never cost a candidate
+      // that an unaudited run would have been served straight off disk.
       if (cache.mode !== 'off') {
         const held = cache.abandonAudit(tu, sym);
         if (typeof held === 'string') {
@@ -329,16 +355,23 @@ export const agbccReal: RealCompile = {
   },
 };
 
-function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[]): string {
+function compileCandidateRaw(
+  tu: string,
+  sym: string,
+  cflags: readonly string[],
+  seen: { report?: PreprocessorReport },
+): string {
   const dir = candScratch();
   const iPath = join(dir, 'c.i'),
+    dPath = join(dir, 'c.d'),
     sPath = join(dir, 'c.s'),
     oPath = join(dir, 'c.o');
   // candidate TUs are self-contained (typedefs/vendored context inline): bare -nostdinc cpp
-  const cpp = preprocessCandidate(tu, iPath);
+  const cpp = preprocessCandidate(tu, iPath, dPath);
   if (cpp.status !== 0) {
     stepFailed('cpp', cpp);
   }
+  seen.report = cppReport(dPath, iPath);
   assemble(stripPrototype(readFileSync(iPath, 'utf8'), sym), sPath, oPath, cflags);
   return oPath;
 }

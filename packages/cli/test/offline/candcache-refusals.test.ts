@@ -76,62 +76,6 @@ const object = (bytes: string): string => {
 };
 
 describe('a TU whose object is not a function of its own bytes is refused PER KEY', () => {
-  // The regex this replaces ran on RAW text, and the preprocessor gets there first: phase 2
-  // splices backslash-newlines, phase 3 replaces comments. Six spellings were demonstrated as
-  // real includes that the guard passed — each one a header the namespace cannot see.
-  test.each([
-    ['plain', '#include "k.h"\nint f(void);\n'],
-    ['backslash-newline inside the word', '#in\\\nclude "k.h"\nint f(void);\n'],
-    ['backslash-newline after the #', '#\\\ninclude "k.h"\nint f(void);\n'],
-    ['form feed before the #', '\f#include "k.h"\nint f(void);\n'],
-    ['vertical tab before the #', '\v#include "k.h"\nint f(void);\n'],
-    ['#import', '#import "k.h"\nint f(void);\n'],
-    ['a comment between the # and the directive', '#/*c*/include "k.h"\nint f(void);\n'],
-    ['#include_next', '#include_next "k.h"\nint f(void);\n'],
-    ['the trigraph for #', '??=include "k.h"\nint f(void);\n'],
-    // A comment is replaced by ONE SPACE, newlines and all — so this comment JOINS the two
-    // physical lines into a single directive. Measured against the preprocessor that will read it:
-    // `arm-none-eabi-cpp -nostdinc -I.` on this TU resolves `k.h` and substitutes its macro
-    // (`int f(int x){return x*3;}`). A phase-3 normalisation that keeps the newlines "so line
-    // starts survive" answers `undefined` here, which is the one spelling a raw `/^#include/`
-    // cannot see either.
-    ['a comment spanning the newline', '#/*\n*/include "k.h"\nint f(void);\n'],
-    ['a comment spanning several newlines', '#/*\n\n*/include "k.h"\nint f(void);\n'],
-    // Measured with `arm-none-eabi-cpp -P -nostdinc -I.` and `cpp-14` alike: the digraph includes
-    // `k.h` (its `#define K 7` reaches `return K;`), and `__has_include` picks the branch by
-    // whether the file is there.
-    ['the digraph for #', '%:include "k.h"\nint f(void);\n'],
-    ['__has_include', '#if __has_include("k.h")\nint f(void);\n#endif\n'],
-    ['__has_include_next', '#if __has_include_next(<k.h>)\nint f(void);\n#endif\n'],
-  ])('a TU that reads a file is refused: %s', async (_name, tu) => {
-    const r = await load({}, (m) => m.candidateCacheRefusal(tu));
-    expect(r, 'the preprocessor resolves this include; the guard must see it too').toBe('the-TU-reads-a-file');
-  });
-
-  test.each([['__FILE__'], ['__DATE__'], ['__TIME__'], ['__TIMESTAMP__'], ['__BASE_FILE__']])(
-    'a TU that bakes its path or the clock in is refused: %s',
-    async (macro) => {
-      // MEASURED before this existed: three uncached compiles of a `__FILE__` TU produced three
-      // different 836-byte objects through the production namespace, and the stamp probe — one
-      // fixed TU that uses neither macro — certified the pipeline pure and froze the first.
-      const r = await load({}, (m) => m.candidateCacheRefusal(`const char *s = ${macro};\n`));
-      expect(r).toBe('the-TU-bakes-its-path-or-the-clock-into-the-object');
-    },
-  );
-
-  test('an ordinary candidate is NOT refused — the refusal is per key, not a switch', async () => {
-    const tu = 's32 f(s32 a0) { /* not an #include, just prose */ return a0 + 1; }\n';
-    expect(await load({}, (m) => m.candidateCacheRefusal(tu))).toBeUndefined();
-  });
-
-  test('a #include written INSIDE a multi-line comment is not one — the comment takes it with it', async () => {
-    // The other direction of the same rule, and the one that keeps collapsing comments from
-    // refusing every candidate whose prose mentions a header. Measured: this TU preprocesses to
-    // `int f(int x){return x*2;}`, no include resolved.
-    const tu = '/* a comment mentioning\n#include "k.h"\nspanning lines */\nint f(int x){return x*2;}\n';
-    expect(await load({}, (m) => m.candidateCacheRefusal(tu))).toBeUndefined();
-  });
-
   test('the per-key refusal is COUNTED, not only said — once per reason, every time', async () => {
     // Hole 2's entire protection reported nothing: `noteKeyRefused` said one line per reason and
     // bumped no counter, so a 16-shard run where an emitter change armed `#include` printed one

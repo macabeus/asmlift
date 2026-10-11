@@ -141,6 +141,9 @@ export const mwccCacheSpec = (
   hostCommands: mwccNative(mwcc) ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
   sources: [join(HERE, 'mwcc.ts'), ...DOCKER_COMPILE_SOURCES],
   refused: mwccRefused,
+  // CodeWarrior assembles inline asm itself, and refuses `.include` and `.incbin` there (MEASURED:
+  // "end of line expected" for both).
+  gnuAs: false,
 });
 const cachedCandidate = dockerCachedBy(
   mwccCacheSpec,

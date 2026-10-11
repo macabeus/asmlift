@@ -38,6 +38,7 @@ import {
   dockerStaticStamp,
   gccRefused,
   mwccRefused,
+  runsOn,
   scrubScratchDir,
 } from '../src/compile/docker-cache';
 import { gcc272CacheSpec } from '../src/compile/gcc272';
@@ -164,7 +165,45 @@ const gcc272TestSpec = ({ cache, toolchains }: RunModules, label: string): Docke
   hostCommands: [],
   sources: [],
   refused: cache.gccRefused,
+  gnuAs: true,
 });
+
+/** A private tag on GCC 2.7.2's image, and a second image whose compiles are byte-identical to it,
+ *  so that only their content IDs tell the two apart; both, and the tag's pool, removed afterwards. */
+async function withPrivateImage(
+  fn: (t: {
+    tag: string;
+    other: string;
+    onTag: Record<string, string>;
+    poolOf: (m: RunModules) => string;
+  }) => Promise<void>,
+): Promise<void> {
+  const suffix = `${process.pid}-${Date.now()}`;
+  const tag = `asmlift-test-retag:${suffix}`;
+  const other = `asmlift-test-retag-other:${suffix}`;
+  const pools = new Set<string>();
+  const created = docker(['create', '--platform', 'linux/386', GCC272_TOOLCHAIN.image, 'true']);
+  docker(['commit', '-c', `LABEL asmlift.test=${suffix}`, created, other]);
+  docker(['rm', created]);
+  docker(['tag', GCC272_TOOLCHAIN.image, tag]);
+  try {
+    await fn({
+      tag,
+      other,
+      onTag: { ASMLIFT_GCC272_IMAGE: tag },
+      poolOf: (m) => {
+        const pool = m.toolchains.gcc272PoolCfg().name;
+        pools.add(pool);
+        return pool;
+      },
+    });
+  } finally {
+    for (const pool of pools) {
+      spawnSync(GCC272_TOOLCHAIN.docker, ['rm', '-f', pool]);
+    }
+    spawnSync(GCC272_TOOLCHAIN.docker, ['rmi', tag, other]);
+  }
+}
 
 describe('the namespace takes the compiler directory by content', () => {
   // `native` is true so nothing here asks Docker for an image; the directory half is what is read.
@@ -180,6 +219,7 @@ describe('the namespace takes the compiler directory by content', () => {
     hostCommands: [],
     sources: [],
     refused: gccRefused,
+    gnuAs: true,
   });
 
   test('two copies of one directory are one namespace, and an edit inside it is another', () => {
@@ -246,10 +286,10 @@ describe("each pipeline's key", () => {
   });
 
   test.each(pipelines)(
-    "%s: hashes the harness files its TU and its stored messages pass through, and core's diagnostics",
+    "%s: hashes the harness files its TU and its stored messages pass through, core's diagnostics, and what decides which answers are kept",
     (_name, specFor, files) => {
       const sources = specFor([]).sources;
-      for (const f of [...files, 'docker-cache.ts', CORE_DIAGNOSTICS]) {
+      for (const f of [...files, 'docker-cache.ts', CORE_DIAGNOSTICS, 'candcache-reads.ts']) {
         const hit = sources.find((p) => basename(p) === f);
         expect(hit, `${f} must be a namespace input`).toBeDefined();
         expect(existsSync(hit!)).toBe(true);
@@ -402,36 +442,6 @@ describe.runIf(HAVE_GCC272)('GCC 2.7.2 in its container', () => {
     CONTAINER_BUDGET,
   );
 
-  test.each([
-    ['#include', (h: string) => `#include "${h}"\nint f(void) { return K; }\n`],
-    ['the digraph %:include', (h: string) => `%:include "${h}"\nint f(void) { return K; }\n`],
-    [
-      '__has_include',
-      (h: string) => `#if __has_include("${h}")\nint f(void) { return 3; }\n#else\nint f(void) { return 5; }\n#endif\n`,
-    ],
-  ])(
-    'compiles a TU that reads a file afresh on every run: %s',
-    async (_spelling, tuFor) => {
-      const store = scratch('dockercache-store-');
-      const header = join(scratch('dockercache-hdr-', '/tmp'), 'k.h');
-      const tu = tuFor(header);
-      const compileTu = ({ gcc272 }: { gcc272: typeof import('../src/compile/gcc272') }) =>
-        readFileSync(gcc272.gcc272Real.compileCandidate(tu, 'f', GCC272_FLAGS, 'c'));
-      writeFileSync(header, '#define K 3\n');
-      const before = await asRun(store, {}, compileTu);
-      writeFileSync(header, '#define K 5\n');
-      if (tu.includes('__has_include')) {
-        rmSync(header);
-      }
-      const after = await asRun(store, {}, compileTu);
-      expect(after.stats).toMatchObject({ refusedKeys: 1 });
-      expect(after.stats.hit).toBeUndefined();
-      expect(before.stats.stored).toBeUndefined();
-      expect(after.value.equals(before.value), 'the edited header reached the object').toBe(false);
-    },
-    CONTAINER_BUDGET,
-  );
-
   test(
     'gives a key the audit withheld its stored answer back when the fresh compile fails',
     async () => {
@@ -577,6 +587,116 @@ describe.runIf(HAVE_GCC272)('GCC 2.7.2 in its container', () => {
         }
         spawnSync(GCC272_TOOLCHAIN.docker, ['rmi', tag, other]);
       }
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    'ends the store on a pool that changed image for every flag set, and keeps no rejection compiled there',
+    async () => {
+      await withPrivateImage(async ({ tag, other, onTag, poolOf }) => {
+        const store = scratch('dockercache-store-');
+        const F2 = [...GCC272_FLAGS, '-fno-common'];
+        type Gcc272 = typeof import('../src/compile/gcc272');
+        const compile = (gcc272: Gcc272, tu: string, flags: readonly string[]) =>
+          readFileSync(gcc272.gcc272Real.compileCandidate(tu, 'f', flags, 'c'));
+        const cold = await asRun(store, onTag, ({ gcc272 }) => {
+          compile(gcc272, OK_TU, GCC272_FLAGS);
+          compile(gcc272, OK_TU, F2);
+        });
+        expect(cold.stats).toMatchObject({ stored: 2 });
+
+        const warm = await asRun(store, onTag, (m) => {
+          compile(m.gcc272, OK_TU, GCC272_FLAGS);
+          compile(m.gcc272, OK_TU, F2);
+          docker(['tag', other, tag]);
+          docker(['rm', '-f', poolOf(m)]);
+          // The rejection that restarts the pool on the other image, under the second flag set…
+          const refusal = thrown(() => m.gcc272.gcc272Real.compileCandidate(REFUSED_TU, 'f', F2, 'c'));
+          // …and the first flag set's stored object, on the same pool.
+          compile(m.gcc272, OK_TU, GCC272_FLAGS);
+          return (refusal as Error).constructor.name;
+        });
+        expect(warm.value).toBe('CompilerRejection');
+        expect(warm.stats).toMatchObject({ hit: 2, miss: 1, refusedKeys: 2 });
+        expect(warm.stats.failStored).toBeUndefined();
+        expect(warm.stats.stored).toBeUndefined();
+      });
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    'notices a pool that another process started on a moved image while this one compiled',
+    async () => {
+      await withPrivateImage(async ({ tag, other, onTag, poolOf }) => {
+        const store = scratch('dockercache-store-');
+        // The other process is played by a docker front: the moment this process removes the pool
+        // (after `docker exec` finds it gone), it starts the pool again from the tag, so this
+        // process finds a running pool and confirms it instead of starting one.
+        const front = scratch('docker-front-');
+        const armed = join(front, 'armed');
+        const mounts = gcc272PoolCfg()
+          .mounts.map((m) => `'${m}'`)
+          .join(' ');
+        writeFileSync(
+          join(front, 'docker'),
+          [
+            '#!/bin/sh',
+            `${MWCC_PPC_TOOLCHAIN.docker} "$@"`,
+            'rc=$?',
+            `if [ "$1" = rm ] && [ -e '${armed}' ]; then`,
+            `  rm -f '${armed}'`,
+            `  ${MWCC_PPC_TOOLCHAIN.docker} run -d --name "$3" --platform linux/386 ${mounts} '${tag}' sleep 86400 >/dev/null`,
+            'fi',
+            'exit $rc',
+            '',
+          ].join('\n'),
+        );
+        chmodSync(join(front, 'docker'), 0o755);
+        const run = await asRun(store, { ...onTag, ASMLIFT_DOCKER: join(front, 'docker') }, (m) => {
+          m.gcc272.gcc272Real.compileCandidate(OK_TU, 'f', GCC272_FLAGS, 'c');
+          docker(['tag', other, tag]);
+          writeFileSync(armed, '');
+          docker(['rm', '-f', poolOf(m)]);
+          m.gcc272.gcc272Real.compileCandidate('int f(int a) { return a + 12; }\n', 'f', GCC272_FLAGS, 'c');
+          return existsSync(armed);
+        });
+        expect(run.value, 'the front started the pool again').toBe(false);
+        expect(run.stats).toMatchObject({ miss: 2, stored: 1, refusedKeys: 1 });
+      });
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    'keeps nothing a one-shot docker run compiled: the tag it reads can move between two of them',
+    async () => {
+      await withPrivateImage(async ({ tag, other, onTag, poolOf }) => {
+        // A pool left running on the tag's image, as an earlier process leaves one.
+        await asRun(scratch('dockercache-store-'), onTag, (m) => {
+          poolOf(m);
+          m.gcc272.gcc272Real.compileCandidate(OK_TU, 'f', GCC272_FLAGS, 'c');
+        });
+        const store = scratch('dockercache-store-');
+        const poolless = await asRun(store, { ...onTag, ASMLIFT_DOCKER_POOL: '0' }, ({ gcc272 }) => {
+          gcc272.gcc272Real.compileCandidate('int f(int a) { return a + 11; }\n', 'f', GCC272_FLAGS, 'c');
+          docker(['tag', other, tag]);
+          gcc272.gcc272Real.compileCandidate('int f(int a) { return a + 12; }\n', 'f', GCC272_FLAGS, 'c');
+        });
+        expect(poolless.stats).toMatchObject({ refused: 1 });
+        expect(poolless.stats.stored).toBeUndefined();
+      });
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test(
+    'reads the image of a compile with no pool container off the tag alone',
+    () => {
+      const spec = { ...gcc272CacheSpec(GCC272_FLAGS), native: () => false, pool: 'asmlift-test-no-such-pool' };
+      const id = docker(['image', 'inspect', '--format', '{{.Id}}', GCC272_TOOLCHAIN.image]);
+      expect(runsOn(spec)).toBe(`container:${id}`);
     },
     CONTAINER_BUDGET,
   );

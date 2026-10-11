@@ -5,44 +5,48 @@
 //   - where it runs: natively, or in a container whose image is named by its CONTENT ID. A tag is
 //     whatever was last built under it, and the pool container keeps running the image it started
 //     from after the tag moves, so the namespace takes the tag's ID and refuses when the pool runs
-//     another one. A compile after which this process confirmed or started a pool reads the ID
-//     again, and one that moved ends the store's use for the process;
+//     another one. A compile after which this process confirmed or started that pool reads the ID
+//     again, and one that moved ends the use of every store on that pool for the process. A
+//     one-shot `docker run` reads the tag afresh each time, so a compile that took one is never
+//     stored, and a namespace whose probe took one is refused;
 //   - the compiler directory mounted into the container (or run from on the host), by content;
 //   - every word of the command, the text written ahead of every TU, the compile environment, and
 //     every host command the pipeline runs (the preprocessor, a native runner) followed to the
 //     files that actually run;
 //   - the harness files whose code shapes the TU, the command or a stored rejection's message;
-//   - the pipeline's own object for a fixed probe, compiled twice. A compile that took another
-//     route than the probe's (a one-shot `docker run` where the probe had a pool) is not stored.
+//   - the pipeline's own object for a fixed probe, compiled twice.
+// And per key, what the TU reads besides its own bytes (@asmlift/cli/candcache-reads): what its text
+// decides before the store is asked, and what the compile's preprocessor reports once it has run.
 import {
   COMPILE_ENV,
   type CandCache,
   NOT_CACHEABLE,
   STAMP_PROBE,
   candCache,
-  candidateCacheRefusal,
   isChainMeasurement,
   noteKeyRefused,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
+import { type PreprocessorReport, candidateCacheRefusal, candidateReadsRefusal } from '@asmlift/cli/candcache-reads';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
-import { type ContainerRoutes, containerRoutes } from '@asmlift/toolchains';
+import { oneShots, poolStarts } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { DIAGNOSTIC_SOURCES } from './util';
+import { DIAGNOSTIC_SOURCES, READS_SOURCE } from './util';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOLCHAINS_SRC = join(HERE, '../../../../packages/toolchains/src');
 /** The harness files every containerized candidate compile runs through: this one, the spawn and
- *  diagnostic helpers, and @asmlift/toolchains' compile, native-or-container decision and
- *  toolchain table. */
+ *  diagnostic helpers, the module that decides which answers are kept, and @asmlift/toolchains'
+ *  compile, native-or-container decision and toolchain table. */
 export const DOCKER_COMPILE_SOURCES = [
   join(HERE, 'docker-cache.ts'),
   ...DIAGNOSTIC_SOURCES,
+  READS_SOURCE,
   join(TOOLCHAINS_SRC, 'compile.ts'),
   join(TOOLCHAINS_SRC, 'native.ts'),
   join(TOOLCHAINS_SRC, 'toolchain.ts'),
@@ -69,11 +73,20 @@ export interface DockerCacheSpec {
   sources: readonly string[];
   /** whether a throw is the compiler refusing the text, and so may be stored */
   refused: (e: unknown) => e is CompilerRejection;
+  /** whether the compiler hands inline asm to a GNU assembler */
+  gnuAs: boolean;
 }
 
+/** A compile behind the store: the object's path, after recording in `seen` what its preprocessor
+ *  reported, if it runs one on the host and it ran to the end. */
+export type RawCompile = (tu: string, sym: string, seen: { report?: PreprocessorReport }) => string;
+
+/** A docker command's answer: stdout when it succeeded, else what it said on stderr (Docker 29 prints
+ *  a bare newline on stdout for a container that is not there, and the error on stderr). */
 const inspect = (docker: string, args: readonly string[]): { ok: boolean; out: string } => {
   const r = spawnSync(docker, [...args], { encoding: 'utf8', timeout: 60_000 });
-  return { ok: r.status === 0, out: (r.stdout || r.stderr || String(r.error ?? '')).trim() };
+  const ok = r.status === 0;
+  return { ok, out: ((ok ? r.stdout : r.stderr) || String(r.error ?? '')).trim() };
 };
 
 const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
@@ -195,27 +208,45 @@ function scrubbedFile(objPath: string): string {
   return copy;
 }
 
+/** Per pool container, what this process saw it run: the image its first namespace was measured
+ *  on, the pool starts read since, and whether it has run another image since. Shared by every
+ *  store whose compiles run in that pool. */
+const pools = new Map<string, { runs: string; starts: number; moved: boolean }>();
+
+/** Whether the pool `spec` compiles in has run another image than the one this process first
+ *  measured it on, reading it again after any pool start since the last read. */
+function poolMoved(spec: DockerCacheSpec): boolean {
+  const p = pools.get(spec.pool);
+  if (p === undefined || p.moved) {
+    return p?.moved ?? false;
+  }
+  const starts = poolStarts(spec.pool);
+  if (starts !== p.starts) {
+    p.starts = starts;
+    try {
+      p.moved = runsOn(spec) !== p.runs;
+    } catch {
+      // an image that cannot be read now is not the one the namespace read
+      p.moved = true;
+    }
+  }
+  return p.moved;
+}
+
 /** `raw` behind the store: the same objects (scratch suffix aside, see `scrubScratchDir`) and the
  *  same rejections, compiled once. agbcc.ts `compileCandidate`'s steps, and a compile stored only
- *  when it ran as the probe did. */
-export function dockerCached(
-  spec: DockerCacheSpec,
-  raw: (tu: string, sym: string) => string,
-): (tu: string, sym: string) => string {
+ *  when it ran in the pool or natively, on what the namespace was measured on, and read nothing
+ *  its key does not hold. */
+export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: string, sym: string) => string {
   let cache: CandCache | undefined;
-  // What the namespace was measured on: the probe's route, what it ran on, and the pool starts seen.
-  let probedOneShot = false;
-  let runs = '';
-  let poolStarts = 0;
-  let moved = false;
   const cacheNow = (): CandCache =>
     (cache ??= candCache(spec.label, () => {
       // The probe first: a pool container it starts is then there for `containerImageId` to read.
-      const before = containerRoutes();
+      const before = oneShots();
       const probe = (): string | null => {
         try {
           return createHash('sha256')
-            .update(scrubScratchDir(raw(STAMP_PROBE, 'asmlift_candcache_stamp')))
+            .update(scrubScratchDir(raw(STAMP_PROBE, 'asmlift_candcache_stamp', {})))
             .digest('hex');
         } catch {
           return null;
@@ -226,38 +257,34 @@ export function dockerCached(
       if (a === null || b === null || a !== b) {
         return NOT_CACHEABLE;
       }
-      probedOneShot = containerRoutes().oneShots > before.oneShots;
-      runs = runsOn(spec);
-      poolStarts = containerRoutes().poolStarts;
+      if (oneShots() !== before) {
+        throw new Error(`${spec.label}: the probe compiled in a one-shot docker run, which reads the image tag afresh`);
+      }
+      const runs = runsOn(spec);
+      const p = pools.get(spec.pool);
+      if (p === undefined) {
+        pools.set(spec.pool, { runs, starts: poolStarts(spec.pool), moved: false });
+      } else if (poolMoved(spec) || p.runs !== runs) {
+        p.moved = true;
+        throw new Error(`${spec.label}: ${MOVED}`);
+      }
       return createHash('sha256').update(dockerStaticStamp(spec, runs)).update(a).digest('hex');
     }));
-  /** The reason the compile that ran since `before` may not be stored, or undefined when it ran as
-   *  the probe did: by the same route, on what the namespace was measured on. */
-  const offNamespace = (before: ContainerRoutes): string | undefined => {
-    const now = containerRoutes();
-    if (now.poolStarts !== poolStarts) {
-      poolStarts = now.poolStarts;
-      let still = false;
-      try {
-        still = runsOn(spec) === runs;
-      } catch {
-        // an image that cannot be read now is not the one the namespace read
-      }
-      moved ||= !still;
-    }
-    if (moved) {
-      return MOVED;
-    }
-    return now.oneShots > before.oneShots === probedOneShot ? undefined : ANOTHER_ROUTE;
-  };
+  /** The reason the compile that ran since `oneShotsBefore` may not be stored, or undefined. */
+  const unstorable = (tu: string, seen: { report?: PreprocessorReport }, oneShotsBefore: number) =>
+    poolMoved(spec)
+      ? MOVED
+      : oneShots() !== oneShotsBefore
+        ? ONE_SHOT
+        : candidateReadsRefusal(tu, { report: seen.report, gnuAs: spec.gnuAs });
   return (tu, sym) => {
     const c = cacheNow();
-    const refusal = candidateCacheRefusal(tu) ?? (moved ? MOVED : undefined);
+    const refusal = candidateCacheRefusal(tu) ?? (poolMoved(spec) ? MOVED : undefined);
     if (refusal !== undefined || c.mode === 'off') {
       if (refusal !== undefined && c.mode !== 'off') {
         noteKeyRefused(spec.label, refusal);
       }
-      return raw(tu, sym);
+      return raw(tu, sym, {});
     }
     if (c.mode === 'on') {
       const hit = c.get(tu, sym);
@@ -269,10 +296,11 @@ export function dockerCached(
       }
     }
     c.warm();
-    const before = containerRoutes();
+    const before = oneShots();
+    const seen: { report?: PreprocessorReport } = {};
     try {
-      const o = raw(tu, sym);
-      const off = offNamespace(before);
+      const o = raw(tu, sym, seen);
+      const off = unstorable(tu, seen, before);
       if (off !== undefined) {
         noteKeyRefused(spec.label, off);
         c.abandonAudit(tu, sym);
@@ -283,7 +311,7 @@ export function dockerCached(
       return c.put(tu, sym, kept);
     } catch (e) {
       if (spec.refused(e)) {
-        const off = offNamespace(before);
+        const off = unstorable(tu, seen, before);
         if (off === undefined) {
           c.verifyFail(tu, sym, e);
           c.putFail(tu, sym, e);
@@ -291,9 +319,9 @@ export function dockerCached(
         }
         noteKeyRefused(spec.label, off);
       }
-      // Not the compiler's located verdict where the namespace was measured: never stored, and a key
-      // the sampled audit withheld gets its stored answer back, as an unaudited run would have been
-      // served.
+      // Not the compiler's located verdict on this key where the namespace was measured: never
+      // stored, and a key the sampled audit withheld gets its stored answer back, as an unaudited
+      // run would have been served.
       const held = c.abandonAudit(tu, sym);
       if (typeof held === 'string') {
         return held;
@@ -307,12 +335,12 @@ export function dockerCached(
 }
 
 const MOVED = 'the-image-moved-under-this-process';
-const ANOTHER_ROUTE = 'compiled-by-another-route-than-the-probe';
+const ONE_SHOT = 'compiled-in-a-one-shot-docker-run';
 
 /** One `dockerCached` per namespace key, made on first use. */
 export function dockerCachedBy<K extends readonly unknown[]>(
   specFor: (...key: K) => DockerCacheSpec,
-  rawFor: (...key: K) => (tu: string, sym: string) => string,
+  rawFor: (...key: K) => RawCompile,
 ): (...key: K) => (tu: string, sym: string) => string {
   const made = new Map<string, (tu: string, sym: string) => string>();
   return (...key) => {

@@ -22,8 +22,8 @@
 //      That is the cold-start direction and sound — but it is why the first run after ANY commit
 //      or rebuild is cold, and why a warm store cannot be carried across one.
 //   2. A per-KEY refusal for a TU whose object is not a function of its own bytes —
-//      `candidateCacheRefusal` below: a TU that reads a file, or that bakes its own path or the
-//      wall clock into the object.
+//      candcache-reads.ts: a TU that reads a file, hands its assembler one, or bakes its own path
+//      or the wall clock into the object.
 //   3. `verify` mode — compile anyway, compare stored against fresh IN BOTH DIRECTIONS (a stored
 //      object against a fresh rejection is as wrong as differing bytes, and it is the direction
 //      that silently drops a candidate), count and report. `on` mode runs that same comparison on
@@ -369,52 +369,6 @@ const isSampled = (id: string): boolean =>
  *  outside `on` mode: `verify` audits every key and `off` serves nothing. */
 export const cacheSampleNote = (): string =>
   MODE !== 'on' ? '' : SAMPLE_THRESHOLD > 0 ? ` sample=${SAMPLE_PCT}%/seed=${SAMPLE_SEED}` : ' sample=off';
-
-// ---------------------------------------------------------------------------------------------
-// WHAT A KEY MAY NOT COVER — the per-candidate refusal.
-//
-// The namespace measures the pipeline. It cannot measure an input the CANDIDATE names: a header
-// the TU includes, or the TU's own path baked in by `__FILE__`. Those are refused per key, so the
-// cache stays on for every other candidate.
-//
-// The `#include` test runs on RAW TU text, and the preprocessor gets there first: translation
-// phase 2 splices backslash-newlines and phase 3 replaces comments, so `#in\<newline>clude`,
-// `#/*c*/include`, a form feed before the `#`, and `#import` are all real includes that a
-// `/^[ \t]*#[ \t]*include/m` never sees. Six such spellings were demonstrated. Normalise the way
-// the preprocessor does, then look.
-//
-// A comment becomes ONE SPACE, NEWLINES INCLUDED — phase 3's actual rule, and it decides the
-// multi-line case in both directions. `#/*<newline>*/include "k.h"` is a REAL include: the comment
-// joins the two physical lines into one directive, and `arm-none-eabi-cpp` resolves the header and
-// substitutes its macros (`int f(int x){return x*3;}`). A `#include` written inside a comment that
-// spans lines is not, and disappears with it. Replacing a comment with blanks-and-newlines instead
-// gets the first case backwards, and it is the one a `/^#include/` cannot see either.
-const PATH_OR_CLOCK_MACRO = /\b(__FILE__|__BASE_FILE__|__DATE__|__TIME__|__TIMESTAMP__|__INCLUDE_LEVEL__)\b/;
-
-/** The reason this TU may not be cached under a pipeline namespace, or undefined. */
-export function candidateCacheRefusal(tu: string): string | undefined {
-  // phase 1: the trigraph for `#` (only under -trigraphs, but refuse rather than reason about flags)
-  let t = tu.replaceAll('??=', '#');
-  // phase 2: splice line continuations
-  t = t.replace(/\\[ \t]*\r?\n/g, '');
-  // phase 3: each comment becomes one space, so a comment spanning a newline joins the lines
-  t = t.replace(/\/\*[\s\S]*?\*\//g, ' ');
-  // `%:` is the digraph for `#`, and `__has_include` opens the file it names to answer.
-  if (
-    /(^|[\r\n])[ \t\f\v]*(#|%:)[ \t\f\v]*(include|include_next|import)\b/.test(t) ||
-    /\b__has_include(_next)?\b/.test(t)
-  ) {
-    return 'the-TU-reads-a-file';
-  }
-  // A TU using __FILE__/__DATE__ is not a pure function of its own bytes: the object carries the
-  // scratch path or the wall clock. MEASURED: three uncached compiles of one such TU produced
-  // three different 836-byte objects through the very namespace the bench uses, and the stamp
-  // probe — one fixed TU that uses neither — certified the pipeline pure.
-  if (PATH_OR_CLOCK_MACRO.test(t)) {
-    return 'the-TU-bakes-its-path-or-the-clock-into-the-object';
-  }
-  return undefined;
-}
 
 const saidKeyRefusals = new Set<string>();
 /** Say a per-key refusal ONCE per reason and COUNT every one. The reason is a fact about the

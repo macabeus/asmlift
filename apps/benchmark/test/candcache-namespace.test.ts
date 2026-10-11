@@ -63,6 +63,12 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
     expect(readFileSync(hit!, 'utf8')).toMatch(/export function errorsFirst\b/);
   });
 
+  test("the CLI's candcache-reads.ts is one: it decides, after the compile, which answers are kept", () => {
+    const hit = SHAPING_SOURCES.find((f) => f === join(HARNESS, '../../../../packages/cli/src/candcache-reads.ts'));
+    expect(hit, 'a stricter classifier must never serve what a looser one kept').toBeDefined();
+    expect(readFileSync(hit!, 'utf8')).toMatch(/export function candidateReadsRefusal\b/);
+  });
+
   test.skipIf(!HAVE_AGBCC)('…and the list the namespace hashes ends with exactly those', () => {
     expect(candCacheNamespaceFiles().slice(-SHAPING_SOURCES.length)).toEqual([...SHAPING_SOURCES]);
   });

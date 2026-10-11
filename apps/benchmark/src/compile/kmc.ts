@@ -2,6 +2,7 @@
 // inside the linux/386 container via the pooled helper score.ts uses (a one-shot shell command
 // cannot express the container pool, so the harness strips this toolchain's decomp.yaml
 // compiler — @asmlift/toolchains' compiler, bound at the row's flags, serves candidate scoring).
+import { type PreprocessorReport, cppReport, cppReportFlags } from '@asmlift/cli/candcache-reads';
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { GCC_KMC_TOOLCHAIN, kmcCompile, kmcNative, kmcPoolCfg } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
@@ -36,7 +37,12 @@ function disasm(oPath: string, sym: string): string {
   return dis.stdout;
 }
 
-function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[]): string {
+function compileCandidateRaw(
+  tu: string,
+  sym: string,
+  cflags: readonly string[],
+  seen: { report?: PreprocessorReport },
+): string {
   // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
   // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
   // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
@@ -44,12 +50,14 @@ function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[])
   const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
   const cPath = join(dir, 'c.c'),
     iPath = join(dir, 'c.i'),
+    dPath = join(dir, 'c.d'),
     oPath = join(dir, 'c.o');
   writeFileSync(cPath, tu);
-  const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
+  const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, ...cppReportFlags(dPath), cPath, '-o', iPath]);
   if (cpp.status !== 0) {
     throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
   }
+  seen.report = cppReport(dPath, iPath, cPath);
   writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
   compile(dir, 'c.i', 'c.o', cflags);
   return oPath;
@@ -64,15 +72,16 @@ export const kmcCacheSpec = (cflags: readonly string[]): DockerCacheSpec => ({
   image: GCC_KMC_TOOLCHAIN.image,
   pool: kmcPoolCfg().name,
   dirs: [GCC_KMC_TOOLCHAIN.dir],
-  words: [...CPP_PREPROCESS_FLAGS, ...GCC_KMC_TOOLCHAIN.harnessFlags, ...cflags],
+  words: [...CPP_PREPROCESS_FLAGS, ...cppReportFlags('c.d'), ...GCC_KMC_TOOLCHAIN.harnessFlags, ...cflags],
   prelude: '',
   hostCommands: [CPP],
   sources: [join(HERE, 'kmc.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
   refused: gccRefused,
+  gnuAs: true,
 });
 const cachedCandidate = dockerCachedBy(
   kmcCacheSpec,
-  (cflags: readonly string[]) => (tu, sym) => compileCandidateRaw(tu, sym, cflags),
+  (cflags: readonly string[]) => (tu, sym, seen) => compileCandidateRaw(tu, sym, cflags, seen),
 );
 
 export const kmcReal: RealCompile = {

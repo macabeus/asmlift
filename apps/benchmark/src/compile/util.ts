@@ -95,6 +95,13 @@ export const DIAGNOSTIC_SOURCES = [
   join(dirname(fileURLToPath(import.meta.url)), '../../../../packages/core/src/compiler-diagnostics.ts'),
 ];
 
+/** The module that decides which compiled answers a candidate store may keep. A store that decides
+ *  after compiling hashes it, so an answer a looser version kept is never served under a stricter one. */
+export const READS_SOURCE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../packages/cli/src/candcache-reads.ts',
+);
+
 /** A toolchain seam's throw, restated with the bounded diagnostic the evaluator publishes and
  *  still the KIND it was: a `CompilerRejection` stays one, its whole diagnostic with it, so the
  *  ranking driver's stillborn rule can read the verdict; anything else stays the transient it was. */
