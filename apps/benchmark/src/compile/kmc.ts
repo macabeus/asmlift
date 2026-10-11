@@ -3,14 +3,16 @@
 // cannot express the container pool, so the harness strips this toolchain's decomp.yaml
 // compiler — @asmlift/toolchains' compiler, bound at the row's flags, serves candidate scoring).
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
-import { GCC_KMC_TOOLCHAIN, kmcCompile } from '@asmlift/toolchains';
+import { GCC_KMC_TOOLCHAIN, kmcCompile, kmcNative, kmcPoolCfg } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
+import { DOCKER_COMPILE_SOURCES, dockerCachedBy, gccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, restated, run } from './util';
 
@@ -34,6 +36,42 @@ function disasm(oPath: string, sym: string): string {
   return dis.stdout;
 }
 
+function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[]): string {
+  // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
+  // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
+  // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
+  // (util.ts scratchSlot carries the measurement)
+  const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
+  const cPath = join(dir, 'c.c'),
+    iPath = join(dir, 'c.i'),
+    oPath = join(dir, 'c.o');
+  writeFileSync(cPath, tu);
+  const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
+  if (cpp.status !== 0) {
+    throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
+  }
+  writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
+  compile(dir, 'c.i', 'c.o', cflags);
+  return oPath;
+}
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const cachedCandidate = dockerCachedBy(
+  (cflags: readonly string[]) => ({
+    label: 'bench-kmc',
+    native: kmcNative,
+    docker: GCC_KMC_TOOLCHAIN.docker,
+    image: GCC_KMC_TOOLCHAIN.image,
+    pool: kmcPoolCfg().name,
+    dirs: [GCC_KMC_TOOLCHAIN.dir],
+    words: [...CPP_PREPROCESS_FLAGS, ...GCC_KMC_TOOLCHAIN.harnessFlags, ...cflags],
+    hostCommands: [CPP],
+    sources: [join(HERE, 'kmc.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
+    refused: gccRefused,
+  }),
+  (cflags: readonly string[]) => (tu, sym) => compileCandidateRaw(tu, sym, cflags),
+);
+
 export const kmcReal: RealCompile = {
   undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
   vendoredContext: (preprocessed) => preprocessed,
@@ -46,22 +84,7 @@ export const kmcReal: RealCompile = {
     return { obj: oPath, asm: disasm(oPath, sym) };
   },
   compileCandidate(tu, sym, cflags): string {
-    // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
-    // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
-    // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
-    // (util.ts scratchSlot carries the measurement)
-    const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
-    const cPath = join(dir, 'c.c'),
-      iPath = join(dir, 'c.i'),
-      oPath = join(dir, 'c.o');
-    writeFileSync(cPath, tu);
-    const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
-    if (cpp.status !== 0) {
-      throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
-    }
-    writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(dir, 'c.i', 'c.o', cflags);
-    return oPath;
+    return cachedCandidate(cflags)(tu, sym);
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
     const dir = mkdtempSync(join('/tmp', 'bench-vendor-'));

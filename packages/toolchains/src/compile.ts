@@ -297,8 +297,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
   }
   const w = hostTmp(dir);
   if (w) {
-    const name = poolName('gcc272', `${t.image}|${t.dir}`);
-    const mounts = ['-v', `${t.dir}:/gcc272:ro`, '-v', '/tmp:/host-tmp'];
+    const { name, mounts } = gcc272PoolCfg();
     const cc = poolExec(t.docker, t.image, name, mounts, [
       '-w',
       w,
@@ -481,6 +480,22 @@ function poolName(kind: string, cfg: string): string {
   return `asmlift-pool-${kind}-${createHash('sha256').update(cfg).digest('hex').slice(0, 8)}`;
 }
 
+/** The KMC GCC pool container's identity, its name and mounts kept together as `ppcPoolCfg` keeps
+ *  them. Exported for the benchmark's candidate store, which checks which image that container runs. */
+export function kmcPoolCfg(): { name: string; mounts: string[] } {
+  const t = GCC_KMC_TOOLCHAIN;
+  return { name: poolName('kmc', `${t.image}|${t.dir}`), mounts: ['-v', `${t.dir}:/kmc:ro`, '-v', '/tmp:/host-tmp'] };
+}
+
+/** The GCC 2.7.2 pool container's identity, as `kmcPoolCfg`. */
+export function gcc272PoolCfg(): { name: string; mounts: string[] } {
+  const t = GCC272_TOOLCHAIN;
+  return {
+    name: poolName('gcc272', `${t.image}|${t.dir}`),
+    mounts: ['-v', `${t.dir}:/gcc272:ro`, '-v', '/tmp:/host-tmp'],
+  };
+}
+
 /** Map a host path under /tmp to its path under the pool's /host-tmp mount (null ⇒ not poolable). */
 export function hostTmp(p: string): string | null {
   const abs = p.startsWith('/private/tmp/') ? p.slice('/private'.length) : p;
@@ -550,8 +565,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
   }
   const w = hostTmp(dir);
   if (w) {
-    const name = poolName('kmc', `${t.image}|${t.dir}`);
-    const mounts = ['-v', `${t.dir}:/kmc:ro`, '-v', '/tmp:/host-tmp'];
+    const { name, mounts } = kmcPoolCfg();
     const cc = poolExec(t.docker, t.image, name, mounts, [
       '-w',
       w,

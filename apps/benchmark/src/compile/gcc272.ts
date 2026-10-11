@@ -4,14 +4,16 @@
 // linux/386 container via the pooled helper (gcc272Compile) that score.ts also uses. The object
 // is disassembled + scored with the native host binutils/objdiff.
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
-import { GCC272_TOOLCHAIN, gcc272Compile } from '@asmlift/toolchains';
+import { GCC272_TOOLCHAIN, gcc272Compile, gcc272Native, gcc272PoolCfg } from '@asmlift/toolchains';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-declarations';
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
+import { DOCKER_COMPILE_SOURCES, dockerCachedBy, gccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, restated, run } from './util';
 
@@ -35,6 +37,42 @@ function disasm(oPath: string, sym: string): string {
   return dis.stdout;
 }
 
+function compileCandidateRaw(tu: string, sym: string, cflags: readonly string[]): string {
+  // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
+  // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
+  // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
+  // (util.ts scratchSlot carries the measurement)
+  const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
+  const cPath = join(dir, 'c.c'),
+    iPath = join(dir, 'c.i'),
+    oPath = join(dir, 'c.o');
+  writeFileSync(cPath, tu);
+  const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
+  if (cpp.status !== 0) {
+    throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
+  }
+  writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
+  compile(dir, 'c.i', 'c.o', cflags);
+  return oPath;
+}
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const cachedCandidate = dockerCachedBy(
+  (cflags: readonly string[]) => ({
+    label: 'bench-gcc272',
+    native: gcc272Native,
+    docker: GCC272_TOOLCHAIN.docker,
+    image: GCC272_TOOLCHAIN.image,
+    pool: gcc272PoolCfg().name,
+    dirs: [GCC272_TOOLCHAIN.dir],
+    words: [...CPP_PREPROCESS_FLAGS, ...GCC272_TOOLCHAIN.harnessFlags, ...cflags],
+    hostCommands: [CPP],
+    sources: [join(HERE, 'gcc272.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
+    refused: gccRefused,
+  }),
+  (cflags: readonly string[]) => (tu, sym) => compileCandidateRaw(tu, sym, cflags),
+);
+
 export const gcc272Real: RealCompile = {
   undeclaredCallees: (tu) => hostUndeclaredCallees(tu),
   vendoredContext: (preprocessed) => preprocessed,
@@ -46,22 +84,7 @@ export const gcc272Real: RealCompile = {
     return { obj: oPath, asm: disasm(oPath, sym) };
   },
   compileCandidate(tu, sym, cflags): string {
-    // candidate scratch must live under /tmp (the container pool's mount) — and stays ONE
-    // DIRECTORY PER CANDIDATE, leak and all: reusing a path the container reaches through
-    // that shared mount fails ~30% of compiles with `c.o: No such file or directory`
-    // (util.ts scratchSlot carries the measurement)
-    const dir = mkdtempSync(join('/tmp', 'bench-cand-'));
-    const cPath = join(dir, 'c.c'),
-      iPath = join(dir, 'c.i'),
-      oPath = join(dir, 'c.o');
-    writeFileSync(cPath, tu);
-    const cpp = run(CPP, [...CPP_PREPROCESS_FLAGS, cPath, '-o', iPath]);
-    if (cpp.status !== 0) {
-      throw new Error(`cpp failed: ${compilerDiagnostics(cpp.stderr)}`);
-    }
-    writeFileSync(iPath, stripPrototype(readFileSync(iPath, 'utf8'), sym));
-    compile(dir, 'c.i', 'c.o', cflags);
-    return oPath;
+    return cachedCandidate(cflags)(tu, sym);
   },
   preprocess(cfg: RealProjectCfg, tu: string): string {
     const dir = mkdtempSync(join('/tmp', 'bench-vendor-'));
