@@ -224,11 +224,9 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
  *  local it is copied into (l3/constinit.ts), or refused there.
  *
  *  Read-only data only, with the same refusals as a static's definition: a `.L` label anywhere else
- *  is code, or data this reader has no reason to believe is a constant image. That gate is a fact
- *  about the compilers that write GNU as text here (agbcc places the image in `.rodata`), not about
- *  every compiler: IDO 7.1 places the same initializer's image in `.data` (compiled), so a reader
- *  of its objects asks its own placement. Which names are anonymous at all is reloc-symbol.ts's
- *  decision (`anon-pool`), asked here rather than re-spelled. */
+ *  is code, or data this reader has no reason to believe is a constant image. That gate is agbcc's
+ *  placement, not every compiler's: IDO 7.1 places the same image in `.data` (compiled). Which
+ *  names are anonymous is reloc-symbol.ts's decision (`anon-pool`). */
 export function readGasAnonymousObject(asm: string, label: string): LocalObjectRead {
   if (classifyRelocSymbol(label) !== 'anon-pool') {
     return refused('whose label is not a compiler-generated `.L` label');

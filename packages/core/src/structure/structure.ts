@@ -6831,8 +6831,8 @@ export function structure(
       `cannot structure '${fn.name}': names a function-scope static ('${named.symbol}') ${named.refused}`,
     );
   }
-  // The compiler's anonymous constant is spelled only as the initializer of the local its one copy
-  // fills, which the emitter folds (l3/constinit.ts says why there). Asked here, so a function
+  // The compiler's anonymous constant is spelled only as the initializer of the locals its copies
+  // fill, which the emitter folds (l3/constinit.ts says why there). Asked here, so a function
   // whose image cannot fold declines loudly rather than reaching an emitter that cannot print it.
   const image = constantImageRefusal(named);
   if (image !== null) {

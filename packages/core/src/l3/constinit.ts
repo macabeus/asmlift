@@ -38,15 +38,11 @@
 // its whole address and element accesses, which each print their own width, reach it.
 //
 // Thumb is the only frontend that reads an anonymous image today. The rule is asked of the tree,
-// for any compiler, but the COPY it knows is one spelling of it: a call (`BLOCK_COPIES`). The
-// datum underneath is "every element of the local written once, at the top level, from the same
-// offset of one image, before any other use", and an inline copy is its other spelling — the one
-// every other compiler uses (each compiled with `u8`/`u32` images: gcc 2.7.2 and KMC copy `.LC0`
-// from `.rodata` with lwl/lwr+swl/swr or lw/sw, IDO places the image in `.data` and copies it with
-// lw/sw, mwcc copies `@N` with lwz/stw and calls nothing) and agbcc's own `ldmia`/`stmia` for a
-// word-aligned image of three words and up short of its memcpy sizes. KNOWN GAP: those decline,
-// naming the copy the fold does not read; no benchmark row has one, and the MIPS and PPC frontends
-// refuse the address-taken frame local before the copy is reached.
+// for any compiler, but the only copy it reads is a call (`BLOCK_COPIES`). KNOWN GAP: an INLINE
+// copy — agbcc's `ldmia`/`stmia` for a word-aligned image below its memcpy sizes, lw/sw or
+// lwl/lwr+swl/swr (IDO, gcc 2.7.2, KMC), lwz/stw (mwcc) — declines, naming the copy it does not
+// read; no benchmark row has one, and the MIPS and PPC frontends refuse the address-taken frame
+// local before the copy is reached.
 import { type IrType, typeToString } from '../ir/types';
 import { type Expr, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
 import { localMentions, mentionsAnyLocal } from './mentions';
@@ -155,10 +151,6 @@ function planFolds(sfn: SFn, image: SImage): Fold[] | string {
     }
   });
   if (copies.length === 0) {
-    // KNOWN GAP, and the sentence names it rather than calling the read no copy: a compiler may copy
-    // the image INLINE — agbcc's `ldmia`/`stmia` for a word-aligned `u32 a[4]`, lw/sw (IDO, gcc
-    // 2.7.2, KMC) and lwz/stw (mwcc) for every size — which the tree holds as element loads and
-    // stores, not as a call this table knows.
     return (
       'which no top-level block-copy call (memcpy) takes as its source — the one copy folded into an ' +
       'initializer; an inline, element-by-element copy of the image, and any other read of it, is not'
@@ -231,13 +223,11 @@ function planCopy(sfn: SFn, image: SImage, at: number): Fold | string {
   if (use.extents.some(([from, to]) => from < 0 || to > size)) {
     return `whose copy fills '${local}', which the body indexes past the ${size} bytes copied`;
   }
-  // Where the body reaches the local by anything but its whole address handed to a call or an
-  // element access — an offset, a cast — that spelling was made against the local's own element,
-  // so the image's must be the same width, and the local keeps its type. Where it does not, each
-  // element access carries and prints its own width, so the declaration — which the frame audit
-  // may have typed by bytes alone — witnesses nothing: the image's directives say the element, and
-  // its signedness where one writes a negative (agbcc does only for a signed element), else the
-  // reads of that width do — a signed array of non-negative values writes none.
+  // An offset or a cast was spelled against the local's own element, so the image's must match and
+  // the local keeps its type. Element accesses print their own width, so where only they and the
+  // whole address reach it, the declaration (the frame audit may type it by bytes alone) witnesses
+  // nothing: the image says the element, and its signedness where it writes a negative (agbcc does
+  // only for a signed element), else the reads of that width do.
   let own: Extract<IrType, { kind: 'int' }>;
   if (use.other) {
     if (declElem.width !== elem.width) {

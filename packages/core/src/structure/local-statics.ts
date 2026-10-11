@@ -292,7 +292,8 @@ export function localStaticShapes(
       // Only the elements the source spelled: an element it left out is a hole, and the holes after
       // the last value are dropped. Spelled out as zeros, the initializer is a different one to the
       // compiler, which clears and stores where most of one is zero rather than copy an image
-      // (expr.c `mostly_zeros_p`) — so the printer spells the elements after a hole by designator.
+      // (expr.c `mostly_zeros_p`) — so the printer spells the element after a hole by designator,
+      // where the compiler parses one (`SFn.designators`).
       const init: (number | null)[] = elements(obj, unit, signed);
       for (const [from, n] of obj.directives!.gaps ?? []) {
         if (from % unit !== 0 || n % unit !== 0) {

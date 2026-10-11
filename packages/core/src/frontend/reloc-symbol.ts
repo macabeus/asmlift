@@ -18,14 +18,11 @@
 //  • a function-scope static (`local-static`): the function DEFINES it, so both frontends read its
 //    definition out of the target (frontend/local-object.ts) and the lift writes it in the body
 //    under the name `localStaticName` takes apart, refusing only where the definition cannot be read;
-//  • the compiler's anonymous constant (`anon-pool`): no source names it, but the one that placed
-//    it as a local aggregate's initializer image spelled it — as that initializer. Thumb reads its
-//    definition and marks it anonymous (`LocalObject.anonymous`; l3/constinit.ts spells it back or
-//    refuses); ppc still refuses it by name, with the sentence below, because every object it names
-//    there that a lift reaches is a literal no fold spells — a float constant, a string handed out
-//    by address — and mwcc's copy of an initializer image is inline loads and stores into a frame
-//    local its frontend refuses first, so reading the definition would only change which sentence
-//    declines.
+//  • the compiler's anonymous constant (`anon-pool`): no source names it, but a local aggregate's
+//    initializer image is what the source wrote. Thumb reads it as `LocalObject.anonymous`, which
+//    l3/constinit.ts spells back as that initializer or refuses. ppc still refuses `@N` by name:
+//    every one a lift reaches is a float or a string handed out by address, and mwcc copies an
+//    image inline into a frame local its frontend refuses first.
 // Thumb asks about those kinds and the predefined names alone rather than taking
 // `unspellableReason`'s answer for every kind, because a pool word is not a relocation.
 //
