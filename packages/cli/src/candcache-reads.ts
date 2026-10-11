@@ -21,9 +21,12 @@
 //     asm with any template text is refused. A string the compiler copies into its assembly
 //     unquoted (a section name, MEASURED on agbcc and GCC 2.7.2: `section(".data\n.incbin …")`
 //     puts the `.incbin` on a line of its own) is refused when, decoded and joined, it names a
-//     directive that reads a file or builds one. Only preprocessed text holds every string whole:
-//     in raw text a macro can put the pieces apart, so there any construct that copies a string
-//     into the assembly refuses the TU when the TU has string text at all.
+//     directive that reads a file or builds one. Only preprocessed text holds every string whole.
+//     Raw text cannot say which construct copies a string out (a macro, a trigraph or a flag of the
+//     command builds one with no keyword in the TU), and GNU `as` names a file only in a string, so
+//     raw text refuses any string text it could make;
+//   - with no list, the command too: a word that defines a macro or reads flags or text from
+//     elsewhere hands the TU text it never spelled, which the TU's own text cannot show.
 import { existsSync, readFileSync } from 'node:fs';
 
 /** What a compile's preprocessor reported about a TU it ran to the end on. */
@@ -40,6 +43,9 @@ export interface ReadsCheck {
   report?: PreprocessorReport;
   /** whether inline asm reaches a GNU assembler, which reads `.include` and `.incbin` files */
   gnuAs: boolean;
+  /** the compile's command as text, with the value of every variable it reads: read when there is
+   *  no report */
+  command: string;
 }
 
 /** A line splice in any spelling some compiler honours: a backslash or the `??/` trigraph, any
@@ -79,14 +85,6 @@ const ASM = words(['asm', '__asm', '__asm__']);
 const EMPTY_ASM =
   /(?<![A-Za-z0-9_])(?:__asm__|__asm|asm)\s*(?:(?:__volatile__|__volatile|volatile|inline|goto)\s*)*\(\s*""\s*(?=[:)])/g;
 
-/** What copies a string into the assembly besides inline asm: an attribute (a section or alias
- *  name; GNU, Microsoft or C23 spelling), a pragma, `#ident` and `#sccs`. */
-const AS_STRING_CONSTRUCT = new RegExp(
-  [
-    words(['__attribute__', '__attribute', '__declspec', '_Pragma', 'pragma', 'ident', 'sccs']).source,
-    `(?:\\[|<:)${GAP}(?:\\[|<:)`,
-  ].join('|'),
-);
 /** A directive that reads a file, or a GNU assembler macro, loop or mode that can build one. */
 const AS_FILE_DIRECTIVE = /\.\s*(?:inc|macro|irp|mri)/i;
 const C_ESCAPE = /\\(?:x([0-9a-fA-F]+)|([0-7]{1,3})|u([0-9a-fA-F]{4})|U([0-9a-fA-F]{8})|([\s\S]))/g;
@@ -114,10 +112,11 @@ const decoded = (s: string): string =>
 const stringText = (text: string): string =>
   [...text.matchAll(/'(?:\\.|[^'\\\n])*'|"((?:\\.|[^"\\\n])*)"/g)].map((m) => decoded(m[1] ?? '')).join('');
 
-/** Whether raw text can make string text: a string literal, or a `#` that is not the first token of
- *  its line, which a macro body stringizes with. */
-function hasStringText(text: string): boolean {
-  if (text.includes('"')) {
+/** Whether raw text can make string text: a `"` anywhere (in a character constant too, which costs
+ *  that key only), any trigraph, or a `#` that is not the first token of its line, which a macro
+ *  body stringizes with. */
+function mayMakeStringText(text: string): boolean {
+  if (text.includes('"') || text.includes('??')) {
     return true;
   }
   const directive = new RegExp(`^[ \\t\\f\\v]*${HASH}`);
@@ -130,8 +129,8 @@ function hasStringText(text: string): boolean {
 
 /** Whether a GNU assembler fed `text`'s compile may read a file: inline asm with a template, or a
  *  string naming a file directive. `preprocessed` text holds no comment or splice, and every string
- *  in it is whole, so its strings are read decoded and joined; raw text is read whole, splices
- *  joined, and refused outright when it copies a string into the assembly and has string text. */
+ *  in it is whole, so its strings are read decoded and joined; raw text is refused when it can make
+ *  string text at all, or names a directive anywhere, splices joined. */
 function assemblerMayReadFile(text: string, preprocessed: boolean): boolean {
   if (ASM.test(text.replace(EMPTY_ASM, ''))) {
     return true;
@@ -139,11 +138,26 @@ function assemblerMayReadFile(text: string, preprocessed: boolean): boolean {
   if (preprocessed) {
     return AS_FILE_DIRECTIVE.test(stringText(text));
   }
-  return (
-    (AS_STRING_CONSTRUCT.test(text) && hasStringText(text)) ||
-    AS_FILE_DIRECTIVE.test(decoded(text.replace(new RegExp(SPLICE, 'g'), '')))
-  );
+  return mayMakeStringText(text) || AS_FILE_DIRECTIVE.test(decoded(text.replace(new RegExp(SPLICE, 'g'), '')));
 }
+
+/** A word of a compile command that hands the TU text it never spelled, or reads the TU's text
+ *  otherwise: a macro defined or undefined (`-D`, `-U`, CodeWarrior's `-d`/`-define`), a file read
+ *  ahead of the TU (`-include`, `-imacros`, CodeWarrior's `-prefix`), flags from a file (`@file`,
+ *  `-specs`), from a command's output (`$(…)`, a backquote) or handed straight to the preprocessor
+ *  (`-Xpreprocessor`), a preprocessor that pastes tokens across a comment (`-traditional`), or
+ *  another input charset. Matched wherever a word may start, quotes ignored. */
+const COMMAND_SHAPES_TEXT =
+  /(?:^|[\s"'`=,;&|()\\])(?:-[DUd]|--?(?:define|undefine|include|imacros|specs)|-prefix|-Xpreprocessor|-traditional|-finput-charset|@)|\$\(|`/;
+/** The command words that are fixed and make no string: a macro defined as `1` or as a number, or
+ *  undefined, each one bare word. */
+const PLAIN_MACRO_WORD = /(?<=^|\s)-(?:D[A-Za-z_]\w*(?:=[0-9][\w.]*)?|U[A-Za-z_]\w*)(?=\s|$)/g;
+/** The command substitutions that print only a scratch path. */
+const PATH_SUBSTITUTION = /\$\((?:dirname|basename) \{\{(?:inputPath|outputPath)\}\}\)/g;
+
+/** Whether `command` may hand the TU text it never spelled (`COMMAND_SHAPES_TEXT`). */
+const commandShapesText = (command: string): boolean =>
+  COMMAND_SHAPES_TEXT.test(command.replace(PLAIN_MACRO_WORD, ' ').replace(PATH_SUBSTITUTION, ' '));
 
 /** The reason no answer for `tu` may be stored, whatever its compile reports, or undefined: what a
  *  preprocessor's dependency list cannot show. Checked before the store is asked. */
@@ -164,12 +178,15 @@ export function candidateCacheRefusal(tu: string): string | undefined {
 }
 
 /** The reason the answer compiled for `tu` may not be stored, or undefined. */
-export function candidateReadsRefusal(tu: string, { report, gnuAs }: ReadsCheck): string | undefined {
+export function candidateReadsRefusal(tu: string, { report, gnuAs, command }: ReadsCheck): string | undefined {
   const before = candidateCacheRefusal(tu);
   if (before !== undefined) {
     return before;
   }
   if (report === undefined) {
+    if (commandShapesText(command)) {
+      return 'the-command-hands-the-TU-text';
+    }
     if (FILE_DIRECTIVE.test(tu) || LINE_DIRECTIVE.test(tu) || UCN.test(tu)) {
       return 'the-TU-may-read-a-file';
     }

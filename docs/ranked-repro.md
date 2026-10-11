@@ -595,6 +595,21 @@ find nothing to disagree with and go green having audited nothing.
 - **There is no per-project key.** A command whose compiler asmlift cannot measure refuses on its
   own, naming itself once per run (`reason=stamp-threw`), and `ASMLIFT_CANDCACHE=0` turns the cache
   off for a whole process.
+- **A candidate whose compile may read past its own bytes is refused PER KEY**
+  (`[candcache] REFUSED-KEY label=command reason=…`, said once per reason and counted in
+  `refusedKeys`). The command's compiler is unknown and reports nothing it read, so the TU's text and
+  the command's are read instead, and each test matches more spellings than any compiler honours: a
+  directive that can name a file, `#line` or a linemarker, a UCN, `__has_include`/`__has_embed`,
+  token pasting, the path and clock macros. A GNU assembler opens a `.include`/`.incbin` file named
+  in a string, and a macro, a trigraph or a flag of the command can build what copies a string into
+  the assembly (a section name, a C23 attribute) with no keyword in the TU, so a candidate is also
+  refused for ANY string text it could make: a `"` anywhere, any `??`, or a `#` that is not the first
+  token of its line. And a command word that hands every TU text it never spelled refuses every key
+  (`reason=the-command-hands-the-TU-text`): a macro defined or undefined (`-D`, `-U`, CodeWarrior's
+  `-d`/`-define`) other than a bare `-DNAME`, `-DNAME=<number>` or `-UNAME`; `-include`,
+  `-imacros`, `-prefix`; flags from `@file` or `-specs`; `-Xpreprocessor`; `-traditional`;
+  `-finput-charset`; and a `$(…)` or backquote other than `$(dirname {{outputPath}})`. The words are
+  read in the template and in the value of every variable it names.
 - **What is still NOT measured, said out loud.** A path the command itself COMPUTES
   (`H=in; cat ${H}c/k.h`), which no token scan can resolve, and its cousin, a `cd` into a computed
   directory (`cd "$(dirname …)"` contributes no resolution base — and note the ASYMMETRY, which is

@@ -276,7 +276,7 @@ export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: strin
       ? MOVED
       : oneShots() !== oneShotsBefore
         ? ONE_SHOT
-        : candidateReadsRefusal(tu, { report: seen.report, gnuAs: spec.gnuAs });
+        : candidateReadsRefusal(tu, { report: seen.report, gnuAs: spec.gnuAs, command: spec.words.join(' ') });
   return (tu, sym) => {
     const c = cacheNow();
     const refusal = candidateCacheRefusal(tu) ?? (poolMoved(spec) ? MOVED : undefined);

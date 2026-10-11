@@ -288,7 +288,11 @@ export const agbccReal: RealCompile = {
     cache.warm();
     const seen: { report?: PreprocessorReport } = {};
     const reads = (): string | undefined => {
-      const reason = candidateReadsRefusal(tu, { report: seen.report, gnuAs: true });
+      const reason = candidateReadsRefusal(tu, {
+        report: seen.report,
+        gnuAs: true,
+        command: [...CAND_CPP_FLAGS, ...cppReportFlags('c.d')].join(' '),
+      });
       if (reason !== undefined) {
         noteKeyRefused('bench-agbcc', reason);
       }

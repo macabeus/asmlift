@@ -268,6 +268,14 @@ describe('hole 5 — the compile environment is an input to every candidate comp
     }
   });
 
+  test('the diagnostic variables move the digest — they word the rejections the store keeps', () => {
+    for (const v of ['GCC_COLORS', 'GCC_URLS', 'TERM_URLS', 'GCC_EXTRA_DIAGNOSTIC_OUTPUT', 'COLUMNS']) {
+      const bare = withEnv(v, undefined, () => candCacheStaticStamp(CANONICAL, []));
+      const set = withEnv(v, '40', () => candCacheStaticStamp(CANONICAL, []));
+      expect(set, `${v} shapes a diagnostic's colours, links, fix-it lines or width`).not.toBe(bare);
+    }
+  });
+
   test('an unrelated variable does NOT move it — the list is the claim, not "the whole environment"', () => {
     const bare = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', undefined, () => candCacheStaticStamp(CANONICAL, []));
     const set = withEnv('ASMLIFT_CANDCACHE_NS_UNRELATED', 'x', () => candCacheStaticStamp(CANONICAL, []));

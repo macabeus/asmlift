@@ -976,13 +976,18 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   });
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
   // cache on for every other candidate (candcache-reads.ts, shared with the bench pipelines). The
-  // template's compiler is unknown, so no preprocessor reports what the TU read: its text is read,
-  // fail-closed, and its inline asm is taken to reach a GNU assembler.
+  // template's compiler is unknown, so no preprocessor reports what the TU read: its text and the
+  // command's are read, fail-closed, and its inline asm is taken to reach a GNU assembler. The
+  // command is the template and the value of every variable it names.
+  const commandText = [
+    template,
+    ...[...template.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => process.env[m[1]] ?? ''),
+  ].join('\n');
   const cacheable = (content: string): boolean => {
     if (cache.mode === 'off') {
       return false;
     }
-    const reason = candidateReadsRefusal(content, { gnuAs: true });
+    const reason = candidateReadsRefusal(content, { gnuAs: true, command: commandText });
     if (reason === undefined) {
       return true;
     }

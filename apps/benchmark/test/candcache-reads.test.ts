@@ -7,6 +7,7 @@
 // served the old file's object before the store read the compile's own dependency list, or, where
 // there is none, before it refused the TU's text.
 import {
+  TOOLCHAIN,
   agbccAvailable,
   gcc272Available,
   gcc272Native,
@@ -16,9 +17,10 @@ import {
   mwccNative,
   ppcDockerAvailable,
 } from '@asmlift/toolchains';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { afterAll, describe, expect, test, vi } from 'vitest';
 
 import { scrubScratchDir } from '../src/compile/docker-cache';
@@ -43,11 +45,11 @@ type Pipeline = 'agbcc' | 'gcc272' | 'kmc' | 'mwcc' | 'pooled-kmc' | 'command-ag
 type Stats = Record<string, number>;
 
 /** One process's worth of modules over `store` with the audit off (or with the store off): `tu`
- *  through `pipeline`, as the object's bytes (scratch suffix aside) or the rejection's message and
- *  whole diagnostic. */
+ *  through `pipeline`, or through a GNU compile `command` the CLI runs, as the object's bytes
+ *  (scratch suffix aside) or the rejection's message and whole diagnostic. */
 async function compileIn(
   store: string,
-  pipeline: Pipeline,
+  pipeline: Pipeline | { command: string; cwd: string },
   tu: string,
   mode: 'on' | 'off' = 'on',
 ): Promise<{ out: string; stats: Stats }> {
@@ -61,6 +63,10 @@ async function compileIn(
   vi.resetModules();
   try {
     const compile = async (): Promise<string> => {
+      if (typeof pipeline !== 'string') {
+        const { compileFromCommand } = await import('@asmlift/cli/compile-command');
+        return (await compileFromCommand(pipeline.command, { cwd: pipeline.cwd })(tu, 'f', 'c')) as string;
+      }
       switch (pipeline) {
         case 'agbcc':
           return (await import('../src/compile/agbcc')).agbccReal.compileCandidate(
@@ -328,6 +334,101 @@ describe('agbcc', () => {
       const warm = await compileIn(store, 'agbcc', tu);
       expect(warm.stats).toMatchObject({ refusedKeys: 1 });
       expect(warm.out).toBe((await compileIn(store, 'agbcc', tu, 'off')).out);
+    },
+    BUDGET,
+  );
+});
+
+// A command's compiler is unknown and reports nothing, so its text is read, and with it the command:
+// a GNU assembler names a file only in a string, and a macro, a trigraph or a flag of the command
+// builds what copies one into the assembly with no keyword in the TU. Each spelling below was
+// served the old file's object through arm-none-eabi-gcc.
+const GCC = isAbsolute(TOOLCHAIN.as) ? join(dirname(TOOLCHAIN.as), 'arm-none-eabi-gcc') : 'arm-none-eabi-gcc';
+const HAVE_GCC = spawnSync(GCC, ['-std=c2x', '-trigraphs', '-E', '-x', 'c', '-'], { input: '' }).status === 0;
+const command = (flags: string): string => `"${GCC}" ${flags} -O2 -c -o {{outputPath}} {{inputPath}}`;
+/** A section name holding `.incbin "<path>"`, its directive split across adjacent literals. */
+const splitIncbin = (path: string): string => `".data\\n.in" "cbin \\"${path}\\"\\n.section .data.x"`;
+
+describe('a GNU compile command', () => {
+  /** [what, the flags and the TU for an assembly that reads the file at a path] */
+  const READS: [string, (p: string) => [string, string]][] = [
+    [
+      'a C23 opener a macro builds',
+      (p) => ['-std=c2x', `#define LB [\nLB LB gnu::section(${splitIncbin(p)})]] int x = 1;\n`],
+    ],
+    [
+      'a C23 opener in trigraphs',
+      (p) => ['-std=c2x -trigraphs', `??(??(gnu::section(${splitIncbin(p)})??)??) int x = 1;\n`],
+    ],
+    [
+      'an attribute the command defines',
+      (p) => [`'-DSEC(s)=__attribute__((section(s)))'`, `int x SEC(${splitIncbin(p)}) = 1;\n`],
+    ],
+    ['a string the command defines', (p) => [`'-DS=${splitIncbin(p)}'`, 'int x __attribute__((section(S))) = 1;\n']],
+  ];
+  test.runIf(HAVE_GCC).each(READS)(
+    'compiles a TU whose assembly reads a file afresh on every run: %s',
+    async (_what, shape) => {
+      const store = scratch('candcache-reads-store-');
+      const file = join(scratch('candcache-reads-file-', '/tmp'), 'f.bin');
+      const [flags, tu] = shape(file);
+      const cmd = { command: command(flags), cwd: scratch('candcache-reads-cwd-') };
+      writeFileSync(file, 'AB');
+      const cold = await compileIn(store, cmd, tu);
+      expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
+      writeFileSync(file, 'CD');
+      const warm = await compileIn(store, cmd, tu);
+      expect(warm.stats.hit).toBeUndefined();
+      expect(warm.stats).toMatchObject({ refusedKeys: 1 });
+      expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
+      expect(warm.out).not.toMatch(/^threw /);
+      expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
+    },
+    BUDGET,
+  );
+
+  test.runIf(HAVE_GCC)(
+    'compiles a TU afresh on every run when a variable the command reads defines its section name',
+    async () => {
+      const store = scratch('candcache-reads-store-');
+      const file = join(scratch('candcache-reads-file-', '/tmp'), 'f.bin');
+      const cmd = { command: command('$CANDCACHE_READS_FLAGS'), cwd: scratch('candcache-reads-cwd-') };
+      const tu = 'int x __attribute__((section(S))) = 1;\n';
+      const had = process.env.CANDCACHE_READS_FLAGS;
+      // One word, as the shell splits an unquoted expansion: tabs, not spaces, in the string.
+      process.env.CANDCACHE_READS_FLAGS = `-DS=".data\\n.incbin\\t\\"${file}\\"\\n.section\\t.data.x"`;
+      try {
+        writeFileSync(file, 'AB');
+        const cold = await compileIn(store, cmd, tu);
+        expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
+        writeFileSync(file, 'CD');
+        const warm = await compileIn(store, cmd, tu);
+        expect(warm.stats).toMatchObject({ refusedKeys: 1 });
+        expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
+        expect(warm.out).not.toMatch(/^threw /);
+        expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
+      } finally {
+        if (had === undefined) {
+          delete process.env.CANDCACHE_READS_FLAGS;
+        } else {
+          process.env.CANDCACHE_READS_FLAGS = had;
+        }
+      }
+    },
+    BUDGET,
+  );
+
+  test.runIf(HAVE_GCC)(
+    'keeps a TU with no string text under a plain command',
+    async () => {
+      const store = scratch('candcache-reads-store-');
+      const tu = '#define T 3\nint x [[gnu::unused]] = T;\nint f(int i) { return x + i; }\n';
+      const cmd = { command: command('-std=c2x -DNDEBUG'), cwd: scratch('candcache-reads-cwd-') };
+      const cold = await compileIn(store, cmd, tu);
+      expect(cold.stats).toMatchObject({ stored: 1 });
+      const warm = await compileIn(store, cmd, tu);
+      expect(warm.stats).toMatchObject({ hit: 1 });
+      expect(warm.out).toBe(cold.out);
     },
     BUDGET,
   );
