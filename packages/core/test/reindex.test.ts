@@ -547,6 +547,22 @@ describe('v3 — expression-base walk', () => {
       f.locals[1] = { name: 'i', type: T.u(8) };
       expect(reindexWalks(f)).toBeNull();
     });
+
+    test('from S = 0 a narrow counter must be UNSIGNED: an s8 wraps 127 -> -128 while the walk goes on', () => {
+      const narrow = (type: IrType | undefined): SFn => {
+        const f = mkFn(init, walkBody());
+        if (type) {
+          f.locals[1] = { name: 'i', type };
+        } else {
+          f.locals.splice(1, 1); // the counter declared nowhere: no width to argue from
+        }
+        return f;
+      };
+      expect(reindexWalks(narrow(T.u(8)))).not.toBeNull();
+      expect(reindexWalks(narrow(T.s(8)))).toBeNull();
+      expect(reindexWalks(narrow(T.s(16)))).toBeNull();
+      expect(reindexWalks(narrow(undefined))).toBeNull();
+    });
   });
 
   test('refused: a step ahead of a deref (the *++p walk reads the NEXT element)', () => {

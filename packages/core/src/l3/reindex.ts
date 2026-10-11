@@ -525,11 +525,12 @@ function plusConst(e: Expr, c: number): Expr {
 //     addend — a bare var declared an integer or a byte pointer (or EXPR's `+` would stride its
 //     element), or an object's address, `(u32)&g` beside other addends or `&g` alone — plus pure
 //     invariant addends (var/const/mul/shl trees whose vars the body never assigns);
-//   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
+//   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with
 //     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
 //     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition;
-//   • `i`'s init `i = S` immediately precedes p's, with S a constant (0, or any S for a 32-bit
-//     counter): the index is `i - S + REST/W`, which is plain `i` for the init KMC folds to
+//   • `i`'s init `i = S` immediately precedes p's, with S a constant, and `i` is a declared
+//     integer: any S at 32 bits, only S = 0 when narrower and unsigned, never when narrower and
+//     signed. The index is `i - S + REST/W`, which is plain `i` for the init KMC folds to
 //     `p = &g + S*W` from `for (i = S; …) g[i]`.
 function tryExprWalk(
   prev2: Stmt | undefined,
@@ -656,21 +657,21 @@ function tryExprWalk(
   }
   const pStepIdx = dw.body.length - 2 + tail.findIndex((st) => isIncOf(st, p) !== null);
   const ivT = declTypes(iv);
-  if (ivT !== undefined && ivT.kind !== 'int') {
-    return null;
-  }
   if (!mentionsVar(dw.cond, iv) || mentionsVar(dw.cond, p)) {
     return null;
   }
   // The counter starts at a CONSTANT S (the adjacent `i = S` init) and its ONLY write anywhere in
   // the body is the tail step: n completed steps put `p` at EXPR + n*W and `i` at S + n, so the
-  // deref is BASE[i - S + REST/W]. A nonzero S needs a 32-bit counter — a narrower one wraps
-  // where the walk does not, and `i - S` then names an element S behind it.
+  // deref is BASE[i - S + REST/W]. That holds while `i` takes the values S + n, which a DECLARED
+  // integer counter does: at 32 bits always (it wraps with the address), and narrower only from
+  // S = 0 and unsigned, where it names elements 0 … 2^w - 1 before it wraps. A signed narrow
+  // counter wraps at 2^(w-1) (an s8 goes 127 -> -128 and names an element 256 behind the walk),
+  // and from a nonzero S `i - S` wraps sooner still; an undeclared one has no width to argue from.
   if (prev2?.k !== 'assign' || prev2.name !== iv || prev2.value.k !== 'const') {
     return null;
   }
   const start = prev2.value.value | 0;
-  if (start !== 0 && !(ivT?.kind === 'int' && ivT.width === 32)) {
+  if (ivT?.kind !== 'int' || !(ivT.width === 32 || (start === 0 && !ivT.signed))) {
     return null;
   }
   if (dw.body.slice(0, -2).some((st) => stmtAssigns(st, iv)) || tail.filter((st) => isIncOf(st, iv)).length !== 1) {
