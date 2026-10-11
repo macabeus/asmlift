@@ -312,6 +312,10 @@ describe('a command with no preprocessor report', () => {
     ['-Xpreprocessor', '-Xpreprocessor -DS=1'],
     ['-traditional-cpp', '-traditional-cpp'],
     ['-finput-charset', '-finput-charset=IBM1047'],
+    ['a plugin', '-fplugin=./p.so'],
+    ["Clang's pass plugin", '-fpass-plugin=./p.so'],
+    ['a plugin directory', '-iplugindir=plugins'],
+    ['a wrapper the driver runs its programs under', '-wrapper gdb,--args'],
     ['a command substitution', '$(cat flags)'],
     ['a backquote', '`cat flags`'],
   ])('refuses a TU when the command may hand it text: %s', (_name, flags) => {

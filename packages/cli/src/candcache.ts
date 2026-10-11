@@ -308,9 +308,8 @@ export const sha = (b: Buffer | string): string => createHash('sha256').update(b
 // comparing can, and that is `verify` mode — which costs the entire speedup.
 //
 // So `on` mode does it for a FRACTION of the keys it serves, every run, forever. That does not
-// eliminate the residual `docs/ranked-repro.md` publishes (a computed path, a `cd` into a computed
-// directory, a wrapper that OPENS a config directory, a candidate's assembler `.include`, an
-// opaque runtime); it bounds how long one survives. A staleness that touches every key is caught
+// eliminate the residual `docs/ranked-repro.md` publishes (a driver's built-in search directories,
+// an opaque runtime no list names); it bounds how long one survives. A staleness that touches every key is caught
 // in the FIRST run that serves more than a handful; a staleness that touches exactly one key
 // survives on average 1/rate runs.
 //
@@ -414,6 +413,27 @@ export const COMPILE_ENV = [
   'COLUMNS',
 ];
 
+/** The variables that move where a GCC driver finds its programs and its specs: `GCC_EXEC_PREFIX`
+ *  prefixes the `cc1`, `as` and `specs` it looks up, and `COMPILER_PATH` lists more places to find
+ *  programs. MEASURED: a `specs` file under `GCC_EXEC_PREFIX` holding `*cpp: -DK=7` reached the
+ *  object, and with no `cc1` under it `-print-prog-name=cc1` answers a bare `cc1`. Neither value
+ *  names the files the driver then reads, so a namespace keyed on the value served the old object
+ *  after the specs file changed. */
+const DRIVER_SEARCH_ENV = ['GCC_EXEC_PREFIX', 'COMPILER_PATH'];
+
+/** Throws when the environment moves where a GCC driver finds its programs or specs
+ *  (`DRIVER_SEARCH_ENV`): a namespace stamp calls it first, and `candCache` refuses a stamp that
+ *  threw. */
+export function refuseDriverSearchEnv(env: NodeJS.ProcessEnv = process.env): void {
+  const set = DRIVER_SEARCH_ENV.filter((v) => (env[v] ?? '') !== '');
+  if (set.length > 0) {
+    throw new Error(
+      `${set.join(' and ')} ${set.length === 1 ? 'is' : 'are'} set, which moves where a GCC driver finds its ` +
+        `programs and specs to files this namespace does not read, so nothing is cached`,
+    );
+  }
+}
+
 /** The fixed TU every pipeline's stamp probe compiles — twice, in two different directories, so
  *  the compiler itself answers whether its object is a pure function of its input. */
 export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 1; }\n';
@@ -459,23 +479,11 @@ export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 
 // Making it heredoc-aware anyway would only widen `containerRuntimeNamedBy`'s refusal reach, and
 // that is deliberately not done here.
 //
-// SAY WHAT THIS MOVED, PLAINLY: whole SCRIPTS cross from the refusing side to the serving side.
-// Every CONSTRUCT that refused still refuses — but a script whose only matches were in English is
-// now read, followed and cached, and the file such a script OPENS is not in its chain (the chain
-// follows what a script EXECS). The refusal was never the guard for that: measured, a wrapper
-// reading `ELF="${3:-game.elf}"` with no `$(` anywhere in it was served on both sides of this
-// change, with `game.elf` in neither chain. Keeping the old reading would have closed that hole
-// only for wrappers whose PROSE happened to trip a regex. The remedy is one token in the compile
-// template — pass the file as an argument and `templatePathOperands` measures it by content — and
-// `docs/ranked-repro.md` carries the recipe, the asymmetry that makes it non-obvious, and the cold
-// start it costs. `packages/cli/test/offline/candcache-refusals.test.ts` pins both halves.
-//
-// MEASURED on the one script that inhabits this refusal on this machine — a decomp wrapper whose
-// 61 lines are half commentary — TEN lines trip the detector, EIGHT are English sentences quoting
-// `.set`, `.4byte` and `make` in backticks, and the other TWO ARE CODE. So this change alone does
-// not clear that script: it still refuses, on `REPO="$(cd "$(dirname "$0")/.." && pwd)"` and on a
-// backtick inside a diagnostic string, until the checkout that owns it is edited. Nothing here is
-// entitled to that checkout's warm-cache number.
+// WHAT A CHAIN DOES NOT HOLD: the file a script OPENS, since the chain follows what a script EXECS.
+// Measured, a wrapper reading `ELF="${3:-game.elf}"` was served with `game.elf` in no chain. So the
+// command path keys no script that does more than `exec <program> "$@"` (candcache-command.ts), and
+// this reading decides what the namespace hashes for such a shim and for the bench's own host
+// commands. `packages/cli/test/offline/candcache-refusals.test.ts` pins both.
 //
 // The VERDICT is a SYNTAX test over the program text, and it over-refuses on purpose. A `$(…)`
 // computing a PATH refuses; so does one computing an INTEGER; so does an escaped backtick inside
@@ -559,8 +567,9 @@ const resolveOnPath = (cmd: string): string | undefined => {
  * `docs/ranked-repro.md` publishes, and the two must not drift apart; the assemble-through-the-
  * driver residual around it is stated here and not there.
  *
- * Only absolute, existing answers count; only names that look like a driver are asked at all
- * (agbcc IS a cc1 and takes no such flag), stdin is closed and the probe is bounded.
+ * An answer that names no file here is the measurement `UNRESOLVED:<answer>`; only names that look
+ * like a driver are asked at all (agbcc IS a cc1 and takes no such flag), stdin is closed and the
+ * probe is bounded.
  */
 const driverSubprograms = (p: string): string[] => {
   if (!GCC_DRIVER.test(basename(p))) {
@@ -572,7 +581,16 @@ const driverSubprograms = (p: string): string[] => {
     timeout: 20_000,
   });
   const ans = (r.stdout ?? '').trim();
-  return isAbsolute(ans) && existsSync(ans) ? [ans] : [];
+  if (ans === '') {
+    return [];
+  }
+  if (isAbsolute(ans)) {
+    return existsSync(ans) ? [ans] : [`UNRESOLVED:${ans}`];
+  }
+  // A driver that finds no `cc1` of its own answers the bare name, and runs whatever `cc1` is on
+  // $PATH (`posix_spawnp`). Clang answers it too, and runs none.
+  const onPath = resolveOnPath(ans);
+  return [onPath ?? `UNRESOLVED:${ans}`];
 };
 
 function expandExecutable(p: string, out: Set<string>, depth: number): void {
@@ -594,7 +612,11 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
   }
   if (looksBinary(real)) {
     for (const sub of driverSubprograms(real)) {
-      expandExecutable(sub, out, depth + 1);
+      if (isChainMeasurement(sub)) {
+        out.add(sub);
+      } else {
+        expandExecutable(sub, out, depth + 1);
+      }
     }
     return;
   }

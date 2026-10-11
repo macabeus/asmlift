@@ -24,9 +24,11 @@ import {
   candCache,
   isChainMeasurement,
   noteKeyRefused,
+  refuseDriverSearchEnv,
   sha,
   toolchainFileChain,
 } from './candcache';
+import { type CommandAdmission, commandAdmission } from './candcache-command';
 import { candidateReadsRefusal } from './candcache-reads';
 import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
 import { stripShellComments } from './shell-text';
@@ -176,6 +178,9 @@ const TOKEN_MAX = 4096;
  * -imultilibzz …` both accept it (Apple clang rejects `-imultilib` in EVERY spelling, since it
  * does not know the flag at all).
  *
+ * The `-f` rows and `-iplugindir` name a file or directory a compile reads (a plugin, a profile, a
+ * sanitizer or XRay list, a module) in GCC's or Clang's `=` spelling.
+ *
  * Longest match first, so `-isystem` is not read as `-I` with the operand `system`.
  */
 const PATH_FLAGS: readonly string[] = [
@@ -201,6 +206,28 @@ const PATH_FLAGS: readonly string[] = [
   '-iprefix',
   '-iquote',
   '-specs',
+  '-iplugindir',
+  '-fplugin',
+  '-fpass-plugin',
+  '-fprofile-use',
+  '-fprofile-dir',
+  '-fauto-profile',
+  '-fprofile-instr-use',
+  '-fprofile-sample-use',
+  '-fprofile-list',
+  '-fprofile-remapping-file',
+  '-fsanitize-blacklist',
+  '-fsanitize-ignorelist',
+  '-fsanitize-coverage-allowlist',
+  '-fsanitize-coverage-ignorelist',
+  '-fxray-always-instrument',
+  '-fxray-never-instrument',
+  '-fxray-attr-list',
+  '-fmodule-file',
+  '-fmodule-map-file',
+  '-fmodules-cache-path',
+  '-fprebuilt-module-path',
+  '-fthinlto-index',
   '-I',
   '-B',
   '-L',
@@ -391,11 +418,11 @@ function scanTokens(template: string): string[] {
  *    and where it fits (the bench klonoa checkout, 6 775), the namespace then tracks `build/`
  *      and `.git/`, so every rebuild is a cold start and the cache never warms.
  *
- *  So this is a published RESIDUAL, not a measurement: a glob with no `/` in it, and the quoted
- *  includes of an injected header that lives at the top level, are read by the compile and not
- *  seen here. `docs/ranked-repro.md` lists both, and the answers are the same as for every other
- *  residual — `ASMLIFT_CANDCACHE=verify`. A subdirectory
- *  operand (`-include inc/pre.h`, `cat inc/*.h`) is bounded and is still measured. */
+ *  So neither is measured: a glob with no `/` in it, and the quoted includes of an injected header
+ *  that lives at the top level, are read by the compile and not seen here. The store keys neither
+ *  command: a glob is shell candcache-command.ts does not admit, and `-include` is a word
+ *  candcache-reads.ts refuses. A subdirectory operand (`-include inc/pre.h`, `cat inc/*.h`) is
+ *  bounded and is still measured. */
 
 /** The paths a compile template names, in token order and de-duplicated by spelling: every path
  *  flag's operand, `@response` files and `-specs` files (they hold compile flags, so their
@@ -403,7 +430,7 @@ function scanTokens(template: string): string[] {
  *  includes from, and the DIRECTORY PART of a glob. A glob is path-LIKE and is not a path —
  *  `inc/*.h` has both a `/` and a `.`, and `statSync` says no — yet what it expands to is read
  *  by the compile as surely as an `-I` operand is. A glob or an injected header with NO directory
- *  part names the project root, which is a published residual and not an operand.
+ *  part names the project root, which is not an operand.
  *
  *  `expandFlagFilesFrom` turns on the flag-FILE expansion: with it, a response or specs file that
  *  exists under that directory is read and scanned as a template in its own right. Omit the option
@@ -498,8 +525,8 @@ function collectOperands(template: string, readDir: string | undefined, depth: n
  *  operand is resolved against. `cd sub; … -I inc` reads `sub/inc`, and resolving `inc` against
  *  the decomp.yaml's directory alone measured nothing at all. Over-hashing on purpose: both
  *  bases are tried, and a base that holds no such path costs one failed `statSync`. A `cd` whose
- *  target this cannot resolve (`cd "$(dirname …)"`) contributes no base — a published residual
- *  (`docs/ranked-repro.md`), answered by `ASMLIFT_CANDCACHE=verify` or `=0`. */
+ *  target this cannot resolve (`cd "$(dirname …)"`) contributes no base; the store keys a command
+ *  only when that `cd` is into the scratch directory (candcache-command.ts). */
 function cdBases(template: string, cwd: string): string[] {
   const out: string[] = [];
   for (const m of stripShellComments(template).matchAll(/(?:^|[\s;&|(])cd\s+("[^"]*"|'[^']*'|[^\s;&|)]+)/g)) {
@@ -801,6 +828,7 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
           `a new compiler serving old objects. Refusing rather than hashing a stand-in`,
       );
     }
+    refuseDriverSearchEnv();
     h.update('command/v1');
     h.update(template);
     h.update(cwd);
@@ -977,17 +1005,19 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
   // cache on for every other candidate (candcache-reads.ts, shared with the bench pipelines). The
   // template's compiler is unknown, so no preprocessor reports what the TU read: its text and the
-  // command's are read, fail-closed, and its inline asm is taken to reach a GNU assembler. The
-  // command is the template and the value of every variable it names.
-  const commandText = [
-    template,
-    ...[...template.matchAll(/\$\{?([A-Za-z_]\w*)/g)].map((m) => process.env[m[1]] ?? ''),
-  ].join('\n');
+  // command's words are read, fail-closed, and its inline asm is taken to reach a GNU assembler. A
+  // command whose programs may read what its words do not show refuses every key
+  // (candcache-command.ts), read once, when the first key is asked about.
+  let admitted: CommandAdmission | undefined;
   const cacheable = (content: string): boolean => {
     if (cache.mode === 'off') {
       return false;
     }
-    const reason = candidateReadsRefusal(content, { gnuAs: true, command: commandText });
+    admitted ??= commandAdmission(template, { cwd: resolve(opts.cwd ?? process.cwd()), env: process.env });
+    const reason =
+      'refusal' in admitted
+        ? `the-command-reads-more-than-its-words: ${admitted.refusal}`
+        : candidateReadsRefusal(content, { gnuAs: true, command: admitted.words.join(' ') });
     if (reason === undefined) {
       return true;
     }

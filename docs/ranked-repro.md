@@ -565,26 +565,33 @@ find nothing to disagree with and go green having audited nothing.
   (every rebuild cold) or refused the whole cache over the word `docker` in an English sentence.
   Editing the comment still moves the namespace: the template's raw bytes are hashed
   unconditionally.
-  That holds for a WRAPPER SCRIPT the template names, not only for the template itself: a comment
-  computes no delegate and opens no file, so it decides neither what the chain follows nor whether
-  the chain can be followed at all. Measured on one 61-line decomp wrapper — ten of its lines trip
-  the "computes its delegate" refusal below, EIGHT are English sentences quoting `.set`, `.4byte`
-  and `make` in backticks, and the other TWO ARE CODE. So reading prose as prose removes 8 of 10
-  refusal SITES on that script and the script still refuses; clearing it takes an edit in the
-  checkout that owns it as well, and the two halves only work together.
-  Whole SCRIPTS therefore cross from the refusing side to the serving side, which is worth saying
-  plainly even though every CONSTRUCT that refused still refuses. A script that is now followed is
-  a script whose data inputs are your problem — see the residual list below, and the one-token fix
-  under it.
-  One exception, and it is the refusing side: a script containing a HEREDOC is read as written,
-  because inside one a leading `#` is body text and `$(…)` still substitutes, so the comment
-  reading is not decidable there. The marker is a heredoc's SHAPE (`<<EOF`, `<<-'EOF'`) tested on
-  the text with comments already dropped — a bare `<<` on the raw bytes let a `<<` in an English
-  sentence, and an arithmetic `$((1 << 2))`, switch the whole script back to being read as prose.
-  A refusal QUOTES the lines it is about (`… [line 35: REPO="$(cd …)"]`) — naming only the file
-  left the reader to guess which of ten matches was the answer. It is computed LAZILY, once a key
-  is first looked up, so a run that printed no `REFUSED` line may simply have compiled no
-  candidate; that is not evidence the cache worked.
+  **A command is KEYED AT ALL only when every input of it is in view**
+  (`[candcache] REFUSED-KEY label=command reason=the-command-reads-more-than-its-words: <why>`, every
+  key refused, the reason said once). A program the command runs can read more than its words show:
+  a wrapper script that adds `-include pre.h` to its arguments, flags piped from a file through
+  `xargs`, a variable named through another (`${!P}`). Each of those served an old object after the
+  file it read changed. So a command is admitted only in the form below, and every other form is
+  refused rather than listed:
+  - simple commands joined by `;` or `&&`. No pipe, background job, subshell, group, input
+    redirection, here-document, glob, backquote, backslash escape (a line continuation aside), or
+    command substitution other than `$(dirname …)`/`$(basename …)` of `{{inputPath}}` or
+    `{{outputPath}}`. No expansion but `$NAME`/`${NAME}` of a variable the command does not set itself;
+  - output redirected only to `/dev/null` or into the scratch directory;
+  - each program a native executable (ELF or Mach-O), found on `PATH` as the shell finds it, or a
+    shell script whose whole program is `exec <program> "$@"` (the `cpp` → `cpp-14` shim). Not
+    `env`, which runs whatever its words name;
+  - no other word naming a program, a script or a text file (`sh ./cc.sh`, `nice gcc`,
+    `xargs -a flags.txt`), and only a flag's or a path's characters in a word that names nothing;
+  - `cd` only into the scratch directory, and an assignment before a program only of a plain word or
+    of an existing path, never of `PATH`.
+
+  **THE REACH COST:** a project whose compile goes through a wrapper script, a pipe
+  (`cpp | agbcc`), or a template that sets its own variables gets no candidate cache on this path.
+  The benchmark's agbcc command (`cpp …; agbcc … && as …`) is admitted. To cache your project's
+  compiles, call the compiler binaries directly in the template, or make the wrapper exactly
+  `exec <compiler> "$@"`.
+  The admission is read LAZILY, once a key is first looked up, so a run that printed no `REFUSED`
+  line may simply have compiled no candidate; that is not evidence the cache worked.
   The cache still refuses, out loud, when the compile is not a pure function of its input —
   `[candcache] REFUSED label=command reason=object-is-not-a-pure-function-of-its-input` is what
   `ido7.1` gets, because it writes the absolute path of its input `.c` into the object — when a
@@ -592,6 +599,7 @@ find nothing to disagree with and go green having audited nothing.
   listable: the compile can read it and the walk cannot, so nothing is cached), and when the
   command runs the compiler somewhere this namespace cannot follow — a container image named by a
   mutable tag, another host over `ssh`, a `chroot`/`qemu`/`wine` (`reason=stamp-threw`).
+
 - **There is no per-project key.** A command whose compiler asmlift cannot measure refuses on its
   own, naming itself once per run (`reason=stamp-threw`), and `ASMLIFT_CANDCACHE=0` turns the cache
   off for a whole process.
@@ -608,35 +616,18 @@ find nothing to disagree with and go green having audited nothing.
   (`reason=the-command-hands-the-TU-text`): a macro defined or undefined (`-D`, `-U`, CodeWarrior's
   `-d`/`-define`) other than a bare `-DNAME`, `-DNAME=<number>` or `-UNAME`; `-include`,
   `-imacros`, `-prefix`; flags from `@file` or `-specs`; `-Xpreprocessor`; `-traditional`;
-  `-finput-charset`; and a `$(…)` or backquote other than `$(dirname {{outputPath}})`. The words are
-  read in the template and in the value of every variable it names.
-- **What is still NOT measured, said out loud.** A path the command itself COMPUTES
-  (`H=in; cat ${H}c/k.h`), which no token scan can resolve, and its cousin, a `cd` into a computed
-  directory (`cd "$(dirname …)"` contributes no resolution base — and note the ASYMMETRY, which is
-  the most surprising thing in this file: that same `$( )` costs a template a resolution base, and
-  REFUSES THE WHOLE CACHE inside a wrapper SCRIPT, because a script's delegate cannot be read
-  without running it); a wrapper script that reads a config DIRECTORY, or any data FILE it locates
-  for itself (the chain follows what a script EXECS, not what it OPENS — though editing the script
-  itself does move the namespace);
-  `-B /opt/tc/arm-` used as a filename PREFIX rather than a
-  directory (the operand is measured as a path, so the prefix spelling names nothing that exists
-  and contributes nothing);
-  the compiler's own built-in search directories, which every corpus
-  template puts out of reach with `-nostdinc`; and an opaque runtime this build has never heard of
-  — the refusal above is a deny-list of process names, and a deny-list's miss is on the
-  stale-object side.
-  **THE PROJECT ROOT is on this list on purpose, with a number.** A glob with no directory part
-  (`cat *.h`, `rm -f *.o`) expands in the project root, and an injected header spelled without a
-  directory (`-include global.h`) resolves its quoted includes from it — and the project root is
-  the whole checkout, not an include directory anyone named. Measured on one box: 29,126 entries
-  at `pokeemerald`, 25,901 at `af`, 47,211 at a real klonoa dev checkout, all over the
-  20,000-entry stamp budget, so treating `.` as an operand REFUSED those projects outright; its
-  depth-0 files alone are the baserom (26 files / 131,114,078 bytes at `pokeemerald`), a quarter
-  of the 512 MiB budget hashed per process for a file no compile reads; and where it did fit, the
-  namespace tracked `build/` and `.git/`, so every rebuild was a cold start. A glob or an injected
-  header WITH a directory part (`cat inc/*.h`, `-include inc/pre.h`) is bounded and is measured —
-  though only one level: a `#include "../other/k.h"` from inside that header escapes it.
-  One FALSE POSITIVE is kept for the same asymmetry: the container-runtime check reads every
+  `-finput-charset`; a plugin (`-fplugin`, `-fpass-plugin`, `-iplugindir`) or a `-wrapper`; and a
+  `$(…)` or backquote other than `$(dirname {{outputPath}})`. The words are read as the command's
+  programs receive them: quotes removed and every `$NAME` expanded.
+- **What is still NOT measured, said out loud.** `-B /opt/tc/arm-` used as a filename PREFIX rather
+  than a directory (the operand is measured as a path, so the prefix spelling names nothing that
+  exists and contributes nothing); the compiler's own built-in search directories, which every
+  corpus template puts out of reach with `-nostdinc`; and an opaque runtime this build has never
+  heard of — the refusal above is a deny-list of process names, and a deny-list's miss is on the
+  stale-object side. While `GCC_EXEC_PREFIX` or `COMPILER_PATH` is set the cache refuses outright
+  (`reason=stamp-threw`): they move where a GCC driver finds its `cc1` and its `specs` file, and
+  their values do not name those files.
+  One FALSE POSITIVE is kept for the stale-object asymmetry: the container-runtime check reads every
   token, so a runtime word inside a quoted string (`echo "no ssh here"`) refuses the project's
   cache. That is loud and costs a cold start, and a command-position-only rule would silently miss
   `env X=1 docker run`.
@@ -649,44 +640,8 @@ find nothing to disagree with and go green having audited nothing.
   `#include`, so the include directory is never read for any key stored, and a clean verify run is
   zero evidence about the directory measurement specifically. It evidences the toolchain, the
   environment and the template. The evidence for the directory measurement is the offline poison
-  suite (`packages/cli/test/offline/candcache-dirflags.test.ts`), which drives each shape through
-  a real compile across an edit.
-- **A DATA INPUT YOUR WRAPPER OPENS: name it in the template.** The residual above — a script that
-  reads a file it locates for itself — has a fix, and the whole recipe is three steps, none of
-  which is in asmlift:
-  1. pass the file as a template ARGUMENT
-     (`… ./scripts/wrap.sh "$OBJ" "$ASM" build/game.elf`) instead of letting the script find it:
-     every token that names an existing path is measured by content, so the data input rejoins the
-     namespace and rebuilding it correctly invalidates;
-  2. delete the `$(…)` PATH computation from the script — `REPO="$(cd "$(dirname "$0")/.." && pwd)"`
-     is the near-universal wrapper idiom and it alone refuses the whole project, because the
-     detector is a syntax test over a script and does not ask whether the computed value reaches an
-     exec position. Take the directory from the caller, or accept the path as an argument;
-  3. de-backtick any diagnostic STRING (`echo "… (run \`make\` first)"` is code, correctly, so the
-     backtick in it counts).
-
-  Step 2 is the asymmetry the residual list names: the identical `$( )` costs a TEMPLATE a
-  resolution base and REFUSES a SCRIPT outright. Steps 1 and 3 alone leave a script refusing.
-  Proven on the shape that motivated this bullet — a decomp wrapper that appends
-  `.set NAME, 0xADDR` lines read out of the project's linked ELF, so the candidate object is a
-  function of that ELF's symbol table: patching one symbol's `st_value` moved the object's literal
-  pool with its SIZE UNCHANGED (680 B either way, `.word 0x03005478` → `.word 0x03009999`), which
-  is exactly the row objdiff scores. With the ELF named in the template, renaming a symbol it
-  defines recompiled all 1,104 candidates of one fan (`{"miss":1104,"stored":1104}`), and putting
-  the ELF back was the same toolchain again (`{"hit":1082}`). With the identical script locating
-  the same ELF for itself, the same rename served 1,085 stale objects — and the standing 2% audit
-  is what stood between that and a published score: 9 of the 19 sampled keys disagreed and the run
-  exited 3, with `ASMLIFT_CANDCACHE=verify` putting the real damage at 439 of 1,104 keys.
-
-  **AND THE COST, because it is not free.** A named file is a namespace input, so every rebuild of
-  it is a full cold fan — the same rule that keeps the PROJECT ROOT on the residual list above
-  (`build/` and `.git/` in the namespace means the cache never warms). The `{"miss":1104}` line
-  two paragraphs up is that cost as well as the soundness proof: it is what a `make` of the named
-  file buys you, every time. So name the SMALLEST file your wrapper actually reads, not the tree it
-  sits in, and expect a cold start after each build of it. On a workflow that rebuilds that file
-  constantly — a symbol-renaming round, say — that is the honest expected value, and it is what
-  decides whether the warm-cache ratio is real for you.
-
+  suite (`packages/cli/test/offline/candcache-dirflags.test.ts`), which counts the namespaces each
+  shape's stamp makes across an edit.
 - **A `put` does not trust the store either, and that hole had NO audit over it at all.** The
   store is content-addressed: `objects/<sha>` is deduped and hardlinked per key. Treating the
   EXISTENCE of that file as proof of its CONTENT meant a corrupted entry — a disk error, an
@@ -782,8 +737,8 @@ find nothing to disagree with and go green having audited nothing.
     The catch probability in one run is `1 - (1 - rate)^C` where C is the number of SERVED keys the
     staleness touches. At 2%: C = 700 is certain, C = 100 is 87%, C = 9 is 17%, C = 1 is 2%
     (mean 50 runs, 87% within 100). Most of the residuals listed above are "the namespace does
-    not measure input X" where X is read by a whole CLASS — a directory, a wrapper's config, the
-    runtime — and those are caught in the first run that serves a few hundred keys.
+    not measure input X" where X is read by a whole CLASS — a directory, the runtime — and those
+    are caught in the first run that serves a few hundred keys.
     **The BENCH path is sparser than the ranked one, though the rate is the same.** One whole
     `pnpm bench run` serves ~60,800 answers and audits ~1,280 of them (2.1%), so a staleness
     confined to ONE ROW's keys (~9 objects on the agbcc real tier) is caught with probability 17%

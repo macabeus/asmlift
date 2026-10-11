@@ -43,8 +43,7 @@ export interface ReadsCheck {
   report?: PreprocessorReport;
   /** whether inline asm reaches a GNU assembler, which reads `.include` and `.incbin` files */
   gnuAs: boolean;
-  /** the compile's command as text, with the value of every variable it reads: read when there is
-   *  no report */
+  /** the compile's command words, as its programs receive them: read when there is no report */
   command: string;
 }
 
@@ -145,10 +144,11 @@ function assemblerMayReadFile(text: string, preprocessed: boolean): boolean {
  *  otherwise: a macro defined or undefined (`-D`, `-U`, CodeWarrior's `-d`/`-define`), a file read
  *  ahead of the TU (`-include`, `-imacros`, CodeWarrior's `-prefix`), flags from a file (`@file`,
  *  `-specs`), from a command's output (`$(…)`, a backquote) or handed straight to the preprocessor
- *  (`-Xpreprocessor`), a preprocessor that pastes tokens across a comment (`-traditional`), or
- *  another input charset. Matched wherever a word may start, quotes ignored. */
+ *  (`-Xpreprocessor`), a preprocessor that pastes tokens across a comment (`-traditional`),
+ *  another input charset, or code the compiler loads or runs (a plugin, a `-wrapper`). Matched
+ *  wherever a word may start, quotes ignored. */
 const COMMAND_SHAPES_TEXT =
-  /(?:^|[\s"'`=,;&|()\\])(?:-[DUd]|--?(?:define|undefine|include|imacros|specs)|-prefix|-Xpreprocessor|-traditional|-finput-charset|@)|\$\(|`/;
+  /(?:^|[\s"'`=,;&|()\\])(?:-[DUd]|--?(?:define|undefine|include|imacros|specs)|-prefix|-Xpreprocessor|-traditional|-finput-charset|-fplugin|-fpass-plugin|-iplugindir|-wrapper|@)|\$\(|`/;
 /** The command words that are fixed and make no string: a macro defined as `1` or as a number, or
  *  undefined, each one bare word. */
 const PLAIN_MACRO_WORD = /(?<=^|\s)-(?:D[A-Za-z_]\w*(?:=[0-9][\w.]*)?|U[A-Za-z_]\w*)(?=\s|$)/g;

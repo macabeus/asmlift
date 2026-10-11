@@ -10,6 +10,7 @@ import {
   candCache,
   isChainMeasurement,
   noteKeyRefused,
+  refuseDriverSearchEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
 import {
@@ -224,6 +225,7 @@ function cacheFor(cflags: readonly string[]): CandCache {
     return known;
   }
   const cache = candCache('bench-agbcc', () => {
+    refuseDriverSearchEnv();
     // DETERMINISM SELF-TEST, and the backstop object at the same time. A cached object is sound
     // only if it is a pure function of (input bytes, symbol) — which is NOT true of every toolchain
     // (`ido7.1` writes the absolute path of its input .c into the object). So compile one fixed

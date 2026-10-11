@@ -158,6 +158,11 @@ const ATTACHED: [string, string][] = [
   ['--sysroot=inc', ''],
   ['-Wa,-Iinc', 'a comma list handed to the assembler'],
   ['-specs=inc/k.h', 'a FILE operand, path-like yet unreachable as a whole token'],
+  ['-fprofile-use=inc', 'a profile directory'],
+  ['-fauto-profile=inc/k.h', 'a profile file'],
+  ['-fprofile-sample-use=inc/k.h', ''],
+  ['-fplugin=inc/k.h', 'a plugin'],
+  ['-iplugindir=inc', ''],
 ];
 
 describe('a directory a compile flag names is MEASURED, whatever the operand looks like', () => {
@@ -192,16 +197,16 @@ describe('a directory a compile flag names is MEASURED, whatever the operand loo
 
   test('THE CONTROL: with no flag naming it, the same directory is NOT measured', async () => {
     // The rig's header path is built by the shell, so take the flag away and nothing in the
-    // template names `inc` — no token, no glob, and the probe TU never asks for it. The stored
-    // object is then served after the directory moved, which is what every case above is
-    // measuring the ABSENCE of. It is also the residual, stated as a test rather than a
-    // sentence: a directory a command reaches through a path IT COMPUTES is beyond this
-    // measurement, and `ASMLIFT_CANDCACHE=verify` is what catches that shape.
+    // template names `inc` — no token, no glob, and the probe TU never asks for it: one namespace
+    // across the edit, which is what every case above is measuring the ABSENCE of. No object is
+    // served from it, because the store keys no command that runs shell like this
+    // (candcache-command.ts), and that admission, not this measurement, is what keeps a directory
+    // a command reaches through a path IT COMPUTES from serving an old object.
     const p = project();
     const r = await acrossAnEdit(p, templateWith('-Wall -O2'));
     expect(r.first).toContain('#define K 3');
-    expect(r.second, 'nothing names the directory, so the namespace cannot move').toContain('#define K 3');
-    expect(r.namespaces, 'one namespace: the store answered from it').toBe(1);
+    expect(r.namespaces, 'nothing names the directory, so the namespace cannot move').toBe(1);
+    expect(r.second, 'the store keyed nothing, so the edit reached the compile').toContain('#define K 999');
   });
 
   test('the namespace is keyed by CONTENT under BASENAME, never by absolute path', async () => {
@@ -540,14 +545,13 @@ describe('an operand the SHELL spells differently than the scan does', () => {
     expect(typeof homedir()).toBe('string');
   });
 
-  // THE RESIDUAL, pinned in the direction it actually goes. A glob with no directory part
-  // (`cat *.h`) expands in the PROJECT ROOT, and the project root is not a directory anyone
-  // named: measured on this box, walking it is 29 126 entries at pokeemerald and 47 211 at a real
-  // klonoa dev checkout, both over the 20 000-entry stamp budget, so minting `.` as an operand
-  // REFUSED those projects outright; where it fit, the namespace then tracked `build/` and
-  // `.git/` and no run was ever warm. This test exists so that the residual is a decision with a
-  // number on it rather than an oversight, and so that re-minting `.` goes red here first.
-  test('`cat *.h` — a glob naming the PROJECT ROOT is the published residual, not a measurement', async () => {
+  // A glob with no directory part (`cat *.h`) expands in the PROJECT ROOT, and the project root is
+  // not a directory anyone named: measured on this box, walking it is 29 126 entries at
+  // pokeemerald and 47 211 at a real klonoa dev checkout, both over the 20 000-entry stamp budget,
+  // so minting `.` as an operand REFUSED those projects outright; where it fit, the namespace then
+  // tracked `build/` and `.git/` and no run was ever warm. The store keys no command holding a
+  // glob (candcache-command.ts), and this test goes red first if `.` is minted again.
+  test('`cat *.h` — a glob naming the PROJECT ROOT is not measured, and its command is not keyed', async () => {
     const p = project();
     writeFileSync(join(p.cwd, 'k.h'), '#define K 3\n');
     const template =
@@ -563,7 +567,9 @@ describe('an operand the SHELL spells differently than the scan does', () => {
       },
     );
     expect(served.first).toContain('#define K 3');
-    expect(served.second, 'the project root is a residual: `verify` is the answer').toContain('#define K 3');
+    expect(served.second, 'a glob is shell the store keys nothing of, so the edit reached the compile').toContain(
+      '#define K 999',
+    );
     const { templatePathOperands } = await import('../../src/compile-command');
     expect(templatePathOperands(template), 'no `.` operand is synthesized').toEqual([]);
     expect(templatePathOperands(': -include global.h; cc'), 'nor from an injected header at the root').toEqual([

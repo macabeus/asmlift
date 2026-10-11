@@ -10,7 +10,8 @@
 //     one-shot `docker run` reads the tag afresh each time, so a compile that took one is never
 //     stored, and a namespace whose probe took one is refused;
 //   - the compiler directory mounted into the container (or run from on the host), by content;
-//   - every word of the command, the text written ahead of every TU, the compile environment, and
+//   - every word of the command, the text written ahead of every TU, the compile environment (none
+//     at all is cached while it moves where a GCC driver finds its programs or specs), and
 //     every host command the pipeline runs (the preprocessor, a native runner) followed to the
 //     files that actually run;
 //   - the harness files whose code shapes the TU, the command or a stored rejection's message;
@@ -25,6 +26,7 @@ import {
   candCache,
   isChainMeasurement,
   noteKeyRefused,
+  refuseDriverSearchEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
 import { type PreprocessorReport, candidateCacheRefusal, candidateReadsRefusal } from '@asmlift/cli/candcache-reads';
@@ -241,6 +243,7 @@ export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: strin
   let cache: CandCache | undefined;
   const cacheNow = (): CandCache =>
     (cache ??= candCache(spec.label, () => {
+      refuseDriverSearchEnv();
       // The probe first: a pool container it starts is then there for `containerImageId` to read.
       const before = oneShots();
       const probe = (): string | null => {

@@ -18,7 +18,7 @@ import {
   ppcDockerAvailable,
 } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { afterAll, describe, expect, test, vi } from 'vitest';
@@ -292,6 +292,25 @@ describe.each(['agbcc', 'gcc272', 'kmc', 'pooled-kmc'] as const)('%s', (pipeline
   );
 });
 
+// The synthetic tier's agbcc `decomp.yaml` command is `cpp …; agbcc … && as …`: steps joined by `;`
+// and `&&`, output redirected into the scratch directory, every program native or an `exec` shim.
+describe('command-agbcc', () => {
+  test.runIf(HAVE['command-agbcc'])(
+    'keeps a TU the command compiles: the store keys the command',
+    async () => {
+      const store = scratch('candcache-reads-store-');
+      const tu = 'int f(int x) { return x * 7; }\n';
+      const cold = await compileIn(store, 'command-agbcc', tu);
+      expect(cold.stats).toMatchObject({ stored: 1 });
+      expect(cold.stats.refusedKeys).toBeUndefined();
+      const warm = await compileIn(store, 'command-agbcc', tu);
+      expect(warm.stats).toMatchObject({ hit: 1 });
+      expect(warm.out).toBe(cold.out);
+    },
+    BUDGET,
+  );
+});
+
 // A stored rejection carries the compiler's whole diagnostic, which the stillborn rule reads. A GCC
 // that quotes the source line an error is on reads that line from the file the line is NAMED after:
 // agbcc's cpp reads the TU on stdin under the name `c.c`, so with no `-fno-diagnostics-show-caret`
@@ -429,6 +448,172 @@ describe('a GNU compile command', () => {
       const warm = await compileIn(store, cmd, tu);
       expect(warm.stats).toMatchObject({ hit: 1 });
       expect(warm.out).toBe(cold.out);
+    },
+    BUDGET,
+  );
+});
+
+/** `env` set over `fn`, and put back. */
+async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Promise<T> {
+  const saved = Object.fromEntries(Object.keys(env).map((k) => [k, process.env[k]]));
+  Object.assign(process.env, env);
+  try {
+    return await fn();
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) {
+        delete process.env[k];
+      } else {
+        process.env[k] = v;
+      }
+    }
+  }
+}
+
+// A program the command runs can read more than the command's words show, and each spelling below
+// was served the old file's object through arm-none-eabi-gcc: the store keys no such command.
+describe('a command whose program reads what its words do not show', () => {
+  const SECTION = `'-DS=".data\\n.incbin \\"f.bin\\"\\n.section .data.x"'`;
+  /** [what, the command, the TU, the file it reads and that file's two contents, extra env] */
+  const READS: [string, string, string, Record<string, string>, string, [string, string], Record<string, string>][] = [
+    [
+      'a wrapper script that adds -include',
+      './cc.sh -O2 -c -o {{outputPath}} {{inputPath}}',
+      'int f(void) { return K; }\n',
+      { 'cc.sh': `#!/bin/sh\nexec "${GCC}" -include pre.h "$@"\n` },
+      'pre.h',
+      ['#define K 1\n', '#define K 2\n'],
+      {},
+    ],
+    [
+      'a wrapper script that defines a section name reading a file',
+      './cc.sh -O2 -c -o {{outputPath}} {{inputPath}}',
+      'int x __attribute__((section(S))) = 1;\n',
+      { 'cc.sh': `#!/bin/sh\nexec "${GCC}" ${SECTION} "$@"\n` },
+      'f.bin',
+      ['11111111', '22222222'],
+      {},
+    ],
+    [
+      'flags piped from a file through xargs',
+      `cat flags.txt | xargs "${GCC}" -O2 -c -o {{outputPath}} {{inputPath}}`,
+      'int f(void) { return K; }\n',
+      { 'flags.txt': '-include pre.h\n' },
+      'pre.h',
+      ['#define K 1\n', '#define K 2\n'],
+      {},
+    ],
+    [
+      'a variable named through another',
+      `"${GCC}" \${!CANDCACHE_READS_P} -O2 -c -o {{outputPath}} {{inputPath}}`,
+      'int f(void) { return K; }\n',
+      {},
+      'pre.h',
+      ['#define K 1\n', '#define K 2\n'],
+      { CANDCACHE_READS_P: 'CANDCACHE_READS_EXTRA', CANDCACHE_READS_EXTRA: '-include pre.h' },
+    ],
+  ];
+  test.runIf(HAVE_GCC).each(READS)(
+    'compiles afresh on every run: %s',
+    async (_what, command, tu, files, read, [before, after], env) => {
+      const cwd = scratch('candcache-reads-cwd-');
+      for (const [name, body] of Object.entries(files)) {
+        writeFileSync(join(cwd, name), body);
+        chmodSync(join(cwd, name), 0o755);
+      }
+      const store = scratch('candcache-reads-store-');
+      const cmd = { command, cwd };
+      await withEnv(env, async () => {
+        writeFileSync(join(cwd, read), before);
+        const cold = await compileIn(store, cmd, tu);
+        expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
+        expect(cold.stats).toMatchObject({ refusedKeys: 1 });
+        writeFileSync(join(cwd, read), after);
+        const warm = await compileIn(store, cmd, tu);
+        expect(warm.stats.hit).toBeUndefined();
+        expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
+        expect(warm.out).not.toMatch(/^threw /);
+        expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
+      });
+    },
+    BUDGET,
+  );
+
+  test.runIf(HAVE_GCC)(
+    'keeps a TU compiled through a script whose whole program is exec "$@"',
+    async () => {
+      const cwd = scratch('candcache-reads-cwd-');
+      writeFileSync(join(cwd, 'cc.sh'), `#!/bin/sh\nexec "${GCC}" "$@"\n`);
+      chmodSync(join(cwd, 'cc.sh'), 0o755);
+      const store = scratch('candcache-reads-store-');
+      const cmd = { command: './cc.sh -O2 -c -o {{outputPath}} {{inputPath}}', cwd };
+      const tu = 'int f(int i) { return i * 3; }\n';
+      const cold = await compileIn(store, cmd, tu);
+      expect(cold.stats).toMatchObject({ stored: 1 });
+      const warm = await compileIn(store, cmd, tu);
+      expect(warm.stats).toMatchObject({ hit: 1 });
+      expect(warm.out).toBe(cold.out);
+    },
+    BUDGET,
+  );
+});
+
+// `GCC_EXEC_PREFIX` moves where a GCC driver finds its `cc1` and its `specs` file, and a `*cpp:`
+// line in that specs file reaches the object; its value names neither file. The store keys nothing
+// while it is set.
+describe('a GCC driver relocated by GCC_EXEC_PREFIX', () => {
+  const dumped = (flag: string): string => spawnSync(GCC, [flag], { encoding: 'utf8' }).stdout.trim();
+  /** A `GCC_EXEC_PREFIX` tree holding the install's `cc1` and a specs file defining `K`. */
+  const tree = (): { prefix: string; setK: (k: number) => void } => {
+    const root = scratch('candcache-reads-gep-');
+    const [machine, version] = [dumped('-dumpmachine'), dumped('-dumpversion')];
+    const lib = join(root, 'lib/gcc', machine, version);
+    const libexec = join(root, 'libexec/gcc', machine, version);
+    mkdirSync(lib, { recursive: true });
+    mkdirSync(libexec, { recursive: true });
+    symlinkSync(dumped('-print-prog-name=cc1'), join(libexec, 'cc1'));
+    return {
+      prefix: `${join(root, 'lib/gcc')}/`,
+      setK: (k) => writeFileSync(join(lib, 'specs'), `*cpp:\n-DK=${k}\n\n`),
+    };
+  };
+  const TU = 'int f(void) { return K; }\n';
+
+  test.runIf(HAVE_GCC && HAVE.agbcc)(
+    'compiles afresh on every run through agbcc while it is set',
+    async () => {
+      const t = tree();
+      const store = scratch('candcache-reads-store-');
+      await withEnv({ GCC_EXEC_PREFIX: t.prefix }, async () => {
+        t.setK(7);
+        const cold = await compileIn(store, 'agbcc', TU);
+        expect(cold.stats).toMatchObject({ refused: 1 });
+        expect(cold.stats.stored).toBeUndefined();
+        t.setK(8);
+        const warm = await compileIn(store, 'agbcc', TU);
+        expect(warm.out, 'the edited specs file reached the compile').not.toBe(cold.out);
+        expect(warm.out).toBe((await compileIn(store, 'agbcc', TU, 'off')).out);
+      });
+    },
+    BUDGET,
+  );
+
+  test.runIf(HAVE_GCC)(
+    'names the cc1 a driver finds on PATH when it finds none of its own, or that it found none',
+    async () => {
+      const { toolchainFileChain } = await import('@asmlift/cli/candcache');
+      const empty = scratch('candcache-reads-gep-');
+      const bin = scratch('candcache-reads-path-');
+      const fake = join(bin, 'cc1');
+      writeFileSync(fake, '#!/bin/sh\nexit 1\n');
+      chmodSync(fake, 0o755);
+      await withEnv({ GCC_EXEC_PREFIX: `${empty}/` }, async () => {
+        expect(dumped('-print-prog-name=cc1'), 'the driver answers a bare name').toBe('cc1');
+        expect(toolchainFileChain(GCC)).toContain('UNRESOLVED:cc1');
+        await withEnv({ PATH: `${bin}:${process.env.PATH}` }, async () => {
+          expect(toolchainFileChain(GCC)).toContain(realpathSync(fake));
+        });
+      });
     },
     BUDGET,
   );

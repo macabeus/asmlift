@@ -17,10 +17,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { toolchainFileChain } from '../../src/candcache';
+import { commandAdmission } from '../../src/candcache-command';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
 // several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
@@ -635,17 +636,11 @@ describe("a wrapper script's PROSE is not its program", () => {
   });
 });
 
-describe('THE RESIDUAL: a wrapper that OPENS a file it locates for itself', () => {
-  // Said out loud because 48ecc3fb moved whole SCRIPTS across this line, not only constructs. The
-  // chain follows what a script EXECS, never what it OPENS, so a wrapper that reads a project data
-  // file — a linked ELF whose symbol table its output depends on — is SERVED with that file
-  // outside the namespace, and rebuilding the file does not invalidate.
-  //
-  // What the pin is here to keep honest: the delegate refusal was never the guard for this. A
-  // wrapper whose ENGLISH happens to contain a backtick refused; the identical wrapper whose
-  // English does not was served on origin/main too, and both are served now. The remedy is one
-  // token in the compile TEMPLATE — pass the file as an argument, and `templatePathOperands`
-  // measures it by content. `docs/ranked-repro.md` carries the recipe and its cost.
+describe('a wrapper that OPENS a file it locates for itself', () => {
+  // The chain follows what a script EXECS, never what it OPENS, so a wrapper that reads a project
+  // data file — a linked ELF whose symbol table its output depends on — has that file outside the
+  // namespace, prose or no prose, and rebuilding the file would not invalidate. The command path
+  // keys no such wrapper: it admits a script only when its whole program is `exec <program> "$@"`.
   const wrapper = (body: string): string => {
     const dir = scratch();
     writeFileSync(join(dir, 'game.elf'), 'symbols v1');
@@ -667,8 +662,15 @@ describe('THE RESIDUAL: a wrapper that OPENS a file it locates for itself', () =
       expect(chain, `${label}: served, not refused`).toContain(NODE);
       expect(
         chain.some((e) => e.endsWith('game.elf')),
-        `${label}: the data input is the documented residual`,
+        `${label}: the data input is not in the chain`,
       ).toBe(false);
     }
+  });
+
+  test('so a command that runs it is not keyed', () => {
+    const p = wrapper(`#!/bin/sh\n${READS_A_FILE}`);
+    expect(commandAdmission(`${p} -c -o {{outputPath}} {{inputPath}}`, { cwd: dirname(p), env: process.env })).toEqual({
+      refusal: `it runs ${p}, a script that does more than exec a program with its own arguments`,
+    });
   });
 });
