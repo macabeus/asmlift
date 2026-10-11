@@ -12,6 +12,7 @@ import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import type { Prototypes } from './proto';
+import { storeSigned } from './raise/storesign';
 import { type SymbolInfo, accessSignedness } from './symbols';
 import { C_TYPEDEFS, type TargetDescription } from './target';
 
@@ -23,15 +24,23 @@ import { C_TYPEDEFS, type TargetDescription } from './target';
  *  Mirrors structure()'s scalar-global rule: a fact is recorded only for a symbol accessed
  *  EXCLUSIVELY at offset 0 with ONE width and ONE load signedness — anything else (interior
  *  offsets, address arithmetic, width or sign conflicts) records nothing, because those
- *  spellings go through `&gSym` casts where every object decl is address-identical. */
+ *  spellings go through `&gSym` casts where every object decl is address-identical.
+ *
+ *  A symbol never LOADED takes its sign from the stores that carry one (`signed`, which
+ *  raise/storesign.ts reads off the constant a narrow store materialized), seeded through
+ *  `storeSigned` like every other store-typed cell; an unstamped store says nothing, so a cell
+ *  only ever stored unstamped keeps the unsigned default. A load still wins, as in
+ *  raise/structs.ts: the bare `gSym = v` spelling has no cast to carry the stamp, so this
+ *  declaration is the only place the stored constant's view can be written. */
 export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
   const defs = defOpMap(fn);
   const symOf = (v: Value): string | null => {
     const d = defs.get(v);
     return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
   };
-  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
-  const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
+  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; stored: Set<boolean>; interior: boolean }>();
+  const get = (s: string) =>
+    acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), stored: new Set(), interior: false }).get(s)!;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode === 'load' || op.opcode === 'store') {
@@ -44,6 +53,8 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
             a.widths.add(op.attrs.width as number);
             if (op.opcode === 'load') {
               a.signs.add(accessSignedness(op.attrs.width as number, op.attrs.signed as boolean | undefined));
+            } else if (op.attrs.signed !== undefined) {
+              a.stored.add(storeSigned(op, op.attrs.width as number));
             }
           }
         }
@@ -65,8 +76,9 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
   }
   const out = new Map<string, { width: number; signed: boolean }>();
   for (const [s, a] of acc) {
-    if (!a.interior && a.widths.size === 1 && a.signs.size <= 1) {
-      out.set(s, { width: [...a.widths][0], signed: a.signs.has(true) });
+    const signs = a.signs.size > 0 ? a.signs : a.stored;
+    if (!a.interior && a.widths.size === 1 && signs.size <= 1) {
+      out.set(s, { width: [...a.widths][0], signed: signs.has(true) });
     }
   }
   return out;

@@ -4,8 +4,10 @@
 import { expect, test } from 'vitest';
 
 import { Fn, defOpMap } from '../src/ir/core';
+import type { AsmData } from '../src/frontend/asmdata';
 import { applyIdiomPatterns, decompile, liftStamped, raiseRecovered } from '../src/pipeline';
 import { seedNarrowStoreSigns, storedConstantSign } from '../src/raise/storesign';
+import { bareGlobalAccessFacts } from '../src/rank-declare';
 import { MIPS_GCC, TargetDescription } from '../src/target';
 
 test('the register a narrow constant was materialized into says which lvalue type it was converted to', () => {
@@ -119,6 +121,51 @@ test("a constant both views store alike is spelled through its base's own view, 
     { prototypes: { f: { params: ['void *'], returnsVoid: true } } },
   ).source;
   expect(src).toContain('void f(s16 *a0) {\n    a0[3] = -1;\n    a0[5] = 7;\n');
+});
+
+// A map-less bare global (rank-declare.ts): `gS = v` has no cast to carry the stamp, so the
+// declaration the ranked run synthesizes is where the stored constant's view is written.
+const globalFacts = (...lines: [string, string][]) => {
+  const asmData: AsmData = {
+    sections: new Map(),
+    relocs: lines.flatMap(([, sym], i) =>
+      sym ? [{ section: '.text', offset: 4 * i, type: i === 0 ? 'R_MIPS_HI16' : 'R_MIPS_LO16', sym, addend: 0 }] : [],
+    ),
+    symbols: new Map(),
+    symbolCount: 0,
+    bigEndian: true,
+  };
+  const fn: Fn = liftStamped(
+    'f',
+    obj(...lines.map(([l], i) => `${(4 * i).toString(16)}:\t${l}`)),
+    MIPS_GCC,
+    { f: { params: ['void *'], returnsVoid: true } },
+    asmData,
+    undefined,
+  );
+  applyIdiomPatterns(fn, MIPS_GCC);
+  raiseRecovered(fn, MIPS_GCC);
+  return Object.fromEntries(bareGlobalAccessFacts(fn));
+};
+
+test('a bare global only ever stored is declared at the view its stamped store reads', () => {
+  // `extern s16 gS; gS = -1;` → `li v0,-1; lui at,%hi(gS); jr ra; sh v0,%lo(gS)(at)`
+  const store = (k: string) =>
+    globalFacts(['lui\tat,0x0', 'gS'], [`li\tv0,${k}`, ''], ['jr\tra', ''], ['sh\tv0,0(at)', 'gS']);
+  expect(store('-1')).toEqual({ gS: { width: 2, signed: true } });
+  expect(store('0xffff')).toEqual({ gS: { width: 2, signed: false } });
+  expect(store('7')).toEqual({ gS: { width: 2, signed: false } }); // no stamp: the unsigned default
+  // a load still decides: `u16` read, then stored -1 (a register that is not the load's)
+  expect(
+    globalFacts(
+      ['lui\tat,0x0', 'gS'],
+      ['lhu\tv1,0(at)', 'gS'],
+      ['li\tv0,-1', ''],
+      ['sw\tv1,0(a0)', ''],
+      ['jr\tra', ''],
+      ['sh\tv0,0(at)', 'gS'],
+    ).gS,
+  ).toEqual({ width: 2, signed: false });
 });
 
 test('an indexed store carries its stamp into the astore', () => {
