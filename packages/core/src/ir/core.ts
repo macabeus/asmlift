@@ -86,6 +86,11 @@ export interface LocalObject {
   /** What an object FILE records of where the object sits, absent for an assembler listing, whose
    *  `.align` is among its directives. */
   placement?: LocalObjectPlacement;
+  /** The object is the compiler's own, under a label the source never wrote (agbcc's `.LC0`): the
+   *  constant image a local aggregate's initializer is copied from. `name` is then the label, no
+   *  declaration spells it, and it reaches the C only as that local's initializer
+   *  (l3/constinit.ts). */
+  anonymous?: true;
 }
 
 /** What an object file records of where a static sits. */

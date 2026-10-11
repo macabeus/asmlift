@@ -55,6 +55,7 @@ import { parseAsmData } from '../src/frontend/asmdata';
 import {
   type LocalObjectRead,
   gasPoolReferrers,
+  readGasAnonymousObject,
   readGasLocalObject,
   readObjectLocalObject,
 } from '../src/frontend/local-object';
@@ -506,4 +507,67 @@ test("mwcc: a .comment that is not mwcc's, or does not hold one record per symbo
   });
   ad.sections.delete('.comment');
   expect(readObjectLocalObject(ad, 'kt$18', 'rtab')).toMatchObject({ refused: expect.stringContaining('.comment') });
+});
+
+// agbcc 2.9 -mthumb-interwork -O2 -fhex-asm of local aggregates with constant initializers; the
+// source is in the test below that reads each label.
+const constInit = corpus('agbcc-const-init.s');
+
+test("agbcc: a local aggregate's constant image is the anonymous data run under its `.LC` label", () => {
+  // void dead16(void) { u8 a[16] = {0,1,2,4,6,4,2,1,0,-1,-2,-4,-6,-4,-2,-1}; }
+  expect(readGasAnonymousObject(constInit, '.LC0')).toEqual({
+    name: '.LC0',
+    symbol: '.LC0',
+    order: -1,
+    anonymous: true,
+    section: 'rodata',
+    size: 16,
+    bytes: Uint8Array.from([0, 1, 2, 4, 6, 4, 2, 1, 0, 0xff, 0xfe, 0xfc, 0xfa, 0xfc, 0xfe, 0xff]),
+    bigEndian: false,
+    directives: { align: 1, unit: 1, negative: false, string: false },
+  });
+  // s8 a[8] = {0,1,-1,-2,3,4,5,-6}: a signed element writes its negatives
+  expect(readGasAnonymousObject(constInit, '.LC2')).toMatchObject({
+    size: 8,
+    directives: { align: 1, unit: 1, negative: true, string: false },
+  });
+  // u16 a[3] = {1,0xffff,3} and s16 a[3] = {1,-1,3}: `.align 1` and the halfword unit
+  expect(readGasAnonymousObject(constInit, '.LC4')).toMatchObject({
+    size: 6,
+    directives: { align: 2, unit: 2, negative: false },
+  });
+  expect(readGasAnonymousObject(constInit, '.LC6')).toMatchObject({ directives: { unit: 2, negative: true } });
+  // char a[8] = "hello": the image is the literal alone; the tail is a memset in the code
+  expect(readGasAnonymousObject(constInit, '.LC8')).toMatchObject({
+    size: 6,
+    directives: { align: 4, unit: 1, string: true },
+  });
+  // a struct's fields write mixed widths, so there is no one unit
+  expect(readGasAnonymousObject(constInit, '.LC12')).toMatchObject({
+    size: 8,
+    directives: { align: 4, negative: false, string: false },
+  });
+  expect(readGasAnonymousObject(constInit, '.LC12')).not.toHaveProperty('directives.unit');
+});
+
+test('agbcc: an anonymous label that is not read-only data, or not a `.L` label, refuses', () => {
+  // `.L3` is a literal pool in .text
+  expect(readGasAnonymousObject(constInit, '.L3')).toMatchObject({
+    refused: expect.stringContaining("section '.text'"),
+  });
+  expect(readGasAnonymousObject('.data\n.LC0:\n\t.word 1\n', '.LC0')).toMatchObject({
+    refused: expect.stringContaining('defined in data'),
+  });
+  expect(readGasAnonymousObject('.section .rodata\n.LC0:\n\t.word g\n', '.LC0')).toMatchObject({
+    refused: expect.stringContaining("the address 'g'"),
+  });
+  expect(readGasAnonymousObject(constInit, 'dead16')).toMatchObject({
+    refused: expect.stringContaining('compiler-generated'),
+  });
+  expect(readGasAnonymousObject(constInit, '.LC99')).toEqual({ refused: 'whose definition this asm does not carry' });
+});
+
+test('agbcc: a string literal two functions pass shares one image, and both pools name it', () => {
+  // void flit(void) { g("abc"); }  void flit2(void) { g("abc"); }
+  expect([...gasPoolReferrers(constInit, '.LC16')].sort()).toEqual(['flit', 'flit2']);
 });

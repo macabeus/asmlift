@@ -212,6 +212,38 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
     return refused('whose name has no source spelling this reader knows');
   }
   const { name, counter: order } = parts;
+  const read = readGasDefinition(asm, symbol);
+  return 'refused' in read ? read : { name, symbol, order, ...read };
+}
+
+/** Read an ANONYMOUS constant out of GNU as text: the data run under a compiler-generated `.L`
+ *  label (agbcc's `.LC0`), which is how agbcc 2.9 places the image a local aggregate's constant
+ *  initializer is copied from (`u8 a[16] = {…}` is `ldr r1,=.LC0; mov r0,sp; mov r2,#16; bl memcpy`,
+ *  varasm.c `output_constant_def`). Nothing in the source names it, so no declaration can spell it:
+ *  the object is carried {@link LocalObject.anonymous} and spelled only as the initializer of the
+ *  local it is copied into (l3/constinit.ts), or refused there.
+ *
+ *  Read-only data only, with the same refusals as a static's definition: a `.L` label anywhere else
+ *  is code, or data this reader has no reason to believe is a constant image. */
+export function readGasAnonymousObject(asm: string, label: string): LocalObjectRead {
+  if (!/^\.L[\w.$]*$/.test(label)) {
+    return refused('whose label is not a compiler-generated `.L` label');
+  }
+  const read = readGasDefinition(asm, label);
+  if ('refused' in read) {
+    return read;
+  }
+  if (read.section !== 'rodata') {
+    return refused(`defined in ${read.section}, which is not the read-only data a constant image sits in`);
+  }
+  return { name: label, symbol: label, order: -1, anonymous: true, ...read };
+}
+
+/** A definition's section, size, bytes and directives, read from the label down. */
+function readGasDefinition(
+  asm: string,
+  symbol: string,
+): Omit<LocalObject, 'name' | 'symbol' | 'order'> | { refused: string } {
   const lines = asm.split('\n').map(code);
   let declaredSize: number | null = null;
   let section: string | null = null;
@@ -225,7 +257,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
       if (size === null || size <= 0) {
         return refused(`whose '.lcomm' size '${lcomm[2]}' is not a positive number`);
       }
-      return { name, symbol, order, section: 'bss', size, bigEndian: false };
+      return { section: 'bss', size, bigEndian: false };
     }
     const sz = line.match(/^\.size\s+([^\s,]+)\s*,\s*(\S+)$/);
     if (sz && sz[1] === symbol) {
@@ -293,7 +325,7 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
   }
   if (kind === 'bss') {
     return bytes.every((b) => b === 0)
-      ? { name, symbol, order, section: 'bss', size: bytes.length, bigEndian: false }
+      ? { section: 'bss', size: bytes.length, bigEndian: false }
       : refused('defined in bss with non-zero bytes');
   }
   const align = alignAhead(lines, at);
@@ -307,9 +339,6 @@ export function readGasLocalObject(asm: string, symbol: string): LocalObjectRead
   // struct's mixed directives a negative belongs to one field, which says nothing of another.
   const unit = widths.size === 1 && bytes.length % [...widths][0] === 0 ? [...widths][0] : undefined;
   return {
-    name,
-    symbol,
-    order,
     section: kind,
     size: bytes.length,
     bytes: Uint8Array.from(bytes),
