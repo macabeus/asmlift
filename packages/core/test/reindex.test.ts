@@ -673,6 +673,49 @@ describe('v3 — expression-base walk', () => {
     });
   });
 
+  describe('a W-element pointer base: EXPR counts in elements, so REST stays verbatim', () => {
+    const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+    const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
+    const elemFn = (e: Expr, baseType: IrType, start = 0): SFn => {
+      const f = mkFn(e, [{ k: 'store', lval: deref16, value: cn(7) }, inc('p'), inc('i')]);
+      f.locals[0] = { name: 'p', type: u16p as never };
+      f.params[0] = { name: 'a0', type: baseType };
+      (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(start);
+      return f;
+    };
+    const plus = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '+', l, r });
+
+    test('KMC folds for (i = 3; …) a0[i] over a u16 *a0 to p = a0 + 3: it reads a0[i]', () => {
+      const r = reindexWalks(elemFn(plus(v('a0'), cn(3)), u16p as never, 3));
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('a0[i] = 7;');
+    });
+
+    test('a symbolic addend stays verbatim, the constants fold after it', () => {
+      const r = reindexWalks(
+        elemFn(
+          plus(plus(v('a0'), cn(1)), plus({ k: 'bin', op: '*', l: v('a2'), r: v('a1') }, cn(2))),
+          u16p as never,
+          5,
+        ),
+      );
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('a0[i + a2 * a1 - 2] = 7;');
+    });
+
+    test('a pointer to a signed element of the same width counts the same unit', () => {
+      const s16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: true } } as const;
+      expect(reindexWalks(elemFn(plus(v('a0'), cn(3)), s16p as never, 3))).not.toBeNull();
+    });
+
+    test('refused: a pointer base of another element width strides a unit no u16 index names', () => {
+      const u32p = { kind: 'ptr', to: { kind: 'int', width: 32, signed: false } } as const;
+      expect(reindexWalks(elemFn(plus(v('a0'), cn(3)), u32p as never, 3))).toBeNull();
+      expect(reindexWalks(elemFn(plus(v('a0'), cn(3)), T.ptr(T.ptr(T.u(16))), 3))).toBeNull();
+    });
+  });
+
   describe('an address base: `(u32)&g` is the index base, declared or not', () => {
     const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
     const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
