@@ -62,6 +62,31 @@ test('a local handed on whole takes the image’s element; one read by element k
   );
 });
 
+test('a local holding only the address, assigned ahead of the copy, is the local reached by another name', () => {
+  // the readability hoist's head placement: `p0 = (u8 *)&sp0;` before the copy, elements read off p0
+  const alias: Stmt = {
+    k: 'assign',
+    name: 'p0',
+    value: { k: 'cast', to: T.ptr(T.u(8)), e: { k: 'addr', name: 'sp0' } },
+  };
+  const at = (k: number): Expr => ({ k: 'index', base: v('p0'), idx: c(k), width: 1, signed: false });
+  const locals = [...bytes4, { name: 'p0', type: T.ptr(T.u(8)) }];
+  const sfn = fn([alias, copy('sp0', '.LC0', 4), use(v('sp0')), use(at(1)), use(at(3))], locals);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(foldConstantImages(sfn).body).toEqual([alias, use(v('sp0')), use(at(1)), use(at(3))]);
+  // …and only that: read through ahead of the copy, past it, or pointed elsewhere later, it refuses
+  expect(constantImageRefusal(fn([alias, use(v('p0')), copy('sp0', '.LC0', 4)], locals))?.refused).toContain(
+    'not the first thing the body does with it',
+  );
+  expect(constantImageRefusal(fn([alias, copy('sp0', '.LC0', 4), use(at(4))], locals))?.refused).toContain(
+    'which the body indexes past the 4 bytes copied',
+  );
+  const moved: Stmt = { k: 'assign', name: 'p0', value: v('gBuf') };
+  expect(constantImageRefusal(fn([alias, copy('sp0', '.LC0', 4), moved], locals))?.refused).toContain(
+    'not the first thing the body does with it',
+  );
+});
+
 test('an image written as a string literal is spelled as one', () => {
   const str = image([0x68, 0x69, 0], 1, false, { string: true });
   expect(

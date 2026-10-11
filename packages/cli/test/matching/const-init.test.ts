@@ -82,6 +82,20 @@ describe('local aggregate initializers — real agbcc: the candidate copies the 
     expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(0);
   });
 
+  test('two element reads after the copy: the hoisted base ahead of it does not stop the fold', () => {
+    // the readability hoist puts `p0 = (u8 *)sp0;` at the head, above the copy it then folds past
+    const c = `${USE}extern void k(int);\nvoid twice(void) { u8 a[8] = {1, 2, 3, 4, 5, 6, 7, 8}; g(a); k(a[3]); k(a[6]); }`;
+    const asm = compileTargetAsm(c, FLAGS);
+    const r = decompile('twice', asm, ARMV4T_AGBCC, {
+      prototypes: { ...PROTOS, k: { params: ['s32'], returnsVoid: true } },
+    });
+    expect(r.source).toMatch(/u8 sp0\[8\] = \{ 1, 2, 3, 4, 5, 6, 7, 8 \};/);
+    expect(r.source).not.toContain('memcpy');
+    expect(rodata(compileCandAgbcc(`${USE}extern void k(int);\n${r.source}`, FLAGS))).toEqual(
+      rodata(assembleTarget(asm)),
+    );
+  });
+
   test('an initializer shorter than its string array is a copy and a fill, and declines', () => {
     // `char a[8] = "hello"` copies the 6-byte literal and memsets the tail: no one copy fills `a`
     const asm = compileTargetAsm(`${USE}void tail(void) { char a[8] = "hello"; g(a); }`, FLAGS);

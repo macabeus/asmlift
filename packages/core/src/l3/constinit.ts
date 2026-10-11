@@ -23,9 +23,9 @@
 //     body, so it runs once and on every path that reaches it;
 //   • its destination is a whole local integer array of the copied size — or a reservation the
 //     frame rounded up by less than a word, reached by nothing but elements inside the copy and its
-//     whole address — not volatile, and nothing before the copy mentions it, so moving the copy to
-//     the declaration changes no value anything reads (an initializer runs at entry, the copy at
-//     its own position);
+//     whole address — not volatile, and nothing before the copy mentions it but a local assigned
+//     its address alone, so moving the copy to the declaration changes no value anything reads (an
+//     initializer runs at entry, the copy at its own position);
 //   • its source is the whole image, which nothing else mentions, and whose size is the count;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
 //     element type this pass could declare).
@@ -38,7 +38,7 @@
 // anonymous read-only constant too, and their frontends refuse the address-taken frame local first.
 import { type IrType, typeToString } from '../ir/types';
 import { type Expr, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
-import { mentionsAnyLocal } from './mentions';
+import { localMentions, mentionsAnyLocal } from './mentions';
 
 /** The block copies a compiler emits for an aggregate initializer, by callee: which argument is
  *  the destination, the source and the byte count. */
@@ -141,17 +141,26 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
   if (declElem === null || declElem.kind !== 'int' || declSize === null || declSize < size || declSize - size >= 4) {
     return `whose copy fills '${local}', a ${typeToString(decl.type)}, which is not an integer array of its ${size} bytes`;
   }
-  if (mentionsAnyLocal(sfn.body.slice(0, at), new Set([local]))) {
+  // A local that holds nothing but the local's address — `p0 = (u8 *)&sp0;`, the base the
+  // readability hoist (l3/basecse.ts) places at the head of the body, ahead of the copy — reads no
+  // element where it is assigned, so the copy may move past it; its uses are the local's.
+  const aliasAt = aliasesOf(sfn, local);
+  const reach = new Set([local, ...aliasAt.keys()]);
+  const aliasing = new Set(aliasAt.values());
+  const kept = sfn.body.filter((_, i) => i !== at && !aliasing.has(i));
+  if (
+    mentionsAnyLocal(
+      sfn.body.slice(0, at).filter((_, i) => !aliasing.has(i)),
+      reach,
+    )
+  ) {
     return `whose copy into '${local}' is not the first thing the body does with it`;
   }
   // Where the body reaches the local by anything but its whole address handed to a call — an
   // element, an offset, a cast — that spelling was made against the local's own element, so the
   // image's must be the same width, and the local keeps its type. Where it does not, the image's
   // directives are the only witness of the source's element type, and the local takes it.
-  const use = uses(
-    sfn.body.filter((_, i) => i !== at),
-    local,
-  );
+  const use = uses(kept, reach);
   const count = size / (elem.width / 8);
   // Reached as anything but elements, the local may be reached past the bytes copied — the tail a
   // fill writes after a short string's copy — so the reservation must be the copy's exactly.
@@ -177,23 +186,51 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
   };
 }
 
-/** How `body` reaches `local`: the byte extent of each direct element access with a constant
- *  index (`sp0[k]`, `((u8 *)sp0)[k]` — the index node carries its own width), how many of those
- *  there are in all, and whether anything reaches it other than as a whole call argument or a
- *  direct element access. */
-function uses(body: readonly Stmt[], local: string): { indexed: number; extents: [number, number][]; other: boolean } {
+/** The locals of `sfn` that hold `local`'s address and nothing else — assigned it once, at the top
+ *  level of the body, and never written through `&` — each with the index of that assignment. */
+function aliasesOf(sfn: SFn, local: string): Map<string, number> {
+  const counts = localMentions(sfn);
+  const out = new Map<string, number>();
+  sfn.body.forEach((s, i) => {
+    const m = s.k === 'assign' ? counts.get(s.name) : undefined;
+    if (
+      s.k === 'assign' &&
+      s.name !== local &&
+      m?.assigns === 1 &&
+      m.addrTaken === 0 &&
+      wholeObject(s.value) === local
+    ) {
+      out.set(s.name, i);
+    }
+  });
+  return out;
+}
+
+/** How `body` reaches the object the names in `reach` all denote whole: the byte extent of each
+ *  direct element access with a constant index (`sp0[k]`, `((u8 *)sp0)[k]`, `p0[k]` — the index
+ *  node carries its own width), how many of those there are in all, and whether anything reaches
+ *  it other than as a whole call argument or a direct element access. */
+function uses(
+  body: readonly Stmt[],
+  reach: ReadonlySet<string>,
+): { indexed: number; extents: [number, number][]; other: boolean } {
   let total = 0;
   let accounted = 0;
   let indexed = 0;
   const extents: [number, number][] = [];
+  const reaches = (e: Expr): boolean => {
+    const n = wholeObject(e);
+    return n !== null && reach.has(n);
+  };
   for (const e of walkExprs(body as Stmt[])) {
-    if (mentionedName(e) === local) {
+    const n = mentionedName(e);
+    if (n !== undefined && reach.has(n)) {
       total++;
     }
     if (e.k === 'call') {
-      accounted += e.args.filter((a) => wholeObject(a) === local).length;
+      accounted += e.args.filter(reaches).length;
     }
-    if (e.k === 'index' && wholeObject(e.base) === local) {
+    if (e.k === 'index' && reaches(e.base)) {
       accounted++;
       indexed++;
       const k = bare(e.idx);
