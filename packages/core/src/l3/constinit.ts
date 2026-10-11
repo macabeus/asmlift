@@ -171,8 +171,8 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
   // so the image's must be the same width, and the local keeps its type. Where it does not, each
   // element access carries and prints its own width, so the declaration — which the frame audit
   // may have typed by bytes alone — witnesses nothing: the image's directives say the element, and
-  // the reads of that width its signedness, which a signed array of non-negative values does not
-  // write.
+  // its signedness where one writes a negative (agbcc does only for a signed element), else the
+  // reads of that width do — a signed array of non-negative values writes none.
   let own: Extract<IrType, { kind: 'int' }>;
   if (use.other) {
     if (declElem.width !== elem.width) {
@@ -182,11 +182,8 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
   } else {
     const signs = new Set(use.reads.filter((r) => r.width * 8 === elem.width).map((r) => r.signed));
     const signed =
-      signs.size === 1
-        ? [...signs][0]
-        : declElem.width === elem.width && use.indexed > 0
-          ? declElem.signed
-          : elem.signed;
+      elem.signed ||
+      (signs.size === 1 ? [...signs][0] : declElem.width === elem.width && use.indexed > 0 && declElem.signed);
     own = { ...elem, signed };
   }
   return {

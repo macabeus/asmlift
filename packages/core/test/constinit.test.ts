@@ -45,20 +45,23 @@ test('the copy folds into the declaration, and the image and the copy are gone',
   expect(cBackend.emit(sfn)).toBe('void f(void) {\n    u8 sp0[4] = { 1, 2, 3, 4 };\n    g(sp0);\n}\n');
 });
 
-test('a local handed on whole takes the image’s element; one read by element keeps its own', () => {
+test('a local handed on whole takes the image’s element; one reached by an offset keeps its own', () => {
   const halves = image([1, -1, 3], 2, true);
   const wide = [{ name: 'sp0', type: T.array(T.u(8), 8) }];
   // a 6-byte image in the 8 bytes the frame rounded the reservation to
   expect(cBackend.emit(fn([copy('sp0', '.LC0', 6), use(v('sp0'))], wide, halves))).toContain(
     '    s16 sp0[3] = { 1, -1, 3 };\n',
   );
-  const read: Stmt = {
-    k: 'return',
-    value: { k: 'index', base: v('sp0'), idx: c(1), width: 1, signed: false },
-  };
-  const bytes = image([1, 0xff, 3, 4], 1, true);
-  expect(cBackend.emit({ ...fn([copy('sp0', '.LC0', 4), read], bytes4, bytes), retType: T.u(8) })).toContain(
+  // the offset was spelled against the declared `u8`, so a signed image's values are read as that
+  const bytes = image([1, -1, 3, 4], 1, true);
+  const offset = use({ k: 'bin', op: '+', l: v('sp0'), r: c(1) });
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 4), offset], bytes4, bytes))).toContain(
     '    u8 sp0[4] = { 1, 0xff, 3, 4 };\n',
+  );
+  // …where an element read, which prints its own width, leaves the image's signedness standing
+  const read: Stmt = { k: 'return', value: { k: 'index', base: v('sp0'), idx: c(1), width: 1, signed: false } };
+  expect(cBackend.emit({ ...fn([copy('sp0', '.LC0', 4), read], bytes4, bytes), retType: T.u(8) })).toContain(
+    '    s8 sp0[4] = { 1, -1, 3, 4 };\n',
   );
 });
 
