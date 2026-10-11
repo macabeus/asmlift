@@ -514,7 +514,7 @@ function plusConst(e: Expr, c: number): Expr {
 //     p = (T *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
 //
 // The loop already carries its own integer counter, so the walk pointer is pure strength
-// reduction: deleting its init and step and spelling the deref as BASE[i + REST/W] — the sole
+// reduction: deleting its init and step and spelling the deref as BASE[i - S + REST/W] — the sole
 // base addend of EXPR as the index base, the counter FIRST in the index sum — is the
 // indexed source the compiler reduces back. v3 SCOPE (decline over approximate):
 //   • `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum is
@@ -526,7 +526,10 @@ function plusConst(e: Expr, c: number): Expr {
 //     (var/const/mul/shl trees whose vars the body never assigns);
 //   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
 //     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
-//     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition.
+//     its init, its step, and derefs AT OFFSET 0 inside this body, and not by the condition;
+//   • `i`'s init `i = S` immediately precedes p's, with S a constant (0, or any S for a 32-bit
+//     counter): the index is `i - S + REST/W`, which is plain `i` for the init KMC folds to
+//     `p = &g + S*W` from `for (i = S; …) g[i]`.
 function tryExprWalk(
   prev2: Stmt | undefined,
   prev: Stmt | undefined,
@@ -650,9 +653,15 @@ function tryExprWalk(
   if (!mentionsVar(dw.cond, iv) || mentionsVar(dw.cond, p)) {
     return null;
   }
-  // The counter STARTS AT ZERO (the adjacent `i = 0` init — `BASE[i + REST]` counts completed
-  // steps from the walk's own start) and its ONLY write anywhere in the body is the tail step.
-  if (prev2?.k !== 'assign' || prev2.name !== iv || prev2.value.k !== 'const' || prev2.value.value !== 0) {
+  // The counter starts at a CONSTANT S (the adjacent `i = S` init) and its ONLY write anywhere in
+  // the body is the tail step: n completed steps put `p` at EXPR + n*W and `i` at S + n, so the
+  // deref is BASE[i - S + REST/W]. A nonzero S needs a 32-bit counter — a narrower one wraps
+  // where the walk does not, and `i - S` then names an element S behind it.
+  if (prev2?.k !== 'assign' || prev2.name !== iv || prev2.value.k !== 'const') {
+    return null;
+  }
+  const start = prev2.value.value | 0;
+  if (start !== 0 && !(ivT?.kind === 'int' && ivT.width === 32)) {
     return null;
   }
   if (dw.body.slice(0, -2).some((st) => stmtAssigns(st, iv)) || tail.filter((st) => isIncOf(st, iv)).length !== 1) {
@@ -665,7 +674,7 @@ function tryExprWalk(
   const idxOf = (): Expr =>
     plusConst(
       restIdx.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv }),
-      restElems,
+      (restElems - start) | 0,
     );
   let respelled = true;
   const rewriteExpr = (e: Expr): Expr => {

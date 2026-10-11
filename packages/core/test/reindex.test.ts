@@ -496,10 +496,57 @@ describe('v3 — expression-base walk', () => {
     );
   });
 
-  test('refused: a counter starting anywhere but 0 (the index counts completed steps)', () => {
-    const f = mkFn(init, walkBody());
-    (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = cn(5);
-    expect(reindexWalks(f)).toBeNull();
+  describe('a counter starting at a constant S indexes BASE[i - S + REST/W]', () => {
+    const startAt = (f: SFn, start: Expr): SFn => {
+      (f.body[0] as Extract<Stmt, { k: 'assign' }>).value = start;
+      return f;
+    };
+    const idxJson = (r: SFn | null): string => JSON.stringify((r!.body[1] as Extract<Stmt, { k: 'dowhile' }>).body[0]);
+
+    test('S = 5 over a bare base reads a0[i - 5]', () => {
+      const r = reindexWalks(startAt(mkFn({ k: 'cast', to: u8p as never, e: v('a0') }, walkBody()), cn(5)));
+      expect(r).not.toBeNull();
+      expect(cBackend.emit(r!)).toContain('((u8 *)a1)[i] = ((u8 *)a0)[i - 5];');
+    });
+
+    test('S = 5 keeps a symbolic REST and subtracts S last', () => {
+      const r = reindexWalks(startAt(mkFn(init, walkBody()), cn(5)));
+      expect(r).not.toBeNull();
+      expect(idxJson(r)).toContain(
+        '"idx":{"k":"bin","op":"-","l":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"bin","op":"*","l":{"k":"var","name":"a2"},"r":{"k":"var","name":"a1"}}},"r":{"k":"const","value":5}}',
+      );
+    });
+
+    test('S = 1 over the folded init &g + W reads g[i] (KMC: for (i = 1; …) g[i])', () => {
+      const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+      const f = mkFn(
+        {
+          k: 'cast',
+          to: u16p as never,
+          e: { k: 'bin', op: '+', l: { k: 'cast', to: T.u(32), e: { k: 'addr', name: 'gH' } }, r: cn(2) },
+        },
+        [
+          { k: 'store', lval: { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false }, value: cn(0xffff) },
+          inc('p'),
+          inc('i'),
+        ],
+      );
+      f.locals[0] = { name: 'p', type: u16p as never };
+      const r = reindexWalks(startAt(f, cn(1)));
+      expect(r).not.toBeNull();
+      expect(JSON.stringify(r!.body)).not.toContain('"name":"p"');
+      expect(cBackend.emit(r!)).toContain('((u16 *)&gH)[i] = 65535;');
+    });
+
+    test('refused: a symbolic start (no constant to subtract)', () => {
+      expect(reindexWalks(startAt(mkFn(init, walkBody()), v('a1')))).toBeNull();
+    });
+
+    test('refused: a nonzero start on a narrow counter, which wraps where the walk does not', () => {
+      const f = startAt(mkFn(init, walkBody()), cn(5));
+      f.locals[1] = { name: 'i', type: T.u(8) };
+      expect(reindexWalks(f)).toBeNull();
+    });
   });
 
   test('refused: a step ahead of a deref (the *++p walk reads the NEXT element)', () => {
