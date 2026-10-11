@@ -38,8 +38,15 @@
 // its whole address and element accesses, which each print their own width, reach it.
 //
 // Thumb is the only frontend that reads an anonymous image today. The rule is asked of the tree,
-// for any compiler: IDO, KMC GCC, gcc 2.7.2 and mwcc copy a local aggregate's initializer from an
-// anonymous read-only constant too, and their frontends refuse the address-taken frame local first.
+// for any compiler, but the COPY it knows is one spelling of it: a call (`BLOCK_COPIES`). The
+// datum underneath is "every element of the local written once, at the top level, from the same
+// offset of one image, before any other use", and an inline copy is its other spelling — the one
+// every other compiler uses (each compiled with `u8`/`u32` images: gcc 2.7.2 and KMC copy `.LC0`
+// from `.rodata` with lwl/lwr+swl/swr or lw/sw, IDO places the image in `.data` and copies it with
+// lw/sw, mwcc copies `@N` with lwz/stw and calls nothing) and agbcc's own `ldmia`/`stmia` for a
+// word-aligned image of three words and up short of its memcpy sizes. KNOWN GAP: those decline,
+// naming the copy the fold does not read; no benchmark row has one, and the MIPS and PPC frontends
+// refuse the address-taken frame local before the copy is reached.
 import { type IrType, typeToString } from '../ir/types';
 import { type Expr, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
 import { localMentions, mentionsAnyLocal } from './mentions';
@@ -148,7 +155,14 @@ function planFolds(sfn: SFn, image: SImage): Fold[] | string {
     }
   });
   if (copies.length === 0) {
-    return 'which is not the source of a block copy at the top level of the body';
+    // KNOWN GAP, and the sentence names it rather than calling the read no copy: a compiler may copy
+    // the image INLINE — agbcc's `ldmia`/`stmia` for a word-aligned `u32 a[4]`, lw/sw (IDO, gcc
+    // 2.7.2, KMC) and lwz/stw (mwcc) for every size — which the tree holds as element loads and
+    // stores, not as a call this table knows.
+    return (
+      'which no top-level block-copy call (memcpy) takes as its source — the one copy folded into an ' +
+      'initializer; an inline, element-by-element copy of the image, and any other read of it, is not'
+    );
   }
   if (mentions(sfn.body, image.name) !== copies.length) {
     return 'which the body reads other than as the source of a block copy at the top level';

@@ -176,7 +176,7 @@ test.each<[string, SFn, string]>([
   [
     'copied inside a branch',
     fn([{ k: 'if', cond: v('x'), then: [copy('sp0', '.LC0', 4)], else: [] }], bytes4),
-    'not the source of a block copy at the top level',
+    'which no top-level block-copy call (memcpy) takes as its source',
   ],
   ['copied in part', fn([copy('sp0', '.LC0', 2)], bytes4), 'does not move its whole 4 bytes'],
   ['into a global', fn([copy('gBuf', '.LC0', 4)], bytes4), 'does not fill a local'],
