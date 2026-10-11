@@ -10,9 +10,10 @@
 //     s16 *p; p[6] = 0xFFFF;   li v0,-1       →  const -1      →  signed
 //
 // This pass records that as the store's `signed` attr, the slot an `astore` already carries for a
-// member's recorded signedness, and recoverTypes, the structurer's store branch and raise/structs.ts
-// (a field only ever stored) read it. It changes no op and no value: what it moves is which view of
-// the cell the C spells, and both views store the same bytes.
+// member's recorded signedness. raise/arrays.ts and raise/struct-arrays.ts carry it into the
+// `astore` they make; recoverTypes, the structurer's store branches, and raise/structs.ts and
+// raise/struct-arrays.ts (a field only ever stored) read it. It changes no op and no value: what it
+// moves is which view of the cell the C spells, and both views store the same bytes.
 //
 // It refuses (leaves the attr unset, so the convention stands) for:
 //   - a target that does not declare the behavior;

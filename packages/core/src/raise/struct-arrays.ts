@@ -148,7 +148,7 @@ export function recognizeStructArrays(fn: Fn): number {
     // load/store BASE with a field offset inside one element.
     const elemSet = new Set(elems.map((e) => e.add.results[0]));
     const indexOf = new Map(elems.map((e) => [e.add.results[0], e.index]));
-    const accesses: { op: Op; elem: Value; off: number; width: number; signed: boolean }[] = [];
+    const accesses: { op: Op; elem: Value; off: number; width: number; signed: boolean; stamp?: boolean }[] = [];
     for (const bb of fn.blocks) {
       for (const op of bb.ops) {
         const isMem = (op.opcode === 'load' || op.opcode === 'store') && elemSet.has(op.operands[0]);
@@ -170,6 +170,7 @@ export function recognizeStructArrays(fn: Fn): number {
             off,
             width,
             signed: op.opcode === 'load' ? (op.attrs.signed as boolean) : width === 4,
+            stamp: op.opcode === 'load' ? undefined : (op.attrs.signed as boolean | undefined),
           });
         }
       }
@@ -193,13 +194,14 @@ export function recognizeStructArrays(fn: Fn): number {
     // silently drops one side's zero/sign-extension (adversarially learned: `arr[i].f +
     // (u16)arr[i].f` lost its zext and a byte-exact match with it). A STORE's `signed` is the
     // width===4 CONVENTION, not a machine fact, so it never conflicts — the field takes its
-    // signedness from the loads when any exist.
-    const byOff = new Map<number, { width: number; loadSigned: boolean | null }>();
+    // signedness from the loads when any exist, else from the stores raise/storesign.ts stamped
+    // (the signed view when any says signed, as raise/structs.ts `buildStruct` prefers it).
+    const byOff = new Map<number, { width: number; loadSigned: boolean | null; stamped: boolean | null }>();
     for (const a of accesses) {
       const isLoad = a.op.opcode === 'load';
       const prev = byOff.get(a.off);
       if (!prev) {
-        byOff.set(a.off, { width: a.width, loadSigned: isLoad ? a.signed : null });
+        byOff.set(a.off, { width: a.width, loadSigned: isLoad ? a.signed : null, stamped: a.stamp ?? null });
       } else if (prev.width !== a.width) {
         clean = false;
       } else if (isLoad) {
@@ -208,6 +210,8 @@ export function recognizeStructArrays(fn: Fn): number {
         } else if (prev.loadSigned !== a.signed) {
           clean = false;
         }
+      } else if (a.stamp !== undefined) {
+        prev.stamped = prev.stamped === true || a.stamp;
       }
     }
     const offs = [...byOff.entries()].sort(([x], [y]) => x - y);
@@ -228,10 +232,10 @@ export function recognizeStructArrays(fn: Fn): number {
     if (!clean) {
       continue;
     }
-    const dataFields: StructField[] = offs.map(([off, { width, loadSigned }]) => ({
+    const dataFields: StructField[] = offs.map(([off, { width, loadSigned, stamped }]) => ({
       off,
-      // store-only field: the width===4 convention, exactly what the old access carried
-      type: scalarTypeForAccess(width, loadSigned ?? width === 4),
+      // a store-only field: its stamped stores' view, else the width===4 convention
+      type: scalarTypeForAccess(width, loadSigned ?? stamped ?? width === 4),
       name: `field_${off}`,
     }));
     const elemStruct = T.struct(`Elem${name++}`, withPadding(dataFields, stride), stride);
@@ -265,7 +269,11 @@ export function recognizeStructArrays(fn: Fn): number {
         } else if (op.opcode === 'store') {
           bb.ops[i] = mkOp('astore', {
             operands: [base, index, op.operands[1]],
-            attrs: carryDiscipline(op, { elemSize: stride, fieldOff: op.attrs.off as number }),
+            attrs: carryDiscipline(op, {
+              elemSize: stride,
+              fieldOff: op.attrs.off as number,
+              ...(op.attrs.signed !== undefined && { signed: op.attrs.signed }),
+            }),
           });
         }
       }

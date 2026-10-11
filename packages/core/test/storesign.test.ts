@@ -111,6 +111,16 @@ test('the structurer spells a stamped store through the view its constant witnes
   expect(copyThenStore('0xffff')).toContain('    ((u16 *)a0)[6] = 65535;\n');
 });
 
+test('an indexed store carries its stamp into the astore', () => {
+  const src = decompile(
+    'f',
+    obj('0:\tsll\ta1,a1,0x1', '4:\taddu\ta1,a1,a0', '8:\tli\tv0,-1', 'c:\tjr\tra', '10:\tsh\tv0,0(a1)'),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['void *', 's32'], returnsVoid: true } } },
+  ).source;
+  expect(src).toContain('void f(s16 *a0, s32 a1) {\n    a0[a1] = -1;\n');
+});
+
 // A struct recovered from stores alone (raise/structs.ts): the halfword at 6 is never loaded, so its
 // declared type is whatever its stamped stores agree on, else the unsigned view.
 const storedStruct = (...sixes: string[]) =>

@@ -172,11 +172,18 @@ describe('a narrow store of a variable holding a constant is never stamped signe
 
 // The reader's payoff, byte-exact: a read types `p` first, so before the stamp the signed store was
 // spelled through a cast to the unsigned view (or the reverse) and recompiled to the other constant.
-// rt2 is the unsigned control, which matched without the stamp too.
+// rt2 is the unsigned control, which matched without the stamp too. rt4 and rt5 are the indexed
+// stores the stamp rides into (`astore`, scalar and struct element).
 const ROUND_TRIP: [string, string[], string][] = [
   ['rt1', ['s16 *', 's16 *'], 'void rt1(s16 *p, s16 *q) { *q = p[6]; p[6] = -1; }'],
   ['rt2', ['u16 *', 'u16 *'], 'void rt2(u16 *p, u16 *q) { *q = p[6]; p[6] = -1; }'],
   ['rt3', ['s8 *', 's8 *'], 'void rt3(s8 *p, s8 *q) { *q = p[1]; p[1] = -1; }'],
+  ['rt4', ['void *', 's32'], 'void rt4(s16 *p, s32 i) { p[i] = -1; }'],
+  [
+    'rt5',
+    ['void *', 's32'],
+    'typedef struct { s16 a; s16 b; s32 c; } E; void rt5(E *p, s32 i) { p[i].b = -1; p[i].c = 0; }',
+  ],
 ];
 
 const roundTrips: [string, boolean, (c: string, sym: string) => { obj: string; asm: string }, TargetDescription][] = [

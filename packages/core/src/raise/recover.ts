@@ -97,8 +97,8 @@ function typeDerefBases(fn: Fn): void {
           break;
         case 'astore':
           width = op.attrs.elemSize as number;
-          // an astore carries no signedness of its own unless a recovery recorded the member's;
-          // structure.ts reads it by the same rule
+          // an astore carries no signedness of its own unless a recovery recorded the member's or
+          // raise/storesign.ts read one off a stored constant; structure.ts reads it by the same rule
           signed = (op.attrs.signed as boolean | undefined) ?? width === 4;
           break;
         default:
