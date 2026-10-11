@@ -145,9 +145,11 @@
 // mask too — so a parameter mwcc reads only through it reaches this pass with no `zext` reader at
 // all. `and v, 0xffff` is `zext v {width=16}` value for value, so it counts as one (`extensionOf`),
 // unsigned, and becomes the parameter itself when the parameter is declared `u16`. Measured, the
-// two declarations are not one object there: mwcc_242_81 compiles `long *a; unsigned short b; *a &= ~b;`
-// to `clrlwi; not; and` and `long *a; unsigned long b; *a &= ~(b & 0xffff);` to `clrlwi; andc`, because it fuses
-// `x & ~y` only when `~y` already has the `&`'s type.
+// two declarations are not one object there. Over a `long *a`, mwcc_242_81 compiles
+// `*a = *a & ~b; *a = *a | c;` to `not; and` when `b` and `c` are `unsigned short`, and to `andc` when
+// they are `unsigned long` and the body masks them (`~(b & 0xffff)`, `c & 0xffff`). That holds at its
+// canonical `-O4,p` and at Mario Party 4's unit flags, whose trailing `-O0,p` wins. The one-statement
+// `*a &= ~b` separates the two only at the unit's flags; at `-O4,p` both fuse to `andc`.
 //
 // The rule is about the IR, not the ISA, so it reaches every frontend that lifts a mask as `and`.
 // IDO reads a declared `u16`/`u8` parameter as `sw a0,0(sp); andi a0,a0,0xffff`, and frontend/mips.ts

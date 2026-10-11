@@ -203,6 +203,11 @@ export function scoringLadder(
       bare,
     ].map(withNull);
   }
+  // All or nothing: a prependC that declares SOME of the family but not `u8` gets the whole family
+  // again. mwcc accepts an identical redeclaration, but ido7.1's cfe rejects even that. So on the 18
+  // af rows whose prependC declares `s32`, `s16` or `s8` without `u8`, this rung never compiles and a
+  // candidate falls through to the vendored ctx. That costs a compile, not a score. Skipping the
+  // family per name (as ctxTypedefPrelude does) would revive the rung and move those rows' scores.
   const proDefsU8 = /typedef\s+unsigned\s+char\s+u8\b/.test(prependC);
   return [
     bare,

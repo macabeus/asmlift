@@ -179,9 +179,11 @@ export function ctxTypedefPrelude(ctxI: string): string {
 /** asmlift's typedef prelude, each name SPELLED THE WAY THE VENDORED CONTEXT SPELLS IT — the
  *  typedefs of the ladder's rungs that do not carry the context itself (compile/real.ts).
  *
- *  `int` and `long` are both 32 bits on every target here, and still not one type: mwcc compiles
- *  `long *a; unsigned short b; *a &= ~b;` to `clrlwi; not; and` and the same body over `int *a` to
- *  `clrlwi; andc`, because it fuses `x & ~y` only when `~y` already has the `&`'s type. Mario Party
+ *  `int` and `long` are both 32 bits on every target here, and still not one type: with `unsigned
+ *  short b, c`, mwcc_242_81 compiles `*a = *a & ~b; *a = *a | c;` over a `long *a` to `not; and` and
+ *  the same body over an `int *a` to `andc`. That was measured at its canonical `-O4,p` and at Mario
+ *  Party 4's unit flags, whose trailing `-O0,p` wins. The one-statement `*a &= ~b` splits that way
+ *  only at the unit's flags; at `-O4,p` it fuses to `andc` over a `long` too. Mario Party
  *  4, Mario Party 3, Pikmin, Animal Crossing and Snowboard Kids 2 all declare `s32` as a `long`
  *  (some spell it `signed long`, some plain `long`; the rung copies whichever the context wrote),
  *  and a candidate their unit refuses fell to a rung where `s32` meant `int` — a world the target
