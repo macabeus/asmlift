@@ -531,7 +531,7 @@ function plusConst(e: Expr, c: number): Expr {
 //   • `i`'s init `i = S` immediately precedes p's, with S a constant, and `i` is a declared
 //     integer: any S at 32 bits, only S = 0 when narrower and unsigned, never when narrower and
 //     signed. The index is `i - S + REST/W`, which is plain `i` for the init KMC folds to
-//     `p = &g + S*W` from `for (i = S; …) g[i]`.
+//     `p = (u32)&g + S*W` from `for (i = S; …) g[i]`.
 function tryExprWalk(
   prev2: Stmt | undefined,
   prev: Stmt | undefined,
@@ -554,7 +554,7 @@ function tryExprWalk(
     return null;
   }
   // EXPR decomposition. Only casts that keep all 32 bits are stripped — a pointer cast, or an
-  // integer cast at 32 bits. A narrowing cast over EXPR (`(u16 *)(s16)(&g + 2)`) truncates the
+  // integer cast at 32 bits. A narrowing cast over EXPR (`(u16 *)(s16)((u32)&g + 2)`) truncates the
   // address, which no index off the untruncated base reproduces, so it stays and the walk declines.
   let expr: Expr = prev.value;
   while (expr.k === 'cast' && (expr.to.kind === 'ptr' || (expr.to.kind === 'int' && expr.to.width === 32))) {
