@@ -358,10 +358,10 @@ describe('agbcc', () => {
   );
 });
 
-// A command's compiler is unknown and reports nothing, so its text is read, and with it the command:
-// a GNU assembler names a file only in a string, and a macro, a trigraph or a flag of the command
-// builds what copies one into the assembly with no keyword in the TU. Each spelling below was
-// served the old file's object through arm-none-eabi-gcc.
+// A project's command is not keyed at all (@asmlift/cli/candcache-bench): its compiler is unknown
+// and reports nothing, and a GNU assembler names a file only in a string that a macro, a trigraph or
+// a flag of the command builds with no keyword in the TU. Each spelling below was served the old
+// file's object through arm-none-eabi-gcc.
 const GCC = isAbsolute(TOOLCHAIN.as) ? join(dirname(TOOLCHAIN.as), 'arm-none-eabi-gcc') : 'arm-none-eabi-gcc';
 const HAVE_GCC = spawnSync(GCC, ['-std=c2x', '-trigraphs', '-E', '-x', 'c', '-'], { input: '' }).status === 0;
 const command = (flags: string): string => `"${GCC}" ${flags} -O2 -c -o {{outputPath}} {{inputPath}}`;
@@ -437,15 +437,14 @@ describe('a GNU compile command', () => {
     BUDGET,
   );
 
-  test.runIf(HAVE_GCC)(
-    'keeps a TU with no string text under a plain command',
+  test.runIf(HAVE['command-agbcc'])(
+    "keeps a TU with no string text under the benchmark's own command",
     async () => {
       const store = scratch('candcache-reads-store-');
-      const tu = '#define T 3\nint x [[gnu::unused]] = T;\nint f(int i) { return x + i; }\n';
-      const cmd = { command: command('-std=c2x -DNDEBUG'), cwd: scratch('candcache-reads-cwd-') };
-      const cold = await compileIn(store, cmd, tu);
+      const tu = '#define T 3\nint x = T;\nint f(int i) { return x + i; }\n';
+      const cold = await compileIn(store, 'command-agbcc', tu);
       expect(cold.stats).toMatchObject({ stored: 1 });
-      const warm = await compileIn(store, cmd, tu);
+      const warm = await compileIn(store, 'command-agbcc', tu);
       expect(warm.stats).toMatchObject({ hit: 1 });
       expect(warm.out).toBe(cold.out);
     },
@@ -471,7 +470,7 @@ async function withEnv<T>(env: Record<string, string>, fn: () => Promise<T>): Pr
 }
 
 // A program the command runs can read more than the command's words show, and each spelling below
-// was served the old file's object through arm-none-eabi-gcc: the store keys no such command.
+// was served the old file's object through arm-none-eabi-gcc: the store keys no project's command.
 describe('a command whose program reads what its words do not show', () => {
   const SECTION = `'-DS=".data\\n.incbin \\"f.bin\\"\\n.section .data.x"'`;
   /** [what, the command, the TU, the file it reads and that file's two contents, extra env] */
@@ -535,24 +534,6 @@ describe('a command whose program reads what its words do not show', () => {
         expect(warm.out).not.toMatch(/^threw /);
         expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
       });
-    },
-    BUDGET,
-  );
-
-  test.runIf(HAVE_GCC)(
-    'keeps a TU compiled through a script whose whole program is exec "$@"',
-    async () => {
-      const cwd = scratch('candcache-reads-cwd-');
-      writeFileSync(join(cwd, 'cc.sh'), `#!/bin/sh\nexec "${GCC}" "$@"\n`);
-      chmodSync(join(cwd, 'cc.sh'), 0o755);
-      const store = scratch('candcache-reads-store-');
-      const cmd = { command: './cc.sh -O2 -c -o {{outputPath}} {{inputPath}}', cwd };
-      const tu = 'int f(int i) { return i * 3; }\n';
-      const cold = await compileIn(store, cmd, tu);
-      expect(cold.stats).toMatchObject({ stored: 1 });
-      const warm = await compileIn(store, cmd, tu);
-      expect(warm.stats).toMatchObject({ hit: 1 });
-      expect(warm.out).toBe(cold.out);
     },
     BUDGET,
   );

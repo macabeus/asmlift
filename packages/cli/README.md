@@ -307,8 +307,11 @@ cannot derive.
 | `ASMLIFT_MIPS_OBJDUMP`          | The objdump for MIPS object input, where `tools.asmlift.objdump` does not name one                                                                                                                                                                                               |
 | `ASMLIFT_PPC_OBJDUMP`           | The same for PowerPC                                                                                                                                                                                                                                                             |
 
-Every run that touched the store ends with a one-line `asmlift: [candcache] …` summary carrying
-the mode, the sample rate and seed, and the hit/miss counts.
+The store keys only the asmlift benchmark's own compile commands: a project's `decomp.yaml` command
+compiles every candidate, because it can read inputs its words do not name
+([why](../../docs/ranked-repro.md#the-cache-state-is-part-of-the-number)). Every run that touched
+the store ends with a one-line `asmlift: [candcache] …` summary carrying the mode, the sample rate
+and seed, and the hit/miss counts.
 
 ## Using it as a library
 

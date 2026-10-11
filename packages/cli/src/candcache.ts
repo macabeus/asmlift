@@ -308,8 +308,8 @@ export const sha = (b: Buffer | string): string => createHash('sha256').update(b
 // comparing can, and that is `verify` mode — which costs the entire speedup.
 //
 // So `on` mode does it for a FRACTION of the keys it serves, every run, forever. That does not
-// eliminate the residual `docs/ranked-repro.md` publishes (a driver's built-in search directories,
-// an opaque runtime no list names); it bounds how long one survives. A staleness that touches every key is caught
+// eliminate the residual `docs/ranked-repro.md` publishes (a driver's built-in search
+// directories); it bounds how long one survives. A staleness that touches every key is caught
 // in the FIRST run that serves more than a handful; a staleness that touches exactly one key
 // survives on average 1/rate runs.
 //
@@ -384,23 +384,14 @@ export function noteKeyRefused(label: string, reason: string): void {
   say(`REFUSED-KEY label=${label} reason=${reason}`);
 }
 
-/** The compile ENVIRONMENT gcc/cpp read whether or not a command line names it. `CPATH` and
- *  `C_INCLUDE_PATH` are honoured even under `-nostdinc` (MEASURED: `CPATH=inc arm-none-eabi-cpp
- *  -nostdinc` resolves `#include "g0.h"` and its value reaches the object), so every one of these
- *  is an input to every candidate compile. The rest word a stored rejection: the locale picks a
- *  message's language and its quote marks, and the others its colours, links, fix-it lines and the
- *  width of a quoted source line. ONE list: both pipelines compile with the same compilers, and two
+/** The compile ENVIRONMENT a compile reads by value whether or not a command line names it: the
+ *  locale picks a message's language and its quote marks, the others its colours, links, fix-it
+ *  lines and the width of a quoted source line, and `SOURCE_DATE_EPOCH` the date a compile may
+ *  write. Each value is hashed. ONE list: every pipeline compiles with the same compilers, and two
  *  copies of the answer is how the tenth variable gets added to one of them. */
 export const COMPILE_ENV = [
-  'CPATH',
-  'C_INCLUDE_PATH',
-  'CPLUS_INCLUDE_PATH',
-  'GCC_EXEC_PREFIX',
-  'COMPILER_PATH',
   'LIBRARY_PATH',
   'SOURCE_DATE_EPOCH',
-  'DEPENDENCIES_OUTPUT',
-  'SUNPRO_DEPENDENCIES',
   'LANG',
   'LANGUAGE',
   'LC_ALL',
@@ -413,23 +404,41 @@ export const COMPILE_ENV = [
   'COLUMNS',
 ];
 
-/** The variables that move where a GCC driver finds its programs and its specs: `GCC_EXEC_PREFIX`
- *  prefixes the `cc1`, `as` and `specs` it looks up, and `COMPILER_PATH` lists more places to find
- *  programs. MEASURED: a `specs` file under `GCC_EXEC_PREFIX` holding `*cpp: -DK=7` reached the
- *  object, and with no `cc1` under it `-print-prog-name=cc1` answers a bare `cc1`. Neither value
- *  names the files the driver then reads, so a namespace keyed on the value served the old object
- *  after the specs file changed. */
-const DRIVER_SEARCH_ENV = ['GCC_EXEC_PREFIX', 'COMPILER_PATH'];
+/** The variables that change what a compile runs or reads with a value that names none of it:
+ *  - an exported shell function (`BASH_FUNC_<name>%%`, any variable of that prefix) replaces the
+ *    program `<name>` in every shell a compile starts;
+ *  - `BASH_ENV` and `ENV` name a file a shell may read before it runs a script;
+ *  - `CCC_OVERRIDE_OPTIONS` edits every clang command line;
+ *  - `GCC_EXEC_PREFIX` and `COMPILER_PATH` move where a GCC driver finds its `cc1`, `as` and
+ *    `specs` (MEASURED: a `specs` file under `GCC_EXEC_PREFIX` holding `*cpp: -DK=7` reached the
+ *    object);
+ *  - `CPATH`, `C_INCLUDE_PATH`, `CPLUS_INCLUDE_PATH` and `OBJC_INCLUDE_PATH` add directories a
+ *    preprocessor searches, even under `-nostdinc`, and `DEPENDENCIES_OUTPUT` and
+ *    `SUNPRO_DEPENDENCIES` make it write a file. */
+const UNKEYED_ENV = [
+  'BASH_ENV',
+  'ENV',
+  'CCC_OVERRIDE_OPTIONS',
+  'GCC_EXEC_PREFIX',
+  'COMPILER_PATH',
+  'CPATH',
+  'C_INCLUDE_PATH',
+  'CPLUS_INCLUDE_PATH',
+  'OBJC_INCLUDE_PATH',
+  'DEPENDENCIES_OUTPUT',
+  'SUNPRO_DEPENDENCIES',
+];
 
-/** Throws when the environment moves where a GCC driver finds its programs or specs
- *  (`DRIVER_SEARCH_ENV`): a namespace stamp calls it first, and `candCache` refuses a stamp that
- *  threw. */
-export function refuseDriverSearchEnv(env: NodeJS.ProcessEnv = process.env): void {
-  const set = DRIVER_SEARCH_ENV.filter((v) => (env[v] ?? '') !== '');
+/** Throws while any `UNKEYED_ENV` variable, or an exported shell function, is set — even empty: a
+ *  namespace stamp calls it first, and `candCache` refuses a stamp that threw. */
+export function refuseUnkeyedEnv(env: NodeJS.ProcessEnv = process.env): void {
+  const set = Object.keys(env)
+    .filter((v) => env[v] !== undefined && (UNKEYED_ENV.includes(v) || v.startsWith('BASH_FUNC_')))
+    .sort();
   if (set.length > 0) {
     throw new Error(
-      `${set.join(' and ')} ${set.length === 1 ? 'is' : 'are'} set, which moves where a GCC driver finds its ` +
-        `programs and specs to files this namespace does not read, so nothing is cached`,
+      `${set.join(', ')} ${set.length === 1 ? 'is' : 'are'} set, which changes what a compile runs or ` +
+        `reads through a value that names none of it, so nothing is cached`,
     );
   }
 }
@@ -450,7 +459,8 @@ export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 
 // So an executable is expanded into the CHAIN of files that actually run, and where the chain
 // cannot be followed the cache REFUSES rather than hashing a stand-in:
 //   • a script is hashed AND followed — its interpreter, and every token naming a file or
-//     resolving on $PATH;
+//     resolving on $PATH — when its interpreter is a flagless `#!/bin/sh`; under any other it is a
+//     refusal, since an interpreter may read startup files no token names;
 //   • a script that names its delegate through a VARIABLE (`exec "$MYCPP" "$@"` — the ccache /
 //     distcc / toolchain-wrapper shape, and the commonest one there is) has that variable's VALUE
 //     measured into the chain and followed if it names a file. A syntax list would have to call
@@ -481,7 +491,7 @@ export const STAMP_PROBE = 'int asmlift_candcache_stamp(int x) { return x * 3 + 
 //
 // WHAT A CHAIN DOES NOT HOLD: the file a script OPENS, since the chain follows what a script EXECS.
 // Measured, a wrapper reading `ELF="${3:-game.elf}"` was served with `game.elf` in no chain. So the
-// command path keys no script that does more than `exec <program> "$@"` (candcache-command.ts), and
+// command path keys no script that does more than `exec <program> "$@"` (candcache-bench.ts), and
 // this reading decides what the namespace hashes for such a shim and for the bench's own host
 // commands. `packages/cli/test/offline/candcache-refusals.test.ts` pins both.
 //
@@ -624,6 +634,17 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
   // not that compiler. `text` is the bytes (hashed by the caller, and the shebang is read off it);
   // `scan` is the program those bytes describe, which is what every reading below is about.
   const text = readFileSync(real, 'utf8');
+  // Only a flagless `#!/bin/sh` is followed. An interpreter reads startup files no chain names —
+  // zsh reads `.zshenv` for every script, bash `$BASH_ENV`, `sh -l` `.profile` — while `/bin/sh`
+  // without a flag reads none running a script (`refuseUnkeyedEnv` refuses `ENV` and `BASH_ENV`),
+  // and a file with no `#!` line runs under whichever shell runs it.
+  const first = text.split('\n', 1)[0] ?? '';
+  if (!/^#!\/bin\/sh[ \t]*$/.test(first)) {
+    throw new Error(
+      `${real} runs under ${first.startsWith('#!') ? first.slice(2).trim() : 'no #! line'}, not a flagless ` +
+        `/bin/sh, so what its interpreter reads first cannot be hashed — the cache refuses rather than hash a stand-in`,
+    );
+  }
   const scan = shellProgramText(text);
   if (SCRIPT_COMPUTES_ITS_DELEGATE.test(scan)) {
     const where = computedDelegateSites(scan);
@@ -655,19 +676,9 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
       expandExecutable(val, out, depth + 1);
     }
   }
-  // The SHEBANG is read off the raw bytes on purpose: `#!` is the one `#` line in a script that
-  // names a program, and the stripper — correctly, for every other line — has removed it.
-  //
-  // EVERY token of it goes back, not just the first: `#!/usr/bin/env python3` names TWO programs
-  // and both of them run, so keeping only `/usr/bin/env` drops the real interpreter out of the
-  // namespace and swapping what is behind `env` would serve objects built by a different program.
-  // The rest of the line is argv (`#!/bin/sh -e`), which the token loop already ignores because it
-  // resolves to nothing.
-  const first = text.split('\n', 1)[0] ?? '';
-  const tokens = scan.split(/[\s"'<>|;&()=]+/);
-  if (first.startsWith('#!')) {
-    tokens.unshift(...first.slice(2).trim().split(/\s+/));
-  }
+  // `/bin/sh` itself joins the chain: the stripper — correctly, for every other line — has removed
+  // the `#!` line it is named on.
+  const tokens = ['/bin/sh', ...scan.split(/[\s"'<>|;&()=]+/)];
   for (const tok of tokens) {
     if (!tok || tok.length > 300) {
       continue;

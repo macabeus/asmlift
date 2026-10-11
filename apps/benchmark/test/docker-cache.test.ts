@@ -254,15 +254,15 @@ describe('the namespace takes the compiler directory by content', () => {
     const a = scratch('dockercache-dir-');
     writeFileSync(join(a, 'gcc'), 'driver');
     const unset = dockerStaticStamp(spec(a));
-    const saved = process.env.CPATH;
-    process.env.CPATH = a;
+    const saved = process.env.SOURCE_DATE_EPOCH;
+    process.env.SOURCE_DATE_EPOCH = '1';
     try {
       expect(dockerStaticStamp(spec(a))).not.toBe(unset);
     } finally {
       if (saved === undefined) {
-        delete process.env.CPATH;
+        delete process.env.SOURCE_DATE_EPOCH;
       } else {
-        process.env.CPATH = saved;
+        process.env.SOURCE_DATE_EPOCH = saved;
       }
     }
   });

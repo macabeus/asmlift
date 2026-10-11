@@ -24,11 +24,11 @@ import {
   candCache,
   isChainMeasurement,
   noteKeyRefused,
-  refuseDriverSearchEnv,
+  refuseUnkeyedEnv,
   sha,
   toolchainFileChain,
 } from './candcache';
-import { type CommandAdmission, commandAdmission } from './candcache-command';
+import { type BenchCommand, benchCommandRefusal } from './candcache-bench';
 import { candidateReadsRefusal } from './candcache-reads';
 import { macroDefinesOf, renderDeclarations, selfDeclaredContext } from './declare';
 import { stripShellComments } from './shell-text';
@@ -115,6 +115,9 @@ export interface CompileCommandOptions {
   /** The compiler name the command's `{{cc}}` stands for (an objdiff.json unit's `scratch.compiler`),
    *  required exactly when the command has one. */
   cc?: string;
+  /** The benchmark toolchain whose committed template the command is, and the values its
+   *  placeholders took: the candidate store keys no other command (candcache-bench.ts). */
+  bench?: BenchCommand;
 }
 
 /** A compiler name that reaches the shell as itself. */
@@ -420,7 +423,7 @@ function scanTokens(template: string): string[] {
  *
  *  So neither is measured: a glob with no `/` in it, and the quoted includes of an injected header
  *  that lives at the top level, are read by the compile and not seen here. The store keys neither
- *  command: a glob is shell candcache-command.ts does not admit, and `-include` is a word
+ *  command: it keys only the benchmark's own (candcache-bench.ts), and `-include` is a word
  *  candcache-reads.ts refuses. A subdirectory operand (`-include inc/pre.h`, `cat inc/*.h`) is
  *  bounded and is still measured. */
 
@@ -525,8 +528,8 @@ function collectOperands(template: string, readDir: string | undefined, depth: n
  *  operand is resolved against. `cd sub; … -I inc` reads `sub/inc`, and resolving `inc` against
  *  the decomp.yaml's directory alone measured nothing at all. Over-hashing on purpose: both
  *  bases are tried, and a base that holds no such path costs one failed `statSync`. A `cd` whose
- *  target this cannot resolve (`cd "$(dirname …)"`) contributes no base; the store keys a command
- *  only when that `cd` is into the scratch directory (candcache-command.ts). */
+ *  target this cannot resolve (`cd "$(dirname …)"`) contributes no base; the store keys only the
+ *  benchmark's own commands (candcache-bench.ts). */
 function cdBases(template: string, cwd: string): string[] {
   const out: string[] = [];
   for (const m of stripShellComments(template).matchAll(/(?:^|[\s;&|(])cd\s+("[^"]*"|'[^']*'|[^\s;&|)]+)/g)) {
@@ -646,6 +649,288 @@ const unwrap = (r: Verdict): string => {
   return r.objPath;
 };
 
+// The cross-run candidate-object cache on the command path (candcache.ts), for the commands it keys
+// (candcache-bench.ts).
+//
+// The NAMESPACE is a measurement, not a version constant: the template text, the cwd, the
+// content hash of every directory a path FLAG names (`-iquote include`, recursively), of every
+// existing file the template names
+// (`./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`), of every command it
+// resolves on $PATH, the value of every environment variable it reads, and, decisively, the
+// OBJECT BYTES this very template produces for one fixed probe TU, compiled twice in two
+// different directories so the compiler itself answers whether its output is a pure function
+// of its input.
+/** The walk ran out of its allowance (`MeasurementBudget`). Truncating instead would be the
+ *  other thing, and the other thing is a stale object.
+ *
+ *  The allowance is one running total for the whole STAMP, not per input — so the entry the walk
+ *  dies on is an accident of walk order and is not what a reader can act on. The message names
+ *  the OPERAND the walk started from as well, which is the half that says what to change. */
+class MeasurementTooLarge extends Error {}
+/** `statSync` said this IS a path, and then the READ of it failed. That is NOT "the token was
+ *  not a path": the compile reads it and the namespace cannot, so the namespace is incomplete,
+ *  and an incomplete namespace is a stale object.
+ *
+ *  MEASURED, and it is why this class exists: an include directory at mode 0311 — searchable,
+ *  not listable, which is exactly what a compile needs and a walk does not — served a stale
+ *  object with no stderr line, because every non-budget error was swallowed into "contributes
+ *  nothing". Worse in the transient case: one `EIO` on one `readdirSync` mints a PERMANENT
+ *  incomplete namespace, which is the same silent-wrong-answer shape `recordAnswer`
+ *  refuses to store transient rejections for. Loud refusal instead. */
+class MeasurementUnreadable extends Error {}
+/** `budget` is the walk's remaining allowance, threaded rather than captured: it is spent as the
+ *  walk runs, so it belongs to one STAMP and not to the instance. `root` is the operand this
+ *  walk began at — carried down the recursion for the diagnostics only. `inDir` says the entry
+ *  was NAMED by a `readdirSync` we already succeeded at, which changes what a failed `statSync`
+ *  means. */
+function hashPath(
+  budget: MeasurementBudget,
+  h: ReturnType<typeof createHash>,
+  tag: string,
+  p: string,
+  root: string = p,
+  inDir = false,
+): boolean {
+  let st;
+  try {
+    st = statSync(p);
+  } catch {
+    if (inDir) {
+      // A directory entry the listing named and a stat cannot see: a dangling symlink, or a
+      // file deleted under the walk. Refusing over a dangling symlink would refuse half the
+      // toolchains on earth, so the NAME still joins the digest — strictly more than the old
+      // spelling contributed — and the walk goes on.
+      h.update('unstattable:' + tag);
+      return false;
+    }
+    // Not a path HERE: a flag word, a shell builtin, an operand that is simply absent. It
+    // contributes nothing, and needs no MISSING marker — the template TEXT is hashed
+    // unconditionally, so absent -> present still moves the namespace.
+    return false;
+  }
+  if (--budget.entries < 0) {
+    throw new MeasurementTooLarge(
+      `refusing to measure ${root}: over ${MAX_MEASURED_ENTRIES} files in one namespace stamp (the walk reached ` +
+        `${p}). A namespace that stops walking is an incomplete namespace, which is a stale ` +
+        `object — so nothing is cached`,
+    );
+  }
+  if (st.isDirectory()) {
+    let entries;
+    try {
+      entries = readdirSync(p, { withFileTypes: true });
+    } catch (e) {
+      throw new MeasurementUnreadable(
+        `refusing to measure ${root}: cannot list the directory ${p} ` +
+          `(${e instanceof Error ? e.message : String(e)}). The compile can read what is in ` +
+          `there and this namespace cannot, so nothing is cached`,
+      );
+    }
+    // A directory is hashed by its whole contents, recursively and in sorted order: that is
+    // the entire point of measuring it (`-I ./inc` reaches `inc/k.h`, which no token set and
+    // no probe TU can see).
+    h.update('dir:' + tag);
+    for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      hashPath(budget, h, tag + '/' + e.name, join(p, e.name), root, true);
+    }
+    return true;
+  }
+  if (!st.isFile()) {
+    return false;
+  }
+  if ((budget.bytes -= st.size) < 0) {
+    throw new MeasurementTooLarge(
+      `refusing to measure ${root}: over ${MAX_MEASURED_BYTES / (1024 * 1024)}MiB in one namespace stamp ` +
+        `(the walk reached ${p}). ` +
+        `An incomplete namespace is a stale object, so nothing is cached`,
+    );
+  }
+  let bytes;
+  try {
+    bytes = readFileSync(p);
+  } catch (e) {
+    throw new MeasurementUnreadable(
+      `refusing to measure ${root}: cannot read the file ${p} ` +
+        `(${e instanceof Error ? e.message : String(e)}). The compile can read it and this ` +
+        `namespace cannot, so nothing is cached`,
+    );
+  }
+  // Both updates run only after the read SUCCEEDED. A file this walk cannot read contributes
+  // nothing here because it never gets here — `MeasurementUnreadable` throws on a failed read.
+  // That is not a general claim about the digest: a directory entry `statSync` cannot see joins
+  // it as `unstattable:`, deliberately, because refusing over a dangling symlink would refuse
+  // half the toolchains on earth.
+  h.update(tag);
+  h.update(sha(bytes));
+  return true;
+}
+/** One entry of a delegate chain. A measurement entry (`UNRESOLVED:`, `ENV:`) is hashed as the
+ *  STRING it is — it is an answer, not a file, and skipping it drops the answer. A file is
+ *  hashed by CONTENT under its BASENAME, never its absolute path, so that a toolchain MOVED but
+ *  not changed keeps its digest.
+ *
+ *  It does NOT follow that two worktrees holding byte-identical toolchains share a namespace:
+ *  `h.update(cwd)` in `commandStaticStamp` keys the whole namespace on the absolute working directory, so
+ *  two byte-identical worktrees with an identical template and an identical `inc/` measured as
+ *  two namespaces. A tag is not a key; content is what decides. */
+function hashChain(budget: MeasurementBudget, h: ReturnType<typeof createHash>, tok: string, entry: string): void {
+  if (isChainMeasurement(entry)) {
+    h.update(tok + '>' + entry);
+    return;
+  }
+  hashPath(budget, h, tok + '>' + basename(entry), entry);
+}
+/** Every input of `template` run in `cwd` that a namespace measures before its probe compiles:
+ *  the template's text and every file, directory, program chain and variable it names (the stamp
+ *  `compilersFromCommand` keys its store under also holds the probe's object). Throws where an
+ *  input cannot be measured. */
+export function commandStaticStamp(template: string, cwd: string): string {
+  const h = createHash('sha256');
+  const budget = newMeasurementBudget();
+  // Checked FIRST: a refusal here saves two probe compiles, and through a container those are
+  // two `docker run`s.
+  const runtime = containerRuntimeNamedBy(template);
+  if (runtime !== undefined) {
+    throw new Error(
+      `the compile command runs the compiler through ${runtime}, which puts it somewhere this ` +
+        `namespace cannot read it — inside an image named by a mutable TAG, on another host, or ` +
+        `under a sandbox root the template never spells. An image rebuilt under the same tag is ` +
+        `a new compiler serving old objects. Refusing rather than hashing a stand-in`,
+    );
+  }
+  refuseUnkeyedEnv();
+  h.update('command/v1');
+  h.update(template);
+  h.update(cwd);
+  // THIS MODULE'S OWN BYTES. The bench pipeline hashes its harness code (`compile/agbcc.ts`,
+  // `compile/util.ts`) because that code shapes what the compiler is handed; this one shapes it
+  // too, and it shapes something the probe object structurally cannot see — most of what a warm
+  // store SERVES is a stored REJECTION, and `verdict()` builds the text that is stored and then
+  // published as `ranked.dropped[].error`. The probe only ever exercises the success path, so
+  // perturbing that text left the namespace unmoved and the store replayed the old spelling.
+  h.update('self:');
+  h.update(sha(readFileSync(fileURLToPath(import.meta.url))));
+  // (1) every template token that names an existing FILE: the project's own
+  //     `./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`, hashed by content.
+  // (2) every remaining token that RESOLVES ON $PATH: `arm-none-eabi-cpp`, `arm-none-eabi-as`,
+  //     `cc`, hashed by content too. MEASURED WHY: the probe object did NOT move between
+  //     two different pinned agbcc revisions (they agree on the probe TU), so a namespace
+  //     resting on the probe alone would have served one compiler's objects for the other.
+  // (3) every shell variable the template READS but does not itself assign: that is an
+  //     external input choosing the compiler, so its value (and its content, if it names a
+  //     file) joins the stamp.
+  const assigned = new Set<string>();
+  for (const m of stripShellComments(template).matchAll(/^\s*([A-Za-z_]\w*)=/gm)) {
+    assigned.add(m[1]);
+  }
+  // ONE hashPath per resolved path, whichever scan reaches it first. The token scan and the
+  // operand scan share ONE running budget, so a directory both reach would be walked twice on
+  // an effective budget of 10000 rather than 20000, and `-I big` and `-I ./big` — the same
+  // directory — would have different fates (one cached, the other refused).
+  const pathSeen = new Map<string, boolean>();
+  const hashOnce = (tag: string, p: string): boolean => {
+    const prev = pathSeen.get(p);
+    if (prev !== undefined) {
+      return prev;
+    }
+    const r = hashPath(budget, h, tag, p);
+    pathSeen.set(p, r);
+    return r;
+  };
+  // Where a relative token could name a path FROM. `cd sub; … -I inc` moves the base, and a
+  // template that `cd`s is not exotic; both bases are tried, which is the cold-start side.
+  const bases = [cwd, ...cdBases(template, cwd)];
+  /** Every absolute path a token could be. `~/inc` is expanded here because the SHELL expands
+   *  it before the compiler ever sees it, and `resolve(cwd, '~/inc')` is a directory that does
+   *  not exist — measured: a `-I ~/inc` template served a stale object. */
+  const candidatePaths = (tok: string): string[] => {
+    if (tok === '~' || tok.startsWith('~/')) {
+      return [join(homedir(), tok.slice(1))];
+    }
+    return isAbsolute(tok) ? [tok] : bases.map((b) => resolve(b, tok));
+  };
+  const seen = new Set<string>();
+  const seenEnv = new Set<string>();
+  for (const tok of scanTokens(template)) {
+    if (seen.has(tok)) {
+      continue;
+    }
+    seen.add(tok);
+    // EVERY token is tried as a path — `statSync` is what answers "is this one", and that IS
+    // the measurement. A path-SHAPE guard in front of it (`/[/.]/.test(tok)`) is a heuristic in
+    // front of a measurement: it drops every bare-word operand, which is the `-iquote include`
+    // hole itself and, with no list to fall back on, `-fsome-future-flag inc` too.
+    let onDisk = false;
+    let execPath: string | undefined;
+    for (const p of candidatePaths(tok)) {
+      if (hashOnce(tok, p)) {
+        onDisk = true;
+        if (execPath === undefined && isExecutableFile(p)) {
+          execPath = p;
+        }
+      }
+    }
+    if (execPath !== undefined) {
+      // A token that names an EXECUTABLE file (`./tools/agbcc/bin/agbcc`) can be a wrapper too,
+      // so follow it as well; a plain data file (`charmap.txt`) has no chain and costs one stat.
+      for (const f of toolchainFileChain(execPath)) {
+        hashChain(budget, h, tok, f);
+      }
+    }
+    if (onDisk && /[/.]/.test(tok)) {
+      // A token spelled as a path means the same thing to `sh` as it does here, so there is no
+      // second reading to chase. A BARE word has one — the delegate chain — and falls through.
+      continue;
+    }
+    if (/^[A-Za-z][\w.+-]*$/.test(tok)) {
+      // Not "the file this name resolves to" — the whole CHAIN that actually runs. A `cpp` that
+      // is a `#!/bin/sh` shim exec'ing `cpp-14`, or a gcc driver exec'ing `cc1`, has its
+      // compiler one level past the file a namespace would otherwise hash; repointing the
+      // delegate served a stale object with the outer file byte-identical. `toolchainFileChain`
+      // THROWS where it cannot follow, and `candCache` turns that into a loud refusal.
+      for (const f of toolchainFileChain(tok)) {
+        hashChain(budget, h, tok, f);
+      }
+    }
+  }
+  // (2b) the paths only a FLAG names, because the operand is glued to it (`-Iinc`), lives in a
+  // file (`@opts`, `-specs=x.specs`), or is a pattern rather than a path (`inc/*.h`). The
+  // separated spellings are already covered by the token scan; these are what `statSync`
+  // structurally cannot be asked about.
+  //
+  // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: a
+  // toolchain MOVED but not changed should keep its digest. (It does not follow that two
+  // worktrees share a namespace — `h.update(cwd)` settles that, and they do not.)
+  for (const operand of templatePathOperands(template, { expandFlagFilesFrom: cwd })) {
+    for (const p of candidatePaths(operand)) {
+      // An operand that is not there contributes nothing and needs no MISSING marker: the
+      // template TEXT is hashed unconditionally, so absent -> present still moves the namespace
+      // and two different absent operands cannot collide.
+      hashOnce('flag:' + basename(operand), p);
+    }
+  }
+  // (3b) the compile ENVIRONMENT a compile reads by value whether or not the template mentions it —
+  // the one list, shared with the bench's own pipelines (candcache.ts `COMPILE_ENV`).
+  for (const v of COMPILE_ENV) {
+    h.update(`compileenv:${v}=${process.env[v] ?? ''}`);
+  }
+  for (const m of stripShellComments(template).matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
+    const v = m[1];
+    if (assigned.has(v) || seenEnv.has(v)) {
+      continue;
+    }
+    seenEnv.add(v);
+    const val = process.env[v] ?? '';
+    h.update('env:' + v + '=' + val);
+    if (val) {
+      for (const q of candidatePaths(val)) {
+        hashOnce('env:' + v, q);
+      }
+    }
+  }
+  return h.digest('hex');
+}
+
 /** Build a CandidateCompiler from a `decomp.yaml` command template, run by @match-kit/compiler.
  *  `{{inputPath}}` and `{{outputPath}}` are REQUIRED placeholders (substituted with absolute
  *  paths); `{{symbol}}` and `{{flags}}` are optional. The placeholder
@@ -683,290 +968,10 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   // headers collision (drop prelude + decls); failure means the TEMPLATE is broken — keep
   // everything so the first real candidate fails with the template's own loud diagnostics.
   // Exit-code-only: no error-message parsing (gcc-2.9/IDO/mwcc all format differently).
-  // The cross-run candidate-object cache on the project-template path (candcache.ts).
-  //
-  // The NAMESPACE is a measurement, not a version constant: the template text, the cwd, the
-  // content hash of every directory a path FLAG names (`-iquote include`, recursively), of every
-  // existing file the template names
-  // (`./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`), of every command it
-  // resolves on $PATH, the value of every environment variable it reads, and, decisively, the
-  // OBJECT BYTES this very template produces for one fixed probe TU, compiled twice in two
-  // different directories so the compiler itself answers whether its output is a pure function
-  // of its input.
-  /** The walk ran out of its allowance (`MeasurementBudget`). Truncating instead would be the
-   *  other thing, and the other thing is a stale object.
-   *
-   *  The allowance is one running total for the whole STAMP, not per input — so the entry the walk
-   *  dies on is an accident of walk order and is not what a reader can act on. The message names
-   *  the OPERAND the walk started from as well, which is the half that says what to change. */
-  class MeasurementTooLarge extends Error {}
-  /** `statSync` said this IS a path, and then the READ of it failed. That is NOT "the token was
-   *  not a path": the compile reads it and the namespace cannot, so the namespace is incomplete,
-   *  and an incomplete namespace is a stale object.
-   *
-   *  MEASURED, and it is why this class exists: an include directory at mode 0311 — searchable,
-   *  not listable, which is exactly what a compile needs and a walk does not — served a stale
-   *  object with no stderr line, because every non-budget error was swallowed into "contributes
-   *  nothing". Worse in the transient case: one `EIO` on one `readdirSync` mints a PERMANENT
-   *  incomplete namespace, which is the same silent-wrong-answer shape `recordAnswer`
-   *  refuses to store transient rejections for. Loud refusal instead. */
-  class MeasurementUnreadable extends Error {}
-  /** `budget` is the walk's remaining allowance, threaded rather than captured: it is spent as the
-   *  walk runs, so it belongs to one STAMP and not to the instance. `root` is the operand this
-   *  walk began at — carried down the recursion for the diagnostics only. `inDir` says the entry
-   *  was NAMED by a `readdirSync` we already succeeded at, which changes what a failed `statSync`
-   *  means. */
-  const hashPath = (
-    budget: MeasurementBudget,
-    h: ReturnType<typeof createHash>,
-    tag: string,
-    p: string,
-    root: string = p,
-    inDir = false,
-  ): boolean => {
-    let st;
-    try {
-      st = statSync(p);
-    } catch {
-      if (inDir) {
-        // A directory entry the listing named and a stat cannot see: a dangling symlink, or a
-        // file deleted under the walk. Refusing over a dangling symlink would refuse half the
-        // toolchains on earth, so the NAME still joins the digest — strictly more than the old
-        // spelling contributed — and the walk goes on.
-        h.update('unstattable:' + tag);
-        return false;
-      }
-      // Not a path HERE: a flag word, a shell builtin, an operand that is simply absent. It
-      // contributes nothing, and needs no MISSING marker — the template TEXT is hashed
-      // unconditionally, so absent -> present still moves the namespace.
-      return false;
-    }
-    if (--budget.entries < 0) {
-      throw new MeasurementTooLarge(
-        `refusing to measure ${root}: over ${MAX_MEASURED_ENTRIES} files in one namespace stamp (the walk reached ` +
-          `${p}). A namespace that stops walking is an incomplete namespace, which is a stale ` +
-          `object — so nothing is cached`,
-      );
-    }
-    if (st.isDirectory()) {
-      let entries;
-      try {
-        entries = readdirSync(p, { withFileTypes: true });
-      } catch (e) {
-        throw new MeasurementUnreadable(
-          `refusing to measure ${root}: cannot list the directory ${p} ` +
-            `(${e instanceof Error ? e.message : String(e)}). The compile can read what is in ` +
-            `there and this namespace cannot, so nothing is cached`,
-        );
-      }
-      // A directory is hashed by its whole contents, recursively and in sorted order: that is
-      // the entire point of measuring it (`-I ./inc` reaches `inc/k.h`, which no token set and
-      // no probe TU can see).
-      h.update('dir:' + tag);
-      for (const e of entries.sort((a, b) => (a.name < b.name ? -1 : 1))) {
-        hashPath(budget, h, tag + '/' + e.name, join(p, e.name), root, true);
-      }
-      return true;
-    }
-    if (!st.isFile()) {
-      return false;
-    }
-    if ((budget.bytes -= st.size) < 0) {
-      throw new MeasurementTooLarge(
-        `refusing to measure ${root}: over ${MAX_MEASURED_BYTES / (1024 * 1024)}MiB in one namespace stamp ` +
-          `(the walk reached ${p}). ` +
-          `An incomplete namespace is a stale object, so nothing is cached`,
-      );
-    }
-    let bytes;
-    try {
-      bytes = readFileSync(p);
-    } catch (e) {
-      throw new MeasurementUnreadable(
-        `refusing to measure ${root}: cannot read the file ${p} ` +
-          `(${e instanceof Error ? e.message : String(e)}). The compile can read it and this ` +
-          `namespace cannot, so nothing is cached`,
-      );
-    }
-    // Both updates run only after the read SUCCEEDED. A file this walk cannot read contributes
-    // nothing here because it never gets here — `MeasurementUnreadable` throws on a failed read.
-    // That is not a general claim about the digest: a directory entry `statSync` cannot see joins
-    // it as `unstattable:`, deliberately, because refusing over a dangling symlink would refuse
-    // half the toolchains on earth.
-    h.update(tag);
-    h.update(sha(bytes));
-    return true;
-  };
-  /** One entry of a delegate chain. A measurement entry (`UNRESOLVED:`, `ENV:`) is hashed as the
-   *  STRING it is — it is an answer, not a file, and skipping it drops the answer. A file is
-   *  hashed by CONTENT under its BASENAME, never its absolute path, so that a toolchain MOVED but
-   *  not changed keeps its digest.
-   *
-   *  It does NOT follow that two worktrees holding byte-identical toolchains share a namespace:
-   *  `h.update(cwd)` in `stamp()` keys the whole namespace on the absolute working directory, so
-   *  two byte-identical worktrees with an identical template and an identical `inc/` measured as
-   *  two namespaces. A tag is not a key; content is what decides. */
-  const hashChain = (budget: MeasurementBudget, h: ReturnType<typeof createHash>, tok: string, entry: string): void => {
-    if (isChainMeasurement(entry)) {
-      h.update(tok + '>' + entry);
-      return;
-    }
-    hashPath(budget, h, tok + '>' + basename(entry), entry);
-  };
+  // The NAMESPACE (`commandStaticStamp`, then the probe below), measured only for a command the
+  // store keys (candcache-bench.ts).
   const stamp = async (): Promise<string> => {
-    const h = createHash('sha256');
-    const budget = newMeasurementBudget();
-    const cwd = resolve(opts.cwd ?? process.cwd());
-    // Checked FIRST: a refusal here saves two probe compiles, and through a container those are
-    // two `docker run`s.
-    const runtime = containerRuntimeNamedBy(template);
-    if (runtime !== undefined) {
-      throw new Error(
-        `the compile command runs the compiler through ${runtime}, which puts it somewhere this ` +
-          `namespace cannot read it — inside an image named by a mutable TAG, on another host, or ` +
-          `under a sandbox root the template never spells. An image rebuilt under the same tag is ` +
-          `a new compiler serving old objects. Refusing rather than hashing a stand-in`,
-      );
-    }
-    refuseDriverSearchEnv();
-    h.update('command/v1');
-    h.update(template);
-    h.update(cwd);
-    // THIS MODULE'S OWN BYTES. The bench pipeline hashes its harness code (`compile/agbcc.ts`,
-    // `compile/util.ts`) because that code shapes what the compiler is handed; this one shapes it
-    // too, and it shapes something the probe object structurally cannot see — most of what a warm
-    // store SERVES is a stored REJECTION, and `verdict()` builds the text that is stored and then
-    // published as `ranked.dropped[].error`. The probe only ever exercises the success path, so
-    // perturbing that text left the namespace unmoved and the store replayed the old spelling.
-    h.update('self:');
-    h.update(sha(readFileSync(fileURLToPath(import.meta.url))));
-    // (1) every template token that names an existing FILE: the project's own
-    //     `./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`, hashed by content.
-    // (2) every remaining token that RESOLVES ON $PATH: `arm-none-eabi-cpp`, `arm-none-eabi-as`,
-    //     `cc`, hashed by content too. MEASURED WHY: the probe object below did NOT move between
-    //     two different pinned agbcc revisions (they agree on the probe TU), so a namespace
-    //     resting on the probe alone would have served one compiler's objects for the other.
-    // (3) every shell variable the template READS but does not itself assign: that is an
-    //     external input choosing the compiler, so its value (and its content, if it names a
-    //     file) joins the stamp.
-    const assigned = new Set<string>();
-    for (const m of stripShellComments(template).matchAll(/^\s*([A-Za-z_]\w*)=/gm)) {
-      assigned.add(m[1]);
-    }
-    // ONE hashPath per resolved path, whichever scan reaches it first. The token scan and the
-    // operand scan share ONE running budget, so a directory both reach would be walked twice on
-    // an effective budget of 10000 rather than 20000, and `-I big` and `-I ./big` — the same
-    // directory — would have different fates (one cached, the other refused).
-    const pathSeen = new Map<string, boolean>();
-    const hashOnce = (tag: string, p: string): boolean => {
-      const prev = pathSeen.get(p);
-      if (prev !== undefined) {
-        return prev;
-      }
-      const r = hashPath(budget, h, tag, p);
-      pathSeen.set(p, r);
-      return r;
-    };
-    // Where a relative token could name a path FROM. `cd sub; … -I inc` moves the base, and a
-    // template that `cd`s is not exotic; both bases are tried, which is the cold-start side.
-    const bases = [cwd, ...cdBases(template, cwd)];
-    /** Every absolute path a token could be. `~/inc` is expanded here because the SHELL expands
-     *  it before the compiler ever sees it, and `resolve(cwd, '~/inc')` is a directory that does
-     *  not exist — measured: a `-I ~/inc` template served a stale object. */
-    const candidatePaths = (tok: string): string[] => {
-      if (tok === '~' || tok.startsWith('~/')) {
-        return [join(homedir(), tok.slice(1))];
-      }
-      return isAbsolute(tok) ? [tok] : bases.map((b) => resolve(b, tok));
-    };
-    const seen = new Set<string>();
-    const seenEnv = new Set<string>();
-    for (const tok of scanTokens(template)) {
-      if (seen.has(tok)) {
-        continue;
-      }
-      seen.add(tok);
-      // EVERY token is tried as a path — `statSync` is what answers "is this one", and that IS
-      // the measurement. A path-SHAPE guard in front of it (`/[/.]/.test(tok)`) is a heuristic in
-      // front of a measurement: it drops every bare-word operand, which is the `-iquote include`
-      // hole itself and, with no list to fall back on, `-fsome-future-flag inc` too.
-      let onDisk = false;
-      let execPath: string | undefined;
-      for (const p of candidatePaths(tok)) {
-        if (hashOnce(tok, p)) {
-          onDisk = true;
-          if (execPath === undefined && isExecutableFile(p)) {
-            execPath = p;
-          }
-        }
-      }
-      if (execPath !== undefined) {
-        // A token that names an EXECUTABLE file (`./tools/agbcc/bin/agbcc`) can be a wrapper too,
-        // so follow it as well; a plain data file (`charmap.txt`) has no chain and costs one stat.
-        for (const f of toolchainFileChain(execPath)) {
-          hashChain(budget, h, tok, f);
-        }
-      }
-      if (onDisk && /[/.]/.test(tok)) {
-        // A token spelled as a path means the same thing to `sh` as it does here, so there is no
-        // second reading to chase. A BARE word has one — the delegate chain — and falls through.
-        continue;
-      }
-      if (/^[A-Za-z][\w.+-]*$/.test(tok)) {
-        // Not "the file this name resolves to" — the whole CHAIN that actually runs. A `cpp` that
-        // is a `#!/bin/sh` shim exec'ing `cpp-14`, or a gcc driver exec'ing `cc1`, has its
-        // compiler one level past the file a namespace would otherwise hash; repointing the
-        // delegate served a stale object with the outer file byte-identical. `toolchainFileChain`
-        // THROWS where it cannot follow, and `candCache` turns that into a loud refusal.
-        for (const f of toolchainFileChain(tok)) {
-          hashChain(budget, h, tok, f);
-        }
-      }
-    }
-    // (2b) the paths only a FLAG names, because the operand is glued to it (`-Iinc`), lives in a
-    // file (`@opts`, `-specs=x.specs`), or is a pattern rather than a path (`inc/*.h`). The
-    // separated spellings are already covered by the token scan; these are what `statSync`
-    // structurally cannot be asked about.
-    //
-    // Tagged by BASENAME, never by absolute path, for the same reason the delegate chain is: a
-    // toolchain MOVED but not changed should keep its digest. (It does not follow that two
-    // worktrees share a namespace — `h.update(cwd)` settles that, and they do not.)
-    for (const operand of templatePathOperands(template, { expandFlagFilesFrom: cwd })) {
-      for (const p of candidatePaths(operand)) {
-        // An operand that is not there contributes nothing and needs no MISSING marker: the
-        // template TEXT is hashed unconditionally, so absent -> present still moves the namespace
-        // and two different absent operands cannot collide.
-        hashOnce('flag:' + basename(operand), p);
-      }
-    }
-    // (3b) the compile ENVIRONMENT gcc/cpp read whether or not the template mentions it — the one
-    // list, shared with the bench's agbcc pipeline (candcache.ts `COMPILE_ENV`). The VALUE is the
-    // answer for `SOURCE_DATE_EPOCH`; for the search-path variables it is only half of one —
-    // `CPATH=inc` reaches `inc/k.h` exactly as `-I inc` does, and gcc honours it even under
-    // `-nostdinc`. So each `:`-separated segment is hashed as a path too.
-    for (const v of COMPILE_ENV) {
-      const val = process.env[v] ?? '';
-      h.update(`compileenv:${v}=${val}`);
-      for (const seg of val.split(':')) {
-        if (seg) {
-          hashOnce(`compileenv:${v}:` + basename(seg), isAbsolute(seg) ? seg : resolve(cwd, seg));
-        }
-      }
-    }
-    for (const m of stripShellComments(template).matchAll(/\$\{?([A-Za-z_]\w*)\}?/g)) {
-      const v = m[1];
-      if (assigned.has(v) || seenEnv.has(v)) {
-        continue;
-      }
-      seenEnv.add(v);
-      const val = process.env[v] ?? '';
-      h.update('env:' + v + '=' + val);
-      if (val) {
-        for (const q of candidatePaths(val)) {
-          hashOnce('env:' + v, q);
-        }
-      }
-    }
+    const staticStamp = commandStaticStamp(template, resolve(opts.cwd ?? process.cwd()));
     // (4) BACKSTOP + DETERMINISM SELF-TEST, in one measurement. The object bytes this template
     // produces for one fixed probe TU, compiled TWICE in two different directories. Identical
     // means the object is a pure function of its input and the bytes join the namespace;
@@ -984,14 +989,10 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     if (b1 !== sha(readFileSync(p2.objPath))) {
       return NOT_CACHEABLE;
     }
-    h.update(b1);
-    return h.digest('hex');
+    return createHash('sha256').update(staticStamp).update(b1).digest('hex');
   };
-  // ON, for any project's own command, unless ASMLIFT_CANDCACHE says otherwise — there is no
-  // second, per-project opt-IN. A project DECLARING what its command reads is wrong in the
-  // stale-object direction the moment the declaration is incomplete, and nothing verifies it; the
-  // namespace measures those inputs instead (`stamp()`).
-  //
+  // ON unless ASMLIFT_CANDCACHE says otherwise, and only for the benchmark's own commands
+  // (candcache-bench.ts): every other command refuses every key, and is never stamped.
   //
   // The stamp compiles, so `warmCache` measures it once, before the first candidate, and the cache
   // reads the measurement. A stamp that threw reaches the cache as a throw, which refuses it.
@@ -1002,22 +1003,21 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
     }
     return stamped;
   });
+  /** Why no key of this command may be stored, or undefined: read once. */
+  let commandRefusal: { reason: string | undefined } | undefined;
+  const refusedCommand = (): string | undefined =>
+    (commandRefusal ??= {
+      reason: benchCommandRefusal(command, opts.bench, { cwd: resolve(opts.cwd ?? process.cwd()), env: process.env }),
+    }).reason;
   // A candidate TU whose object is not a function of its own bytes is refused PER KEY, keeping the
-  // cache on for every other candidate (candcache-reads.ts, shared with the bench pipelines). The
-  // template's compiler is unknown, so no preprocessor reports what the TU read: its text and the
-  // command's words are read, fail-closed, and its inline asm is taken to reach a GNU assembler. A
-  // command whose programs may read what its words do not show refuses every key
-  // (candcache-command.ts), read once, when the first key is asked about.
-  let admitted: CommandAdmission | undefined;
+  // cache on for every other candidate (candcache-reads.ts, shared with the bench pipelines). No
+  // preprocessor reports what the TU read on this path: its text and the command's are read,
+  // fail-closed, and its inline asm is taken to reach a GNU assembler.
   const cacheable = (content: string): boolean => {
     if (cache.mode === 'off') {
       return false;
     }
-    admitted ??= commandAdmission(template, { cwd: resolve(opts.cwd ?? process.cwd()), env: process.env });
-    const reason =
-      'refusal' in admitted
-        ? `the-command-reads-more-than-its-words: ${admitted.refusal}`
-        : candidateReadsRefusal(content, { gnuAs: true, command: admitted.words.join(' ') });
+    const reason = refusedCommand() ?? candidateReadsRefusal(content, { gnuAs: true, command: template });
     if (reason === undefined) {
       return true;
     }
@@ -1094,9 +1094,10 @@ export function compilersFromCommand(command: string, opts: CompileCommandOption
   let warming: Promise<void> | undefined;
   const warmCache = (): Promise<void> =>
     (warming ??= (async () => {
-      if (cache.mode !== 'off') {
-        stamped = await stamp().catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+      if (cache.mode === 'off' || refusedCommand() !== undefined) {
+        return;
       }
+      stamped = await stamp().catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
       cache.warm();
     })());
 

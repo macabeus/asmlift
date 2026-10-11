@@ -26,7 +26,7 @@ import {
   candCache,
   isChainMeasurement,
   noteKeyRefused,
-  refuseDriverSearchEnv,
+  refuseUnkeyedEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
 import { type PreprocessorReport, candidateCacheRefusal, candidateReadsRefusal } from '@asmlift/cli/candcache-reads';
@@ -243,7 +243,7 @@ export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: strin
   let cache: CandCache | undefined;
   const cacheNow = (): CandCache =>
     (cache ??= candCache(spec.label, () => {
-      refuseDriverSearchEnv();
+      refuseUnkeyedEnv();
       // The probe first: a pool container it starts is then there for `containerImageId` to read.
       const before = oneShots();
       const probe = (): string | null => {

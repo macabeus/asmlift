@@ -19,6 +19,7 @@
 // committed `docker run` one: the same compiler and words over host paths, so the same code, at
 // the cost of one process instead of one container per candidate. The reproduction scripts
 // (`bench target`) get the committed command intact on every toolchain.
+import { renderBenchPlaceholders } from '@asmlift/cli/candcache-bench';
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
@@ -57,7 +58,6 @@ import {
   gccRefused,
   mwccRefused,
 } from './compile/docker-cache';
-import { shq } from './compile/util';
 import type { ToolchainId } from './toolchains';
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
@@ -175,16 +175,15 @@ const POOLED: Partial<Record<ToolchainId, (flags: readonly string[]) => Candidat
   mwcc_242_81: cachedPooled(mwccCandidateCompiler('mwcc_242_81'), pooledMwcc),
 };
 
-/** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim.
- *  Unknown $ASMLIFT_* names are a loud error — a typo would otherwise reach sh unexpanded. */
+/** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim — the rendering
+ *  the candidate store matches a command against (@asmlift/cli/candcache-bench). Unknown $ASMLIFT_*
+ *  names are a loud error — a typo would otherwise reach sh unexpanded. */
 function substitutePlaceholders(cmd: string, id: ToolchainId): string {
-  return cmd.replace(/"\$(ASMLIFT_[A-Z0-9_]+)"|\$(ASMLIFT_[A-Z0-9_]+)/g, (_, quoted, bare) => {
-    const value = placeholderValues(id)[quoted ?? bare];
-    if (value === undefined) {
-      throw new Error(`unknown placeholder $${quoted ?? bare} in dataset/toolchains/${id}/decomp.yaml`);
-    }
-    return quoted !== undefined ? shq(value) : value;
-  });
+  try {
+    return renderBenchPlaceholders(cmd, placeholderValues(id));
+  } catch (e) {
+    throw new Error(`${(e as Error).message} in dataset/toolchains/${id}/decomp.yaml`);
+  }
 }
 
 interface BenchDoc {
@@ -233,10 +232,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
 
   const pooled = POOLED[id];
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
+  const native = pooled === undefined ? nativeScoreCommand(id) : undefined;
   if (pooled !== undefined) {
     delete doc.tools.asmlift.compiler;
   } else {
-    doc.tools.asmlift.compiler = nativeScoreCommand(id) ?? doc.tools.asmlift.compiler;
+    doc.tools.asmlift.compiler = native ?? doc.tools.asmlift.compiler;
   }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
@@ -254,7 +254,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   if ('error' in res || res.targetKey !== id) {
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
-  const compile = pooled !== undefined ? pooled(cflags) : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags });
+  // The committed command names its toolchain to the candidate store, which keys no other; a native
+  // command is not a committed template, and compiles uncached.
+  const bench = native === undefined ? { bench: { toolchain: id, placeholders: placeholderValues(id) } } : {};
+  const compile =
+    pooled !== undefined ? pooled(cflags) : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags, ...bench });
   memo.set(memoKey, compile);
   return compile;
 }
@@ -294,11 +298,9 @@ export interface ScoreConfigParts {
  *  it. `elf` (absolute path — symbol-fed rows) lands as tools.asmlift.elf so the CLI loads the
  *  project's symbol map exactly as the benchmark did.
  *
- *  Nothing here decides whether a reproduction CACHES. The candidate-object cache needs no
- *  per-project declaration — everything the command reads is measured — and it is on by default,
- *  so a reader running one of these scripts gets the same store the harness does unless they say
- *  ASMLIFT_CANDCACHE=0. Sound either way: a cache changes throughput and never a result, so a miss is
- *  indistinguishable in RESULT from no cache at all. */
+ *  A reproduction compiles every candidate: the CLI keys no command a `decomp.yaml` hands it (the
+ *  candidate store keys only the benchmark's own, @asmlift/cli/candcache-bench). A cache changes
+ *  throughput and never a result, so this costs a reader time and nothing else. */
 export function writeScoreConfig(
   id: ToolchainId,
   cflags: readonly string[],

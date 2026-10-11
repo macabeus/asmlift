@@ -337,8 +337,8 @@ the variations accumulate. `ASMLIFT_CANDCACHE=0` (or `off`, or SET-BUT-EMPTY) by
 `ASMLIFT_BENCH_CACHE=0`; `ASMLIFT_CANDCACHE=verify` compiles everything anyway and audits the store
 against it, failing the run on any disagreement. Serving mode audits itself too, on a sampled 2% of
 the keys it serves — the `[candcache]` line carries `sample=…%/seed=…`, and a shard that finds a
-disagreement FAILS. The flag table, the cold-vs-warm rule and what a project must declare before the
-cache runs on its own `decomp.yaml` are in `docs/ranked-repro.md`.
+disagreement FAILS. The flag table, the cold-vs-warm rule and why a project's own `decomp.yaml`
+command is never cached are in `docs/ranked-repro.md`.
 
 **What that audit is worth here, measured 2026-08-31 on a full run of the then-948-row corpus**
 (warm store, 16 shards, nothing planted): the shards served **10,221 objects and 50,583
@@ -368,9 +368,9 @@ because the answer is not what the `decomp.yaml` files suggest:
 
 One consequence worth stating plainly: the real-tier agbcc path is reached under
 `label=bench-agbcc`, the containerized toolchains under their own labels, and `ASMLIFT_CANDCACHE=0`
-is the only switch over them. A dockerized `decomp.yaml` COMMAND (what `bench target` hands a
-reproduction script) stays off the cache through `containerRuntimeNamedBy` — it names `docker`, so
-the namespace stamp refuses and `candCache` reports `REFUSED reason=stamp-threw`, once per run.
+is the only switch over them. A reproduction script's `decomp.yaml` command (what `bench target`
+hands it) is not the benchmark's own as the store reads it, so every key of it is refused
+(`REFUSED-KEY reason=the-command-is-not-a-bench-template`).
 
 **`bench fidelity` runs both of every row's scripts — m2c's and asmlift's — with
 `ASMLIFT_CANDCACHE=0`**, pinned in `runScript`. That gate exists to prove a READER who copies a published script reproduces the

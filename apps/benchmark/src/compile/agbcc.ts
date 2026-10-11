@@ -10,7 +10,7 @@ import {
   candCache,
   isChainMeasurement,
   noteKeyRefused,
-  refuseDriverSearchEnv,
+  refuseUnkeyedEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
 import {
@@ -225,7 +225,7 @@ function cacheFor(cflags: readonly string[]): CandCache {
     return known;
   }
   const cache = candCache('bench-agbcc', () => {
-    refuseDriverSearchEnv();
+    refuseUnkeyedEnv();
     // DETERMINISM SELF-TEST, and the backstop object at the same time. A cached object is sound
     // only if it is a pure function of (input bytes, symbol) — which is NOT true of every toolchain
     // (`ido7.1` writes the absolute path of its input .c into the object). So compile one fixed
@@ -267,9 +267,7 @@ export const agbccReal: RealCompile = {
     const cache = cacheFor(cflags);
     // A candidate TU whose object is not a function of its own bytes is refused PER KEY, and the
     // reason is said once: a TU that reads a file (the path is in the TU, not in any flag, and no
-    // probe exercises it — MEASURED: with `CPATH` pointing at a directory, editing the included
-    // header between two cache-on runs served 7143fac350d6311b where the truth is
-    // 7430abf1c6ff95bc), that hands its assembler one, or that bakes its own path or the clock in.
+    // probe exercises it), that hands its assembler one, or that bakes its own path or the clock in.
     // What the text alone decides is refused here; what cpp reports, once the compile has run.
     const refusal = candidateCacheRefusal(tu);
     if (refusal) {

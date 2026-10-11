@@ -14,14 +14,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, test, vi } from 'vitest';
 
+import { benchCommand } from '../../src/candcache-bench';
+
 type CompileCommandModule = typeof import('../../src/compile-command');
 
-/** The project's "own toolchain", as a decomp.yaml command template: cpp -> agbcc -> as. */
-const TEMPLATE = [
-  `cpp -P -nostdinc {{inputPath}} > {{inputPath}}.pp.c`,
-  `${TOOLCHAIN.agbcc} {{inputPath}}.pp.c -o {{inputPath}}.s ${TOOLCHAIN.harnessFlags.join(' ')} ${TOOLCHAIN_TARGETS.agbcc.canonicalFlags.join(' ')}`,
-  `${TOOLCHAIN.as} ${TOOLCHAIN.asFlags.join(' ')} {{inputPath}}.s -o {{outputPath}}`,
-].join(' && ');
+/** The benchmark's own agbcc command (cpp -> agbcc -> as) over this machine's toolchain: the only
+ *  kind of command the store keys (src/candcache-bench.ts). */
+const BENCH = { toolchain: 'agbcc', placeholders: { ASMLIFT_AGBCC: TOOLCHAIN.agbcc, ASMLIFT_ARM_AS: TOOLCHAIN.as } };
+const COMMAND = benchCommand(BENCH);
+const O2: readonly string[] = TOOLCHAIN_TARGETS.agbcc.canonicalFlags ?? [];
+const compileFromBench = (m: CompileCommandModule, cwd: string, cflags: readonly string[] = O2) =>
+  m.compileFromCommand(COMMAND, { cwd, cflags, bench: BENCH });
 
 const CANDIDATES = [
   'u32 f(u32 a0) { return a0 >> 1; }\n',
@@ -84,8 +87,8 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     const store = scratch('candcache-e2e-store-');
     const cwd = scratch('candcache-e2e-proj-');
 
-    const cold = await withCache('1', store, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd });
+    const cold = await withCache('1', store, async (m) => {
+      const compile = compileFromBench(m, cwd);
       const objects: string[] = [];
       for (const c of CANDIDATES) {
         objects.push(readFileSync(await compile(c, 'f', 'c')).toString('hex'));
@@ -97,8 +100,8 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     expect(objectsIn(store).length, 'agbcc is path-independent through this template').toBeGreaterThan(0);
     expect(new Set(cold).size, 'the fixtures must be distinct objects, or this proves nothing').toBe(CANDIDATES.length);
 
-    const warm = await withCache('1', store, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd });
+    const warm = await withCache('1', store, async (m) => {
+      const compile = compileFromBench(m, cwd);
       const objects: string[] = [];
       for (const c of CANDIDATES) {
         objects.push(readFileSync(await compile(c, 'f', 'c')).toString('hex'));
@@ -107,8 +110,8 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     });
     expect(warm).toEqual(cold);
 
-    const stats = await withCache('verify', store, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd });
+    const stats = await withCache('verify', store, async (m) => {
+      const compile = compileFromBench(m, cwd);
       for (const c of CANDIDATES) {
         await compile(c, 'f', 'c');
       }
@@ -123,11 +126,7 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     const cwd = scratch('candcache-e2e-proj-');
     const one = CANDIDATES[0];
 
-    const served = await withCache(
-      '1',
-      store,
-      async ({ compileFromCommand }) => await compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c'),
-    );
+    const served = await withCache('1', store, async (m) => await compileFromBench(m, cwd)(one, 'f', 'c'));
     // What a namespace hole looks like on disk: a well-formed object of the wrong toolchain.
     // Write THROUGH the hardlink so the content-addressed copy moves with it.
     const truth = readFileSync(served);
@@ -136,8 +135,8 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     writeFileSync(served, forged);
     expect(statSync(served).size).toBe(truth.length);
 
-    const { stats, log } = await withCache('verify', store, async ({ compileFromCommand }) => {
-      await compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c');
+    const { stats, log } = await withCache('verify', store, async (m) => {
+      await compileFromBench(m, cwd)(one, 'f', 'c');
       const cc = await import('../../src/candcache');
       return { stats: cc.cacheStats(), log: readFileSync(cc.MISMATCH_LOG, 'utf8') };
     });
@@ -146,8 +145,8 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     expect(log).toContain('symbol=f');
 
     // and the fresh bytes won
-    const repaired = await withCache('1', store, async ({ compileFromCommand }) =>
-      readFileSync(await compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c')),
+    const repaired = await withCache('1', store, async (m) =>
+      readFileSync(await compileFromBench(m, cwd)(one, 'f', 'c')),
     );
     expect(repaired.equals(truth)).toBe(true);
   });
@@ -156,12 +155,12 @@ describe('the candidate cache, verified against real agbcc objects', () => {
     const store = scratch('candcache-e2e-store-');
     const cwd = scratch('candcache-e2e-proj-');
     const one = CANDIDATES[CANDIDATES.length - 1];
-    const o1 = TEMPLATE.replace('-O2', '-O1');
-    expect(o1).not.toBe(TEMPLATE);
+    const o1 = O2.map((f) => (f === '-O2' ? '-O1' : f));
+    expect(o1).not.toEqual(O2);
 
-    const [a, b] = await withCache('1', store, async ({ compileFromCommand }) => [
-      readFileSync(await compileFromCommand(TEMPLATE, { cwd })(one, 'f', 'c')).toString('hex'),
-      readFileSync(await compileFromCommand(o1, { cwd })(one, 'f', 'c')).toString('hex'),
+    const [a, b] = await withCache('1', store, async (m) => [
+      readFileSync(await compileFromBench(m, cwd)(one, 'f', 'c')).toString('hex'),
+      readFileSync(await compileFromBench(m, cwd, o1)(one, 'f', 'c')).toString('hex'),
     ]);
     expect(b, 'the second compile must be its own object, not the first one served back').not.toBe(a);
     expect(readdirSync(join(store, 'ns')).length).toBe(2);

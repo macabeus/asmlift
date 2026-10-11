@@ -300,7 +300,6 @@ test('nothing in the shipped sources cuts a row IDENTITY on `:`', () => {
     "packages/bench-schema/src/identity.ts: const parts = e.id.split(':');",
     "packages/bench-schema/src/identity.ts: const tail = id.slice(id.lastIndexOf(':'));",
     "packages/bench-schema/src/identity.ts: if (names.some((n) => n.slice(0, n.lastIndexOf(':')) === ref)) {",
-    "packages/cli/src/compile-command.ts: for (const seg of val.split(':')) {",
     "packages/core/src/l3/homesplit.ts: const base = leaf.startsWith('c:') ? `0x${Number(leaf.slice(2)).toString(16)}` : leaf.slice(leaf.indexOf(':') + 1);",
   ]);
 });

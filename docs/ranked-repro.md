@@ -466,6 +466,13 @@ quoted from now on has to say which state it was measured in, in the same breath
 | `verify` (any capitalisation)               | compiles every candidate AND audits the store against it, loudly                                       | after any change to the cache, or when a stored answer is suspect                      |
 | anything else                               | **OFF, with `[candcache] REFUSED reason=unrecognised-mode` on stderr**                                 | never on purpose — the parse is closed so a typo cannot silently SERVE                 |
 
+**It keys only the benchmark's own compile commands** — a committed
+`apps/benchmark/dataset/toolchains/<id>/decomp.yaml` template under the values the benchmark puts in
+it — and never a project's `decomp.yaml` command (`[candcache] REFUSED-KEY label=command
+reason=the-command-is-not-a-bench-template`): a project's command can read inputs its words do not
+name, such as a wrapper script, a response file or a driver's search prefix, so a store keyed on
+its words would serve an old object after one of them changed.
+
 **EVERY WALL PUBLISHED IN THIS REPO BEFORE THE DEFAULT FLIPPED WAS MEASURED CACHE-OFF**, because
 the variable was set in no shell profile, no `.envrc` and no CI job — so `unset` and `off` were the
 same run. They are not the same run now. A wall taken today with nothing said about the cache is a
@@ -538,75 +545,19 @@ find nothing to disagree with and go green having audited nothing.
   indistinguishable in RESULT from no cache at all. If a `[score]` line moves between a cold run
   and a warm one, the cache is wrong; run the `diff` below, then re-run with `ASMLIFT_CANDCACHE=0`
   and report it.
-- **On a PROJECT's own `decomp.yaml` command, the cache runs — there is nothing to declare.**
-  **THE POSTURE CHANGE, stated where it happens:** two of them, in sequence. First, the cache
-  stopped needing a `tools.asmlift.cacheInputs` declaration, so `ASMLIFT_CANDCACHE=1` stopped being
-  inert on a project's own command. Then the DEFAULT flipped: it is live for everyone now, on every
-  project's own `decomp.yaml` — the path every published score comes from — with no variable set
-  anywhere. Your next run caches your own project's compiles with no further action, and the only
-  signal is one `asmlift: [candcache]` line among the phase output. `ASMLIFT_CANDCACHE=0` is the
-  way back.
-  The opt-in existed because one input class could not be measured: a directory named by a flag.
-  `-I tools/agbcc/include` was hashed by content already; `-iquote include` — klonoa's own template
-  — was a bare word nothing looked at. A declaration a project could get incomplete was itself a
-  stale-object hole, so it is gone: the namespace measures the toolchain rather than listing it.
-  Measured now: **every token that names an existing path**, whether or not anyone listed the flag
-  in front of it (`--include-directory inc`, `-iframework inc`, a flag invented after this was
-  written); every ATTACHED operand of the flags in the de-gluer table (`-Iinc`, `--sysroot=dir`,
-  `-Wa,-Iinc`); the CONTENTS of a `@response` or `-specs` file, scanned BOTH ways the outer
-  template is — the de-gluer table and every token tried as a path — because scanning a body with
-  the table alone made a response file the safer place to hide an input; the directory a
-  SUBDIRECTORY-qualified injected `-include` header resolves its own quoted includes from; the
-  DIRECTORY PART of a glob (`cat inc/*.h`); an operand held in a variable the template assigns,
-  quoted with a space in it, or written `~/…`; the base a `cd` in the template moves to; and what
-  `CPATH` and friends point AT.
-  A shell COMMENT is not scanned — `sh` drops from an unquoted `#` to the end of the line, so
-  nothing in it is read, and scanning it put the project's own `build/` tree in the namespace
-  (every rebuild cold) or refused the whole cache over the word `docker` in an English sentence.
-  Editing the comment still moves the namespace: the template's raw bytes are hashed
-  unconditionally.
-  **A command is KEYED AT ALL only when every input of it is in view**
-  (`[candcache] REFUSED-KEY label=command reason=the-command-reads-more-than-its-words: <why>`, every
-  key refused, the reason said once). A program the command runs can read more than its words show:
-  a wrapper script that adds `-include pre.h` to its arguments, flags piped from a file through
-  `xargs`, a variable named through another (`${!P}`). Each of those served an old object after the
-  file it read changed. So a command is admitted only in the form below, and every other form is
-  refused rather than listed:
-  - simple commands joined by `;` or `&&`. No pipe, background job, subshell, group, input
-    redirection, here-document, glob, backquote, backslash escape (a line continuation aside), or
-    command substitution other than `$(dirname …)`/`$(basename …)` of `{{inputPath}}` or
-    `{{outputPath}}`. No expansion but `$NAME`/`${NAME}` of a variable the command does not set itself;
-  - output redirected only to `/dev/null` or into the scratch directory;
-  - each program a native executable (ELF or Mach-O), found on `PATH` as the shell finds it, or a
-    shell script whose whole program is `exec <program> "$@"` (the `cpp` → `cpp-14` shim). Not
-    `env`, which runs whatever its words name;
-  - no other word naming a program, a script or a text file (`sh ./cc.sh`, `nice gcc`,
-    `xargs -a flags.txt`), and only a flag's or a path's characters in a word that names nothing;
-  - `cd` only into the scratch directory, and an assignment before a program only of a plain word or
-    of an existing path, never of `PATH`.
-
-  **THE REACH COST:** a project whose compile goes through a wrapper script, a pipe
-  (`cpp | agbcc`), or a template that sets its own variables gets no candidate cache on this path.
-  The benchmark's agbcc command (`cpp …; agbcc … && as …`) is admitted. To cache your project's
-  compiles, call the compiler binaries directly in the template, or make the wrapper exactly
-  `exec <compiler> "$@"`.
-  The admission is read LAZILY, once a key is first looked up, so a run that printed no `REFUSED`
-  line may simply have compiled no candidate; that is not evidence the cache worked.
-  The cache still refuses, out loud, when the compile is not a pure function of its input —
-  `[candcache] REFUSED label=command reason=object-is-not-a-pure-function-of-its-input` is what
-  `ido7.1` gets, because it writes the absolute path of its input `.c` into the object — when a
-  measured path exists and CANNOT BE READ (an include directory at mode 0311 is searchable and not
-  listable: the compile can read it and the walk cannot, so nothing is cached), and when the
-  command runs the compiler somewhere this namespace cannot follow — a container image named by a
-  mutable tag, another host over `ssh`, a `chroot`/`qemu`/`wine` (`reason=stamp-threw`).
-
-- **There is no per-project key.** A command whose compiler asmlift cannot measure refuses on its
-  own, naming itself once per run (`reason=stamp-threw`), and `ASMLIFT_CANDCACHE=0` turns the cache
-  off for a whole process.
+- **On the benchmark's command the cache still refuses, out loud,** when the compile is not a pure
+  function of its input (`[candcache] REFUSED label=command reason=object-is-not-a-pure-function-of-its-input`
+  is what `ido7.1` gets, because it writes the absolute path of its input `.c` into the object); when
+  a program the command runs is neither a native executable nor a flagless `#!/bin/sh` script whose
+  whole program is `exec <program> "$@"` (`reason=the-bench-command-runs-what-the-store-cannot-key`);
+  and while a variable that changes what a compile runs or reads without naming it is set —
+  an exported shell function (`BASH_FUNC_*`), `BASH_ENV`, `ENV`, `CCC_OVERRIDE_OPTIONS`,
+  `GCC_EXEC_PREFIX`, `COMPILER_PATH`, `CPATH` and the other include-path variables
+  (`reason=stamp-threw`).
 - **A candidate whose compile may read past its own bytes is refused PER KEY**
   (`[candcache] REFUSED-KEY label=command reason=…`, said once per reason and counted in
-  `refusedKeys`). The command's compiler is unknown and reports nothing it read, so the TU's text and
-  the command's are read instead, and each test matches more spellings than any compiler honours: a
+  `refusedKeys`). No preprocessor reports what the TU read on this path, so the TU's text and the
+  command's are read instead, and each test matches more spellings than any compiler honours: a
   directive that can name a file, `#line` or a linemarker, a UCN, `__has_include`/`__has_embed`,
   token pasting, the path and clock macros. A GNU assembler opens a `.include`/`.incbin` file named
   in a string, and a macro, a trigraph or a flag of the command can build what copies a string into
@@ -619,29 +570,10 @@ find nothing to disagree with and go green having audited nothing.
   `-finput-charset`; a plugin (`-fplugin`, `-fpass-plugin`, `-iplugindir`) or a `-wrapper`; and a
   `$(…)` or backquote other than `$(dirname {{outputPath}})`. The words are read as the command's
   programs receive them: quotes removed and every `$NAME` expanded.
-- **What is still NOT measured, said out loud.** `-B /opt/tc/arm-` used as a filename PREFIX rather
-  than a directory (the operand is measured as a path, so the prefix spelling names nothing that
-  exists and contributes nothing); the compiler's own built-in search directories, which every
-  corpus template puts out of reach with `-nostdinc`; and an opaque runtime this build has never
-  heard of — the refusal above is a deny-list of process names, and a deny-list's miss is on the
-  stale-object side. While `GCC_EXEC_PREFIX` or `COMPILER_PATH` is set the cache refuses outright
-  (`reason=stamp-threw`): they move where a GCC driver finds its `cc1` and its `specs` file, and
-  their values do not name those files.
-  One FALSE POSITIVE is kept for the stale-object asymmetry: the container-runtime check reads every
-  token, so a runtime word inside a quoted string (`echo "no ssh here"`) refuses the project's
-  cache. That is loud and costs a cold start, and a command-position-only rule would silently miss
-  `env X=1 docker run`.
-  If your command reads something in one of those shapes, run with `ASMLIFT_CANDCACHE=verify` — it compiles anyway
-  and fails on any disagreement — or `ASMLIFT_CANDCACHE=0`. Serving mode's own sampled audit is the
-  standing mitigation for this whole list, and it is a bound on how long one survives, not a
-  removal: see the `on` MODE AUDITS ITSELF bullet below.
-  **What `verify` can and cannot evidence for this bullet.** A verify run compares stored bytes
-  against fresh for every key it stores — but 0 of 66,816 LoadBGTilemapData candidate TUs carry an
-  `#include`, so the include directory is never read for any key stored, and a clean verify run is
-  zero evidence about the directory measurement specifically. It evidences the toolchain, the
-  environment and the template. The evidence for the directory measurement is the offline poison
-  suite (`packages/cli/test/offline/candcache-dirflags.test.ts`), which counts the namespaces each
-  shape's stamp makes across an edit.
+- **What is still NOT measured, said out loud:** the compiler's own built-in search directories,
+  which the benchmark's commands put out of reach with `-nostdinc`. Serving mode's sampled audit is
+  the standing mitigation, and it is a bound on how long a miss survives, not a removal: see the
+  `on` MODE AUDITS ITSELF bullet below.
 - **A `put` does not trust the store either, and that hole had NO audit over it at all.** The
   store is content-addressed: `objects/<sha>` is deduped and hardlinked per key. Treating the
   EXISTENCE of that file as proof of its CONTENT meant a corrupted entry — a disk error, an

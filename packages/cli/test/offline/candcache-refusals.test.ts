@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { toolchainFileChain } from '../../src/candcache';
-import { commandAdmission } from '../../src/candcache-command';
+import { benchCommand, benchCommandRefusal } from '../../src/candcache-bench';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
 // several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
@@ -640,7 +640,8 @@ describe('a wrapper that OPENS a file it locates for itself', () => {
   // The chain follows what a script EXECS, never what it OPENS, so a wrapper that reads a project
   // data file — a linked ELF whose symbol table its output depends on — has that file outside the
   // namespace, prose or no prose, and rebuilding the file would not invalidate. The command path
-  // keys no such wrapper: it admits a script only when its whole program is `exec <program> "$@"`.
+  // keys no such wrapper: it admits a script only when its whole program is `exec <program> "$@"`
+  // (src/candcache-bench.ts).
   const wrapper = (body: string): string => {
     const dir = scratch();
     writeFileSync(join(dir, 'game.elf'), 'symbols v1');
@@ -667,10 +668,11 @@ describe('a wrapper that OPENS a file it locates for itself', () => {
     }
   });
 
-  test('so a command that runs it is not keyed', () => {
+  test('so the benchmark command run through it is not keyed', () => {
     const p = wrapper(`#!/bin/sh\n${READS_A_FILE}`);
-    expect(commandAdmission(`${p} -c -o {{outputPath}} {{inputPath}}`, { cwd: dirname(p), env: process.env })).toEqual({
-      refusal: `it runs ${p}, a script that does more than exec a program with its own arguments`,
-    });
+    const bench = { toolchain: 'ido7.1', placeholders: { ASMLIFT_IDO_CC: p } };
+    expect(benchCommandRefusal(benchCommand(bench), bench, { cwd: dirname(p), env: process.env })).toBe(
+      `the-bench-command-runs-what-the-store-cannot-key: it runs ${p}, a script that is not a flagless #!/bin/sh exec of a program with its own arguments`,
+    );
   });
 });

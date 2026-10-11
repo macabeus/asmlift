@@ -28,7 +28,7 @@
 // guess when the binary is not installed — so the two tests that call it are skipped where agbcc
 // is absent, which is every hosted runner. What must not be lost there is the dropped-entry guard,
 // so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
-import { toolchainFileChain } from '@asmlift/cli/candcache';
+import { refuseUnkeyedEnv, toolchainFileChain } from '@asmlift/cli/candcache';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { TOOLCHAIN } from '@asmlift/toolchains';
 import { execSync } from 'node:child_process';
@@ -252,11 +252,12 @@ describe('hole 5 — the compile environment is an input to every candidate comp
     }
   };
 
-  test('CPATH and C_INCLUDE_PATH move the digest — cpp honours them even under -nostdinc', () => {
+  test('CPATH and C_INCLUDE_PATH refuse the namespace — cpp honours them even under -nostdinc', () => {
     for (const v of ['CPATH', 'C_INCLUDE_PATH']) {
-      const bare = withEnv(v, undefined, () => candCacheStaticStamp(CANONICAL, []));
-      const set = withEnv(v, '/private/tmp/candcache-ns-probe-inc', () => candCacheStaticStamp(CANONICAL, []));
-      expect(set, `${v} is an include-path input and must re-namespace`).not.toBe(bare);
+      withEnv(v, '/private/tmp/candcache-ns-probe-inc', () => {
+        expect(() => refuseUnkeyedEnv(), `${v} names directories, not what is in them`).toThrow(v);
+        return '';
+      });
     }
   });
 
@@ -317,16 +318,9 @@ describe("a script's PROSE is not its program", () => {
     expect(toolchainFileChain(p), 'the interpreter is a delegate').toContain(realpathSync('/bin/sh'));
   });
 
-  test('…and `#!/usr/bin/env sh` names TWO programs, both of which run', () => {
-    // The stripper removes the shebang like any other `#` line, so it is re-added from the raw
-    // bytes — and re-adding only the FIRST token drops the real interpreter out of the namespace
-    // for every `env` shebang. Swap the interpreter behind `env` and the cache would serve objects
-    // built by a different program.
-    const sh = realpathSync(execSync('command -v sh', { shell: '/bin/sh' }).toString().trim());
+  test('…and a script under `#!/usr/bin/env sh` is refused: `env` runs whatever interpreter it finds', () => {
     const p = wrapper('#!/usr/bin/env sh\n# a comment\nexec /usr/bin/true "$@"\n');
-    const chain = toolchainFileChain(p);
-    expect(chain, 'env itself').toContain(realpathSync('/usr/bin/env'));
-    expect(chain, 'and the interpreter env goes on to run').toContain(sh);
+    expect(() => toolchainFileChain(p)).toThrow(/runs under \/usr\/bin\/env sh, not a flagless \/bin\/sh/);
   });
 });
 
