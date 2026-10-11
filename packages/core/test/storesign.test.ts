@@ -91,3 +91,50 @@ test('the structurer spells a stamped store through the view its constant witnes
   expect(copyThenStore('-1')).toContain('    a0[6] = -1;\n');
   expect(copyThenStore('0xffff')).toContain('    ((u16 *)a0)[6] = 65535;\n');
 });
+
+// A struct recovered from stores alone (raise/structs.ts): the halfword at 6 is never loaded, so its
+// declared type is whatever its stamped stores agree on, else the unsigned view.
+const storedStruct = (...sixes: string[]) =>
+  decompile(
+    'f',
+    obj(
+      '0:\tsh\tzero,4(a0)',
+      ...sixes.flatMap((k, i) => [
+        `${(4 + 8 * i).toString(16)}:\tli\tv0,${k}`,
+        `${(8 + 8 * i).toString(16)}:\tsh\tv0,6(a0)`,
+      ]),
+      `${(4 + 8 * sixes.length).toString(16)}:\tjr\tra`,
+      `${(8 + 8 * sixes.length).toString(16)}:\tsw\tzero,12(a0)`,
+    ),
+    MIPS_GCC,
+    { prototypes: { f: { params: ['void *'], returnsVoid: true } } },
+  ).source;
+
+test('a field only ever stored declares the view its stamped stores agree on', () => {
+  expect(storedStruct('-104')).toContain(' s16 field_6;');
+  expect(storedStruct('-104')).toContain('    a0->field_6 = -104;\n');
+  expect(storedStruct('0xff98')).toContain(' u16 field_6;');
+  // no stamp (bit 15 clear): the unsigned view; two stamps that disagree: the signed one, as two
+  // loads that disagree would
+  expect(storedStruct('104')).toContain(' u16 field_6;');
+  expect(storedStruct('-104', '0xff98')).toContain(' s16 field_6;');
+});
+
+test("a load's signedness wins over a stamped store's at the same field", () => {
+  const src = (load: string) =>
+    decompile(
+      'f',
+      obj(
+        `0:\t${load}\tv1,6(a0)`,
+        '4:\tli\tv0,-104',
+        '8:\tsh\tv0,6(a0)',
+        'c:\tsw\tzero,12(a0)',
+        '10:\tjr\tra',
+        '14:\tsh\tv1,0(a1)',
+      ),
+      MIPS_GCC,
+      { prototypes: { f: { params: ['void *', 'u16 *'], returnsVoid: true } } },
+    ).source;
+  expect(src('lhu')).toContain(' u16 field_6;');
+  expect(src('lh')).toContain(' s16 field_6;');
+});

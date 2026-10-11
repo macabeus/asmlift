@@ -107,9 +107,9 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
- *  scaled-extension → array-legalize → truncated-load → struct-array → member-array → struct-pointer →
- *  short-circuit → branch-short-circuit → narrow-reads → narrow-local → parameter-width →
- *  scaled-extension-restore → store-sign.
+ *  scaled-extension → array-legalize → truncated-load → store-sign → struct-array → member-array →
+ *  struct-pointer → short-circuit → branch-short-circuit → narrow-reads → narrow-local →
+ *  parameter-width → scaled-extension-restore.
  *  See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
@@ -216,6 +216,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
       foldTruncatedLoads(fn, target.capabilities.endianness === 'little', TRUNC_LOAD_GATES),
     dce: false,
   },
+  // BEFORE `structs`, which reads the stamp to type a field that is only ever stored, and AFTER
+  // `arrays`, whose `astore` keeps its own convention. `struct-arrays` and `member-arrays` read a
+  // store's signedness by the word convention, so the stamp moves nothing of theirs. `dce: false` —
+  // it changes no op.
+  { id: 'storesign', run: (fn, _self, _opts, target) => seedNarrowStoreSigns(fn, target), dce: false },
   // struct-arrays AFTER arrays (scalar stride==width shapes are claimed first — see the
   // discriminator note in raise/struct-arrays.ts) and BEFORE structs (an element's field
   // accesses must not be re-derived as constant-offset struct-pointer accesses).
@@ -309,10 +314,6 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     dce: true,
     gate: foldsShiftPairCasts,
   },
-  // AFTER every pass that rewrites a `store`: it stamps an attr on the stores that are left, and a
-  // store an array or struct recognizer turned into something else keeps that recognizer's view.
-  // Changes no op, so `dce: false`.
-  { id: 'storesign', run: (fn, _self, _opts, target) => seedNarrowStoreSigns(fn, target), dce: false },
 ];
 
 /** The `paramwidth` entry's body, taking both of its tables, so a census can pass wrapped ones. */
