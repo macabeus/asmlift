@@ -70,7 +70,7 @@
 // Past the table, the counter's DECLARATION is retired with its writes: nothing mentions it any
 // more, and a declared-but-untouched local reads as the deliberate `uninit` slot it is not.
 //
-// v3 SCOPE — the up-counting BYTE walk with an EXPRESSION base (`p = (u8 *)(EXPR)` ahead of a
+// v3 SCOPE — the up-counting walk with an EXPRESSION base (`p = (T *)(EXPR)` ahead of a
 // counter-carried do-while): full rules at `tryExprWalk` below.
 //
 // v4 SCOPE — the UNGUARDED countdown, the shape agbcc emits for `for(i=0;i<C;i++) a[i]` with a
@@ -504,19 +504,25 @@ function reindexStmt(s: Stmt, walk: WalkLoop, iv: string): Stmt | null {
   }
 }
 
-// ── v3: the up-counting BYTE walk with an EXPRESSION base ────────────────────────────────────
+/** `e + c`, spelled `e - |c|` for a negative c and `e` alone for 0. */
+function plusConst(e: Expr, c: number): Expr {
+  return c === 0 ? e : { k: 'bin', op: c < 0 ? '-' : '+', l: e, r: { k: 'const', value: Math.abs(c) } };
+}
+
+// ── v3: the up-counting walk with an EXPRESSION base ─────────────────────────────────────────
 //
-//     p = (u8 *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
+//     p = (T *)(EXPR); do { … *p … ; p = p + 1; i = i + 1; } while (i < n);
 //
 // The loop already carries its own integer counter, so the walk pointer is pure strength
-// reduction: deleting its init and step and spelling the deref as BASE[i + REST] — the sole
+// reduction: deleting its init and step and spelling the deref as BASE[i + REST/W] — the sole
 // bare-var addend of EXPR as the index base, the counter FIRST in the index sum — is the
 // indexed source the compiler reduces back. v3 SCOPE (decline over approximate):
-//   • `p` is a `u8 *` (byte walk: the index and the byte arithmetic agree by construction —
-//     a wider element would need the REST addends rescaled from bytes to elements);
+//   • `p` is a `T *` over an integer T of W bytes, and every deref of `p` reads W. EXPR's sum is
+//     BYTE arithmetic, so for W > 1 every REST addend is a constant whose total is a multiple of
+//     W (it is rescaled to elements); a symbolic addend would need dividing, and declines;
 //   • the init `p = EXPR` immediately precedes the `dowhile`; EXPR (casts stripped) flattens
-//     over `+` into exactly ONE bare-var addend (the base — itself not a non-byte pointer, or
-//     `base[i]` would stride its element) plus pure invariant addends (var/const/mul/shl trees
+//     over `+` into exactly ONE bare-var addend (the base — an integer or a byte pointer, or
+//     EXPR's `+` would stride its element) plus pure invariant addends (var/const/mul/shl trees
 //     whose vars the body never assigns);
 //   • the body's statements include exactly one `p = p + 1` and one `i = i + 1` with integer
 //     `i` read by the do-while condition; `p` is mentioned nowhere else in the function beyond
@@ -535,10 +541,11 @@ function tryExprWalk(
   }
   const p = prev.name;
   const pT = ptrVars.get(p)!;
-  if (pT.kind !== 'ptr' || pT.to.kind !== 'int' || pT.to.width !== 8) {
+  if (pT.kind !== 'ptr' || pT.to.kind !== 'int' || pT.to.width % 8 !== 0) {
     return null;
   }
-  if (!derefWidths([dw], p).every((w) => w === 1)) {
+  const W = pT.to.width / 8;
+  if (!derefWidths([dw], p).every((w) => w === W)) {
     return null;
   }
   // EXPR decomposition
@@ -563,7 +570,7 @@ function tryExprWalk(
   }
   const base = bare[0] as Extract<Expr, { k: 'var' }>;
   // declTypes carries params, locals AND globals: a base declared nowhere has an unknowable C
-  // stride (its project declaration decides), and a wider pointer strides its element under [i]
+  // stride (its project declaration decides), and a wider pointer strides its element in EXPR
   // — both decline.
   const baseT = declTypes(base.name);
   if (baseT === undefined) {
@@ -595,6 +602,18 @@ function tryExprWalk(
   restVars.add(base.name);
   if (!rest.every(pure) || [...restVars].some((n) => assignedIn(dw.body, n))) {
     return null;
+  }
+  // REST in ELEMENTS: verbatim for a byte walk, else a constant byte total divided by W
+  let restIdx: Expr[] = rest;
+  let restElems = 0;
+  if (W > 1) {
+    const consts = rest.filter((a): a is Extract<Expr, { k: 'const' }> => a.k === 'const');
+    const bytes = consts.reduce((acc, c) => acc + c.value, 0) | 0; // the 32-bit sum, signed
+    if (consts.length !== rest.length || bytes % W !== 0) {
+      return null;
+    }
+    restIdx = [];
+    restElems = bytes / W;
   }
   // the steps and the counter
   const isIncOf = (st: Stmt, name?: string): string | null => {
@@ -633,7 +652,11 @@ function tryExprWalk(
     return null;
   }
   // rewrite the derefs, then verify nothing of `p` survives
-  const idxOf = (): Expr => rest.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv });
+  const idxOf = (): Expr =>
+    plusConst(
+      restIdx.reduce<Expr>((acc, r) => ({ k: 'bin', op: '+', l: acc, r }), { k: 'var', name: iv }),
+      restElems,
+    );
   let respelled = true;
   const rewriteExpr = (e: Expr): Expr => {
     const m = mapExprChildren(e, rewriteExpr);
@@ -781,7 +804,7 @@ export function reindexWalks(
           }
         }
       }
-      // v3 — the up-counting byte walk with an expression base: `p = (u8 *)(EXPR)` immediately
+      // v3 — the up-counting walk with an expression base: `p = (T *)(EXPR)` immediately
       // ahead of a counter-carried do-while (see tryExprWalk)
       if (s.k === 'dowhile') {
         const prev = out[out.length - 1];

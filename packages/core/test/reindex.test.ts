@@ -444,7 +444,7 @@ test('keptWalks collects the v1 while-walk base (here a param — harmless to th
 });
 
 // ── v3: the up-counting byte walk with an expression base ─────────────────────────────────────
-describe('v3 — expression-base byte walk', () => {
+describe('v3 — expression-base walk', () => {
   const u8p = { kind: 'ptr', to: { kind: 'int', width: 8, signed: false } } as const;
   const s32t = { kind: 'int', width: 32, signed: true } as const;
   const cn = (value: number): Expr => ({ k: 'const', value });
@@ -563,6 +563,50 @@ describe('v3 — expression-base byte walk', () => {
       mkFn(init, walkBody(), [{ k: 'return', value: { k: 'cast', to: s32t as never, e: v('p') } }]),
     );
     expect(r).toBeNull();
+  });
+
+  describe('a wider element (W bytes): the constant byte REST is rescaled to elements', () => {
+    const u16p = { kind: 'ptr', to: { kind: 'int', width: 16, signed: false } } as const;
+    const deref16: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 2, signed: false };
+    const halfBody = (val: Expr = deref16): Stmt[] => [
+      { k: 'store', lval: { k: 'index', base: v('a1'), idx: v('i'), width: 2, signed: false }, value: val },
+      inc('p'),
+      inc('i'),
+    ];
+    const u16Fn = (init16: Expr, body: Stmt[] = halfBody()): SFn => {
+      const f = mkFn(init16, body);
+      f.locals[0] = { name: 'p', type: u16p as never };
+      return f;
+    };
+    const at = (off: Expr): Expr => ({
+      k: 'cast',
+      to: u16p as never,
+      e: { k: 'bin', op: '+', l: v('a0'), r: off },
+    });
+
+    test('a u16 walk from byte offset 2k reads BASE[i + k]', () => {
+      const r = reindexWalks(u16Fn(at(cn(6))));
+      expect(r).not.toBeNull();
+      const src = JSON.stringify(r!.body);
+      expect(src).not.toContain('"name":"p"');
+      expect(src).toContain(
+        '{"k":"index","base":{"k":"var","name":"a0"},"idx":{"k":"bin","op":"+","l":{"k":"var","name":"i"},"r":{"k":"const","value":3}},"width":2,"signed":false}',
+      );
+      expect(cBackend.emit(r!)).toContain('((u16 *)a0)[i + 3]');
+    });
+
+    test('refused: a byte offset that is not a multiple of the element (no element index names it)', () => {
+      expect(reindexWalks(u16Fn(at(cn(3))))).toBeNull();
+    });
+
+    test('refused: a symbolic byte offset (rescaling it would need a division)', () => {
+      expect(reindexWalks(u16Fn(at({ k: 'bin', op: '*', l: v('a2'), r: cn(2) })))).toBeNull();
+    });
+
+    test('refused: a deref narrower than the walk element', () => {
+      const narrow: Expr = { k: 'index', base: v('p'), idx: cn(0), width: 1, signed: false };
+      expect(reindexWalks(u16Fn(at(cn(2)), halfBody(narrow)))).toBeNull();
+    });
   });
 
   test('refused: a wider deref would stride differently', () => {
