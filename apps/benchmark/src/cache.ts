@@ -327,9 +327,10 @@ export async function cachedM2cResult(
   // that context byte for byte, and `ctx` is that file plus at most the row's own prototype line
   // (cases/real.ts `appendCtxProto`), so it equals the context outright on only 194 of them. m2c's
   // file is a separately vendored one on Mario Party 4's 42 and 41 of ac-decomp's. Pikmin's 42 and 1
-  // ac-decomp row vendor none for m2c: there `ctx` is the row's hand-written context (the 1), then
-  // the callee declarations asmlift's lift read (eval/evaluate.ts `m2cDeclarations`), which are
-  // non-empty on all 42 of pikmin's. Off the key, an edit to a prependC or to the
+  // ac-decomp row vendor none for m2c: there `ctx` is the row's hand-written context, if it has one
+  // (only the ac-decomp row does), then the callee declarations asmlift's lift read that it does not
+  // already declare (eval/evaluate.ts `m2cDeclarations`) — none on the ac-decomp row, and some on
+  // all 42 of pikmin's. Off the key, an edit to a prependC or to the
   // typedef spelling the context-free rungs take from the context (compile/util.ts `bareTypedefs`)
   // replays the old score. The digest covers the closure's ARGUMENTS, not its code: a change to the
   // ladder itself (compile/real.ts `scoringLadder`) is not on the key and owes a bump of `v`.
