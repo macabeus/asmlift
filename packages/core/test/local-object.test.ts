@@ -587,6 +587,6 @@ test('agbcc: a `.LC` image another function names too is still read, and refused
   // two copies of one initializer share an image too — but a string passed by address is no copy.
   expect([...(liftThumb('flit', constInit, ARMV4T_AGBCC).localObjects?.keys() ?? [])]).toEqual(['.LC16']);
   expect(() => decompile('flit', constInit, ARMV4T_AGBCC)).toThrow(
-    "reads the compiler's anonymous constant ('.LC16') whose one read is not the source of a block copy",
+    "reads the compiler's anonymous constant ('.LC16') which is not the source of a block copy",
   );
 });

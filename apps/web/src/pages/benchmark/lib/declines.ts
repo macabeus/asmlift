@@ -48,8 +48,8 @@
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
 //                               with no type to qualify, the pass-through of a recovered switch's own `why`,
-//                               the compiler's anonymous constant read other than as one local's
-//                               initializer,
+//                               the compiler's anonymous constant read other than as the
+//                               initializer of the locals its copies fill,
 //                               an access whose byte offset is not a whole number of its own elements
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no

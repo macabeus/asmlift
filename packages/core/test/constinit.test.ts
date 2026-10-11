@@ -118,8 +118,27 @@ test('an element the source left out is a hole, and the next one is spelled by d
   expect(emitCFamily('void f()', sfn, undefined, false)).toContain('    u8 sp0[8] = { 0, 0, 1, 2, 0, 0, 3 };\n');
 });
 
+test('one image copied into two locals initializes each', () => {
+  // agbcc places one image per identical constant, and loads its address once for both copies
+  const locals = [...bytes4, { name: 'sp4', type: T.array(T.u(8), 4) }];
+  const sfn = fn([copy('sp0', '.LC0', 4), copy('sp4', '.LC0', 4), use(v('sp0')), use(v('sp4'))], locals);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(cBackend.emit(sfn)).toBe(
+    'void f(void) {\n    u8 sp0[4] = { 1, 2, 3, 4 };\n    u8 sp4[4] = { 1, 2, 3, 4 };\n    g(sp0);\n    g(sp4);\n}\n',
+  );
+});
+
 test.each<[string, SFn, string]>([
-  ['read twice', fn([copy('sp0', '.LC0', 4), use({ k: 'addr', name: '.LC0' })], bytes4), 'reads more than once'],
+  [
+    'read other than by a copy',
+    fn([copy('sp0', '.LC0', 4), use({ k: 'addr', name: '.LC0' })], bytes4),
+    'reads other than as the source of a block copy',
+  ],
+  [
+    'copied twice into one local',
+    fn([copy('sp0', '.LC0', 4), use(v('sp0')), copy('sp0', '.LC0', 4)], bytes4),
+    "whose copy into 'sp0' is not the first thing the body does with it",
+  ],
   [
     'copied inside a branch',
     fn([{ k: 'if', cond: v('x'), then: [copy('sp0', '.LC0', 4)], else: [] }], bytes4),

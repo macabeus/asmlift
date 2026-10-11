@@ -26,7 +26,11 @@
 //     whole address — not volatile, and nothing before the copy mentions it but a local assigned
 //     its address alone, so moving the copy to the declaration changes no value anything reads (an
 //     initializer runs at entry, the copy at its own position);
-//   • its source is the whole image, which nothing else mentions, and whose size is the count;
+//   • its source is the whole image, which nothing but such copies mentions, and whose size is the
+//     count — one image may fill several locals, since the compiler places one per identical
+//     constant (varasm.c `output_constant_def`), each into its own local. KNOWN GAP: Thumb's
+//     frame audit reserves a frame's address-taken bytes as one local, so two arrays refuse at the
+//     size check, whether or not they share an image;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
 //     element type this pass could declare).
 // The local keeps its own element type where the body reaches it by an offset or a cast — those
@@ -85,9 +89,8 @@ function resign(v: number, width: number, signed: boolean): number {
   return signed && u >= 2 ** (bits - 1) ? u - 2 ** bits : u;
 }
 
-/** One image's fold: the copy statement's index, the local and its declaration. */
+/** One copy's fold: the copy statement's index, the local and its declaration. */
 interface Fold {
-  image: SImage;
   at: number;
   local: string;
   type: IrType;
@@ -95,27 +98,44 @@ interface Fold {
   string: boolean;
 }
 
-/** Why `image` cannot fold, as the tail of a sentence naming it, or its fold. */
-function planFold(sfn: SFn, image: SImage): Fold | string {
+/** Why `image` cannot fold, as the tail of a sentence naming it, or the fold of each copy of it. */
+function planFolds(sfn: SFn, image: SImage): Fold[] | string {
   if (image.type.kind !== 'array' || image.type.elem.kind !== 'int') {
     return 'whose image writes no one element width — a struct, or padding alone';
   }
-  const elem = image.type.elem;
-  const size = byteSize(image.type)!;
-  if (mentions(sfn.body, image.name) !== 1) {
-    return 'which the body reads more than once, or never';
-  }
-  const at = sfn.body.findIndex(
-    (s) =>
+  const copies: number[] = [];
+  sfn.body.forEach((s, i) => {
+    if (
       s.k === 'exprstmt' &&
       s.value.k === 'call' &&
       typeof s.value.fn === 'string' &&
       BLOCK_COPIES[s.value.fn] !== undefined &&
-      wholeObject(s.value.args[BLOCK_COPIES[s.value.fn].src] ?? { k: 'const', value: 0 }) === image.name,
-  );
-  if (at === -1) {
-    return 'whose one read is not the source of a block copy at the top level of the body';
+      wholeObject(s.value.args[BLOCK_COPIES[s.value.fn].src] ?? { k: 'const', value: 0 }) === image.name
+    ) {
+      copies.push(i);
+    }
+  });
+  if (copies.length === 0) {
+    return 'which is not the source of a block copy at the top level of the body';
   }
+  if (mentions(sfn.body, image.name) !== copies.length) {
+    return 'which the body reads other than as the source of a block copy at the top level';
+  }
+  const folds: Fold[] = [];
+  for (const at of copies) {
+    const fold = planCopy(sfn, image, at);
+    if (typeof fold === 'string') {
+      return fold;
+    }
+    folds.push(fold);
+  }
+  return folds;
+}
+
+/** Why the block copy of `image` at body index `at` cannot fold, or its fold. */
+function planCopy(sfn: SFn, image: SImage, at: number): Fold | string {
+  const elem = (image.type as Extract<IrType, { kind: 'array' }>).elem as Extract<IrType, { kind: 'int' }>;
+  const size = byteSize(image.type)!;
   const call = (sfn.body[at] as Extract<Stmt, { k: 'exprstmt' }>).value as Extract<Expr, { k: 'call' }>;
   const roles = BLOCK_COPIES[call.fn as string];
   const n = bare(call.args[roles.n] ?? { k: 'var', name: '' });
@@ -187,7 +207,6 @@ function planFold(sfn: SFn, image: SImage): Fold | string {
     own = { ...elem, signed };
   }
   return {
-    image,
     at,
     local,
     type: { kind: 'array', elem: own, count },
@@ -258,7 +277,7 @@ function uses(
  *  else the image's name and the tail of the sentence that refuses it. */
 export function constantImageRefusal(sfn: SFn): { image: string; refused: string } | null {
   for (const image of sfn.images ?? []) {
-    const plan = planFold(sfn, image);
+    const plan = planFolds(sfn, image);
     if (typeof plan === 'string') {
       return { image: image.name, refused: plan };
     }
@@ -266,9 +285,9 @@ export function constantImageRefusal(sfn: SFn): { image: string; refused: string
   return null;
 }
 
-/** `sfn` with every anonymous image folded into the initializer of the local its copy fills, the
- *  copy gone and the image with it. Throws where one does not fold: structure() refused that
- *  function already, so a tree that reaches here unfoldable was made so by a later pass. */
+/** `sfn` with every anonymous image folded into the initializer of each local its copies fill,
+ *  the copies gone and the image with them. Throws where one does not fold: structure() refused
+ *  that function already, so a tree that reaches here unfoldable was made so by a later pass. */
 export function foldConstantImages(sfn: SFn): SFn {
   if (sfn.images === undefined) {
     return sfn;
@@ -276,18 +295,21 @@ export function foldConstantImages(sfn: SFn): SFn {
   let out: SFn = { ...sfn };
   delete out.images;
   for (const image of sfn.images) {
-    const plan = planFold(out, image);
+    const plan = planFolds(out, image);
     if (typeof plan === 'string') {
       throw new Error(`cannot spell '${sfn.name}': the compiler's anonymous constant '${image.name}' ${plan}`);
     }
+    const copies = new Set(plan.map((f) => f.at));
+    const by = new Map(plan.map((f) => [f.local, f]));
     out = {
       ...out,
-      body: out.body.filter((_, i) => i !== plan.at),
-      locals: out.locals.map((l) =>
-        l.name === plan.local
-          ? { ...l, type: plan.type, init: plan.init, ...(plan.string ? { initString: true as const } : {}) }
-          : l,
-      ),
+      body: out.body.filter((_, i) => !copies.has(i)),
+      locals: out.locals.map((l) => {
+        const f = by.get(l.name);
+        return f === undefined
+          ? l
+          : { ...l, type: f.type, init: f.init, ...(f.string ? { initString: true as const } : {}) };
+      }),
     };
   }
   return out;
