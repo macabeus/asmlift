@@ -384,7 +384,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       'differ only in how the registers around them are allocated: a sibling `u8` parameter is copied ' +
       'before it is widened under the narrow one.',
     offeredWhen: {
-      when: 'Some parameter is read only through casts to 8 or 16 bits, and the default lift left it 32 bits wide.',
+      when: 'Some parameter is read only through 8- or 16-bit casts or masks, and the default lift left it 32 bits wide.',
       decidedBy: { symbol: 'runPreRecovery', file: 'packages/core/src/raise/pre-recovery.ts' },
       gates: ['PARAM_READER_WIDTH_GATES'],
     },

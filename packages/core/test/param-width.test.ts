@@ -32,7 +32,7 @@ import {
 import { recoverTypes } from '../src/raise/recover';
 import { type Candidate, compareScored, enumerateCandidates } from '../src/rank';
 import { structure } from '../src/structure/structure';
-import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, type NarrowParamWitness } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, type NarrowParamWitness, PPC_MWCC } from '../src/target';
 
 // The IR below is agbcc's prologue shape unless a test says otherwise, so the default witness is
 // the one agbcc declares — read OFF the target rather than spelled as a literal, so a round that
@@ -538,6 +538,77 @@ describe('a parameter every reader of which is an extension (/narrow-param)', ()
   test('reports a width no prototype declares', () => {
     expect(runExtended(EXTENDED_AT_USES).narrowed.map((c) => c.declared)).toEqual([undefined]);
     expect(runExtended(EXTENDED_AT_USES, { params: ['s16', 'u8 *'] }).narrowed.map((c) => c.declared)).toEqual([16]);
+  });
+});
+
+// mwcc has no extension for an unsigned narrow value: `u16 b` is read as `clrlwi rD,rS,16`, which
+// frontend/ppc.ts lifts as the mask it is. Mario Party 4's `fn_1_F4D4(unkObjStruct *, u16, u16)`
+// reads each `u16` once that way and never in the prologue.
+const MASKED_AT_USE = `fn f {
+^bb0(%0: s32*, %1: unk32):
+  %2: unk32 = load %0 {off=0, signed=false, width=4}
+  %3: unk32 = const {value=65535}
+  %4: unk32 = and %1, %3
+  %5: unk32 = or %2, %4
+  store %0, %5 {off=0, width=4}
+  ret
+}
+`;
+const MWCC_WITNESS = PPC_MWCC.compilerBehaviors.narrowParamWitness!;
+
+describe('a parameter every reader of which is a low mask (/narrow-param on PPC)', () => {
+  test("is declared unsigned at the mask's width, and the mask becomes the parameter", () => {
+    const { n, fn, ir } = runExtended(MASKED_AT_USE, undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS);
+    expect(n).toBe(1);
+    expect(fn.blocks[0].params[1].type).toEqual(T.int(16, false));
+    expect(ir).toMatch(/or %2, %1/);
+    expect(ir).not.toMatch(/and /);
+  });
+
+  test('the mask on either side, and 0xff as the byte', () => {
+    const flipped = MASKED_AT_USE.replace('and %1, %3', 'and %3, %1').replace('value=65535', 'value=255');
+    const { fn } = runExtended(flipped, undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS);
+    expect(fn.blocks[0].params[1].type).toEqual(T.int(8, false));
+  });
+
+  test('a mask no C type spells is no extension', () => {
+    expect(
+      runExtended(MASKED_AT_USE.replace('value=65535', 'value=4095'), undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS)
+        .n,
+    ).toBe(0);
+  });
+
+  test('a raw reader beside the mask keeps the parameter wide', () => {
+    const raw = MASKED_AT_USE.replace('  ret\n}', '  store %0, %1 {off=4, width=4}\n  ret\n}');
+    expect(runExtended(raw, undefined, PARAM_READER_WIDTH_GATES, MWCC_WITNESS).n).toBe(0);
+    expect(runExtended(raw, undefined, without(PARAM_READER_WIDTH_GATES, 'wide-reader'), MWCC_WITNESS).n).toBe(1);
+  });
+
+  test('the default pass leaves it wide: a mask is no prologue extension', () => {
+    expect(run(MASKED_AT_USE, undefined, MWCC_WITNESS).n).toBe(0);
+  });
+
+  test('is offered on the mwcc object, and declares both masked parameters u16', () => {
+    const asm = [
+      '00000000 <fn_1_F4D4>:',
+      '   0:\tlwz     r6,0(r3)',
+      '   4:\tclrlwi  r0,r4,16',
+      '   8:\tnot     r0,r0',
+      '   c:\tand     r0,r6,r0',
+      '  10:\tstw     r0,0(r3)',
+      '  14:\tlwz     r6,0(r3)',
+      '  18:\tclrlwi  r0,r5,16',
+      '  1c:\tor      r0,r6,r0',
+      '  20:\tstw     r0,0(r3)',
+      '  24:\tblr',
+      '',
+    ].join('\n');
+    const prototypes = { fn_1_F4D4: { returnsVoid: true } };
+    const all = enumerateCandidates('fn_1_F4D4', asm, PPC_MWCC, { prototypes });
+    const narrow = all.filter((c) => c.variations.includes('narrow-param'));
+    expect(narrow.length).toBeGreaterThan(0);
+    expect(narrow.every((c) => /u16 a1, u16 a2\)/.test(c.source) && !c.source.includes('65535'))).toBe(true);
+    expect(all.some((c) => !c.variations.includes('narrow-param') && c.source.includes('& 65535'))).toBe(true);
   });
 });
 
