@@ -12,6 +12,7 @@ import { type Fn, type Value, defOpMap } from './ir/core';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import type { Prototypes } from './proto';
+import { storeSigned, storedConstantSign } from './raise/storesign';
 import { type SymbolInfo, accessSignedness } from './symbols';
 import { C_TYPEDEFS, type TargetDescription } from './target';
 
@@ -23,15 +24,35 @@ import { C_TYPEDEFS, type TargetDescription } from './target';
  *  Mirrors structure()'s scalar-global rule: a fact is recorded only for a symbol accessed
  *  EXCLUSIVELY at offset 0 with ONE width and ONE load signedness — anything else (interior
  *  offsets, address arithmetic, width or sign conflicts) records nothing, because those
- *  spellings go through `&gSym` casts where every object decl is address-identical. */
+ *  spellings go through `&gSym` casts where every object decl is address-identical.
+ *
+ *  A symbol never LOADED takes its sign from its stamped stores (raise/storesign.ts); an unstamped
+ *  store says nothing, so a cell only ever stored unstamped keeps the unsigned default. A load
+ *  still wins, as in raise/structs.ts. Stores whose stamps disagree keep the width with the
+ *  unsigned default: dropping the fact would declare `extern u32` under a bare `gSym = v` that
+ *  then compiles to `sw` where the target has `sh`. The bare spelling has no cast to carry the
+ *  stamp, so this declaration is the only place the stored constant's view can be written.
+ *
+ *  An UNSTAMPED store of a constant zero-extended from its narrow sign bit vetoes a signed
+ *  declaration. storesign.ts leaves such a store unstamped when a wider use shares the constant,
+ *  and the structurer spells it as the literal (`gS = 65535; gW = 65535;`). Under `extern s16 gS`,
+ *  that literal converts to -1, and the shared register splits in two. The veto only ever chooses
+ *  the unsigned default, which is what the declaration was before stamps existed. */
 export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; signed: boolean }> {
   const defs = defOpMap(fn);
   const symOf = (v: Value): string | null => {
     const d = defs.get(v);
     return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : null;
   };
-  const acc = new Map<string, { widths: Set<number>; signs: Set<boolean>; interior: boolean }>();
-  const get = (s: string) => acc.get(s) ?? acc.set(s, { widths: new Set(), signs: new Set(), interior: false }).get(s)!;
+  const acc = new Map<
+    string,
+    { widths: Set<number>; signs: Set<boolean>; stored: Set<boolean>; unsignedLiteral: boolean; interior: boolean }
+  >();
+  const get = (s: string) =>
+    acc.get(s) ??
+    acc
+      .set(s, { widths: new Set(), signs: new Set(), stored: new Set(), unsignedLiteral: false, interior: false })
+      .get(s)!;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode === 'load' || op.opcode === 'store') {
@@ -44,6 +65,16 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
             a.widths.add(op.attrs.width as number);
             if (op.opcode === 'load') {
               a.signs.add(accessSignedness(op.attrs.width as number, op.attrs.signed as boolean | undefined));
+            } else if (op.attrs.signed !== undefined) {
+              a.stored.add(storeSigned(op, op.attrs.width as number));
+            } else {
+              const d = defs.get(op.operands[1]);
+              if (
+                d?.opcode === 'const' &&
+                storedConstantSign(d.attrs.value as number, op.attrs.width as number) === false
+              ) {
+                a.unsignedLiteral = true;
+              }
             }
           }
         }
@@ -65,9 +96,15 @@ export function bareGlobalAccessFacts(fn: Fn): Map<string, { width: number; sign
   }
   const out = new Map<string, { width: number; signed: boolean }>();
   for (const [s, a] of acc) {
-    if (!a.interior && a.widths.size === 1 && a.signs.size <= 1) {
-      out.set(s, { width: [...a.widths][0], signed: a.signs.has(true) });
+    if (a.interior || a.widths.size !== 1 || a.signs.size > 1) {
+      continue;
     }
+    // Loads decide when there are any. Stores whose stamps disagree pick no view, nor does a signed
+    // stamp beside an unstamped zero-extended literal: the declaration keeps the width and takes
+    // the unsigned default it had before stamps existed.
+    const signed =
+      a.signs.size === 1 ? a.signs.has(true) : a.stored.size === 1 && a.stored.has(true) && !a.unsignedLiteral;
+    out.set(s, { width: [...a.widths][0], signed });
   }
   return out;
 }

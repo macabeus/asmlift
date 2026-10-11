@@ -53,6 +53,7 @@ import { nextStructIndex } from '../ir/struct-names';
 import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
+import { storeSigned } from './storesign';
 
 /** A single observed constant-offset access to a base: the op itself and its program point, its
  *  byte offset, its access width (bytes), and the signedness a recovered field would take from it.
@@ -62,10 +63,11 @@ import { RaiseUnsupportedError, StructOverlapError } from './errors';
  *  like" — and a second copy of the walk would let them come to disagree about the answer while
  *  each looked right on its own.
  *
- *  SIGNEDNESS ON THE STORE HALF IS A POLICY, not a reading: a store carries none, and a word store
- *  makes an `s32` field where a narrower one makes an unsigned one. `buildStruct` then prefers a
- *  LOAD's own signedness at the same offset, which is the reading. raise/truncload.ts never sees
- *  this field — its `covering-store` rule refuses a store cover before the signedness is used. */
+ *  SIGNEDNESS ON THE STORE HALF IS A POLICY, not a reading, unless raise/storesign.ts stamped the
+ *  store from the constant it stores: otherwise a word store makes an `s32` field where a narrower
+ *  one makes an unsigned one. `buildStruct` then prefers a LOAD's own signedness at the same offset,
+ *  which is the reading, over either. raise/truncload.ts never sees this field — its
+ *  `covering-store` rule refuses a store cover before the signedness is used. */
 export interface Access {
   op: Op;
   /** index into `fn.blocks`, for the dominance question raise/truncload.ts asks. */
@@ -77,6 +79,9 @@ export interface Access {
   signed: boolean;
   isLoad: boolean;
 }
+
+/** A store whose signedness raise/storesign.ts read off the constant it stores. */
+const isStamped = (a: Access): boolean => !a.isLoad && a.op.attrs.signed !== undefined;
 
 /** What one walk of a function yields about its constant-offset memory accesses. */
 export interface ConstOffsetAccesses {
@@ -124,7 +129,7 @@ export function constOffsetAccesses(fn: Fn): ConstOffsetAccesses {
             at,
             off: op.attrs.off as number,
             width: op.attrs.width as number,
-            signed: (op.attrs.width as number) === 4,
+            signed: storeSigned(op, op.attrs.width as number),
             isLoad: false,
           });
           break;
@@ -197,9 +202,12 @@ function buildStruct(name: string, accesses: Access[]): IrType {
         `cannot recover struct '${name}': overlapping fields at offset ${a.off} (widths ${prev.width} and ${a.width}) — unions not modelled`,
       );
     }
-    if (a.signed && !prev.signed) {
+    // A load reads its signedness, and a stamped store only stands in for one: a load replaces a
+    // stamped store, and otherwise the signed view wins, but never a stamped store's over a load's.
+    const replace = isStamped(prev) && a.isLoad ? true : a.signed && !prev.signed && !(isStamped(a) && prev.isLoad);
+    if (replace) {
       byOff.set(a.off, a);
-    } // prefer the signed (load-derived) view
+    }
   }
   const dataFields: StructField[] = [...byOff.values()]
     .sort((x, y) => x.off - y.off)
@@ -318,9 +326,15 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
         );
       }
       // The extensions this width is LOADED with, unsigned first; a word has one type whatever its
-      // loads say, and a width only stored gets the unsigned view.
+      // loads say, and a width only stored gets the signed view when a stamped store reads it
+      // (raise/storesign.ts), as `buildStruct` prefers it, and the unsigned one otherwise.
       const loaded = new Set(group.filter((a) => a.isLoad).map((a) => a.signed));
-      const signs = width === 4 ? [true] : [false, true].filter((sg) => loaded.has(sg));
+      const signs =
+        width === 4
+          ? [true]
+          : loaded.size === 0 && group.some((a) => isStamped(a) && a.signed)
+            ? [true]
+            : [false, true].filter((sg) => loaded.has(sg));
       const views = signs.length === 0 ? [false] : signs;
       const viewOf = (a: Access): boolean => (views.length === 1 ? views[0] : a.isLoad ? a.signed : false);
       return views.map((signed): StructField => {

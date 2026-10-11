@@ -37,6 +37,7 @@ import { fuseParamPairs } from './pairparams';
 import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES, narrowEntryParams, narrowExtendedParams } from './paramwidth';
 import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
+import { seedNarrowStoreSigns } from './storesign';
 import { recognizeStructArrays } from './struct-arrays';
 import { recognizeStructs } from './structs';
 import { TRUNC_LOAD_GATES, foldTruncatedLoads } from './truncload';
@@ -106,9 +107,9 @@ export interface PreRecoveryPass {
 
 /** THE ordered pre-recovery pass list — the single source of truth shared by pipeline / rank / report.
  *  address-numbering → const-materialize → magic-division → pow2-division → soft-division →
- *  scaled-extension → array-legalize → truncated-load → struct-array → member-array → struct-pointer →
- *  short-circuit → branch-short-circuit → narrow-reads → narrow-local → parameter-width →
- *  scaled-extension-restore.
+ *  scaled-extension → store-sign → array-legalize → truncated-load → struct-array → member-array →
+ *  struct-pointer → short-circuit → branch-short-circuit → narrow-reads → narrow-local →
+ *  parameter-width → scaled-extension-restore.
  *  See each recognizer's file for the rationale. */
 export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // FIRST: collapsing duplicate address definitions removes block params every later recognizer
@@ -189,6 +190,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     dce: true,
     gate: foldsShiftPairCasts,
   },
+  // BEFORE `arrays` and `struct-arrays`, which carry the stamp into the `astore` they make (and
+  // struct-arrays types a field only ever stored from it), and before `structs`, which does the
+  // same for a constant-offset field. `member-arrays` overwrites an astore's `signed` with its
+  // member's (raise/memberarrays.ts says why). `dce: false` — it changes no op.
+  { id: 'storesign', run: (fn, _self, _opts, target) => seedNarrowStoreSigns(fn, target), dce: false },
   { id: 'arrays', run: recognizeArrays, dce: true },
   // BEFORE the three struct synthesizers, and that is what the pass is FOR: `raise/structs.ts` is
   // the pass that refuses one offset read at two widths, and it can only see one width per offset

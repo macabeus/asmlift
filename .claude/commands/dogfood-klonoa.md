@@ -345,8 +345,9 @@ Whatever the shape, these have to be somewhere in it:
 - **Reproducing this**: tool commits, the worktree recipe, the scripts you had to write, and any
   number that is already stale because a tool was fixed mid-round.
 
-Then update the memory files under
-`~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory/` (at minimum
+Then update the memory files under the project's memory directory,
+`~/.claude/projects/$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)" | tr / -)/memory/`
+(derived, never a literal: `-Users-…` on macOS, `-home-…` on Linux; at minimum
 `asmlift-adversarial-validation.md` and `klonoa-first-shipped-match.md`).
 
 ---

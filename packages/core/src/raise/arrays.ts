@@ -78,7 +78,11 @@ export function recognizeArrays(fn: Fn): number {
         }
         b.ops[i] = mkOp('astore', {
           operands: [m.base, m.index, op.operands[1]],
-          attrs: carryDiscipline(op, { elemSize: op.attrs.width as number }),
+          // the signedness raise/storesign.ts read off a stored constant, when it read one
+          attrs: carryDiscipline(op, {
+            elemSize: op.attrs.width as number,
+            ...(op.attrs.signed !== undefined && { signed: op.attrs.signed }),
+          }),
         });
         count++;
       }

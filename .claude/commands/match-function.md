@@ -436,8 +436,9 @@ this phase is the only pass they get.
 
 - Summary: baseline → final for $1, full-bench totals before/after, one line per commit.
 - What you did **not** do and why (blocked capability, unmatchable quirk, rejected variation).
-- Update the relevant memory file under
-  `~/.claude/projects/-Users-macabeus-ApenasMeu-decompiler-asmlift/memory/` (usually
+- Update the relevant memory file under the project's memory directory,
+  `~/.claude/projects/$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)" | tr / -)/memory/`
+  (derived, never a literal: `-Users-…` on macOS, `-home-…` on Linux; usually
   `asmlift-adversarial-validation.md`) with the round's outcome and any gate that turned out to be
   load-bearing.
 - Push the branch (this project's convention is commit + push on a finished goal).

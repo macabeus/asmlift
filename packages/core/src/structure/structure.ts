@@ -85,6 +85,7 @@ import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
+import { storeSigned } from '../raise/storesign';
 import { collectStructs } from '../raise/structs';
 import {
   type DeclaredField,
@@ -650,6 +651,39 @@ function displacementIndex(off: number, width: number): number {
     );
   }
   return off / width;
+}
+
+/** A stamped narrow store (raise/storesign.ts) spelled through a MEMBER — a struct field, a union
+ *  member's view, a struct-array element's field — is converted by the compiler to the member's
+ *  DECLARED type, so a declaration whose sign is not the stamp's loses it: `a0->field_6 = -104`
+ *  under `u16 field_6` recompiles to `li 0xff98`. Such a store is spelled instead as the flat cell
+ *  at the same address, `((s16 *)a0)[3] = -104`, or `((s16 *)(a0 + a1))[1] = -104` for an
+ *  element. The member's type is read off the spelled lvalue (`ctype`), so a member declared by a
+ *  load, a stamp or a union's view is judged alike.
+ *
+ *  `storeWidth` is `undefined` for an `astore`, which does not carry it: raise/struct-arrays.ts
+ *  declares each field at the one width its accesses share, so the member's width is the store's.
+ *
+ *  `lval` comes back unchanged for an unstamped store, an lvalue that is not a member, no
+ *  `flatBase`, a member that is not a narrow integer of the store's width or agrees with the stamp,
+ *  and an offset that is not a whole number of cells (no flat subscript spells it). */
+function stampedStoreLval(
+  lval: Expr,
+  stamp: boolean | undefined,
+  storeWidth: number | undefined,
+  flatBase: Expr | null,
+  off: number,
+  ctype: (e: Expr) => IrType | undefined,
+): Expr {
+  if (stamp === undefined || lval.k !== 'field' || flatBase === null) {
+    return lval;
+  }
+  const t = ctype(lval);
+  const width = storeWidth ?? (t?.kind === 'int' ? t.width / 8 : 0);
+  if (t?.kind !== 'int' || (width !== 1 && width !== 2) || t.width !== width * 8 || t.signed === stamp || off % width) {
+    return lval;
+  }
+  return { k: 'index', base: flatBase, idx: { k: 'const', value: off / width }, width, signed: stamp };
 }
 
 function memAccess(
@@ -2302,6 +2336,20 @@ export function structure(
   const advanceStepOf = (base: Value): number | undefined => {
     const step = defs.get(base)?.attrs.advancedBy;
     return typeof step === 'number' ? step : undefined;
+  };
+
+  /** THE view a `store` (`width` bytes) or `astore` (`elemSize`) lvalue is spelled through, for
+   *  both branches below: `storeSigned`, the scalar the recovered pointee was seeded at, so an
+   *  inserted cast declares the same type. An UNSTAMPED narrow store of a constant both views store
+   *  alike (narrow sign bit clear) takes its base's own int pointee instead and asks for no cast,
+   *  since nothing witnessed either type. */
+  const storeView = (op: Op, width: number): boolean => {
+    const t = op.operands[0].type;
+    const own = t.kind === 'ptr' && t.to.kind === 'int' && t.to.width === width * 8 ? t.to.signed : undefined;
+    const v = defs.get(op.operands[op.opcode === 'astore' ? 2 : 1]);
+    const k = v?.opcode === 'const' ? v.attrs.value : undefined;
+    const neutral = typeof k === 'number' && Number.isInteger(k) && k >= 0 && k < 2 ** (width * 8 - 1) && width < 4;
+    return op.attrs.signed === undefined && neutral && own !== undefined ? own : storeSigned(op, width);
   };
 
   // ── analysis phase (structure/analysis.ts): use registry, liveness, materialization ──
@@ -4804,12 +4852,15 @@ export function structure(
         // A store whose lvalue is a bare global (`gSym = v`, from an `&gSym` base at off 0) emits
         // as an ASSIGN, not a store — memAccess returns a `var` node for that case.
         const width = op.attrs.width as number;
+        const off = op.attrs.off as number;
+        const stamp = op.attrs.signed as boolean | undefined;
+        const baseExpr = expr(op.operands[0]);
         const lval0 = memAccess(
           op.operands[0],
-          expr(op.operands[0]),
-          op.attrs.off as number,
+          baseExpr,
+          off,
           width,
-          width === 4,
+          storeView(op, width),
           ctype,
           scalarGlobals,
           symCtx,
@@ -4821,25 +4872,42 @@ export function structure(
           out.push({ k: 'assign', name: lval0.name, value: intoPtrCell(lval0, expr(op.operands[1])) });
           continue;
         }
-        // signedness mirrors recoverTypes' store seed (word ⇒ signed, narrow ⇒ unsigned), so an
-        // inserted cast declares the same scalar the recovered pointee would have.
-        const lval = pinnedAccess(op, lval0);
+        // a member whose declared sign is not the stamp's is spelled as the flat cell (stampedStoreLval)
+        const bt = op.operands[0].type;
+        const lval = pinnedAccess(
+          op,
+          stampedStoreLval(
+            lval0,
+            stamp,
+            width,
+            bt.kind === 'ptr' && bt.to.kind === 'struct' ? baseExpr : null,
+            off,
+            ctype,
+          ),
+        );
         out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
       } else if (op.opcode === 'astore') {
         const elemSize = op.attrs.elemSize as number;
-        const lval = arrayAccess(
+        const fieldOff = op.attrs.fieldOff as number | undefined;
+        const stamp = op.attrs.signed as boolean | undefined;
+        const lval0 = arrayAccess(
           op.operands[0],
           expr(op.operands[0]),
           expr(op.operands[1]),
-          op.attrs.fieldOff as number | undefined,
+          fieldOff,
           op.attrs.memberOff as number | undefined,
           elemSize,
-          // a member array's store spells through the member's OWN declaration, which the
-          // recognizer records; every other astore keeps the width===4 convention
-          (op.attrs.signed as boolean | undefined) ?? elemSize === 4,
+          storeView(op, elemSize),
           ctype,
           symCtx,
         );
+        // a struct-array element's field: `base[i].field_K`, whose flat cell is
+        // `(base + i)[K / width]` — C scales `base + i` by the element, exactly as `base[i]` does
+        const el = lval0.k === 'field' && lval0.base.k === 'index' ? lval0.base : null;
+        const lval =
+          el === null || fieldOff === undefined
+            ? lval0
+            : stampedStoreLval(lval0, stamp, undefined, { k: 'bin', op: '+', l: el.base, r: el.idx }, fieldOff, ctype);
         out.push({
           k: 'store',
           lval: pinnedAccess(op, lval),

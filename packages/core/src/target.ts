@@ -711,6 +711,16 @@ export interface TargetDescription {
     // three descriptions that measured false (four compilers) set it anyway, so absent means
     // UNMEASURED rather than "no".
     reloadsLocalReread?: boolean;
+    // Does this compiler convert a constant to a NARROW lvalue's type before it materializes it
+    // for the store? Then the stored register's upper bits say the lvalue's signedness whenever
+    // the narrow sign bit is set: `u16 *p; p[6] = -1;` loads 0xffff and `s16 *p; p[6] = 0xFFFF;`
+    // loads -1. Measured on every bench compiler at its rows' flags by lifting the probe in
+    // packages/cli/test/matching/narrow-store-constant.test.ts and reading the const each store
+    // takes. Read by raise/storesign.ts (through raise/pre-recovery.ts).
+    //
+    // ABSENT ⇒ the seed stands down and a narrow store keeps the unsigned view; a compiler opts IN
+    // on its own probe.
+    narrowStoreConstantTakesLvalueType?: boolean;
     // A LAYOUT fact rather than a canonicalization one, kept here because it is the COMPILER's:
     // the size, in bytes, it aligns and rounds EVERY struct and union to, whatever its members.
     // agbcc: 4 — `sizeof(struct { u16 h; })` is 4, and `struct { u8 a; union { u16 h; u8 b[2]; } u; }`
@@ -913,6 +923,13 @@ export const ARMV4T_AGBCC: TargetDescription = {
     eightByteReturnScratch: 'r2',
     arrayShapeFromStride: true,
     reloadsLocalReread: true,
+    // MEASURED: the probe at the field. A signed constant often lifts as `mov #1; neg` or
+    // `mov #0x80; lsl #8`, a `neg`/`shl` the seed does not read. agbcc also materializes one
+    // constant ONCE for several narrow stores through the same base, whatever their signedness:
+    // `struct { s32 a; s16 b; u16 c; } *p; p->b = -300; p->c = -300;` is one `ldr r1,=0xfed4` for
+    // both `strh`. A stamp here then names one store's type, not necessarily each's (the `s16`
+    // store is stamped unsigned, which is also the convention).
+    narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 4,
     largestAlignment: 4,
     aggregateReturn: 'apcs',
@@ -1006,6 +1023,8 @@ export const MIPS_IDO: TargetDescription = {
     switchAllowsNeqCase: false,
     // MEASURED — the pair at the field compiles to one load of `p[1]` for every local spelling.
     reloadsLocalReread: false,
+    // MEASURED: the probe at the field.
+    narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 1,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
@@ -1124,6 +1143,8 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves (the note above): one load of `p[1]` for
     // every local spelling of the pair at the field, gcc2.7.2kmc at -O2 and gcc2.7.2 at -O1 alike.
     reloadsLocalReread: false,
+    // MEASURED on BOTH toolchains this description serves, the probe at the field.
+    narrowStoreConstantTakesLvalueType: true,
     // MEASURED on BOTH toolchains this description serves, the pairs at the field.
     keepsPointerSumAddend: true,
     aggregateBoundary: 1,
@@ -1178,6 +1199,8 @@ export const PPC_MWCC: TargetDescription = {
     // `u8 v = p[3]; if ((v & 0x7f) == 0x7f) { fnA(); p[4] = v; return; }` under an `if (a)`
     // matches only once `read-behind-effect` stops refusing it (3/24 → MATCH 0/22).
     reloadsLocalReread: false,
+    // MEASURED on all three builds at -O4,p, and on mwcc_247_107 at -O0,p: the probe at the field.
+    narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 1,
     // MEASURED on all three builds: `struct {u8 a; double d;}` and its `long long` twin put the
     // member at 8 and size 16
