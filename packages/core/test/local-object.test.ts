@@ -581,9 +581,11 @@ test('agbcc: a pool word naming a `.LC` image lifts to the address of an anonymo
   expect(gaddrs.map((op) => op.attrs.sym)).toEqual(['.LC0']);
 });
 
-test('agbcc: a `.LC` image another function names too refuses, naming that function', () => {
-  // flit and flit2 both pass "abc": agbcc emits the literal once
-  expect(() => liftThumb('flit', constInit, ARMV4T_AGBCC)).toThrow(
-    "names the compiler's anonymous data ('.LC16') that flit2 also names — it is not this function's alone",
+test('agbcc: a `.LC` image another function names too is still read, and refused only where it is no initializer', () => {
+  // flit and flit2 both pass "abc": agbcc emits the literal once. Sharing is not what refuses it —
+  // two copies of one initializer share an image too — but a string passed by address is no copy.
+  expect([...(liftThumb('flit', constInit, ARMV4T_AGBCC).localObjects?.keys() ?? [])]).toEqual(['.LC16']);
+  expect(() => decompile('flit', constInit, ARMV4T_AGBCC)).toThrow(
+    "reads the compiler's anonymous constant ('.LC16') whose one read is not the source of a block copy",
   );
 });

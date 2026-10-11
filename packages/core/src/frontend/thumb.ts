@@ -3538,22 +3538,16 @@ function thumbOperands({
   };
 
   /** The compiler's anonymous constant a pool word names (agbcc's `.LC0`), read out of this same
-   *  asm and recorded beside the statics — or a decline naming why it is not one, or why it is not
-   *  this function's alone (agbcc shares one image between every use of an identical string
-   *  literal in a unit). */
+   *  asm and recorded beside the statics — or a decline naming why it is not one. Unlike a static,
+   *  it need not be this function's alone: agbcc places one image for every identical constant in
+   *  a unit (varasm.c `output_constant_def` hashes them), and each function that copies it spells
+   *  its own initializer, which the recompiled unit shares again. */
   const anonymousObject = (label: string): string => {
     const read = readGasAnonymousObject(asm, label);
     if ('refused' in read) {
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': literal-pool load of a pool word that names the compiler's anonymous data ` +
           `('${label}') ${read.refused}`,
-      );
-    }
-    const others = [...gasPoolReferrers(asm, label)].filter((f) => f !== name);
-    if (others.length > 0) {
-      throw new FrontendUnsupportedError(
-        `cannot lift '${name}': literal-pool load of a pool word that names the compiler's anonymous data ` +
-          `('${label}') that ${others.join(', ')} also names — it is not this function's alone`,
       );
     }
     return statics.define(read);

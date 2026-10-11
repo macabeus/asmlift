@@ -109,6 +109,21 @@ describe('local aggregate initializers — real agbcc: the candidate copies the 
     );
   });
 
+  test('two functions with one initializer share one image, and each spells it again', () => {
+    // agbcc places an identical constant once per unit (varasm.c `output_constant_def`)
+    const init = '{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}';
+    const c = `${USE}void one(s32 x) { u8 a[16] = ${init}; if (x) g(0); else g(a); }\nvoid two(void) { u8 a[16] = ${init}; g(a); }`;
+    const asm = compileTargetAsm(c, FLAGS);
+    expect(asm.match(/\.word\t\.LC0/g)).toHaveLength(2);
+    const target = assembleTarget(asm);
+    const lifted = ['one', 'two'].map((sym) => decompile(sym, asm, ARMV4T_AGBCC, { prototypes: PROTOS }).source);
+    const unit = USE + lifted.join('');
+    expect(rodata(compileCandAgbcc(unit, FLAGS))).toEqual(rodata(target));
+    for (const sym of ['one', 'two']) {
+      expect(scoreC(unit, sym, target, FLAGS).score, unit).toBe(0);
+    }
+  });
+
   test('an initializer shorter than its string array is a copy and a fill, and declines', () => {
     // `char a[8] = "hello"` copies the 6-byte literal and memsets the tail: no one copy fills `a`
     const asm = compileTargetAsm(`${USE}void tail(void) { char a[8] = "hello"; g(a); }`, FLAGS);
