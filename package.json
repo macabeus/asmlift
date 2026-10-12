@@ -13,9 +13,9 @@
     "test:offline": "vitest run packages/core/test packages/cli/test/offline packages/toolchains/test",
     "test:matching": "sh scripts/gate-vitest.sh --config vitest.matching.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p packages/core && tsc --noEmit -p apps/web && tsc --noEmit -p apps/web/tsconfig.test.json",
-    "bench": "tsx apps/benchmark/src/cli.ts",
+    "bench": "node --import ./packages/cli/src/loaded-code-hook.mjs --import tsx apps/benchmark/src/cli.ts",
     "bench:merge": "tsx apps/benchmark/src/cli.ts merge",
-    "bench:smoke": "tsx apps/benchmark/src/cli.ts smoke",
+    "bench:smoke": "node --import ./packages/cli/src/loaded-code-hook.mjs --import tsx apps/benchmark/src/cli.ts smoke",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

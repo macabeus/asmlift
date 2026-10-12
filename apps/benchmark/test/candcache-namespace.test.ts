@@ -29,10 +29,11 @@
 // guess when the binary is not installed — so the two tests that call it are skipped where agbcc
 // is absent, which is every hosted runner. What must not be lost there is the dropped-entry guard,
 // so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
-import { loadedCodeDigest, noteLoadedCode, refuseUnkeyedEnv, sha, toolchainFileChain } from '@asmlift/cli/candcache';
+import { refuseUnkeyedEnv, sha, toolchainFileChain } from '@asmlift/cli/candcache';
+import { loadedCodeDigest } from '@asmlift/cli/loaded-code';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { TOOLCHAIN } from '@asmlift/toolchains';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -78,7 +79,7 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
     }
   });
 
-  test('patching the .s tail agbcc.ts appends MOVES the digest — the exact stale-object repro', () => {
+  test('patching the .s tail agbcc.ts appends MOVES the digest — the exact stale-object repro', async () => {
     const before = join(scratch(), 'agbcc.ts');
     const after = join(scratch(), 'agbcc.ts');
     copyFileSync(join(HARNESS, 'agbcc.ts'), before);
@@ -87,12 +88,27 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
       "'\\n.text\\n\\t.align\\t2, 0\\n'",
     );
     writeFileSync(after, src.replace("'\\n.text\\n\\t.align\\t2, 0\\n'", "'\\n.text\\n\\t.align\\t4, 0\\n'"));
-    noteLoadedCode(before, after);
-
-    expect(
-      candCacheStaticStamp(CANONICAL, [], [after]),
-      'a harness edit that changes the object must re-namespace',
-    ).not.toBe(candCacheStaticStamp(CANONICAL, [], [before]));
+    // Stamped in a process that starts after both copies were written, by more than the slack a
+    // coarse file system gets: this one refuses a source written after it started.
+    await new Promise((r) => setTimeout(r, 2_100));
+    const [b, a] = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '-e',
+          [
+            `const { candCacheStaticStamp } = await import(${JSON.stringify(join(HARNESS, 'agbcc.ts'))});`,
+            `const canonical = ${JSON.stringify(CANONICAL)};`,
+            `console.log(JSON.stringify([${JSON.stringify(before)}, ${JSON.stringify(after)}].map((p) => candCacheStaticStamp(canonical, [], [p]))));`,
+          ].join('\n'),
+        ],
+        { encoding: 'utf8', cwd: join(HARNESS, '../..') },
+      ),
+    ) as [string, string];
+    expect(a, 'a harness edit that changes the object must re-namespace').not.toBe(b);
   });
 
   test('it is CONTENT, not the path: identical bytes at two paths agree, different bytes do not', () => {
@@ -110,27 +126,17 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
 
   test('an input that cannot be READ throws — the cache refuses, it never guesses', () => {
     expect(() => candCacheStaticStamp(CANONICAL, [join(scratch(), 'absent.ts')])).toThrow(/ENOENT|no such file/i);
-    const unreadable = join(scratch(), 'absent.ts');
-    noteLoadedCode(unreadable);
-    writeFileSync(unreadable, 'export const late = 1;\n');
-    expect(() => candCacheStaticStamp(CANONICAL, [], [unreadable])).toThrow(/cannot read .* as it was loaded/);
+    expect(() => candCacheStaticStamp(CANONICAL, [], [join(scratch(), 'absent.ts')])).toThrow(
+      /cannot read .*absent\.ts/,
+    );
   });
 });
 
-describe('R310-37: the harness code is hashed as this process loaded it', () => {
-  test('an edit on disk after the load does not move the namespace', () => {
+describe('R310-43: the harness code is hashed as this process loaded it', () => {
+  test('a source changed after this process started refuses the namespace', () => {
     const src = join(scratch(), 'util.ts');
     copyFileSync(join(HARNESS, 'util.ts'), src);
-    noteLoadedCode(src);
-    const loaded = candCacheStaticStamp(CANONICAL, [], [src]);
-    writeFileSync(src, readFileSync(src, 'utf8').replace('.slice(0, 240)', '.slice(0, 24)'));
-    expect(candCacheStaticStamp(CANONICAL, [], [src]), 'the process still runs what it loaded').toBe(loaded);
-  });
-
-  test('a source no module recorded when it loaded refuses the namespace', () => {
-    const src = join(scratch(), 'unrecorded.ts');
-    writeFileSync(src, 'export const tail = 2;\n');
-    expect(() => candCacheStaticStamp(CANONICAL, [], [src])).toThrow(/no module recorded when it was loaded/);
+    expect(() => candCacheStaticStamp(CANONICAL, [], [src])).toThrow(/util\.ts changed after this process started/);
   });
 });
 

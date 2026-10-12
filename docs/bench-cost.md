@@ -1178,7 +1178,7 @@ no sooner than its dearest row.
 **Never wait on `pgrep -f "<pattern>"` when the pattern also matches your own waiting shell** —
 five waiter shells once deadlocked on each other for eight hours doing exactly that, long after
 the jobs they watched had finished. `grep '[b]ench/src/cli\.ts'` does not match
-`apps/benchmark/src/cli.ts` either: the process to look for is the `tsx …/apps/benchmark/src/cli.ts
+`apps/benchmark/src/cli.ts` either: the process to look for is the `node … apps/benchmark/src/cli.ts
 run …` parent, and its shard children are `… run --tier <t> --shard i/N --claim <gen>`.
 
 ### What you may keep working ON
@@ -1208,13 +1208,16 @@ sample is sticky and reverting does not undo it. Stop it, revert or commit, star
 
 ### Stopping one
 
-**`kill -TERM` does not stop a `bench run`** — measured 2026-09-10: one sent SIGTERM 6 s in ran all 291 cases
-and REWROTE `results/synthetic.json` before exiting 143. A run is blocked in `spawnSync` for every
-compile on its own thread, so no signal handler can run until it is done, and `lock.ts` has no handlers by design for
-the same reason.
+**`kill -TERM` stops a `bench run` that `pnpm bench` started, not one started as `tsx …/cli.ts`.**
+The tsx CLI binds a hidden handler that defers the signal: measured 2026-09-10, a run sent SIGTERM
+6 s in ran all 291 cases and REWROTE `results/synthetic.json` before exiting 143 — it is blocked in
+`spawnSync` for every compile, so no handler runs until that is done. `pnpm bench` and its shards
+run under `node --import tsx`, which binds none (a process importing `orchestrate.ts`, blocked in a
+5 s `spawnSync`, sent SIGTERM 1.5 s in: gone at 1.6 s under node, 5.4 s under the tsx CLI), and
+`lock.ts` has no handlers by design for the same reason.
 
-`kill -9` is the stop that works — **and, sent to the parent alone, it orphans the shards.** They
-are ordinary `spawn`ed `tsx` children (`orchestrate.ts`), left compiling at PPID 1; an orphan
+`kill -9` stops either — **and either, sent to the parent alone, orphans the shards.** They are
+ordinary `spawn`ed `node` children (`orchestrate.ts`), left compiling at PPID 1; an orphan
 finishes its current row and then stops claiming, and until it has, a new run in that worktree
 refuses to start and names its pid. So:
 

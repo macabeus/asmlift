@@ -421,12 +421,16 @@ of every store forever.
   libraries those programs load (`otool -L` on macOS, `ldd` on Linux; the macOS system libraries
   live in the OS and are keyed by its build, `sw_vers`), the words of the command, the harness code
   that shapes the compiler's input (on the command path, `@match-kit/compiler` too: it runs the
-  command and words a failure) as the process LOADED it, so a `pnpm install` or `git pull` during a
-  run is the next run's namespace and not this one's, the compile environment (`LANG`/`LC_*`,
-  `SOURCE_DATE_EPOCH`, `MACOSX_DEPLOYMENT_TARGET`, `SDKROOT`, `DEVELOPER_DIR`, the allocator's
-  settings and the rest of `compileEnvironment` in `packages/cli/src/candcache.ts`), the host's OS
-  release, for a containerized compile the image's content ID and the runtime that executes it
-  (`docker info`: engine version, kernel and system), and the object one fixed probe TU
+  command and words a failure) as the process LOADED it — a load hook every bench process imports
+  first (`tsx --import packages/cli/src/loaded-code-hook.ts`) hashes the text each module is
+  compiled from, and a process without it refuses a file changed since it started — so a `pnpm
+install` or `git pull` during a run is the next run's namespace and not this one's, the compile
+  environment (`LANG`/`LC_*`, `SOURCE_DATE_EPOCH`, `MACOSX_DEPLOYMENT_TARGET`, the SDK that `SDKROOT`
+  or `DEVELOPER_DIR` names by its real path and `SDKSettings.json`, the allocator's settings and the
+  rest of `compileEnvironment` in `packages/cli/src/candcache.ts`), the host's OS release, for a
+  containerized compile the image's content ID, the pool container's ID (read again before each
+  result is stored) and the runtime that executes it (`docker info`: engine version, kernel and
+  system), and the object one fixed probe TU
   compiles to — twice, in two directories, so the compiler itself answers whether its object is a
   pure function of its input.
 - **What the command path keys.** Only the benchmark's own command — a committed

@@ -9,9 +9,7 @@ import {
   candCache,
   compileEnvironment,
   isChainMeasurement,
-  loadedCodeDigest,
   noteKeyRefused,
-  noteLoadedCode,
   refuseUnkeyedEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
@@ -22,6 +20,7 @@ import {
   cppReport,
   cppReportFlags,
 } from '@asmlift/cli/candcache-reads';
+import { loadedCodeDigest } from '@asmlift/cli/loaded-code';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { withoutDebugSections } from '@asmlift/core/frontend/thumb';
 import { TOOLCHAIN } from '@asmlift/toolchains';
@@ -115,7 +114,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *  `candCacheNamespaceFiles()` below MEASURES the machine's compilers and refuses when it cannot
  *  read one, so the assertion that these are on the list cannot itself run on a bare runner. */
 export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), ...DIAGNOSTIC_SOURCES, READS_SOURCE];
-noteLoadedCode(...SHAPING_SOURCES);
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
 /** Preprocess a candidate TU: cpp reads it on stdin, so no scratch directory reaches its linemarkers
@@ -177,7 +175,7 @@ export function candCacheNamespaceFiles(): string[] {
 /**
  * The namespace's STATIC half: the flags, the compile environment, the content of every file in
  * `files` as it is now, and of every code file in `sources` as this process loaded it
- * (`noteLoadedCode`). No compile runs here — the pipeline's own object bytes join the namespace
+ * (`loadedCodeDigest`). No compile runs here — the pipeline's own object bytes join the namespace
  * separately (the two-directory probe below), because that half is both the backstop and the
  * purity test.
  *

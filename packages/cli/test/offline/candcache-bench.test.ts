@@ -28,8 +28,6 @@ import {
   findOnPath,
   lddLibraries,
   linuxLibraries,
-  loadedCodeDigest,
-  noteLoadedCode,
   otoolLibraries,
   refuseUnkeyedEnv,
   sha,
@@ -42,8 +40,10 @@ import {
   templateCommands,
   templateRefusal,
 } from '../../src/candcache-bench';
-import { commandStaticStamp, noteLoadedRunner, runnerPackageDir } from '../../src/compile-command';
+import { commandStaticStamp, runnerPackageDir } from '../../src/compile-command';
+import { loadedCodeDigest } from '../../src/loaded-code';
 import { benchAgbcc } from './bench-command-double';
+import { runChild } from './loaded-code-child';
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -368,6 +368,53 @@ describe('R310-25: the namespace keys the deployment target and the host release
   });
 });
 
+describe('R310-45: SDKROOT and DEVELOPER_DIR are keyed by the SDK they name', () => {
+  const sdk = (root: string, version: string): string => {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, 'SDKSettings.json'), JSON.stringify({ Version: version }));
+    return root;
+  };
+
+  test('one path, repointed from one SDK to another, is two environments', () => {
+    const d = scratch('candcache-bench-sdk-');
+    const old = sdk(join(d, 'MacOSX14.5.sdk'), '14.5');
+    const now = sdk(join(d, 'MacOSX15.5.sdk'), '15.5');
+    const link = join(d, 'MacOSX.sdk');
+    symlinkSync(old, link);
+    const before = compileEnvironment({ SDKROOT: link });
+    expect(compileEnvironment({ SDKROOT: link }), 'the same SDK is the same environment').toBe(before);
+    rmSync(link);
+    symlinkSync(now, link);
+    expect(compileEnvironment({ SDKROOT: link })).not.toBe(before);
+  });
+
+  test('an SDK whose SDKSettings.json changes in place is another environment', () => {
+    const root = sdk(join(scratch('candcache-bench-sdk-'), 'MacOSX.sdk'), '14.5');
+    const before = compileEnvironment({ SDKROOT: root });
+    sdk(root, '15.5');
+    expect(compileEnvironment({ SDKROOT: root })).not.toBe(before);
+  });
+
+  test("DEVELOPER_DIR is keyed by its real path and its SDK's settings", () => {
+    const d = scratch('candcache-bench-devdir-');
+    const clt = (name: string, version: string): string => {
+      sdk(join(d, name, 'SDKs', 'MacOSX.sdk'), version);
+      return join(d, name);
+    };
+    const a = clt('CLT-a', '14.5');
+    const link = join(d, 'CommandLineTools');
+    symlinkSync(a, link);
+    const before = compileEnvironment({ DEVELOPER_DIR: link });
+    sdk(join(a, 'SDKs', 'MacOSX.sdk'), '15.5');
+    expect(compileEnvironment({ DEVELOPER_DIR: link }), 'its SDK moved').not.toBe(before);
+    const xcode = join(d, 'Xcode', 'Contents', 'Developer');
+    sdk(join(xcode, 'Platforms', 'MacOSX.platform', 'Developer', 'SDKs', 'MacOSX.sdk'), '14.5');
+    const inXcode = compileEnvironment({ DEVELOPER_DIR: xcode });
+    sdk(join(xcode, 'Platforms', 'MacOSX.platform', 'Developer', 'SDKs', 'MacOSX.sdk'), '15.5');
+    expect(compileEnvironment({ DEVELOPER_DIR: xcode }), "an Xcode's SDK moved").not.toBe(inXcode);
+  });
+});
+
 describe('R310-27: a relative PATH entry is read as a spawn reads it', () => {
   const away = scratch('candcache-bench-relpath-');
   script(join(away, 'r310-27-bin'), 'cpp', `#!/bin/sh\nexec ${DOUBLE} "$@"\n`);
@@ -581,6 +628,33 @@ describe('R310-29: the namespace holds the runner’s code', () => {
     expect(text, file).toContain(from);
     writeFileSync(file, text.replace(from, to));
   };
+  /** `commandStaticStamp` against each of `runners`, in a child that loaded each one's `loaded` of
+   *  them (`--import`ed beneath the load hook, as a bench process loads its runner). */
+  const stamps = async (runners: { dir: string; loaded: boolean }[]): Promise<string[]> => {
+    const d = scratch('candcache-bench-stamps-');
+    writeFileSync(join(d, 'package.json'), '{ "type": "module" }\n');
+    const script = join(d, 'stamps.ts');
+    writeFileSync(
+      script,
+      [
+        'const [compileCommand, command, cwd, runners] = JSON.parse(process.argv[2]) as',
+        '  [string, string, string, { dir: string; loaded: boolean }[]];',
+        'const { commandStaticStamp } = await import(compileCommand);',
+        "for (const r of runners) if (r.loaded) await import(r.dir + '/dist/index.js');",
+        'const stamp = (dir: string): string => {',
+        '  try {',
+        '    return commandStaticStamp(command, cwd, dir);',
+        '  } catch (e) {',
+        "    return 'THROW ' + (e as Error).message;",
+        '  }',
+        '};',
+        'console.log(JSON.stringify(runners.map((r) => stamp(r.dir))));',
+        '',
+      ].join('\n'),
+    );
+    const compileCommand = new URL('../../src/compile-command.ts', import.meta.url).href;
+    return JSON.parse(await runChild(script, [compileCommand, BENCH.command, cwd, runners])) as string[];
+  };
 
   test('is the installed @match-kit/compiler, its files rather than a link to them', () => {
     expect(realpathSync(runner)).toBe(runner);
@@ -588,26 +662,25 @@ describe('R310-29: the namespace holds the runner’s code', () => {
     expect(commandStaticStamp(BENCH.command, cwd)).toBe(commandStaticStamp(BENCH.command, cwd, runner));
   });
 
-  test('moves when the code that runs the template changes', () => {
+  test('moves when the code that runs the template, or words a failed outcome, changes', async () => {
     const before = copy();
-    const after = copy();
-    edit(join(after, 'dist/process/run.js'), "'-ec'", "'-c'");
-    noteLoadedRunner(before);
-    noteLoadedRunner(after);
-    expect(commandStaticStamp(BENCH.command, cwd, after)).not.toBe(commandStaticStamp(BENCH.command, cwd, before));
-  });
-
-  test('moves when the code that words a failed outcome changes', () => {
-    const before = copy();
-    const after = copy();
+    const shell = copy();
+    edit(join(shell, 'dist/process/run.js'), "'-ec'", "'-c'");
+    const words = copy();
     edit(
-      join(after, 'dist/process/outcome.js'),
+      join(words, 'dist/process/outcome.js'),
       'output: scrub(output, paths.dir)',
       "output: scrub(output, paths.dir) + '.'",
     );
-    noteLoadedRunner(before);
-    noteLoadedRunner(after);
-    expect(commandStaticStamp(BENCH.command, cwd, after)).not.toBe(commandStaticStamp(BENCH.command, cwd, before));
+    const [b, s, w] = await stamps([before, shell, words].map((dir) => ({ dir, loaded: true })));
+    expect(b).toMatch(/^[0-9a-f]{64}$/);
+    expect(s).not.toBe(b);
+    expect(w).not.toBe(b);
+  });
+
+  test('R310-43: refuses a runner this process did not load', async () => {
+    const [stamp] = await stamps([{ dir: copy(), loaded: false }]);
+    expect(stamp).toMatch(/^THROW no module of .*compiler was loaded by this process/);
   });
 
   test.each(['dependencies', 'peerDependencies', 'optionalDependencies'])(
@@ -616,29 +689,16 @@ describe('R310-29: the namespace holds the runner’s code', () => {
       const d = copy();
       const manifest = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
       writeFileSync(join(d, 'package.json'), JSON.stringify({ ...manifest, [field]: { 'left-pad': '1.3.0' } }));
-      noteLoadedRunner(d);
       expect(() => commandStaticStamp(BENCH.command, cwd, d)).toThrow(/depends on left-pad/);
     },
   );
-
-  test('R310-37: holds the runner as it was loaded, not as the disk holds it at the stamp', () => {
-    const d = copy();
-    noteLoadedRunner(d);
-    const loaded = commandStaticStamp(BENCH.command, cwd, d);
-    edit(join(d, 'dist/process/run.js'), "'-ec'", "'-c'");
-    expect(commandStaticStamp(BENCH.command, cwd, d), 'the process still runs what it loaded').toBe(loaded);
-  });
-
-  test('R310-37: refuses a runner no one recorded when it was loaded', () => {
-    expect(() => commandStaticStamp(BENCH.command, cwd, copy())).toThrow(/was not recorded when it was loaded/);
-  });
 
   test("R310-37: this module's own bytes are the ones it was loaded with", () => {
     const self = fileURLToPath(new URL('../../src/compile-command.ts', import.meta.url));
     expect(loadedCodeDigest(self)).toBe(sha(readFileSync(self)));
   });
 
-  test('R310-37: a process whose compile-command.ts changed on disk after it loaded stamps the code it runs', () => {
+  test('R310-37: a process whose compile-command.ts changed on disk after it loaded stamps the code it runs', async () => {
     // A copy of this package's sources, beside them so that they resolve the same packages, and a
     // process per run: `edit` changes the copy's compile-command.ts after importing it.
     const pkg = fileURLToPath(new URL('../..', import.meta.url));
@@ -658,38 +718,15 @@ describe('R310-29: the namespace holds the runner’s code', () => {
           '',
         ].join('\n'),
       );
-      const tsx = fileURLToPath(new URL('../../../../node_modules/.bin/tsx', import.meta.url));
-      const stamp = (mode: string): string =>
-        execFileSync(tsx, [probe, JSON.stringify([BENCH.command, cwd, mode])], { encoding: 'utf8' }).trim();
+      const stamp = (mode: string): Promise<string> => runChild(probe, [BENCH.command, cwd, mode]);
       const original = readFileSync(join(root, 'src/compile-command.ts'));
-      const editedAfterLoad = stamp('edit');
-      expect(stamp('plain'), 'a process that loaded the edit is another namespace').not.toBe(editedAfterLoad);
+      const editedAfterLoad = await stamp('edit');
+      expect(await stamp('plain'), 'a process that loaded the edit is another namespace').not.toBe(editedAfterLoad);
       writeFileSync(join(root, 'src/compile-command.ts'), original);
-      expect(stamp('plain'), 'and the one that loaded the original is this one').toBe(editedAfterLoad);
+      expect(await stamp('plain'), 'and the one that loaded the original is this one').toBe(editedAfterLoad);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
-  });
-});
-
-describe('R310-37: code a namespace hashes, as this process loaded it', () => {
-  test('keeps the bytes it first read, whatever the file holds later', () => {
-    const f = join(scratch('candcache-bench-loaded-'), 'run.js');
-    writeFileSync(f, "spawn('sh', ['-ec', command]);\n");
-    noteLoadedCode(f);
-    const loaded = loadedCodeDigest(f);
-    expect(loaded).toBe(sha(readFileSync(f)));
-    writeFileSync(f, "spawn('sh', ['-c', command]);\n");
-    noteLoadedCode(f);
-    expect(loadedCodeDigest(f)).toBe(loaded);
-  });
-
-  test('refuses a file no module recorded, and one it could not read', () => {
-    const d = scratch('candcache-bench-loaded-');
-    expect(() => loadedCodeDigest(join(d, 'never.js'))).toThrow(/no module recorded when it was loaded/);
-    noteLoadedCode(join(d, 'absent.js'));
-    writeFileSync(join(d, 'absent.js'), '');
-    expect(() => loadedCodeDigest(join(d, 'absent.js'))).toThrow(/cannot read .*absent\.js as it was loaded/);
   });
 });
 

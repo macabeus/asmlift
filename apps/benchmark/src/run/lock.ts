@@ -42,11 +42,11 @@
 // `spawnSync('sleep', ['10'])`, SIGTERM at 600 ms): with no listener it died at 608 ms; with one it
 // ran the full 10 s, exited **0**, and the listener never ran — the signal was swallowed outright.
 //
-// What this does NOT buy is a killable `bench run`. Importing `run/orchestrate.ts` makes tsx bind
-// its own hidden SIGINT/SIGTERM handler (hidden: it patches `process.listenerCount`, which reports
-// 0), so the CLI is signal-deferred on `origin/main` too — measured, with no handler of ours: a
-// `bench run --tier synthetic --serial` sent SIGTERM 6 s in ran all 291 cases, REWROTE
-// `results/synthetic.json`, and only then exited 143. `kill -9` is the stop that works.
+// The tsx CLI is one: its preflight binds a hidden SIGINT/SIGTERM handler (hidden: it patches
+// `process.listenerCount`, which reports 0), so a `bench run` started as `tsx …/cli.ts` ran all 291
+// synthetic cases after a SIGTERM 6 s in, rewrote `results/synthetic.json`, and only then exited
+// 143. `pnpm bench` and its shards run under `node --import tsx` (`loadedCodeArgv`), which binds
+// none. `kill -9` stops either.
 //
 // So a run that dies without reaching its exit path leaves its record behind, exactly like a
 // SIGKILL: it names a pid that is gone, so it reads `stale`, and stale blocks nothing.

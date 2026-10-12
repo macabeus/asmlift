@@ -307,48 +307,6 @@ const CAP_BYTES = CAP_MB * 1024 * 1024;
  *  second definition of "the sha256 of these bytes" is a definition that can drift. */
 export const sha = (b: Buffer | string): string => createHash('sha256').update(b).digest('hex');
 
-/** Per code file a namespace hashes, the sha256 of its bytes when this process loaded it, or why
- *  they could not be read then. A namespace is stamped at its first compile, which can come long
- *  after the code was loaded, and by then a `pnpm install` or `git pull` may have put other bytes
- *  on disk: the answers the process compiles are the loaded code's, so the key must be too. */
-const loadedCode = new Map<string, string | Error>();
-
-/** Records each of `paths` as this process loaded it, unless it already is. Called where the module
- *  that imports the code is evaluated, which is when the code it runs was read. */
-export function noteLoadedCode(...paths: string[]): void {
-  for (const p of paths.map((q) => resolve(q))) {
-    if (loadedCode.has(p)) {
-      continue;
-    }
-    try {
-      loadedCode.set(p, sha(readFileSync(p)));
-    } catch (e) {
-      loadedCode.set(
-        p,
-        new Error(
-          `cannot read ${p} as it was loaded (${e instanceof Error ? e.message : String(e)}), so nothing is cached`,
-        ),
-      );
-    }
-  }
-}
-
-/** The digest `noteLoadedCode` recorded for `path`. Throws for a file no module recorded, whose bytes
- *  now are not known to be the ones that run, and for one it could not read. */
-export function loadedCodeDigest(path: string): string {
-  const d = loadedCode.get(resolve(path));
-  if (d === undefined) {
-    throw new Error(
-      `${path} is namespace code that no module recorded when it was loaded, so the file on disk may ` +
-        `not be the code that runs, and nothing is cached`,
-    );
-  }
-  if (d instanceof Error) {
-    throw d;
-  }
-  return d;
-}
-
 // ---------------------------------------------------------------------------------------------
 // SAMPLED VERIFICATION — what licenses serving at all.
 //
@@ -441,7 +399,7 @@ export function noteKeyRefused(label: string, reason: string): void {
  *  lines and the width of a quoted source line, `SOURCE_DATE_EPOCH` the date a compile may write,
  *  and `MACOSX_DEPLOYMENT_TARGET` the version a macOS preprocessor predefines
  *  (`__ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__`), which a clang also reads off the SDK that
- *  `SDKROOT` or `DEVELOPER_DIR` picks. ONE list: every pipeline compiles with the
+ *  `SDKROOT` or `DEVELOPER_DIR` picks (`SDK_ENV`). ONE list: every pipeline compiles with the
  *  same compilers, and two copies of the answer is how the tenth variable gets added to one of
  *  them. */
 const COMPILE_ENV = [
@@ -458,9 +416,41 @@ const COMPILE_ENV = [
   'GCC_EXTRA_DIAGNOSTIC_OUTPUT',
   'COLUMNS',
   'MACOSX_DEPLOYMENT_TARGET',
-  'SDKROOT',
-  'DEVELOPER_DIR',
 ];
+
+/** The variables that name an SDK a macOS compile reads, and where each one's `SDKSettings.json`
+ *  lies under the real path it names: the SDK itself, or a Command Line Tools or Xcode developer
+ *  directory's macOS SDK. */
+const SDK_ENV: Readonly<Record<string, readonly string[]>> = {
+  SDKROOT: ['SDKSettings.json'],
+  DEVELOPER_DIR: [
+    'SDKs/MacOSX.sdk/SDKSettings.json',
+    'Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/SDKSettings.json',
+  ],
+};
+
+/** `SDK_ENV`'s variables by what they name, not by their words: one path is a link that an SDK
+ *  update repoints (`MacOSX.sdk` from 14.5 to 15.5 moves a clang's predefined version), so each is
+ *  its real path and the content of the `SDKSettings.json` there. */
+function sdkEnvironment(env: NodeJS.ProcessEnv): string[] {
+  return Object.entries(SDK_ENV).map(([v, settings]) => {
+    const value = env[v];
+    if (value === undefined) {
+      return `env:${v}=`;
+    }
+    let real: string;
+    try {
+      real = realpathSync(value);
+    } catch {
+      return `env:${v}=${value} (names nothing)`;
+    }
+    const read = settings.map((f) => {
+      const p = join(real, f);
+      return existsSync(p) ? `${f}:${sha(readFileSync(p))}` : `${f}:absent`;
+    });
+    return [`env:${v}=${value} -> ${real}`, ...read].join(' ');
+  });
+}
 
 /** Variable prefixes read by value too: the C library allocator's settings, which decide what a
  *  compiler reading memory it never wrote finds there. */
@@ -492,6 +482,7 @@ export function compileEnvironment(env: NodeJS.ProcessEnv = process.env): string
     .sort();
   return [
     ...COMPILE_ENV.map((v) => `env:${v}=${env[v] ?? ''}`),
+    ...sdkEnvironment(env),
     ...prefixed.map((v) => `env:${v}=${env[v]}`),
     `host:${platform()} ${release()} ${version()} ${process.arch}`,
     ...(platform() === 'darwin' ? [`os:${readMacosBuild()}`] : []),

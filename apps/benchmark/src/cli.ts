@@ -93,6 +93,7 @@ import {
   cacheSampleNote,
   cacheStats,
 } from '@asmlift/cli/candcache';
+import { loadedCodeArgv } from '@asmlift/cli/loaded-code';
 import { shellJoinFlags } from '@asmlift/core/codegen-flags';
 import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { symbolMapToJson } from '@asmlift/core/symbols';
@@ -318,7 +319,7 @@ switch (command) {
       const fd = openSync(log, 'a');
       const t0 = Date.now();
       const argv = process.argv.slice(2).filter((a) => a !== '--detach');
-      const child = spawn('tsx', [import.meta.filename, ...argv], {
+      const child = spawn(process.execPath, [...loadedCodeArgv(), import.meta.filename, ...argv], {
         cwd: process.cwd(),
         detached: true,
         stdio: ['ignore', fd, fd],

@@ -5,7 +5,8 @@
 // linux/386 container, CodeWarrior through wibo in its image. The transient failures are real too:
 // the compiler is pointed at an object path it cannot write, which is the shape a lost scratch
 // directory or a full disk gives.
-import { loadedCodeDigest, noteLoadedCode, sha } from '@asmlift/cli/candcache';
+import { sha } from '@asmlift/cli/candcache';
+import { loadedCodeDigest } from '@asmlift/cli/loaded-code';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import {
@@ -29,6 +30,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -327,7 +329,7 @@ describe('R310-34: a native compile keys the host files its driver reads', () =>
   });
 });
 
-describe('R310-37: a namespace holds the harness code this process loaded', () => {
+describe('a namespace holds the harness code this process loaded', () => {
   const spec = (sources: string[]): DockerCacheSpec => ({
     label: 'test-loaded-sources',
     native: () => true,
@@ -344,24 +346,10 @@ describe('R310-37: a namespace holds the harness code this process loaded', () =
     gnuAs: true,
   });
 
-  test('an edit on disk after the load does not move it, and other loaded bytes do', () => {
-    const loaded = join(scratch('dockercache-src-'), 'kmc.ts');
-    writeFileSync(loaded, "throw restated('kmc gcc', e);\n");
-    noteLoadedCode(loaded);
-    const stamp = dockerStaticStamp(spec([loaded]), 'native');
-    writeFileSync(loaded, "throw restated('KMC GCC', e);\n");
-    expect(dockerStaticStamp(spec([loaded]), 'native'), 'the process still runs what it loaded').toBe(stamp);
-
-    const edited = join(scratch('dockercache-src-'), 'kmc.ts');
-    writeFileSync(edited, "throw restated('KMC GCC', e);\n");
-    noteLoadedCode(edited);
-    expect(dockerStaticStamp(spec([edited]), 'native')).not.toBe(stamp);
-  });
-
-  test('a source no module recorded when it loaded refuses', () => {
+  test('R310-43: a source changed after this process started refuses it', () => {
     const src = join(scratch('dockercache-src-'), 'kmc.ts');
-    writeFileSync(src, '');
-    expect(() => dockerStaticStamp(spec([src]), 'native')).toThrow(/no module recorded when it was loaded/);
+    writeFileSync(src, "throw restated('kmc gcc', e);\n");
+    expect(() => dockerStaticStamp(spec([src]), 'native')).toThrow(/kmc\.ts changed after this process started/);
   });
 
   test.each([
@@ -370,7 +358,7 @@ describe('R310-37: a namespace holds the harness code this process loaded', () =
     ['real-tier CodeWarrior', mwccCacheSpec('mwcc_233_163n', ['-O4'], 'c')],
     ['pooled KMC GCC', pooledKmcSpec(['-O2'])],
     ['pooled CodeWarrior', pooledMwccSpec(['-O4'])],
-  ])('%s: every source was recorded when its module loaded', (_name, s) => {
+  ])('%s: every source is hashed as this process loaded it', (_name, s) => {
     for (const p of s.sources) {
       expect(loadedCodeDigest(p), p).toBe(sha(readFileSync(p)));
     }
@@ -558,13 +546,16 @@ describe.runIf(HAVE_GCC272)('GCC 2.7.2 in its container', () => {
     'stores an object it may only read, and leaves that file as the compiler wrote it',
     async () => {
       // A container running as root on a Linux host leaves the object root-owned: readable, not
-      // writable. A read-only file is that here.
+      // writable. Where the object is this process's own, a read-only file is that; where it is
+      // root's (R310-42), it already is, and this process may not change its mode.
       const store = scratch('dockercache-store-');
       const run = (m: RunModules) => {
         const written: Buffer[] = [];
         const compile = m.cache.dockerCached(gcc272TestSpec(m, 'test-readonly'), (tu) => {
           const o = gcc272In(tu, 'c.o', m.toolchains.gcc272Compile);
-          chmodSync(o, 0o444);
+          if (statSync(o).uid === process.getuid?.()) {
+            chmodSync(o, 0o444);
+          }
           written.push(readFileSync(o));
           return o;
         });
@@ -803,6 +794,41 @@ describe.runIf(HAVE_GCC272)('GCC 2.7.2 in its container', () => {
         });
         expect(run.value, 'the front started the pool again').toBe(false);
         expect(run.stats).toMatchObject({ miss: 2, stored: 1, refusedKeys: 1 });
+      });
+    },
+    CONTAINER_BUDGET,
+  );
+
+  test.each([
+    ['on another image', true],
+    ['on the same image: another daemon, or a restart', false],
+  ])(
+    'R310-44: stores nothing compiled in a pool another process replaced, %s, and ends the store',
+    async (_name, otherImage) => {
+      await withPrivateImage(async ({ tag, other, onTag, poolOf }) => {
+        const store = scratch('dockercache-store-');
+        const run = await asRun(store, onTag, (m) => {
+          m.gcc272.gcc272Real.compileCandidate(OK_TU, 'f', GCC272_FLAGS, 'c');
+          // The pool is replaced under its name by someone else: this process never starts it.
+          const pool = poolOf(m);
+          docker(['rm', '-f', pool]);
+          docker([
+            'run',
+            '-d',
+            '--name',
+            pool,
+            '--platform',
+            'linux/386',
+            ...m.toolchains.gcc272PoolCfg().mounts,
+            otherImage ? other : tag,
+            'sleep',
+            '86400',
+          ]);
+          m.gcc272.gcc272Real.compileCandidate('int f(int a) { return a + 12; }\n', 'f', GCC272_FLAGS, 'c');
+          m.gcc272.gcc272Real.compileCandidate(OK_TU, 'f', GCC272_FLAGS, 'c');
+        });
+        expect(run.stats).toMatchObject({ miss: 2, stored: 1, refusedKeys: 2 });
+        expect(run.stats.hit, 'the store is not used after the pool moved').toBeUndefined();
       });
     },
     CONTAINER_BUDGET,

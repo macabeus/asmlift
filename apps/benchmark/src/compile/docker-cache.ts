@@ -25,13 +25,12 @@ import {
   candCache,
   compileEnvironment,
   isChainMeasurement,
-  loadedCodeDigest,
   noteKeyRefused,
-  noteLoadedCode,
   refuseUnkeyedEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
 import { type PreprocessorReport, candidateCacheRefusal, candidateReadsRefusal } from '@asmlift/cli/candcache-reads';
+import { loadedCodeDigest } from '@asmlift/cli/loaded-code';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { oneShots, poolStarts } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
@@ -55,14 +54,9 @@ export const DOCKER_COMPILE_SOURCES = [
   join(TOOLCHAINS_SRC, 'native.ts'),
   join(TOOLCHAINS_SRC, 'toolchain.ts'),
 ];
-noteLoadedCode(...DOCKER_COMPILE_SOURCES);
 
-/** A pipeline's harness files: its own `files` and `DOCKER_COMPILE_SOURCES`, each recorded as this
- *  process loaded it. Called where the pipeline's module is evaluated. */
-export function dockerSources(...files: string[]): readonly string[] {
-  noteLoadedCode(...files);
-  return [...files, ...DOCKER_COMPILE_SOURCES];
-}
+/** A pipeline's harness files: its own `files` and `DOCKER_COMPILE_SOURCES`. */
+export const dockerSources = (...files: string[]): readonly string[] => [...files, ...DOCKER_COMPILE_SOURCES];
 
 /** The `specs` files a GCC 2.7.2-based driver for `mips-mips-gnu` (GCC 2.7.2's, KMC GCC's) reads
  *  when they exist, outside its own directory: its built-in search prefixes. */
@@ -90,8 +84,8 @@ export interface DockerCacheSpec {
   prelude: string;
   /** host commands the pipeline runs, by name or path: the preprocessor, a native runner */
   hostCommands: readonly string[];
-  /** the harness files whose code shapes the TU or the command, each recorded by `noteLoadedCode`
-   *  where the module that imports it is loaded */
+  /** the harness files whose code shapes the TU or the command, hashed as this process loaded them
+   *  (`loadedCodeDigest`) */
   sources: readonly string[];
   /** host files a native compile reads when they exist, outside its directories: keyed by content,
    *  or as absent */
@@ -116,25 +110,35 @@ const inspect = (docker: string, args: readonly string[]): { ok: boolean; out: s
 
 const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
 
-/** The content ID of the image a containerized compile runs: the tag's, which a pool container
- *  already running must also be running. Throws (the store refuses) when the tag cannot be read or
- *  the pool runs another image. */
-function containerImageId(docker: string, image: string, pool: string): string {
+/** The content ID of the image a containerized compile runs, the tag's, and the pool container
+ *  running it: `<container ID> <image ID>`, or `absent` where there is none. Throws (the store
+ *  refuses) when the tag cannot be read or the pool runs another image. */
+function containerImage(docker: string, image: string, pool: string): { image: string; pool: string } {
   const tagged = inspect(docker, ['image', 'inspect', '--format', '{{.Id}}', image]);
   if (!tagged.ok || !IMAGE_ID.test(tagged.out)) {
     throw new Error(`docker image inspect ${image}: ${tagged.out}`);
   }
-  const running = inspect(docker, ['container', 'inspect', '--format', '{{.Image}}', pool]);
-  if (!running.ok && !/No such (?:container|object)/i.test(running.out)) {
-    throw new Error(`docker container inspect ${pool}: ${running.out}`);
-  }
-  if (running.ok && running.out !== tagged.out) {
+  const running = poolContainer(docker, pool);
+  if (running !== 'absent' && running.split(' ')[1] !== tagged.out) {
     throw new Error(
-      `the pool container ${pool} runs ${running.out.slice(0, 19)}, but ${image} now names ` +
+      `the pool container ${pool} runs ${running.split(' ')[1].slice(0, 19)}, but ${image} now names ` +
         `${tagged.out.slice(0, 19)}: its compiles are not the tag's. Remove it (docker rm -f ${pool}) to restart it`,
     );
   }
-  return tagged.out;
+  return { image: tagged.out, pool: running };
+}
+
+/** The pool container named `pool` on the daemon `docker` talks to now: `<container ID> <image ID>`,
+ *  or `absent`. Throws when it cannot be read. */
+function poolContainer(docker: string, pool: string): string {
+  const running = inspect(docker, ['container', 'inspect', '--format', '{{.Id}} {{.Image}}', pool]);
+  if (!running.ok) {
+    if (/No such (?:container|object)/i.test(running.out)) {
+      return 'absent';
+    }
+    throw new Error(`docker container inspect ${pool}: ${running.out}`);
+  }
+  return running.out;
 }
 
 const treeDigests = new Map<string, string>();
@@ -180,11 +184,17 @@ function containerRuntime(docker: string): string {
 }
 
 /** What the pipeline's compiles run on now: the host, or the content ID of a container image and
- *  the runtime that executes it. */
-export const runsOn = (spec: DockerCacheSpec): string =>
-  spec.native()
-    ? 'native'
-    : `container:${containerImageId(spec.docker, spec.image, spec.pool)} ${containerRuntime(spec.docker)}`;
+ *  the runtime that executes it — and, read with them, the pool container that runs the image. */
+function readRunsOn(spec: DockerCacheSpec): { runs: string; pool: string } {
+  if (spec.native()) {
+    return { runs: 'native', pool: 'native' };
+  }
+  const { image, pool } = containerImage(spec.docker, spec.image, spec.pool);
+  return { runs: `container:${image} ${containerRuntime(spec.docker)}`, pool };
+}
+
+/** What the pipeline's compiles run on now (`readRunsOn`). */
+export const runsOn = (spec: DockerCacheSpec): string => readRunsOn(spec).runs;
 
 /** The namespace's static half: everything but the probe's own object. Throws where an input
  *  cannot be read, which `candCache` turns into a refusal. */
@@ -261,10 +271,10 @@ function scrubbedFile(objPath: string): string {
   return copy;
 }
 
-/** Per pool container, what this process saw it run: the image its first namespace was measured
- *  on, the pool starts read since, and whether it has run another image since. Shared by every
- *  store whose compiles run in that pool. */
-const pools = new Map<string, { runs: string; starts: number; moved: boolean }>();
+/** Per pool name, what this process saw it run: the image and runtime its first namespace was
+ *  measured on, the container read with them, the pool starts read since, and whether it has run
+ *  anything else since. Shared by every store whose compiles run in that pool. */
+const pools = new Map<string, { runs: string; container: string; starts: number; moved: boolean }>();
 
 /** Whether the pool `spec` compiles in has run another image than the one this process first
  *  measured it on, reading it again after any pool start since the last read. */
@@ -277,11 +287,36 @@ function poolMoved(spec: DockerCacheSpec): boolean {
   if (starts !== p.starts) {
     p.starts = starts;
     try {
-      p.moved = runsOn(spec) !== p.runs;
+      const now = readRunsOn(spec);
+      p.moved = now.runs !== p.runs;
+      p.container = now.pool;
     } catch {
       // an image that cannot be read now is not the one the namespace read
       p.moved = true;
     }
+  }
+  return p.moved;
+}
+
+/** Whether the pool `spec` compiles in is still the container this process read with its image —
+ *  not one another process put under its name, or one on another daemon — read again now. A pool
+ *  that is not ends the store for this process. */
+function poolReplaced(spec: DockerCacheSpec): boolean {
+  if (poolMoved(spec)) {
+    return true;
+  }
+  const p = pools.get(spec.pool);
+  if (p === undefined || p.container === 'native') {
+    return false;
+  }
+  let now: string;
+  try {
+    now = poolContainer(spec.docker, spec.pool);
+  } catch {
+    now = 'unreadable';
+  }
+  if (now !== p.container) {
+    p.moved = true;
   }
   return p.moved;
 }
@@ -295,7 +330,7 @@ export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: strin
   const cacheNow = (): CandCache =>
     (cache ??= candCache(spec.label, () => {
       refuseUnkeyedEnv();
-      // The probe first: a pool container it starts is then there for `containerImageId` to read.
+      // The probe first: a pool container it starts is then there for `readRunsOn` to read.
       const before = oneShots();
       const probe = (): string | null => {
         try {
@@ -314,11 +349,11 @@ export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: strin
       if (oneShots() !== before) {
         throw new Error(`${spec.label}: the probe compiled in a one-shot docker run, which reads the image tag afresh`);
       }
-      const runs = runsOn(spec);
+      const { runs, pool } = readRunsOn(spec);
       const p = pools.get(spec.pool);
       if (p === undefined) {
-        pools.set(spec.pool, { runs, starts: poolStarts(spec.pool), moved: false });
-      } else if (poolMoved(spec) || p.runs !== runs) {
+        pools.set(spec.pool, { runs, container: pool, starts: poolStarts(spec.pool), moved: false });
+      } else if (poolMoved(spec) || p.runs !== runs || p.container !== pool) {
         p.moved = true;
         throw new Error(`${spec.label}: ${MOVED}`);
       }
@@ -326,7 +361,7 @@ export function dockerCached(spec: DockerCacheSpec, raw: RawCompile): (tu: strin
     }));
   /** The reason the compile that ran since `oneShotsBefore` may not be stored, or undefined. */
   const unstorable = (tu: string, seen: { report?: PreprocessorReport }, oneShotsBefore: number) =>
-    poolMoved(spec)
+    poolReplaced(spec)
       ? MOVED
       : oneShots() !== oneShotsBefore
         ? ONE_SHOT
