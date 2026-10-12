@@ -12,7 +12,8 @@ import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import { type Outcome, createRunner, isStable } from '@match-kit/compiler';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -786,11 +787,16 @@ function hashChain(budget: MeasurementBudget, h: ReturnType<typeof createHash>, 
   }
   hashPath(budget, h, tok + '>' + basename(entry), entry);
 }
+/** The directory of the @match-kit/compiler this module runs templates with: resolved from here,
+ *  as the import above is, and followed through the package manager's links to its files. */
+export const runnerPackageDir = (): string =>
+  dirname(realpathSync(createRequire(import.meta.url).resolve('@match-kit/compiler/package.json')));
+
 /** Every input of `template` run in `cwd` that a namespace measures before its probe compiles:
  *  the template's text and every file, directory, program chain and variable it names (the stamp
- *  `compilersFromCommand` keys its store under also holds the probe's object). Throws where an
- *  input cannot be measured. */
-export function commandStaticStamp(template: string, cwd: string): string {
+ *  `compilersFromCommand` keys its store under also holds the probe's object), and the code of the
+ *  runner in `runner`. Throws where an input cannot be measured. */
+export function commandStaticStamp(template: string, cwd: string, runner: string = runnerPackageDir()): string {
   const h = createHash('sha256');
   const budget = newMeasurementBudget();
   // Checked FIRST: a refusal here saves two probe compiles, and through a container those are
@@ -821,6 +827,20 @@ export function commandStaticStamp(template: string, cwd: string): string {
   // perturbing that text left the namespace unmoved and the store replayed the old spelling.
   h.update('self:');
   h.update(sha(readFileSync(fileURLToPath(import.meta.url))));
+  // THE RUNNER'S BYTES, for the same reason: @match-kit/compiler runs the template (`sh -ec`),
+  // decides which outcome a compile had, and writes the command and output a stored rejection
+  // replays. Its package.json picks the entry point; its `dist/` is the code that runs.
+  const manifest = JSON.parse(readFileSync(join(runner, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>;
+  };
+  if (Object.keys(manifest.dependencies ?? {}).length > 0) {
+    throw new Error(
+      `@match-kit/compiler at ${runner} depends on ${Object.keys(manifest.dependencies ?? {}).join(', ')}, ` +
+        `code this namespace does not measure, so nothing is cached`,
+    );
+  }
+  hashPath(budget, h, 'runner/package.json', join(runner, 'package.json'));
+  hashPath(budget, h, 'runner/dist', join(runner, 'dist'));
   // (1) every template token that names an existing FILE: the project's own
   //     `./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`, hashed by content.
   // (2) every remaining token that RESOLVES ON $PATH: `arm-none-eabi-cpp`, `arm-none-eabi-as`,

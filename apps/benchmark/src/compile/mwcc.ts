@@ -140,6 +140,7 @@ export const mwccCacheSpec = (
   prelude: '',
   hostCommands: mwccNative(mwcc) ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
   sources: [join(HERE, 'mwcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  hostFiles: [],
   refused: mwccRefused,
   // CodeWarrior assembles inline asm itself, and refuses `.include` and `.incbin` there (MEASURED:
   // "end of line expected" for both).

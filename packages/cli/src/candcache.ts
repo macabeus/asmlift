@@ -421,11 +421,26 @@ const COMPILE_ENV = [
  *  compiler reading memory it never wrote finds there. */
 const COMPILE_ENV_PREFIXES = ['MALLOC_', 'Malloc', 'GLIBC_TUNABLES'];
 
+let macosBuild: string | undefined;
+/** `sw_vers`: the macOS version, its build and any Rapid Security Response suffix. */
+function readMacosBuild(): string {
+  if (macosBuild === undefined) {
+    const r = spawnSync('/usr/bin/sw_vers', [], { encoding: 'utf8', timeout: 20_000 });
+    if (r.status !== 0 || !/BuildVersion:/.test(r.stdout ?? '')) {
+      throw new Error(`cannot read the macOS build: sw_vers ${r.error?.message ?? r.stderr}`);
+    }
+    macosBuild = r.stdout.trim().replace(/\s+/g, ' ');
+  }
+  return macosBuild;
+}
+
 /** What a stamp hashes for the environment a compile runs in: each `COMPILE_ENV` value, each
  *  variable of a `COMPILE_ENV_PREFIXES` prefix, and the host's operating system and release. A
  *  host preprocessor predefines macros from the release (macOS: the major version, where
- *  `MACOSX_DEPLOYMENT_TARGET` is unset), and the macOS system libraries every program loads ship
- *  in the OS (the dyld shared cache), with no file of theirs on disk to hash. */
+ *  `MACOSX_DEPLOYMENT_TARGET` is unset). On macOS it adds the OS build: the system libraries every
+ *  program loads ship in the dyld shared cache, which has no file of theirs on disk to hash and
+ *  which an OS update can replace without a new kernel. Linux's libraries are files, hashed by
+ *  content in each program's chain (`linuxLibraries`). */
 export function compileEnvironment(env: NodeJS.ProcessEnv = process.env): string {
   const prefixed = Object.keys(env)
     .filter((v) => env[v] !== undefined && COMPILE_ENV_PREFIXES.some((p) => v.startsWith(p)))
@@ -434,6 +449,7 @@ export function compileEnvironment(env: NodeJS.ProcessEnv = process.env): string
     ...COMPILE_ENV.map((v) => `env:${v}=${env[v] ?? ''}`),
     ...prefixed.map((v) => `env:${v}=${env[v]}`),
     `host:${platform()} ${release()} ${version()} ${process.arch}`,
+    ...(platform() === 'darwin' ? [`os:${readMacosBuild()}`] : []),
   ].join('\n');
 }
 
@@ -659,48 +675,65 @@ const resolveOnPath = (cmd: string): string | undefined => {
 const SH_SELECTION = '/private/var/select/sh';
 
 /** Where a library's path names no file: the macOS system libraries, which live in the dyld shared
- *  cache and are keyed through the OS release (`compileEnvironment`). */
+ *  cache and are keyed through the OS build (`compileEnvironment`). */
 const OS_LIBRARY = /^\/(?:usr\/lib|System)\//;
 
+/** The library every `xcrun` trampoline loads (`/usr/bin/cpp`, `/usr/bin/cc`, `/usr/bin/xcrun`). */
+const XCSELECT = '/usr/lib/libxcselect.dylib';
+
 /**
- * The libraries the native program `p` loads, as the dynamic linker finds them: `otool -L` on macOS
- * (a path that starts at `@loader_path` or `@executable_path` is the program's directory, and
- * `@rpath` is a refusal), `ldd` on Linux (a library it cannot find is the measurement
- * `UNRESOLVED:<name>`). A statically linked program loads none. Throws where the libraries cannot
- * be listed.
+ * The libraries an `otool -L` listing of `program` names, as dyld finds them. `ids` are the
+ * program's own install names (`otool -D`), which a library's listing names first and which it
+ * does not load. A path that starts at `@loader_path` is `program`'s directory and one that starts
+ * at `@executable_path` is `executable`'s, the main program that loaded it. A path that names no
+ * file is the measurement `UNRESOLVED:<name>`. Throws for `@rpath`, which this does not follow, and
+ * for an `xcrun` trampoline: the tool it runs is chosen by `xcode-select`, `DEVELOPER_DIR`,
+ * `SDKROOT` and `TOOLCHAINS`, and the SDK it picks moves what a compile predefines.
  */
-function loadedLibraries(p: string): string[] {
-  if (process.platform === 'darwin') {
-    const r = spawnSync('/usr/bin/otool', ['-L', p], { encoding: 'utf8', timeout: 20_000 });
-    if (r.status !== 0) {
-      throw new Error(`cannot list the libraries ${p} loads: otool -L ${r.error?.message ?? r.stderr}`);
+export function otoolLibraries(
+  listing: string,
+  program: string,
+  executable: string,
+  ids: readonly string[] = [],
+): string[] {
+  const out: string[] = [];
+  for (const m of listing.matchAll(/^\t(.+?) \(compatibility version /gm)) {
+    const name = m[1];
+    if (ids.includes(name)) {
+      continue;
     }
-    const out: string[] = [];
-    for (const m of r.stdout.matchAll(/^\t(.+?) \(compatibility version /gm)) {
-      const name = m[1];
-      if (OS_LIBRARY.test(name)) {
-        continue;
-      }
-      if (name.startsWith('@rpath/')) {
-        throw new Error(`${p} loads ${name} through its run path, which this does not follow`);
-      }
-      const lib = name.replace(/^@(?:loader|executable)_path(?=\/)/, dirname(p));
-      out.push(existsSync(lib) ? lib : `UNRESOLVED:${name}`);
+    if (name === XCSELECT) {
+      throw new Error(
+        `${program} is an xcrun trampoline: the tool it runs is chosen by xcode-select, DEVELOPER_DIR, ` +
+          `SDKROOT and TOOLCHAINS, so nothing is cached — put a GNU program of that name ahead of it on PATH`,
+      );
     }
-    return out;
+    if (OS_LIBRARY.test(name)) {
+      continue;
+    }
+    if (name.startsWith('@rpath/')) {
+      throw new Error(`${program} loads ${name} through its run path, which this does not follow`);
+    }
+    const lib = name
+      .replace(/^@loader_path(?=\/)/, dirname(program))
+      .replace(/^@executable_path(?=\/)/, dirname(executable));
+    out.push(existsSync(lib) ? lib : `UNRESOLVED:${name}`);
   }
-  if (process.platform === 'linux') {
-    const r = spawnSync('ldd', [p], { encoding: 'utf8', timeout: 20_000, env: { PATH: process.env.PATH } });
-    const text = `${r.stdout ?? ''}${r.stderr ?? ''}`;
-    if (/not a dynamic executable|statically linked/.test(text)) {
-      return [];
-    }
-    if (r.status !== 0) {
-      throw new Error(`cannot list the libraries ${p} loads: ldd ${r.error?.message ?? text.trim()}`);
-    }
-    return lddLibraries(text);
+  return out;
+}
+
+/** The libraries `program` loads on Linux, as the `ldd` first on `env.PATH` lists them. A
+ *  statically linked program loads none. Throws where the libraries cannot be listed. */
+export function linuxLibraries(program: string, env: NodeJS.ProcessEnv = process.env): string[] {
+  const r = spawnSync('ldd', [program], { encoding: 'utf8', timeout: 20_000, env: { PATH: env.PATH } });
+  const text = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+  if (/^\s*(?:not a dynamic executable|statically linked)\s*$/m.test(text)) {
+    return [];
   }
-  throw new Error(`cannot list the libraries ${p} loads on ${process.platform}`);
+  if (r.status !== 0) {
+    throw new Error(`cannot list the libraries ${program} loads: ldd ${r.error?.message ?? text.trim()}`);
+  }
+  return lddLibraries(text);
 }
 
 /** The libraries an `ldd` listing names: each resolved path, and `UNRESOLVED:<name>` for one the
@@ -720,6 +753,31 @@ export function lddLibraries(listing: string): string[] {
     }
   }
   return out;
+}
+
+/**
+ * The libraries the native program `p` loads, as the dynamic linker finds them: `otool -L` on macOS
+ * (`otoolLibraries`; `executable` is the main program, `p` itself unless `p` is a library),
+ * `ldd` on Linux (`linuxLibraries`). Throws where the libraries cannot be listed.
+ */
+function loadedLibraries(p: string, executable: string): string[] {
+  if (process.platform === 'darwin') {
+    const otool = (flag: string): string => {
+      const r = spawnSync('/usr/bin/otool', [flag, p], { encoding: 'utf8', timeout: 20_000 });
+      if (r.status !== 0) {
+        throw new Error(`cannot list the libraries ${p} loads: otool ${flag} ${r.error?.message ?? r.stderr}`);
+      }
+      return r.stdout;
+    };
+    const ids = otool('-D')
+      .split('\n')
+      .filter((l) => l !== '' && !l.endsWith(':'));
+    return otoolLibraries(otool('-L'), p, executable, ids);
+  }
+  if (process.platform === 'linux') {
+    return linuxLibraries(p);
+  }
+  throw new Error(`cannot list the libraries ${p} loads on ${process.platform}`);
 }
 
 /**
@@ -764,16 +822,20 @@ const driverSubprograms = (p: string): string[] => {
   return [onPath ?? `UNRESOLVED:${ans}`];
 };
 
-function expandExecutable(p: string, out: Set<string>, depth: number): void {
+/** `seen` holds each program expanded, and each library with the main program it was expanded for;
+ *  `executable` is set when `p` is a library: the main program that loads it. */
+function expandExecutable(p: string, out: Set<string>, seen: Set<string>, depth: number, executable?: string): void {
   let real: string;
   try {
     real = realpathSync(p);
   } catch {
     throw new Error(`namespace input cannot be resolved: ${p}`);
   }
-  if (out.has(real)) {
+  const visit = executable === undefined ? real : `${real}\0${executable}`;
+  if (seen.has(visit)) {
     return;
   }
+  seen.add(visit);
   if (depth > CHAIN_MAX_DEPTH) {
     throw new Error(`namespace delegate chain deeper than ${CHAIN_MAX_DEPTH} at ${real}`);
   }
@@ -783,13 +845,24 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
   }
   if (looksBinary(real)) {
     if (real === realpathSync('/bin/sh') && existsSync(SH_SELECTION)) {
-      expandExecutable(SH_SELECTION, out, depth + 1);
+      expandExecutable(SH_SELECTION, out, seen, depth + 1);
     }
-    for (const sub of [...driverSubprograms(real), ...loadedLibraries(real)]) {
+    // The libraries first: an `xcrun` trampoline refuses there, before it is run to answer a
+    // driver's question.
+    const main = executable ?? real;
+    const libraries = loadedLibraries(real, main);
+    for (const lib of libraries) {
+      if (isChainMeasurement(lib)) {
+        out.add(lib);
+      } else {
+        expandExecutable(lib, out, seen, depth + 1, main);
+      }
+    }
+    for (const sub of driverSubprograms(real)) {
       if (isChainMeasurement(sub)) {
         out.add(sub);
       } else {
-        expandExecutable(sub, out, depth + 1);
+        expandExecutable(sub, out, seen, depth + 1);
       }
     }
     return;
@@ -837,7 +910,7 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
       throw new Error(`namespace delegate chain wider than ${CHAIN_MAX_FILES} entries at ${real}`);
     }
     if (val && isAbsolute(val) && existsSync(val) && statSync(val).isFile()) {
-      expandExecutable(val, out, depth + 1);
+      expandExecutable(val, out, seen, depth + 1);
     }
   }
   // `/bin/sh` itself joins the chain: the stripper — correctly, for every other line — has removed
@@ -849,14 +922,14 @@ function expandExecutable(p: string, out: Set<string>, depth: number): void {
     }
     if (isAbsolute(tok)) {
       if (existsSync(tok) && statSync(tok).isFile()) {
-        expandExecutable(tok, out, depth + 1);
+        expandExecutable(tok, out, seen, depth + 1);
       }
       continue;
     }
     if (/^[A-Za-z][\w.+-]*$/.test(tok)) {
       const r = resolveOnPath(tok);
       if (r) {
-        expandExecutable(r, out, depth + 1);
+        expandExecutable(r, out, seen, depth + 1);
       }
     }
   }
@@ -890,7 +963,7 @@ export function toolchainFileChain(cmd: string): string[] {
       return [`UNRESOLVED:${cmd}`];
     }
   }
-  expandExecutable(start, out, 0);
+  expandExecutable(start, out, new Set(), 0);
   return [...out];
 }
 

@@ -164,6 +164,7 @@ const gcc272TestSpec = ({ cache, toolchains }: RunModules, label: string): Docke
   prelude: '',
   hostCommands: [],
   sources: [],
+  hostFiles: [],
   refused: cache.gccRefused,
   gnuAs: true,
 });
@@ -218,6 +219,7 @@ describe('the namespace takes the compiler directory by content', () => {
     prelude: '',
     hostCommands: [],
     sources: [],
+    hostFiles: [],
     refused: gccRefused,
     gnuAs: true,
   });
@@ -265,6 +267,76 @@ describe('the namespace takes the compiler directory by content', () => {
         process.env.SOURCE_DATE_EPOCH = saved;
       }
     }
+  });
+});
+
+describe('R310-34: a native compile keys the host files its driver reads', () => {
+  const spec = (hostFiles: string[]): DockerCacheSpec => ({
+    label: 'test-host-files',
+    native: () => true,
+    docker: 'docker',
+    image: 'unused',
+    pool: 'unused',
+    dirs: [],
+    words: ['-O1'],
+    prelude: '',
+    hostCommands: [],
+    sources: [],
+    hostFiles,
+    refused: gccRefused,
+    gnuAs: true,
+  });
+
+  test('moves when one appears or changes, and only where the compile runs on the host', () => {
+    const specs = join(scratch('dockercache-specs-'), 'specs');
+    const absent = dockerStaticStamp(spec([specs]), 'native');
+    writeFileSync(specs, '*cc1:\n\n');
+    const present = dockerStaticStamp(spec([specs]), 'native');
+    expect(present).not.toBe(absent);
+    writeFileSync(specs, '*cc1:\n-finline-functions\n');
+    expect(dockerStaticStamp(spec([specs]), 'native')).not.toBe(present);
+    expect(dockerStaticStamp(spec([specs]), 'container:sha256:0')).toBe(
+      dockerStaticStamp(spec([]), 'container:sha256:0'),
+    );
+  });
+
+  test("GCC 2.7.2's are its driver's built-in specs paths", () => {
+    expect(gcc272CacheSpec(GCC272_FLAGS).hostFiles).toEqual([
+      '/opt/cross/lib/gcc-lib/mips-mips-gnu/2.7.2/specs',
+      '/opt/cross/mips-mips-gnu/lib/mips-mips-gnu/2.7.2/specs',
+      '/opt/cross/mips-mips-gnu/lib/specs',
+      '/usr/lib/gcc/mips-mips-gnu/2.7.2/specs',
+    ]);
+  });
+});
+
+describe('R310-32: a CodeWarrior refusal names its source as a native compile does', () => {
+  const report = (file: string): CompilerRejection =>
+    new CompilerRejection(
+      'mwcceppc failed',
+      [
+        '### mwcceppc.exe Compiler:',
+        `#    File: ${file}`,
+        '# ------------',
+        '#       1: int f(void) { return undeclared_x; }',
+        '#   Error:                      ^^^^^^^^^^^^',
+        "#   undefined identifier 'undeclared_x'",
+        '',
+        'Errors caused tool to abort.',
+        '',
+      ].join('\r\n'),
+    );
+
+  test('keeps one that names the candidate bare, or by its path', () => {
+    expect(mwccRefused(report('c.c'))).toBe(true);
+    expect(mwccRefused(report('/work/c.c'))).toBe(true);
+  });
+
+  test('does not keep one that names another file', () => {
+    expect(mwccRefused(report('other.c'))).toBe(false);
+    expect(mwccRefused(report('/work/other.c'))).toBe(false);
+    expect(mwccRefused(report('abc.c'))).toBe(false);
+    expect(mwccRefused(report('/work/abc.c'))).toBe(false);
   });
 });
 

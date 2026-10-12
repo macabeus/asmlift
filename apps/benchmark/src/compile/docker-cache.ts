@@ -34,7 +34,7 @@ import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { oneShots, poolStarts } from '@asmlift/toolchains';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -73,6 +73,9 @@ export interface DockerCacheSpec {
   hostCommands: readonly string[];
   /** the harness files whose code shapes the TU or the command */
   sources: readonly string[];
+  /** host files a native compile reads when they exist, outside its directories: keyed by content,
+   *  or as absent */
+  hostFiles: readonly string[];
   /** whether a throw is the compiler refusing the text, and so may be stored */
   refused: (e: unknown) => e is CompilerRejection;
   /** whether the compiler hands inline asm to a GNU assembler */
@@ -166,6 +169,13 @@ export function dockerStaticStamp(spec: DockerCacheSpec, runs = runsOn(spec)): s
     }
     h.update(`file:${basename(p)}`);
     h.update(createHash('sha256').update(readFileSync(p)).digest('hex'));
+  }
+  if (runs === 'native') {
+    for (const p of spec.hostFiles) {
+      h.update(
+        existsSync(p) ? `host:${p}:${createHash('sha256').update(readFileSync(p)).digest('hex')}` : `absent:${p}`,
+      );
+    }
   }
   return h.digest('hex');
 }
@@ -374,8 +384,9 @@ const MWCC_ABORTED = 'Errors caused tool to abort.';
 /** A CodeWarrior rejection the store may keep: the output is the compiler's reports and nothing else
  *  (a line of anyone else's, a crashed emulator's say, means it did not finish), every report is the
  *  compiler's own (`### mwcceppc.exe Compiler:`, never its driver's or its usage errors, which are
- *  about files and the command line), the reports name the candidate's source, and every one that
- *  is an error points at a source line. */
+ *  about files and the command line), the reports name the candidate's source (by the path the
+ *  container compile gives it, or bare as a native compile in its directory does), and every one
+ *  that is an error points at a source line. */
 export function mwccRefused(e: unknown): e is CompilerRejection {
   if (!(e instanceof CompilerRejection)) {
     return false;
@@ -387,7 +398,7 @@ export function mwccRefused(e: unknown): e is CompilerRejection {
     errors.length > 0 &&
     text.split('\n').every((l) => l.trim() === '' || l.startsWith('#') || l.trim() === MWCC_ABORTED) &&
     reports.every((r) => r.startsWith('### mwcceppc.exe Compiler:\n')) &&
-    /^#\s+(?:File|From): .*[\\/](?:c|cand)\.(?:c|cp)$/m.test(text) &&
+    /^#\s+(?:File|From): (?:.*[\\/])?(?:c|cand)\.(?:c|cp)$/m.test(text) &&
     errors.every((r) => /^#\s+\d+: /m.test(r))
   );
 }

@@ -76,6 +76,7 @@ export const kmcCacheSpec = (cflags: readonly string[]): DockerCacheSpec => ({
   prelude: '',
   hostCommands: [CPP],
   sources: [join(HERE, 'kmc.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  hostFiles: [],
   refused: gccRefused,
   gnuAs: true,
 });

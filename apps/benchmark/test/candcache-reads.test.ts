@@ -131,6 +131,15 @@ const HAVE: Record<Pipeline, boolean> = {
   'command-agbcc': agbccAvailable(),
 };
 
+/** Whether the agbcc pipeline's preprocessor reads `#embed` (GCC 15 and later). */
+const HAVE_EMBED = ((): boolean => {
+  const file = join(scratch('candcache-reads-embed-'), 'b');
+  writeFileSync(file, 'x');
+  return spawnSync('arm-none-eabi-cpp', ['-P', '-'], { input: `#embed "${file}"\n` }).status === 0;
+})();
+/** The cases a host may lack the feature of, and whether this one has it. */
+const NEEDS: Record<string, boolean> = { '#embed': HAVE_EMBED, __has_embed: HAVE_EMBED };
+
 /** `path` as the compile running in `pipeline`'s container (or natively) sees it. */
 const inside = (pipeline: Pipeline, path: string): string => {
   if (pipeline === 'agbcc' || pipeline === 'command-agbcc') {
@@ -252,26 +261,29 @@ const CASES: [string, Pipeline, (p: string) => string, (string | null)[]][] = [
 
 describe.each(['agbcc', 'gcc272', 'kmc', 'mwcc', 'pooled-kmc', 'command-agbcc'] as const)('%s', (pipeline) => {
   const cases = CASES.filter(([, p]) => p === pipeline);
-  test.runIf(HAVE[pipeline]).each(cases.map(([what, , tuFor, contents]) => [what, tuFor, contents] as const))(
-    'compiles a TU that reads a file afresh on every run: %s',
-    async (_what, tuFor, contents) => {
-      const store = scratch('candcache-reads-store-');
-      const file = join(scratch('candcache-reads-file-', '/tmp'), 'f.in');
-      const put = (c: string | null): void => (c === null ? rmSync(file, { force: true }) : writeFileSync(file, c));
-      const tu = tuFor(file);
-      put(contents[0]);
-      const before = await compileIn(store, pipeline, tu);
-      put(contents[1]);
-      const after = await compileIn(store, pipeline, tu);
-      expect(before.stats.stored, 'the first run kept an object').toBeUndefined();
-      expect(before.stats.failStored, 'the first run kept a rejection').toBeUndefined();
-      expect(after.stats.hit ?? after.stats.failHit).toBeUndefined();
-      expect(after.stats).toMatchObject({ refusedKeys: 1 });
-      expect(after.out, 'the edited file reached the compile').not.toBe(before.out);
-      expect(after.out).not.toMatch(/^threw /);
-    },
-    BUDGET,
-  );
+  for (const have of new Set(cases.map(([what]) => NEEDS[what] ?? true))) {
+    const these = cases.filter(([what]) => (NEEDS[what] ?? true) === have);
+    test.runIf(HAVE[pipeline] && have).each(these.map(([what, , tuFor, contents]) => [what, tuFor, contents] as const))(
+      'compiles a TU that reads a file afresh on every run: %s',
+      async (_what, tuFor, contents) => {
+        const store = scratch('candcache-reads-store-');
+        const file = join(scratch('candcache-reads-file-', '/tmp'), 'f.in');
+        const put = (c: string | null): void => (c === null ? rmSync(file, { force: true }) : writeFileSync(file, c));
+        const tu = tuFor(file);
+        put(contents[0]);
+        const before = await compileIn(store, pipeline, tu);
+        put(contents[1]);
+        const after = await compileIn(store, pipeline, tu);
+        expect(before.stats.stored, 'the first run kept an object').toBeUndefined();
+        expect(before.stats.failStored, 'the first run kept a rejection').toBeUndefined();
+        expect(after.stats.hit ?? after.stats.failHit).toBeUndefined();
+        expect(after.stats).toMatchObject({ refusedKeys: 1 });
+        expect(after.out, 'the edited file reached the compile').not.toBe(before.out);
+        expect(after.out).not.toMatch(/^threw /);
+      },
+      BUDGET,
+    );
+  }
 });
 
 // CodeWarrior preprocesses inside its own compile and a command's preprocessor reports nothing, so
@@ -513,31 +525,36 @@ describe('a command whose program reads what its words do not show', () => {
       { CANDCACHE_READS_P: 'CANDCACHE_READS_EXTRA', CANDCACHE_READS_EXTRA: '-include pre.h' },
     ],
   ];
-  test.runIf(HAVE_GCC).each(READS)(
-    'compiles afresh on every run: %s',
-    async (_what, command, tu, files, read, [before, after], env) => {
-      const cwd = scratch('candcache-reads-cwd-');
-      for (const [name, body] of Object.entries(files)) {
-        writeFileSync(join(cwd, name), body);
-        chmodSync(join(cwd, name), 0o755);
-      }
-      const store = scratch('candcache-reads-store-');
-      const cmd = { command, cwd };
-      await withEnv(env, async () => {
-        writeFileSync(join(cwd, read), before);
-        const cold = await compileIn(store, cmd, tu);
-        expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
-        expect(cold.stats, 'a project command never reaches the store').toEqual({});
-        writeFileSync(join(cwd, read), after);
-        const warm = await compileIn(store, cmd, tu);
-        expect(warm.stats.hit).toBeUndefined();
-        expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
-        expect(warm.out).not.toMatch(/^threw /);
-        expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
-      });
-    },
-    BUDGET,
-  );
+  /** Whether the `sh` a command runs under expands `${!name}` (bash does, dash does not). */
+  const SH_INDIRECT = spawnSync('sh', ['-c', 'a=b; b=1; echo "${!a}"'], { encoding: 'utf8' }).stdout?.trim() === '1';
+  const needs = (what: string): boolean => (what === 'a variable named through another' ? SH_INDIRECT : true);
+  for (const have of new Set(READS.map(([what]) => needs(what)))) {
+    test.runIf(HAVE_GCC && have).each(READS.filter(([what]) => needs(what) === have))(
+      'compiles afresh on every run: %s',
+      async (_what, command, tu, files, read, [before, after], env) => {
+        const cwd = scratch('candcache-reads-cwd-');
+        for (const [name, body] of Object.entries(files)) {
+          writeFileSync(join(cwd, name), body);
+          chmodSync(join(cwd, name), 0o755);
+        }
+        const store = scratch('candcache-reads-store-');
+        const cmd = { command, cwd };
+        await withEnv(env, async () => {
+          writeFileSync(join(cwd, read), before);
+          const cold = await compileIn(store, cmd, tu);
+          expect(cold.stats.stored, 'the first run kept an object').toBeUndefined();
+          expect(cold.stats, 'a project command never reaches the store').toEqual({});
+          writeFileSync(join(cwd, read), after);
+          const warm = await compileIn(store, cmd, tu);
+          expect(warm.stats.hit).toBeUndefined();
+          expect(warm.out, 'the edited file reached the compile').not.toBe(cold.out);
+          expect(warm.out).not.toMatch(/^threw /);
+          expect(warm.out).toBe((await compileIn(store, cmd, tu, 'off')).out);
+        });
+      },
+      BUDGET,
+    );
+  }
 });
 
 // `GCC_EXEC_PREFIX` moves where a GCC driver finds its `cc1` and its `specs` file, and a `*cpp:`

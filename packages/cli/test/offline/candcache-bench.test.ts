@@ -7,9 +7,11 @@
 import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
@@ -24,6 +26,8 @@ import {
   compileEnvironment,
   findOnPath,
   lddLibraries,
+  linuxLibraries,
+  otoolLibraries,
   refuseUnkeyedEnv,
   toolchainFileChain,
 } from '../../src/candcache';
@@ -34,6 +38,7 @@ import {
   templateCommands,
   templateRefusal,
 } from '../../src/candcache-bench';
+import { commandStaticStamp, runnerPackageDir } from '../../src/compile-command';
 import { benchAgbcc } from './bench-command-double';
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -528,6 +533,215 @@ describe('a command that does not name itself as the benchmark’s never reaches
       expect(run.code, 'a nonmatching ranked run').toBe(1);
       expect(run.stderr + said).not.toContain('[candcache]');
       expect(readdirSync(store), 'the store directory is never written').toEqual([]);
+    }
+  });
+});
+
+describe('R310-28: an xcrun trampoline refuses the namespace', () => {
+  test('a listing that loads libxcselect throws, naming what picks the tool', () => {
+    const listing = [
+      '/usr/bin/cpp:',
+      '\t/usr/lib/libxcselect.dylib (compatibility version 1.0.0, current version 1.0.0)',
+      '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)',
+    ].join('\n');
+    expect(() => otoolLibraries(listing, '/usr/bin/cpp', '/usr/bin/cpp')).toThrow(
+      '/usr/bin/cpp is an xcrun trampoline: the tool it runs is chosen by xcode-select, DEVELOPER_DIR, SDKROOT and TOOLCHAINS',
+    );
+  });
+
+  test.runIf(platform() === 'darwin' && existsSync('/usr/bin/cpp'))(
+    'a store run whose cpp is Apple’s /usr/bin/cpp stores nothing',
+    async () => {
+      expect(() => toolchainFileChain('/usr/bin/cpp')).toThrow(/is an xcrun trampoline/);
+      const r = await storeRun(
+        BENCH.command,
+        { cwd, cflags: ['-O2'], bench: BENCH.bench },
+        { PATH: `/usr/bin:/bin:${process.env.PATH}` },
+      );
+      expect(r.said).toContain('REFUSED label=command reason=stamp-threw: /usr/bin/cpp is an xcrun trampoline');
+      expect(r.stats.stored).toBeUndefined();
+      expect(r.namespaced).toBe(false);
+    },
+  );
+});
+
+describe('R310-29: the namespace holds the runner’s code', () => {
+  const runner = runnerPackageDir();
+  const copy = (): string => {
+    const d = join(scratch('candcache-bench-runner-'), 'compiler');
+    cpSync(runner, d, { recursive: true });
+    return d;
+  };
+  const edit = (file: string, from: string, to: string): void => {
+    const text = readFileSync(file, 'utf8');
+    expect(text, file).toContain(from);
+    writeFileSync(file, text.replace(from, to));
+  };
+
+  test('is the installed @match-kit/compiler, its files rather than a link to them', () => {
+    expect(realpathSync(runner)).toBe(runner);
+    expect(JSON.parse(readFileSync(join(runner, 'package.json'), 'utf8')).name).toBe('@match-kit/compiler');
+    expect(commandStaticStamp(BENCH.command, cwd)).toBe(commandStaticStamp(BENCH.command, cwd, runner));
+  });
+
+  test('moves when the code that runs the template changes', () => {
+    const before = copy();
+    const after = copy();
+    edit(join(after, 'dist/process/run.js'), "'-ec'", "'-c'");
+    expect(commandStaticStamp(BENCH.command, cwd, after)).not.toBe(commandStaticStamp(BENCH.command, cwd, before));
+  });
+
+  test('moves when the code that words a failed outcome changes', () => {
+    const before = copy();
+    const after = copy();
+    edit(
+      join(after, 'dist/process/outcome.js'),
+      'output: scrub(output, paths.dir)',
+      "output: scrub(output, paths.dir) + '.'",
+    );
+    expect(commandStaticStamp(BENCH.command, cwd, after)).not.toBe(commandStaticStamp(BENCH.command, cwd, before));
+  });
+
+  test('refuses a runner that depends on a package it does not measure', () => {
+    const d = copy();
+    const manifest = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
+    writeFileSync(join(d, 'package.json'), JSON.stringify({ ...manifest, dependencies: { 'left-pad': '1.3.0' } }));
+    expect(() => commandStaticStamp(BENCH.command, cwd, d)).toThrow(/depends on left-pad/);
+  });
+});
+
+describe('R310-30: the libraries a program loads, as the loader finds them', () => {
+  test('only /usr/lib and /System are the OS’s; /usr/local and /opt are followed', () => {
+    const listing = [
+      '/opt/tc/bin/cc1:',
+      '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)',
+      '\t/System/Library/Frameworks/CoreFoundation.framework/Versions/A/CoreFoundation (compatibility version 150.0.0, current version 4109.0.0)',
+      '\t/usr/local/lib/libasmlift-none.1.dylib (compatibility version 1.0.0, current version 1.0.0)',
+      '\t/opt/homebrew/lib/libasmlift-none.2.dylib (compatibility version 1.0.0, current version 1.0.0)',
+    ].join('\n');
+    expect(otoolLibraries(listing, '/opt/tc/bin/cc1', '/opt/tc/bin/cc1')).toEqual([
+      'UNRESOLVED:/usr/local/lib/libasmlift-none.1.dylib',
+      'UNRESOLVED:/opt/homebrew/lib/libasmlift-none.2.dylib',
+    ]);
+  });
+
+  test('refuses a library loaded through the run path', () => {
+    const listing =
+      '/opt/tc/bin/cc1:\n\t@rpath/libisl.23.dylib (compatibility version 24.0.0, current version 24.0.0)\n';
+    expect(() => otoolLibraries(listing, '/opt/tc/bin/cc1', '/opt/tc/bin/cc1')).toThrow(
+      '/opt/tc/bin/cc1 loads @rpath/libisl.23.dylib through its run path',
+    );
+  });
+
+  test('reads @loader_path from the library and @executable_path from the main program, and skips the library’s own name', () => {
+    const exeDir = scratch('candcache-bench-exe-');
+    const libDir = scratch('candcache-bench-libdir-');
+    for (const f of [join(exeDir, 'libexe.dylib'), join(libDir, 'libload.dylib')]) {
+      writeFileSync(f, '');
+    }
+    const listing = [
+      `${libDir}/libouter.dylib:`,
+      `\t${libDir}/libouter.dylib (compatibility version 1.0.0, current version 1.0.0)`,
+      '\t@executable_path/libexe.dylib (compatibility version 1.0.0, current version 1.0.0)',
+      '\t@loader_path/libload.dylib (compatibility version 1.0.0, current version 1.0.0)',
+    ].join('\n');
+    expect(
+      otoolLibraries(listing, join(libDir, 'libouter.dylib'), join(exeDir, 'prog'), [join(libDir, 'libouter.dylib')]),
+    ).toEqual([join(exeDir, 'libexe.dylib'), join(libDir, 'libload.dylib')]);
+  });
+
+  test.runIf(platform() === 'darwin')(
+    'a library’s @executable_path and @loader_path libraries are in its program’s chain',
+    () => {
+      const exeDir = scratch('candcache-bench-exe-');
+      const libDir = scratch('candcache-bench-libdir-');
+      const c = (dir: string, name: string, body: string): string => {
+        writeFileSync(join(dir, name), body);
+        return join(dir, name);
+      };
+      const lib = (dir: string, name: string, installName: string, ...rest: string[]): string => {
+        execFileSync('cc', ['-dynamiclib', '-install_name', installName, '-o', join(dir, name), ...rest]);
+        return join(dir, name);
+      };
+      const libexe = lib(
+        exeDir,
+        'libexe.dylib',
+        '@executable_path/libexe.dylib',
+        c(exeDir, 'e.c', 'int e(void) { return 1; }\n'),
+      );
+      const libload = lib(
+        libDir,
+        'libload.dylib',
+        '@loader_path/libload.dylib',
+        c(libDir, 'l.c', 'int l(void) { return 2; }\n'),
+      );
+      const outer = join(libDir, 'libouter.dylib');
+      lib(
+        libDir,
+        'libouter.dylib',
+        outer,
+        c(libDir, 'o.c', 'int e(void); int l(void);\nint o(void) { return e() + l(); }\n'),
+        libexe,
+        libload,
+      );
+      execFileSync('cc', [
+        '-o',
+        join(exeDir, 'prog'),
+        c(exeDir, 'main.c', 'int o(void);\nint main(void) { return o() == 3 ? 0 : 1; }\n'),
+        outer,
+      ]);
+      execFileSync(join(exeDir, 'prog'), { stdio: 'pipe' }); // dyld finds every library where the chain says
+      expect(toolchainFileChain(join(exeDir, 'prog'))).toEqual(
+        expect.arrayContaining([realpathSync(outer), realpathSync(libexe), realpathSync(libload)]),
+      );
+    },
+  );
+
+  describe('on Linux, through the ldd on PATH (a stand-in here)', () => {
+    const lddSaying = (stdout: string, status: number): NodeJS.ProcessEnv => {
+      const bin = scratch('candcache-bench-ldd-');
+      script(bin, 'ldd', `#!/bin/sh\nprintf '%s' '${stdout}'\nexit ${status}\n`);
+      return { PATH: `${bin}:/usr/bin:/bin` };
+    };
+    test('a dynamic program loads the libraries ldd lists, the C library and its loader included', () => {
+      const env = lddSaying(
+        '\tlinux-vdso.so.1 (0x00007ffd3b7f2000)\n' +
+          '\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f3c1a200000)\n' +
+          '\t/lib64/ld-linux-x86-64.so.2 (0x00007f3c1a9d2000)\n',
+        0,
+      );
+      expect(linuxLibraries('/usr/bin/wibo', env)).toEqual([
+        '/lib/x86_64-linux-gnu/libc.so.6',
+        '/lib64/ld-linux-x86-64.so.2',
+      ]);
+    });
+    test('a static program loads none', () => {
+      expect(linuxLibraries('/opt/gcc272/gcc', lddSaying('\tnot a dynamic executable\n', 1))).toEqual([]);
+      expect(linuxLibraries('/opt/gcc272/gcc', lddSaying('\tstatically linked\n', 0))).toEqual([]);
+    });
+    test('a listing ldd could not make throws', () => {
+      expect(() =>
+        linuxLibraries('/opt/gcc272/gcc', lddSaying('ldd: /opt/gcc272/gcc: No such file or directory\n', 1)),
+      ).toThrow('cannot list the libraries /opt/gcc272/gcc loads: ldd ldd: /opt/gcc272/gcc: No such file or directory');
+    });
+  });
+
+  test('compileEnvironment keys GLIBC_TUNABLES', () => {
+    const base = { PATH: '/bin' };
+    expect(compileEnvironment({ ...base, GLIBC_TUNABLES: 'glibc.malloc.perturb=1' })).not.toBe(
+      compileEnvironment(base),
+    );
+  });
+});
+
+describe('R310-31: the namespace keys the OS build', () => {
+  test('names the macOS build on macOS, and nothing more elsewhere', () => {
+    const env = compileEnvironment({ PATH: '/bin' });
+    if (platform() === 'darwin') {
+      const build = execFileSync('/usr/bin/sw_vers', ['-buildVersion'], { encoding: 'utf8' }).trim();
+      expect(env).toMatch(new RegExp(`^os:.*BuildVersion: ${build}$`, 'm'));
+    } else {
+      expect(env).not.toMatch(/^os:/m);
     }
   });
 });

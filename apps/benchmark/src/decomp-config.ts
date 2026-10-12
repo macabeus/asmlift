@@ -143,6 +143,7 @@ export const pooledKmcSpec = (flags: readonly string[]): DockerCacheSpec => ({
   prelude: C_TYPEDEFS,
   hostCommands: [],
   sources: DOCKER_COMPILE_SOURCES,
+  hostFiles: [],
   refused: gccRefused,
   gnuAs: true,
 });
@@ -157,6 +158,7 @@ export const pooledMwccSpec = (flags: readonly string[]): DockerCacheSpec => ({
   prelude: C_TYPEDEFS,
   hostCommands: mwccNative('mwcc_242_81') ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
   sources: DOCKER_COMPILE_SOURCES,
+  hostFiles: [],
   refused: mwccRefused,
   gnuAs: false,
 });

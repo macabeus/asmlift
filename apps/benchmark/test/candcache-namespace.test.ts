@@ -203,9 +203,9 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
   test('a variable the script ASSIGNS itself is not an external input', () => {
     const dir = scratch();
     const w = join(dir, 'wrapper-selfassign');
-    writeFileSync(w, '#!/bin/sh\nCC=/usr/bin/true\nexec "$CC" "$@"\n');
+    writeFileSync(w, '#!/bin/sh\nASMLIFT_TOOL=/usr/bin/true\nexec "$ASMLIFT_TOOL" "$@"\n');
     chmodSync(w, 0o755);
-    expect(toolchainFileChain(w).some((e) => e.startsWith('ENV:CC='))).toBe(false);
+    expect(toolchainFileChain(w).some((e) => e.startsWith('ENV:ASMLIFT_TOOL='))).toBe(false);
   });
 
   test('the file half is keyed by CONTENT, not by the absolute path it sits at', () => {

@@ -136,7 +136,7 @@ winner by rescoring captured objects, rather than recompiling CLI stdout.
 
 ```sh
 cd "$KLEOD"
-ASMLIFT_CANDCACHE=0 node "$REPO/packages/cli/dist/asmlift.mjs" \
+node "$REPO/packages/cli/dist/asmlift.mjs" \
   "$SCRATCH/upstream-gfx.s" --name sub_0804C484 \
   --config "$SCRATCH/kleod.yaml" --score-against "$SCRATCH/upstream-gfx.o" \
   --proto '{"thunk_HeapFree":{"params":1,"returnsVoid":true}}' \

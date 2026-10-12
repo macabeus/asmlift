@@ -65,6 +65,14 @@ function compileCandidateRaw(
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+/** The `specs` files GCC 2.7.2's driver reads, when they exist, after its own directory's: its
+ *  built-in search prefixes. */
+const HOST_SPECS = [
+  '/opt/cross/lib/gcc-lib/mips-mips-gnu/2.7.2/specs',
+  '/opt/cross/mips-mips-gnu/lib/mips-mips-gnu/2.7.2/specs',
+  '/opt/cross/mips-mips-gnu/lib/specs',
+  '/usr/lib/gcc/mips-mips-gnu/2.7.2/specs',
+];
 /** The candidate store's key for this pipeline at `cflags` (compile/docker-cache.ts). */
 export const gcc272CacheSpec = (cflags: readonly string[]): DockerCacheSpec => ({
   label: 'bench-gcc272',
@@ -77,6 +85,7 @@ export const gcc272CacheSpec = (cflags: readonly string[]): DockerCacheSpec => (
   prelude: '',
   hostCommands: [CPP],
   sources: [join(HERE, 'gcc272.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  hostFiles: HOST_SPECS,
   refused: gccRefused,
   gnuAs: true,
 });
