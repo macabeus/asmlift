@@ -3535,9 +3535,10 @@ function frameAddressesAtCalls(
 // (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question, and
 // `/setup-args` is not offered at a call that hands out such an escape (`lowerCall`'s
 // `withholdsSetupArgs`), since this definition read every argument register it holds as handed
-// over. Elsewhere that a value an EARLIER block left is dead is the whole guess of that reading, and
-// agbcc does leave a dead `mov r3, sp` base in a call's argument registers (sa3 sub_805DADC). Those
-// cuts are asked of the lifted IR instead: the reading is withheld where the cut leaves the object
+// over; at the function's other calls the reading asks `leftOut` of every register it cuts
+// (`asksEveryCut`), an earlier block's frame address included. Elsewhere that a value an EARLIER
+// block left is dead is the whole guess of that reading, and agbcc does leave a dead `mov r3, sp`
+// base in a call's argument registers (sa3 sub_805DADC). Those cuts are asked of the lifted IR instead: the reading is withheld where the cut leaves the object
 // it addresses with no reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
@@ -5266,6 +5267,14 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
     // same bytes), as it does with four parameters.
     withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
+    // …AND AT EVERY OTHER CALL OF A FUNCTION WHOSE VERDICT LEANED ON AN ESCAPE, the reading asks
+    // `leftOut` of every register it cuts, not only of those this block wrote. The verdict read every
+    // argument register as possibly handed over, so a frame address an EARLIER block left there is
+    // not the dead base the reading guesses at: `g(b, s)` escapes, then `&t` formed before a branch
+    // reaches `if (a) h(b, a, t); else *q = t[0];` in r2, and the cut `h(b, a)` would drop it while
+    // the else arm still reads `t`. The question refuses only frame addresses, so a call that cuts
+    // none (a sibling `f2()`) still narrows.
+    asksEveryCut: () => frame.escapesReliedOn.size > 0,
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),

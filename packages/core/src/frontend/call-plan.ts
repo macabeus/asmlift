@@ -143,6 +143,10 @@ export interface CallSite {
   /** whether the frontend withholds the shorter `/setup-args` reading from THIS CALL whatever it
    *  cuts; the frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
   readonly withholdsSetupArgs?: () => boolean;
+  /** whether the shorter `/setup-args` reading of this call asks `leftOut` of EVERY register it
+   *  cuts, not only of those the call's own block wrote (`GuessedCallSite.asksEveryCut`); the
+   *  frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
+  readonly asksEveryCut?: () => boolean;
 }
 
 /** A call through a register. It names no callee, so no declaration plans it: an argument
@@ -643,6 +647,7 @@ export function callDeclarations(
                 kept,
               ),
         site.withholdsSetupArgs,
+        site.asksEveryCut,
       );
     }
     if (p.declaredVoid) {

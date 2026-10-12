@@ -300,6 +300,50 @@ describe('a frame address an earlier block left in a register the narrower readi
     expect(cs.every((c) => call.test(c.source))).toBe(true);
   });
 
+  // `void f(int a, int b, int *q) { int s[3]; char t[16]; s[0] = a; s[1] = b; g(b, s); t[0] = a;
+  // t[1] = b; t[2] = 0; if (a) h(b, a, t); else *q = t[0]; }` — the escape is at g, a call whose own
+  // block passes it. h's block writes only r0 and r1; `&t` reaches it in r2 from the block before
+  // the branch, and the else arm reads t too, so the IR cannot tell the cut from a dead store base.
+  // The verdict still read every argument register as handed over, so the reading asks of r2 too.
+  test('is kept in every candidate at a later call of a function whose verdict leaned on an escape', () => {
+    const later = [
+      'f:',
+      '\tpush\t{r4, r5, r6, lr}',
+      '\tadd\tsp, sp, #-0x1c',
+      '\tadd\tr5, r0, #0',
+      '\tadd\tr4, r1, #0',
+      '\tadd\tr6, r2, #0',
+      '\tstr\tr5, [sp]',
+      '\tstr\tr4, [sp, #0x4]',
+      '\tadd\tr0, r4, #0',
+      '\tmov\tr1, sp',
+      '\tbl\tg',
+      '\tadd\tr2, sp, #0xc',
+      '\tmov\tr0, #0x0',
+      '\tstrb\tr5, [r2]',
+      '\tstrb\tr4, [r2, #0x1]',
+      '\tstrb\tr0, [r2, #0x2]',
+      '\tcmp\tr5, #0',
+      '\tbeq\t.L3',
+      '\tadd\tr0, r4, #0',
+      '\tadd\tr1, r5, #0',
+      '\tbl\th',
+      '\tb\t.L4',
+      '.L3:',
+      '\tldrb\tr0, [r2]',
+      '\tstr\tr0, [r6]',
+      '.L4:',
+      '\tadd\tsp, sp, #0x1c',
+      '\tpop\t{r4, r5, r6}',
+      '\tpop\t{r0}',
+      '\tbx\tr0',
+      '',
+    ].join('\n');
+    const cs = enumerateCandidates('f', later, ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.every((c) => /\bh\(a1, a0, \(u32\)sp0 \+ 12\)/.test(c.source))).toBe(true);
+  });
+
   // CONTROL: an object something else reads is still the dead store base the narrower reading
   // guesses it may be (sa3 sub_805DADC: `mov r3, sp` as a store base, reloaded after the call), and
   // that reading is still offered beside the default.

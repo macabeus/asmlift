@@ -124,7 +124,8 @@ export interface SsaBuilder {
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
    *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
-   *  `passesCalleeResult`, `trimmed` and `withholdsSetupArgs`: see {@link GuessedCallSite}. */
+   *  `passesCalleeResult`, `trimmed`, `withholdsSetupArgs` and `asksEveryCut`: see
+   *  {@link GuessedCallSite}. */
   recordGuessedCall(
     op: Op,
     b: number,
@@ -132,6 +133,7 @@ export interface SsaBuilder {
     passesCalleeResult?: (result: Value) => boolean,
     trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
     withholdsSetupArgs?: () => boolean,
+    asksEveryCut?: () => boolean,
   ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -870,6 +872,7 @@ export function makeSsaBuilder(
       passesCalleeResult?: (result: Value) => boolean,
       trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
       withholdsSetupArgs?: () => boolean,
+      asksEveryCut?: () => boolean,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
@@ -878,6 +881,7 @@ export function makeSsaBuilder(
         passesCalleeResult,
         trimmed,
         withholdsSetupArgs,
+        asksEveryCut,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -1078,12 +1082,17 @@ export interface GuessedCallSite {
    *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
    *  second time. An unfresh cut is the trim's own proof; a fresh one went with a hole below it
    *  (see {@link trimClobberedCallArgs}), which proves nothing. The `/setup-args` reading asks it a
-   *  third time, of the cut registers the call's own block wrote, and a refusal there withholds that
-   *  reading for the site instead of declining. Absent where nothing is asked. */
+   *  third time, of the cut registers the call's own block wrote (of every one it cuts, where
+   *  `asksEveryCut`), and a refusal there withholds that reading for the site instead of declining.
+   *  Absent where nothing is asked. */
   trimmed?: (cut: readonly string[], kept: readonly string[]) => void;
   /** whether the frontend withholds the `/setup-args` reading from this site whatever it would cut
    *  (`CallSite.withholdsSetupArgs`). Absent where it does not. */
   withholdsSetupArgs?: () => boolean;
+  /** whether the `/setup-args` reading of this site asks `trimmed` of every register it cuts, an
+   *  earlier block's leftovers included ({@link narrowingKeepsFrameAddresses};
+   *  `CallSite.asksEveryCut`). Absent where it asks only of what the call's own block wrote. */
+  asksEveryCut?: () => boolean;
 }
 
 export interface CallArgTrim {
@@ -1384,9 +1393,17 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
  *  that guess — the block set it up for the call — so where it may hold a frame address the call
  *  passes, the cut would drop an argument. A refusal withholds this candidate for this site only;
  *  the default reading stands. A leftover the guess was wrong about is caught of the lifted IR
- *  instead, where the cut leaves the object it addresses unread ({@link cutsUnreadFrameObjects}). */
+ *  instead, where the cut leaves the object it addresses unread ({@link cutsUnreadFrameObjects}).
+ *
+ *  …AND EVERY REGISTER IT CUTS where the frontend says so (`GuessedCallSite.asksEveryCut`): a
+ *  function whose frame verdict reads every argument register a call holds as possibly handed
+ *  over, where a frame address an earlier block left is not the dead base this reading guesses at,
+ *  and the IR question cannot settle it when the object is read elsewhere too
+ *  (`if (a) h(b, a, t); else *q = t[0];` with `&t` left in r2). The question refuses only frame
+ *  addresses, so a call that cuts none still narrows. */
 function narrowingKeepsFrameAddresses(s: GuessedCallSite, argRegs: readonly string[], local: number): boolean {
-  const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => s.freshBefore.has(r));
+  const every = s.asksEveryCut?.() === true;
+  const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => every || s.freshBefore.has(r));
   if (s.trimmed === undefined || cut.length === 0) {
     return true;
   }
@@ -1484,7 +1501,8 @@ interface FrameAddress {
  *
  *  NOT ANSWERED HERE: a cut whose object is read elsewhere too. That leftover cannot be told from the
  *  sub_805DADC dead base, by the IR or by the register file, so it narrows, except where the frontend
- *  withholds the reading at that call (`GuessedCallSite.withholdsSetupArgs`). */
+ *  withholds the reading at that call (`GuessedCallSite.withholdsSetupArgs`) or asks the register
+ *  question of every cut there (`GuessedCallSite.asksEveryCut`). */
 function cutsUnreadFrameObjects(fn: Fn): Set<Op> {
   const def = defOpMap(fn);
   const memo = new Map<Value, FrameAddress | null>();
