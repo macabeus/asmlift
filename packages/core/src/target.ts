@@ -536,6 +536,29 @@ export interface TargetDescription {
     // producer a one-word frame does NOT exclude is a <=4-byte non-integer-like struct return,
     // which the post-lift audit settles per call rather than by size.
     oneWordFrameIsTheCapturedObject?: boolean;
+    // A frame address this function hands out — in an argument register at a call, or stored to
+    // memory — is the address of a LOCAL, so its receiver may read the frame from there up and no
+    // word from there up is a call's outgoing argument. Its one reader is the outgoing-argument
+    // analysis (`frontend/stackargs.ts`, the `escape` event): a store never reloaded HERE is read
+    // THERE. Absent ⇒ a handed-out frame address explains nothing.
+    //
+    // Set on agbcc, compiled at 2.9-arm-000512 and its canonical flags, and re-measurable from the
+    // committed probe (`scripts/regen-outgoing-area-probes.ts` → `test/corpus/agbcc-escape.s`, read
+    // by `frame-escape-probes.test.ts`). An address-taken local sits ABOVE the outgoing area
+    // (`f1`: `add r0, sp, #4` beside `h5(1,2,3,4,x)`), and at [sp,#0] only when no call in the
+    // function takes a stack word (`f0`).
+    //
+    // Its RESIDUE is a by-value struct argument's block copy (`mov r0, sp` / `add r0, sp, #4`, then
+    // `bl memcpy`), whose base IS the outgoing area. agbcc stages a call's outgoing words in
+    // ASCENDING offset order, the copy included (`qh5`, `a2`, `a3`): a word staged before the copy
+    // lies below its base, and one staged after it is still pending at the call. That is why the
+    // event ends pending words PER PROGRAM POINT and only from its offset up — read
+    // flow-insensitively, it would set aside `qh5`'s fifth `h5` word and lift `h5(1, 2, 3, 4)`. The
+    // cost is false alarms that decline loud (`if (x) gt(&s); else h(y);`); where the analysis also
+    // reads the event whole-function, it only refuses or excuses a word no call takes
+    // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, sound only
+    // where no block copy fits.
+    escapedFrameAddressNamesALocal?: boolean;
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
     // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
@@ -985,6 +1008,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
+    // compiled: the committed probe `test/corpus/agbcc-escape.s` (`scripts/regen-outgoing-area-probes.ts`)
+    escapedFrameAddressNamesALocal: true,
     // agbcc's `*call_indirect` and `*call_value_indirect` emit `bl _call_via_%0` (gcc/thumb.md:997-1021),
     // and libgcc defines `_call_via_<reg>` as `bx <reg>` for r0-r9, sl, fp, ip, sp and lr
     // (libgcc/lib1thumb.asm:595-633). Neither `sp` (the frame) nor `lr` (which the `bl` itself

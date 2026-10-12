@@ -124,12 +124,16 @@ export interface SsaBuilder {
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
    *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
-   *  `passesCalleeResult`: see {@link GuessedCallSite}. */
+   *  `passesCalleeResult`, `trimmed`, `withholdsSetupArgs` and `asksEveryCut`: see
+   *  {@link GuessedCallSite}. */
   recordGuessedCall(
     op: Op,
     b: number,
     abi: { argRegs: string[]; returnReg: string },
     passesCalleeResult?: (result: Value) => boolean,
+    trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
+    withholdsSetupArgs?: () => boolean,
+    asksEveryCut?: () => boolean,
   ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -866,12 +870,18 @@ export function makeSsaBuilder(
       b: number,
       abi: { argRegs: string[]; returnReg: string },
       passesCalleeResult?: (result: Value) => boolean,
+      trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
+      withholdsSetupArgs?: () => boolean,
+      asksEveryCut?: () => boolean,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
         block: b,
         op,
         passesCalleeResult,
+        trimmed,
+        withholdsSetupArgs,
+        asksEveryCut,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -1068,6 +1078,21 @@ export interface GuessedCallSite {
   /** which earlier callee's result in the return register is an argument here, not a leftover:
    *  the site's lowering says so ({@link SsaBuilder.recordGuessedCall}). Absent where none is. */
   passesCalleeResult?: (result: Value) => boolean;
+  /** handed the FRESH argument registers the trim cuts from this site's guess, and the ones it
+   *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
+   *  second time. An unfresh cut is the trim's own proof; a fresh one went with a hole below it
+   *  (see {@link trimClobberedCallArgs}), which proves nothing. The `/setup-args` reading asks it a
+   *  third time, of the cut registers the call's own block wrote (of every one it cuts, where
+   *  `asksEveryCut`), and a refusal there withholds that reading for the site instead of declining.
+   *  Absent where nothing is asked. */
+  trimmed?: (cut: readonly string[], kept: readonly string[]) => void;
+  /** whether the frontend withholds the `/setup-args` reading from this site whatever it would cut
+   *  (`CallSite.withholdsSetupArgs`). Absent where it does not. */
+  withholdsSetupArgs?: () => boolean;
+  /** whether the `/setup-args` reading of this site asks `trimmed` of every register it cuts, an
+   *  earlier block's leftovers included ({@link narrowingKeepsFrameAddresses};
+   *  `CallSite.asksEveryCut`). Absent where it asks only of what the call's own block wrote. */
+  asksEveryCut?: () => boolean;
 }
 
 export interface CallArgTrim {
@@ -1315,6 +1340,12 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     const fresh = s.afterCallInBlock ? s.freshBefore : new Set([...freshIn[s.block], ...s.freshBefore]);
     const n = argcAt(s, fresh);
     if (n < callArgs(s.op).length) {
+      // only the FRESH ones: an unfresh register is the trim's proof (a path reaches here with
+      // nothing set up in it since a call), a fresh one went with a hole below it
+      s.trimmed?.(
+        argRegs.slice(n, callArgs(s.op).length).filter((r) => fresh.has(r)),
+        argRegs.slice(0, n),
+      );
       truncateCallArgs(s.op, n);
     }
     // The SHORTER arity the same evidence also allows, recorded for {@link narrowToSetupArgs}: the
@@ -1335,12 +1366,55 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     const localFresh =
       setsUpLater(s.freshBefore) || (passed && !dropsPassed) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
-    if (local < callArgs(s.op).length) {
+    if (
+      local < callArgs(s.op).length &&
+      s.withholdsSetupArgs?.() !== true &&
+      narrowingKeepsFrameAddresses(s, argRegs, local)
+    ) {
       setupArgc.set(s.op, local);
       if (local === 0 && dropsPassed) {
         discardsPassedResult.add(s.op);
       }
     }
+  }
+}
+
+/** Whether the narrower reading of `s` ({@link narrowToSetupArgs}, cutting it to `local` arguments)
+ *  passes the lowering's `CallSite.leftOut` question too (`GuessedCallSite.trimmed`). That reading
+ *  is applied in the ranker AFTER the lift and its frame audit, so nothing downstream re-asks it: a
+ *  register it cuts can hold a frame address set up in the call's own block (`mov r2, sp`) above an
+ *  argument that came from an earlier one, and the cut lifts `g(a, b, s)` as `g(a)`, leaving the
+ *  stores to `s` dead.
+ *
+ *  ONLY WHAT THE CALL'S OWN BLOCK WROTE is asked (`freshBefore`). That a value an earlier block left
+ *  in a register is dead is this reading's whole guess, and a frame address is no exception: agbcc
+ *  keeps `mov r3, sp` as a store base across blocks and calls `TransformSprite(s, t)` with it still
+ *  in r3 (sa3 sub_805DADC), where the cut is the right arity. A register this block wrote is not
+ *  that guess — the block set it up for the call — so where it may hold a frame address the call
+ *  passes, the cut would drop an argument. A refusal withholds this candidate for this site only;
+ *  the default reading stands. A leftover the guess was wrong about is caught of the lifted IR
+ *  instead, where the cut leaves the object it addresses unread ({@link cutsUnreadFrameObjects}).
+ *
+ *  …AND EVERY REGISTER IT CUTS where the frontend says so (`GuessedCallSite.asksEveryCut`): a
+ *  function whose frame verdict reads every argument register a call holds as possibly handed
+ *  over, where a frame address an earlier block left is not the dead base this reading guesses at,
+ *  and the IR question cannot settle it when the object is read elsewhere too
+ *  (`if (a) h(b, a, t); else *q = t[0];` with `&t` left in r2). The question refuses only frame
+ *  addresses, so a call that cuts none still narrows. */
+function narrowingKeepsFrameAddresses(s: GuessedCallSite, argRegs: readonly string[], local: number): boolean {
+  const every = s.asksEveryCut?.() === true;
+  const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => every || s.freshBefore.has(r));
+  if (s.trimmed === undefined || cut.length === 0) {
+    return true;
+  }
+  try {
+    s.trimmed(cut, argRegs.slice(0, local));
+    return true;
+  } catch (e) {
+    if (e instanceof FrontendUnsupportedError) {
+      return false;
+    }
+    throw e;
   }
 }
 
@@ -1379,9 +1453,157 @@ export function setupArgsDiscardsPassedResult(fn: Fn): boolean {
 
 /** Whether anything in `fn` HAS the narrower reading — the variation's gate, so the ~99% of functions
  *  with no narrowable call cost no re-lift. Read it off the lift itself: a later pipeline stage may
- *  replace a `call` op (softdiv rewrites one to a division), and the table is keyed by op. */
+ *  replace a `call` op (softdiv rewrites one to a division), and the table is keyed by op. A call
+ *  {@link cutsUnreadFrameObjects} withholds has none. */
 export function hasSetupArgsNarrowing(fn: Fn): boolean {
-  return fn.blocks.some((b) => b.ops.some((op) => setupArgc.has(op)));
+  if (!fn.blocks.some((b) => b.ops.some((op) => setupArgc.has(op)))) {
+    return false;
+  }
+  const withheld = cutsUnreadFrameObjects(fn);
+  return fn.blocks.some((b) => b.ops.some((op) => setupArgc.has(op) && !withheld.has(op)));
+}
+
+/** A frame address in the lifted IR: a `laddr`'s offset plus the constants added to it. `exact` is
+ *  false once a term that is not a constant was added (`&buf[i]`), and `off` is then the address
+ *  that term was added to. `end` is where the `laddr`'s storage ends. */
+interface FrameAddress {
+  readonly off: number;
+  readonly exact: boolean;
+  readonly end: number;
+}
+
+/** The calls whose `/setup-args` reading cuts the address of a frame object nothing else in `fn`
+ *  reads, under that reading — which is then withheld for that call, the default reading standing.
+ *
+ *  THE QUESTION THE IR CAN ANSWER of a frame address an earlier block left in a register the reading
+ *  cuts. That such a leftover is dead is the reading's whole guess, and agbcc does leave a dead
+ *  `mov r3, sp` store base in a call's argument registers (sa3 sub_805DADC, which reloads the
+ *  object after the call). Where the leftover was an argument after all, cutting it leaves the
+ *  object's stores with no reader: `if (a) g(b, s)` with `s` left in r1 by the entry block lifts as
+ *  `g(a1)` beside `s[0] = a0; s[1] = a1;`, which nothing reads. A source that compiled to those stores
+ *  read the object somewhere, so a cut that leaves it unread drops an argument. The register file
+ *  cannot tell the two leftovers apart; the object's readers can.
+ *
+ *  A READER is any use of an address into the object but the address operand of a store into it
+ *  and an argument the narrower reading cuts — a load, an address stored or returned or carried
+ *  to another block, an argument some call still passes. The other calls are read under the same
+ *  narrowing, since the ranker applies it to every call at once.
+ *
+ *  THE OBJECT is the span between the offsets the function forms addresses at or accesses. Where the
+ *  frame audit sized one `laddr` over two source objects (an escaped `sp+k`, which excuses every word
+ *  from k up), the address the compiler formed for the second one (`add r2, sp, #0xc`) is where it
+ *  starts: `int s[3]; char t[16]; ... if (a) g(b, s, t)` cut to `g(a1, sp0)` leaves `t` unread
+ *  though `sp0` is passed. An access's offset counts as well, because the lift folds a formed
+ *  `add r4, sp, #8` into the offsets of the loads and stores through r4, so the `laddr` they share
+ *  no longer says where the second object starts. Splitting finer only withholds more. A load or
+ *  argument at an offset reads the span it falls in. An address with a term that is not a constant
+ *  reads its base's span: an index stays inside the object its base addresses.
+ *
+ *  NOT ANSWERED HERE: a cut whose object is read elsewhere too. That leftover cannot be told from the
+ *  sub_805DADC dead base, by the IR or by the register file, so it narrows, except where the frontend
+ *  withholds the reading at that call (`GuessedCallSite.withholdsSetupArgs`) or asks the register
+ *  question of every cut there (`GuessedCallSite.asksEveryCut`). */
+function cutsUnreadFrameObjects(fn: Fn): Set<Op> {
+  const def = defOpMap(fn);
+  const memo = new Map<Value, FrameAddress | null>();
+  const frameAddress = (v: Value): FrameAddress | null => {
+    if (memo.has(v)) {
+      return memo.get(v)!;
+    }
+    memo.set(v, null); // a cycle through a phi's operands is no frame address
+    const d = def.get(v);
+    let r: FrameAddress | null = null;
+    if (d?.opcode === 'laddr') {
+      const off = d.attrs.off as number;
+      r = { off, exact: true, end: off + (d.attrs.width as number) * (d.attrs.count as number) };
+    } else if ((d?.opcode === 'add' || d?.opcode === 'sub') && d.operands.length === 2) {
+      const konst = (x: Value): number | undefined => {
+        const k = def.get(x);
+        return k?.opcode === 'const' && typeof k.attrs.value === 'number' ? k.attrs.value : undefined;
+      };
+      const [x, y] = d.operands;
+      const fx = frameAddress(x);
+      const fy = d.opcode === 'add' ? frameAddress(y) : null; // `k - &s` is no address
+      const base = fx === null ? fy : fy === null ? fx : null;
+      if (base !== null) {
+        const k = konst(fx === null ? x : y);
+        r =
+          k === undefined || !base.exact
+            ? { ...base, exact: false }
+            : { ...base, off: d.opcode === 'add' ? base.off + k : base.off - k };
+      }
+    }
+    memo.set(v, r);
+    return r;
+  };
+  const bounds = new Set<number>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const r of op.results) {
+        frameAddress(r);
+      }
+      const at = op.opcode === 'load' || op.opcode === 'store' ? frameAddress(op.operands[0]) : null;
+      if (at?.exact) {
+        bounds.add(at.off + (op.attrs.off as number)); // an access's offset (see THE OBJECT)
+      }
+    }
+  }
+  for (const a of memo.values()) {
+    if (a !== null) {
+      bounds.add(a.end);
+      if (a.exact) {
+        bounds.add(a.off);
+      }
+    }
+  }
+  const sorted = [...bounds].sort((x, y) => x - y);
+  /** the span an access at `a` (plus `extra` bytes) reads — see THE OBJECT above */
+  const span = (a: FrameAddress, extra = 0): [number, number] => {
+    const at = a.off + extra;
+    const lo = sorted.filter((x) => x <= at).pop() ?? at;
+    const hi = sorted.find((x) => x > at) ?? a.end;
+    return [lo, Math.max(hi, lo + 1)];
+  };
+  const reads: [number, number][] = [];
+  const cuts = new Map<Op, [number, number][]>();
+  const read = (v: Value, extra = 0): void => {
+    const a = frameAddress(v);
+    if (a !== null) {
+      reads.push(span(a, extra));
+    }
+  };
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      if ((op.opcode === 'add' || op.opcode === 'sub') && frameAddress(op.results[0]) !== null) {
+        continue; // a derivation: its result's uses are the ones that read
+      }
+      const args = op.opcode === 'call' ? callArgs(op) : [];
+      const keep = setupArgc.get(op) ?? args.length;
+      op.operands.forEach((v, i) => {
+        if ((op.opcode === 'store' || op.opcode === 'astore') && i === 0) {
+          return;
+        }
+        if (op.opcode === 'call' && i >= keep && i < args.length) {
+          const a = frameAddress(v);
+          if (a !== null) {
+            cuts.set(op, [...(cuts.get(op) ?? []), span(a)]);
+          }
+          return;
+        }
+        read(v, op.opcode === 'load' && i === 0 ? (op.attrs.off as number) : 0);
+      });
+      for (const s of op.successors) {
+        s.args.forEach((v) => read(v));
+      }
+    }
+  }
+  const withheld = new Set<Op>();
+  for (const [op, spans] of cuts) {
+    if (spans.some(([lo, hi]) => !reads.some(([rlo, rhi]) => rlo < hi && rhi > lo))) {
+      withheld.add(op);
+    }
+  }
+  return withheld;
 }
 
 /** Cut every guessed call to the arity its OWN BLOCK set up, and report whether anything moved.
@@ -1399,8 +1621,13 @@ export function hasSetupArgsNarrowing(fn: Fn): boolean {
  *  Applies only to arities that were GUESSED — a declared prototype never recorded the fact. */
 export function narrowToSetupArgs(fn: Fn): boolean {
   let changed = false;
+  const withheld = cutsUnreadFrameObjects(fn);
   for (const b of fn.blocks) {
     for (const op of b.ops) {
+      if (withheld.has(op)) {
+        setupArgc.delete(op);
+        discardsPassedResult.delete(op);
+      }
       const setup = setupArgc.get(op);
       if (setup !== undefined && setup < callArgs(op).length) {
         truncateCallArgs(op, setup);

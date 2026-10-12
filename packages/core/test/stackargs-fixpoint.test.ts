@@ -12,6 +12,8 @@ import { type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from '.
 type Ev = StackArgsEvent<string>;
 const st = (off: number): Ev => ({ kind: 'store', off });
 const ld = (off: number): Ev => ({ kind: 'load', off });
+/** The frame address `sp + off` handed to a callee or stored to memory. */
+const esc = (off: number): Ev => ({ kind: 'escape', off });
 /** A call taking `n` stack words; `n` 0 means nothing declares it (indirect, or no prototype). */
 const call = (name: string, n: number): Ev => ({
   kind: 'call',
@@ -271,6 +273,69 @@ describe('the contiguity filter, and the frames that refuse outright', () => {
   test('a captured one-word frame with no declared 5th argument still lifts', () => {
     const r = run(line([st(0), call('one', 0)]), chain(1), 4, true);
     expect(r).toEqual({ blocker: null, blocks: new Map(), area: 0 });
+  });
+});
+
+describe('an escaped frame address is read by its receiver, from that address up', () => {
+  // sa3's `sub_8060940`: a 40-byte local filled word by word, `str r4, [sp]` last, then `mov r0, sp`
+  // handed to the call. Every store is the object being filled for the callee that is handed it.
+  test('the words an escape hands over are not pending at the call that receives them', () => {
+    const r = run(line([st(4), st(0x1c), st(0), esc(0), call('use', 0)]), chain(1), 0x28);
+    expect(r).toEqual({ blocker: null, blocks: new Map(), area: 0 });
+  });
+
+  // kleod's `sub_0804C60C`: the escape is a store of the address to a device register, after the
+  // last call, so the word is pending nowhere and is read by the device — (a)'s false alarm.
+  test('…and a word published after the last call is read by the device', () => {
+    expect(run(line([call('get', 0), st(0), esc(0)]), chain(1), 8).blocker).toBeNull();
+  });
+
+  test('a store that reaches a call BEFORE the escape is still that call’s candidate argument', () => {
+    const r = run(line([st(0), call('five', 0), esc(0), call('use', 0)]), chain(1), 8);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl five` unread/);
+  });
+
+  // agbcc's `th(*p); h5(1, 2, 3, 4, x)` with a 13-word struct: `mov r0, sp` is `memcpy`'s
+  // destination, the block-copy base of `th`'s argument, and `h5`'s fifth word is staged after.
+  test('a word staged after the escape is pending at the next call, as before', () => {
+    const r = run(line([esc(0), call('memcpy', 0), call('th', 0), st(0), call('h5', 0)]), chain(1), 0x34);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl h5` unread/);
+  });
+
+  test('a declared block at or above an escaped address names one word twice, and refuses', () => {
+    const r = run(line([esc(0), call('memcpy', 0), call('th', 0), st(0), call('h5', 1)]), chain(1), 0x34);
+    expect(r.blocker).toMatch(
+      /callee `h5` is declared with 5 arguments, so \[sp,#0\] is its outgoing stack argument — but the frame address \[sp,#0\] escapes/,
+    );
+  });
+
+  // agbcc's `g(&s); return h5(1, 2, 3, 4, x)`: the local moves ABOVE the area, `add r0, sp, #4`,
+  // and the word at [sp,#8] (`s.b`) is the object's, not a sixth argument.
+  test('an escape above the declared block lets the block and the object coexist', () => {
+    const r = run(line([st(4), st(8), esc(4), call('g', 0), st(0), call('h5', 1)]), chain(1), 0x10);
+    expect(r.blocker).toBeNull();
+    expect(r.blocks.get('h5')).toEqual([0]);
+  });
+
+  // The receiver MAY read the words; a survivor bound is a proof that a word held a value across a
+  // call, and a may-read cannot supply one. Counted as a load, this escape would put the bound at 0
+  // and excuse the word staged for `five`.
+  test('an escape proves no word survived a call', () => {
+    const r = run(line([st(0), call('five', 0), esc(0), call('use', 0)]), chain(1), 8);
+    expect(r.blocker).not.toBeNull();
+  });
+
+  test('an escape in a dead block reads nothing', () => {
+    const r = analyzeOutgoingArgs<string>({
+      blocks: [blk([st(0), call('five', 0)]), blk([esc(0)])],
+      preds: [[], [0]],
+      live: new Set([0]),
+      localArea: 8,
+      argRegs: 4,
+      capturedWholeFrame: false,
+      localsAboveOutgoingArea: true,
+    });
+    expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
   });
 });
 

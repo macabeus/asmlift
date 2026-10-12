@@ -135,6 +135,18 @@ export interface CallSite {
     /** refuses a guess of `argc` words this ABI's outgoing area could extend */
     refuse(argc: number): void;
   };
+  /** handed the argument registers an UNDECLARED arity leaves out although a value reaches them —
+   *  past a guessed count, or past the bound of a call through an argument register — and the ones
+   *  it passes. The call drops what the left-out ones hold, so a frontend that knows one to be an
+   *  argument all the same refuses here. */
+  readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
+  /** whether the frontend withholds the shorter `/setup-args` reading from THIS CALL whatever it
+   *  cuts; the frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
+  readonly withholdsSetupArgs?: () => boolean;
+  /** whether the shorter `/setup-args` reading of this call asks `leftOut` of EVERY register it
+   *  cuts, not only of those the call's own block wrote (`GuessedCallSite.asksEveryCut`); the
+   *  frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
+  readonly asksEveryCut?: () => boolean;
 }
 
 /** A call through a register. It names no callee, so no declaration plans it: an argument
@@ -497,6 +509,19 @@ export function callDeclarations(
     if (widths === null) {
       guess?.refuse(argc);
     }
+    // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
+    // count, or past the bound a call through an argument register sets, that a value reaches.
+    // Where the frontend states `guess`, the gap refusal has already fired on any such register
+    // past a guess; otherwise the register leaves the call silently, and the frontend says whether
+    // it knows that one to be an argument all the same.
+    if (site.leftOut !== undefined && (widths === null || bound >= 0)) {
+      site.leftOut(
+        target.argRegs
+          .slice(argc)
+          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => !highHalves?.has(v))),
+        target.argRegs.slice(0, argc),
+      );
+    }
     // ARGUMENT WORD `k`: a register, or past the registers the word the frontend's ABI places
     // there. A guess never exceeds `argRegs.length`, so a stack word can only come from a stated
     // width.
@@ -602,8 +627,28 @@ export function callDeclarations(
     // to an unprototyped type, so a dropped argument would never be refused, and `p(g())` would lift
     // as `g(); p();`, which compiles to the same bytes. Kept, it lifts as `p(g())`, which passes what
     // the machine passes — unless `g` is declared void, and its result names nothing.
+    //
+    // …AND WHAT THE TRIM CUTS IS LEFT OUT TOO, so the frontend is asked the `leftOut` question of it
+    // as well: a guess of four the check above passed can still lose a frame address in r2 when
+    // the trim cuts it back to the run below an unfresh r1 (`v = f64(); g(v, &s)` with neither
+    // declared, which otherwise lifts as `g(v)`).
     if (widths === null) {
-      ssa.recordGuessedCall(call, bi, target, indirect === undefined ? undefined : (r) => !voidResults.has(r));
+      const leftOut = site.leftOut;
+      ssa.recordGuessedCall(
+        call,
+        bi,
+        target,
+        indirect === undefined ? undefined : (r) => !voidResults.has(r),
+        leftOut === undefined
+          ? undefined
+          : (cut, kept) =>
+              leftOut(
+                cut.filter((r) => r !== indirect?.reg),
+                kept,
+              ),
+        site.withholdsSetupArgs,
+        site.asksEveryCut,
+      );
     }
     if (p.declaredVoid) {
       voidResults.add(res);

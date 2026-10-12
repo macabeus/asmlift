@@ -337,3 +337,53 @@ describe('a source read reaches the frame bytes its walk and unit say', () => {
     expect(sourceReach(blockTransferRead(CpuSet, 0x04000002), 2)).toEqual({ lo: -2, hi: 8 });
   });
 });
+
+// THE ESCAPE EVENT'S PREMISE, RE-ASKED OF THE IR. The frontend's outgoing-argument verdict leaned on
+// `sp + off` escaping (`escapesReliedOn`), so the lifted function must hand that address to a call
+// or publish it outside the frame; an arity that shrank after the event was read leaves it nowhere.
+describe('an escape the outgoing-argument verdict leans on is re-proven', () => {
+  const run = (blk: Block, escapesReliedOn: ReadonlySet<number>) =>
+    auditFrameObjects({
+      name: 'f',
+      irBlocks: [blk],
+      ownedLocals: { from: 0, to: 12 },
+      declaredLocals: { from: 0, to: 12 },
+      usedSlotOffsets: new Set(),
+      capturedObjectIsTheWholeFrame: false,
+      escapesReliedOn,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      symbols: undefined,
+      target: ARMV4T_AGBCC,
+    });
+  const stored = (passed: boolean): Block => {
+    const a = mkValue(T.unk(32));
+    const v = mkValue(T.unk(32));
+    return {
+      params: [v],
+      ops: [
+        mkOp('laddr', { results: [a], attrs: { off: 0 } }),
+        mkOp('store', { operands: [a, v], attrs: { off: 0, width: 1 } }),
+        mkOp('call', { operands: passed ? [a] : [v], attrs: { target: 'g' } }),
+        mkOp('ret'),
+      ],
+    };
+  };
+
+  test('the address handed to the call passes', () => {
+    expect(() => run(stored(true), new Set([0]))).not.toThrow();
+  });
+
+  test('the address no call takes declines', () => {
+    expect(() => run(stored(false), new Set([0]))).toThrow(
+      /set aside the stores from \[sp,#0\] up on that address escaping, and in the lifted function no call takes it/,
+    );
+  });
+
+  test('with no capture left in the IR at all it declines too', () => {
+    const v = mkValue(T.unk(32));
+    const blk: Block = { params: [v], ops: [mkOp('call', { operands: [v], attrs: { target: 'g' } }), mkOp('ret')] };
+    expect(() => run(blk, new Set([0]))).toThrow(/no call takes it/);
+    expect(run(blk, new Set())).toBeUndefined();
+  });
+});

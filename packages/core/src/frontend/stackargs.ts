@@ -15,11 +15,24 @@
  *  that matter — a sub-word or register-offset access is not a slot, and one anywhere turns the
  *  whole word-slot model off at the same gate this analysis's `blocker` feeds, so no access that
  *  could alias a licensed word is ever silently missing from the events. */
-export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C>;
+export type StackArgsEvent<C> = StackArgsSlot | StackArgsCall<C> | StackArgsEscape;
 
 /** A whole-word access to a reserved frame slot at `off`, which must lie inside `[0, localArea)`. */
 export interface StackArgsSlot {
   readonly kind: 'store' | 'load';
+  readonly off: number;
+}
+
+/** A frame address `sp + off` LEAVING this function — in an argument register at a call, or stored
+ *  to memory a device or another function reads. Its receiver may read the frame from `off` up, so
+ *  a word there that this function stored and never reloads has been read, by the receiver.
+ *
+ *  Emitted only under `compilerBehaviors.escapedFrameAddressNamesALocal`: that premise is what
+ *  makes the words from `off` up a local's rather than an argument area's. It ends only what is
+ *  pending WHERE it fires, never a word staged after it, and the field says why that is the safe
+ *  reading of a whole-function layout fact (a block copy's base escapes too). */
+export interface StackArgsEscape {
+  readonly kind: 'escape';
   readonly off: number;
 }
 
@@ -82,6 +95,7 @@ export interface OutgoingArgs<C> {
 }
 
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
+const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
 
 /** THE LOWEST FRAME WORD THAT SURVIVES A CALL, or `Infinity` when none does. A word LOADED on some
  *  path out of a live call before anything re-stores it held a value across that call. Under
@@ -91,7 +105,9 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
  *
  *  A backward liveness over the live blocks: a load makes its offset live, a store kills it, and a
  *  call is transparent — a word read after two calls survived both. Dead blocks contribute nothing:
- *  a load that cannot run proves nothing, and a call that cannot run is not a call it survived. */
+ *  a load that cannot run proves nothing, and a call that cannot run is not a call it survived.
+ *  An ESCAPE is transparent too: its receiver MAY read the words, and a bound is a proof, which a
+ *  read that may not happen cannot supply. */
 function survivorBound<C>(
   blocks: readonly StackArgsBlock<C>[],
   succs: readonly (readonly number[])[],
@@ -114,7 +130,7 @@ function survivorBound<C>(
           }
         } else if (ev.kind === 'load') {
           cur.add(ev.off);
-        } else {
+        } else if (ev.kind === 'store') {
           cur.delete(ev.off);
         }
       }
@@ -242,6 +258,9 @@ export function analyzeOutgoingArgs<C>({
   // that computes it owns which escapes qualify. A declared fifth argument says [sp,#0] is a
   // DIFFERENT callee's argument slot. Two contradictory claims about the same word, and nothing
   // here can decide which to believe, so the honest answer is the decline it has always been.
+  // This is the flow-INSENSITIVE reading of an escape, sound only at one word; the `escape` event
+  // is the per-program-point reading of the same escapes at any frame size, and its contradiction
+  // with a declared block is the "ESCAPED ADDRESS AT OR BELOW A LICENSED WORD" refusal below.
   if (capturedWholeFrame) {
     for (const ev of calls) {
       const offs = ev.declared;
@@ -332,9 +351,18 @@ export function analyzeOutgoingArgs<C>({
           may.add(ev.off);
           must.add(ev.off);
           stored.add(ev.off);
-        } else {
+        } else if (ev.kind === 'load') {
           may.delete(ev.off);
           must.delete(ev.off);
+        } else {
+          // the receiver of the escaped address reads what it was handed, so those words stop
+          // being pending exactly as a reload would end them
+          for (const o of everySlot) {
+            if (o >= ev.off) {
+              may.delete(o);
+              must.delete(o);
+            }
+          }
         }
       }
       const grow = (out: Array<Set<number>>, cur: Set<number>): void => {
@@ -400,6 +428,24 @@ export function analyzeOutgoingArgs<C>({
       licensed.add(o);
     }
   }
+  // An ESCAPED ADDRESS AT OR BELOW A LICENSED WORD — the one-word captured frame's contradiction,
+  // at any frame size. The escape names the words from its offset up as an object's, a licensed
+  // block names one of them as a callee's argument, and nothing here can decide which to believe.
+  // Under agbcc the two never meet (an address-taken local sits ABOVE the outgoing area, and at
+  // [sp,#0] only when no call takes a stack word), so a function that has both is not agbcc's
+  // layout and declines.
+  const escapes = [...live].flatMap((b) => asmBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : [])));
+  const lowestEscape = Math.min(Infinity, ...escapes);
+  for (const ev of calls) {
+    const offs = blocks.get(ev.call) ?? [];
+    const clash = offs.find((o) => o >= lowestEscape);
+    if (clash !== undefined) {
+      return refuse(
+        `callee \`${ev.callee}\` is declared with ${declaredAs(ev, offs)}, so [sp,#${clash}] is its outgoing stack argument — ` +
+          `but the frame address [sp,#${lowestEscape}] escapes this function, so the words from there up are an object's, and the two name the same word`,
+      );
+    }
+  }
   // The two whole-function facts the next two refusals read: every offset live code stores, and
   // every offset live code loads back. A reload in dead code is not evidence that anything reads
   // the slot back, so it does not count.
@@ -407,9 +453,24 @@ export function analyzeOutgoingArgs<C>({
   const stores = new Set<number>();
   for (const b of live) {
     for (const ev of asmBlocks[b].events) {
-      if (ev.kind !== 'call') {
+      if (isSlotEvent(ev)) {
         (ev.kind === 'store' ? stores : reloaded).add(ev.off);
       }
+    }
+  }
+  // …and a word an escaped address hands over is read by its receiver, which is a reload for (a):
+  // its never being read back HERE is explained by who reads it THERE.
+  //
+  // WHOLE-FUNCTION, unlike the pending sets above: a store after the last escape, or on a path
+  // that never escapes, is excused here too. That is sound because (a) is not what clears a word
+  // for a call. A word that is some call's argument reaches that call pending, and the licence's
+  // equality (a declared callee) or (b) (an undeclared one) refuses it there, per program point:
+  // `qh5`'s fifth `h5` word, staged after its memcpy base escapes, is refused by (b). What this
+  // widening lets through is a store that reaches no call pending with its lower slots supplied,
+  // which by CONTIGUITY (above) no call takes as an argument.
+  for (const o of everySlot) {
+    if (o >= lowestEscape) {
+      reloaded.add(o);
     }
   }
   const storedAnywhere = belowBound(stores);

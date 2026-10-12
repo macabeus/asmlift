@@ -50,7 +50,7 @@ import {
   mintArgSlotHoles,
   stackSlotKey,
 } from './ssa';
-import { type OutgoingArgs, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
+import { type OutgoingArgs, type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
 
 interface Instr {
   /** the CANONICAL spelling — legacy names are normalised (see LEGACY_MNEMONICS) so that every
@@ -651,9 +651,11 @@ const stackArgIndex = (key: string): number | null => {
 // so the callee reads them at `[sp, #N]` where N is at or above its own frame. Those are
 // PARAMETERS, not locals — declining them as "sp used as data" refuses a calling convention.
 //
-// The frame depth is tracked by a linear walk of the ENTRY BLOCK only, which is
-// why the gate is what it is: within one straight-line block the depth at each instruction is
-// exact and needs no CFG reasoning. Every case that would need more declines.
+// The frame depth is tracked by a linear walk of ONE BLOCK, from a depth that is exact where the
+// block starts: 0 at the entry block (when nothing branches back to it), and for every other block
+// the depth the entry block leaves, but only where the function is proven never to move sp outside
+// its prologue and its returning tails (`frameDepthBlocker`). Within a straight-line block the depth
+// at each instruction is then exact. Every case that would need more declines.
 //
 // `push {a,b,c}` deepens by 4 per register; `sub sp, #N` and `add sp, sp, #-N` deepen by N.
 //
@@ -666,12 +668,12 @@ const stackArgIndex = (key: string): number | null => {
 // preserve is written next to the state it is about.
 //
 // `deps` carries the only two things about the FUNCTION this needs — the ABI's argument-register
-// count, and whether the entry block has predecessors — so the walk itself reads nothing but the
-// instructions it is stepped over.
-const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolean }) => {
+// count, and the depth this block starts at (null where none is proven) — so the walk itself reads
+// nothing but the instructions it is stepped over.
+const makeFrameWalk = (deps: { argRegs: readonly string[]; start: number | null }) => {
   // Bytes the frame has grown since function entry, along this block's linear order only.
-  let depth = 0;
-  let depthKnown = true;
+  let depth = deps.start ?? 0;
+  let depthKnown = deps.start !== null;
 
   // Returns null whenever the depth cannot be computed exactly — including for any write to sp
   // this does not model. The capability rests on the depth being EXACT, so an approximation is
@@ -736,6 +738,11 @@ const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolea
       }
     },
 
+    /** The depth the instructions stepped so far leave, or null where it is not exact. */
+    depthNow(): number | null {
+      return depthKnown ? depth : null;
+    },
+
     // Is `[sp, #off]` an incoming stack argument, and which one? `null` means NO — and every null is
     // a DECLINE, because the caller falls through to readData's sp guard.
     //
@@ -759,19 +766,16 @@ const makeFrameWalk = (deps: { argRegs: readonly string[]; entryHasPreds: boolea
     // reads. `step` enforces it, and never un-poisons: once sp has been above the line, a push during
     // the excursion may have written the later slots too. This is a PREMISE, not a detail — leaving
     // it unstated is what let the first version hand back a callee-saved register as an argument.
-    argIndex(addr: { base: string; off: number; regOff?: string }, width: number, bi: number): number | null {
+    argIndex(addr: { base: string; off: number; regOff?: string }, width: number): number | null {
       const { base, off, regOff } = addr;
       if (!isSpReg(base) || regOff !== undefined) {
         return null; // not sp, or `[sp, rX]` — not a fixed argument slot
       }
-      if (bi !== 0 || deps.entryHasPreds) {
-        return null; // depth is exact only along the ENTRY block's linear order, and only when its
-        // params are parameters rather than phis
-      }
       if (!depthKnown || depth <= 0) {
-        return null; // an unmeasurable frame, or none established: a headerless FRAGMENT whose
-        // prologue was sliced off looks identical to a frameless function, and there the slots are
-        // locals — minting one would be the silent-wrong trade this frontend refuses
+        return null; // no exact start (`start`), an unmeasurable frame, or none established: a
+        // headerless FRAGMENT whose prologue was sliced off looks identical to a frameless
+        // function, and there the slots are locals — minting one would be the silent-wrong trade
+        // this frontend refuses
       }
       if (width !== 4 || off < depth || (off - depth) % 4 !== 0) {
         return null; // the argument area is word-granular; BELOW the top is a local, which is the
@@ -2484,6 +2488,7 @@ function liftOnce(
     ...frame.partition,
     usedSlotOffsets: fill.frameUses.usedSlotOffsets,
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
+    escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
     returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
     symbols,
@@ -2761,12 +2766,22 @@ interface ThumbFrame {
   readonly localArea: number;
   readonly savedRegs: ReadonlySet<string>;
   readonly capturedObjectIsTheWholeFrame: boolean;
+  /** the offsets of the escaped frame addresses the outgoing-argument verdict leans on, which the
+   *  audit re-proves of the lifted IR; empty where the verdict leans on none */
+  readonly escapesReliedOn: ReadonlySet<number>;
+  /** the calls that hand out an escape the verdict leans on; empty where it leans on none */
+  readonly callsReliedOn: ReadonlySet<Instr>;
   /** the frame offset each instruction leaves a register holding, where `heldFrameWalk` follows it */
   readonly captureOffsetOf: ReadonlyMap<Instr, number>;
+  /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAtCalls`) */
+  readonly frameAddressesAtCall: ReadonlyMap<Instr, FrameAddressesAtCall>;
   readonly outgoingArgs: OutgoingArgs<Instr>;
   /** why the word-slot model is off, or null when it is on (`slotModelBlocker`) */
   readonly slotsOffReason: string | null;
   readonly slotsOk: boolean;
+  /** the frame depth at every instruction outside the entry block, or null where it is not proven
+   *  one number (`frameDepthBlocker`) */
+  readonly settledDepth: number | null;
   readonly partition: Readonly<Pick<FrameObjectAudit, 'ownedLocals' | 'declaredLocals'>>;
   isFrameObjectAccess(base: string, off: number, regOff: string | undefined, width: number): boolean;
   isOwnFrameWordSlot(base: string, off: number, regOff: string | undefined, width: number): boolean;
@@ -2831,15 +2846,19 @@ function measureThumbFrame({
   // feeds (`capturedObjectIsTheWholeFrame`, below `localArea`), not here.
   //
   // ARGUMENT registers only: the frame base merely live across a call is not evidence that it was
-  // passed to one, and for `blx rN` the TARGET register is not an argument either.
+  // passed to one, and for `blx rN` the TARGET register is not an argument either. Which registers
+  // a call reads, and which stores send a word outside the frame, are ONE rule for every escape
+  // this function asks about — `frameAddressReceivers` — so the three walks that ask differ only
+  // in the kill rule, and `heldFrameWalk` says why that one differs.
+  const mayHoldFrameAddress = registersThatMayHoldAFrameAddress(asmBlocks, entryReachable);
+  const handedOutRegs = (ins: Instr): readonly string[] =>
+    frameAddressReceivers(ins, target, calls, mayHoldFrameAddress);
   const frameBasePassedToCallee = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
     if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
       return false;
     }
-    // A call through a register is no argument of it: `mov r3, sp; blx r3` branches THROUGH the
-    // frame base, it does not pass it.
-    const targetReg = calleeRegister(ins, target);
-    return [...held].some(([r, off]) => off === 0 && target.argRegs.includes(r) && r !== targetReg);
+    const handed = handedOutRegs(ins);
+    return [...held].some(([r, off]) => off === 0 && handed.includes(r));
   });
 
   // THE FRAME BASE PUBLISHED TO MEMORY — the other way an agbcc frame address escapes, and the
@@ -2896,7 +2915,9 @@ function measureThumbFrame({
   // (u32)&b;` compiles to `add sp,#-0x44 / mov r0,sp / mov r2,#0x44 / bl memcpy / ldr r0,.L9+4 /
   // mov r1,sp / str r1,[r0]` — a block-copy base that IS published to memory (measured). At a
   // wider frame the publish escape admits exactly the shape the callee escape's table warns
-  // about; at one word it cannot occur.
+  // about; at one word it cannot occur. A wider frame's publish is read by the outgoing-argument
+  // `escape` event instead (below), per program point, which is the reading that survives a block
+  // copy: see "ONE DECISION, TWO LICENCES" above `capturedObjectIsTheWholeFrame`.
   //
   // THE WALK IS `heldFrameWalk`, the same one the callee escape is spelled with, because the
   // question is the same one and only the consuming event differs. Here that event is a WORD store
@@ -2912,18 +2933,18 @@ function measureThumbFrame({
   // refusal it produces stops being the two-models-for-one-byte one and becomes the audit's. A
   // clause without a row is decoration until an input says otherwise.
   //
-  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, and the one place they part is worth
-  // knowing: this walk is BLOCK-LOCAL while `taint` is whole-function, so a base captured in an
-  // earlier block is excluded there and not here. The containment still holds — whole-function
-  // taint is a superset of block-local held-ness, so the audit excludes every base this excludes
-  // and more — and the difference therefore lands on the refusing side. Pinned as a row.
-  const frameBasePublishedToMemory = heldFrameWalk(asmBlocks, entryReachable, mentionsReg, (ins, held) => {
-    if (ins.mnemonic !== 'str' || held.get(reg(ins.ops[0] ?? '')) !== 0) {
-      return false;
-    }
-    const { base } = parseAddr(ins.ops[1] ?? '');
-    return !isSpReg(base) && !held.has(reg(base));
-  });
+  // THE AUDIT'S RE-PROOF IS NOT THIS PREDICATE RE-SPELLED, but its BASE clause is the same
+  // whole-function fact on both sides. The stored VALUE must be held here (block-local); the BASE
+  // must be no register that holds a frame address ANYWHERE in the function
+  // (`registersThatMayHoldAFrameAddress`), the audit's whole-function `taint` read off the
+  // instructions. So a base captured in an earlier block is refused by the licence itself, before
+  // the audit sees it. Pinned as a row.
+  const frameBasePublishedToMemory = heldFrameWalk(
+    asmBlocks,
+    entryReachable,
+    mentionsReg,
+    (ins, held) => ins.mnemonic === 'str' && handedOutRegs(ins).some((r) => held.get(r) === 0),
+  );
 
   const localArea = reservedLocalArea(asmBlocks[0]);
   const savedRegs = prologueSavedRegs(asmBlocks[0]);
@@ -2964,7 +2985,8 @@ function measureThumbFrame({
   // block-copy base — each needs two frame words before agbcc names its base with a register at
   // all — and the two-word struct returns with them. Any larger frame has bytes this model does not
   // describe, and they are either the rest of a wider object the callee writes or another call's
-  // argument slots; neither is provable here, so the answer stays the decline.
+  // argument slots. Neither is provable from the frame alone, so THIS licence stays at one word,
+  // and a larger frame is left to the `escape` event, which does not have to decide it.
   //
   // What the frame size does NOT exclude is the one-word struct return in the table above, which is
   // instruction-for-instruction an out-parameter call. That one is settled after the lift, by the
@@ -2976,8 +2998,8 @@ function measureThumbFrame({
   // handed to a callee arrives there through a frame this conjunct never looks at, and what bounds
   // its extent is the audit's frame-accounting rule rather than anything here.
   //
-  // WHY IT IS NOT WIDENED anyway, since a wider frame is the obvious next change. Three shapes,
-  // each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
+  // WHY THIS FLOW-INSENSITIVE LICENCE IS NOT WIDENED, since a wider frame is the obvious next
+  // change (the `escape` event reads a wider frame instead). Three shapes, each compiled with agbcc 2.9-arm-000512, `-O2 -mthumb-interwork -Wimplicit -fhex-asm
   // -fprologue-bugfix`, and only the first is about extent at all:
   //
   // UNDECIDABLE — a slot THIS FUNCTION stores and reloads. Two sources that disagree about who
@@ -3031,6 +3053,15 @@ function measureThumbFrame({
   // modelled as `volatile u16 sp0`, and its lift is byte-identical with this conjunct widened to
   // `localArea >= 4` (measured). Nothing about the frame size moves it either way — which is what
   // makes it the wrong function to reason about a wider licence from.
+  //
+  // ONE DECISION, TWO LICENCES. This gate and the outgoing-argument `escape` event (fed below,
+  // under `compilerBehaviors.escapedFrameAddressNamesALocal`) read the same escapes
+  // (`frameAddressReceivers`) and differ only in flow-sensitivity. This gate is flow-INSENSITIVE —
+  // one escape anywhere and no frame word is any call's argument — which is sound only where no
+  // block-copy base fits, a one-word frame. The event ends only the stores pending where the address
+  // leaves, at any frame size; that field says why that survives a block copy. So what this gate
+  // adds is a store that reaches an undeclared call BEFORE the address leaves (the CONTROL of "a
+  // capture in an unreachable block proves nothing"), and every "not widened" above is about it.
   const capturedObjectIsTheWholeFrame =
     target.compilerBehaviors.oneWordFrameIsTheCapturedObject === true &&
     (frameBasePassedToCallee || frameBasePublishedToMemory) &&
@@ -3042,10 +3073,24 @@ function measureThumbFrame({
   // What the walk cannot follow (a move in another block than the capture) the lift does not
   // fold either; the audit folds it from the IR, and refuses it by that name where the object
   // lands on a word this left keyed as a slot.
+  //
+  // …AND THE LOWEST FRAME ADDRESS EACH INSTRUCTION HANDS OUT, off the same walk: one held in an
+  // argument register the callee's declaration reads at a call (every one, where nothing declares
+  // it), or stored as a word to memory outside the frame — the two escapes above, at any offset.
+  // This walk keeps a capture addressed through (`mov r0, sp / strb r3, [r0, #8] / bl use`, sa3's
+  // `sub_8060940`), because the question here is what the receiver CAN read, and the outgoing-
+  // argument analysis only lets it end a word's pending store (`escapeEvent`, below). Its receivers
+  // are `handedOutRegs`, the rule the two licences above read too.
   const captureOffsetOf = new Map<Instr, number>();
+  const escapedOffsetOf = new Map<Instr, number>();
   heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
+    const handed = handedOutRegs(ins);
+    const offs = [...held].filter(([r, off]) => handed.includes(r) && off >= 0).map(([, off]) => off);
+    if (offs.length > 0) {
+      escapedOffsetOf.set(ins, Math.min(...offs));
+    }
     const defined = frameAddressDefined(ins, held);
-    if (defined !== null) {
+    if (defined !== null && Number.isFinite(defined[1])) {
       captureOffsetOf.set(ins, defined[1]);
     }
     return false;
@@ -3069,39 +3114,96 @@ function measureThumbFrame({
     const a = spMemAccess(ins);
     return a && !a.regOff && a.width === 4 && a.off % 4 === 0 && a.off >= 0 && a.off + 4 <= localArea ? a.off : null;
   };
-  const outgoingArgs = analyzeOutgoingArgs<Instr>({
-    blocks: asmBlocks.map((ab) => ({
-      events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
-        const off = slotAcc(ins);
-        if (off !== null && !constantCaptureOffsets.has(off)) {
-          return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
-        }
-        if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
-          const callee = ins.ops[0] ?? '?';
-          const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
-          return [
-            {
-              kind: 'call',
-              call: ins,
-              callee,
-              declared: declared === null ? null : outgoingBlock(declared.widths, target),
-              params: declared?.params,
-            },
-          ];
-        }
-        return [];
-      }),
-    })),
-    preds,
-    live: entryReachable,
-    localArea,
-    argRegs: target.argRegs.length,
-    capturedWholeFrame: capturedObjectIsTheWholeFrame,
-    localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
-  });
+  //
+  // AN ESCAPED FRAME ADDRESS IS READ BY ITS RECEIVER, and the event says so just before the call or
+  // the store that hands it over — but only where the target declares the layout premise that
+  // makes the words from that address up a local's (`escapedFrameAddressNamesALocal`).
+  const escapesHere = target.compilerBehaviors.escapedFrameAddressNamesALocal === true;
+  const escapeEvent = (ins: Instr): StackArgsEvent<Instr>[] => {
+    const off = escapedOffsetOf.get(ins);
+    return escapesHere && off !== undefined ? [{ kind: 'escape', off }] : [];
+  };
+  const eventBlocks = asmBlocks.map((ab) => ({
+    events: ab.instrs.flatMap((ins): StackArgsEvent<Instr>[] => {
+      const escaped = escapeEvent(ins);
+      if (escaped.length > 0 && ins.mnemonic === 'str') {
+        return escaped;
+      }
+      const off = slotAcc(ins);
+      if (off !== null && !constantCaptureOffsets.has(off)) {
+        return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
+      }
+      if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+        const callee = ins.ops[0] ?? '?';
+        const declared = calleeRegister(ins, target) === null ? calls.declaredCall(callee) : null;
+        return [
+          ...escaped,
+          {
+            kind: 'call',
+            call: ins,
+            callee,
+            declared: declared === null ? null : outgoingBlock(declared.widths, target),
+            params: declared?.params,
+          },
+        ];
+      }
+      return [];
+    }),
+  }));
+  const outgoingArgsOver = (blocks: readonly StackArgsBlock<Instr>[]): OutgoingArgs<Instr> =>
+    analyzeOutgoingArgs<Instr>({
+      blocks,
+      preds,
+      live: entryReachable,
+      localArea,
+      argRegs: target.argRegs.length,
+      capturedWholeFrame: capturedObjectIsTheWholeFrame,
+      localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
+    });
+  const outgoingArgs = outgoingArgsOver(eventBlocks);
+  // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
+  // `escapesReliedOn`). The `escape` event is read off what a REGISTER holds at a `bl` or a `str`,
+  // and it switches refusals OFF; the lift then decides what the call is really handed, and an
+  // arity that shrinks after the event was read (a guess, then the trim) can leave the address out
+  // of the call while its stores stay excused. The one-word licence has this re-check
+  // (`recheckWholeFramePremise`); this is the same one at any frame size. Only where the analysis
+  // would refuse WITHOUT the escapes, so an escape that excused nothing asks nothing of the IR.
+  const escapeOffsets = new Set(
+    [...entryReachable].flatMap((b) => eventBlocks[b].events.flatMap((ev) => (ev.kind === 'escape' ? [ev.off] : []))),
+  );
+  const escapesReliedOn: ReadonlySet<number> =
+    outgoingArgs.blocker === null &&
+    escapeOffsets.size > 0 &&
+    outgoingArgsOver(eventBlocks.map((b) => ({ events: b.events.filter((ev) => ev.kind !== 'escape') }))).blocker !==
+      null
+      ? escapeOffsets
+      : new Set();
+  const callsReliedOn: ReadonlySet<Instr> = new Set(
+    escapesReliedOn.size === 0
+      ? []
+      : [...escapedOffsetOf.keys()].filter((ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx'),
+  );
 
   const slotsOffReason = slotModelBlocker(asmBlocks, localArea, outgoingArgs);
   const slotsOk = slotsOffReason === null;
+
+  // THE DEPTH EVERY OTHER BLOCK RUNS AT: what the entry block leaves, where `frameDepthBlocker`
+  // proves no block but a returning one moves sp again. Not where the entry is itself a loop
+  // target (its prologue would run twice) or returns (no block runs after it).
+  const entry = asmBlocks[0];
+  const entryWalk = makeFrameWalk({ argRegs: target.argRegs, start: 0 });
+  for (const ins of entry.instrs) {
+    if (!classifyXfer(ins)) {
+      entryWalk.step(ins);
+    }
+  }
+  const entryEnd = entry.instrs[entry.instrs.length - 1];
+  const settledDepth =
+    frameDepthBlocker(asmBlocks) === null &&
+    preds[0].length === 0 &&
+    !(entryEnd !== undefined && classifyXfer(entryEnd) === 'return')
+      ? entryWalk.depthNow()
+      : null;
 
   // …AND THE ONE OFFSET THAT MUST NOT BE A SLOT. When `capturedObjectIsTheWholeFrame` holds, the
   // frame is one word and a callee is being handed its address, so an `[sp,#0]` access is an access
@@ -3196,10 +3298,14 @@ function measureThumbFrame({
     localArea,
     savedRegs,
     capturedObjectIsTheWholeFrame,
+    escapesReliedOn,
+    callsReliedOn,
     captureOffsetOf,
+    frameAddressesAtCall: frameAddressesAtCalls(asmBlocks, preds, entryReachable, calls.callClobbers),
     outgoingArgs,
     slotsOffReason,
     slotsOk,
+    settledDepth,
     partition,
     isFrameObjectAccess,
     isOwnFrameWordSlot,
@@ -3230,6 +3336,13 @@ function measureThumbFrame({
 // question, and there the capture has to reach the consumer UNTOUCHED (`mentionsReg`): a copy
 // addressed through and still live at a call is an addressing copy, not an argument —
 // `EReader_Reset` is `mov r1, sp / strh r0, [r1] / … / bl` into callees that take nothing.
+// WHAT THE RECEIVER CAN READ is the third question, the outgoing-argument analysis's `escape`
+// event, and it reads the first rule: sa3's `sub_8060940` fills its object through the very copy it
+// passes (`mov r0, sp / strb r3, [r0, #8] / bl use`). What keeps `EReader_Reset` out there is the
+// receiver rule both share (`frameAddressReceivers`): a callee declared to take nothing is handed
+// no register. And an undeclared callee that took a stack word needs all four argument registers
+// written for it first, which the write rule sees, so a capture still held in one at the `bl` is
+// passed to it.
 //
 // A `bl` CLEARS EVERY HELD REGISTER, and for the callee escape that is the ABI — the argument
 // registers are the only ones it tests and the callee clobbers them. The publish escape can hold
@@ -3270,6 +3383,13 @@ function heldFrameWalk(
 // null. The shapes that carry one: the capture itself (`mov rD, sp`, `add rD, sp, #k`), a copy
 // of a held register (`mov rD, rS`, and agbcc's `add rD, rS, #0`), and a held register moved by
 // a constant (`add rD, rS, #c`, `add rD, #c`). Everything else only kills.
+//
+// …AND A FRAME ADDRESS MOVED BY A REGISTER, at an offset nothing here knows (NaN): sp or a held
+// register plus a runtime index, `add r2, r2, sp` — agbcc's `&buf[i]` — or `mov r1, sp / add r0,
+// r1, r4`. It names no one word, so no walk that asks for an offset can credit it (NaN equals
+// none, and an escape at NaN is no escape); what it is carried for is the "may hold a frame
+// address" questions: without it an undeclared call's guessed arity drops `&buf[i]` with no
+// refusal (`g3(a, b, &buf[i])` as `g3()`).
 function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [string, number] | null {
   const [d, s1, s2] = ins.ops;
   if (d === undefined || isSpReg(d)) {
@@ -3283,13 +3403,166 @@ function frameAddressDefined(ins: Instr, held: ReadonlyMap<string, number>): [st
   }
   if (/^adds?$/.test(ins.mnemonic)) {
     const [src, by] = s2 === undefined ? [d, s1] : [s1, s2];
-    if (src === undefined || by === undefined || !IMM_LITERAL.test(by)) {
+    if (src === undefined || by === undefined) {
       return null;
     }
-    const from = isSpReg(src) ? 0 : held.get(reg(src));
+    const at = (r: string): number | undefined => (isSpReg(r) ? 0 : held.get(reg(r)));
+    if (!IMM_LITERAL.test(by)) {
+      return at(src) !== undefined || at(by) !== undefined ? [reg(d), NaN] : null;
+    }
+    const from = at(src);
     return from === undefined ? null : [reg(d), from + imm(by)];
   }
   return null;
+}
+
+// Every register that holds a frame address at some instruction of live code — the shapes
+// `frameAddressDefined` carries, closed over every block at once rather than along one. So it is
+// a SUPERSET of every block's `held`, and what it EXCLUDES is the only thing it is used for: a
+// store through one of these is not a store outside the frame. A frame address reloaded from
+// memory is not followed; the store through it then counts as leaving the frame, which is the
+// imprecision `frameAddressReceivers` states.
+function registersThatMayHoldAFrameAddress(
+  asmBlocks: readonly AsmBlock[],
+  entryReachable: ReadonlySet<number>,
+): ReadonlySet<string> {
+  const held = new Map<string, number>();
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const b of entryReachable) {
+      for (const ins of asmBlocks[b].instrs) {
+        // CONSTANT OFFSETS ONLY. Closed over every block at once, an index sum (NaN) would carry
+        // the frame base through every `add rD, rS, rT` in the function — measured: klonoa's
+        // `DmaControllerInit` then held its DMA register's base, and its publish stopped counting
+        // as one. A store through `&buf[i]` stays the counted-as-leaving imprecision stated above.
+        const defined = frameAddressDefined(ins, held);
+        if (defined !== null && Number.isFinite(defined[1]) && !held.has(defined[0])) {
+          held.set(defined[0], 0); // the offset is not the question here, only the register
+          grew = true;
+        }
+      }
+    }
+  }
+  return new Set(held.keys());
+}
+
+// THE FRAME ADDRESSES ARGUMENT REGISTERS HOLD AT EACH CALL, two ways. The shapes carried are
+// `frameAddressDefined`'s, and a write of anything else ends one, as in `heldFrameWalk`.
+//   - `may`: on SOME path from the entry, ACROSS blocks, joined by union — the question is a
+//     refusal's, so a capture made in one block and handed over in the next (`mov r5, sp` / … /
+//     `.L3: add r3, r5, #0` / `bl`) must count, and a call ends only what it clobbers, because a
+//     capture in r4-r7 outlives it. Two paths that disagree on the offset leave it unknown (NaN).
+//     The entry block starts empty, which keeps an incoming argument register from counting:
+//     nothing arrives in it but the caller's value.
+//   - `must`: defined in the call's own block, which every path to the call runs.
+interface FrameAddressesAtCall {
+  readonly may: ReadonlyMap<string, number>;
+  readonly must: ReadonlyMap<string, number>;
+}
+function frameAddressesAtCalls(
+  asmBlocks: readonly AsmBlock[],
+  preds: readonly (readonly number[])[],
+  entryReachable: ReadonlySet<number>,
+  clobbers: readonly string[],
+): ReadonlyMap<Instr, FrameAddressesAtCall> {
+  const atCall = new Map<Instr, FrameAddressesAtCall>();
+  const out = asmBlocks.map(() => new Map<string, number>());
+  const step = (ins: Instr, held: Map<string, number>): void => {
+    if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+      clobbers.forEach((r) => held.delete(r));
+      return;
+    }
+    const carried = frameAddressDefined(ins, held);
+    for (const r of [...held.keys()]) {
+      if (mayWriteReg(ins, r)) {
+        held.delete(r);
+      }
+    }
+    if (carried !== null) {
+      held.set(carried[0], carried[1]);
+    }
+  };
+  const flow = (b: number, record: boolean): Map<string, number> => {
+    const may = new Map<string, number>();
+    for (const p of preds[b] ?? []) {
+      for (const [r, off] of out[p]) {
+        may.set(r, !may.has(r) || may.get(r) === off ? off : NaN);
+      }
+    }
+    const must = new Map<string, number>();
+    for (const ins of asmBlocks[b].instrs) {
+      if (record && (ins.mnemonic === 'bl' || ins.mnemonic === 'blx')) {
+        atCall.set(ins, { may: new Map(may), must: new Map(must) });
+      }
+      step(ins, may);
+      step(ins, must);
+    }
+    return may;
+  };
+  const same = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>) =>
+    a.size === b.size && [...a].every(([r, off]) => b.has(r) && Object.is(b.get(r), off));
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const b of entryReachable) {
+      const next = flow(b, false);
+      if (!same(next, out[b])) {
+        out[b] = next;
+        changed = true;
+      }
+    }
+  }
+  for (const b of entryReachable) {
+    flow(b, true);
+  }
+  return atCall;
+}
+
+// THE REGISTERS AN INSTRUCTION HANDS TO CODE OUTSIDE THIS FUNCTION — the one definition of a frame
+// address escaping, which every escape walk in `measureThumbFrame` reads, so which registers a
+// callee reads and which stores leave the frame are decided once.
+//
+// A CALL hands over the argument registers its callee's DECLARATION reads — one per 32-bit word,
+// so `g(void)` is handed nothing — and every argument register where nothing declares it. A call
+// through a register (`blx r3`, a `_call_via_r3` thunk) branches THROUGH that register; it does not
+// pass it. "Every register" is wider than what the lift passes an undeclared callee — a guessed
+// count, or the bound of a call through an argument register — and the two agree on a frame address
+// only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
+// `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold) — of
+// the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
+// trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
+// cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
+// the outgoing-argument verdict leans on an escape, the audit re-proves it of the lifted IR as well
+// (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question, and
+// `/setup-args` is not offered at a call that hands out such an escape (`lowerCall`'s
+// `withholdsSetupArgs`), since this definition read every argument register it holds as handed
+// over; at the function's other calls the reading asks `leftOut` of every register it cuts
+// (`asksEveryCut`), an earlier block's frame address included. Elsewhere that a value an EARLIER
+// block left is dead is the whole guess of that reading, and agbcc does leave a dead `mov r3, sp`
+// base in a call's argument registers (sa3 sub_805DADC). Those cuts are asked of the lifted IR instead: the reading is withheld where the cut leaves the object
+// it addresses with no reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
+//
+// A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
+// sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
+// function): then the address is written INTO this frame, and nothing outside has been handed it.
+// A frame address the base reached through memory is the one this misses, and it counts as
+// leaving. A `strh`/`strb` hands over part of an address, which no reader can follow.
+function frameAddressReceivers(
+  ins: Instr,
+  target: TargetDescription,
+  calls: CallDeclarations,
+  mayHoldFrameAddress: ReadonlySet<string>,
+): readonly string[] {
+  if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
+    const targetReg = calleeRegister(ins, target);
+    const declared = targetReg === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
+    const words = declared?.widths.reduce((n, w) => n + Math.ceil(w / 32), 0) ?? target.argRegs.length;
+    return target.argRegs.slice(0, words).filter((r) => r !== targetReg);
+  }
+  if (ins.mnemonic !== 'str') {
+    return [];
+  }
+  const { base } = parseAddr(ins.ops[1] ?? '');
+  return isSpReg(base) || mayHoldFrameAddress.has(reg(base)) ? [] : [reg(ins.ops[0] ?? '')];
 }
 
 // Is the word-slot model safe for THIS function? Every disqualifier below leaves every `[sp,#k]`
@@ -3323,13 +3596,54 @@ function slotModelBlocker(
       // frameless function taking sp's address has nothing to model and refuses in those arms.
     }
   }
-  // sp must be CONSTANT wherever a slot is keyed, because the key IS the raw offset. Two shapes
-  // are legitimate and everything else refuses: a PROLOGUE (sp moves before the block touches the
-  // frame) and an EPILOGUE (sp moves after it has finished touching it, and the block returns, so
-  // nothing downstream can key a slot against the changed sp). A modification BETWEEN two
-  // accesses moves the frame under a slot already keyed, and only the entry block may deepen —
-  // elsewhere a pre-access modification would put the block at a different depth from the one the
-  // prologue established.
+  const depthBlocker = frameDepthBlocker(asmBlocks);
+  if (depthBlocker !== null) {
+    return depthBlocker;
+  }
+  // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
+  // decides per call whether the words staged at the bottom of the frame are a callee's
+  // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
+  // function still declines loud.
+  if (outgoing.blocker !== null) {
+    return outgoing.blocker;
+  }
+  // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
+  // taken while the local area is still reserved reads a slot this model has retargeted into SSA
+  // — the load simply disagrees with the store. A real epilogue releases the locals first
+  // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
+  for (const ab of asmBlocks) {
+    let released = 0;
+    for (const ins of ab.instrs) {
+      if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
+        const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
+        if (isSpReg(base)) {
+          return 'a pop reads the frame while the local area is still reserved';
+        }
+      }
+      if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
+        const d = spAdjust(ins);
+        if (d !== null && d > 0) {
+          released += d;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// Is sp ONE VALUE at every frame access of this function, the one its prologue leaves? Null when it
+// is, else why not. The slot model needs it because a slot's key IS the raw offset, and an incoming
+// stack argument read outside the entry block needs it because its index is the offset less the
+// depth (`makeFrameWalk`).
+//
+// Two shapes are legitimate and everything else refuses: a PROLOGUE (sp moves before the block
+// touches the frame) and an EPILOGUE (sp moves after it has finished touching it, and the block
+// returns, so nothing downstream can key a slot against the changed sp). A modification BETWEEN two
+// accesses moves the frame under a slot already keyed, and only the entry block may deepen —
+// elsewhere a pre-access modification would put the block at a different depth from the one the
+// prologue established. So every block but the entry starts at the depth the entry leaves, and
+// only a block that returns moves sp.
+function frameDepthBlocker(asmBlocks: readonly AsmBlock[]): string | null {
   for (let bi = 0; bi < asmBlocks.length; bi++) {
     const ins = asmBlocks[bi].instrs;
     const mems = ins.map((x, i) => (touchesFrame(x) ? i : -1)).filter((i) => i >= 0);
@@ -3357,34 +3671,6 @@ function slotModelBlocker(
         }
       } else {
         return 'the frame moves between two accesses that keyed slots against it';
-      }
-    }
-  }
-  // OUTGOING ARGUMENTS — one analysis, and its refusals are this guard's. `analyzeOutgoingArgs`
-  // decides per call whether the words staged at the bottom of the frame are a callee's
-  // arguments; everything it cannot license refuses here, so a `[sp,#k]` access in such a
-  // function still declines loud.
-  if (outgoing.blocker !== null) {
-    return outgoing.blocker;
-  }
-  // A `pop`/`ldm` off sp READS frame memory, and push/pop are transparent to dataflow, so a pop
-  // taken while the local area is still reserved reads a slot this model has retargeted into SSA
-  // — the load simply disagrees with the store. A real epilogue releases the locals first
-  // (`add sp,#N; pop {…}`), which is what this requires; `pop {r1}` mid-frame does not.
-  for (const ab of asmBlocks) {
-    let released = 0;
-    for (const ins of ab.instrs) {
-      if ((ins.mnemonic === 'pop' || ins.mnemonic === 'ldmia') && released < localArea) {
-        const base = ins.mnemonic === 'pop' ? 'sp' : (ins.ops[0] ?? '').replace(/!$/, '');
-        if (isSpReg(base)) {
-          return 'a pop reads the frame while the local area is still reserved';
-        }
-      }
-      if ((ins.mnemonic === 'add' || ins.mnemonic === 'sub') && isSpReg(ins.ops[0])) {
-        const d = spAdjust(ins);
-        if (d !== null && d > 0) {
-          released += d;
-        }
       }
     }
   }
@@ -3916,6 +4202,9 @@ function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmB
 interface ThumbFrameUses {
   readonly usedSlotOffsets: Set<number>;
   readonly movedCaptures: Set<Value>;
+  /** the blocks other than the entry that read an incoming stack argument
+   *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `withholdsSetupArgs` reads */
+  readonly offEntryArgReads: Set<number>;
 }
 
 /** WHAT THE FILL OF A BLOCK READS: the records of the stages before it, the SSA builder it writes
@@ -3999,7 +4288,7 @@ function thumbFillOf(
     pairs,
     flags,
     statics,
-    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set() },
+    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set(), offEntryArgReads: new Set() },
   };
 }
 
@@ -4018,7 +4307,7 @@ interface BlockCursor {
   consumed: Instr | null;
 }
 
-function openBlockCursor({ target, cfg, ssa, flags }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
+function openBlockCursor({ target, cfg, ssa, flags, frame }: ThumbFill, ab: AsmBlock, bi: number): BlockCursor {
   const irb = ssa.irBlocks[bi];
   // Seeded at the block's FIRST instruction, not at its terminator, so an inherited compare is
   // judged by the in-block clear (`retireFlags`) exactly as one this block made itself would be: a
@@ -4029,12 +4318,12 @@ function openBlockCursor({ target, cfg, ssa, flags }: ThumbFill, ab: AsmBlock, b
   // that made a compare and then overwrote it is a different gap from one that never had a
   // compare at all, and a single message for both makes two gaps read as one.
   const noCmpWhy = typeof inherited === 'string' ? inherited : '';
-  // Tracks the frame through this block's linear instruction order. Meaningful for the entry
-  // block; elsewhere a `[sp,#N]` access declines. Both dependencies are read HERE rather than
-  // closed over: `preds` is final long before the first `fillThumbBlock` runs, so the boolean is the
-  // same for every block, and passing it in makes that a property of this line instead of a
-  // property of wherever the walk happens to be declared.
-  const walk = makeFrameWalk({ argRegs: target.argRegs, entryHasPreds: cfg.preds[0].length > 0 });
+  // Tracks the frame through this block's linear instruction order, from the depth the block starts
+  // at: 0 for an entry block nothing branches back to (its params are parameters, not phis), and
+  // the depth the entry leaves for every other block where the frame is proven settled
+  // (`ThumbFrame.settledDepth`). Elsewhere a `[sp,#N]` access declines.
+  const start = bi === 0 ? (cfg.preds[0].length > 0 ? null : 0) : frame.settledDepth;
+  const walk = makeFrameWalk({ argRegs: target.argRegs, start });
   return { ab, bi, irb, walk, pendingCmp, noCmpWhy, consumed: null };
 }
 
@@ -4804,8 +5093,11 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // `argIndex` can make, and the soundness proof that each one is needed for, lives on the
   // predicate itself — restating them here is how the two copies drifted.
   {
-    const index = walk.argIndex({ base, off, regOff }, width, bi);
+    const index = walk.argIndex({ base, off, regOff }, width);
     if (index !== null) {
+      if (bi !== 0) {
+        fill.frameUses.offEntryArgReads.add(bi);
+      }
       writeData(reg(a), bi, readVar(stackArgKey(index), bi));
       return;
     }
@@ -4931,6 +5223,58 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
       usedSlotOffsets.add(off);
       return ssa.readVar(stackSlotKey(off), bi);
     },
+    // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT IS AN ARGUMENT ALL THE SAME. The frame walks
+    // read the call as handed every argument register it holds (`frameAddressReceivers`), and the
+    // lift reads the object as written by that receiver (`isFrameObjectAccess`, with no reaching-
+    // definition test). The guessed count stops at the first register this function did not write,
+    // which is also an incoming argument passed on unchanged, so a capture in r3 behind r1 and r2
+    // left at their incoming values falls outside it: the call is lifted without the address, and
+    // the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])` as `func()`,
+    // then `*data = sp1`). A call through r1 stops at the bound r1 sets and leaves r2 out the same
+    // way (`CallDeclarations.lower`'s KNOWN GAP). Which count is right the register file cannot
+    // say, so this refuses.
+    //
+    // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
+    // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside
+    // the copy it passes in r0 (`mov r3, sp / str r0, [r3] / mov r0, sp / bl g`).
+    leftOut: (regs, passed) => {
+      const at = frame.frameAddressesAtCall.get(ins);
+      // …and an address at an offset nothing knows (NaN, `&buf[i]`) is the same as no other one
+      const handed = new Set(
+        passed.flatMap((p) => (at?.must.has(p) && Number.isFinite(at.must.get(p)) ? [at.must.get(p)] : [])),
+      );
+      const r = regs.find((r) => at?.may.has(r) && !handed.has(at.may.get(r)!));
+      if (r !== undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the call '${ins.mnemonic} ${callee}' has no prototype, and the arity lifted ` +
+            `without one leaves out ${r}, which may hold a frame address — so whether the callee is handed the ` +
+            `object is not decidable`,
+        );
+      }
+    },
+    // NO `/setup-args` READING at a call whose escape the outgoing-argument verdict leaned on (an
+    // escaped `sp+k` excuses every frame word from k up as the callee's to read). That verdict read
+    // every argument register the call holds as handed over (`frameAddressReceivers`), so a reading
+    // that cuts one contradicts it, whatever the register holds: `&t` an earlier block formed, a
+    // second `mov r3, sp` the `leftOut` exception excuses beside a passed `sp`, or the `mov r2, #0`
+    // agbcc reuses from the frame's initialisation (`g(a, s, 0, 0)` would narrow to `g(a, s)`).
+    //
+    // …NOR AT ANY CALL OF A FUNCTION WHOSE BLOCK OTHER THAN THE ENTRY READS AN INCOMING STACK
+    // ARGUMENT. That is a conservative guard, not a property of the cut: the licence that lifts such a
+    // read (`ThumbFrame.settledDepth`) reads no argument register. It keeps the guess off the
+    // functions only that licence lifts (`if (a) g(n, w, e)` with `&w` left in r1 by the entry would
+    // narrow to `g(n)`). The same leftover still narrows where agbcc schedules the stack argument's
+    // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
+    // same bytes), as it does with four parameters.
+    withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
+    // …AND AT EVERY OTHER CALL OF A FUNCTION WHOSE VERDICT LEANED ON AN ESCAPE, the reading asks
+    // `leftOut` of every register it cuts, not only of those this block wrote. The verdict read every
+    // argument register as possibly handed over, so a frame address an EARLIER block left there is
+    // not the dead base the reading guesses at: `g(b, s)` escapes, then `&t` formed before a branch
+    // reaches `if (a) h(b, a, t); else *q = t[0];` in r2, and the cut `h(b, a)` would drop it while
+    // the else arm still reads `t`. The question refuses only frame addresses, so a call that cuts
+    // none (a sibling `f2()`) still narrows.
+    asksEveryCut: () => frame.escapesReliedOn.size > 0,
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),
