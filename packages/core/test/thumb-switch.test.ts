@@ -501,10 +501,9 @@ test('a default arm that returns on its own does not name where the switch ends'
   // default: p[9]=7; return 5;} return 0;` (case 2 unlisted), transliterated to Thumb block for
   // block: the range check sets the stored value in its delay slot, so the default arm takes it
   // from the switch edge, and case 2 sets it itself and falls into the default. The default edge's
-  // `ret` is the default arm's own `return 5`, and the five `break`s meet at `return 0`, a block
-  // that is no arm's entry. Anchoring on the default would end the switch inside the default arm
-  // and spell every `break` as `return 0;`; there are two ends here and the anchor is not evidence
-  // for either, so the stop reading's decline stands.
+  // `ret` is the default arm's own `return 5`, and the five `break`s reach `return 0`, laid out
+  // past it. Anchoring on the default would end the switch inside the default arm and spell every
+  // `break` as `return 0;`, so the stop reading's decline stands.
   const asm =
     'f:\n\tmov\tr3, #0x7\n\tcmp\tr0, #0x5\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr2, .L13\n' +
     '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
@@ -520,10 +519,10 @@ test('a default arm that returns on its own does not name where the switch ends'
 test('a default arm that returns on its own does not name the end beside one `break` either', () => {
   // KMC's output for `switch(x){case 0:p[0]=1;break; case 1:p[1]=2;return 1; case 2:p[2]=3;return 2;
   // case 3:p[3]=7;return 5; case 4:p[4]=5;return 4; default: p[3]=7; return 5;} return 0;`,
-  // transliterated block for block (case 3 cross-jumped into the default). One `break` arm meets
-  // nothing, and the graph is the one a value carried past returning arms has (the test above
-  // that one) — but case 0's `return 0` is laid out PAST the default's `return 5`, and the code
-  // after a switch is laid out after every arm, so the default is not where the switch ends.
+  // transliterated block for block (case 3 cross-jumped into the default). The graph is the one
+  // a value carried past returning arms has (`VALUE_PAST_RETURNS` above); what differs is that
+  // case 0's `return 0` is laid out PAST the default's `return 5`, and the code after a switch is
+  // laid out after every arm, so the default is not where the switch ends.
   const asm =
     'f:\n\tmov\tr3, #0x7\n\tcmp\tr0, #0x4\n\tbhi\t.L64\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr2, .L13\n' +
     '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
@@ -540,9 +539,8 @@ test('a default arm that returns on its own does not name the end beside one `br
 test('two returning arms that share a cross-jumped tail still leave the `break` arms an end', () => {
   // agbcc `-O2` for `switch(x){case 0:p[0]=1;break; … case 2:p[2]=1;p[9]=3;return 1; …
   // case 5:p[5]=1;p[9]=3;return 1; case 6:p[6]=7;break; case 7:p[7]=8;break;} return 0;`. The two
-  // returning arms meet at their shared `p[9]=3; return 1` (.L15), a block that is no arm's entry —
-  // the shape a returning `default:` leaves its `break` arms in, except that it is laid out
-  // above the code after the switch, so that is still where the switch ends.
+  // returning arms meet at their shared `p[9]=3; return 1` (.L15), a block that is no arm's entry,
+  // and both are laid out above the code after the switch, so that is still where it ends.
   const asm =
     'f:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x7\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L16\n' +
     '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t.L12\n\t.align\t2, 0\n' +
