@@ -2769,6 +2769,8 @@ interface ThumbFrame {
   /** the offsets of the escaped frame addresses the outgoing-argument verdict leans on, which the
    *  audit re-proves of the lifted IR; empty where the verdict leans on none */
   readonly escapesReliedOn: ReadonlySet<number>;
+  /** the calls that hand out an escape the verdict leans on; empty where it leans on none */
+  readonly callsReliedOn: ReadonlySet<Instr>;
   /** the frame offset each instruction leaves a register holding, where `heldFrameWalk` follows it */
   readonly captureOffsetOf: ReadonlyMap<Instr, number>;
   /** at each call, the frame addresses its argument registers may and must hold (`frameAddressesAtCalls`) */
@@ -3176,6 +3178,11 @@ function measureThumbFrame({
       null
       ? escapeOffsets
       : new Set();
+  const callsReliedOn: ReadonlySet<Instr> = new Set(
+    escapesReliedOn.size === 0
+      ? []
+      : [...escapedOffsetOf.keys()].filter((ins) => ins.mnemonic === 'bl' || ins.mnemonic === 'blx'),
+  );
 
   const slotsOffReason = slotModelBlocker(asmBlocks, localArea, outgoingArgs);
   const slotsOk = slotsOffReason === null;
@@ -3292,6 +3299,7 @@ function measureThumbFrame({
     savedRegs,
     capturedObjectIsTheWholeFrame,
     escapesReliedOn,
+    callsReliedOn,
     captureOffsetOf,
     frameAddressesAtCall: frameAddressesAtCalls(asmBlocks, preds, entryReachable, calls.callClobbers),
     outgoingArgs,
@@ -3524,13 +3532,14 @@ function frameAddressesAtCalls(
 // trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
 // cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
 // the outgoing-argument verdict leans on an escape, the audit re-proves it of the lifted IR as well
-// (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question. A frame
-// address an EARLIER block left in a register `/setup-args` cuts is asked here only where the
-// function lifts under a licence main refused it (`lowerCall`'s `asksEveryCut`). Elsewhere that a
-// leftover is dead is the whole guess of that reading, and agbcc does leave a dead `mov r3, sp` base
-// in a call's argument registers (sa3 sub_805DADC). Those cuts are asked of the lifted IR instead:
-// the reading is withheld where the cut leaves the object it addresses with no reader
-// (`frontend/ssa.ts` cutsUnreadFrameObjects).
+// (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question, and
+// `/setup-args` is not offered at a call that hands out such an escape (`lowerCall`'s
+// `withholdsSetupArgs`), since this definition read every argument register it holds as handed
+// over. Elsewhere that a value an
+// EARLIER block left is dead is the whole guess of that reading, and agbcc does leave a dead
+// `mov r3, sp` base in a call's argument registers (sa3 sub_805DADC). Those cuts are asked of the
+// lifted IR instead: the reading is withheld where the cut leaves the object it addresses with no
+// reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
@@ -4194,7 +4203,7 @@ interface ThumbFrameUses {
   readonly usedSlotOffsets: Set<number>;
   readonly movedCaptures: Set<Value>;
   /** the blocks other than the entry that read an incoming stack argument
-   *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `asksEveryCut` reads */
+   *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `withholdsSetupArgs` reads */
   readonly offEntryArgReads: Set<number>;
 }
 
@@ -5243,15 +5252,21 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
         );
       }
     },
-    // …AND OF EVERY REGISTER THE `/setup-args` READING CUTS, where this function lifts only under a
-    // licence main refused it: an escape the outgoing-argument verdict leaned on (an escaped `sp+k`
-    // excuses every frame word from k up as the callee's to read), or an incoming stack argument
-    // read outside the entry block. Under either, a frame address an earlier block left in an
-    // argument register is no dead leftover to guess away: `if (a) g(n, w, e)` with `&w` left in r1
-    // by the entry block, and r0 and r2 (`ldr r2, [sp, #0x20]`) set up by the call's own, would
-    // narrow to `g(a3)`, dropping `w` and `e`. Elsewhere the lifted IR answers instead
-    // (`frontend/ssa.ts` cutsUnreadFrameObjects).
-    asksEveryCut: () => frame.escapesReliedOn.size > 0 || fill.frameUses.offEntryArgReads.size > 0,
+    // NO `/setup-args` READING at a call whose escape the outgoing-argument verdict leaned on (an
+    // escaped `sp+k` excuses every frame word from k up as the callee's to read). That verdict read
+    // every argument register the call holds as handed over (`frameAddressReceivers`), so a reading
+    // that cuts one contradicts it, whatever the register holds: `&t` an earlier block formed, a
+    // second `mov r3, sp` the `leftOut` exception excuses beside a passed `sp`, or the `mov r2, #0`
+    // agbcc reuses from the frame's initialisation (`g(a, s, 0, 0)` would narrow to `g(a, s)`).
+    //
+    // …NOR AT ANY CALL OF A FUNCTION WHOSE BLOCK OTHER THAN THE ENTRY READS AN INCOMING STACK
+    // ARGUMENT. That is a conservative guard, not a property of the cut: the licence that lifts such a
+    // read (`ThumbFrame.settledDepth`) reads no argument register. It keeps the guess off the
+    // functions only that licence lifts (`if (a) g(n, w, e)` with `&w` left in r1 by the entry would
+    // narrow to `g(n)`). The same leftover still narrows where agbcc schedules the stack argument's
+    // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
+    // same bytes), as it does with four parameters.
+    withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),

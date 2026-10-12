@@ -147,8 +147,8 @@ describe('a frame address an earlier block left in a register the narrower readi
 
   // `void f(int a, int b, int *q, int n, int e) { char w[8]; w[0] = b; w[1] = 0; if (a) g(n, w, e);
   // else *q = w[0]; }` — as above, but w IS read elsewhere, so the lifted IR cannot tell `&w` in r1
-  // from a dead store base. The incoming stack argument read in the call's block is what main
-  // declined on, so no `/setup-args` reading is offered at all: every register it would cut is asked.
+  // from a dead store base. The function lifts only by reading an incoming stack argument outside
+  // the entry block, and no `/setup-args` reading is offered there at all.
   test('is kept in every candidate beside an incoming stack argument even where the object is read elsewhere', () => {
     const readElsewhere = [
       'f:',
@@ -258,6 +258,46 @@ describe('a frame address an earlier block left in a register the narrower readi
     const cs = enumerateCandidates('f', indexed, ARMV4T_AGBCC);
     expect(cs.length).toBeGreaterThan(0);
     expect(cs.every((c) => /\bg\(a1, sp0, \(u32\)sp0 \+ 12, a1\)/.test(c.source))).toBe(true);
+  });
+
+  // `void f(int a, int b) { int s[3]; char t[16]; s[0] = a; s[1] = b; t[0] = a; t[1] = b; t[2] = 0;
+  // if (a) g(a, s, 0, X); }` — the escape case, where the leftover r2 is no frame address but the
+  // `mov r2, #0` the entry block stored into t[2], reused as the third argument; X is 0 (rematerialized
+  // as `mov r3, #0`) or s again (`mov r3, sp`, beside the passed `mov r1, sp` at the same offset). The
+  // escape verdict read every argument register as handed over, so no `/setup-args` reading is offered.
+  const reused = (r3: string): string =>
+    [
+      'f:',
+      '\tpush\t{lr}',
+      '\tadd\tsp, sp, #-0x1c',
+      '\tadd\tr3, r0, #0',
+      '\tstr\tr3, [sp]',
+      '\tstr\tr1, [sp, #0x4]',
+      '\tadd\tr0, sp, #0xc',
+      '\tmov\tr2, #0x0',
+      '\tstrb\tr3, [r0]',
+      '\tstrb\tr1, [r0, #0x1]',
+      '\tstrb\tr2, [r0, #0x2]',
+      '\tcmp\tr3, #0',
+      '\tbeq\t.L3',
+      '\tadd\tr0, r3, #0',
+      '\tmov\tr1, sp',
+      `\tmov\tr3, ${r3}`,
+      '\tbl\tg',
+      '.L3:',
+      '\tadd\tsp, sp, #0x1c',
+      '\tpop\t{r0}',
+      '\tbx\tr0',
+      '',
+    ].join('\n');
+  test.each([
+    ['#0x0', /\bg\(a0, sp0, 0, 0\)/],
+    ['sp', /\bg\(a0, sp0, 0, sp0\)/],
+  ])('is kept with every other argument where the escape verdict leaned on the call (mov r3, %s)', (r3, call) => {
+    const cs = enumerateCandidates('f', reused(r3), ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
+    expect(cs.every((c) => call.test(c.source))).toBe(true);
   });
 
   // CONTROL: an object something else reads is still the dead store base the narrower reading
