@@ -1484,7 +1484,7 @@ interface FrameAddress {
  *
  *  NOT ANSWERED HERE: a cut whose object is read elsewhere too. That leftover cannot be told from the
  *  sub_805DADC dead base, by the IR or by the register file, so it narrows, except where the frontend
- *  withholds the reading from the whole function (`GuessedCallSite.withholdsSetupArgs`). */
+ *  withholds the reading at that call (`GuessedCallSite.withholdsSetupArgs`). */
 function cutsUnreadFrameObjects(fn: Fn): Set<Op> {
   const def = defOpMap(fn);
   const memo = new Map<Value, FrameAddress | null>();

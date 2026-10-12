@@ -140,9 +140,8 @@ export interface CallSite {
    *  it passes. The call drops what the left-out ones hold, so a frontend that knows one to be an
    *  argument all the same refuses here. */
   readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
-  /** whether the frontend's verdict on this function leaned on a premise the shorter `/setup-args`
-   *  reading of THIS CALL would contradict, so that reading is not offered here whatever it cuts. A
-   *  thunk: it is asked once every block is lowered. */
+  /** whether the frontend withholds the shorter `/setup-args` reading from THIS CALL whatever it
+   *  cuts; the frontend says why where it sets it. A thunk: it is asked once every block is lowered. */
   readonly withholdsSetupArgs?: () => boolean;
 }
 

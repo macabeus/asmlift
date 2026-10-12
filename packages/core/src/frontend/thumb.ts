@@ -3535,11 +3535,10 @@ function frameAddressesAtCalls(
 // (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question, and
 // `/setup-args` is not offered at a call that hands out such an escape (`lowerCall`'s
 // `withholdsSetupArgs`), since this definition read every argument register it holds as handed
-// over. Elsewhere that a value an
-// EARLIER block left is dead is the whole guess of that reading, and agbcc does leave a dead
-// `mov r3, sp` base in a call's argument registers (sa3 sub_805DADC). Those cuts are asked of the
-// lifted IR instead: the reading is withheld where the cut leaves the object it addresses with no
-// reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
+// over. Elsewhere that a value an EARLIER block left is dead is the whole guess of that reading, and
+// agbcc does leave a dead `mov r3, sp` base in a call's argument registers (sa3 sub_805DADC). Those
+// cuts are asked of the lifted IR instead: the reading is withheld where the cut leaves the object
+// it addresses with no reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
