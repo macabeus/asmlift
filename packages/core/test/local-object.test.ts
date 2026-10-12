@@ -158,15 +158,66 @@ test('agbcc: a directive inside the run that is not data refuses rather than end
   expect(bytes(readGasLocalObject('.data\nx.1:\n\t.byte 1\n\t.align 2, 0\ny.2:\n\t.word 3\n', 'x.1'))).toEqual([1]);
 });
 
-test('agbcc: an initializer holding an address refuses — the word is relocated', () => {
-  expect(readGasLocalObject(agbcc, 's.23')).toEqual({
-    refused: "whose initializer holds the address '.LC5' — a relocation inside the object",
+test("agbcc: an initializer holding an ordinary global's address records it — the word is relocated", () => {
+  expect(readGasLocalObject(agbcc, 'p.27')).toMatchObject({
+    section: 'data',
+    size: 4,
+    bytes: Uint8Array.from([0, 0, 0, 0]),
+    directives: { unit: 4 },
+    relocs: [{ offset: 0, symbol: 'g', addend: 0 }],
   });
-  expect(readGasLocalObject(agbcc, 'p.27')).toMatchObject({ refused: expect.stringContaining("the address 'g'") });
-  // the lift opens the sentence with the static it could not define
+  // `&garr[2]` (compiled: agbcc folds the index into the operand), and `&garr[-1]` both ways it is
+  // spelled: agbcc's `+-0x4`, and GNU as's own `-4`
+  expect(
+    readGasLocalObject(
+      '.section .rodata\n\t.align 2, 0\nt.3:\n\t.word\t7\n\t.word\tgarr+0x8\n\t.word\tgarr+-0x4\n\t.word\tgarr-4\n',
+      't.3',
+    ),
+  ).toMatchObject({
+    bytes: Uint8Array.from([7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    relocs: [
+      { offset: 4, symbol: 'garr', addend: 8 },
+      { offset: 8, symbol: 'garr', addend: -4 },
+      { offset: 12, symbol: 'garr', addend: -4 },
+    ],
+  });
+  // none: no `relocs` at all
+  expect(readGasLocalObject(agbcc, 'w.19')).not.toHaveProperty('relocs');
+  // the lift carries it; the definition does not spell it yet
   expect(() => decompile('fg', agbcc, ARMV4T_AGBCC)).toThrow(
-    "cannot lift 'fg': literal-pool load of a pool word that names a function-scope static ('p.27') whose " +
-      "initializer holds the address 'g'",
+    "cannot structure 'fg': names a function-scope static ('p.27') whose initializer holds the address 'g' — " +
+      'a relocation inside the object',
+  );
+});
+
+test('agbcc: an address no declaration outside the function names, or no pointer holds, refuses', () => {
+  // the compiler's anonymous string, another static: the naming policy's own sentences
+  expect(readGasLocalObject(agbcc, 's.23')).toEqual({
+    refused:
+      "whose initializer holds an address that names an anonymous constant pool entry ('.LC5') — the compiler " +
+      'generated that name for a literal it has no declaration for, so no C source can refer to it',
+  });
+  const one = (data: string) => readGasLocalObject(`.section .rodata\n\t.align 2, 0\nt.3:\n${data}\n`, 't.3');
+  expect(one('\t.word\ttide.2')).toMatchObject({
+    refused: expect.stringContaining("an address that names a function-scope static ('tide.2')"),
+  });
+  expect(one('\t.short\tg')).toEqual({
+    refused: "whose initializer holds the address 'g' in a 2-byte value — not a pointer's 4",
+  });
+  expect(one('\t.word\ta-b')).toEqual({
+    refused: "whose initializer holds 'a-b', an expression this reader does not read as an address",
+  });
+  expect(one('\t.byte\t1\n\t.word\tg')).toEqual({
+    refused: "whose initializer holds the address 'g' off its 4-byte words",
+  });
+  // in bss there is nothing to relocate
+  expect(readGasLocalObject('.bss\nt.3:\n\t.word\tg\n', 't.3')).toEqual({
+    refused: 'defined in bss with non-zero bytes',
+  });
+  // the lift opens the sentence with the static it could not define
+  expect(() => decompile('ff', agbcc, ARMV4T_AGBCC)).toThrow(
+    "cannot lift 'ff': literal-pool load of a pool word that names a function-scope static ('s.23') whose " +
+      'initializer holds an address that names an anonymous constant pool entry',
   );
 });
 
@@ -258,7 +309,7 @@ test("mwcc: a static every inliner names is not one function's", () => {
   });
 });
 
-test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table that refuses', () => {
+test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table whose addresses are recorded', () => {
   const lbrk = readObjectLocalObject(dump('mwcc-dump-lbRk_SeirekiDays.txt'), 't_seiyo_days_tbl$32', 'lbRk_SeirekiDays');
   expect(lbrk).toMatchObject({ name: 't_seiyo_days_tbl', section: 'data', size: 0x1a });
   expect(bytes(lbrk).slice(0, 4)).toEqual([0x00, 0x1f, 0x1c, 0x1f]);
@@ -275,9 +326,54 @@ test('mwcc: benchmark rows — .data table, .bss scalar, and a pointer table tha
     bigEndian: true,
     placement: { align: 8, section: '.bss', offset: 0 },
   });
+  // two R_PPC_ADDR32 in .data, one per function pointer; the .debug section's UADDR32 is no referrer
   expect(
     readObjectLocalObject(dump('mwcc-dump-mCoBG_MakeJumpFlag.txt'), 'make_jump_flag_proc$320', 'mCoBG_MakeJumpFlag'),
-  ).toMatchObject({ refused: expect.stringContaining('a relocation inside the object') });
+  ).toMatchObject({
+    section: 'data',
+    size: 8,
+    relocs: [
+      { offset: 0, symbol: 'mCoBG_MakeJumpFlag_NotOldOnGround', addend: 0 },
+      { offset: 4, symbol: 'mCoBG_MakeJumpFlag_OldOnGround', addend: 0 },
+    ],
+  });
+});
+
+test('mwcc: an address relocation of another type, off the words, or naming no ordinary global refuses', () => {
+  const at = (type: string, offset: number, sym: string, addend = 0, word = [0, 0, 0, 0]) => {
+    const ad = dump('mwcc-dump-mCoBG_MakeJumpFlag.txt');
+    ad.relocs = ad.relocs.filter((r) => r.section !== '.data');
+    ad.relocs.push({ section: '.data', offset, type, sym, addend });
+    ad.sections.get('.data')!.set(word, offset & ~3);
+    return readObjectLocalObject(ad, 'make_jump_flag_proc$320', 'mCoBG_MakeJumpFlag');
+  };
+  expect(at('R_PPC_ADDR32', 4, 'ga', 8)).toMatchObject({ relocs: [{ offset: 4, symbol: 'ga', addend: 8 }] });
+  // objdump prints a negative RELA addend after a minus (mwcc's `&garr[-1]`, compiled)
+  const neg = parseAsmData(
+    '',
+    'RELOCATION RECORDS FOR [.sdata2]:\nOFFSET   TYPE              VALUE\n00000000 R_PPC_ADDR32      garr-0x00000004\n',
+    '',
+    true,
+  );
+  expect(neg.relocs).toEqual([
+    { section: '.sdata2', offset: 0, type: 'R_PPC_ADDR32', sym: 'garr', addend: 0xfffffffc },
+  ]);
+  // a REL relocation's addend is the word it fills, which adds to a RELA addend (zero there)
+  expect(at('R_PPC_ADDR32', 0, 'ga', 0, [0xff, 0xff, 0xff, 0xfc])).toMatchObject({
+    relocs: [{ offset: 0, symbol: 'ga', addend: -4 }],
+  });
+  expect(at('R_PPC_ADDR16_LO', 4, 'ga')).toEqual({
+    refused: "whose initializer holds the address 'ga' by a R_PPC_ADDR16_LO relocation — no pointer's absolute address",
+  });
+  expect(at('R_PPC_ADDR32', 2, 'ga')).toEqual({
+    refused: "whose initializer holds the address 'ga' off its 4-byte words",
+  });
+  expect(at('R_PPC_ADDR32', 0, '@15')).toMatchObject({
+    refused: expect.stringContaining("an address that names an anonymous constant pool entry ('@15')"),
+  });
+  expect(at('R_PPC_ADDR32', 0, 'tbl$4')).toMatchObject({
+    refused: expect.stringContaining("an address that names a function-scope static ('tbl$4')"),
+  });
 });
 
 test('mwcc: an absent symbol and a section that is not data refuse', () => {
@@ -561,8 +657,9 @@ test('agbcc: an anonymous label that is not read-only data, or not a `.L` label,
   expect(readGasAnonymousObject('.data\n.LC0:\n\t.word 1\n', '.LC0')).toMatchObject({
     refused: expect.stringContaining('defined in data'),
   });
+  // an address is recorded, as a static's is; what is folded from it is l3/constinit.ts's to decide
   expect(readGasAnonymousObject('.section .rodata\n.LC0:\n\t.word g\n', '.LC0')).toMatchObject({
-    refused: expect.stringContaining("the address 'g'"),
+    relocs: [{ offset: 0, symbol: 'g', addend: 0 }],
   });
   expect(readGasAnonymousObject(constInit, 'dead16')).toMatchObject({
     refused: expect.stringContaining('compiler-generated'),

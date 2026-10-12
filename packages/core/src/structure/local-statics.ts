@@ -266,6 +266,9 @@ export function localStaticShapes(
   // it places in the order it first uses them: the candidate's code decides that, no declaration.
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
+    if (obj.relocs !== undefined) {
+      return say(`whose initializer holds the address '${obj.relocs[0].symbol}' — a relocation inside the object`);
+    }
     if (obj.anonymous) {
       // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
       // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
