@@ -5,10 +5,12 @@
 // linux/386 container, CodeWarrior through wibo in its image. The transient failures are real too:
 // the compiler is pointed at an object path it cannot write, which is the shape a lost scratch
 // directory or a full disk gives.
+import { loadedCodeDigest, noteLoadedCode, sha } from '@asmlift/cli/candcache';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { C_TYPEDEFS } from '@asmlift/core/target';
 import {
   GCC272_TOOLCHAIN,
+  GCC_KMC_TOOLCHAIN,
   MWCC_PPC_TOOLCHAIN,
   gcc272Available,
   gcc272Compile,
@@ -35,6 +37,7 @@ import { afterAll, describe, expect, test, vi } from 'vitest';
 
 import {
   type DockerCacheSpec,
+  GCC_MIPS_HOST_SPECS,
   dockerStaticStamp,
   gccRefused,
   mwccRefused,
@@ -307,6 +310,70 @@ describe('R310-34: a native compile keys the host files its driver reads', () =>
       '/opt/cross/mips-mips-gnu/lib/specs',
       '/usr/lib/gcc/mips-mips-gnu/2.7.2/specs',
     ]);
+  });
+
+  test("R310-36: KMC GCC's, real-tier and pooled, are the same paths", () => {
+    expect(kmcCacheSpec(['-O2']).hostFiles).toEqual(GCC_MIPS_HOST_SPECS);
+    expect(pooledKmcSpec(['-O2']).hostFiles).toEqual(GCC_MIPS_HOST_SPECS);
+    expect(gcc272CacheSpec(GCC272_FLAGS).hostFiles).toEqual(GCC_MIPS_HOST_SPECS);
+  });
+
+  const KMC_DRIVER = join(GCC_KMC_TOOLCHAIN.dir, 'gcc');
+  test.runIf(existsSync(KMC_DRIVER))('R310-36: …because the KMC driver is built with those search prefixes', () => {
+    const bytes = readFileSync(KMC_DRIVER);
+    for (const s of ['/opt/cross/lib/gcc-lib/\0', '/usr/lib/gcc/\0', '/opt/cross/\0', 'mips-mips-gnu\0', '2.7.2\0']) {
+      expect(bytes.includes(Buffer.from(s)), s).toBe(true);
+    }
+  });
+});
+
+describe('R310-37: a namespace holds the harness code this process loaded', () => {
+  const spec = (sources: string[]): DockerCacheSpec => ({
+    label: 'test-loaded-sources',
+    native: () => true,
+    docker: 'docker',
+    image: 'unused',
+    pool: 'unused',
+    dirs: [],
+    words: ['-O1'],
+    prelude: '',
+    hostCommands: [],
+    sources,
+    hostFiles: [],
+    refused: gccRefused,
+    gnuAs: true,
+  });
+
+  test('an edit on disk after the load does not move it, and other loaded bytes do', () => {
+    const loaded = join(scratch('dockercache-src-'), 'kmc.ts');
+    writeFileSync(loaded, "throw restated('kmc gcc', e);\n");
+    noteLoadedCode(loaded);
+    const stamp = dockerStaticStamp(spec([loaded]), 'native');
+    writeFileSync(loaded, "throw restated('KMC GCC', e);\n");
+    expect(dockerStaticStamp(spec([loaded]), 'native'), 'the process still runs what it loaded').toBe(stamp);
+
+    const edited = join(scratch('dockercache-src-'), 'kmc.ts');
+    writeFileSync(edited, "throw restated('KMC GCC', e);\n");
+    noteLoadedCode(edited);
+    expect(dockerStaticStamp(spec([edited]), 'native')).not.toBe(stamp);
+  });
+
+  test('a source no module recorded when it loaded refuses', () => {
+    const src = join(scratch('dockercache-src-'), 'kmc.ts');
+    writeFileSync(src, '');
+    expect(() => dockerStaticStamp(spec([src]), 'native')).toThrow(/no module recorded when it was loaded/);
+  });
+
+  test.each([
+    ['real-tier KMC GCC', kmcCacheSpec(['-O2'])],
+    ['real-tier GCC 2.7.2', gcc272CacheSpec(GCC272_FLAGS)],
+    ['real-tier CodeWarrior', mwccCacheSpec('mwcc_233_163n', ['-O4'], 'c')],
+    ['pooled KMC GCC', pooledKmcSpec(['-O2'])],
+    ['pooled CodeWarrior', pooledMwccSpec(['-O4'])],
+  ])('%s: every source was recorded when its module loaded', (_name, s) => {
+    for (const p of s.sources) {
+      expect(loadedCodeDigest(p), p).toBe(sha(readFileSync(p)));
+    }
   });
 });
 
@@ -764,11 +831,17 @@ describe.runIf(HAVE_GCC272)('GCC 2.7.2 in its container', () => {
   );
 
   test(
-    'reads the image of a compile with no pool container off the tag alone',
+    'reads the image of a compile with no pool container off the tag alone, and the runtime that executes it',
     () => {
       const spec = { ...gcc272CacheSpec(GCC272_FLAGS), native: () => false, pool: 'asmlift-test-no-such-pool' };
       const id = docker(['image', 'inspect', '--format', '{{.Id}}', GCC272_TOOLCHAIN.image]);
-      expect(runsOn(spec)).toBe(`container:${id}`);
+      const runtime = docker([
+        'info',
+        '--format',
+        '{{.ServerVersion}} {{.KernelVersion}} {{.OperatingSystem}} {{.Architecture}}',
+      ]);
+      expect(runtime.split(' ').length).toBeGreaterThanOrEqual(4);
+      expect(runsOn(spec)).toBe(`container:${id} ${runtime}`);
     },
     CONTAINER_BUDGET,
   );

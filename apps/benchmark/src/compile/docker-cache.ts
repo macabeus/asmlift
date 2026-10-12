@@ -25,7 +25,9 @@ import {
   candCache,
   compileEnvironment,
   isChainMeasurement,
+  loadedCodeDigest,
   noteKeyRefused,
+  noteLoadedCode,
   refuseUnkeyedEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
@@ -53,6 +55,23 @@ export const DOCKER_COMPILE_SOURCES = [
   join(TOOLCHAINS_SRC, 'native.ts'),
   join(TOOLCHAINS_SRC, 'toolchain.ts'),
 ];
+noteLoadedCode(...DOCKER_COMPILE_SOURCES);
+
+/** A pipeline's harness files: its own `files` and `DOCKER_COMPILE_SOURCES`, each recorded as this
+ *  process loaded it. Called where the pipeline's module is evaluated. */
+export function dockerSources(...files: string[]): readonly string[] {
+  noteLoadedCode(...files);
+  return [...files, ...DOCKER_COMPILE_SOURCES];
+}
+
+/** The `specs` files a GCC 2.7.2-based driver for `mips-mips-gnu` (GCC 2.7.2's, KMC GCC's) reads
+ *  when they exist, outside its own directory: its built-in search prefixes. */
+export const GCC_MIPS_HOST_SPECS = [
+  '/opt/cross/lib/gcc-lib/mips-mips-gnu/2.7.2/specs',
+  '/opt/cross/mips-mips-gnu/lib/mips-mips-gnu/2.7.2/specs',
+  '/opt/cross/mips-mips-gnu/lib/specs',
+  '/usr/lib/gcc/mips-mips-gnu/2.7.2/specs',
+];
 
 export interface DockerCacheSpec {
   /** the store's label: one per pipeline, since two pipelines compile one TU differently */
@@ -71,7 +90,8 @@ export interface DockerCacheSpec {
   prelude: string;
   /** host commands the pipeline runs, by name or path: the preprocessor, a native runner */
   hostCommands: readonly string[];
-  /** the harness files whose code shapes the TU or the command */
+  /** the harness files whose code shapes the TU or the command, each recorded by `noteLoadedCode`
+   *  where the module that imports it is loaded */
   sources: readonly string[];
   /** host files a native compile reads when they exist, outside its directories: keyed by content,
    *  or as absent */
@@ -144,9 +164,27 @@ function treeDigest(dir: string): string {
   return digest;
 }
 
-/** What the pipeline's compiles run on now: the host, or the content ID of a container image. */
+/** The runtime that executes a container: its engine, the kernel it runs on and that kernel's
+ *  system, which on a Mac is a VM whose emulator runs the image's x86 code and which updates apart
+ *  from the image. */
+function containerRuntime(docker: string): string {
+  const info = inspect(docker, [
+    'info',
+    '--format',
+    '{{.ServerVersion}} {{.KernelVersion}} {{.OperatingSystem}} {{.Architecture}}',
+  ]);
+  if (!info.ok || info.out === '') {
+    throw new Error(`docker info: ${info.out}`);
+  }
+  return info.out;
+}
+
+/** What the pipeline's compiles run on now: the host, or the content ID of a container image and
+ *  the runtime that executes it. */
 export const runsOn = (spec: DockerCacheSpec): string =>
-  spec.native() ? 'native' : `container:${containerImageId(spec.docker, spec.image, spec.pool)}`;
+  spec.native()
+    ? 'native'
+    : `container:${containerImageId(spec.docker, spec.image, spec.pool)} ${containerRuntime(spec.docker)}`;
 
 /** The namespace's static half: everything but the probe's own object. Throws where an input
  *  cannot be read, which `candCache` turns into a refusal. */
@@ -162,13 +200,18 @@ export function dockerStaticStamp(spec: DockerCacheSpec, runs = runsOn(spec)): s
   h.update(compileEnvironment());
   // Files by BASENAME and content, as agbcc.ts's namespace hashes them, so two worktrees holding the
   // same bytes share a store.
-  for (const p of [...spec.hostCommands.flatMap((c) => toolchainFileChain(c)), ...spec.sources]) {
+  for (const p of spec.hostCommands.flatMap((c) => toolchainFileChain(c))) {
     if (isChainMeasurement(p)) {
       h.update(`measured:${p}`);
       continue;
     }
     h.update(`file:${basename(p)}`);
     h.update(createHash('sha256').update(readFileSync(p)).digest('hex'));
+  }
+  // The harness code as this process loaded it, not as the disk holds it now.
+  for (const p of spec.sources) {
+    h.update(`file:${basename(p)}`);
+    h.update(loadedCodeDigest(p));
   }
   if (runs === 'native') {
     for (const p of spec.hostFiles) {

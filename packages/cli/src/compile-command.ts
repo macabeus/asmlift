@@ -25,7 +25,9 @@ import {
   candCache,
   compileEnvironment,
   isChainMeasurement,
+  loadedCodeDigest,
   noteKeyRefused,
+  noteLoadedCode,
   refuseUnkeyedEnv,
   sha,
   toolchainFileChain,
@@ -792,11 +794,73 @@ function hashChain(budget: MeasurementBudget, h: ReturnType<typeof createHash>, 
 export const runnerPackageDir = (): string =>
   dirname(realpathSync(createRequire(import.meta.url).resolve('@match-kit/compiler/package.json')));
 
+/** Per runner directory, the digest of its manifest and `dist/` as this process loaded them, or why
+ *  they cannot be measured. */
+const loadedRunners = new Map<string, string | Error>();
+
+/** Records the runner in `dir` as this process loaded it, unless it already is. Its `dist/` is the
+ *  code that runs a template; a package it declares, of any kind, is code that digest does not hold. */
+export function noteLoadedRunner(dir: string): void {
+  if (loadedRunners.has(dir)) {
+    return;
+  }
+  try {
+    const manifest = readFileSync(join(dir, 'package.json'));
+    const fields = JSON.parse(manifest.toString('utf8')) as Record<string, Record<string, string> | undefined>;
+    const declared = (['dependencies', 'peerDependencies', 'optionalDependencies'] as const).flatMap((k) =>
+      Object.keys(fields[k] ?? {}),
+    );
+    if (declared.length > 0) {
+      throw new Error(
+        `@match-kit/compiler at ${dir} depends on ${declared.join(', ')}, code this namespace does not ` +
+          `measure, so nothing is cached`,
+      );
+    }
+    const h = createHash('sha256');
+    h.update('runner/package.json');
+    h.update(sha(manifest));
+    hashPath(newMeasurementBudget(), h, 'runner/dist', join(dir, 'dist'));
+    loadedRunners.set(dir, h.digest('hex'));
+  } catch (e) {
+    loadedRunners.set(dir, e instanceof Error ? e : new Error(String(e)));
+  }
+}
+
+const SELF = fileURLToPath(import.meta.url);
+noteLoadedCode(SELF);
+/** The runner this module imported, recorded as it was loaded; or why it could not be found. */
+const LOADED_RUNNER = ((): string | Error => {
+  try {
+    const dir = runnerPackageDir();
+    noteLoadedRunner(dir);
+    return dir;
+  } catch (e) {
+    return e instanceof Error ? e : new Error(String(e));
+  }
+})();
+
+/** What `noteLoadedRunner` recorded for `dir`. Throws for a runner no one recorded, and for one it
+ *  could not measure. */
+function loadedRunnerDigest(dir: string | Error): string {
+  if (dir instanceof Error) {
+    throw dir;
+  }
+  const d = loadedRunners.get(dir);
+  if (d === undefined) {
+    throw new Error(`the runner at ${dir} was not recorded when it was loaded, so nothing is cached`);
+  }
+  if (d instanceof Error) {
+    throw d;
+  }
+  return d;
+}
+
 /** Every input of `template` run in `cwd` that a namespace measures before its probe compiles:
  *  the template's text and every file, directory, program chain and variable it names (the stamp
  *  `compilersFromCommand` keys its store under also holds the probe's object), and the code of the
- *  runner in `runner`. Throws where an input cannot be measured. */
-export function commandStaticStamp(template: string, cwd: string, runner: string = runnerPackageDir()): string {
+ *  runner in `runner` (`noteLoadedRunner`), this module's runner by default, as both were loaded.
+ *  Throws where an input cannot be measured. */
+export function commandStaticStamp(template: string, cwd: string, runner?: string): string {
   const h = createHash('sha256');
   const budget = newMeasurementBudget();
   // Checked FIRST: a refusal here saves two probe compiles, and through a container those are
@@ -826,21 +890,12 @@ export function commandStaticStamp(template: string, cwd: string, runner: string
   // published as `ranked.dropped[].error`. The probe only ever exercises the success path, so
   // perturbing that text left the namespace unmoved and the store replayed the old spelling.
   h.update('self:');
-  h.update(sha(readFileSync(fileURLToPath(import.meta.url))));
+  h.update(loadedCodeDigest(SELF));
   // THE RUNNER'S BYTES, for the same reason: @match-kit/compiler runs the template (`sh -ec`),
   // decides which outcome a compile had, and writes the command and output a stored rejection
   // replays. Its package.json picks the entry point; its `dist/` is the code that runs.
-  const manifest = JSON.parse(readFileSync(join(runner, 'package.json'), 'utf8')) as {
-    dependencies?: Record<string, string>;
-  };
-  if (Object.keys(manifest.dependencies ?? {}).length > 0) {
-    throw new Error(
-      `@match-kit/compiler at ${runner} depends on ${Object.keys(manifest.dependencies ?? {}).join(', ')}, ` +
-        `code this namespace does not measure, so nothing is cached`,
-    );
-  }
-  hashPath(budget, h, 'runner/package.json', join(runner, 'package.json'));
-  hashPath(budget, h, 'runner/dist', join(runner, 'dist'));
+  h.update('runner:');
+  h.update(loadedRunnerDigest(runner ?? LOADED_RUNNER));
   // (1) every template token that names an existing FILE: the project's own
   //     `./tools/agbcc/bin/agbcc`, `tools/preproc/preproc`, `charmap.txt`, hashed by content.
   // (2) every remaining token that RESOLVES ON $PATH: `arm-none-eabi-cpp`, `arm-none-eabi-as`,

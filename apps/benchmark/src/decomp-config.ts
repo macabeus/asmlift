@@ -55,6 +55,7 @@ import YAML from 'yaml';
 import {
   DOCKER_COMPILE_SOURCES,
   type DockerCacheSpec,
+  GCC_MIPS_HOST_SPECS,
   dockerCachedBy,
   gccRefused,
   mwccRefused,
@@ -143,7 +144,7 @@ export const pooledKmcSpec = (flags: readonly string[]): DockerCacheSpec => ({
   prelude: C_TYPEDEFS,
   hostCommands: [],
   sources: DOCKER_COMPILE_SOURCES,
-  hostFiles: [],
+  hostFiles: GCC_MIPS_HOST_SPECS,
   refused: gccRefused,
   gnuAs: true,
 });

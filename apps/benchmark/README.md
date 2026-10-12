@@ -421,9 +421,12 @@ of every store forever.
   libraries those programs load (`otool -L` on macOS, `ldd` on Linux; the macOS system libraries
   live in the OS and are keyed by its build, `sw_vers`), the words of the command, the harness code
   that shapes the compiler's input (on the command path, `@match-kit/compiler` too: it runs the
-  command and words a failure), the compile environment (`LANG`/`LC_*`, `SOURCE_DATE_EPOCH`,
-  `MACOSX_DEPLOYMENT_TARGET`, the allocator's settings and the rest of `compileEnvironment` in
-  `packages/cli/src/candcache.ts`), the host's OS release, and the object one fixed probe TU
+  command and words a failure) as the process LOADED it, so a `pnpm install` or `git pull` during a
+  run is the next run's namespace and not this one's, the compile environment (`LANG`/`LC_*`,
+  `SOURCE_DATE_EPOCH`, `MACOSX_DEPLOYMENT_TARGET`, `SDKROOT`, `DEVELOPER_DIR`, the allocator's
+  settings and the rest of `compileEnvironment` in `packages/cli/src/candcache.ts`), the host's OS
+  release, for a containerized compile the image's content ID and the runtime that executes it
+  (`docker info`: engine version, kernel and system), and the object one fixed probe TU
   compiles to — twice, in two directories, so the compiler itself answers whether its object is a
   pure function of its input.
 - **What the command path keys.** Only the benchmark's own command — a committed
@@ -437,7 +440,8 @@ of every store forever.
 - **What refuses a whole namespace** (`REFUSED label=… reason=…`): an object that is not a pure
   function of its input (`ido7.1`, which writes its input's path into the object); a program
   that is an `xcrun` trampoline (Apple's `/usr/bin/cpp`: `xcode-select`, `DEVELOPER_DIR`, `SDKROOT`
-  and `TOOLCHAINS` pick the tool it runs); a program that loads a library through `@rpath`; a relative
+  and `TOOLCHAINS` pick the tool it runs); a program that loads a library through `@rpath`, or whose
+  `otool -L` listing names no `libSystem` (it was not read as a macOS program); a relative
   PATH entry (`./node_modules/.bin`, as `pnpm` adds it) that holds a program the pipeline runs, from
   a directory a compile starts in; and any variable that changes what a compile runs or reads without naming
   it — an exported shell function (`BASH_FUNC_*`), `BASH_ENV`, `ENV`, `SHELLOPTS`, `BASHOPTS`,

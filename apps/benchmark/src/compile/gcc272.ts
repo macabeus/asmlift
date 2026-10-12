@@ -14,7 +14,7 @@ import { undeclaredCallees as hostUndeclaredCallees } from '../cases/implicit-de
 import { CPP } from '../config';
 import type { BuiltTarget } from '../toolchains';
 import { stripPrototype } from './agbcc';
-import { DOCKER_COMPILE_SOURCES, type DockerCacheSpec, dockerCachedBy, gccRefused } from './docker-cache';
+import { type DockerCacheSpec, GCC_MIPS_HOST_SPECS, dockerCachedBy, dockerSources, gccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { CPP_PREPROCESS_FLAGS, compilerDiagnostics, contentDir, restated, run } from './util';
 
@@ -65,14 +65,7 @@ function compileCandidateRaw(
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-/** The `specs` files GCC 2.7.2's driver reads, when they exist, after its own directory's: its
- *  built-in search prefixes. */
-const HOST_SPECS = [
-  '/opt/cross/lib/gcc-lib/mips-mips-gnu/2.7.2/specs',
-  '/opt/cross/mips-mips-gnu/lib/mips-mips-gnu/2.7.2/specs',
-  '/opt/cross/mips-mips-gnu/lib/specs',
-  '/usr/lib/gcc/mips-mips-gnu/2.7.2/specs',
-];
+const SOURCES = dockerSources(join(HERE, 'gcc272.ts'), join(HERE, 'agbcc.ts'));
 /** The candidate store's key for this pipeline at `cflags` (compile/docker-cache.ts). */
 export const gcc272CacheSpec = (cflags: readonly string[]): DockerCacheSpec => ({
   label: 'bench-gcc272',
@@ -84,8 +77,8 @@ export const gcc272CacheSpec = (cflags: readonly string[]): DockerCacheSpec => (
   words: [...CPP_PREPROCESS_FLAGS, ...cppReportFlags('c.d'), ...GCC272_TOOLCHAIN.harnessFlags, ...cflags],
   prelude: '',
   hostCommands: [CPP],
-  sources: [join(HERE, 'gcc272.ts'), join(HERE, 'agbcc.ts'), ...DOCKER_COMPILE_SOURCES],
-  hostFiles: HOST_SPECS,
+  sources: SOURCES,
+  hostFiles: GCC_MIPS_HOST_SPECS,
   refused: gccRefused,
   gnuAs: true,
 });

@@ -32,7 +32,7 @@ import { unitCompileWrapper } from '../cases/dtk-project';
 import { functionDisassembly } from '../eval/function-scope';
 import type { BuiltTarget } from '../toolchains';
 import { declarationsOnly } from './declarations';
-import { DOCKER_COMPILE_SOURCES, type DockerCacheSpec, dockerCachedBy, mwccRefused } from './docker-cache';
+import { type DockerCacheSpec, dockerCachedBy, dockerSources, mwccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir, restated } from './util';
 
@@ -124,6 +124,7 @@ export function noPrototypeCalls(output: string, tu: string): string[] {
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const SOURCES = dockerSources(join(HERE, 'mwcc.ts'));
 /** The candidate store's key for one CodeWarrior build at `cflags` (compile/docker-cache.ts). */
 export const mwccCacheSpec = (
   mwcc: MwccToolchainId,
@@ -139,7 +140,7 @@ export const mwccCacheSpec = (
   words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...cflags, langFlag(language)],
   prelude: '',
   hostCommands: mwccNative(mwcc) ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
-  sources: [join(HERE, 'mwcc.ts'), ...DOCKER_COMPILE_SOURCES],
+  sources: SOURCES,
   hostFiles: [],
   refused: mwccRefused,
   // CodeWarrior assembles inline asm itself, and refuses `.include` and `.incbin` there (MEASURED:

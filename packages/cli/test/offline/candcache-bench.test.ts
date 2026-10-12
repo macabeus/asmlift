@@ -20,6 +20,7 @@ import {
 } from 'node:fs';
 import { platform, release, tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, test, vi } from 'vitest';
 
 import {
@@ -27,8 +28,11 @@ import {
   findOnPath,
   lddLibraries,
   linuxLibraries,
+  loadedCodeDigest,
+  noteLoadedCode,
   otoolLibraries,
   refuseUnkeyedEnv,
+  sha,
   toolchainFileChain,
 } from '../../src/candcache';
 import {
@@ -38,7 +42,7 @@ import {
   templateCommands,
   templateRefusal,
 } from '../../src/candcache-bench';
-import { commandStaticStamp, runnerPackageDir } from '../../src/compile-command';
+import { commandStaticStamp, noteLoadedRunner, runnerPackageDir } from '../../src/compile-command';
 import { benchAgbcc } from './bench-command-double';
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -588,6 +592,8 @@ describe('R310-29: the namespace holds the runner’s code', () => {
     const before = copy();
     const after = copy();
     edit(join(after, 'dist/process/run.js'), "'-ec'", "'-c'");
+    noteLoadedRunner(before);
+    noteLoadedRunner(after);
     expect(commandStaticStamp(BENCH.command, cwd, after)).not.toBe(commandStaticStamp(BENCH.command, cwd, before));
   });
 
@@ -599,14 +605,91 @@ describe('R310-29: the namespace holds the runner’s code', () => {
       'output: scrub(output, paths.dir)',
       "output: scrub(output, paths.dir) + '.'",
     );
+    noteLoadedRunner(before);
+    noteLoadedRunner(after);
     expect(commandStaticStamp(BENCH.command, cwd, after)).not.toBe(commandStaticStamp(BENCH.command, cwd, before));
   });
 
-  test('refuses a runner that depends on a package it does not measure', () => {
+  test.each(['dependencies', 'peerDependencies', 'optionalDependencies'])(
+    'refuses a runner whose %s name a package it does not measure',
+    (field) => {
+      const d = copy();
+      const manifest = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
+      writeFileSync(join(d, 'package.json'), JSON.stringify({ ...manifest, [field]: { 'left-pad': '1.3.0' } }));
+      noteLoadedRunner(d);
+      expect(() => commandStaticStamp(BENCH.command, cwd, d)).toThrow(/depends on left-pad/);
+    },
+  );
+
+  test('R310-37: holds the runner as it was loaded, not as the disk holds it at the stamp', () => {
     const d = copy();
-    const manifest = JSON.parse(readFileSync(join(d, 'package.json'), 'utf8'));
-    writeFileSync(join(d, 'package.json'), JSON.stringify({ ...manifest, dependencies: { 'left-pad': '1.3.0' } }));
-    expect(() => commandStaticStamp(BENCH.command, cwd, d)).toThrow(/depends on left-pad/);
+    noteLoadedRunner(d);
+    const loaded = commandStaticStamp(BENCH.command, cwd, d);
+    edit(join(d, 'dist/process/run.js'), "'-ec'", "'-c'");
+    expect(commandStaticStamp(BENCH.command, cwd, d), 'the process still runs what it loaded').toBe(loaded);
+  });
+
+  test('R310-37: refuses a runner no one recorded when it was loaded', () => {
+    expect(() => commandStaticStamp(BENCH.command, cwd, copy())).toThrow(/was not recorded when it was loaded/);
+  });
+
+  test("R310-37: this module's own bytes are the ones it was loaded with", () => {
+    const self = fileURLToPath(new URL('../../src/compile-command.ts', import.meta.url));
+    expect(loadedCodeDigest(self)).toBe(sha(readFileSync(self)));
+  });
+
+  test('R310-37: a process whose compile-command.ts changed on disk after it loaded stamps the code it runs', () => {
+    // A copy of this package's sources, beside them so that they resolve the same packages, and a
+    // process per run: `edit` changes the copy's compile-command.ts after importing it.
+    const pkg = fileURLToPath(new URL('../..', import.meta.url));
+    const root = mkdtempSync(join(pkg, '.r310-37-'));
+    try {
+      cpSync(join(pkg, 'src'), join(root, 'src'), { recursive: true });
+      const probe = join(root, 'probe.ts');
+      writeFileSync(
+        probe,
+        [
+          "import { readFileSync, writeFileSync } from 'node:fs';",
+          'const [command, cwd, mode] = JSON.parse(process.argv[2]) as [string, string, string];',
+          "const { commandStaticStamp } = await import('./src/compile-command');",
+          "const self = new URL('./src/compile-command.ts', import.meta.url);",
+          "if (mode === 'edit') writeFileSync(self, readFileSync(self, 'utf8') + '// edited after the load\\n');",
+          'console.log(commandStaticStamp(command, cwd));',
+          '',
+        ].join('\n'),
+      );
+      const tsx = fileURLToPath(new URL('../../../../node_modules/.bin/tsx', import.meta.url));
+      const stamp = (mode: string): string =>
+        execFileSync(tsx, [probe, JSON.stringify([BENCH.command, cwd, mode])], { encoding: 'utf8' }).trim();
+      const original = readFileSync(join(root, 'src/compile-command.ts'));
+      const editedAfterLoad = stamp('edit');
+      expect(stamp('plain'), 'a process that loaded the edit is another namespace').not.toBe(editedAfterLoad);
+      writeFileSync(join(root, 'src/compile-command.ts'), original);
+      expect(stamp('plain'), 'and the one that loaded the original is this one').toBe(editedAfterLoad);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('R310-37: code a namespace hashes, as this process loaded it', () => {
+  test('keeps the bytes it first read, whatever the file holds later', () => {
+    const f = join(scratch('candcache-bench-loaded-'), 'run.js');
+    writeFileSync(f, "spawn('sh', ['-ec', command]);\n");
+    noteLoadedCode(f);
+    const loaded = loadedCodeDigest(f);
+    expect(loaded).toBe(sha(readFileSync(f)));
+    writeFileSync(f, "spawn('sh', ['-c', command]);\n");
+    noteLoadedCode(f);
+    expect(loadedCodeDigest(f)).toBe(loaded);
+  });
+
+  test('refuses a file no module recorded, and one it could not read', () => {
+    const d = scratch('candcache-bench-loaded-');
+    expect(() => loadedCodeDigest(join(d, 'never.js'))).toThrow(/no module recorded when it was loaded/);
+    noteLoadedCode(join(d, 'absent.js'));
+    writeFileSync(join(d, 'absent.js'), '');
+    expect(() => loadedCodeDigest(join(d, 'absent.js'))).toThrow(/cannot read .*absent\.js as it was loaded/);
   });
 });
 
@@ -624,6 +707,27 @@ describe('R310-30: the libraries a program loads, as the loader finds them', () 
       'UNRESOLVED:/opt/homebrew/lib/libasmlift-none.2.dylib',
     ]);
   });
+
+  test('R310-40: refuses a listing that names no libSystem: it was not read as one', () => {
+    const listing = '/opt/tc/bin/cc1:\n\t/opt/tc/lib/libisl.23.dylib (compatibility version 24.0.0)\n';
+    expect(() => otoolLibraries(listing, '/opt/tc/bin/cc1', '/opt/tc/bin/cc1')).toThrow(
+      'cannot read the libraries /opt/tc/bin/cc1 loads: otool -L names no /usr/lib/libSystem.B.dylib',
+    );
+    expect(() =>
+      otoolLibraries('/opt/tc/bin/cc1: is not an object file\n', '/opt/tc/bin/cc1', '/opt/tc/bin/cc1'),
+    ).toThrow(/names no \/usr\/lib\/libSystem\.B\.dylib/);
+  });
+
+  test.runIf(platform() === 'darwin')(
+    'R310-40: refuses a program otool cannot read, which it lists as no libraries',
+    () => {
+      const elf = join(scratch('candcache-bench-elf-'), 'gcc');
+      writeFileSync(elf, Buffer.concat([Buffer.from('\x7fELF\x01\x01\x01', 'latin1'), Buffer.alloc(64)]));
+      chmodSync(elf, 0o755);
+      expect(execFileSync('/usr/bin/otool', ['-L', elf], { encoding: 'utf8' })).toContain('is not an object file');
+      expect(() => toolchainFileChain(elf)).toThrow(/otool -L names no \/usr\/lib\/libSystem\.B\.dylib/);
+    },
+  );
 
   test('refuses a library loaded through the run path', () => {
     const listing =
@@ -644,6 +748,7 @@ describe('R310-30: the libraries a program loads, as the loader finds them', () 
       `\t${libDir}/libouter.dylib (compatibility version 1.0.0, current version 1.0.0)`,
       '\t@executable_path/libexe.dylib (compatibility version 1.0.0, current version 1.0.0)',
       '\t@loader_path/libload.dylib (compatibility version 1.0.0, current version 1.0.0)',
+      '\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1356.0.0)',
     ].join('\n');
     expect(
       otoolLibraries(listing, join(libDir, 'libouter.dylib'), join(exeDir, 'prog'), [join(libDir, 'libouter.dylib')]),

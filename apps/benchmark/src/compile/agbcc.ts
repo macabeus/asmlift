@@ -9,7 +9,9 @@ import {
   candCache,
   compileEnvironment,
   isChainMeasurement,
+  loadedCodeDigest,
   noteKeyRefused,
+  noteLoadedCode,
   refuseUnkeyedEnv,
   toolchainFileChain,
 } from '@asmlift/cli/candcache';
@@ -113,6 +115,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  *  `candCacheNamespaceFiles()` below MEASURES the machine's compilers and refuses when it cannot
  *  read one, so the assertion that these are on the list cannot itself run on a bare runner. */
 export const SHAPING_SOURCES = [join(HERE, 'agbcc.ts'), ...DIAGNOSTIC_SOURCES, READS_SOURCE];
+noteLoadedCode(...SHAPING_SOURCES);
 const CAND_CPP_FLAGS = ['-nostdinc'];
 
 /** Preprocess a candidate TU: cpp reads it on stdin, so no scratch directory reaches its linemarkers
@@ -144,12 +147,13 @@ function stampProbeIn(dir: string, cflags: readonly string[]): string | null {
 }
 
 /**
- * Every FILE whose BYTES are an input to a candidate compile — the compiler, the assembler, the
- * preprocessor, and the HARNESS'S OWN CODE that shapes what they are handed. This list IS the
- * namespace's file half: `candCacheStaticStamp` hashes exactly what it returns, so an input
- * dropped from here is an input the cache stops noticing.
+ * Every toolchain FILE whose BYTES are an input to a candidate compile — the compiler, the
+ * assembler, the preprocessor and what they delegate to. With `SHAPING_SOURCES`, the HARNESS'S
+ * OWN CODE that shapes what they are handed, this is the namespace's file half:
+ * `candCacheStaticStamp` hashes exactly these, so an input dropped from here is an input the cache
+ * stops noticing.
  *
- * `agbcc.ts` and `util.ts` are on it because the pipeline is not only its binaries.
+ * `agbcc.ts` and `util.ts` are shaping sources because the pipeline is not only its binaries.
  * `compileCandidateRaw` runs `cpp -nostdinc`, then `stripPrototype`, then agbcc, then APPENDS
  * `.text/.align 2, 0` to the `.s`, then `as`; `util.ts` owns `run`'s env pass-through and its
  * 120 s timeout. Patching that tail to `.align 4, 0` changes the object by 16 bytes while every
@@ -167,23 +171,25 @@ export function candCacheNamespaceFiles(): string[] {
     ...toolchainFileChain(TOOLCHAIN.agbcc),
     ...toolchainFileChain(TOOLCHAIN.as),
     ...toolchainFileChain('arm-none-eabi-cpp'),
-    ...SHAPING_SOURCES,
   ];
 }
 
 /**
- * The namespace's STATIC half: the flags, the compile environment, and the content of every file in
- * `files`. No compile runs here — the pipeline's own object bytes join the namespace separately
- * (the two-directory probe below), because that half is both the backstop and the purity test.
+ * The namespace's STATIC half: the flags, the compile environment, the content of every file in
+ * `files` as it is now, and of every code file in `sources` as this process loaded it
+ * (`noteLoadedCode`). No compile runs here — the pipeline's own object bytes join the namespace
+ * separately (the two-directory probe below), because that half is both the backstop and the
+ * purity test.
  *
- * `files` is a parameter so a test can hash copies it controls and assert that CONTENT, not the
- * path, is what moves the digest. An unreadable input THROWS: `candCache` turns that into a loud
- * refusal, which is the only sound answer — a namespace that guesses at an input it cannot read
- * is a namespace that serves stale objects.
+ * `files` and `sources` are parameters so a test can hash copies it controls and assert that
+ * CONTENT, not the path, is what moves the digest. An unreadable input THROWS: `candCache` turns
+ * that into a loud refusal, which is the only sound answer — a namespace that guesses at an input
+ * it cannot read is a namespace that serves stale objects.
  */
 export function candCacheStaticStamp(
   cflags: readonly string[],
   files: readonly string[] = candCacheNamespaceFiles(),
+  sources: readonly string[] = SHAPING_SOURCES,
 ): string {
   const h = createHash('sha256');
   // 'bench-agbcc/v2' is FORMAT SALT, not a version knob, and it must never be bumped as one:
@@ -209,6 +215,10 @@ export function candCacheStaticStamp(
     }
     h.update(`file:${basename(p)}`);
     h.update(createHash('sha256').update(readFileSync(p)).digest('hex'));
+  }
+  for (const p of sources) {
+    h.update(`file:${basename(p)}`);
+    h.update(loadedCodeDigest(p));
   }
   return h.digest('hex');
 }
