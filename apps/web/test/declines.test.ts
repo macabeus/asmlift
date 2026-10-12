@@ -923,9 +923,15 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
   // spells. The class still takes the refusals keyed on its text that no earlier class claims —
   // the pool-word shapes declines.ts lists, and the compiler's anonymous data that is not such an
-  // image (one whose initializer holds an address, `void (*a[4])(void) = {h1, h2, h1, h2}`, refuses
-  // with "names the compiler's anonymous data ('.LC0') whose initializer holds the address 'h1'");
-  // no benchmark row reaches any of them.
+  // image (one whose initializer holds an address no declaration outside the function names, such
+  // as another `.LC`); no benchmark row reaches any of them.
+  //
+  // `tu-scoped-name` joins as `pool-word-shape` did: its one inhabitant,
+  // `pokeemerald:GetGroundEffectFlags_JumpLanding:agbcc`, is a function-scope static whose
+  // initializer holds function addresses, which structure/local-statics.ts now spells as address
+  // constants. The class still takes the static the naming policy or the reader refuses — an
+  // address of a section, an anonymous constant or another static, an element narrower than a
+  // pointer — and no benchmark row reaches any of them.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
@@ -934,6 +940,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'pool-word-shape',
     'store-class',
     'structs',
+    'tu-scoped-name',
     'unread-data-directive',
   ];
 
@@ -1002,15 +1009,12 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // transfer pairs are the control-transfer capabilities sitting above `branch-form`, and
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames, and
   // Thumb's refusal of a never-reloaded `[sp,#0]` store says it may be an outgoing stack argument
-  // after saying the stack pointer is used as data. Thumb's refusal of a function-scope static
-  // whose initializer holds an address is a literal-pool load of the pool word naming it, and the
-  // static is what has to be built.
+  // after saying the stack pointer is used as data.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > stack-frames', 4],
     ['ctr-transfer > branch-form', 4],
     ['outgoing-stack-args > stack-frames', 3],
-    ['tu-scoped-name > pool-word-shape', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
