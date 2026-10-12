@@ -3521,17 +3521,14 @@ function frameAddressesAtCalls(
 // only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
 // `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold) — of
 // the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
-// trimmed`), and of those the ranked `/setup-args` reading would cut, which is withheld for that
-// site instead (it runs in the ranker, after the audit below). That reading asks of the registers the
-// call's own block wrote, and of every one it cuts where the outgoing-argument verdict leans on an
-// escape (`CallSite.asksEveryCut`) — an escaped `sp+k` excuses every word from k up, a frame address
-// an earlier block left among them. The audit re-proves a relied-on escape of the lifted IR as well
-// (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question. Not
-// covered: a frame address an EARLIER block left in a register `/setup-args` cuts, in a function
-// whose verdict leans on no escape — that a leftover is dead is the whole guess of that ranked
-// reading, and agbcc does leave a dead `mov r3, sp` base in a call's argument registers (sa3
-// sub_805DADC); where the leftover was an argument (`if (a) g(b, s)`, s left in r1 by the entry
-// block), that reading drops it, as main's does.
+// trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
+// cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
+// the outgoing-argument verdict leans on an escape, the audit re-proves it of the lifted IR as well
+// (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question. A frame
+// address an EARLIER block left in a register `/setup-args` cuts is not asked here — that a leftover
+// is dead is the whole guess of that reading, and agbcc does leave a dead `mov r3, sp` base in a
+// call's argument registers (sa3 sub_805DADC) — but of the lifted IR: the reading is withheld where
+// the cut leaves the object it addresses with no reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
@@ -5238,10 +5235,6 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
         );
       }
     },
-    // …AND A FRAME VERDICT THAT LEANED ON AN ESCAPE read every argument register as handed over,
-    // a leftover from an earlier block included, so the ranked `/setup-args` reading asks the
-    // question above of every register it cuts, not only of those this block wrote.
-    asksEveryCut: frame.escapesReliedOn.size > 0,
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),

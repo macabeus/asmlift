@@ -103,27 +103,52 @@ describe('a frame address the narrower reading would cut', () => {
   });
 });
 
-describe('a frame address an earlier block left, in a function whose frame verdict leaned on an escape', () => {
+describe('a frame address an earlier block left in a register the narrower reading cuts', () => {
   // agbcc, no prototypes: `int s[3]; char t[16]; s[0] = a; s[1] = b; t[0] = a; t[1] = b; t[2] = 0;
   // if (a) g(b, s, t);`. The entry block leaves `&t` in r2 (`add r2, sp, #0xc`); g's block writes
-  // only r0 and r1 (`mov r1, sp`). The stores to `t` are never reloaded, so the frame verdict holds
-  // only because `sp+0` escapes into the call, which excuses every word from 0 up. Cutting r2 as a
-  // dead leftover would lift `g(a1, sp0)` with the stores to `t` excused by that escape alone.
+  // only r0 and r1 (`mov r1, sp`). The frame audit sizes one object over s and t (`sp+0` escapes),
+  // but the compiler formed an address at 12, so t is an object of its own, and nothing reads it but
+  // g: cutting r2 as a dead leftover would lift `g(a1, sp0)` with the stores to t unread.
   const ESCAPE =
     'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x1c\n\tadd\tr3, r1, #0\n\tstr\tr0, [sp]\n\tstr\tr3, [sp, #0x4]\n' +
     '\tadd\tr2, sp, #0xc\n\tmov\tr1, #0x0\n\tstrb\tr0, [r2]\n\tstrb\tr3, [r2, #0x1]\n\tstrb\tr1, [r2, #0x2]\n' +
     '\tcmp\tr0, #0\n\tbeq\t.L3\n\tadd\tr0, r3, #0\n\tmov\tr1, sp\n\tbl\tg\n.L3:\n\tadd\tsp, sp, #0x1c\n\tpop\t{r0}\n\tbx\tr0\n';
 
-  test('is kept in every candidate, the `/setup-args` ones included', () => {
+  test('is kept in every candidate where the object has no other reader (one object behind an escape)', () => {
     const cs = enumerateCandidates('f', ESCAPE, ARMV4T_AGBCC);
     expect(cs.length).toBeGreaterThan(0);
     expect(cs.every((c) => /\bg\(a1, sp0, \(u32\)sp0 \+ 12, a1\)/.test(c.source))).toBe(true);
   });
 
-  // CONTROL: where no escape is relied on, a frame address an earlier block left is still the dead
-  // leftover the narrower reading guesses it may be (sa3 sub_805DADC: `mov r3, sp` as a store base,
-  // reloaded after the call), and that reading is still offered beside the default.
-  test('…while one in a function that relies on no escape is still cut by the `/setup-args` sibling', () => {
+  // `char s[4]; s[0] = a; s[1] = b; s[2] = 0; s[3] = 0; if (a) g(b, s);` — no escape: `&s` is the
+  // entry block's store base, left in r1, and g's block writes only r0.
+  test('is kept in every candidate where the object has no other reader (a store base)', () => {
+    const base =
+      'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr3, r1, #0\n\tmov\tr1, sp\n\tmov\tr2, #0x0\n' +
+      '\tstrb\tr0, [r1]\n\tstrb\tr3, [r1, #0x1]\n\tstrb\tr2, [r1, #0x2]\n\tstrb\tr2, [r1, #0x3]\n\tcmp\tr0, #0\n' +
+      '\tbeq\t.L3\n\tadd\tr0, r3, #0\n\tbl\tg\n.L3:\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n';
+    const cs = enumerateCandidates('f', base, ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.every((c) => /\bg\(a1, sp0, 0, a1\)/.test(c.source))).toBe(true);
+  });
+
+  // `void f(int a, int b, int c, int n, int e) { char w[8]; w[0] = b; w[1] = 0; if (a) g(n, w, e); }`
+  // — the call's block reads the fifth argument off the incoming stack (`ldr r2, [sp, #0x10]`), and
+  // `&w` is the entry block's store base, left in r1.
+  test('is kept in every candidate where the object has no other reader (beside an incoming stack argument)', () => {
+    const stackArg =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r3, #0\n\tmov\tr2, sp\n\tmov\tr3, #0x0\n' +
+      '\tstrb\tr1, [r2]\n\tmov\tr1, sp\n\tstrb\tr3, [r1, #0x1]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tadd\tr0, r4, #0\n' +
+      '\tldr\tr2, [sp, #0x10]\n\tbl\tg\n.L3:\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const cs = enumerateCandidates('f', stackArg, ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.every((c) => /\bg\(a3, sp0, a4, 0\)/.test(c.source))).toBe(true);
+  });
+
+  // CONTROL: an object something else reads is still the dead store base the narrower reading
+  // guesses it may be (sa3 sub_805DADC: `mov r3, sp` as a store base, reloaded after the call), and
+  // that reading is still offered beside the default.
+  test('…while one whose object is read after the call is still cut by the `/setup-args` sibling', () => {
     const leftover =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tmov\tr3, sp\n\tstrh\tr1, [r3]\n' +
       '\tmov\tr2, #0x2\n\tcmp\tr1, #0\n\tbeq\t.L2\n\tadd\tr0, r4, #0\n\tbl\tg\n.L2:\n\tmov\tr0, sp\n' +

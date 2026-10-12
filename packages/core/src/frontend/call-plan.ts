@@ -140,10 +140,6 @@ export interface CallSite {
    *  it passes. The call drops what the left-out ones hold, so a frontend that knows one to be an
    *  argument all the same refuses here. */
   readonly leftOut?: (regs: readonly string[], passed: readonly string[]) => void;
-  /** whether a value an EARLIER block left in an argument register may still be one the callee is
-   *  handed, so the ranked `/setup-args` reading asks `leftOut` of every register it cuts rather than
-   *  only of those the call's own block wrote (`GuessedCallSite.asksEveryCut`) */
-  readonly asksEveryCut?: boolean;
 }
 
 /** A call through a register. It names no callee, so no declaration plans it: an argument
@@ -643,7 +639,6 @@ export function callDeclarations(
                 cut.filter((r) => r !== indirect?.reg),
                 kept,
               ),
-        site.asksEveryCut,
       );
     }
     if (p.declaredVoid) {
