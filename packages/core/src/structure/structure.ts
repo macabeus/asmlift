@@ -2450,9 +2450,8 @@ export function structure(
   // the shape rather than a check, which is why it is written down here. The anchored RETRY that
   // caller adds is no exception in practice: inside a loop the latch carries every arm to every
   // `ret`, so the arm that returns shares one with the default edge and is kept, and nothing is
-  // left out. Measured on five in-loop switches with one returning arm, compiled with agbcc and
-  // IDO: wherever the retry is asked it keeps every successor, and each of the nine that declined
-  // before declines with the same message. That is a reach this does not have, not a guard.
+  // left out (measured on five in-loop switches with one returning arm, compiled with agbcc and
+  // IDO: every one declines). That is a reach this does not have, not a guard.
   const followsByShared = new Map<string, Map<Block, Block | null>>();
   const followOverReturns = (b: Block, stop: Block | null, anchor: Block | null = null): Block | null => {
     const shared = sharedRetsOf(b, reachFrom, anchor);
@@ -5301,9 +5300,9 @@ export function structure(
           siblings.add(defEdge.block);
         }
         // `analyzeArmExit` does not depend on emission order, so the exits can be settled before
-        // the chain and reused below. Grouping by target already gives
-        // every arm a DISTINCT entry block, so no two sort keys can be equal and the tie-break
-        // Regime A needs on shared bodies has nothing to decide here.
+        // the chain and reused below. Grouping by target already gives every arm a DISTINCT entry
+        // block, so no two sort keys can be equal and the tie-break Regime A needs on shared bodies
+        // has nothing to decide here.
         const exits = new Map<Block, ArmExit>();
         for (const entry of [...arms.map((a) => a.entry), defEdge.block]) {
           if (!exits.has(entry)) {
@@ -5426,8 +5425,7 @@ export function structure(
       // past the code after the switch — not the arm order `switchArmsFollowLayout` places, so it
       // is not behind that declaration. Where it fails — PPC's synthetic return blocks sort after
       // every real one — it can only refuse, so its cost is a decline the `stop` reading already
-      // made, never a spelling. Measured with real compiles of 28 jump-table shapes on agbcc, IDO,
-      // KMC, gcc 2.7.2 and mwcc, it refuses only where a returning `default:` named the end.
+      // made, never a spelling.
       //
       // A RETRY, NOT A THIRD LINK IN THE `??` CHAIN. Where the `stop` reading spells, it is legal
       // C already, and asking the anchored reading first re-spells three shapes whose `stop`
@@ -5502,10 +5500,9 @@ export function structure(
       // output (the same reason emitDoWhile reuses its `updates`).
       const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
       const bodies = emitOrder.map((a, i) => {
-        // The refusal `armRefusal` found for this reading, thrown at the arm it names — the same
-        // point in the emission the check used to sit at, so an earlier arm's own refusal still
-        // speaks first. Its order is this emission array, so "the next arm" is read off the seam
-        // where a position acquires control-flow meaning, as Regime A's is.
+        // The refusal `armRefusal` found for this reading, thrown at the arm it names, so an
+        // earlier arm's own refusal speaks first. Its order is this emission array, so "the next
+        // arm" is read off the seam where a position acquires control-flow meaning, as Regime A's is.
         if (read.refusal !== null && read.refusal.at === i) {
           read.refusal.raise();
         }

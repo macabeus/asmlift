@@ -411,8 +411,8 @@ test('a jump-table arm that returns on its own leaves the other arms an end', ()
 
 test('an arm that returns on its own does not re-spell a switch the stop reading already spells', () => {
   // The retry is read only where the `stop` reading DECLINES. A real fall-through into the shared
-  // tail's default (one arm, so it linearizes) keeps the spelling it had before the retry existed:
-  // the arm runs on into the default, which carries the tail.
+  // tail's default (one arm, so it linearizes) keeps the stop reading's spelling: the arm runs on
+  // into the default, which carries the tail.
   const oneFalls = returningArms(UNCONDITIONAL_RETURN).replace(
     '.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n',
     '.Lc2:\n\tbl\tsideC\n\tbx\tlr\n',
@@ -426,11 +426,12 @@ test('an arm that returns on its own does not re-spell a switch the stop reading
 // THE RETRY IS ANCHORED ON THE DEFAULT EDGE, not on an arm being alone. Both shapes below are agbcc
 // `-O2` output (`.s` verbatim from the function label) of C with no `default:` label, so the
 // dispatch's default edge goes straight to the code after the switch, and the retry keeps exactly
-// the arms that share a `ret` with it. The same C declines on main under IDO, KMC and gcc 2.7.2 too.
+// the arms that share a `ret` with it. IDO, KMC and gcc 2.7.2 compile the same C to the same shape.
 //
 // `int f(int x,int *p){ switch(x){case 0:p[0]=1;break;case 1:p[1]=2;case 2:p[2]=0;return 1;
 //   case 3:p[3]=4;break;case 4:p[4]=5;break;case 5:p[5]=6;break;} return 0; }` — two arms share the
-// returning `ret`, so dropping only arms that are alone leaves both in and nothing to intersect.
+// returning `ret`, so an arm is left out for sharing no `ret` with the default edge, not for being
+// alone.
 const FALLS_INTO_RETURN =
   'f:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L13\n' +
   '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
@@ -454,7 +455,7 @@ test('a case that falls into a returning case leaves the other arms an end', () 
 // `int f(int x,int y,int *p){ int v=y*3; switch(x){case 0: v=y+7; break; case 1: p[1]=0; return 1;
 //   … case 4: p[4]=0; return 4;} p[0]=v; return 0; }` — the stop reading LINEARIZES this one (case 0
 // alone falls into the default block) and declines later, on the switch-edge copy the fall-through
-// would re-run. A retry gated on the chain alone never saw that refusal.
+// would re-run, so the retry is read on every refusal, not on a null chain alone.
 const VALUE_PAST_RETURNS =
   'f:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tlsl\tr0, r3, #0x1\n\tadd\tr0, r0, r3\n' +
   '\tcmp\tr4, #0x4\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tldr\tr1, .L12\n\tadd\tr0, r0, r1\n' +
