@@ -74,6 +74,34 @@ describe('C++ call arguments', () => {
     expect(strict(a0, 'toVoidp')).toContain('return toVoidp(a0);');
     expect(strict({ k: 'const', value: 0 }, 'toU32p')).toContain('return toU32p(0);');
   });
+
+  test('…and a pointer of another pointee written into a pointer slot, the same third conversion', () => {
+    // mwcc's C: "illegal implicit conversion from 'unsigned int *' to 'int *'" on `return t;` from an
+    // `s32 *` function whose `t` is a `const u32[2]` static (compiled)
+    const withRet = (value: Expr, extra: Partial<SFn> = {}): string =>
+      cBackend
+        .emit({
+          ...fnWith(a0, 'toS32p'),
+          retType: T.ptr(T.s(32)),
+          statics: [{ name: 't', type: T.array(T.u(32), 2), const: true, init: [1, 2] }],
+          body: [{ k: 'return', value }],
+          ...extra,
+        })
+        .split('\n')
+        .find((l) => l.includes('return'))!
+        .trim();
+    const t: Expr = { k: 'addr', name: 't' };
+    const voidp: Expr = { k: 'cast', to: T.ptr(T.void()), e: a1 };
+    expect(withRet(t, { strictConversions: true })).toBe('return (s32 *)t;');
+    expect(withRet(t, { dialect: 'c++' })).toBe('return (s32 *)t;');
+    // the same pointee converts implicitly, and so does a `void *`…
+    expect(withRet(a0, { strictConversions: true })).toBe('return a0;');
+    expect(withRet(voidp, { strictConversions: true })).toBe('return (void *)a1;');
+    // …in C: C++ converts no `void *` to another pointer implicitly
+    expect(withRet(voidp, { dialect: 'c++' })).toBe('return (s32 *)(void *)a1;');
+    // C converts it implicitly, and a const static's address only loses its qualifier
+    expect(withRet(t)).toBe('return (u32 *)t;');
+  });
 });
 
 describe('where the dialect comes from', () => {

@@ -2929,6 +2929,7 @@ export function structure(
     scalarGlobals,
     varType,
     compiler: opts,
+    strictPointerConversions,
     useSitesOf,
     isNamed: (v) => varName.has(v),
   });

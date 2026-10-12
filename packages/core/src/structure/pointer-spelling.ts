@@ -53,6 +53,10 @@ export interface PointerSpellingDeps {
   varType: ReadonlyMap<string, IrType>;
   /** the compiler behaviors a row is guarded on (`ArithRow.when`); absent ⇒ none holds. */
   compiler?: ArithCompilerFacts;
+  /** the compiler's C refuses C's implicit integer-to-pointer conversion (the compiler behavior
+   *  `strictPointerConversions`, mwcc), so an integer stored into a pointer cell is cast
+   *  (`intoPtrCell`); absent ⇒ C's implicit conversion. */
+  strictPointerConversions?: boolean;
   /** each value's readers (analysis.ts `useSitesOf`); absent ⇒ none. */
   useSitesOf?: ReadonlyMap<Value, readonly { op: Op }[]>;
   /** whether a name holds the value — LIVE, read at call time; absent ⇒ none does. */
@@ -440,6 +444,7 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     scalarGlobals,
     varType,
     compiler = {},
+    strictPointerConversions = false,
     useSitesOf,
     isNamed = () => false,
   } = deps;
@@ -856,7 +861,17 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     // the population this rule exists for — reads `undefined` there. An already-`void *` value is
     // assignable as it stands.
     const isPtr = pointerValue(roleOf(value)) || (vt?.kind === 'ptr' && vt.to.kind !== 'void');
-    return isPtr ? pointerCellValue(value) : value;
+    if (isPtr) {
+      return pointerCellValue(value);
+    }
+    // AN INTEGER stored into the cell — an address table's `u32` element (`gp = t[i]`), a numeric
+    // address — is a conversion C makes implicitly and mwcc's C refuses ("illegal implicit
+    // conversion" of a `const unsigned int` to an `int *`, compiled). The same `(void *)` spells it,
+    // which every object-pointer declaration of the cell takes, and a word's conversion is no
+    // instruction. The literal `0` is the null pointer and converts everywhere; anything
+    // `needsIntSpelling` reads as a pointer already is one.
+    const integer = !(value.k === 'const' && value.value === 0) && !needsIntSpelling(value);
+    return strictPointerConversions && integer ? pointerCellValue(value) : value;
   };
 
   const pointerGlobal = (name: string): boolean => nameFacts(name).pointer;

@@ -16,6 +16,7 @@
 import { renderDeclarations } from '@asmlift/core/declare';
 import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   assembleTarget,
@@ -461,6 +462,22 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
     const r = decompile('mdp', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mdp'), prototypes });
     expect(r.source).toContain('g((s32 *)t[a0]);');
     expect(scoreCPpc('mwcc_242_81', context + r.source, 'mdp', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('an address element stored into a pointer global is cast, which mwcc’s C requires', () => {
+    // The store is the argument's conversion again: `gp = t[a0];` is "illegal implicit conversion
+    // from 'const unsigned int' to 'int *'" where agbcc converts it. The project's map is what says
+    // `gp` is a pointer.
+    const context = 'extern s32 ga, gb; extern s32 *gp;\n';
+    const c = 'void mst(s32 i) { static s32 *const t[2] = { &ga, &gb }; gp = t[i]; }';
+    const symbols: SymbolMap = new Map([
+      [0x80400000, [{ name: 'gp', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+    ]);
+    const prototypes = { mst: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mst', FLAGS);
+    const r = decompile('mst', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mst'), prototypes, symbols });
+    expect(r.source).toContain('gp = (void *)t[a0];');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mst', obj, FLAGS).match, r.source).toBe(true);
   });
 
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {

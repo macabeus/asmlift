@@ -23,6 +23,8 @@ interface Fixture {
   /** the globals structure() spells bare */
   scalar?: string[];
   varType?: Record<string, IrType>;
+  /** the compiler's C refuses the implicit integer-to-pointer conversion (mwcc) */
+  strict?: true;
 }
 // The map lookup as structure() builds it: by name, with its member lookup.
 const make = (f: Fixture = {}) => {
@@ -35,6 +37,7 @@ const make = (f: Fixture = {}) => {
     wordLoadedGlobals: new Set(f.wordLoaded ?? []),
     scalarGlobals: new Set(f.scalar ?? []),
     varType: new Map(Object.entries(f.varType ?? {})),
+    ...(f.strict ? { strictPointerConversions: true } : {}),
   });
 };
 
@@ -175,6 +178,25 @@ describe('intoPtrCell', () => {
     expect(s.intoPtrCell(v('gCell'), v('a0'))).toEqual(v('a0'));
     expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(v('a1'));
     expect(s.intoPtrCell(v('gWord'), v('a0'))).toEqual(v('a0'));
+  });
+
+  test('…save an integer where the compiler refuses to convert it implicitly (mwcc): it goes through `void *` too', () => {
+    // an address table's `u32` element stored into a pointer global: mwcc's C refuses
+    // `gp = t[i]` ("illegal implicit conversion from 'const unsigned int' to 'int *'", compiled)
+    const s = make({
+      map: [ptrInfo('gP')],
+      pointerLoaded: ['gCell'],
+      varType: { a0: T.ptr(T.void()), a1: T.s(32) },
+      strict: true,
+    });
+    const elem: Expr = { k: 'index', base: v('t'), idx: v('a1'), width: 4, signed: false };
+    expect(s.intoPtrCell(v('gP'), elem)).toEqual(cast(T.ptr(T.void()), elem));
+    expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(cast(T.ptr(T.void()), v('a1')));
+    // the null pointer, a `void *`, an address, and a cell that is no pointer value stay as spelled
+    expect(s.intoPtrCell(v('gP'), c(0))).toEqual(c(0));
+    expect(s.intoPtrCell(v('gP'), v('a0'))).toEqual(v('a0'));
+    expect(s.intoPtrCell(v('gP'), addr('gArr'))).toEqual(addr('gArr'));
+    expect(s.intoPtrCell(v('gWord'), v('a1'))).toEqual(v('a1'));
   });
 
   test("a pointer value stored into a word cell the map declares an integer takes the cell's type", () => {

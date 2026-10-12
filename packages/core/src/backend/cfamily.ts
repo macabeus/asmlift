@@ -647,6 +647,22 @@ function endsTerminated(body: Stmt[]): boolean {
   );
 }
 
+/** Is `e` a pointer to another pointee than the pointer slot `t` declares, as rendered? Its pointer
+ *  type is its C type, or, for the address of a declared object (which `exprCType` leaves
+ *  unknown), a pointer to that object or to an array's element, the way it decays. A `void *` slot
+ *  takes every object pointer implicitly, and so does any slot a `void *` value in C (`cxx` false:
+ *  mwcc's C takes `gp = (void *)x` into an `s32 *gp`, compiled), where C++ refuses it. An unknown
+ *  type is no opinion. */
+function otherPointee(t: IrType | undefined, e: Expr, vt: (name: string) => IrType | undefined, cxx: boolean): boolean {
+  if (t?.kind !== 'ptr' || t.to.kind === 'void') {
+    return false;
+  }
+  const of = e.k === 'addr' ? vt(e.name) : undefined;
+  const ct = of !== undefined ? T.ptr(of.kind === 'array' ? of.elem : of) : exprCType(e, vt);
+  const p = ct?.kind === 'array' ? T.ptr(ct.elem) : ct;
+  return p?.kind === 'ptr' && (cxx || p.to.kind !== 'void') && !typeEquals(p, t);
+}
+
 // C-FAMILY WRITE LEGALIZATION (the assign-side sibling of the deref legalization in printExpr):
 // the C family's answer to `writesNonPointerIntoPointer` is the reinterpret cast to the DECLARED
 // type — exactly what the machine's register move does — where Pascal, having no such cast,
@@ -656,9 +672,18 @@ function legalizePointerWrites(fn: SFn): SFn {
   const vt = declaredTypes(fn);
   // …and the mirror: a rendered pointer into an INTEGER slot takes the slot's type. A cast keeps
   // the sum it wraps, so the bytes are the uncast write's; CodeWarrior rejects that write outright.
+  //
+  // …and, where the compiler refuses the third implicit conversion too (C++, or mwcc's C:
+  // `SFn.strictConversions`), a pointer of ANOTHER pointee into a pointer slot: mwcc rejects
+  // `return t;` from an `s32 *` function when `t` is a `const u32[2]` static (mwcc: "illegal implicit
+  // conversion" of an `unsigned int *` to an `int *`, compiled), and takes it cast (`otherPointee`
+  // says which `void *` converts implicitly).
+  const strict = fn.dialect === 'c++' || fn.strictConversions === true;
   const castTo = (t: IrType | undefined, e: Expr): Expr =>
-    writesNonPointerIntoPointer(t, e, vt) || (t?.kind === 'int' && exprCType(e, vt)?.kind === 'ptr')
-      ? { k: 'cast', to: t, e }
+    writesNonPointerIntoPointer(t, e, vt) ||
+    (t?.kind === 'int' && exprCType(e, vt)?.kind === 'ptr') ||
+    (strict && otherPointee(t, e, vt, fn.dialect === 'c++'))
+      ? { k: 'cast', to: t!, e }
       : e;
   const fix = (s: Stmt): Stmt => {
     switch (s.k) {
