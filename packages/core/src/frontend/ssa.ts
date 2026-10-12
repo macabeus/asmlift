@@ -1074,7 +1074,9 @@ export interface GuessedCallSite {
   /** handed the FRESH argument registers the trim cuts from this site's guess, and the ones it
    *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
    *  second time. An unfresh cut is the trim's own proof; a fresh one went with a hole below it
-   *  (see {@link trimClobberedCallArgs}), which proves nothing. Absent where nothing is asked. */
+   *  (see {@link trimClobberedCallArgs}), which proves nothing. The `/setup-args` reading asks it a
+   *  third time, of the cut registers the call's own block wrote, and a refusal there withholds that
+   *  reading for the site instead of declining. Absent where nothing is asked. */
   trimmed?: (cut: readonly string[], kept: readonly string[]) => void;
 }
 
@@ -1349,12 +1351,42 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
     const localFresh =
       setsUpLater(s.freshBefore) || (passed && !dropsPassed) ? new Set([argRegs[0], ...s.freshBefore]) : s.freshBefore;
     const local = Math.min(runOfFresh(localFresh, 0), callArgs(s.op).length);
-    if (local < callArgs(s.op).length) {
+    if (local < callArgs(s.op).length && narrowingKeepsFrameAddresses(s, argRegs, local)) {
       setupArgc.set(s.op, local);
       if (local === 0 && dropsPassed) {
         discardsPassedResult.add(s.op);
       }
     }
+  }
+}
+
+/** Whether the narrower reading of `s` ({@link narrowToSetupArgs}, cutting it to `local` arguments)
+ *  passes the lowering's `CallSite.leftOut` question too (`GuessedCallSite.trimmed`). That reading
+ *  is applied in the ranker AFTER the lift and its frame audit, so nothing downstream re-asks it: a
+ *  register it cuts can hold a frame address set up in the call's own block (`mov r2, sp`) above an
+ *  argument that came from an earlier one, and the cut lifts `g(a, b, s)` as `g(a)`, leaving the
+ *  stores to `s` dead.
+ *
+ *  ONLY WHAT THE CALL'S OWN BLOCK WROTE is asked (`freshBefore`). That a value an earlier block left
+ *  in a register is dead is this reading's whole guess, and a frame address is no exception: agbcc
+ *  keeps `mov r3, sp` as a store base across blocks and calls `TransformSprite(s, t)` with it still
+ *  in r3 (sa3 sub_805DADC), where the cut is the right arity. A register this block wrote is not
+ *  that guess — the block set it up for the call — so where it may hold a frame address the call
+ *  passes, the cut would drop an argument. A refusal withholds this candidate for this site only;
+ *  the default reading stands. */
+function narrowingKeepsFrameAddresses(s: GuessedCallSite, argRegs: readonly string[], local: number): boolean {
+  const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => s.freshBefore.has(r));
+  if (s.trimmed === undefined || cut.length === 0) {
+    return true;
+  }
+  try {
+    s.trimmed(cut, argRegs.slice(0, local));
+    return true;
+  } catch (e) {
+    if (e instanceof FrontendUnsupportedError) {
+      return false;
+    }
+    throw e;
   }
 }
 

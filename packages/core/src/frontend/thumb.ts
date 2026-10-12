@@ -3520,9 +3520,14 @@ function frameAddressesAtCalls(
 // count, or the bound of a call through an argument register — and the two agree on a frame address
 // only because the lowering refuses to leave one out (`lowerCall`'s `leftOut`, over
 // `frameAddressesAtCalls`, which holds at each call a superset of what the walks here hold) — of
-// the registers its guess leaves out AND of those the trim cuts afterwards (`GuessedCallSite.
-// trimmed`). Where the outgoing-argument verdict leans on an escape, the audit re-proves it of the
-// lifted IR as well (`escapesReliedOn`), so a shrink that bypassed both still declines.
+// the registers its guess leaves out, of those the trim cuts afterwards (`GuessedCallSite.
+// trimmed`), and of those the call's own block wrote that the ranked `/setup-args` reading would
+// cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
+// the outgoing-argument verdict leans on an escape, the audit re-proves it of the lifted IR as well
+// (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question. Not
+// covered: a frame address an EARLIER block left in a register `/setup-args` cuts — that a leftover
+// is dead is the whole guess of that ranked reading, and agbcc does leave a dead `mov r3, sp` base
+// in a call's argument registers (sa3 sub_805DADC).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-

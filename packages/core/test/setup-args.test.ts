@@ -80,3 +80,25 @@ describe('a guessed argument that survived from an earlier block', () => {
     expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
   });
 });
+
+describe('a frame address the narrower reading would cut', () => {
+  // agbcc, no prototypes: `int s[2]; ... s[0] = a; s[1] = b; if (gv) g(a, b, s);` behind two early
+  // returns that each call. g's block writes r0 and r2 (`mov r2, sp`), but r1 comes from an earlier
+  // block, so the run this block set up stops at r1 and would take r2 with it: `g(a0)`, both stores
+  // to s dead. The sibling must ask the lowering's frame-address question of what it cuts, as the
+  // trim does, and keep g whole; the other calls' narrowings (`f2(a0, a1, a0)` to `f2()`) stand.
+  const V1 =
+    'v1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r0, #0\n\tcmp\tr2, #0\n\tbne\t.L3\n\tbl\tf\n' +
+    '\tmov\tr0, #0x1\n\tb\t.L6\n.L3:\n\tcmp\tr1, #0\n\tbne\t.L4\n\tbl\tf2\n\tmov\tr0, #0x2\n\tb\t.L6\n' +
+    '.L4:\n\tstr\tr2, [sp]\n\tstr\tr1, [sp, #0x4]\n\tldr\tr0, .L7\n\tldr\tr0, [r0]\n\tcmp\tr0, #0\n' +
+    '\tbeq\t.L5\n\tadd\tr0, r2, #0\n\tmov\tr2, sp\n\tbl\tg\n.L5:\n\tmov\tr0, #0x0\n.L6:\n' +
+    '\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L7:\n\t.word\tgv\n';
+
+  test('is kept in every candidate, the `/setup-args` ones included', () => {
+    const cs = enumerateCandidates('v1', V1, ARMV4T_AGBCC);
+    const narrowed = cs.filter((c) => hasVariation(c.variations, 'setup-args'));
+    expect(narrowed.length).toBeGreaterThan(0);
+    expect(narrowed.some((c) => /\bf2\(\)/.test(c.source))).toBe(true);
+    expect(cs.every((c) => /\bg\(a0, a1, sp0\)/.test(c.source))).toBe(true);
+  });
+});
