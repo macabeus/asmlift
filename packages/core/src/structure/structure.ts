@@ -5352,33 +5352,81 @@ export function structure(
         // one: it is already in `preChain`, and `defaultLayoutPos` withholds the label's position.
         const dflt = defEdge.block !== at && !armOf.has(defEdge.block) ? defEdge.block : null;
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, exits);
-        return { exits, falls, chain, declines: chain === null || emissionDeclines(exits, chain) };
+        const refusal = chain === null ? null : armRefusal(exits, chain);
+        return { exits, falls, chain, refusal, declines: chain === null || refusal !== null };
       };
-      // WOULD THE EMISSION DECLINE THIS READING? Every refusal the emission below throws: a null
-      // chain (which a fall-through in a language without one forces too — `readArms` reads that
-      // one), and three asked here per arm, in emission order, without emitting anything — an arm
-      // whose exit is unstructurable, a fall-through into an arm that is not the next one emitted,
-      // and a fall-through into an arm that opens with switch-edge copies. The emission still
-      // throws them itself, and in its own order, so a reading this says declines fails with
-      // exactly the message it always did.
+      // THE EMISSION'S PER-ARM REFUSALS, the one definition of them. Every refusal the emission
+      // below throws is a null chain (which a fall-through in a language without one forces too —
+      // `readArms` reads that one) or one of three asked here per arm, in emission order, without
+      // emitting anything: an arm whose exit is unstructurable, a fall-through into an arm that is
+      // not the next one emitted, and a fall-through into an arm that opens with switch-edge
+      // copies. The answer is the arm it refuses at and a `raise` that throws the refusal, and the
+      // emission calls exactly the one `readArms` carries for the reading it adopted — so the
+      // retry's gate and the emission cannot disagree about what declines, and a reading that
+      // declines fails with the message it always did. Each refusal stays a literal
+      // `throw new StructureError(…)` so the decline-message harvest (apps/web declines.test.ts)
+      // still reads it.
       //
       // `edgeCopyRecords` stands in for `argAssignsFor` because it mints no swap-cycle temp — a
-      // name minted here would change the output of every arm emitted after it — but it is not a
-      // pure query either: an `undef` copy it drops is recorded in `droppedUndefCopies`, which a
-      // postcondition reads. So the records this question leaves are rolled back, as the
-      // speculative dispatch hoist does with its own.
-      const emissionDeclines = (exits: Map<Block, ArmExit>, chain: Block[]): boolean => {
-        const order = [...chain.map((e) => armOf.get(e)!), { entry: defEdge.block, edge: defEdge }];
+      // name minted here would change the output of every arm emitted after it — and it answers
+      // the same question: `sequentialize` emits at least one statement per record and none for
+      // none. It is not a pure query either: an `undef` copy it drops is recorded in
+      // `droppedUndefCopies`, which a postcondition reads. So the records this question leaves are
+      // rolled back, as the speculative dispatch hoist does with its own.
+      const armRefusal = (exits: Map<Block, ArmExit>, chain: Block[]): { at: number; raise: () => never } | null => {
+        const order: { entry: Block; edge: (typeof succ)[number]; values: number[] | null }[] = [
+          ...chain.map((e) => armOf.get(e)!),
+          { entry: defEdge.block, edge: defEdge, values: null },
+        ];
         const auditMark = droppedUndefCopies.length;
         try {
-          return order.some((a, i) => {
+          for (const [i, a] of order.entries()) {
             const exit = exits.get(a.entry)!;
             if (exit.kind === 'unstructurable') {
-              return true;
+              const { why } = exit;
+              return {
+                at: i,
+                raise: () => {
+                  throw new StructureError(`cannot structure '${fn.name}': ${why}`);
+                },
+              };
+            }
+            if (exit.kind !== 'fallthrough') {
+              continue;
             }
             const next = order[i + 1];
-            return exit.kind === 'fallthrough' && (next?.entry !== exit.to || edgeCopyRecords(b, next.edge).length > 0);
-          });
+            if (next?.entry !== exit.to) {
+              const { values } = a;
+              return {
+                at: i,
+                raise: () => {
+                  throw new StructureError(
+                    `cannot structure '${fn.name}': ${values ? `case ${values.join('/')}` : 'the default arm'} falls ` +
+                      `through into an arm that is not the next one emitted — C fall-through only reaches the arm below`,
+                  );
+                },
+              };
+            }
+            // The arm fallen INTO opens with its own switch-edge copies, which are how the dispatch
+            // hands it its block parameters. On the fall-through path those copies would RE-RUN and
+            // overwrite what the falling arm just computed (`case 0: v=7; case 1: v=5;` — the case-0
+            // path calling with 5). They cannot simply be dropped either: entering that arm by its
+            // own case value needs them. Hoisting them above the switch is possible but not always
+            // safe (another arm may read the same name first), so this shape declines LOUD;
+            // recovering it is future work.
+            if (edgeCopyRecords(b, next.edge).length > 0) {
+              return {
+                at: i,
+                raise: () => {
+                  throw new StructureError(
+                    `cannot structure '${fn.name}': the case fallen into takes a value from the switch edge, ` +
+                      `which the fall-through path would re-run`,
+                  );
+                },
+              };
+            }
+          }
+          return null;
         } finally {
           droppedUndefCopies.length = auditMark;
         }
@@ -5471,32 +5519,15 @@ export function structure(
       // output (the same reason emitDoWhile reuses its `updates`).
       const edgeCopies = emitOrder.map((a) => argAssignsFor(b, a.edge));
       const bodies = emitOrder.map((a, i) => {
+        // The refusal `armRefusal` found for this reading, thrown at the arm it names — the same
+        // point in the emission the check used to sit at, so an earlier arm's own refusal still
+        // speaks first. Its order is this emission array, so "the next arm" is read off the seam
+        // where a position acquires control-flow meaning, as Regime A's is.
+        if (read.refusal !== null && read.refusal.at === i) {
+          read.refusal.raise();
+        }
         const exit = exitOf.get(a.entry)!;
-        if (exit.kind === 'unstructurable') {
-          throw new StructureError(`cannot structure '${fn.name}': ${exit.why}`);
-        }
         const ft = exit.kind === 'fallthrough';
-        const next = emitOrder[i + 1];
-        // Re-read off the EMISSION array rather than trusted from `chainArms` — the seam where a
-        // position acquires control-flow meaning, checked on the same side of it as Regime A's.
-        if (ft && next?.entry !== exit.to) {
-          throw new StructureError(
-            `cannot structure '${fn.name}': ${a.values ? `case ${a.values.join('/')}` : 'the default arm'} falls ` +
-              `through into an arm that is not the next one emitted — C fall-through only reaches the arm below`,
-          );
-        }
-        // The arm fallen INTO opens with its own switch-edge copies, which are how the dispatch hands
-        // it its block parameters. On the fall-through path those copies would RE-RUN and overwrite
-        // what the falling arm just computed (`case 0: v=7; case 1: v=5;` — the case-0 path calling
-        // with 5). They cannot simply be dropped either: entering that arm by its own case value
-        // needs them. Hoisting them above the switch is possible but not always safe (another arm may
-        // read the same name first), so this shape declines LOUD; recovering it is future work.
-        if (ft && edgeCopies[i + 1].length) {
-          throw new StructureError(
-            `cannot structure '${fn.name}': the case fallen into takes a value from the switch edge, ` +
-              `which the fall-through path would re-run`,
-          );
-        }
         return {
           // A falling-through arm stops AT its successor arm, which then emits that body once under
           // its own labels; a closed arm runs to the merge as before.
