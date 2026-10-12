@@ -67,6 +67,13 @@ export interface SymbolRef {
    *  cell bare and nothing reads it as an integer (`pointerPartners`). A name-only declaration of it
    *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
   holdsPointer?: true;
+  /** A call target with NO spellable prototype whose address a function-scope static's (or an
+   *  anonymous image's) initializer holds. `declare.ts` prints C's own implicit declaration,
+   *  `int F();`, spelled out: the static's `(u32)&F` precedes every call in the body, so the
+   *  implicit declaration the call would make comes too late for the initializer, and `int F();`
+   *  is that same declaration made first — it states no parameter, so it binds the call exactly as
+   *  the implicit one did and changes nothing the compiler emits for it. */
+  implicitCall?: true;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -129,10 +136,12 @@ export function collectSymbolRefs(
   // A function-scope static's initializer names the globals whose addresses it holds
   // (`(u32)&MetatileBehavior_IsTallGrass`), which the candidate must declare as much as the body's —
   // and so does an anonymous image, which the emitter folds into a local's initializer.
+  const initAddresses = new Set<string>();
   for (const st of [...(tree.statics ?? []), ...(tree.images ?? [])]) {
     for (const v of st.init ?? []) {
       if (v !== null && typeof v === 'object' && symbols.has(v.symbol)) {
         valueRefs.add(v.symbol);
+        initAddresses.add(v.symbol);
       }
     }
   }
@@ -155,7 +164,11 @@ export function collectSymbolRefs(
   return [...new Set([...valueRefs, ...proto.keys()])]
     .sort()
     .filter((n) => {
-      if (called.has(n) && !proto.has(n)) {
+      // …except where an initializer holds its address: there the name is spelled ahead of every
+      // call, so leaving it to the call's implicit declaration leaves the initializer naming an
+      // undeclared identifier, and the implicit declaration itself is the one that is printed
+      // (`SymbolRef.implicitCall`).
+      if (called.has(n) && !proto.has(n) && !initAddresses.has(n)) {
         onRefused?.(n, 'call-target');
         return false;
       }
@@ -180,6 +193,7 @@ export function collectSymbolRefs(
         ...(p ? { proto: p } : {}),
         ...(definition ? { returned: definition } : {}),
         ...(holdsPointer.has(n) ? { holdsPointer: true as const } : {}),
+        ...(called.has(n) && !p ? { implicitCall: true as const } : {}),
       };
     });
 }

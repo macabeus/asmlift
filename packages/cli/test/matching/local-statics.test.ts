@@ -13,7 +13,9 @@
 // data sections hold exactly that function's statics, and where one of them lands depends on the
 // ones declared before it, on its own alignment and on whether it had an initializer — none of
 // which any score checks either.
+import { renderDeclarations } from '@asmlift/core/declare';
 import { decompile } from '@asmlift/core/pipeline';
+import { enumerateCandidates } from '@asmlift/core/rank';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   assembleTarget,
@@ -358,6 +360,28 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
     expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(0);
   });
 
+  // THE SELF-DECLARED WORLD (no headers, no map, no prototype): the block asmlift renders is all the
+  // candidate is compiled against. The body also CALLS a function whose address the table holds, so
+  // the static's `(u32)&h1` comes ahead of the call that would have declared `h1` implicitly — the
+  // block must declare it, and as the implicit declaration (`int h1();`), not as a prototype nothing
+  // states. Every candidate failed to compile with "`h1' undeclared" before it did.
+  test('a table member the body also calls with no prototype is declared ahead of the static', () => {
+    const c =
+      'u8 h1(u8); u8 h2(u8);\n' +
+      's32 both(s32 i, u8 x) { static u8 (*const t[2])(u8) = { h1, h2 }; return t[i](x) + h1(x); }';
+    const asm = compileTargetAsm(c, FLAGS);
+    const target = assembleTarget(asm);
+    const cands = enumerateCandidates('both', asm, ARMV4T_AGBCC, { prototypes: {} });
+    expect(cands.length).toBeGreaterThan(0);
+    const scores = cands.map((cand) => {
+      const decls = renderDeclarations(cand.symbolRefs ?? []);
+      expect(decls).toMatch(/^int h1\(\);$/m);
+      expect(addressWords(compileTargetAsm(decls + cand.source, FLAGS))).toEqual(addressWords(asm));
+      return scoreC(decls + cand.source, 'both', target, FLAGS).score;
+    });
+    expect(scores).toContain(0);
+  });
+
   test('a static every caller of an inlined function names declines, naming the others', () => {
     // agbcc 2.9 puts `n` ahead of A, the first function it inlined `counter` into; B names it too.
     const c =
@@ -407,6 +431,24 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
     expect(inData(cand)).toEqual(inData(obj));
     const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
     expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+  });
+
+  test('a table member the body also calls with no prototype is declared ahead of the static', () => {
+    // mwcc has no implicit declaration to fall back on inside an initializer either: "undefined
+    // identifier 'h1'" on every candidate until the block declared it (`int h1();`).
+    const c =
+      'extern s32 ga; extern s32 h1(s32);\n' +
+      's32 q1(s32 i) { static s32 *const t[2] = { &ga, (s32 *)h1 }; return *t[i] + h1(i); }';
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, 'q1', FLAGS);
+    const asmData = extractPpcAsmData(obj, 'q1');
+    const cands = enumerateCandidates('q1', asm, PPC_MWCC, { asmData, prototypes: {} });
+    expect(cands.length).toBeGreaterThan(0);
+    const scores = cands.map((cand) => {
+      const decls = renderDeclarations(cand.symbolRefs ?? []);
+      expect(decls).toMatch(/^int h1\(\);$/m);
+      return scoreCPpc('mwcc_242_81', decls + cand.source, 'q1', obj, FLAGS).score;
+    });
+    expect(scores).toContain(0);
   });
 
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {

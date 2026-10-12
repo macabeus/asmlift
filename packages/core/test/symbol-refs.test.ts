@@ -4,10 +4,12 @@
 // Pins the derivation's contracts: a map-derived VALUE reference (data global, `(u32)Func`) is
 // recorded with its SymbolInfo; a CALL target is NEVER recorded — not even when the same symbol
 // is also value-referenced (prototyping a called symbol is C89 poison, verified fact 3 of the
-// research doc); the '/raw-globals' variation names nothing so it carries no refs; and INERTNESS —
+// research doc), unless a static's initializer names it ahead of the call, where it is recorded as
+// C's own implicit declaration; the '/raw-globals' variation names nothing so it carries no refs; and INERTNESS —
 // no map ⇒ the field is absent everywhere.
 import { describe, expect, test } from 'vitest';
 
+import { renderDeclarations } from '../src/declare';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC } from '../src/target';
@@ -110,6 +112,29 @@ describe('call targets are NEVER recorded', () => {
     expect(named.length).toBeGreaterThan(0);
     for (const c of cands) {
       expect((c.symbolRefs ?? []).map((r) => r.name)).not.toContain('DoThing');
+    }
+  });
+
+  test('…except one a static initializer ALSO names: recorded as the implicit declaration', () => {
+    // agbcc's own listing of `static void (*const tbl[2])(void) = { h1, h2 }; h2(); tbl[i]();`.
+    // The static's `(u32)&h2` precedes the call `h2(a0)` in the emitted C, so the implicit
+    // declaration the call makes comes too late for the initializer ("`h2' undeclared …
+    // initializer element is not constant"). The ref is kept and marked, and the block prints C's
+    // implicit declaration itself, ahead of the static — `int h2();`, which binds the call the same.
+    const asm =
+      '\t.section .rodata\n\t.align\t2, 0\n\t.type\t tbl.3,object\n\t.size\t tbl.3,8\ntbl.3:\n' +
+      '\t.word\th1\n\t.word\th2\n.text\n\t.align\t2, 0\n\t.globl\tp1b\n\t.thumb_func\np1b:\n' +
+      '\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tbl\th2\n\tldr\tr0, .L3\n\tlsl\tr4, r4, #0x2\n' +
+      '\tadd\tr4, r4, r0\n\tldr\tr0, [r4]\n\tbl\t_call_via_r0\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n' +
+      '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\ttbl.3\n';
+    const cands = enumerateCandidates('p1b', asm, ARMV4T_AGBCC, {});
+    expect(cands.length).toBeGreaterThan(0);
+    for (const c of cands) {
+      expect(c.source).toContain('(u32)&h2');
+      const refs = new Map((c.symbolRefs ?? []).map((r) => [r.name, r]));
+      expect(refs.get('h2')?.implicitCall).toBe(true); // called, unprototyped, named by the static
+      expect(refs.get('h1')).not.toHaveProperty('implicitCall'); // never called
+      expect(renderDeclarations(c.symbolRefs ?? [])).toMatch(/^int h2\(\);$/m);
     }
   });
 
