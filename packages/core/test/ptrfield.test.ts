@@ -137,3 +137,53 @@ test('a read nested inside a loop is cast back exactly once', () => {
   expect(src).toContain('v = (s32)((struct Elem0 *)50345008)[a1].field_4;');
   expect(src).not.toContain('(s32)(s32)');
 });
+
+// A FIELD SELECTED OUT OF A LOCAL ARRAY's bytes is one the frame audit typed: it licenses a wider
+// runtime index into `u8 sp0[n]` only while every access of one width is one integer type, and a
+// pointer is an alias set of its own in agbcc — a read of it is reused past an `int` store to the
+// same bytes (frame-base-copy.test.ts, the element-struct fan test). Reached directly, or through
+// a local the bytes' address was copied into.
+test('a field selected out of a local array declines', () => {
+  const st = elem();
+  const overBytes = (base: Expr, extra: Stmt[] = [], locals: SFn['locals'] = []): SFn => ({
+    ...fn(st, [
+      ...extra,
+      {
+        k: 'assign',
+        name: 'v',
+        value: {
+          k: 'field',
+          name: 'field_4',
+          base: {
+            k: 'index',
+            base: { k: 'cast', to: T.ptr(st), e: base },
+            idx: { k: 'var', name: 'a1' },
+            width: 8,
+            signed: true,
+          },
+        },
+      },
+    ]),
+    locals: [{ name: 'v', type: T.s(32) }, { name: 'sp0', type: T.array(T.u(8), 16) }, ...locals],
+  });
+  expect(pointerFields(overBytes({ k: 'var', name: 'sp0' }))).toBeNull();
+  expect(
+    pointerFields(
+      overBytes(
+        { k: 'var', name: 'p0' },
+        [{ k: 'assign', name: 'p0', value: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'var', name: 'sp0' } } }],
+        [{ name: 'p0', type: T.ptr(T.s(32)) }],
+      ),
+    ),
+  ).toBeNull();
+  // …while a pointer local that never held the bytes' address stays admitted
+  expect(
+    pointerFields(
+      overBytes(
+        { k: 'var', name: 'p0' },
+        [{ k: 'assign', name: 'p0', value: { k: 'var', name: 'a1' } }],
+        [{ name: 'p0', type: T.ptr(T.s(32)) }],
+      ),
+    ),
+  ).not.toBeNull();
+});

@@ -642,6 +642,47 @@ describe('the audit judges each frame object on its own bytes', () => {
         // …while kept as one object, the scalar is its byte 0 and the index another byte of it
         expect(lift(typed).source).toContain('u8 sp0[8];');
       });
+
+      // agbcc's own output for `int u(int i, int j, int a){ unsigned short t[4][3]; t[i][0] = a;
+      // t[i+1][0] = a+1; return t[j][0]; }` — a row of three halfwords, stride 6. agbcc rounds
+      // every struct to 4 bytes, so an element struct of 6 would be indexed at 8 and its stores
+      // land past the buffer: the stride is spelled as the byte offset it is.
+      test('a stride the compiler would round an element struct off is spelled as bytes', () => {
+        const rows =
+          'u:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x18\n\tlsl\tr3, r0, #0x1\n\tadd\tr3, r3, r0\n\tlsl\tr3, r3, #0x1\n' +
+          '\tadd\tr3, r3, sp\n\tstrh\tr2, [r3]\n\tadd\tr0, r0, #0x1\n\tlsl\tr3, r0, #0x1\n\tadd\tr3, r3, r0\n' +
+          '\tlsl\tr3, r3, #0x1\n\tmov\tr4, sp\n\tadd\tr0, r4, r3\n\tadd\tr2, r2, #0x1\n\tstrh\tr2, [r0]\n' +
+          '\tlsl\tr0, r1, #0x1\n\tadd\tr0, r0, r1\n\tlsl\tr0, r0, #0x1\n\tadd\tr0, r0, sp\n\tldrh\tr0, [r0]\n' +
+          '\tadd\tsp, sp, #0x18\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+        const src = decompile('u', rows, ARMV4T_AGBCC).source;
+        expect(src).toContain('*(u16 *)((u32)sp0 + a0 * 6) = a2;');
+        expect(src).toContain('return *(u16 *)((u32)sp0 + a1 * 6);');
+        for (const c of enumerateCandidates('u', rows, ARMV4T_AGBCC)) {
+          expect(c.source).not.toMatch(/struct Elem/);
+        }
+      });
+
+      // agbcc's own output for `struct E { int a; int b; }; void s7(int i, int j, int q){ struct E
+      // p[2]; int x; memcpy(p, gT, sizeof p); x = p[i].b; ((int *)p)[j] = q; use(x, p[i].b,
+      // p[i].a); }`. The pairs read by index are an element struct over the bytes; a candidate that
+      // declared its word field the pointer it may hold would put the read in a set of its own,
+      // and agbcc compiles that to one load reused past the `int` store — so no candidate does.
+      test('an element struct over the bytes keeps integer fields in every candidate', () => {
+        const pairs =
+          's7:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x10\n\tadd\tr5, r0, #0\n\tadd\tr4, r1, #0\n' +
+          '\tadd\tr6, r2, #0\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x10\n\tbl\tmemcpy\n\tlsl\tr5, r5, #0x3\n' +
+          '\tadd\tr1, sp, #0x4\n\tadd\tr1, r1, r5\n\tldr\tr0, [r1]\n\tlsl\tr4, r4, #0x2\n\tadd\tr4, r4, sp\n' +
+          '\tstr\tr6, [r4]\n\tldr\tr1, [r1]\n\tmov\tr3, sp\n\tadd\tr2, r3, r5\n\tldr\tr2, [r2]\n\tbl\tuse\n' +
+          '\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgT\n';
+        expect(decompile('s7', pairs, ARMV4T_AGBCC).source).toContain('((s32 *)sp0)[a1] = a2;');
+        const cands = enumerateCandidates('s7', pairs, ARMV4T_AGBCC);
+        expect(cands.some((c) => /\(struct Elem\d+ \*\)\s*\(?(\(u32\))?\s*sp0/.test(c.source))).toBe(true);
+        for (const c of cands) {
+          for (const [, fields] of c.source.matchAll(/struct Elem\d+ \{([^}]*)\}/g)) {
+            expect(fields).not.toMatch(/\*/);
+          }
+        }
+      });
     });
 
     test('an object that does not start at the bottom of the area is not the whole area', () => {

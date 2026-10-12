@@ -1105,10 +1105,16 @@ function indexedAccess(
  *  stale 1 for T = unsigned short, void * and long.
  *
  *  So ONE WIDTH IS ONE SET only while every access of that width is spelled as the same integer
- *  type, which is what is spelled: a cast on the storage to the access's own `s32`/`u32` (`int`
- *  and `unsigned int` in every agbcc project's headers), never the pointer an element may hold —
- *  pinned over a whole fan by the pointer-array test in `frame-base-copy.test.ts`. The storage
- *  stays `u8 name[n]` whatever the width, and the stride is not the licence: the alias sets are. */
+ *  type, and it is the type the access READS AT that carries the set, not the cast that reaches
+ *  it. Two spellings reach the bytes: a cast on the storage to the access's own `s32`/`u32` (`int`
+ *  and `unsigned int` in every agbcc project's headers), and — for the indexed pairs
+ *  raise/struct-arrays groups — a member of an element struct cast over the storage
+ *  (`((struct Elem0 *)sp0)[i].field_0`), whose set is its FIELD's type. So both must be an
+ *  integer, never the pointer an element may hold: the first is pinned over a whole fan by the
+ *  pointer-array test in `frame-base-copy.test.ts`, the second by its element-struct fan test and
+ *  by `/ptr-field`'s `over-local-storage` gate (l3/ptrfield.ts), which keeps a field selected out
+ *  of a local array an integer. The storage stays `u8 name[n]` whatever the width, and the stride
+ *  is not the licence: the alias sets are. */
 function indexedWidth(accesses: readonly { readonly width: number }[]): {
   width: number | null;
   refusal: string | null;

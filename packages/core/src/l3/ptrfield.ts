@@ -69,6 +69,7 @@ import {
   type StructType,
   mapExprChildren,
   mapStmtExprs,
+  mentionedName,
   stmtChildren,
   walkExprs,
 } from './ast';
@@ -82,6 +83,8 @@ interface FieldCtx {
   written: boolean;
   /** the field's value stands as the base of an `index` or another `field` */
   dereferenced: boolean;
+  /** some access to the field selects it out of a local array's bytes */
+  overLocalStorage: boolean;
 }
 
 export const PTR_FIELD_GATES: readonly Gate<FieldCtx>[] = [
@@ -106,6 +109,16 @@ export const PTR_FIELD_GATES: readonly Gate<FieldCtx>[] = [
     guardedBy: 'ptrfield.test.ts: a field standing as an access base declines',
     rejects: (c) => c.dereferenced,
   },
+  {
+    id: 'over-local-storage',
+    why:
+      "a local array's bytes are typed by the frame audit, which licenses a wider runtime index only " +
+      'while every access of one width is one integer type; a pointer field over them is an alias ' +
+      'set of its own, and agbcc at -O2 reads it stale past an integer store to the same bytes',
+    sound: true,
+    guardedBy: 'ptrfield.test.ts: a field selected out of a local array declines',
+    rejects: (c) => c.overLocalStorage,
+  },
 ];
 
 /** the struct a `field` node selects from, or null */
@@ -122,6 +135,7 @@ const keyOf = (structName: string, field: string): string => `${structName}.${fi
  *  reads cast back to. */
 function plan(sfn: SFn): Map<string, IrType> {
   const vt = declaredTypes(sfn);
+  const storage = localStorageNames(sfn);
   const seen = new Map<string, FieldCtx & { type: IrType }>();
   const note = (base: Expr, name: string, edit: (c: FieldCtx) => void): void => {
     const st = structOf(base, vt);
@@ -134,6 +148,7 @@ function plan(sfn: SFn): Map<string, IrType> {
       word: declared.kind === 'int' && declared.width === 32,
       written: false,
       dereferenced: false,
+      overLocalStorage: false,
       type: declared,
     };
     edit(cur);
@@ -141,7 +156,11 @@ function plan(sfn: SFn): Map<string, IrType> {
   };
   for (const e of walkExprs(sfn.body)) {
     if (e.k === 'field') {
-      note(e.base, e.name, () => {});
+      note(e.base, e.name, (c) => {
+        if (reachesStorage(e.base, storage)) {
+          c.overLocalStorage = true;
+        }
+      });
     }
     // a field standing as an access base is one the recovery typed from its own use
     const inner = e.k === 'index' ? e.base : e.k === 'field' ? e.base : null;
@@ -161,6 +180,47 @@ function plan(sfn: SFn): Map<string, IrType> {
     }
   }
   return out;
+}
+
+/** The locals whose value is a LOCAL OBJECT'S ADDRESS: every local array (the bytes the frame
+ *  audit typed — `u8 sp0[n]`), then every local assigned an expression that reaches one, or a
+ *  local's address, to a fixpoint (`p0 = (s32 *)sp0;` carries the bytes into `p0`). Over-wide by
+ *  design: a local holding `sp0[i]` (a value read OUT of the bytes) is swept in too, which only
+ *  ever refuses a variation. */
+function localStorageNames(sfn: SFn): { names: Set<string>; locals: Set<string> } {
+  const names = new Set(sfn.locals.filter((l) => l.type.kind === 'array').map((l) => l.name));
+  const locals = new Set(sfn.locals.map((l) => l.name));
+  const asg = [...assigns(sfn.body)];
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const a of asg) {
+      if (locals.has(a.name) && !names.has(a.name) && reachesStorage(a.value, { names, locals })) {
+        names.add(a.name);
+        grew = true;
+      }
+    }
+  }
+  return { names, locals };
+}
+
+/** does the expression name local storage, or take a local's address? */
+function reachesStorage(
+  e: Expr,
+  storage: { readonly names: ReadonlySet<string>; readonly locals: ReadonlySet<string> },
+): boolean {
+  return [...walkExprs([{ k: 'exprstmt', value: e }])].some((x) => {
+    const n = mentionedName(x);
+    return n !== undefined && (storage.names.has(n) || (x.k === 'addr' && storage.locals.has(n)));
+  });
+}
+
+function* assigns(body: readonly Stmt[]): Generator<Extract<Stmt, { k: 'assign' }>> {
+  for (const s of body) {
+    if (s.k === 'assign') {
+      yield s;
+    }
+    yield* assigns(stmtChildren(s));
+  }
 }
 
 /** Every `store` in the tree. ORDER-FREE by construction, which is what lets it use the shared
