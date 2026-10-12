@@ -932,11 +932,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // constants. The class still takes the static the naming policy or the reader refuses — an
   // address of a section, an anonymous constant or another static, an element narrower than a
   // pointer — and no benchmark row reaches any of them.
+  //
+  // `outgoing-stack-args` joins on a capability: its three inhabitants were Thumb `[sp,#0]` stores
+  // that were an address-taken local's first word, handed to a callee or a device, not a call's
+  // argument. A store that reaches a call unread still refuses there.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'no-prototype-args',
+    'outgoing-stack-args',
     'pool-word-shape',
     'store-class',
     'structs',
@@ -1007,14 +1012,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // measurable half of core naming the register file: `unmodelled floating-point instruction` is
   // matched by no other class, so the ordering is no longer load-bearing for any of them. The two
   // transfer pairs are the control-transfer capabilities sitting above `branch-form`, and
-  // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames, and
-  // Thumb's refusal of a never-reloaded `[sp,#0]` store says it may be an outgoing stack argument
-  // after saying the stack pointer is used as data.
+  // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
     ['address-taken-local > stack-frames', 4],
     ['ctr-transfer > branch-form', 4],
-    ['outgoing-stack-args > stack-frames', 3],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
