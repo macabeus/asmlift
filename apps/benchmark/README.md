@@ -421,8 +421,9 @@ of every store forever.
   libraries those programs load (`otool -L` on macOS, `ldd` on Linux; the macOS system libraries
   live in the OS and are keyed by its build, `sw_vers`), the words of the command, the harness code
   that shapes the compiler's input (on the command path, `@match-kit/compiler` too: it runs the
-  command and words a failure) as the process LOADED it — a load hook every bench process imports
-  first (`tsx --import packages/cli/src/loaded-code-hook.ts`) hashes the text each module is
+  command and words a failure) as the process LOADED it — a load hook every bench process registers
+  before tsx (`node --import packages/cli/src/loaded-code-hook.mjs --import tsx`, in that order, so
+  the hook sits beneath tsx's loader) hashes the text each module is
   compiled from, and a process without it refuses a file changed since it started — so a `pnpm
 install` or `git pull` during a run is the next run's namespace and not this one's, the compile
   environment (`LANG`/`LC_*`, `SOURCE_DATE_EPOCH`, `MACOSX_DEPLOYMENT_TARGET`, the SDK that `SDKROOT`
