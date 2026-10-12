@@ -21,6 +21,7 @@
 import { cBackend } from './backend/c';
 import {
   assertDerefsTyped,
+  assertFrameUnionsViewed,
   assertLocalStorageStaysInteger,
   assertLocalsWritten,
   assertNoOrphanedLocals,
@@ -1096,6 +1097,7 @@ export function enumerateCandidates(
         assertPostIncrUnshared(alt);
         assertNoOrphanedLocals(sfn, alt);
         assertLocalStorageStaysInteger(sfn, alt);
+        assertFrameUnionsViewed(alt);
         sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape or declaration-width fact
@@ -1140,6 +1142,7 @@ export function enumerateCandidates(
                 assertPostIncrUnshared(shaped.out);
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertLocalStorageStaysInteger(alt, shaped.out);
+                assertFrameUnionsViewed(shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],
@@ -2290,6 +2293,7 @@ export function enumerateCandidates(
                 assertPostIncrUnshared(made);
                 assertNoOrphanedLocals(sfn, made);
                 assertLocalStorageStaysInteger(sfn, made);
+                assertFrameUnionsViewed(made);
                 // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped
                 // here and only the call over the row's own tree above records one.

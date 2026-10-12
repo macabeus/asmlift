@@ -895,7 +895,6 @@ function localStorageNonIntegers(sfn: SFn): Set<string> {
  *  answer, and a type it gives a local object (a header-typed out-parameter's pointer member, say)
  *  is the source's own spelling, not a variation's claim. */
 export function assertLocalStorageStaysInteger(before: SFn, after: SFn): void {
-  assertFrameUnionsViewed(after);
   const had = localStorageNonIntegers(before);
   const added = [...localStorageNonIntegers(after)].filter((t) => !had.has(t));
   if (added.length) {
@@ -922,7 +921,7 @@ export function assertLocalStorageStaysInteger(before: SFn, after: SFn): void {
  *      device's source register — since handing it on accesses nothing.
  *  ABSOLUTE, not a differential: the default tree satisfies it by construction, so any tree that
  *  does not was made by a variation. Checked on the default tree (pipeline.ts) and on every
- *  respelled one (`assertLocalStorageStaysInteger`). */
+ *  respelled one (rank.ts, beside `assertLocalStorageStaysInteger`). */
 export function assertFrameUnionsViewed(sfn: SFn): void {
   const unions = new Map(sfn.locals.filter((l) => l.type.kind === 'union').map((l) => [l.name, l.type]));
   if (unions.size === 0) {

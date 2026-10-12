@@ -5,7 +5,7 @@
 // of its own in agbcc, which reads it stale past an integer store to the same bytes.
 import { describe, expect, test } from 'vitest';
 
-import { ContractError, assertLocalStorageStaysInteger } from '../src/contracts';
+import { ContractError, assertFrameUnionsViewed, assertLocalStorageStaysInteger } from '../src/contracts';
 import { type IrType, T } from '../src/ir/types';
 import { type Expr, type SFn } from '../src/l3/ast';
 
@@ -90,8 +90,8 @@ describe('what assertLocalStorageStaysInteger leaves alone', () => {
 });
 
 // A FRAME UNION (frontend/frame-objects.ts `unionViews`) is alias-safe only while every access is a
-// member access: `assertFrameUnionsViewed`, which `assertLocalStorageStaysInteger` runs on every
-// respelled tree. Compiled, agbcc returns a stale `mov r0, #0x1` for `*u.half = 1; u.word[0] = x;
+// member access: `assertFrameUnionsViewed`, which rank.ts runs on every respelled tree beside
+// `assertLocalStorageStaysInteger`. Compiled, agbcc returns a stale `mov r0, #0x1` for `*u.half = 1; u.word[0] = x;
 // return *u.half;` and for the cast twin, and reloads for `u.half[0]`.
 describe('a frame union is accessed only through its views', () => {
   const U: IrType = {
@@ -127,13 +127,11 @@ describe('a frame union is accessed only through its views', () => {
   const viewed = withRead(half(true));
 
   test('a subscripted view, and the address handed on as a value, pass', () => {
-    expect(() => assertLocalStorageStaysInteger(viewed, viewed)).not.toThrow();
+    expect(() => assertFrameUnionsViewed(viewed)).not.toThrow();
   });
 
   test('element 0 dereferenced through the view`s decay is refused', () => {
-    expect(() => assertLocalStorageStaysInteger(viewed, withRead(half(false)))).toThrow(
-      /dereferences a view of a frame union/,
-    );
+    expect(() => assertFrameUnionsViewed(withRead(half(false)))).toThrow(/dereferences a view of a frame union/);
   });
 
   test('an access through a pointer to its bytes is refused, directly or through a local', () => {
@@ -144,7 +142,7 @@ describe('a frame union is accessed only through its views', () => {
       width: 2,
       signed: false,
     };
-    expect(() => assertLocalStorageStaysInteger(viewed, withRead(cast))).toThrow(ContractError);
+    expect(() => assertFrameUnionsViewed(withRead(cast))).toThrow(ContractError);
     const p: Expr = {
       k: 'index',
       base: { k: 'var', name: 'p0' },
@@ -157,6 +155,6 @@ describe('a frame union is accessed only through its views', () => {
       [{ k: 'assign', name: 'p0', value: { k: 'cast', to: T.ptr(T.u(16)), e: { k: 'addr', name: 'sp0' } } }],
       [{ name: 'p0', type: T.ptr(T.u(16)) }],
     );
-    expect(() => assertLocalStorageStaysInteger(viewed, held)).toThrow(/through a pointer to its bytes/);
+    expect(() => assertFrameUnionsViewed(held)).toThrow(/through a pointer to its bytes/);
   });
 });
