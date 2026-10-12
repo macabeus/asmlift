@@ -135,6 +135,10 @@ export interface SsaBuilder {
     withholdsSetupArgs?: () => boolean,
     asksEveryCut?: () => boolean,
   ): void;
+  /** Every `call` op {@link recordGuessedCall} registered: a callee no prototype states, whose
+   *  arity counts argument REGISTERS alone — so any stack word it takes is one this function's
+   *  lift cannot see it take. */
+  guessedCallOps(): ReadonlySet<Op>;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
   finish(): void;
@@ -891,6 +895,7 @@ export function makeSsaBuilder(
             : 'inherited',
       });
     },
+    guessedCallOps: () => new Set(guessedCalls.map((g) => g.op)),
     markFilled: (b: number) => {
       filled[b] = true;
       sealReadyBlocks();

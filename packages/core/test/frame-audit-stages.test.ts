@@ -73,7 +73,14 @@ const shape = (
 ) => {
   const { fail, facts, objects, flow, uses } = classify(irBlocks, { owned: range });
   const windows = escapeWindows(irBlocks, uses, flow, facts, ARMV4T_AGBCC);
-  const model = chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+  const model = chooseFrameModel({
+    oneObject: undefined,
+    uses,
+    windows,
+    guessedCalls: new Set(),
+    returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+    fail,
+  });
   const usedSlotOffsets = new Set(slots);
   const args = { objects, uses, owned: range, declared, usedSlotOffsets };
   const shapes = objectShapes({ ...args, returnsWithoutHiddenPointer: declaresNoHiddenPointer, model, fail });
@@ -277,13 +284,14 @@ describe('chooseFrameModel', () => {
   test('offers the one-object answer where every escape only reads and one reads without bound', () => {
     const blk = published(2);
     const { fail, facts, flow, uses } = classify([blk]);
-    const model = chooseFrameModel(
-      undefined,
+    const model = chooseFrameModel({
+      oneObject: undefined,
       uses,
-      escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC),
-      declaresNoHiddenPointer,
+      windows: escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC),
+      guessedCalls: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       fail,
-    );
+    });
     expect(model.onOffer).toBe(true);
     model.shapeRefused('two widths');
     expect(model.refused).toBe(true);
@@ -300,7 +308,14 @@ describe('chooseFrameModel', () => {
     };
     const { fail, facts, flow, uses } = classify([blk]);
     const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
-    return chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+    return chooseFrameModel({
+      oneObject: undefined,
+      uses,
+      windows,
+      guessedCalls: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      fail,
+    });
   };
 
   test('offers the one-object answer where every writer is a callee it holds', () => {
@@ -333,7 +348,14 @@ describe('chooseFrameModel', () => {
     const blk = published(2, 0x8100);
     const { fail, facts, flow, uses } = classify([blk]);
     const windows = escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC);
-    const model = chooseFrameModel(undefined, uses, windows, declaresNoHiddenPointer, fail);
+    const model = chooseFrameModel({
+      oneObject: undefined,
+      uses,
+      windows,
+      guessedCalls: new Set(),
+      returnsWithoutHiddenPointer: declaresNoHiddenPointer,
+      fail,
+    });
     expect(model.onOffer).toBe(false);
     expect(() => model.shapeRefused('two widths')).toThrow(/two widths$/);
   });
@@ -443,6 +465,7 @@ describe('keepAsOneObject', () => {
       usedSlotOffsets: new Set(),
       capturedObjectIsTheWholeFrame: false,
       movedCaptures: new Set(),
+      guessedCalls: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
       target: ARMV4T_AGBCC,

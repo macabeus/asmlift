@@ -2490,6 +2490,7 @@ function liftOnce(
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
     escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
+    guessedCalls: ssa.guessedCallOps(),
     returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
     symbols,
     target,

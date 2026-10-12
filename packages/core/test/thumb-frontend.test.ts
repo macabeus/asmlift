@@ -1934,7 +1934,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, r1\n\tstrh\tr0, [r4]\n\tstr\tr0, [r4]\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(
-      /address-taken stack local — a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide/,
+      /address-taken stack local — a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
     );
     const outgoing =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
@@ -3791,17 +3791,25 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ARMV4T_AGBCC,
       ),
     ).toThrow(laddr);
-    // accesses disagreeing on width: no single declared type reproduces both
-    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n'), ARMV4T_AGBCC)).toThrow(
-      laddr,
-    );
+    // accesses disagreeing on width: no single declared type reproduces both — refused where the
+    // address escapes to a writer the one object cannot hold, and where nothing escapes, the views
+    // of one union, both stores kept
+    const twoWidths = '\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n';
+    expect(() => decompile('f', wrap(`${twoWidths}\tmov\tr0, r4\n\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(laddr);
+    expect(decompile('f', wrap(twoWidths), ARMV4T_AGBCC).source).toContain('sp0.half[0] = a0;\n    sp0.word[0] = a1;');
     // address arithmetic on the capture that is not a constant move: the object's extent stops
     // being one scalar
     expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tsub\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
-    // an access at a nonzero offset through the capture
-    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n'), ARMV4T_AGBCC)).toThrow(laddr);
+    // a word at a nonzero offset through the capture, beside a call no prototype states: it may be
+    // that callee's stack argument (frame-objects.ts `chooseFrameModel`)…
+    const wordAt4 = '\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n';
+    expect(() => decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(laddr);
+    // …and with no call, or with every call declared, it is a word of the one object
+    expect(decompile('f', wrap(wordAt4), ARMV4T_AGBCC).source).toContain('((s32 *)sp0)[1] = a0;');
+    const g1 = { prototypes: { g: { params: 1 } } };
+    expect(decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC, g1).source).toContain('((s32 *)sp0)[1] = a0;');
     // overlap with an SSA slot: one byte, two models — refused where the address escapes to a
     // writer the one object cannot hold (a callee taking it at argument 0 with nothing said of its
     // return)…
@@ -3814,9 +3822,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '*(s32 *)sp0 = a0;\n    *(s32 *)sp0 = a1;\n    return *(s32 *)sp0;',
     );
     // a RUNTIME offset from sp is an index, read through a cast at its own width — so two widths
-    // are two alias sets over bytes the index names none of
+    // are two alias sets over bytes the index names none of, refused by the one object too
     expect(() => decompile('f', wrap('\tadd\tr4, sp, r1\n\tstrh\tr0, [r4]\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
-      /a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide/,
+      /a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
     );
   });
 

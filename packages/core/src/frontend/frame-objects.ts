@@ -37,6 +37,11 @@ export interface FrameObjectAudit {
   escapesReliedOn?: ReadonlySet<number>;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
+  /** every `call` whose arity no prototype states (`SsaBuilder.guessedCallOps`): it counts argument
+   *  registers alone, so a stack word such a callee takes is one the lift cannot see it take — and
+   *  agbcc stages a by-value struct argument into the outgoing words through `mov rD, sp` and
+   *  `stmia` (`chooseFrameModel`) */
+  guessedCalls: ReadonlySet<Op>;
   /** whether a callee's declaration rules out a struct returned through a hidden pointer at
    *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
    *  declarations */
@@ -254,10 +259,10 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     nothing else types — bytes, or ONE wider width, read through a cast on the bytes
  *     (`indexedWidth`) — and its bytes must belong to nothing else in the frame;
  *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
- *     that answer can hold (`writerNotKept`), or where no address escapes at all and an object
- *     lies over a slot (`oneObject`, which this answers and the frontend lifts again with): the
- *     local area is one `u8` array in memory, every fixed-offset access in
- *     it is a member at its own offset, a runtime index may reach it at a byte or at ONE wider
+ *     that answer can hold (`writerNotKept`), or where no address escapes at all and the
+ *     per-object model refuses (`oneObject`, which this answers and the frontend lifts again
+ *     with): the local area is one `u8` array in memory, every fixed-offset access in it is a
+ *     member at its own offset, a runtime index may reach it at a byte or at ONE wider
  *     width (`indexedWidth`), and two widths at one byte are the views of one union
  *     (`unionViews`), or refuse where no view names them (`unionRefusal`).
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
@@ -288,6 +293,7 @@ export function auditFrameObjects({
   capturedObjectIsTheWholeFrame,
   escapesReliedOn = new Set(),
   movedCaptures,
+  guessedCalls,
   returnsWithoutHiddenPointer,
   symbols,
   target,
@@ -310,7 +316,7 @@ export function auditFrameObjects({
   const flow = addressFlow(irBlocks, objects, facts, fail);
   const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel(oneObject, uses, windows, returnsWithoutHiddenPointer, fail);
+  const model = chooseFrameModel({ oneObject, uses, windows, guessedCalls, returnsWithoutHiddenPointer, fail });
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -332,11 +338,12 @@ export function auditFrameObjects({
     fail,
   });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
-  // THE ONE-OBJECT ANSWER, where it is on offer (one escape reaches without bound, and every
-  // writer is one it can hold) and the per-object model does not describe the frame: it refused a
-  // shape, an object sits over a slot, or the unbounded reach meets another object, a slot or a
-  // word nothing accounts for. Then what the device may read or the callee may write is kept
-  // rather than refused: lift again with the local area as one object in memory
+  // THE ONE-OBJECT ANSWER, where it is on offer (`chooseFrameModel`: one escape reaches without
+  // bound and every writer is one it can hold, or no address escapes at all) and the per-object
+  // model does not describe the frame: it refused a shape, an object sits over a slot, or the
+  // unbounded reach meets another object, a slot or a word nothing accounts for. Then what the
+  // device may read or the callee may write — or, with no escape, only this function's own
+  // accesses — is kept rather than refused: lift again with the local area as one object in memory
   // (`keepAsOneObject`). Below the local area are the outgoing arguments and above it the saved
   // registers, neither of them an object. Where the per-object model does describe the frame —
   // one object and nothing else in reach — it stands, and the object keeps its own type.
@@ -345,18 +352,6 @@ export function auditFrameObjects({
     e.hi === Infinity &&
     (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
   if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
-    return { oneObject: { from: declared.from, to: declared.to } };
-  }
-  // …AND WHERE NO ADDRESS ESCAPES AT ALL, an object over a slot asks for the same answer. With no
-  // escape there is no writer and no reader but this function's own accesses, so keeping every word
-  // of the declared area in memory keeps every store and every load the machine made there — a
-  // spill kept in memory changes no value. That is the frame a by-value struct parameter leaves:
-  // agbcc spills its registers word by word (`str r1, [sp]`, the slot model's) and, Thumb having
-  // no sp-relative halfword or byte load, reads its members through `mov rD, sp` (the object's) —
-  // `int f(struct Q { u8 a[9]; } p){ return p.a[1] + p.a[8]; }`. Only an object over a slot: every
-  // other per-object refusal stands where nothing escapes, and the second audit judges the bytes
-  // by its own rules (`keepAsOneObject`), two widths at one byte included.
-  if (uses.escaped.size === 0 && shapes.overSlot.length > 0) {
     return { oneObject: { from: declared.from, to: declared.to } };
   }
   const failWithheld: Refuse = (why) => fail(model.withheld(why));
@@ -1319,25 +1314,53 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
   return null;
 }
 
-/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where one escape reaches without bound and the
- *  one-object answer can hold every writer (`writerNotKept`), that answer is on offer — two
- *  out-parameters handed to one callee as readily as a device read — and the shapes the
- *  per-object model refuses are ones it can hold: a member at [+k] through a capture, two widths
- *  or two signednesses at one address, a runtime index, overlapping objects, a second object
- *  beside an untyped one, an object over a slot. So there each of those refusals asks for that
- *  answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
- *  object by its own rules — two types at one byte are a union there, or refuse. Where the answer is not on offer, each refuses where it stands. */
-function chooseFrameModel(
-  oneObject: FrameRange | undefined,
-  uses: FrameUses,
-  windows: ReadonlyMap<number, ReadWindow>,
-  returnsWithoutHiddenPointer: (callee: string) => boolean,
-  fail: Refuse,
-): ModelChoice {
+/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. The one-object answer is on offer in two
+ *  frames. Where one escape reaches without bound and that answer can hold every writer
+ *  (`writerNotKept`) — two out-parameters handed to one callee as readily as a device read. And
+ *  where NO ADDRESS ESCAPES AT ALL: then there is no writer and no reader but this function's own
+ *  accesses, so keeping every word of the declared area in memory keeps every store and every load
+ *  the machine made there, and a spill kept in memory changes no value. That second frame is the
+ *  one a by-value struct parameter leaves: agbcc spills its registers word by word (`str r1, [sp]`,
+ *  the slot model's) and, Thumb having no sp-relative halfword or byte load, reads its members
+ *  through `mov rD, sp` (the object's) — `int f(struct Q { u8 a[9]; } p){ return p.a[1] + p.a[8]; }`,
+ *  or a member read signed and unsigned, or the struct copied out a word at a time. The shapes the
+ *  per-object model refuses are ones that answer can hold: a member at [+k] through a capture, two
+ *  widths or two signednesses at one address, a runtime index, overlapping objects, a second
+ *  object beside an untyped one, an object over a slot. So there each of those refusals asks for
+ *  that answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
+ *  object by its own rules — two types at one byte are a union there, or refuse. Where the answer
+ *  is not on offer, each refuses where it stands.
+ *
+ *  EXCEPT A WORD THROUGH A CAPTURE BESIDE A GUESSED CALL, where nothing escapes. That refusal
+ *  (`memberRefusal`) is the outgoing-argument guard: `ldr`/`str` have an `[sp,#imm]` form, so a word
+ *  reached through `mov rD, sp` is a block copy, and agbcc copies a by-value struct ARGUMENT into
+ *  the outgoing words that way — `th(1, 2, 3, 4, *p)` is `mov r0, sp / ldmia r1! / stmia r0! /
+ *  bl th`, the address escaping nowhere. Kept as one object, those stores are a local's and the
+ *  call loses every stack word, silently, wherever `th`'s arity is guessed (registers alone,
+ *  `guessedCalls`). A callee a prototype states is safe: the stack-argument analysis holds each
+ *  word it takes to an `[sp,#k]` store, and the one object is declared above that block. So with
+ *  no escape the word refusal is offered only where no call is guessed; where an address escapes,
+ *  the answer is offered as it was before this rule. */
+function chooseFrameModel({
+  oneObject,
+  uses,
+  windows,
+  guessedCalls,
+  returnsWithoutHiddenPointer,
+  fail,
+}: {
+  oneObject: FrameRange | undefined;
+  uses: FrameUses;
+  windows: ReadonlyMap<number, ReadWindow>;
+  guessedCalls: ReadonlySet<Op>;
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
+  fail: Refuse;
+}): ModelChoice {
   const unbounded =
     oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
   const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
-  const onOffer = unbounded && writer === null;
+  const escapeFree = oneObject === undefined && uses.escaped.size === 0;
+  const onOffer = (unbounded && writer === null) || escapeFree;
   const model: ModelChoice = {
     onOffer,
     refused: false,
@@ -1352,6 +1375,9 @@ function chooseFrameModel(
     withheld: (why) => (writer === null ? why : `${why} — and the one object cannot hold every writer: ${writer}`),
   };
   if (uses.memberRefusal !== undefined) {
+    if (escapeFree && guessedCalls.size > 0) {
+      fail(uses.memberRefusal);
+    }
     model.shapeRefused(uses.memberRefusal);
   }
   return model;
@@ -1818,7 +1844,8 @@ function slotKeys(usedSlotOffsets: ReadonlySet<number>, off: number, width: numb
  *  overlap, and refusing first would decline exactly the frames it exists for — an object at
  *  [sp,#0] whose first member is a word stored `str rN, [sp]`, or a by-value struct parameter
  *  spilled word by word and read through `mov rD, sp` where nothing escapes. The other per-object
- *  refusals here go through `shapeRefused`, for the same reason. */
+ *  refusals here go through `shapeRefused`, for the same reason: where nothing escapes, each of
+ *  them asks for that answer too (`chooseFrameModel`). */
 function objectShapes({
   objects,
   uses,

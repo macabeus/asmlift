@@ -694,9 +694,12 @@ width and extension (`p->field_0.half[1]`, `p->field_0.shalf`; `ir/types.ts` `un
 deref contract share `memberOf`, so they agree on which member access is well-typed.
 
 **A frame object is the second inhabitant.** The frame audit keeps a local area as one object in
-memory where a device or a callee holds its address, or where nothing escapes and an object lies
-over a spill slot (a by-value struct parameter, spilled word by word and read member by member
-through `mov rD, sp`). Where two widths meet at one byte of it, the L1 audit stamps the `laddr`
+memory where a device or a callee holds its address, or where nothing escapes and the per-object
+model refuses the frame (a by-value struct parameter, spilled word by word over the spill slots and
+read member by member through `mov rD, sp`, at two widths or two signednesses, or copied out a word
+at a time; `chooseFrameModel` offers it before any shape is judged — save a word reached through
+the copy beside a call no prototype states, which may be that call's stack argument and still
+refuses). Where two widths meet at one byte of it, the L1 audit stamps the `laddr`
 with the views its accesses use (`views`, frontend/frame-objects.ts `unionViews`), and structure
 declares the storage as that union — every view an array tiling it — and spells each access through
 its view on the object itself (`sp0.half[1]`). Element 0 is subscripted, never dereferenced:
