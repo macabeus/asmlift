@@ -718,8 +718,12 @@ function parameterType(p: Parameter, tokens: Tokens, typedefs: ReadonlyMap<strin
  *  false` as nothing) keeps the context's return by `contextReturnUnder`'s rule: a struct return
  *  always — it is what says argument 0 may be a hidden pointer, and an entry stating only the arity
  *  would otherwise hand that pointer to the call as its first argument; a register return only
- *  where the stated `params` (an arity or a list) number as many as the header's. `{ returnsVoid:
- *  false }` alone states no arity, so it keeps no register return. */
+ *  where the stated `params` number as many as the header's parameters. A list is parameters; a
+ *  COUNT is argument registers (`FnProto.params`), and it is compared with the header's parameter
+ *  count all the same, so under a 64-bit parameter a correct register count keeps no return. That
+ *  costs a lift, never a wrong one: a return kept is the header's own, and one dropped declines as
+ *  an undeclared callee does. `{ returnsVoid: false }` alone states no count, so it keeps no
+ *  register return. */
 export function withContextPrototypes(
   stated: Prototypes | undefined,
   context: Prototypes,
@@ -804,10 +808,11 @@ function contextPrototypesUnder(
  *
  *  A REGISTER RETURN says argument 0 is NOT one, so it is the direction that lifts, and it is kept
  *  only where it is the same fact as the parameters it sits under:
- *  - the context states every parameter, and as many as `under` does. A variadic declaration, and a
- *    K&R one, state none (`readSignature`), and the map's DWARF parameters leave the `...` out — so
- *    `int pr(char *, const char *, ...)` under a two-parameter map signature would lower
- *    `pr(buf, s, a, b)` as `pr(buf, s)`. Dropped whole, the call declines;
+ *  - the context states every parameter, and as many as `under` does — a count `under` is read as
+ *    a number of parameters here, though it states registers (`withContextPrototypes`). A variadic
+ *    declaration, and a K&R one, state none (`readSignature`), and the map's DWARF parameters
+ *    leave the `...` out — so `int pr(char *, const char *, ...)` under a two-parameter map
+ *    signature would lower `pr(buf, s, a, b)` as `pr(buf, s)`. Dropped whole, the call declines;
  *  - the return has a width (`declaredWidth`). `float` and `double` have none here, cannot say
  *    anything about a hidden pointer the map's word does not, and on a target with an FPU make
  *    call-plan refuse every call to the name (`$f0`, `f1`), whose result is used or not;

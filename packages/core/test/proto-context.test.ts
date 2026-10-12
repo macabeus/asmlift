@@ -833,6 +833,19 @@ describe('a context register return under a mapped signature', () => {
     expect(withContextPrototypes({ conv: { returnsVoid: false } }, ctx, 'f', symbols, ARMV4T_AGBCC).conv).toEqual({
       returnsVoid: false,
     });
+    // a COUNT states registers, but is compared with the header's parameters: under a 64-bit
+    // parameter the right register count (4) keeps no return, and a parameter count (3) keeps it
+    const wide = prototypesFromContext(
+      'typedef unsigned char u8; typedef long long s64; enum E { A }; u8 *wconv(u8 *, s64, enum E);',
+      'c',
+    );
+    expect(withContextPrototypes({ wconv: { params: 4 } }, wide, 'f', undefined, ARMV4T_AGBCC).wconv).toEqual({
+      params: 4,
+    });
+    expect(withContextPrototypes({ wconv: { params: 3 } }, wide, 'f', undefined, ARMV4T_AGBCC).wconv).toEqual({
+      params: 3,
+      returns: 'u8 *',
+    });
     const va = prototypesFromContext('int pr(char *buf, const char *fmt, ...);', 'c');
     expect(withContextPrototypes({ pr: { params: 2 } }, va, 'f', undefined, ARMV4T_AGBCC).pr).toEqual({ params: 2 });
   });
