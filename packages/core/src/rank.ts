@@ -70,6 +70,7 @@ import {
   type RefusedDeclarationReason,
   bareGlobalAccessFacts,
   bareGlobalSymbols,
+  initAddressSymbols,
   makeRefCollector,
 } from './rank-declare';
 import {
@@ -937,7 +938,11 @@ export function enumerateCandidates(
   // spelling needs one, and the declaration a candidate spelling `gTbl[i]` cannot compile
   // without), and the project map, which knows more than either.
   const mapSymbols = baseOpts.symbols;
-  const targetSymbols = new Map<string, SymbolInfo>([...bareGlobalSymbols(sharedLift), ...sharedLiftShapes]);
+  const targetSymbols = new Map<string, SymbolInfo>([
+    ...initAddressSymbols(sharedLift),
+    ...bareGlobalSymbols(sharedLift),
+    ...sharedLiftShapes,
+  ]);
   const declSymbols = new Map<string, SymbolInfo>([...targetSymbols, ...(mapSymbols ?? [])]);
   // The four per-enumeration constants named at the seam rather than captured across 60 lines of
   // closure (rank-declare.ts states why they belong on one object).

@@ -16,8 +16,12 @@
 // static — when:
 //   • the target does not carry the definition (the symbol is absent, or its label heads no data);
 //   • the object sits in a section that is not read-only data, initialized data or bss;
-//   • a relocation falls inside its bytes — the initializer holds an address, which is a
-//     declaration of another object this reader does not make;
+//   • a relocation falls inside its bytes that is no pointer-width absolute address of an ordinary
+//     global: one narrower or wider than a pointer, or off the object's words, or of another type,
+//     or naming what no declaration outside the function can (a section, the compiler's anonymous
+//     constant, another function-scope static — reloc-symbol.ts's kinds). Such an address is
+//     RECORDED (`LocalObject.relocs`) and left to the reader of the object to spell or refuse
+//     (structure/local-statics.ts);
 //   • its extent cannot be read: a directive inside its data run this reader does not parse, a
 //     size that disagrees with the bytes under the label, or an empty object;
 //   • its alignment cannot be read: an `.align` form this reader does not parse, or an object file
@@ -28,15 +32,28 @@
 //     re-declaring it inside one of them would split one object in two. Only the functions this
 //     input shows can be checked, which is the limit of this refusal: a single-function input
 //     cannot show a second referrer, and one that ends at this function cannot show a later one.
-import type { LocalObject, LocalObjects } from '../ir/core';
+import {
+  type LocalObject,
+  type LocalObjectReloc,
+  type LocalObjects,
+  LOCAL_OBJECT_ADDRESS_BYTES as POINTER_BYTES,
+} from '../ir/core';
 import type { AsmData } from './asmdata';
-import { classifyRelocSymbol, localStaticName } from './reloc-symbol';
+import { classifyRelocSymbol, localStaticName, unspellableReason } from './reloc-symbol';
 
 /** A definition, or why there is none: the tail of a refusal sentence the caller opens with
  *  "names a function-scope static ('<symbol>')", so every refusal of the kind reads the same. */
 export type LocalObjectRead = LocalObject | { refused: string };
 
 const refused = (why: string): { refused: string } => ({ refused: why });
+
+/** Why an initializer's address of `symbol` cannot be recorded, as the tail of the refusal
+ *  sentence — or null for an ordinary global's, which a declaration outside the function names.
+ *  Every other kind is the naming policy's own (reloc-symbol.ts), with its own sentence. */
+function addressRefusal(symbol: string): string | null {
+  const why = unspellableReason(symbol);
+  return why === null ? null : `whose initializer holds an address that ${why}`;
+}
 
 // ── GNU as text (agbcc) ──────────────────────────────────────────────────────────────────────────
 
@@ -112,18 +129,22 @@ const le = (value: number, width: number): number[] =>
   Array.from({ length: width }, (_, i) => (value >>> (8 * i)) & 0xff);
 
 /** What one data directive writes: its bytes, the width of each value it writes (null for
- *  padding, which writes none), whether one of those values is negative, and whether it writes a
- *  string. */
+ *  padding, which writes none), whether one of those values is negative, whether it writes a
+ *  string, and the addresses among its values, at their byte offsets in the directive. */
 interface DirectiveData {
   bytes: number[];
   width: number | null;
   negative: boolean;
   string: boolean;
+  relocs: LocalObjectReloc[];
 }
 
-/** One data directive's data; `{ address }` when an operand is not a number (a symbol — the word is
- *  relocated), null when the directive is not a data directive this reader parses. */
-function dataBytes(directive: string, operands: string): DirectiveData | { address: string } | null {
+/** `sym`, `sym+K` or `sym-K` — the operand GNU as relocates to a symbol's address plus a constant. */
+const GAS_ADDRESS = /^([A-Za-z_.$][\w.$]*)\s*(?:([+-])\s*(\S+))?$/;
+
+/** One data directive's data; `{ refused }` for an operand that is no number and no address this
+ *  reader records, null when the directive is not a data directive this reader parses. */
+function dataBytes(directive: string, operands: string): DirectiveData | { refused: string } | null {
   const width = /^(byte)$/.test(directive)
     ? 1
     : /^(short|hword|2byte)$/.test(directive)
@@ -133,29 +154,54 @@ function dataBytes(directive: string, operands: string): DirectiveData | { addre
         : 0;
   if (width > 0) {
     const out: number[] = [];
+    const relocs: LocalObjectReloc[] = [];
     let negative = false;
     for (const op of operands.split(',')) {
       const v = gasInteger(op);
-      if (v === null) {
-        return { address: op.trim() };
+      if (v !== null) {
+        negative ||= v < 0;
+        out.push(...le(v, width));
+        continue;
       }
-      negative ||= v < 0;
-      out.push(...le(v, width));
+      // Not a number, so the assembler relocates the value: an address, which the bytes do not hold.
+      const a = op.trim().match(GAS_ADDRESS);
+      // agbcc writes a negative addend `garr+-0x4` (compiled: `&garr[-1]`), so the constant keeps a sign
+      const k = a === null ? null : a[3] === undefined ? 0 : gasInteger(a[3]);
+      if (a === null || k === null) {
+        return refused(`whose initializer holds '${op.trim()}', an expression this reader does not read as an address`);
+      }
+      if (width !== POINTER_BYTES) {
+        return refused(
+          `whose initializer holds the address '${op.trim()}' in a ${width}-byte value — not a pointer's ${POINTER_BYTES}`,
+        );
+      }
+      const why = addressRefusal(a[1]);
+      if (why !== null) {
+        return refused(why);
+      }
+      relocs.push({ offset: out.length, symbol: a[1], addend: a[2] === '-' ? -k : k });
+      out.push(...le(0, width));
     }
-    return { bytes: out, width, negative, string: false };
+    return { bytes: out, width, negative, string: false, relocs };
   }
   if (/^(space|skip|zero)$/.test(directive)) {
     const [n, fill, ...rest] = operands.split(',').map((s) => gasInteger(s));
     return n === null || n < 0 || rest.length > 0 || fill === null
       ? null
-      : { bytes: new Array<number>(n).fill((fill ?? 0) & 0xff), width: null, negative: false, string: false };
+      : {
+          bytes: new Array<number>(n).fill((fill ?? 0) & 0xff),
+          width: null,
+          negative: false,
+          string: false,
+          relocs: [],
+        };
   }
   if (/^(ascii|asciz|string)$/.test(directive)) {
     const m = operands.trim().match(/^"((?:[^"\\]|\\.)*)"$/);
     const s = m ? gasString(m[1]) : null;
     return s === null
       ? null
-      : { bytes: directive === 'ascii' ? s : [...s, 0], width: 1, negative: false, string: true };
+      : { bytes: directive === 'ascii' ? s : [...s, 0], width: 1, negative: false, string: true, relocs: [] };
   }
   return null;
 }
@@ -290,6 +336,7 @@ function readGasDefinition(
   let negative = false;
   const strings = new Set<boolean>();
   const gaps: [number, number][] = [];
+  const relocs: LocalObjectReloc[] = [];
   const first = lines[at].replace(/^[A-Za-z_.$][\w.$]*:\s*/, '');
   for (let i = at; i < lines.length; i++) {
     const line = i === at ? first : lines[i];
@@ -310,9 +357,15 @@ function readGasDefinition(
     if (b === null) {
       return refused(`whose data run holds '.${d[1]}', a directive this reader does not read as bytes`);
     }
-    if ('address' in b) {
-      return refused(`whose initializer holds the address '${b.address}' — a relocation inside the object`);
+    if ('refused' in b) {
+      return b;
     }
+    // A word lands wherever the run has reached: agbcc aligns an object's words, never one word
+    // inside it, so one off a pointer boundary is no pointer of the object's.
+    if (b.relocs.length > 0 && bytes.length % POINTER_BYTES !== 0) {
+      return refused(`whose initializer holds the address '${b.relocs[0].symbol}' off its ${POINTER_BYTES}-byte words`);
+    }
+    relocs.push(...b.relocs.map((r) => ({ ...r, offset: r.offset + bytes.length })));
     if (b.width === null && b.bytes.length > 0 && b.bytes.every((x) => x === 0)) {
       const last = gaps[gaps.length - 1];
       if (last !== undefined && last[0] + last[1] === bytes.length) {
@@ -335,7 +388,7 @@ function readGasDefinition(
     return refused(`whose '.size' (${declaredSize}) disagrees with the ${bytes.length} bytes under its label`);
   }
   if (kind === 'bss') {
-    return bytes.every((b) => b === 0)
+    return bytes.every((b) => b === 0) && relocs.length === 0
       ? { section: 'bss', size: bytes.length, bigEndian: false }
       : refused('defined in bss with non-zero bytes');
   }
@@ -361,6 +414,7 @@ function readGasDefinition(
       string: strings.size === 1 && strings.has(true),
       ...(widths.size > 0 && gaps.length > 0 ? { gaps } : {}),
     },
+    ...(relocs.length > 0 ? { relocs } : {}),
   };
 }
 
@@ -423,6 +477,13 @@ const OBJECT_SECTIONS: Readonly<Record<string, LocalObject['section']>> = {
   '.sbss': 'bss',
 };
 
+/** The relocations that fill a pointer-width word with a symbol's absolute address — the only kind
+ *  an initializer's address constant is. Each is listed where a frontend reads its objects through
+ *  this reader: mwcc's (frontend/ppc.ts); MIPS addresses a function-scope static section-relative
+ *  and does not reach it. RELA types only: the addend is read off the relocation entry alone, and a
+ *  REL type (whose addend is the word it fills) joins only with a reader of that word. */
+const ABSOLUTE_WORD: ReadonlySet<string> = new Set(['R_PPC_ADDR32']);
+
 /** Sections whose relocations describe the program for a debugger, not for the machine. */
 const isDebugSection = (s: string): boolean => /^\.(debug|line)/.test(s);
 
@@ -473,9 +534,10 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     return refused('whose symbol-table size is 0, so its extent is unknown');
   }
   const self = ad.symbols.get(fn);
+  const inside: typeof ad.relocs = [];
   for (const r of ad.relocs) {
     if (r.section === sym.section && r.offset >= sym.value && r.offset < sym.value + sym.size) {
-      return refused(`whose initializer holds the address '${r.sym}' — a relocation inside the object`);
+      inside.push(r);
     }
     if (r.sym !== symbol || isDebugSection(r.section)) {
       continue;
@@ -492,11 +554,31 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
   }
   const placement = { align, section: sym.section, offset: sym.value };
   if (kind === 'bss') {
-    return { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian, placement };
+    return inside.length === 0
+      ? { name, symbol, order, section: 'bss', size: sym.size, bigEndian: ad.bigEndian, placement }
+      : refused('defined in bss with a relocation inside it');
   }
   const contents = ad.sections.get(sym.section);
   if (contents === undefined || sym.value + sym.size > contents.length) {
     return refused(`whose bytes the side table's '${sym.section}' contents do not hold`);
+  }
+  const relocs: LocalObjectReloc[] = [];
+  for (const r of inside.sort((a, b) => a.offset - b.offset)) {
+    const at = r.offset - sym.value;
+    if (!ABSOLUTE_WORD.has(r.type)) {
+      return refused(
+        `whose initializer holds the address '${r.sym}' by a ${r.type} relocation — no pointer's absolute address`,
+      );
+    }
+    if (at % POINTER_BYTES !== 0 || at + POINTER_BYTES > sym.size) {
+      return refused(`whose initializer holds the address '${r.sym}' off its ${POINTER_BYTES}-byte words`);
+    }
+    const why = addressRefusal(r.sym);
+    if (why !== null) {
+      return refused(why);
+    }
+    // a RELA relocation (ABSOLUTE_WORD): the linker replaces the word, so its bytes add nothing
+    relocs.push({ offset: at, symbol: r.sym, addend: r.addend | 0 });
   }
   return {
     name,
@@ -507,6 +589,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     bytes: contents.slice(sym.value, sym.value + sym.size),
     bigEndian: ad.bigEndian,
     placement,
+    ...(relocs.length > 0 ? { relocs } : {}),
   };
 }
 

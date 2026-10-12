@@ -86,11 +86,28 @@ export interface LocalObject {
   /** What an object FILE records of where the object sits, absent for an assembler listing, whose
    *  `.align` is among its directives. */
   placement?: LocalObjectPlacement;
+  /** Every address the initializer holds, in offset order — the words a relocation fills in at
+   *  link time, which the bytes alone do not carry. Absent for an object holding none. The bytes
+   *  under one say nothing: the relocation's `addend` is the whole of it. */
+  relocs?: readonly LocalObjectReloc[];
   /** The object is the compiler's own, under a label the source never wrote (agbcc's `.LC0`): the
    *  constant image a local aggregate's initializer is copied from. `name` is then the label, no
    *  declaration spells it, and it reaches the C only as that local's initializer
    *  (l3/constinit.ts). */
   anonymous?: true;
+}
+
+/** The bytes of every address an initializer holds ({@link LocalObjectReloc}): a pointer's, on every
+ *  target whose initializers the frontends relocate (agbcc's `.word sym`, mwcc's `R_PPC_ADDR32`). */
+export const LOCAL_OBJECT_ADDRESS_BYTES = 4;
+
+/** One address an initializer holds: the pointer-width word at byte `offset` of the object is
+ *  `symbol`'s address plus `addend` — an ordinary global's, the only kind a declaration outside the
+ *  function can name (frontend/reloc-symbol.ts). */
+export interface LocalObjectReloc {
+  offset: number;
+  symbol: string;
+  addend: number;
 }
 
 /** What an object file records of where a static sits. */

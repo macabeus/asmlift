@@ -46,6 +46,17 @@ test('the copy folds into the declaration, and the image and the copy are gone',
   expect(cBackend.emit(sfn)).toBe('void f(void) {\n    u8 sp0[4] = { 1, 2, 3, 4 };\n    g(sp0);\n}\n');
 });
 
+test('an image holding addresses folds as one of numbers, each element its address constant', () => {
+  const addrs = image([], 4, false, {
+    type: T.array(T.u(32), 3),
+    init: [{ symbol: 'h1', addend: 0 }, 7, { symbol: 'garr', addend: -4 }],
+  });
+  const words = [{ name: 'sp0', type: T.array(T.u(8), 12) }];
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 12), use(v('sp0'))], words, addrs))).toContain(
+    '    u32 sp0[3] = { (u32)&h1, 7, (u32)((u8 *)&garr - 4) };\n',
+  );
+});
+
 test('a local handed on whole takes the image’s element; one reached by an offset keeps its own', () => {
   const halves = image([1, -1, 3], 2, true);
   const wide = [{ name: 'sp0', type: T.array(T.u(8), 8) }];

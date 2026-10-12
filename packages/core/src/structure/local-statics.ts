@@ -29,19 +29,36 @@
 // source's (`tide`) in one step, `nameLocalStatics`, which is where a clash between that name and
 // anything else the function names can first be seen whole.
 //
+// An element the target RELOCATES holds an address — a table of function pointers, of data
+// pointers, of `&arr[k]` — and is spelled as the address constant it is, `(u32)&sym` or
+// `(u32)((u8 *)&sym + k)`, in the integer element the rest of this typing picks: such an element
+// compiles to the same word and the same relocation as the pointer-typed source (agbcc and mwcc,
+// compiled), so the definition needs no pointer type to put the bytes where the target has them.
+//
 // REFUSES, naming the static, when the target's compiler declares no layout rules, when nothing
 // in the definition settles the width and the accesses disagree on it, when the width is no
 // integer type's or does not divide the size, when the loads disagree on the signedness, when the
 // definition is aligned narrower than its declaration here would be, when a bss static sits where
 // only a scalar initialized to zero is sure to land and it is no scalar (or the input does not
-// show where it sits);
+// show where it sits), when an element holding an address — a static's or the compiler's
+// anonymous image's — is no pointer's width;
 // and, at the rename, when two statics share a source name (one block cannot declare both) or
 // when the function names anything else by it — a global, a callee, a parameter, a local, itself —
-// which the block-scope static would hide.
-import { type Fn, type LocalObject, type LocalObjects, type Op, type Value, defOpMap } from '../ir/core';
+// which the block-scope static would hide — and when a global an initializer holds the address of
+// is hidden there by a static, parameter or local of its name.
+import {
+  type Fn,
+  LOCAL_OBJECT_ADDRESS_BYTES,
+  type LocalObject,
+  type LocalObjects,
+  type Op,
+  type Value,
+  defOpMap,
+} from '../ir/core';
 import { type IrType, T } from '../ir/types';
 import {
   type Expr,
+  type InitAddress,
   type SFn,
   type SImage,
   type SStatic,
@@ -294,12 +311,23 @@ export function localStaticShapes(
       // compiler, which clears and stores where most of one is zero rather than copy an image
       // (expr.c `mostly_zeros_p`) — so the printer spells the element after a hole by designator,
       // where the compiler parses one (`SFn.designators`).
-      const init: (number | null)[] = elements(obj, unit, signed);
+      const init: (number | InitAddress | null)[] = elements(obj, unit, signed);
       for (const [from, n] of obj.directives!.gaps ?? []) {
         if (from % unit !== 0 || n % unit !== 0) {
           return say(`whose padding at byte ${from} does not fall on its ${unit}-byte elements`);
         }
         init.fill(null, from / unit, (from + n) / unit);
+      }
+      // An element the image relocates holds an address, as a static's does — an array of pointers
+      // (agbcc copies one with memcpy from 16 words, compiled).
+      for (const r of obj.relocs ?? []) {
+        if (unit !== LOCAL_OBJECT_ADDRESS_BYTES || r.offset % unit !== 0) {
+          return say(
+            `whose image holds the address '${r.symbol}', which its ${unit}-byte elements cannot — ` +
+              `an address is ${LOCAL_OBJECT_ADDRESS_BYTES}`,
+          );
+        }
+        init[r.offset / unit] = { symbol: r.symbol, addend: r.addend };
       }
       // A string literal's image is placed at the compiler's string alignment, which a brace list of
       // strings is not (agbcc: `.align 2, 0` ahead of a STRING_CST's label, none ahead of
@@ -346,7 +374,22 @@ export function localStaticShapes(
     const signed = signs.size > 0 ? signs.has(true) : dir?.negative === true;
     const count = obj.size / width;
     const elem = T.int(width * 8, signed);
-    const init = zeroed.has(obj.symbol) ? [0] : obj.bytes === undefined ? undefined : elements(obj, width, signed);
+    const init: (number | InitAddress)[] | undefined = zeroed.has(obj.symbol)
+      ? [0]
+      : obj.bytes === undefined
+        ? undefined
+        : elements(obj, width, signed);
+    // An element the target relocates holds an address, which only an element of a pointer's width
+    // can: the relocation fills exactly that many bytes.
+    for (const r of obj.relocs ?? []) {
+      if (width !== LOCAL_OBJECT_ADDRESS_BYTES || r.offset % width !== 0) {
+        return say(
+          `whose initializer holds the address '${r.symbol}', which its ${width}-byte elements cannot — ` +
+            `an address is ${LOCAL_OBJECT_ADDRESS_BYTES}`,
+        );
+      }
+      init![r.offset / width] = { symbol: r.symbol, addend: r.addend };
+    }
     if (zeroed.has(obj.symbol) && count !== 1) {
       return say(`laid out where only a scalar initialized to zero is, but of ${count} elements`);
     }
@@ -394,7 +437,26 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   for (const g of sfn.globals ?? []) {
     taken.add(g.name);
   }
+  // The globals an initializer holds the address of are named here as much as the body's: a static
+  // of the same name is in scope from its own declarator on, its initializer included.
+  const addressed = new Map<string, string>();
+  for (const obj of objs.values()) {
+    for (const r of obj.relocs ?? []) {
+      taken.add(r.symbol);
+      addressed.set(r.symbol, obj.symbol);
+    }
+  }
   const bound = new Set([...sfn.params, ...sfn.locals].map((x) => x.name));
+  // …and the function's own parameters hide one too: a static's initializer is read in their scope.
+  // A local is declared after every static and hides none, but its name is the emitter's to move.
+  for (const [name, holder] of addressed) {
+    if (bound.has(name)) {
+      return {
+        symbol: holder,
+        refused: `whose initializer holds the address of '${name}', which a parameter or local here also names — it would hide that global`,
+      };
+    }
+  }
   const callees = new Set<string>([sfn.name]);
   for (const e of walkExprs(sfn.body)) {
     if (e.k === 'call' && typeof e.fn === 'string') {

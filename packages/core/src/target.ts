@@ -464,6 +464,19 @@ export interface TargetDescription {
     // and without this spells the run as zeros, which a compiler that cannot parse the index takes.
     // Absent ⇒ zeros, the spelling every C compiler parses.
     designatedInitializers?: boolean;
+    // Does this compiler's C front end REFUSE the three pointer conversions C makes implicitly — an
+    // integer to a pointer, a pointer to an integer, and an object pointer to one of another
+    // pointee — as C++ does? Every mwcc build the benchmark ships refuses all three in C, compiled
+    // with `-lang=c`: 2.4.2 and 2.4.7 ("illegal implicit conversion" of an `unsigned int` to an
+    // `int *`) and 2.3.3 ("cannot convert"). agbcc, IDO 7.1 and both gcc 2.7.2 builds compile the same three
+    // calls at their canonical flags. Read by the C-family printer (`SFn.strictConversions`), which
+    // then casts an argument to its callee's declared parameter and a pointer of another pointee
+    // into a pointer slot exactly as it does for C++ (backend/cfamily.ts `argConversion`,
+    // `legalizePointerWrites`), and by the store of an integer into a declared pointer cell
+    // (structure/pointer-spelling.ts `intoPtrCell`, which declines that store under C++, where only a
+    // cast to the cell's own type converts). Each cast is the conversion the compiler would
+    // otherwise have made, so it changes no instruction. Absent ⇒ C's implicit conversions.
+    strictPointerConversions?: boolean;
     // Arguments past the argument registers are staged into an area this function RESERVES at the
     // BOTTOM of its own frame — `[sp,#0]` upward, one word each — rather than pushed at the call
     // site. It is GCC's ACCUMULATE_OUTGOING_ARGS target macro, and it is what makes an outgoing
@@ -1203,6 +1216,9 @@ export const PPC_MWCC: TargetDescription = {
   // two compiler-wide guesses standing in for the per-function observation named at MIPS_GCC.
   compilerBehaviors: {
     contractsFloatProducts: true,
+    // MEASURED on all three builds in C: an integer, a pointer and a `u16 *` passed to an `s32 *`,
+    // `u32` and `s32 *` parameter each fail to compile, and each compiles once cast (see the field).
+    strictPointerConversions: true,
     coalesceLoopInit: false,
     preserveDivergentBranchSense: true,
     orderArgCopiesByWriteOrder: true,

@@ -403,7 +403,7 @@ export interface SFn {
      *  (`SImage.init`) — present only on the copy the C-family emitter prints, where
      *  l3/constinit.ts folded the block copy of the compiler's anonymous constant image into it
      *  (`u8 sp0[16] = { … };`). Never on a tree a pass sees. */
-    init?: (number | null)[];
+    init?: (number | InitAddress | null)[];
     /** that initializer is spelled as a string literal — the image was written as one */
     initString?: true;
   }[];
@@ -438,9 +438,10 @@ export interface SFn {
    *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
   slotOrder?: 'ascending' | 'descending';
   /** Each declared callee's parameter types (an entry the printer cannot spell is `undefined`):
-   *  what an argument converts to. Read by the C-family printer where `dialect` says C++, which
-   *  refuses three conversions C makes implicitly (backend/cfamily.ts `argConversion`), and by the
-   *  pointer-cell conversions in every dialect (l3/ptrcell.ts). */
+   *  what an argument converts to. Read by the C-family printer where `dialect` says C++ or
+   *  `strictConversions` is set, either of which refuses three conversions C makes implicitly
+   *  (backend/cfamily.ts `argConversion`), and by the pointer-cell conversions in every dialect
+   *  (l3/ptrcell.ts). */
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
   /** Each declared callee's return type as the project spells it, never printed: whether a call a
    *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
@@ -452,17 +453,31 @@ export interface SFn {
    *  C-family printer spells an initializer's left-out run by index where present, as zeros where
    *  not. */
   designators?: true;
+  /** The compiler refuses C's implicit pointer conversions in C as well, as C++ does — carried from
+   *  `compilerBehaviors.strictPointerConversions`. An emission policy: the C-family printer casts an
+   *  argument to its declared parameter (`declaredArgs`), and a pointer of another pointee written
+   *  into a pointer slot, wherever it would for C++. */
+  strictConversions?: true;
+}
+
+/** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s
+ *  address plus `addend` bytes, held in the element's integer type — a global's, which a
+ *  declaration outside the function names. */
+export interface InitAddress {
+  symbol: string;
+  addend: number;
 }
 
 /** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is
- *  the initial elements in order, absent for a static with no initializer (the target's bss).
- *  `align` is an alignment in bytes wider than the type's own, which the definition must state. */
+ *  the initial elements in order, absent for a static with no initializer (the target's bss); an
+ *  element the target relocates is the {@link InitAddress} it holds. `align` is an alignment in
+ *  bytes wider than the type's own, which the definition must state. */
 export interface SStatic {
   name: string;
   type: IrType;
   const?: true;
   align?: number;
-  init?: number[];
+  init?: (number | InitAddress)[];
   /** the initializer is spelled as a string literal — a byte array the compiler aligns as a
    *  string (structure/local-statics.ts) */
   string?: true;
@@ -471,11 +486,12 @@ export interface SStatic {
 /** One constant image of the compiler's own (ir/core.ts `LocalObject.anonymous`), named by its
  *  label: an integer array typed by the directives that wrote it, and its initializer element by
  *  element — null where the source left one out (padding in the image, which C supplies as zero),
- *  and ending at the last one it spelled, so it may be shorter than `type`. */
+ *  the {@link InitAddress} an element the target relocates holds, and ending at the last one it
+ *  spelled, so it may be shorter than `type`. */
 export interface SImage {
   name: string;
   type: IrType;
-  init: (number | null)[];
+  init: (number | InitAddress | null)[];
   /** the image was written as a string literal (`.ascii`) */
   string?: true;
 }

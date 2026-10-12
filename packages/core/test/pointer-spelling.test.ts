@@ -23,6 +23,9 @@ interface Fixture {
   /** the globals structure() spells bare */
   scalar?: string[];
   varType?: Record<string, IrType>;
+  /** the compiler's C refuses the implicit integer-to-pointer conversion (mwcc) */
+  strict?: true;
+  cxx?: true;
 }
 // The map lookup as structure() builds it: by name, with its member lookup.
 const make = (f: Fixture = {}) => {
@@ -35,6 +38,8 @@ const make = (f: Fixture = {}) => {
     wordLoadedGlobals: new Set(f.wordLoaded ?? []),
     scalarGlobals: new Set(f.scalar ?? []),
     varType: new Map(Object.entries(f.varType ?? {})),
+    ...(f.strict ? { strictPointerConversions: true } : {}),
+    ...(f.cxx ? { dialect: 'c++' as const } : {}),
   });
 };
 
@@ -175,6 +180,50 @@ describe('intoPtrCell', () => {
     expect(s.intoPtrCell(v('gCell'), v('a0'))).toEqual(v('a0'));
     expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(v('a1'));
     expect(s.intoPtrCell(v('gWord'), v('a0'))).toEqual(v('a0'));
+  });
+
+  test('…save an integer where the compiler refuses to convert it implicitly (mwcc): it goes through `void *` too', () => {
+    // an address table's `u32` element stored into a pointer global: mwcc's C refuses
+    // `gp = t[i]` ("illegal implicit conversion from 'const unsigned int' to 'int *'", compiled)
+    const s = make({
+      map: [ptrInfo('gP')],
+      pointerLoaded: ['gCell'],
+      varType: { a0: T.ptr(T.void()), a1: T.s(32) },
+      strict: true,
+    });
+    const elem: Expr = { k: 'index', base: v('t'), idx: v('a1'), width: 4, signed: false };
+    expect(s.intoPtrCell(v('gP'), elem)).toEqual(cast(T.ptr(T.void()), elem));
+    // a cell only the body reads as a pointer may be declared `u32` (mwcc refuses `void *` into
+    // it), and a bare shape-less global's value is typed by a header this pass cannot read
+    expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(v('a1'));
+    expect(s.intoPtrCell(v('gP'), v('gQ'))).toEqual(v('gQ'));
+    // the null pointer, a `void *`, an address, and a cell that is no pointer value stay as spelled
+    expect(s.intoPtrCell(v('gP'), c(0))).toEqual(c(0));
+    expect(s.intoPtrCell(v('gP'), v('a0'))).toEqual(v('a0'));
+    expect(s.intoPtrCell(v('gP'), addr('gArr'))).toEqual(addr('gArr'));
+    expect(s.intoPtrCell(v('gWord'), v('a1'))).toEqual(v('a1'));
+  });
+
+  test('a global the map declares an integer is an integer too: it goes through `void *`', () => {
+    // `gp = gw` with the project's `u32 gw`: mwcc's C refuses it bare, takes `(void *)gw` (compiled)
+    const s = make({ map: [ptrInfo('gP'), u16Info('gW', { size: 4 })], strict: true });
+    expect(s.intoPtrCell(v('gP'), v('gW'))).toEqual(cast(T.ptr(T.void()), v('gW')));
+  });
+
+  test('…and under C++, which takes neither spelling into a typed pointer, the store declines', () => {
+    const s = make({
+      map: [ptrInfo('gP'), u16Info('gW', { size: 4 })],
+      varType: { a1: T.s(32) },
+      strict: true,
+      cxx: true,
+    });
+    const elem: Expr = { k: 'index', base: v('t'), idx: v('a1'), width: 4, signed: false };
+    expect(() => s.intoPtrCell(v('gP'), elem)).toThrow(/C\+\+/);
+    expect(() => s.intoPtrCell(v('gP'), v('gW'))).toThrow(/C\+\+/);
+    // a pointer copied bare, the null pointer, and a cell no declaration types still lift
+    expect(s.intoPtrCell(v('gP'), v('gQ'))).toEqual(v('gQ'));
+    expect(s.intoPtrCell(v('gP'), c(0))).toEqual(c(0));
+    expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(v('a1'));
   });
 
   test("a pointer value stored into a word cell the map declares an integer takes the cell's type", () => {

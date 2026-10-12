@@ -12,7 +12,7 @@
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
 import { doubleLiteral } from '../ir/float-bits';
 import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
-import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
+import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -253,7 +253,8 @@ function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt
  *  made and the compiled code is C's: an object pointer to a pointer of another pointee (a conversion
  *  to `void *`, or one that only adds a qualifier, is implicit in C++ too), an integer to a pointer
  *  (the literal `0` is the one integer that converts), and a pointer to an integer. Only reached on a
- *  function compiled as C++ (`SFn.dialect`). */
+ *  function compiled as C++ (`SFn.dialect`), or by a C front end that refuses the same three
+ *  (`SFn.strictConversions` — mwcc). */
 function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
   const from = exprCType(a, vt.type);
   // qualifiers never decide it: a `T * const` parameter is a pointer parameter
@@ -646,6 +647,22 @@ function endsTerminated(body: Stmt[]): boolean {
   );
 }
 
+/** Is `e` a pointer to another pointee than the pointer slot `t` declares, as rendered? Its pointer
+ *  type is its C type, or, for the address of a declared object (which `exprCType` leaves
+ *  unknown), a pointer to that object or to an array's element, the way it decays. A `void *` slot
+ *  takes every object pointer implicitly. A `void *` value converts into any pointer slot in C
+ *  (mwcc's C takes `gp = (void *)x` into an `s32 *gp`, compiled) but not in C++ (`cxx`). An unknown
+ *  type is no opinion. */
+function otherPointee(t: IrType | undefined, e: Expr, vt: (name: string) => IrType | undefined, cxx: boolean): boolean {
+  if (t?.kind !== 'ptr' || t.to.kind === 'void') {
+    return false;
+  }
+  const of = e.k === 'addr' ? vt(e.name) : undefined;
+  const ct = of !== undefined ? T.ptr(of.kind === 'array' ? of.elem : of) : exprCType(e, vt);
+  const p = ct?.kind === 'array' ? T.ptr(ct.elem) : ct;
+  return p?.kind === 'ptr' && (cxx || p.to.kind !== 'void') && !typeEquals(p, t);
+}
+
 // C-FAMILY WRITE LEGALIZATION (the assign-side sibling of the deref legalization in printExpr):
 // the C family's answer to `writesNonPointerIntoPointer` is the reinterpret cast to the DECLARED
 // type — exactly what the machine's register move does — where Pascal, having no such cast,
@@ -655,9 +672,18 @@ function legalizePointerWrites(fn: SFn): SFn {
   const vt = declaredTypes(fn);
   // …and the mirror: a rendered pointer into an INTEGER slot takes the slot's type. A cast keeps
   // the sum it wraps, so the bytes are the uncast write's; CodeWarrior rejects that write outright.
+  //
+  // …and, where the compiler refuses the third implicit conversion too (C++, or mwcc's C:
+  // `SFn.strictConversions`), a pointer of ANOTHER pointee into a pointer slot: mwcc rejects
+  // `return t;` from an `s32 *` function when `t` is a `const u32[2]` static (mwcc: "illegal implicit
+  // conversion" of an `unsigned int *` to an `int *`, compiled), and takes it cast (`otherPointee`
+  // says which `void *` converts implicitly).
+  const strict = fn.dialect === 'c++' || fn.strictConversions === true;
   const castTo = (t: IrType | undefined, e: Expr): Expr =>
-    writesNonPointerIntoPointer(t, e, vt) || (t?.kind === 'int' && exprCType(e, vt)?.kind === 'ptr')
-      ? { k: 'cast', to: t, e }
+    writesNonPointerIntoPointer(t, e, vt) ||
+    (t?.kind === 'int' && exprCType(e, vt)?.kind === 'ptr') ||
+    (strict && otherPointee(t, e, vt, fn.dialect === 'c++'))
+      ? { k: 'cast', to: t!, e }
       : e;
   const fix = (s: Stmt): Stmt => {
     switch (s.k) {
@@ -722,10 +748,25 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean)
   return lines;
 }
 
-/** One initial element: hex from 10 up, a negative one with its sign, so a byte table reads as the
+/** One initial number: hex from 10 up, a negative one with its sign, so a byte table reads as the
  *  bytes and a signed one as its values. */
-const initElement = (v: number): string =>
+const initNumber = (v: number): string =>
   Math.abs(v) < 10 ? `${v}` : `${v < 0 ? '-' : ''}0x${Math.abs(v).toString(16)}`;
+
+/** One initial element of type `elem`: a number, or the address constant a relocated one holds,
+ *  converted to the element's integer type — `(u32)&sym`, and with an addend `(u32)((u8 *)&sym + k)`:
+ *  the offset in bytes, as the relocation counts it. Not `(u32)&sym + k`, which agbcc folds alike but
+ *  mwcc refuses as an illegal constant expression (compiled); through a byte pointer both write the
+ *  pointer-typed source's word and relocation (`&garr[2]`, `&garr[-1]`, compiled on both). */
+function initElement(v: number | InitAddress, elem: IrType): string {
+  if (typeof v === 'number') {
+    return initNumber(v);
+  }
+  const t = cType(elem);
+  return v.addend === 0
+    ? `(${t})&${v.symbol}`
+    : `(${t})((u8 *)&${v.symbol} ${v.addend < 0 ? '-' : '+'} ${initNumber(Math.abs(v.addend))})`;
+}
 
 /** A byte array's initial elements as a string literal: printable characters as themselves, every
  *  other byte in three-digit octal (which no following digit can extend), and a `?` after a `?`
@@ -764,21 +805,27 @@ function staticDefinition(st: SStatic): string[] {
 function initialized(
   head: string,
   type: IrType,
-  init: readonly (number | null)[],
+  init: readonly (number | InitAddress | null)[],
   string: boolean,
   designators: boolean,
 ): string[] {
   const whole = init.map((v) => v ?? 0);
   if (string) {
-    return [`${head} = ${stringLiteral(whole)};`];
+    // a string's elements are bytes, and no byte holds an address (structure/local-statics.ts)
+    const bytes = whole.filter((v): v is number => typeof v === 'number');
+    if (bytes.length !== whole.length) {
+      throw new Error(`internal: a string initializer of '${head.trim()}' holds an address`);
+    }
+    return [`${head} = ${stringLiteral(bytes)};`];
   }
   if (type.kind !== 'array') {
-    return [`${head} = ${initElement(whole[0])};`];
+    return [`${head} = ${initElement(whole[0], type)};`];
   }
   const items: string[] = [];
   init.forEach((v, i) => {
     if (v !== null || !designators) {
-      items.push(init[i - 1] === null && designators ? `[${i}] = ${initElement(v!)}` : initElement(v ?? 0));
+      const e = initElement(v ?? 0, type.elem);
+      items.push(init[i - 1] === null && designators ? `[${i}] = ${e}` : e);
     }
   });
   if (items.length <= 8) {

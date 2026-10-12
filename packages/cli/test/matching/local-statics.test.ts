@@ -13,8 +13,11 @@
 // data sections hold exactly that function's statics, and where one of them lands depends on the
 // ones declared before it, on its own alignment and on whether it had an initializer — none of
 // which any score checks either.
+import { renderDeclarations } from '@asmlift/core/declare';
 import { decompile } from '@asmlift/core/pipeline';
-import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { enumerateCandidates } from '@asmlift/core/rank';
+import type { SymbolMap } from '@asmlift/core/symbols';
+import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
   assembleTarget,
   compileCandAgbcc,
@@ -272,6 +275,63 @@ const CASES: {
   },
 ];
 
+/** Initializers holding ADDRESSES: a table of function pointers, of data pointers, of `&arr[k]`
+ *  either side of the array, and a pointer scalar in .data. Neither the bytes nor the score sees an
+ *  address — both name it only through a relocation — so each compiler's own record of the
+ *  relocations inside the data is compared too. `context` declares what the project's headers would. */
+const ADDRESS_CASES: { sym: string; c: string; context: string; spelled: RegExp; mwccDeclines?: RegExp }[] = [
+  {
+    sym: 'fptab',
+    context: 'u8 h1(u8);\nu8 h2(u8);\nu8 h3(u8);\n',
+    c: 's32 fptab(s32 i, u8 x) { static u8 (*const tbl[3])(u8) = { h1, h2, h3 }; return tbl[i](x); }',
+    spelled: /static const u32 tbl\[3\] = \{ \(u32\)&h1, \(u32\)&h2, \(u32\)&h3 \};/,
+    // mwcc calls through it with `bctrl`, which its frontend does not model
+    mwccDeclines: /unmodelled control transfer 'bctrl'/,
+  },
+  {
+    sym: 'dptab',
+    context: 'extern s32 ga, gb;\n',
+    c: 's32 dptab(s32 i) { static s32 *const tbl[2] = { &ga, &gb }; return *tbl[i]; }',
+    spelled: /static const u32 tbl\[2\] = \{ \(u32\)&ga, \(u32\)&gb \};/,
+  },
+  {
+    sym: 'addend',
+    context: 'extern s32 garr[8];\n',
+    c: 's32 addend(s32 i) { static s32 *const tbl[3] = { &garr[2], &garr[-1], garr }; return *tbl[i]; }',
+    spelled:
+      /static const u32 tbl\[3\] = \{ \(u32\)\(\(u8 \*\)&garr \+ 8\), \(u32\)\(\(u8 \*\)&garr - 4\), \(u32\)&garr \};/,
+  },
+  {
+    sym: 'ptrdata',
+    context: 'extern s32 g;\n',
+    c: 's32 ptrdata(s32 i) { static s32 *p = &g; return p[i]; }',
+    spelled: /static u32 p = \(u32\)&g;/,
+  },
+];
+
+/** The words of each data run agbcc's listing writes as addresses, under the label that heads it. */
+const addressWords = (asm: string): string[] => {
+  const out: string[] = [];
+  let label = '';
+  let inData = false;
+  for (const line of asm.split('\n')) {
+    if (/^\s*\.(section\s+\.(rodata|data)|data)\b/.test(line)) {
+      inData = true;
+    } else if (/^\s*\.(text|section)\b/.test(line)) {
+      inData = false;
+    }
+    const l = line.match(/^([A-Za-z_][\w.$]*):/);
+    if (l) {
+      label = l[1];
+    }
+    const w = line.match(/^\s*\.word\s+([A-Za-z_].*)$/);
+    if (inData && w) {
+      out.push(`${label}: ${w[1]}`);
+    }
+  }
+  return out;
+};
+
 describe('function-scope statics — real agbcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
   test.each(CASES)('$sym', ({ sym, c, spelled, agbccScore = 0, layoutOnly, context = '' }) => {
@@ -285,6 +345,42 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
     if (!layoutOnly) {
       expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
     }
+  });
+
+  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled }) => {
+    const asm = compileTargetAsm(context + c, FLAGS);
+    const target = assembleTarget(asm);
+    const r = decompile(sym, asm, ARMV4T_AGBCC);
+    expect(r.source).toMatch(spelled);
+    const cand = compileCandAgbcc(context + r.source, FLAGS);
+    expect(dataSections(cand)).toEqual(dataSections(target));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(target));
+    const words = addressWords(asm);
+    expect(words.length).toBeGreaterThan(0);
+    expect(addressWords(compileTargetAsm(context + r.source, FLAGS))).toEqual(words);
+    expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(0);
+  });
+
+  // THE SELF-DECLARED WORLD (no headers, no map, no prototype): the block asmlift renders is all the
+  // candidate is compiled against. The body also CALLS a function whose address the table holds, so
+  // the static's `(u32)&h1` comes ahead of the call that would have declared `h1` implicitly — the
+  // block must declare it, and as the implicit declaration (`int h1();`), not as a prototype nothing
+  // states; undeclared, it is "`h1' undeclared".
+  test('a table member the body also calls with no prototype is declared ahead of the static', () => {
+    const c =
+      'u8 h1(u8); u8 h2(u8);\n' +
+      's32 both(s32 i, u8 x) { static u8 (*const t[2])(u8) = { h1, h2 }; return t[i](x) + h1(x); }';
+    const asm = compileTargetAsm(c, FLAGS);
+    const target = assembleTarget(asm);
+    const cands = enumerateCandidates('both', asm, ARMV4T_AGBCC, { prototypes: {} });
+    expect(cands.length).toBeGreaterThan(0);
+    const scores = cands.map((cand) => {
+      const decls = renderDeclarations(cand.symbolRefs ?? []);
+      expect(decls).toMatch(/^int h1\(\);$/m);
+      expect(addressWords(compileTargetAsm(decls + cand.source, FLAGS))).toEqual(addressWords(asm));
+      return scoreC(decls + cand.source, 'both', target, FLAGS).score;
+    });
+    expect(scores).toContain(0);
   });
 
   test('a static every caller of an inlined function names declines, naming the others', () => {
@@ -314,6 +410,143 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
       const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
       expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
     }
+  });
+
+  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled, mwccDeclines }) => {
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, sym, FLAGS);
+    const asmData = extractPpcAsmData(obj, sym);
+    if (mwccDeclines) {
+      expect(() => decompile(sym, asm, PPC_MWCC, { asmData })).toThrow(mwccDeclines);
+      return;
+    }
+    const r = decompile(sym, asm, PPC_MWCC, { asmData });
+    expect(r.source).toMatch(spelled);
+    const cand = compileCandPpc('mwcc_242_81', context + r.source, FLAGS);
+    expect(dataSections(cand)).toEqual(dataSections(obj));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
+    const inData = (o: string) =>
+      extractPpcAsmData(o, sym)
+        .relocs.filter((x) => DATA_SECTIONS.has(x.section))
+        .sort((a, b) => a.section.localeCompare(b.section) || a.offset - b.offset);
+    expect(asmData.relocs.some((x) => DATA_SECTIONS.has(x.section))).toBe(true);
+    expect(inData(cand)).toEqual(inData(obj));
+    const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
+    expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+  });
+
+  test('a table member the body also calls with no prototype is declared ahead of the static', () => {
+    // mwcc has no implicit declaration to fall back on inside an initializer either: "undefined
+    // identifier 'h1'" unless the block declares it (`int h1();`).
+    const c =
+      'extern s32 ga; extern s32 h1(s32);\n' +
+      's32 q1(s32 i) { static s32 *const t[2] = { &ga, (s32 *)h1 }; return *t[i] + h1(i); }';
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, 'q1', FLAGS);
+    const asmData = extractPpcAsmData(obj, 'q1');
+    const cands = enumerateCandidates('q1', asm, PPC_MWCC, { asmData, prototypes: {} });
+    expect(cands.length).toBeGreaterThan(0);
+    const scores = cands.map((cand) => {
+      const decls = renderDeclarations(cand.symbolRefs ?? []);
+      expect(decls).toMatch(/^int h1\(\);$/m);
+      return scoreCPpc('mwcc_242_81', decls + cand.source, 'q1', obj, FLAGS).score;
+    });
+    expect(scores).toContain(0);
+  });
+
+  test('an address element passed to a declared pointer parameter is cast, which mwcc’s C requires', () => {
+    // The element is held as `u32`; mwcc refuses the implicit `u32` → `s32 *` at the call ("illegal
+    // implicit conversion from 'const unsigned int' to 'int *'") where agbcc converts it.
+    const context = 'extern s32 ga, gb; void g(s32 *);\n';
+    const c = 'void mdp(s32 i) { static s32 *const t[2] = { &ga, &gb }; g(t[i]); }';
+    const prototypes = { g: { params: ['s32 *'], returnsVoid: true }, mdp: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mdp', FLAGS);
+    const r = decompile('mdp', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mdp'), prototypes });
+    expect(r.source).toContain('g((s32 *)t[a0]);');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mdp', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('an address element stored into a pointer global is cast, which mwcc’s C requires', () => {
+    // The store is the argument's conversion again: `gp = t[a0];` is "illegal implicit conversion
+    // from 'const unsigned int' to 'int *'" where agbcc converts it. The project's map is what says
+    // `gp` is a pointer.
+    const context = 'extern s32 ga, gb; extern s32 *gp;\n';
+    const c = 'void mst(s32 i) { static s32 *const t[2] = { &ga, &gb }; gp = t[i]; }';
+    const symbols: SymbolMap = new Map([
+      [0x80400000, [{ name: 'gp', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+    ]);
+    const prototypes = { mst: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mst', FLAGS);
+    const r = decompile('mst', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mst'), prototypes, symbols });
+    expect(r.source).toContain('gp = (void *)t[a0];');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mst', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('a global the map declares an integer, stored into a pointer global, is cast as an address element is', () => {
+    // `gw` is typed by the map, so the store is an integer's conversion like `t[i]`'s: bare, mwcc's C
+    // refuses it ("illegal implicit conversion from 'unsigned int' to 'int *'").
+    const context = 'extern u32 gw; extern s32 *gp;\n';
+    const c = 'void mgw(void) { gp = (s32 *)gw; }';
+    const symbols: SymbolMap = new Map([
+      [0x80400000, [{ name: 'gp', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+      [0x80400004, [{ name: 'gw', kind: 'data', declared: true, shape: 'scalar', signed: false, size: 4 }]],
+    ]);
+    const prototypes = { mgw: { params: [], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mgw', FLAGS);
+    const r = decompile('mgw', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mgw'), prototypes, symbols });
+    expect(() => compileCandPpc('mwcc_242_81', `${context}void bare(void) { gp = gw; }`, FLAGS)).toThrow(
+      /illegal implicit conversion/,
+    );
+    expect(r.source).toContain('gp = (void *)gw;');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mgw', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('an integer stored into a declared pointer global declines under C++, which converts it only to the declared type', () => {
+    // C++ refuses the bare `u32` and the `(void *)` alike into the header's `int *gp` ("illegal
+    // implicit conversion from 'void *' to 'int *'", compiled), and the map names no pointee type.
+    const CXX = [...FLAGS, '-lang=c++'];
+    const context = 'extern s32 ga, gb; extern s32 *gp;\n';
+    const c = 'extern "C" void cst(s32 i) { static s32 *const t[2] = { &ga, &gb }; gp = t[i]; }';
+    const symbols: SymbolMap = new Map([
+      [0x80400000, [{ name: 'gp', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+    ]);
+    const prototypes = { cst: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'cst', CXX);
+    const target = targetFor('mwcc_242_81', CXX).target;
+    const voidCast = 'extern "C" void k(u32 *t, s32 i) { gp = (void *)t[i]; }';
+    expect(() => compileCandPpc('mwcc_242_81', context + voidCast, CXX)).toThrow(/illegal implicit conversion/);
+    expect(() =>
+      decompile('cst', asm, target, { asmData: extractPpcAsmData(obj, 'cst'), prototypes, symbols }),
+    ).toThrow(/C\+\+/);
+  });
+
+  test('a cell only the body reads as a pointer takes no cast: the project may declare it an integer', () => {
+    // The map names `gw` but gives no shape; the body dereferences it, so it reads as a pointer
+    // cell. `(void *)` into the project's `u32 gw` is "illegal implicit conversion from 'void *' to
+    // 'unsigned int'" on mwcc, where the bare value compiles.
+    const context = 'extern u32 gw;\n';
+    const c = 'void mcd(u32 x) { *(s32 *)gw = 1; gw = x * 3; }';
+    const symbols: SymbolMap = new Map([[0x80400000, [{ name: 'gw', kind: 'data', declared: true, size: 4 }]]]);
+    const prototypes = { mcd: { params: ['u32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mcd', FLAGS);
+    const r = decompile('mcd', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mcd'), prototypes, symbols });
+    expect(r.source).not.toContain('(void *)');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mcd', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('a pointer copied from a global no declaration types is stored bare, which C++ requires', () => {
+    // `gp = gq`: both pointers in the header, neither typed for asmlift. C++ refuses `(void *)gq`
+    // into an `int *` ("illegal implicit conversion from 'void *' to 'int *'").
+    const CXX = [...FLAGS, '-lang=c++'];
+    const context = 'extern s32 *gp, *gq;\n';
+    const c = 'extern "C" void cx(s32 n) { *gp = n; gp = gq; }';
+    const prototypes = { cx: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'cx', CXX);
+    const r = decompile('cx', asm, targetFor('mwcc_242_81', CXX).target, {
+      asmData: extractPpcAsmData(obj, 'cx'),
+      prototypes,
+    });
+    expect(r.source).toContain('gp = gq;');
+    const unit = `${context}extern "C" {\n${r.source}\n}`;
+    expect(scoreCPpc('mwcc_242_81', unit, 'cx', obj, CXX).match, r.source).toBe(true);
   });
 
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {

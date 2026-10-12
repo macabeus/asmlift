@@ -208,6 +208,25 @@ describe('local aggregate initializers — real agbcc: the candidate copies the 
     }
   });
 
+  test('an image holding addresses folds into an initializer of address constants', () => {
+    // a pointer array agbcc copies with memcpy (from 16 words; 4-12 it copies with ldmia/stmia); the
+    // bytes are all zero, so the words' relocations are what say the image is the target's
+    const ctx = 'void h1(void); void h2(void); extern void g(void *);\n';
+    const fns = Array.from({ length: 16 }, (_, i) => (i % 3 === 2 ? 'h2' : 'h1'));
+    const c = `${ctx}void fptr16(void) { void (*a[16])(void) = { ${fns.join(', ')} }; g(a); }`;
+    const asm = compileTargetAsm(c, FLAGS);
+    expect(asm).toContain('memcpy');
+    const target = assembleTarget(asm);
+    const r = decompile('fptr16', asm, ARMV4T_AGBCC, { prototypes: PROTOS });
+    expect(r.source).toMatch(/u32 sp0\[16\] = \{\n {8}\(u32\)&h1, \(u32\)&h1, \(u32\)&h2, \(u32\)&h1,/);
+    expect(r.source).not.toContain('memcpy');
+    const words = (a: string) => a.split('\n').filter((l) => /^\s*\.word\s+h\d/.test(l));
+    expect(words(asm)).toHaveLength(16);
+    expect(words(compileTargetAsm(ctx + r.source, FLAGS))).toEqual(words(asm));
+    expect(rodata(compileCandAgbcc(ctx + r.source, FLAGS))).toEqual(rodata(target));
+    expect(scoreC(ctx + r.source, 'fptr16', target, FLAGS).score, r.source).toBe(0);
+  });
+
   test('an initializer shorter than its string array is a copy and a fill, and declines', () => {
     // `char a[8] = "hello"` copies the 6-byte literal and memsets the tail: no one copy fills `a`
     const asm = compileTargetAsm(`${USE}void tail(void) { char a[8] = "hello"; g(a); }`, FLAGS);

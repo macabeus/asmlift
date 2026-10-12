@@ -67,6 +67,11 @@ export interface SymbolRef {
    *  cell bare and nothing reads it as an integer (`pointerPartners`). A name-only declaration of it
    *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
   holdsPointer?: true;
+  /** A call target with NO spellable prototype whose address a function-scope static's (or an
+   *  anonymous image's) initializer holds. The static's `(u32)&F` precedes every call, so the
+   *  implicit declaration a call makes comes too late for it; `declare.ts` prints that same
+   *  declaration first, `int F();`, which states no parameter and so binds the call as before. */
+  implicitCall?: true;
 }
 
 /** The declarable symbols a structured body references in a VALUE context — the input to the
@@ -126,6 +131,18 @@ export function collectSymbolRefs(
     stmtChildren(s).forEach(visitStmt);
   };
   tree.body.forEach(visitStmt);
+  // A function-scope static's initializer names the globals whose addresses it holds
+  // (`(u32)&MetatileBehavior_IsTallGrass`), which the candidate must declare as much as the body's —
+  // and so does an anonymous image, which the emitter folds into a local's initializer.
+  const initAddresses = new Set<string>();
+  for (const st of [...(tree.statics ?? []), ...(tree.images ?? [])]) {
+    for (const v of st.init ?? []) {
+      if (v !== null && typeof v === 'object' && symbols.has(v.symbol)) {
+        valueRefs.add(v.symbol);
+        initAddresses.add(v.symbol);
+      }
+    }
+  }
   const holdsPointer = new Set([...pointerCellsOf(tree), ...pointerPartners(tree)]);
   // A call target is a ref in its own right, whether or not the body also names it as a value —
   // `Object.hasOwn`, because `prototypes` is caller-supplied JSON and a callee may be named
@@ -145,7 +162,11 @@ export function collectSymbolRefs(
   return [...new Set([...valueRefs, ...proto.keys()])]
     .sort()
     .filter((n) => {
-      if (called.has(n) && !proto.has(n)) {
+      // …except where an initializer holds its address: there the name is spelled ahead of every
+      // call, so leaving it to the call's implicit declaration leaves the initializer naming an
+      // undeclared identifier, and the implicit declaration itself is the one that is printed
+      // (`SymbolRef.implicitCall`).
+      if (called.has(n) && !proto.has(n) && !initAddresses.has(n)) {
         onRefused?.(n, 'call-target');
         return false;
       }
@@ -170,6 +191,7 @@ export function collectSymbolRefs(
         ...(p ? { proto: p } : {}),
         ...(definition ? { returned: definition } : {}),
         ...(holdsPointer.has(n) ? { holdsPointer: true as const } : {}),
+        ...(called.has(n) && !p ? { implicitCall: true as const } : {}),
       };
     });
 }

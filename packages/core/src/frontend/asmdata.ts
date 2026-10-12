@@ -50,8 +50,14 @@ const readU32 = (b: Uint8Array, off: number, big: boolean): number =>
     ? ((b[off] << 24) | (b[off + 1] << 16) | (b[off + 2] << 8) | b[off + 3]) >>> 0
     : ((b[off + 3] << 24) | (b[off + 2] << 16) | (b[off + 1] << 8) | b[off]) >>> 0;
 
-// Parse an `objdump -r` VALUE field: `sw_jt+0x00000020` / `.text` / `@15` → {sym, addend}.
+// Parse an `objdump -r` VALUE field: `sw_jt+0x00000020` / `.text` / `@15` → {sym, addend}. A
+// negative RELA addend prints as `garr-0x00000004` (mwcc's `&garr[-1]`, compiled), and is kept as
+// the same 32-bit word a positive one is.
 function parseRelocValue(v: string): { sym: string; addend: number } {
+  const minus = v.match(/^(.+)-(0x[0-9a-f]+)$/i);
+  if (minus) {
+    return { sym: minus[1], addend: -parseInt(minus[2], 16) >>> 0 };
+  }
   const plus = v.indexOf('+');
   if (plus < 0) {
     return { sym: v, addend: 0 };

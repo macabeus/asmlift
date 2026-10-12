@@ -185,7 +185,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
   const declaredTypedefs = new Set<string>();
-  for (const { name, info, access, proto, returned, holdsPointer } of refs) {
+  for (const { name, info, access, proto, returned, holdsPointer, implicitCall } of refs) {
     // An address-cast macro declares itself: the header's own body, verbatim. It must NOT become
     // an `extern` — that is the whole point of the fact (an extern emits a relocated pool word
     // where the macro emits the numeric one the target shows).
@@ -216,10 +216,17 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       lines.push(`${proto.returns} ${name}(${proto.params.length > 0 ? proto.params.join(', ') : 'void'});`);
       continue;
     }
+    // A CALL TARGET no prototype spells, named ahead of its first call by an initializer — C's
+    // implicit declaration, `int F();`, written where the initializer can see it. No parameter
+    // list, so the call binds to it exactly as it bound to the implicit one (see collectSymbolRefs).
+    if (implicitCall) {
+      lines.push(`int ${name}();`);
+      continue;
+    }
     if (info.kind === 'code') {
       // value-referenced code symbol ((u32)Func): any prototype makes the name visible, and
-      // the address is arity-independent. A call target reaches this module only with a complete
-      // prototype, which the branch above already printed — see collectSymbolRefs.
+      // the address is arity-independent. A call target reaches here only with a complete
+      // prototype or as an initializer's implicit call, which the branches above printed.
       lines.push(`void ${name}(void);`);
       continue;
     }

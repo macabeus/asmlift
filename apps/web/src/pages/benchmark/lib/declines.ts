@@ -533,10 +533,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // (octal to the assembler) — which is TWO of the seven, once for a pool word and once for the
     // offset its operand carries. A pool word naming the function's predefined name (`__func__.N`)
     // reaches it too. Another is a word naming the compiler's anonymous data (agbcc's `.LC0`) that is
-    // no constant image a local is copied from: one whose initializer holds an address, or one the
-    // reader cannot define (frontend/local-object.ts `readGasAnonymousObject`). Earlier classes take
-    // the rest first: `tu-scoped-name` the two function-scope-static throws, and
-    // `unread-data-directive` a data label whose directive is not read as words (a `why` of the
+    // no constant image a local is copied from: one whose initializer holds an address no
+    // declaration outside the function names, or one the reader cannot define
+    // (frontend/local-object.ts `readGasAnonymousObject`). Earlier classes take the rest first:
+    // `tu-scoped-name` the two function-scope-static throws, and `unread-data-directive` a data label whose directive is not read as words (a `why` of the
     // not-modelled throw). Keying on `pool word` matched three of the shapes, so the rest — the same
     // capability at the same site — would arrive as unclassified.
     key: 'pool-word-shape',
