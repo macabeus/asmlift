@@ -774,8 +774,8 @@ export interface TargetDescription {
     // answer 2 and 2: the natural layout, 1. Compiled as `return sizeof …` / `return (int)&((T *)0)->m`
     // at each row's flags; gcc2.7.2 (-O1), mwcc_233_163n and mwcc_247_107 answer the same as their
     // descriptions' measured compilers. Read by raise/structs.ts (through raise/pre-recovery.ts),
-    // which sizes a recovered UNION member with it; raise/struct-arrays.ts sizes element structs
-    // without it, which on agbcc is a known gap.
+    // which sizes a recovered UNION member with it, and by raise/struct-arrays.ts, which declines
+    // an element struct whose stride it would round (agbcc: a stride-6 `u16 [3]` row is 8 bytes).
     //
     // ABSENT ⇒ unmeasured, and the union recovery declines every union narrower than a word: no
     // value is safe to assume, since one too small mislays the fields after it on agbcc and one too

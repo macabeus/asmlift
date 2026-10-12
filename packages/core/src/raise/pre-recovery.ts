@@ -224,7 +224,11 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // struct-arrays AFTER arrays (scalar stride==width shapes are claimed first — see the
   // discriminator note in raise/struct-arrays.ts) and BEFORE structs (an element's field
   // accesses must not be re-derived as constant-offset struct-pointer accesses).
-  { id: 'struct-arrays', run: recognizeStructArrays, dce: true },
+  {
+    id: 'struct-arrays',
+    run: (fn, _self, _opts, target) => recognizeStructArrays(fn, target.compilerBehaviors.aggregateBoundary),
+    dce: true,
+  },
   // member-arrays AFTER struct-arrays, and that order IS load-bearing — but the order alone does
   // not deconflict them, because the two passes claim different VALUES: struct-arrays types the
   // materialized `add(P, K)` and member-arrays groups on `P`, so `P->tbl[i].f` reaches both. What
