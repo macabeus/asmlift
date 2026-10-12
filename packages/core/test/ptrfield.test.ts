@@ -213,11 +213,19 @@ test('a field read through a re-obtained pointer after a frame address escaped d
     },
     value: { k: 'const', value: 1 },
   };
-  const tree = (through: string, before: Stmt[], after: Stmt[]): SFn => ({
+  const tree = (through: string | Expr, before: Stmt[], after: Stmt[]): SFn => ({
     ...fn(st, [
       ...before,
       { k: 'assign', name: 'p', value: { k: 'call', fn: 'get', args: [] } },
-      { k: 'assign', name: 'v', value: { k: 'field', name: 'field_0', base: { k: 'var', name: through } } },
+      {
+        k: 'assign',
+        name: 'v',
+        value: {
+          k: 'field',
+          name: 'field_0',
+          base: typeof through === 'string' ? { k: 'var', name: through } : through,
+        },
+      },
       ...after,
     ]),
     params: [
@@ -242,4 +250,16 @@ test('a field read through a re-obtained pointer after a frame address escaped d
   expect(pointerFields(tree('p', [], [write]))).not.toBeNull();
   expect(pointerFields(tree('p', [escape], []))).not.toBeNull();
   expect(pointerFields(tree('q', [escape], [write]))).not.toBeNull();
+  // an offset by a fixed value does not fix an obtained pointer: `((struct S *)(p + a1))->a`, the
+  // int param on either side, is read stale past the store just the same (compiled: no reload)
+  const offset = (l: Expr, r: Expr): Expr => ({ k: 'cast', to: T.ptr(st), e: { k: 'bin', op: '+', l, r } });
+  const p: Expr = { k: 'var', name: 'p' };
+  const a1: Expr = { k: 'var', name: 'a1' };
+  const q: Expr = { k: 'var', name: 'q' };
+  expect(pointerFields(tree(offset(p, a1), [escape], [write]))).toBeNull();
+  expect(pointerFields(tree(offset(a1, p), [escape], [write]))).toBeNull();
+  expect(pointerFields(tree(offset(p, { k: 'const', value: 4 }), [escape], [write]))).toBeNull();
+  // …while a param's pointer offset by a param or a constant stays admitted
+  expect(pointerFields(tree(offset(q, a1), [escape], [write]))).not.toBeNull();
+  expect(pointerFields(tree(offset(q, { k: 'const', value: 4 }), [escape], [write]))).not.toBeNull();
 });

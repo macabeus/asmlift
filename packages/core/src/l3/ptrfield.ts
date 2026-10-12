@@ -255,9 +255,11 @@ function fixedPointer(sfn: SFn): (e: Expr) => boolean {
         return storage.get(e.name) === 'param' && !assigned.has(e.name);
       case 'cast':
         return fixed(e.e);
-      // an offset from a fixed pointer stays in the object it points into
+      // An offset from a fixed pointer stays in the object it points into, but the tree does not
+      // say which operand is the pointer: in `p + off` with `p = get()` and `off` a param, the
+      // param is the fixed side and `p` may be the frame. So every operand must be fixed.
       case 'bin':
-        return e.op === '+' ? fixed(e.l) || fixed(e.r) : e.op === '-' && fixed(e.l);
+        return (e.op === '+' || e.op === '-') && fixed(e.l) && fixed(e.r);
       default:
         return false;
     }
