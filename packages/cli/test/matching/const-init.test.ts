@@ -14,6 +14,7 @@ import {
   compileMipsGcc272Target,
   compileTargetAsm,
   gcc272Available,
+  idoAvailable,
   scoreC,
 } from '@asmlift/toolchains';
 import { readFileSync } from 'node:fs';
@@ -91,6 +92,20 @@ const CASES: { sym: string; c: string; spelled: RegExp }[] = [
     c: `${USE}void rows8(void) { char a[2][8] = {"abcdefg", "hijklm"}; g(a); }`,
     spelled:
       /u8 sp0\[16\] = \{\n {8}0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0,\n {8}0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0,\n {4}\};/,
+  },
+  {
+    // …and one whose strings fill their rows exactly has no `.space`: what tells it from a string
+    // literal is the `.align 2, 0` agbcc writes ahead of a STRING_CST's label and not of a brace
+    // list's, so spelled as a literal the image would move from `.rodata` align 1 to 4
+    sym: 'fit6',
+    c: `${USE}void fit6(void) { char a[1][6] = {"abcde"}; g(a); }`,
+    spelled: /u8 sp0\[6\] = \{ 0x61, 0x62, 0x63, 0x64, 0x65, 0 \};/,
+  },
+  {
+    sym: 'fit16',
+    c: `${USE}void fit16(void) { char a[2][8] = {"abcdefg", "hijklmn"}; g(a); }`,
+    spelled:
+      /u8 sp0\[16\] = \{\n {8}0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0,\n {8}0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0,\n {4}\};/,
   },
   {
     // the elements the initializer left out are a `.space` in the image, and stay left out: spelled
@@ -206,32 +221,36 @@ describe('local aggregate initializers — real agbcc: the candidate copies the 
 // image leaves elements out: spelled by index where the compiler parses it, as zeros where it does not
 describe('a designated initializer element parses exactly where the target says it does', () => {
   const DESIGNATED = 'extern void g(void *);\nvoid des(void) { u8 a[16] = { 1, [8] = 2 }; g(a); }\n';
+  // the same initializer spelled with zeros, which every dialect parses: compiled first, so that a
+  // toolchain that does not run (or a prelude that does not parse) fails here, not as "refuses"
+  const ZEROS = 'extern void g(void *);\nvoid des(void) { u8 a[16] = { 1, 0, 0, 0, 0, 0, 0, 0, 2 }; g(a); }\n';
   const says = (id: ToolchainId): boolean =>
     TOOLCHAIN_TARGETS[id].description.compilerBehaviors.designatedInitializers === true;
-  const parses = (compile: () => unknown): boolean => {
+  const parses = (compile: (c: string) => unknown): boolean => {
+    compile(ZEROS);
     try {
-      compile();
+      compile(DESIGNATED);
       return true;
     } catch {
       return false;
     }
   };
   test('agbcc', () => {
-    expect(parses(() => compileCandAgbcc(DESIGNATED, TOOLCHAIN_TARGETS.agbcc.canonicalFlags))).toBe(says('agbcc'));
+    expect(parses((c) => compileCandAgbcc(c, TOOLCHAIN_TARGETS.agbcc.canonicalFlags))).toBe(says('agbcc'));
   });
-  test('ido7.1', () => {
+  test.runIf(idoAvailable())('ido7.1', () => {
     const flags = TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags;
-    expect(parses(() => compileCandIdoC(DESIGNATED, flags))).toBe(says('ido7.1'));
+    expect(parses((c) => compileCandIdoC(c, flags))).toBe(says('ido7.1'));
   });
   test.runIf(gcc272Available())('gcc2.7.2', () => {
     const flags = TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags;
-    expect(parses(() => compileMipsGcc272Target(DESIGNATED, 'des', flags))).toBe(says('gcc2.7.2'));
+    expect(parses((c) => compileMipsGcc272Target(c, 'des', flags))).toBe(says('gcc2.7.2'));
   });
   test.runIf(kmcGate('const-init'))(
     'gcc2.7.2kmc',
     () => {
       const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;
-      expect(parses(() => compileCandKmc(DESIGNATED, flags))).toBe(says('gcc2.7.2kmc'));
+      expect(parses((c) => compileCandKmc(c, flags))).toBe(says('gcc2.7.2kmc'));
     },
     60_000,
   );
@@ -239,7 +258,7 @@ describe('a designated initializer element parses exactly where the target says 
     'mwcc_242_81',
     () => {
       const flags = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
-      expect(parses(() => compileCandPpc('mwcc_242_81', DESIGNATED, flags))).toBe(says('mwcc_242_81'));
+      expect(parses((c) => compileCandPpc('mwcc_242_81', c, flags))).toBe(says('mwcc_242_81'));
     },
     60_000,
   );
