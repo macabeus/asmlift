@@ -30,7 +30,7 @@ import { ARMV4T_AGBCC, structureOptionsFor } from '../src/target';
 function emit(ir: string, returnsVoid = true): string {
   const fn = parse(ir);
   verify(fn);
-  recognizeStructArrays(fn);
+  recognizeStructArrays(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
   if (recognizeMemberArrays(fn)) {
     dce(fn);
   }
@@ -44,7 +44,7 @@ function emit(ir: string, returnsVoid = true): string {
 function refusals(ir: string): (string | null)[] {
   const fn = parse(ir);
   verify(fn);
-  recognizeStructArrays(fn);
+  recognizeStructArrays(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
   return memberArrayCandidates(fn).map((g) => firstRejection(MEMBER_ARRAY_GATES, g.c));
 }
 
@@ -189,7 +189,7 @@ describe('member-array recovery — the gates', () => {
   const claimedRefusals = (ir: string, gates = MEMBER_ARRAY_GATES): (string | null)[] => {
     const fn = parse(ir);
     verify(fn);
-    recognizeStructArrays(fn);
+    recognizeStructArrays(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
     dce(fn);
     return memberArrayCandidates(fn).map((g) => firstRejection(gates, g.c));
   };
@@ -206,7 +206,7 @@ describe('member-array recovery — the gates', () => {
   test('an ablated array-of-struct member declines loudly', () => {
     const fn = parse(ELEM_AT_4);
     verify(fn);
-    recognizeStructArrays(fn);
+    recognizeStructArrays(fn, ARMV4T_AGBCC.compilerBehaviors.aggregateBoundary);
     dce(fn);
     expect(recognizeMemberArrays(fn, without(MEMBER_ARRAY_GATES, 'claimed-access'))).toBe(2);
     dce(fn);

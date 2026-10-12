@@ -11,7 +11,7 @@ import { recognizeStructArrays } from '../src/raise/struct-arrays';
 const run = (ir: string): number => {
   const fn = parse(ir);
   verify(fn);
-  return recognizeStructArrays(fn);
+  return recognizeStructArrays(fn, 1);
 };
 
 // the clean golden: one element pointer, disjoint aligned fields, base untyped and un-derefed
@@ -30,6 +30,22 @@ const GOLDEN = `fn ok {
 describe('struct-arrays clean-gate — adversarial-round pins', () => {
   test('the golden single-element-pointer shape still fires', () => {
     expect(run(GOLDEN)).toBe(1);
+  });
+
+  // An unmeasured aggregate boundary (target.ts: ABSENT) sizes no element struct, as it sizes no
+  // union in raise/structs.ts — not even a stride every measured boundary divides. A stride-6 row
+  // of halfwords is the case it guards: the natural layout recovers it, agbcc's 4 would round it.
+  test('an absent aggregate boundary declines, rather than assuming the natural layout', () => {
+    const SIX = GOLDEN.replace('{value=8}', '{value=6}').replace('signed=true, width=4', 'signed=true, width=2');
+    const at = (ir: string, boundary: number | undefined): number => {
+      const fn = parse(ir);
+      verify(fn);
+      return recognizeStructArrays(fn, boundary);
+    };
+    expect(at(GOLDEN, undefined)).toBe(0);
+    expect(at(SIX, undefined)).toBe(0);
+    expect(at(SIX, 1)).toBe(1);
+    expect(at(SIX, 4)).toBe(0);
   });
 
   test('F1a: elem as the store VALUE of its own access declines (operand positions > 0 are uses)', () => {
@@ -197,7 +213,7 @@ describe('remediation-verifier pins — stale values and signedness', () => {
 }
 `);
     verify(fn);
-    expect(recognizeStructArrays(fn)).toBe(2); // both groups recover
+    expect(recognizeStructArrays(fn, 1)).toBe(2); // both groups recover
     verify(fn); // and every operand still has a live def — the crash shape
   });
 

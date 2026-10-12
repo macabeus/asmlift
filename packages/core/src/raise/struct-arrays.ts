@@ -99,9 +99,10 @@ function withPadding(dataFields: StructField[], stride: number): StructField[] {
  *  `compilerBehaviors.aggregateBoundary`): agbcc 4, so `struct { u16 a; u8 _pad0[4]; }` is 8
  *  bytes there, not the 6 its fields add up to. A group whose stride that rounding would change
  *  declines, and its accesses keep the byte-offset spelling (`*(u16 *)(base + i * 6)`), which
- *  says the stride itself. Absent, only the members' own alignment rounds the struct (the
- *  natural layout), which is what every caller that does not pass a target assumes. */
-export function recognizeStructArrays(fn: Fn, aggregateBoundary?: number): number {
+ *  says the stride itself. ABSENT means unmeasured (target.ts), and then every group declines the
+ *  same way: no boundary is safe to assume, since one too small is that very mis-stride on agbcc,
+ *  and the caller must say which layout it means — a target's value, or 1 for the natural one. */
+export function recognizeStructArrays(fn: Fn, aggregateBoundary: number | undefined): number {
   const defs = defOpMap(fn);
   let count = 0;
   // The NAME index is not the recognition count: `count` is this function's return value — how
@@ -237,7 +238,8 @@ export function recognizeStructArrays(fn: Fn, aggregateBoundary?: number): numbe
     // boundary; a stride neither divides is one `sizeof` cannot reproduce. On agbcc a stride-6
     // `u16 t[N][3]` row recompiled as an Elem struct indexes at 8 — a read from the wrong bytes
     // and a store past a frame buffer sized from the asm (sa3 sub_8038910, `lsl r4, r1, #3`).
-    if (stride % Math.max(maxAlign, aggregateBoundary ?? 1) !== 0) {
+    // An unmeasured boundary sizes no struct at all, so it declines every group.
+    if (aggregateBoundary === undefined || stride % Math.max(maxAlign, aggregateBoundary) !== 0) {
       clean = false;
     }
     if (!clean) {

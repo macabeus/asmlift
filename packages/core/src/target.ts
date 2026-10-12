@@ -777,9 +777,10 @@ export interface TargetDescription {
     // which sizes a recovered UNION member with it, and by raise/struct-arrays.ts, which declines
     // an element struct whose stride it would round (agbcc: a stride-6 `u16 [3]` row is 8 bytes).
     //
-    // ABSENT ⇒ unmeasured, and the union recovery declines every union narrower than a word: no
-    // value is safe to assume, since one too small mislays the fields after it on agbcc and one too
-    // large drops the pad in front of them everywhere else.
+    // ABSENT ⇒ unmeasured: the union recovery declines every union narrower than a word, and the
+    // struct-array recovery declines every element struct. No value is safe to assume, since one
+    // too small mislays the fields after it on agbcc (and mis-strides an element struct) and one
+    // too large drops the pad in front of them everywhere else.
     aggregateBoundary?: number;
     // The largest alignment any member of a struct takes, in bytes (BIGGEST_ALIGNMENT): agbcc 4,
     // thumb.h:358, so a `long long` member sits at a word. With `aggregateBoundary` it is what sizes
