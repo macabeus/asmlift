@@ -12,7 +12,7 @@
 // too, shared with the scoring layer's synthesized declarations so the two cannot drift).
 import { doubleLiteral } from '../ir/float-bits';
 import { IrType, T, scalarTypeForAccess, typeEquals, typeToString } from '../ir/types';
-import { BinOp, Expr, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
+import { BinOp, Expr, InitAddress, SFn, SStatic, Stmt, dotBase } from '../l3/ast';
 import { foldConstantImages } from '../l3/constinit';
 import { legalizePointerCells } from '../l3/ptrcell';
 import { orderSlotLocals } from '../l3/slotorder';
@@ -722,10 +722,25 @@ function cFamilyBody(fn0: SFn, leaf: LeafHook | undefined, designators: boolean)
   return lines;
 }
 
-/** One initial element: hex from 10 up, a negative one with its sign, so a byte table reads as the
+/** One initial number: hex from 10 up, a negative one with its sign, so a byte table reads as the
  *  bytes and a signed one as its values. */
-const initElement = (v: number): string =>
+const initNumber = (v: number): string =>
   Math.abs(v) < 10 ? `${v}` : `${v < 0 ? '-' : ''}0x${Math.abs(v).toString(16)}`;
+
+/** One initial element of type `elem`: a number, or the address constant a relocated one holds,
+ *  converted to the element's integer type — `(u32)&sym`, and with an addend `(u32)((u8 *)&sym + k)`:
+ *  the offset in bytes, as the relocation counts it. Not `(u32)&sym + k`, which agbcc folds alike but
+ *  mwcc refuses as an illegal constant expression (compiled); through a byte pointer both write the
+ *  pointer-typed source's word and relocation (`&garr[2]`, `&garr[-1]`, compiled on both). */
+function initElement(v: number | InitAddress, elem: IrType): string {
+  if (typeof v === 'number') {
+    return initNumber(v);
+  }
+  const t = cType(elem);
+  return v.addend === 0
+    ? `(${t})&${v.symbol}`
+    : `(${t})((u8 *)&${v.symbol} ${v.addend < 0 ? '-' : '+'} ${initNumber(Math.abs(v.addend))})`;
+}
 
 /** A byte array's initial elements as a string literal: printable characters as themselves, every
  *  other byte in three-digit octal (which no following digit can extend), and a `?` after a `?`
@@ -764,21 +779,27 @@ function staticDefinition(st: SStatic): string[] {
 function initialized(
   head: string,
   type: IrType,
-  init: readonly (number | null)[],
+  init: readonly (number | InitAddress | null)[],
   string: boolean,
   designators: boolean,
 ): string[] {
   const whole = init.map((v) => v ?? 0);
   if (string) {
-    return [`${head} = ${stringLiteral(whole)};`];
+    // a string's elements are bytes, and no byte holds an address (structure/local-statics.ts)
+    const bytes = whole.filter((v): v is number => typeof v === 'number');
+    if (bytes.length !== whole.length) {
+      throw new Error(`internal: a string initializer of '${head.trim()}' holds an address`);
+    }
+    return [`${head} = ${stringLiteral(bytes)};`];
   }
   if (type.kind !== 'array') {
-    return [`${head} = ${initElement(whole[0])};`];
+    return [`${head} = ${initElement(whole[0], type)};`];
   }
   const items: string[] = [];
   init.forEach((v, i) => {
     if (v !== null || !designators) {
-      items.push(init[i - 1] === null && designators ? `[${i}] = ${initElement(v!)}` : initElement(v ?? 0));
+      const e = initElement(v ?? 0, type.elem);
+      items.push(init[i - 1] === null && designators ? `[${i}] = ${e}` : e);
     }
   });
   if (items.length <= 8) {

@@ -61,6 +61,7 @@ import {
 } from '../src/frontend/local-object';
 import { lift as liftThumb } from '../src/frontend/thumb';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
@@ -183,11 +184,6 @@ test("agbcc: an initializer holding an ordinary global's address records it — 
   });
   // none: no `relocs` at all
   expect(readGasLocalObject(agbcc, 'w.19')).not.toHaveProperty('relocs');
-  // the lift carries it; the definition does not spell it yet
-  expect(() => decompile('fg', agbcc, ARMV4T_AGBCC)).toThrow(
-    "cannot structure 'fg': names a function-scope static ('p.27') whose initializer holds the address 'g' — " +
-      'a relocation inside the object',
-  );
 });
 
 test('agbcc: an address no declaration outside the function names, or no pointer holds, refuses', () => {
@@ -557,6 +553,72 @@ test('the loads settle the signedness, and the definition only where no load of 
   );
   expect(decompile('f', struct, ARMV4T_AGBCC).source).toContain(
     '    static const u8 t[8] __attribute__((aligned(4))) = { 0xff, 0xff, 5, 0, 0xfe, 0xff, 6, 0 };\n',
+  );
+});
+
+test("an element holding an ordinary global's address is spelled as the address constant it is", () => {
+  // `static int *p = &g;` in .data: the word element the access reads, holding g's address
+  expect(decompile('fg', agbcc, ARMV4T_AGBCC).source).toBe(
+    's32 fg(s32 a0) {\n    static u32 p = (u32)&g;\n    return ((s32 *)p)[a0];\n}\n',
+  );
+  // a table of them, an addend in bytes either way, beside numbers — a byte pointer carries the
+  // offset as the relocation counts it, which mwcc parses in a constant expression and `+ k` it does not
+  const asm = thumbFn(
+    '\t.section .rodata\n\t.align\t2, 0\nt.3:\n\t.word\th1\n\t.word\tgarr+0x8\n\t.word\tgarr+-0x4\n\t.word\t7',
+    '\tldr\tr1, .L3\n\tlsl\tr0, r0, #0x2\n\tldr\tr0, [r0, r1]',
+    ['t.3'],
+  );
+  expect(decompile('f', asm, ARMV4T_AGBCC).source).toContain(
+    '    static const u32 t[4] = { (u32)&h1, (u32)((u8 *)&garr + 8), (u32)((u8 *)&garr - 4), 7 };\n',
+  );
+});
+
+test('a candidate declares the globals an initializer holds the address of, as it does the body’s', () => {
+  // map-less, as the playground opens a row: only the static's relocation names `g`
+  const cands = enumerateCandidates('fg', agbcc, ARMV4T_AGBCC);
+  expect(cands.length).toBeGreaterThan(0);
+  for (const c of cands) {
+    expect(c.symbolRefs).toEqual([expect.objectContaining({ name: 'g', synthesized: true })]);
+  }
+});
+
+test('an address in an element narrower than a pointer, or in an anonymous image, declines', () => {
+  // bytes, then a word: the directives agree on no width, so the byte loads say the element
+  const mixed = thumbFn(
+    '\t.section .rodata\n\t.align\t2, 0\nt.3:\n\t.byte\t1\n\t.byte\t2\n\t.byte\t3\n\t.byte\t4\n\t.word\tg',
+    '\tldr\tr1, .L3\n\tldrb\tr0, [r0, r1]',
+    ['t.3'],
+  );
+  expect(() => decompile('f', mixed, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('t.3') whose initializer holds the address 'g', which its 1-byte elements " +
+      'cannot — an address is 4',
+  );
+  // a `.LC` image of addresses is read, and the fold it would need is not built
+  const image = thumbFn(
+    '\t.section .rodata\n\t.align\t2, 0\n.LC0:\n\t.word\tg\n\t.word\th',
+    '\tldr\tr1, .L3\n\tldr\tr0, [r1]',
+    ['.LC0'],
+  );
+  expect(() => decompile('f', image, ARMV4T_AGBCC)).toThrow(
+    "reads the compiler's anonymous constant ('.LC0') whose image holds the address 'g' — a relocation inside the object",
+  );
+});
+
+test('a global an initializer holds the address of, hidden by a static or a parameter of its name, declines', () => {
+  // a static named `g` would be in scope in its own initializer, and in every later one
+  const own = thumbFn('.data\n\t.align\t2, 0\ng.3:\n\t.word\tg', '\tldr\tr1, .L3\n\tldr\tr0, [r1]', ['g.3']);
+  expect(() => decompile('f', own, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('g.3') whose source name 'g' is also a global this one names",
+  );
+  // the parameter `a0` is in scope there too
+  const param = thumbFn(
+    '.data\n\t.align\t2, 0\np.3:\n\t.word\ta0',
+    '\tldr\tr1, .L3\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1',
+    ['p.3'],
+  );
+  expect(() => decompile('f', param, ARMV4T_AGBCC)).toThrow(
+    "names a function-scope static ('p.3') whose initializer holds the address of 'a0', which a parameter or local " +
+      'here also names — it would hide that global',
   );
 });
 

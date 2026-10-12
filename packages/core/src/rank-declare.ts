@@ -220,6 +220,21 @@ export function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
   return out;
 }
 
+/** The globals a function-scope static's initializer holds the address of (ir/core.ts
+ *  `LocalObject.relocs`), as name-only symbols for the same synthesis: the candidate spells each in
+ *  the static's definition (`(u32)&Name`), and only the static's relocations name it. Kept apart
+ *  from {@link bareGlobalSymbols}, whose names the variation gates read as the globals the BODY
+ *  addresses: an address in a table no access ever subscripts says nothing of how one is spelled. */
+export function initAddressSymbols(fn: Fn): Map<string, SymbolInfo> {
+  const out = new Map<string, SymbolInfo>();
+  for (const obj of fn.localObjects?.values() ?? []) {
+    for (const r of obj.relocs ?? []) {
+      out.set(r.symbol, { name: r.symbol, kind: 'data' });
+    }
+  }
+  return out;
+}
+
 /** The reference collector one enumeration uses, over ONE dictionary. A factory rather than a
  *  free function because all four of its inputs are per-enumeration constants that must not vary
  *  per tree — naming them here is what keeps a caller from passing a different dictionary to two

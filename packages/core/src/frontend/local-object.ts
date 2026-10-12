@@ -32,7 +32,12 @@
 //     re-declaring it inside one of them would split one object in two. Only the functions this
 //     input shows can be checked, which is the limit of this refusal: a single-function input
 //     cannot show a second referrer, and one that ends at this function cannot show a later one.
-import type { LocalObject, LocalObjectReloc, LocalObjects } from '../ir/core';
+import {
+  type LocalObject,
+  type LocalObjectReloc,
+  type LocalObjects,
+  LOCAL_OBJECT_ADDRESS_BYTES as POINTER_BYTES,
+} from '../ir/core';
 import type { AsmData } from './asmdata';
 import { classifyRelocSymbol, localStaticName, unspellableReason } from './reloc-symbol';
 
@@ -41,10 +46,6 @@ import { classifyRelocSymbol, localStaticName, unspellableReason } from './reloc
 export type LocalObjectRead = LocalObject | { refused: string };
 
 const refused = (why: string): { refused: string } => ({ refused: why });
-
-/** The bytes of a pointer on every target whose initializers these readers relocate — the width of
- *  the only relocations they record (agbcc's `.word sym`, mwcc's `R_PPC_ADDR32`). */
-const POINTER_BYTES = 4;
 
 /** Why an initializer's address of `symbol` cannot be recorded, as the tail of the refusal
  *  sentence — or null for an ordinary global's, which a declaration outside the function names.

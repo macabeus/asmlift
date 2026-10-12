@@ -272,6 +272,63 @@ const CASES: {
   },
 ];
 
+/** Initializers holding ADDRESSES: a table of function pointers, of data pointers, of `&arr[k]`
+ *  either side of the array, and a pointer scalar in .data. Neither the bytes nor the score sees an
+ *  address — both name it only through a relocation — so each compiler's own record of the
+ *  relocations inside the data is compared too. `context` declares what the project's headers would. */
+const ADDRESS_CASES: { sym: string; c: string; context: string; spelled: RegExp; mwccDeclines?: RegExp }[] = [
+  {
+    sym: 'fptab',
+    context: 'u8 h1(u8);\nu8 h2(u8);\nu8 h3(u8);\n',
+    c: 's32 fptab(s32 i, u8 x) { static u8 (*const tbl[3])(u8) = { h1, h2, h3 }; return tbl[i](x); }',
+    spelled: /static const u32 tbl\[3\] = \{ \(u32\)&h1, \(u32\)&h2, \(u32\)&h3 \};/,
+    // mwcc calls through it with `bctrl`, which its frontend does not model
+    mwccDeclines: /unmodelled control transfer 'bctrl'/,
+  },
+  {
+    sym: 'dptab',
+    context: 'extern s32 ga, gb;\n',
+    c: 's32 dptab(s32 i) { static s32 *const tbl[2] = { &ga, &gb }; return *tbl[i]; }',
+    spelled: /static const u32 tbl\[2\] = \{ \(u32\)&ga, \(u32\)&gb \};/,
+  },
+  {
+    sym: 'addend',
+    context: 'extern s32 garr[8];\n',
+    c: 's32 addend(s32 i) { static s32 *const tbl[3] = { &garr[2], &garr[-1], garr }; return *tbl[i]; }',
+    spelled:
+      /static const u32 tbl\[3\] = \{ \(u32\)\(\(u8 \*\)&garr \+ 8\), \(u32\)\(\(u8 \*\)&garr - 4\), \(u32\)&garr \};/,
+  },
+  {
+    sym: 'ptrdata',
+    context: 'extern s32 g;\n',
+    c: 's32 ptrdata(s32 i) { static s32 *p = &g; return p[i]; }',
+    spelled: /static u32 p = \(u32\)&g;/,
+  },
+];
+
+/** The words of each data run agbcc's listing writes as addresses, under the label that heads it. */
+const addressWords = (asm: string): string[] => {
+  const out: string[] = [];
+  let label = '';
+  let inData = false;
+  for (const line of asm.split('\n')) {
+    if (/^\s*\.(section\s+\.(rodata|data)|data)\b/.test(line)) {
+      inData = true;
+    } else if (/^\s*\.(text|section)\b/.test(line)) {
+      inData = false;
+    }
+    const l = line.match(/^([A-Za-z_][\w.$]*):/);
+    if (l) {
+      label = l[1];
+    }
+    const w = line.match(/^\s*\.word\s+([A-Za-z_].*)$/);
+    if (inData && w) {
+      out.push(`${label}: ${w[1]}`);
+    }
+  }
+  return out;
+};
+
 describe('function-scope statics — real agbcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
   test.each(CASES)('$sym', ({ sym, c, spelled, agbccScore = 0, layoutOnly, context = '' }) => {
@@ -285,6 +342,20 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
     if (!layoutOnly) {
       expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(agbccScore);
     }
+  });
+
+  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled }) => {
+    const asm = compileTargetAsm(context + c, FLAGS);
+    const target = assembleTarget(asm);
+    const r = decompile(sym, asm, ARMV4T_AGBCC);
+    expect(r.source).toMatch(spelled);
+    const cand = compileCandAgbcc(context + r.source, FLAGS);
+    expect(dataSections(cand)).toEqual(dataSections(target));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(target));
+    const words = addressWords(asm);
+    expect(words.length).toBeGreaterThan(0);
+    expect(addressWords(compileTargetAsm(context + r.source, FLAGS))).toEqual(words);
+    expect(scoreC(context + r.source, sym, target, FLAGS).score, r.source).toBe(0);
   });
 
   test('a static every caller of an inlined function names declines, naming the others', () => {
@@ -314,6 +385,28 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
       const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
       expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
     }
+  });
+
+  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled, mwccDeclines }) => {
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, sym, FLAGS);
+    const asmData = extractPpcAsmData(obj, sym);
+    if (mwccDeclines) {
+      expect(() => decompile(sym, asm, PPC_MWCC, { asmData })).toThrow(mwccDeclines);
+      return;
+    }
+    const r = decompile(sym, asm, PPC_MWCC, { asmData });
+    expect(r.source).toMatch(spelled);
+    const cand = compileCandPpc('mwcc_242_81', context + r.source, FLAGS);
+    expect(dataSections(cand)).toEqual(dataSections(obj));
+    expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
+    const inData = (o: string) =>
+      extractPpcAsmData(o, sym)
+        .relocs.filter((x) => DATA_SECTIONS.has(x.section))
+        .sort((a, b) => a.section.localeCompare(b.section) || a.offset - b.offset);
+    expect(asmData.relocs.some((x) => DATA_SECTIONS.has(x.section))).toBe(true);
+    expect(inData(cand)).toEqual(inData(obj));
+    const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
+    expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
   });
 
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {

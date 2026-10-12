@@ -29,19 +29,36 @@
 // source's (`tide`) in one step, `nameLocalStatics`, which is where a clash between that name and
 // anything else the function names can first be seen whole.
 //
+// An element the target RELOCATES holds an address — a table of function pointers, of data
+// pointers, of `&arr[k]` — and is spelled as the address constant it is, `(u32)&sym` or
+// `(u32)((u8 *)&sym + k)`, in the integer element the rest of this typing picks: such an element
+// compiles to the same word and the same relocation as the pointer-typed source (agbcc and mwcc,
+// compiled), so the definition needs no pointer type to put the bytes where the target has them.
+//
 // REFUSES, naming the static, when the target's compiler declares no layout rules, when nothing
 // in the definition settles the width and the accesses disagree on it, when the width is no
 // integer type's or does not divide the size, when the loads disagree on the signedness, when the
 // definition is aligned narrower than its declaration here would be, when a bss static sits where
 // only a scalar initialized to zero is sure to land and it is no scalar (or the input does not
-// show where it sits);
+// show where it sits), when an element holding an address is no pointer's width, when the
+// compiler's anonymous image holds one (l3/constinit.ts folds numbers only);
 // and, at the rename, when two statics share a source name (one block cannot declare both) or
 // when the function names anything else by it — a global, a callee, a parameter, a local, itself —
-// which the block-scope static would hide.
-import { type Fn, type LocalObject, type LocalObjects, type Op, type Value, defOpMap } from '../ir/core';
+// which the block-scope static would hide — and when a global an initializer holds the address of
+// is hidden there by a static, parameter or local of its name.
+import {
+  type Fn,
+  LOCAL_OBJECT_ADDRESS_BYTES,
+  type LocalObject,
+  type LocalObjects,
+  type Op,
+  type Value,
+  defOpMap,
+} from '../ir/core';
 import { type IrType, T } from '../ir/types';
 import {
   type Expr,
+  type InitAddress,
   type SFn,
   type SImage,
   type SStatic,
@@ -266,10 +283,10 @@ export function localStaticShapes(
   // it places in the order it first uses them: the candidate's code decides that, no declaration.
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
-    if (obj.relocs !== undefined) {
-      return say(`whose initializer holds the address '${obj.relocs[0].symbol}' — a relocation inside the object`);
-    }
     if (obj.anonymous) {
+      if (obj.relocs !== undefined) {
+        return say(`whose image holds the address '${obj.relocs[0].symbol}' — a relocation inside the object`);
+      }
       // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
       // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
       // folds it into the local the copy fills, which is the declaration that placed it.
@@ -349,7 +366,22 @@ export function localStaticShapes(
     const signed = signs.size > 0 ? signs.has(true) : dir?.negative === true;
     const count = obj.size / width;
     const elem = T.int(width * 8, signed);
-    const init = zeroed.has(obj.symbol) ? [0] : obj.bytes === undefined ? undefined : elements(obj, width, signed);
+    const init: (number | InitAddress)[] | undefined = zeroed.has(obj.symbol)
+      ? [0]
+      : obj.bytes === undefined
+        ? undefined
+        : elements(obj, width, signed);
+    // An element the target relocates holds an address, which only an element of a pointer's width
+    // can: the relocation fills exactly that many bytes.
+    for (const r of obj.relocs ?? []) {
+      if (width !== LOCAL_OBJECT_ADDRESS_BYTES || r.offset % width !== 0) {
+        return say(
+          `whose initializer holds the address '${r.symbol}', which its ${width}-byte elements cannot — ` +
+            `an address is ${LOCAL_OBJECT_ADDRESS_BYTES}`,
+        );
+      }
+      init![r.offset / width] = { symbol: r.symbol, addend: r.addend };
+    }
     if (zeroed.has(obj.symbol) && count !== 1) {
       return say(`laid out where only a scalar initialized to zero is, but of ${count} elements`);
     }
@@ -397,7 +429,26 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   for (const g of sfn.globals ?? []) {
     taken.add(g.name);
   }
+  // The globals an initializer holds the address of are named here as much as the body's: a static
+  // of the same name is in scope from its own declarator on, its initializer included.
+  const addressed = new Map<string, string>();
+  for (const obj of objs.values()) {
+    for (const r of obj.relocs ?? []) {
+      taken.add(r.symbol);
+      addressed.set(r.symbol, obj.symbol);
+    }
+  }
   const bound = new Set([...sfn.params, ...sfn.locals].map((x) => x.name));
+  // …and the function's own parameters hide one too: a static's initializer is read in their scope.
+  // A local is declared after every static and hides none, but its name is the emitter's to move.
+  for (const [name, holder] of addressed) {
+    if (bound.has(name)) {
+      return {
+        symbol: holder,
+        refused: `whose initializer holds the address of '${name}', which a parameter or local here also names — it would hide that global`,
+      };
+    }
+  }
   const callees = new Set<string>([sfn.name]);
   for (const e of walkExprs(sfn.body)) {
     if (e.k === 'call' && typeof e.fn === 'string') {

@@ -98,6 +98,10 @@ export interface LocalObject {
   anonymous?: true;
 }
 
+/** The bytes of every address an initializer holds ({@link LocalObjectReloc}): a pointer's, on every
+ *  target whose initializers the frontends relocate (agbcc's `.word sym`, mwcc's `R_PPC_ADDR32`). */
+export const LOCAL_OBJECT_ADDRESS_BYTES = 4;
+
 /** One address an initializer holds: the pointer-width word at byte `offset` of the object is
  *  `symbol`'s address plus `addend` — an ordinary global's, the only kind a declaration outside the
  *  function can name (frontend/reloc-symbol.ts). */

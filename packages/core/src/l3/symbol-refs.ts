@@ -126,6 +126,15 @@ export function collectSymbolRefs(
     stmtChildren(s).forEach(visitStmt);
   };
   tree.body.forEach(visitStmt);
+  // A function-scope static's initializer names the globals whose addresses it holds
+  // (`(u32)&MetatileBehavior_IsTallGrass`), which the candidate must declare as much as the body's.
+  for (const st of tree.statics ?? []) {
+    for (const v of st.init ?? []) {
+      if (typeof v === 'object' && symbols.has(v.symbol)) {
+        valueRefs.add(v.symbol);
+      }
+    }
+  }
   const holdsPointer = new Set([...pointerCellsOf(tree), ...pointerPartners(tree)]);
   // A call target is a ref in its own right, whether or not the body also names it as a value —
   // `Object.hasOwn`, because `prototypes` is caller-supplied JSON and a callee may be named

@@ -454,15 +454,24 @@ export interface SFn {
   designators?: true;
 }
 
+/** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s
+ *  address plus `addend` bytes, held in the element's integer type — a global's, which a
+ *  declaration outside the function names. */
+export interface InitAddress {
+  symbol: string;
+  addend: number;
+}
+
 /** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is
- *  the initial elements in order, absent for a static with no initializer (the target's bss).
- *  `align` is an alignment in bytes wider than the type's own, which the definition must state. */
+ *  the initial elements in order, absent for a static with no initializer (the target's bss); an
+ *  element the target relocates is the {@link InitAddress} it holds. `align` is an alignment in
+ *  bytes wider than the type's own, which the definition must state. */
 export interface SStatic {
   name: string;
   type: IrType;
   const?: true;
   align?: number;
-  init?: number[];
+  init?: (number | InitAddress)[];
   /** the initializer is spelled as a string literal — a byte array the compiler aligns as a
    *  string (structure/local-statics.ts) */
   string?: true;
