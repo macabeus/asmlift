@@ -6,7 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import { declaredCallArgs, declaredWidth } from '../src/proto';
 import { prototypesFromContext, withContextPrototypes } from '../src/proto-context';
-import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 // the shape of the CARD block in Pikmin's context: its typedefs and an `extern "C"` block
 const PIKMIN_CARD = `
@@ -774,6 +774,65 @@ describe('a context register return under a mapped signature', () => {
     expect(merged.put).toBeUndefined();
   });
 
+  // the map's DWARF parameters leave a `...` out (gba-kit reads DW_TAG_formal_parameter only), so a
+  // variadic entry's return under them would lower `pr(buf, s, a, b)` as `pr(buf, s)`; a K&R entry
+  // states its parameters no better
+  test('a return is kept only under as many parameters as the context states', () => {
+    const odd = prototypesFromContext(
+      'enum Mode { M0, M1 }; int pr(char *buf, const char *fmt, ...); int kr(); int two(enum Mode m, int n);',
+      'c',
+    );
+    expect(odd.pr).toEqual({ returns: 'int' });
+    expect(odd.kr).toEqual({ returns: 'int' });
+    const ptr = { size: 4, signed: null, pointer: true };
+    const sigs = new Map([
+      [0x2000, [{ name: 'pr', kind: 'code' as const, signature: { returns: word(), params: [ptr, ptr] } }]],
+      [0x2100, [{ name: 'kr', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
+      [0x2200, [{ name: 'two', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
+    ]);
+    const m = withContextPrototypes(undefined, odd, 'f', sigs, ARMV4T_AGBCC);
+    expect(m.pr).toBeUndefined();
+    expect(m.kr).toBeUndefined();
+    expect(m.two).toBeUndefined();
+  });
+
+  // a floating return says nothing of a hidden pointer the map's word does not, and on a target
+  // with an FPU call-plan refuses every call to a name declared to return one
+  test('a floating return is not kept', () => {
+    const fl = prototypesFromContext('enum Mode { M0, M1 }; float g(enum Mode m); double d(enum Mode m);', 'c');
+    const sigs = new Map([
+      [0x3000, [{ name: 'g', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
+      [
+        0x3100,
+        [{ name: 'd', kind: 'code' as const, signature: { returns: { size: 8, signed: true }, params: [word()] } }],
+      ],
+    ]);
+    const m = withContextPrototypes(undefined, fl, 'f', sigs, MIPS_IDO);
+    expect(m.g).toBeUndefined();
+    expect(m.d).toBeUndefined();
+    // …nor under a stated entry, where no map width is there to disagree with it
+    expect(withContextPrototypes({ g: { params: 1 } }, fl, 'f', undefined, MIPS_IDO).g).toEqual({ params: 1 });
+  });
+
+  // a --proto or manifest entry that states only the parameters meets the same rule
+  test('a stated entry that says nothing of the return keeps it under as many parameters', () => {
+    const arity = withContextPrototypes({ conv: { params: 4 } }, ctx, 'f', symbols, ARMV4T_AGBCC);
+    expect(arity.conv).toEqual({ params: 4, returns: 'u8 *' });
+    const notVoid = withContextPrototypes(
+      { conv: { params: ['u8 *', 's32', 's32', 'u8'], returnsVoid: false } },
+      ctx,
+      'f',
+      undefined,
+      ARMV4T_AGBCC,
+    );
+    expect(notVoid.conv).toEqual({ params: ['u8 *', 's32', 's32', 'u8'], returnsVoid: false, returns: 'u8 *' });
+    expect(withContextPrototypes({ conv: { params: 3 } }, ctx, 'f', symbols, ARMV4T_AGBCC).conv).toEqual({
+      params: 3,
+    });
+    const va = prototypesFromContext('int pr(char *buf, const char *fmt, ...);', 'c');
+    expect(withContextPrototypes({ pr: { params: 2 } }, va, 'f', undefined, ARMV4T_AGBCC).pr).toEqual({ params: 2 });
+  });
+
   // agbcc -O2 of `void f(s32 w, s32 i, s32 m) { u8 buf[16]; u8 *p = conv(buf, i, 1, 3); *p++ = 0xBA;
   // conv(p, m, 1, 3); print(w, 1, buf, center(1, buf, 56)); }`, the shape of pokeemerald's
   // DrawListIndexNumber: the frame buffer is argument 0 of a call whose result is used
@@ -831,6 +890,11 @@ describe('a context register return under a mapped signature', () => {
         prototypes: { ...merged, ...others, conv: { params: merged.conv!.params! } },
       }),
     ).toThrow(/`conv` takes it at argument 0 and nothing says what that callee returns/);
+    // …and a stated entry that gives only the arity lifts it the same
+    const stated = withContextPrototypes({ conv: { params: 4 } }, ctx, 'f', undefined, ARMV4T_AGBCC);
+    expect(decompile('f', `${HANDED}\n`, ARMV4T_AGBCC, { prototypes: { ...stated, ...others } }).source).toContain(
+      'v0 = conv(sp0, a1, 1, 3);',
+    );
   });
 });
 
