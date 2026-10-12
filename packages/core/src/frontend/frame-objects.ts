@@ -265,6 +265,8 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     member at its own offset, a runtime index may reach it at a byte or at ONE wider
  *     width (`indexedWidth`), and two widths at one byte are the views of one union
  *     (`unionViews`), or refuse where no view names them (`unionRefusal`).
+ *  In either model, beside a call whose arity is guessed, a store through a capture that nothing
+ *  in the function reads declines: it may be that call's stack argument (`storedNeverRead`).
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -317,6 +319,7 @@ export function auditFrameObjects({
   const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
   const model = chooseFrameModel({ oneObject, uses, windows, guessedCalls, returnsWithoutHiddenPointer, fail });
+  storedNeverRead(uses, guessedCalls, fail);
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
@@ -808,6 +811,12 @@ interface FrameUses {
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
+  readonly fixed: readonly {
+    readonly at: number;
+    readonly width: number;
+    readonly isLoad: boolean;
+    readonly frameOnly: boolean;
+  }[];
 }
 
 /** Did the address at `off` reach something that may write the frame back: a callee that is not a
@@ -917,7 +926,17 @@ function classifyFrameUses({
   // …and without it, the first such access, which the per-object model refuses once the model is
   // chosen (`chooseFrameModel`)
   let memberRefusal: string | undefined;
+  // …and in either model, every fixed-offset access as the frame bytes it touches, whether it
+  // reads them, and whether its address is this frame's on every path — what `storedNeverRead`
+  // asks of a frame beside a guessed call
+  const fixed: { at: number; width: number; isLoad: boolean; frameOnly: boolean }[] = [];
   const scalar = (kind: string, op: Op, off: number, v: Value): void => {
+    fixed.push({
+      at: off + (op.attrs.off as number),
+      width: op.attrs.width as number,
+      isLoad: kind === 'load',
+      frameOnly: frameOnEveryPath.has(v),
+    });
     if (oneObject !== undefined) {
       members.push({ at: off + (op.attrs.off as number), width: op.attrs.width as number });
       return;
@@ -1044,6 +1063,7 @@ function classifyFrameUses({
     indexed,
     members,
     memberRefusal,
+    fixed,
   };
 }
 
@@ -1340,7 +1360,9 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
  *  `guessedCalls`). A callee a prototype states is safe: the stack-argument analysis holds each
  *  word it takes to an `[sp,#k]` store, and the one object is declared above that block. So with
  *  no escape the word refusal is offered only where no call is guessed; where an address escapes,
- *  the answer is offered as it was before this rule. */
+ *  the answer is offered as it was before this rule. An argument built in place a byte or a
+ *  halfword at a time is every access at +0 of its own capture and never meets this refusal —
+ *  `storedNeverRead`, the stage after this one, refuses it in either model. */
 function chooseFrameModel({
   oneObject,
   uses,
@@ -1381,6 +1403,44 @@ function chooseFrameModel({
     model.shapeRefused(uses.memberRefusal);
   }
   return model;
+}
+
+/** A FRAME STORE NOTHING HERE READS, BESIDE A CALL WHOSE ARITY IS GUESSED, IS THAT CALL'S STACK
+ *  ARGUMENT AS FAR AS ANYONE HERE CAN TELL — refuse. A guessed call (`guessedCalls`) counts
+ *  argument registers alone, so the words it takes from the outgoing block are invisible to the
+ *  lift, and agbcc builds an argument it cannot place with `str rX, [sp,#k]` IN PLACE through a
+ *  capture: a by-value struct is `mov rD, sp` + `stmia`, a compound literal is `strb`/`strh`
+ *  through `mov rD, sp` moved by `add rD, #k` — every access at +0 of its own capture, so
+ *  `memberRefusal` never sees it. Whatever model then holds those bytes, a local per capture or
+ *  the one object, keeps the stores and the call loses its stack words:
+ *  `th(1, 2, 3, 4, (struct S){{x, y}})` lifts as `th(1, 2, 3, 4)`.
+ *
+ *  What tells such a store from a local's is that nothing in this function reads it: no
+ *  fixed-offset load covers any byte it wrote, no runtime index reaches it from an object at or
+ *  below it, and no escaped address at or below it hands it to anyone who could. A store through a
+ *  pointer that is the frame's on only some paths (`*(p ? p : &local) = x`) is not asked: it is
+ *  not a store the outgoing block alone can own. A store into a local the source wrote and never
+ *  read is the one honest shape this refuses too, and only beside a guessed call; a callee a
+ *  prototype states is the stack-argument analysis' to judge, so with no guessed call this asks
+ *  nothing. */
+function storedNeverRead(uses: FrameUses, guessedCalls: ReadonlySet<Op>, fail: Refuse): void {
+  if (guessedCalls.size === 0) {
+    return;
+  }
+  const reachedFrom = Math.min(...uses.escaped, ...uses.indexed.keys());
+  const bytes = (a: { at: number; width: number }): number[] => [...Array(a.width).keys()].map((i) => a.at + i);
+  const read = new Set(uses.fixed.filter((a) => a.isLoad).flatMap(bytes));
+  const unread = uses.fixed.find(
+    (a) => !a.isLoad && a.frameOnly && a.at + a.width <= reachedFrom && !bytes(a).some((b) => read.has(b)),
+  );
+  if (unread !== undefined) {
+    const call = [...guessedCalls][0].attrs.target;
+    fail(
+      `the ${unread.width}-byte store at [sp,#${unread.at}) through a captured address is never read here, beside ` +
+        `a call whose arity is guessed${typeof call === 'string' ? ` (\`${call}\`)` : ''} — it may be that ` +
+        "call's stack argument, which the lift would drop",
+    );
+  }
 }
 
 /** THE ACCEPTANCE'S PREMISE, RE-ASKED OF THE IR. `capturedObjectIsTheWholeFrame` is a reading
@@ -1659,7 +1719,9 @@ function keepAsOneObject({
     }
   }
   if (twoWidths !== undefined) {
-    const why = unionRefusal({ from, to, uses, indexed: index.width !== null });
+    // any runtime index, a byte one too: `indexedWidth` leaves width 1 out because a char access
+    // agrees with every width, but a union view is still spelled for fixed offsets alone
+    const why = unionRefusal({ from, to, uses, indexed: uses.indexed.size > 0 });
     if (why !== null) {
       fail(
         `the byte at [sp,#${twoWidths.b}] of ${kept} is accessed ${twoWidths.had} and ${twoWidths.width} bytes ` +

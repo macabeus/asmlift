@@ -887,6 +887,15 @@ describe('a frame nothing escapes from is one object where the slot model and an
     );
   });
 
+  test('two widths and a byte runtime index refuse, as the index', () => {
+    // `struct P { u16 a, b; u8 c[8]; }; int f(struct P p, int i){ return p.a + p.c[i]; }` — a char
+    // index agrees with every width (`indexedWidth`), but no view of a union is spelled for one
+    const indexed = byValue(
+      '\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tadd\tr1, sp, #0x4\n\tadd\tr1, r1, r3\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n',
+    );
+    expect(() => lift(indexed)).toThrow(/accessed 4 and 2 bytes wide, .* and a runtime index reaches them too/);
+  });
+
   // EVERY PER-OBJECT REFUSAL, not only the overlap: with nothing escaping, the one-object answer is
   // on offer before any shape is judged (frame-objects.ts `chooseFrameModel`), so which refusal the
   // per-object model would have reached first does not decide whether the frame lifts.
@@ -938,5 +947,41 @@ describe('a frame nothing escapes from is one object where the slot model and an
     // …and a prototype that states the stack words holds them to `[sp,#k]` stores, loudly
     const declared = (params: number) => decompile('f', STAGED_ARG, ARMV4T_AGBCC, { prototypes: { th: { params } } });
     expect(() => declared(7)).toThrow(/callee `th` is declared with 7 arguments, so its outgoing stack-argument block/);
+  });
+
+  // …AND ANY STORE NOTHING READS, BESIDE A GUESSED CALL, whatever refusal the per-object model meets
+  // or none at all. agbcc builds a compound-literal argument IN PLACE with `strb`/`strh` through
+  // `mov rD, sp` moved by `add rD, #k`, every access at +0 of its own capture, so the word guard
+  // above never sees it. Verbatim agbcc output, `th` undeclared.
+  const inPlace = (calls: string) =>
+    `f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n${calls}\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n`;
+  const TH = '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tth\n';
+  const BYTES_LITERAL =
+    '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tmov\tr0, sp\n\tstrb\tr4, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n' +
+    '\tmov\tr6, sp\n\tadd\tr6, r6, #0x2\n\tstrb\tr4, [r6]\n\tadd\tr0, r0, #0x2\n\tstrb\tr5, [r0]\n';
+  const STORED_NEVER_READ =
+    /the 1-byte store at \[sp,#0\) through a captured address is never read here, beside a call whose arity is guessed \(`th`\)/;
+
+  test('an argument built in place at two widths is not the one object', () => {
+    // `struct S { s8 a[4]; }; struct T { u16 h[2]; }; int th();
+    //  int f(int x, int y){ th(1, 2, 3, 4, (struct S){{x, y, x, y}}); return th(1, 2, 3, 4, (struct T){{x, y}}); }`
+    // — the width disagreement asks for the one object, which would keep both literals as a local's
+    // stores and call `th(1, 2, 3, 4)` twice
+    const twoWidths = inPlace(`${BYTES_LITERAL}${TH}\tmov\tr0, sp\n\tstrh\tr4, [r0]\n\tstrh\tr5, [r6]\n${TH}`);
+    expect(() => lift(twoWidths)).toThrow(STORED_NEVER_READ);
+    // …and a prototype that states the stack words leaves it to the stack-argument analysis, loudly
+    expect(() => decompile('f', twoWidths, ARMV4T_AGBCC, { prototypes: { th: { params: 5 } } })).toThrow(
+      /callee `th` is declared with 5 arguments, so its outgoing stack-argument block is \[sp,#0\]/,
+    );
+  });
+
+  test('an argument built in place at one width is not a dead local', () => {
+    // `struct S { u8 a[4]; }; int th(); int f(int x, int y){ return th(1, 2, 3, 4, (struct S){{x, y, x, y}}); }`
+    // — the per-object model refuses nothing here, and would drop four dead locals and the argument
+    expect(() => lift(inPlace(`${BYTES_LITERAL}${TH}`))).toThrow(STORED_NEVER_READ);
+    // with no call there is nothing to take the bytes, and a store read back is a local's
+    expect(lift(inPlace(`${BYTES_LITERAL}\tmov\tr0, #0x0\n`)).source).not.toContain('th(');
+    const readBack = '\tmov\tr0, sp\n\tstrb\tr1, [r0]\n' + TH + '\tmov\tr0, sp\n\tldrb\tr0, [r0]\n';
+    expect(lift(inPlace(readBack)).source).toContain('th(1, 2, 3, 4);');
   });
 });
