@@ -1114,8 +1114,10 @@ function indexedAccess(
  *  integer, never the pointer an element may hold: the first is pinned over a whole fan by the
  *  pointer-array test in `frame-base-copy.test.ts`, the second by its element-struct fan test and
  *  by `/ptr-field`'s `over-local-storage` gate (l3/ptrfield.ts), which keeps a field selected out
- *  of a local array an integer. The storage stays `u8 name[n]` whatever the width, and the stride
- *  is not the licence: the alias sets are. */
+ *  of a local array an integer. Every respelled tree is held to it by contracts.ts
+ *  `assertLocalStorageStaysInteger`, so a later variation that re-types the bytes fails at its
+ *  own stage rather than reading stale in a candidate. The storage stays `u8 name[n]` whatever
+ *  the width, and the stride is not the licence: the alias sets are. */
 function indexedWidth(accesses: readonly { readonly width: number }[]): {
   width: number | null;
   refusal: string | null;
