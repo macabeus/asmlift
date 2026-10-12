@@ -22,12 +22,13 @@ import {
   declaredCallArgs,
   declaredWidth,
   declaresAggregateReturn,
+  declaresVoidReturn,
   isFloatingSpelling,
   statesNoReturn,
   symbolPrototype,
   validatePrototypes,
 } from './proto';
-import type { SymbolMap } from './symbols';
+import type { SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
@@ -714,9 +715,15 @@ function parameterType(p: Parameter, tokens: Tokens, typedefs: ReadonlyMap<strin
  *  fact, and only what the caller states about it is kept.
  *
  *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
- *  false` as nothing) keeps a struct return the context states: it is what says argument 0 may be
- *  a hidden pointer, and an entry stating only the arity would otherwise hand that pointer to the
- *  call as its first argument. */
+ *  false` as nothing) keeps the context's return by `contextReturnUnder`'s rule: a struct return
+ *  always — it is what says argument 0 may be a hidden pointer, and an entry stating only the arity
+ *  would otherwise hand that pointer to the call as its first argument; a register return only
+ *  where the stated `params` number as many as the header's parameters. A list is parameters; a
+ *  COUNT is argument registers (`FnProto.params`), and it is compared with the header's parameter
+ *  count all the same, so under a 64-bit parameter a correct register count keeps no return. That
+ *  costs a lift, never a wrong one: a return kept is the header's own, and one dropped declines as
+ *  an undeclared callee does. `{ returnsVoid: false }` alone states no count, so it keeps no
+ *  register return. */
 export function withContextPrototypes(
   stated: Prototypes | undefined,
   context: Prototypes,
@@ -729,21 +736,12 @@ export function withContextPrototypes(
   for (const [name, p] of Object.entries(stated ?? {})) {
     const heard = Object.hasOwn(callees, name) ? callees[name] : undefined;
     if (p && statesNoReturn(p)) {
-      out[name] = { ...p, ...aggregateReturnOf(heard) };
+      // `heard` is the entry as the map left it: its return, where it has one, is either the whole
+      // context entry's or one `contextPrototypesUnder` already checked against the map
+      out[name] = { ...p, ...contextReturnUnder(heard ?? undefined, p.params, undefined) };
     }
   }
   return out;
-}
-
-/** The keys that state `p`'s struct or union return, or none where it states no such return. */
-function aggregateReturnOf(p: FnProto | undefined): Pick<FnProto, 'returns' | 'returnLayout'> {
-  if (p === undefined || !declaresAggregateReturn(p)) {
-    return {};
-  }
-  return {
-    ...(p.returns !== undefined ? { returns: p.returns } : {}),
-    ...(p.returnLayout !== undefined ? { returnLayout: p.returnLayout } : {}),
-  };
 }
 
 const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stringify(a) === JSON.stringify(b);
@@ -752,9 +750,22 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  lets any entry it is handed shadow the map's signature for that name, so what reaches it decides
  *  which source wins, per name: a context entry that sizes every parameter wins — it is the
  *  declaration the candidate is compiled against, and its spellings are the ones a C++ call's casts
- *  need; an entry that cannot size one yields to a map signature that can be spelled, which sizes by
- *  byte count what a declaration names (a by-value struct of a register's width); and where the map
- *  spells nothing either, the context entry stays. */
+ *  need; it is taken whole, its return included, and the map is not consulted for it. An entry that
+ *  cannot size one yields to a map signature that can be spelled, which sizes by byte count what a
+ *  declaration names (a by-value struct of a register's width); and where the map spells nothing
+ *  either, the context entry stays.
+ *
+ *  AN ENTRY THAT YIELDS ITS PARAMETERS KEEPS THE RETURN IT STATES where `contextReturnUnder` says
+ *  it may, because the map's signature carries no `returns`. DWARF does say that a pointer, or a
+ *  signed or unsigned base type, comes back in a register; `symbolPrototype` chooses not to spell it
+ *  (`FnProto.returns`: a header states it and nothing derives it), because a spelled return also
+ *  types the call's result and prints in the candidate's declarations, and the map's `void *` is not
+ *  the header's `u8 *` — C++ does not convert it implicitly. So a map-only lift (no context) still
+ *  declines this shape, and a context entry dropped whole leaves every non-void call to that name
+ *  undeclared — and a frame address handed to an undeclared callee may be its hidden struct-return
+ *  pointer (`returnsWithoutHiddenPointer`). pokeemerald's `u8 *ConvertIntToDecimalStringN(u8 *,
+ *  s32, enum StringConvertMode, u8)` is the case: its enum parameter has no width here, so the
+ *  entry yields its parameters and keeps its `u8 *`. */
 function contextPrototypesUnder(
   context: Prototypes,
   symbols: SymbolMap | undefined,
@@ -763,26 +774,75 @@ function contextPrototypesUnder(
   if (symbols === undefined) {
     return context;
   }
-  const mapped = new Map<string, FnProto>();
+  const mapped = new Map<string, { signed: FnProto; returned: SymbolTypeFacts | null }>();
   for (const infos of symbols.values()) {
     for (const info of infos) {
       const signed = symbolPrototype(info);
-      if (signed?.params !== undefined && !mapped.has(info.name)) {
-        mapped.set(info.name, signed);
+      if (signed?.params !== undefined && info.signature !== undefined && !mapped.has(info.name)) {
+        mapped.set(info.name, { signed, returned: info.signature.returns });
       }
     }
   }
-  // An entry that yields keeps a struct return it states, over the map's parameters: DWARF names no
-  // struct, so the map states one only by its size (`symbolPrototype`), and never its members.
   return Object.fromEntries(
     Object.entries(context).flatMap(([name, p]): [string, FnProto][] => {
-      const signed = mapped.get(name);
-      if (declaredCallArgs(p, target) !== undefined || signed === undefined) {
+      const map = mapped.get(name);
+      if (declaredCallArgs(p, target) !== undefined || map === undefined) {
         return [[name, p]];
       }
-      return declaresAggregateReturn(p) && signed.returnsVoid !== true
-        ? [[name, { ...signed, ...aggregateReturnOf(p) }]]
-        : [];
+      const kept = contextReturnUnder(p, map.signed.params, map.returned);
+      return kept === undefined ? [] : [[name, { ...map.signed, ...kept }]];
     }),
   );
+}
+
+/** The return a context entry `p` keeps under parameters another source states (`under`: the
+ *  map's signature, or a stated entry that says nothing of the return) — or `undefined` when it
+ *  keeps none. `returned` is the map's DWARF return where the map's signature is the other source,
+ *  `null` for a map that says `void`, and `undefined` where the map is not consulted.
+ *
+ *  A `void` return is not kept: whether the callee returns is the map's to state.
+ *
+ *  A STRUCT RETURN is kept as stated: DWARF names no struct, so the map states one only by its size
+ *  (`symbolPrototype`), and never its members; and keeping it is the safe direction, since it only
+ *  says argument 0 may be a hidden pointer.
+ *
+ *  A REGISTER RETURN says argument 0 is NOT one, so it is the direction that lifts, and it is kept
+ *  only where it is the same fact as the parameters it sits under:
+ *  - the context states every parameter, and as many as `under` does — a count `under` is read as
+ *    a number of parameters here, though it states registers (`withContextPrototypes`). A variadic
+ *    declaration, and a K&R one, state none (`readSignature`), and the map's DWARF parameters
+ *    leave the `...` out — so `int pr(char *, const char *, ...)` under a two-parameter map
+ *    signature would lower `pr(buf, s, a, b)` as `pr(buf, s)`. Dropped whole, the call declines;
+ *  - the return has a width (`declaredWidth`). `float` and `double` have none here, cannot say
+ *    anything about a hidden pointer the map's word does not, and on a target with an FPU make
+ *    call-plan refuse every call to the name (`$f0`, `f1`), whose result is used or not;
+ *  - the map, where it is consulted, does not contradict it: a return the map calls `void`, or a
+ *    width its byte size disagrees with (`int` declared, `u8` defined). This is a rule of the merged entry only — its parameters are the map's and its
+ *    return the header's, and the two are one fact a table must not hold half of. A context entry
+ *    taken whole (it sizes every parameter) never meets the map, and keeps its return unchecked.
+ *  Each refusal leaves the call undeclared (`FnProto.returns`). */
+function contextReturnUnder(
+  p: FnProto | undefined,
+  under: FnProto['params'],
+  returned: SymbolTypeFacts | null | undefined,
+): Pick<FnProto, 'returns' | 'returnLayout'> | undefined {
+  if (p === undefined || returned === null || statesNoReturn(p) || declaresVoidReturn(p)) {
+    return undefined;
+  }
+  const kept = {
+    ...(p.returns !== undefined ? { returns: p.returns } : {}),
+    ...(p.returnLayout !== undefined ? { returnLayout: p.returnLayout } : {}),
+  };
+  if (declaresAggregateReturn(p)) {
+    return kept;
+  }
+  const arity = typeof under === 'number' ? under : under?.length;
+  if (!Array.isArray(p.params) || p.params.length !== arity) {
+    return undefined;
+  }
+  const width = p.returns === undefined ? undefined : declaredWidth(p.returns);
+  if (width === undefined) {
+    return undefined;
+  }
+  return returned !== undefined && returned.size !== null && returned.size * 8 !== width ? undefined : kept;
 }
