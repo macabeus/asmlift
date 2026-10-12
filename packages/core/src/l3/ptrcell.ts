@@ -17,7 +17,16 @@
 // l3/symbol-refs.ts's header gives: a rewrite that drops the store must drop the fact with it.
 import { type IrType, T } from '../ir/types';
 import { declaredWidth } from '../proto';
-import { type Expr, type SFn, type Stmt, exprChildren, mapExprChildren, stmtChildren, walkExprs } from './ast';
+import {
+  type Expr,
+  type SFn,
+  type Stmt,
+  assignsIn,
+  exprChildren,
+  mapExprChildren,
+  taintOverAssigns,
+  walkExprs,
+} from './ast';
 import { declaredTypes, exprCType } from './typing';
 
 /** A value stored into a pointer cell: `(void *)X`, which every pointer declaration of the cell
@@ -33,18 +42,6 @@ export function pointerCellStore(s: Stmt): string | undefined {
 }
 
 const COMPARE = new Set(['<', '<=', '>', '>=', '==', '!=']);
-
-const assigns = (body: Stmt[]): Extract<Stmt, { k: 'assign' }>[] => {
-  const out: Extract<Stmt, { k: 'assign' }>[] = [];
-  const visit = (s: Stmt): void => {
-    if (s.k === 'assign') {
-      out.push(s);
-    }
-    stmtChildren(s).forEach(visit);
-  };
-  body.forEach(visit);
-  return out;
-};
 
 /** Whether `e` reads a variable `pick` takes. */
 const readsVar = (e: Expr, pick: (name: string) => boolean): boolean =>
@@ -65,18 +62,12 @@ export function cellOffset(e: Expr, cells: ReadonlySet<string>): boolean {
 /** The globals `body` stores a pointer into: a `(void *)` store, or the bare value of another one,
  *  or that value moved by integers (`cellOffset`). */
 export function pointerCells(body: Stmt[], isGlobal: (name: string) => boolean): Set<string> {
-  const stores = assigns(body).filter((s) => isGlobal(s.name));
-  const out = new Set(stores.filter((s) => pointerCellStore(s) !== undefined).map((s) => s.name));
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const s of stores) {
-      if (!out.has(s.name) && ((s.value.k === 'var' && out.has(s.value.name)) || cellOffset(s.value, out))) {
-        out.add(s.name);
-        grew = true;
-      }
-    }
-  }
-  return out;
+  const stores = assignsIn(body).filter((s) => isGlobal(s.name));
+  return taintOverAssigns(
+    stores,
+    stores.filter((s) => pointerCellStore(s) !== undefined).map((s) => s.name),
+    (s, cells) => (s.value.k === 'var' && cells.has(s.value.name)) || cellOffset(s.value, cells),
+  );
 }
 
 /** The bare globals a pointer cell meets bare: compared with one or with its `cellOffset`, or
@@ -89,7 +80,7 @@ function meetsBare(body: Stmt[], isGlobal: (name: string) => boolean, cells: Rea
     }
   };
   const isCell = (e: Expr): boolean => (e.k === 'var' && cells.has(e.name)) || cellOffset(e, cells);
-  for (const s of assigns(body)) {
+  for (const s of assignsIn(body)) {
     if (cells.has(s.name)) {
       meets(s.value);
     }

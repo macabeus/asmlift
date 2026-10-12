@@ -137,3 +137,129 @@ test('a read nested inside a loop is cast back exactly once', () => {
   expect(src).toContain('v = (s32)((struct Elem0 *)50345008)[a1].field_4;');
   expect(src).not.toContain('(s32)(s32)');
 });
+
+// A FIELD SELECTED OUT OF A LOCAL ARRAY's bytes is one the frame audit typed: it licenses a wider
+// runtime index into `u8 sp0[n]` only while every access of one width is one integer type, and a
+// pointer is an alias set of its own in agbcc — a read of it is reused past an `int` store to the
+// same bytes (frame-base-copy.test.ts, the element-struct fan test). Reached directly, or through
+// a local the bytes' address was copied into.
+test('a field selected out of a local array declines', () => {
+  const st = elem();
+  const overBytes = (base: Expr, extra: Stmt[] = [], locals: SFn['locals'] = []): SFn => ({
+    ...fn(st, [
+      ...extra,
+      {
+        k: 'assign',
+        name: 'v',
+        value: {
+          k: 'field',
+          name: 'field_4',
+          base: {
+            k: 'index',
+            base: { k: 'cast', to: T.ptr(st), e: base },
+            idx: { k: 'var', name: 'a1' },
+            width: 8,
+            signed: true,
+          },
+        },
+      },
+    ]),
+    locals: [{ name: 'v', type: T.s(32) }, { name: 'sp0', type: T.array(T.u(8), 16) }, ...locals],
+  });
+  expect(pointerFields(overBytes({ k: 'var', name: 'sp0' }))).toBeNull();
+  expect(
+    pointerFields(
+      overBytes(
+        { k: 'var', name: 'p0' },
+        [{ k: 'assign', name: 'p0', value: { k: 'cast', to: T.ptr(T.s(32)), e: { k: 'var', name: 'sp0' } } }],
+        [{ name: 'p0', type: T.ptr(T.s(32)) }],
+      ),
+    ),
+  ).toBeNull();
+  // …while a pointer local that never held the bytes' address stays admitted
+  expect(
+    pointerFields(
+      overBytes(
+        { k: 'var', name: 'p0' },
+        [{ k: 'assign', name: 'p0', value: { k: 'var', name: 'a1' } }],
+        [{ name: 'p0', type: T.ptr(T.s(32)) }],
+      ),
+    ),
+  ).not.toBeNull();
+});
+
+// A FIELD READ THROUGH A POINTER OBTAINED AFTER A FRAME ADDRESS ESCAPED may be read over the frame
+// itself: `k(buf); p = get(); x = p->a; buf[i] = v;` — get() can hand back what k() kept, and a
+// `void *` field over those bytes is an alias set of its own, so agbcc reuses `p->a` past the `int`
+// store (compiled at the corpus's flags: no second load). A param's pointer predates the frame, and
+// with nothing written to local storage there is no store to read stale past.
+test('a field read through a re-obtained pointer after a frame address escaped declines', () => {
+  const st: Extract<IrType, { kind: 'struct' }> = {
+    kind: 'struct',
+    name: 'Struct0',
+    fields: [{ off: 0, type: T.s(32), name: 'field_0' }],
+    size: 4,
+  };
+  const buf: Expr = { k: 'var', name: 'buf' };
+  const escape: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'k', args: [buf] } };
+  const write: Stmt = {
+    k: 'store',
+    lval: {
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.s(32)), e: buf },
+      idx: { k: 'var', name: 'a1' },
+      width: 4,
+      signed: true,
+    },
+    value: { k: 'const', value: 1 },
+  };
+  const tree = (through: string | Expr, before: Stmt[], after: Stmt[]): SFn => ({
+    ...fn(st, [
+      ...before,
+      { k: 'assign', name: 'p', value: { k: 'call', fn: 'get', args: [] } },
+      {
+        k: 'assign',
+        name: 'v',
+        value: {
+          k: 'field',
+          name: 'field_0',
+          base: typeof through === 'string' ? { k: 'var', name: through } : through,
+        },
+      },
+      ...after,
+    ]),
+    params: [
+      { name: 'a1', type: T.s(32) },
+      { name: 'q', type: T.ptr(st) },
+    ],
+    locals: [
+      { name: 'v', type: T.s(32) },
+      { name: 'p', type: T.ptr(st) },
+      { name: 'buf', type: T.array(T.u(8), 8) },
+    ],
+  });
+  expect(pointerFields(tree('p', [escape], [write]))).toBeNull();
+  // the address stored to memory escapes as surely as one passed to a call
+  const stored: Stmt = {
+    k: 'store',
+    lval: { k: 'index', base: { k: 'var', name: 'q' }, idx: { k: 'const', value: 0 }, width: 4, signed: true },
+    value: buf,
+  };
+  expect(pointerFields(tree('p', [stored], [write]))).toBeNull();
+  // …while each half alone, or a param's pointer, stays admitted
+  expect(pointerFields(tree('p', [], [write]))).not.toBeNull();
+  expect(pointerFields(tree('p', [escape], []))).not.toBeNull();
+  expect(pointerFields(tree('q', [escape], [write]))).not.toBeNull();
+  // an offset by a fixed value does not fix an obtained pointer: `((struct S *)(p + a1))->a`, the
+  // int param on either side, is read stale past the store just the same (compiled: no reload)
+  const offset = (l: Expr, r: Expr): Expr => ({ k: 'cast', to: T.ptr(st), e: { k: 'bin', op: '+', l, r } });
+  const p: Expr = { k: 'var', name: 'p' };
+  const a1: Expr = { k: 'var', name: 'a1' };
+  const q: Expr = { k: 'var', name: 'q' };
+  expect(pointerFields(tree(offset(p, a1), [escape], [write]))).toBeNull();
+  expect(pointerFields(tree(offset(a1, p), [escape], [write]))).toBeNull();
+  expect(pointerFields(tree(offset(p, { k: 'const', value: 4 }), [escape], [write]))).toBeNull();
+  // …while a param's pointer offset by a param or a constant stays admitted
+  expect(pointerFields(tree(offset(q, a1), [escape], [write]))).not.toBeNull();
+  expect(pointerFields(tree(offset(q, { k: 'const', value: 4 }), [escape], [write]))).not.toBeNull();
+});

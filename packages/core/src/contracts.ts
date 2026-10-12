@@ -22,6 +22,7 @@ import {
   walkExprs,
 } from './l3/ast';
 import { mentionedLocals } from './l3/mentions';
+import { localAddresses } from './l3/storage';
 import { declaredTypes, exprCType } from './l3/typing';
 import { castOffDeclaration } from './l3/volstore';
 
@@ -854,6 +855,52 @@ export function assertNoOrphanedLocals(before: SFn, after: SFn): void {
         .map((n) => `'${n}'`)
         .join(', ')} in '${after.name}' ` +
         `while the tree still names ${found.size > 1 ? 'them' : 'it'} — an undeclared identifier in the candidate`,
+    );
+  }
+}
+
+/** The types a tree reads or writes LOCAL STORAGE at, other than an integer — the frame bytes
+ *  reached by address (l3/storage.ts `localAddresses`), each access typed as it is spelled
+ *  (`exprCType`: the cast on the storage, or the element struct's field). An aggregate is the
+ *  element a `.field` selects from, not an access, so only scalars count. */
+function localStorageNonIntegers(sfn: SFn): Set<string> {
+  const { isAddress, accessAddress } = localAddresses(sfn);
+  const vt = declaredTypes(sfn);
+  const out = new Set<string>();
+  for (const e of walkExprs(sfn.body)) {
+    if ((e.k === 'index' || e.k === 'field') && isAddress(accessAddress(e))) {
+      const t = exprCType(e, vt);
+      if (t !== undefined && t.kind !== 'int' && t.kind !== 'struct' && t.kind !== 'array') {
+        out.add(typeToString(t));
+      }
+    }
+  }
+  return out;
+}
+
+/** After a respell variation: no access to LOCAL STORAGE is re-typed to a non-integer.
+ *
+ *  The frame audit's licence for a runtime index wider than a byte (frontend/frame-objects.ts
+ *  `indexedWidth`) rests on what L3 SPELLS: agbcc at -O2 keeps a read ordered after a store to the
+ *  same bytes only while both are integers of one width, and gives a pointer (or `long`, or a
+ *  float) an alias set of its own, so a variation that re-types the bytes' reads hands the
+ *  compiler a stale read the asm never had — C that compiles, scores, and is wrong. `/ptr-field`'s
+ *  `over-local-storage` gate is the refusal that names itself; this is the backstop for the next
+ *  variation that re-types, failing at its own stage rather than three away.
+ *
+ *  A DIFFERENTIAL, like `assertNoOrphanedLocals`: it judges only a non-integer type the tree it
+ *  derives from did not already read the storage at. The default tree is the frame audit's
+ *  answer, and a type it gives a local object (a header-typed out-parameter's pointer member, say)
+ *  is the source's own spelling, not a variation's claim. */
+export function assertLocalStorageStaysInteger(before: SFn, after: SFn): void {
+  const had = localStorageNonIntegers(before);
+  const added = [...localStorageNonIntegers(after)].filter((t) => !had.has(t));
+  if (added.length) {
+    throw new ContractError(
+      `a respell variation re-typed an access to local storage in '${after.name}' as ${added
+        .sort()
+        .map((t) => `'${t}'`)
+        .join(', ')} — not an integer, so agbcc may read it stale past an integer store to the same bytes`,
     );
   }
 }

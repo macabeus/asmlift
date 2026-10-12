@@ -93,8 +93,16 @@ function withPadding(dataFields: StructField[], stride: number): StructField[] {
  *  pokeemerald:GetGenderFromSpeciesAndPersonality, whose address is materialized twice). A base
  *  whose element pointers
  *  disagree on stride declines entirely: two strides over one base is a reinterpreted view or
- *  a 2D layout, genuinely ambiguous — decline over guess. */
-export function recognizeStructArrays(fn: Fn): number {
+ *  a 2D layout, genuinely ambiguous — decline over guess.
+ *
+ *  `aggregateBoundary` is the size the compiler rounds EVERY struct to (target.ts
+ *  `compilerBehaviors.aggregateBoundary`): agbcc 4, so `struct { u16 a; u8 _pad0[4]; }` is 8
+ *  bytes there, not the 6 its fields add up to. A group whose stride that rounding would change
+ *  declines, and its accesses keep the byte-offset spelling (`*(u16 *)(base + i * 6)`), which
+ *  says the stride itself. ABSENT means unmeasured (target.ts), and then every group declines the
+ *  same way: no boundary is safe to assume, since one too small is that very mis-stride on agbcc,
+ *  and the caller must say which layout it means — a target's value, or 1 for the natural one. */
+export function recognizeStructArrays(fn: Fn, aggregateBoundary: number | undefined): number {
   const defs = defOpMap(fn);
   let count = 0;
   // The NAME index is not the recognition count: `count` is this function's return value — how
@@ -226,7 +234,10 @@ export function recognizeStructArrays(fn: Fn): number {
       }
       maxAlign = Math.max(maxAlign, width);
     }
-    if (stride % maxAlign !== 0) {
+    // The DECLARED struct is rounded to its widest member AND to the compiler's aggregate
+    // boundary; a stride neither divides is one `sizeof` cannot reproduce, and recompiled it reads
+    // the wrong bytes and stores past a frame buffer sized from the asm (sa3 sub_8038910).
+    if (aggregateBoundary === undefined || stride % Math.max(maxAlign, aggregateBoundary) !== 0) {
       clean = false;
     }
     if (!clean) {

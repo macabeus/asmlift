@@ -250,13 +250,14 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — and it is
  *  judged in one of two models, chosen before any shape is:
  *   - PER OBJECT, the default: every MEMORY access through it must be at offset 0, with one agreed
- *     width and one agreed extension, or a byte read or written through a runtime index into
- *     storage nothing else types, and its bytes must belong to nothing else in the frame;
+ *     width and one agreed extension, or a read or write through a runtime index into storage
+ *     nothing else types — bytes, or ONE wider width, read through a cast on the bytes
+ *     (`indexedWidth`) — and its bytes must belong to nothing else in the frame;
  *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
  *     that answer can hold (`writerNotKept`; `oneObject`, which this answers and the frontend
  *     lifts again with): the local area is one `u8` array in memory, every fixed-offset access in
- *     it is a member at its own offset, a runtime index may reach a byte of it, and two widths at
- *     one byte refuse.
+ *     it is a member at its own offset, a runtime index may reach it at a byte or at ONE wider
+ *     width (`indexedWidth`), and two widths at one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -1091,6 +1092,38 @@ function indexedAccess(
   }
 }
 
+/** The one width wider than a byte that runtime-indexed accesses take, or why there is not one.
+ *
+ *  A runtime index names no byte, so its access type must agree with every access it may reach,
+ *  and "agree" is what stops agbcc reordering two of them. At -O2 it runs type-based alias
+ *  analysis (toplev.c:3616), and `c_get_alias_set` (c-common.c:1892-2005) gives an integer type
+ *  and its unsigned twin one set, a character type set 0 (conflicting with every set), a
+ *  member access its member's type's set, and any other type — a pointer included — a new set.
+ *  Compiled at the corpus's flags, `k(sp0); ((int *)sp0)[i] = 1; ((T *)sp0)[j] = 0; return
+ *  ((int *)sp0)[i];` reloads the word for T = int, unsigned int and unsigned char, and returns the
+ *  stale 1 for T = unsigned short, void * and long.
+ *
+ *  So ONE WIDTH IS ONE SET only while every access of that width READS AT one integer type or its
+ *  twin: a cast on the storage to `s32`/`u32` (`int`/`unsigned int` in every agbcc project), or a
+ *  member of an element struct (raise/struct-arrays) whose FIELD is such an integer — never the pointer an element
+ *  may hold. `/ptr-field`'s `over-local-storage` gate keeps such a field an integer, and contracts.ts
+ *  `assertLocalStorageStaysInteger` holds every respelled tree to it. The storage stays
+ *  `u8 name[n]` whatever the width. */
+function indexedWidth(accesses: readonly { readonly width: number }[]): {
+  width: number | null;
+  refusal: string | null;
+} {
+  const widths = [...new Set(accesses.map((x) => x.width))].filter((w) => w !== 1);
+  return {
+    width: widths[0] ?? null,
+    refusal:
+      widths.length > 1
+        ? `accesses ${widths.join(' and ')} bytes wide, and agbcc at -O2 lets a read of one type pass a store ` +
+          'of the other (strict aliasing) — a cast spelling would read stale'
+        : null,
+  };
+}
+
 /** The bytes an escape may reach, `[lo, hi)` from the object's own offset, and how it reads them
  *  as a refusal words it. */
 interface ReadWindow {
@@ -1542,12 +1575,13 @@ function keepAsOneObject({
   if (writer !== null) {
     fail(`${kept} cannot hold every writer — ${writer}`);
   }
-  // A runtime index names no byte, so no access type can be checked against the others at the
-  // bytes it reaches — except a byte access, which needs none: character types alias every type.
-  if ([...uses.indexed.values()].some((xs) => xs.some((x) => x.width !== 1))) {
-    fail(
-      `a runtime index into ${kept} accesses more than a byte, and names no byte whose type it can be checked against`,
-    );
+  // A runtime index names no byte, so the rule below is asked of it at EVERY byte it may reach:
+  // all of them. Two indexed widths refuse here; an index beside a member of another width
+  // refuses after the members are checked against each other, so a member pair keeps naming its
+  // own byte (`indexedWidth` says why one width is enough).
+  const index = indexedWidth([...uses.indexed.values()].flat());
+  if (index.refusal !== null) {
+    fail(`a runtime index into ${kept} ${index.refusal}`);
   }
   // ONE TYPE PER BYTE. agbcc at -O2 turns on type-based alias analysis (toplev.c:3616), and
   // compiled, a `u32` read through a cast is served the earlier `u32` store straight past a
@@ -1574,6 +1608,15 @@ function keepAsOneObject({
         );
       }
       widthAt.set(b, m.width);
+    }
+  }
+  for (const [b, had] of widthAt) {
+    if (index.width !== null && had !== index.width) {
+      fail(
+        `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${index.width} ` +
+          'bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a ' +
+          'cast spelling would read stale',
+      );
     }
   }
   // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
@@ -1749,26 +1792,18 @@ function objectShapes({
         // …asked for the one object instead, which sizes no object of its own
         continue;
       }
-      // An indexed access reads ONE ELEMENT of the storage declared below, so it must be one:
-      // an unsigned byte. A wider element is a different array over the same bytes, and a
-      // sign-extending read is not what `u8` spells.
-      for (const a of byIndex) {
-        if (a.width !== 1) {
-          model.shapeRefused(
-            `a runtime index into the object at [sp,#${off}) accesses ${a.width} bytes, and the storage ` +
-              'nothing else types is declared as bytes — only a byte element is modelled',
-          );
-        }
-        if (a.signed) {
-          model.shapeRefused(
-            `a runtime index into the object at [sp,#${off}) sign-extends, and the storage is declared unsigned`,
-          );
-        }
+      // An indexed access reads THROUGH A CAST on the storage declared below, at its own width
+      // and signedness, as an access to the one object does (`keepAsOneObject`), so the accesses
+      // wider than a byte must be of one width, one alias set (`indexedWidth`).
+      const index = indexedWidth(byIndex);
+      if (index.refusal !== null) {
+        model.shapeRefused(`a runtime index into the object at [sp,#${off}) ${index.refusal}`);
       }
       // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
       // conjuncts above say they are all this object's, so the declaration commits to an EXTENT
       // and to nothing else: `u8 name[n]` over the declared range, unsigned bytes because no
       // access named an element type and inventing one is the guess this refuses everywhere else.
+      // An indexed access names only its own width, which its cast spells where it reads.
       //
       // THE EXTENT IS A ROUNDED ONE, stated because it is not a defect. agbcc reserves the
       // local area in whole words, so a source object of 13, 14, 15 or 16 bytes all reserve

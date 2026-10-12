@@ -46,18 +46,18 @@ describe('struct-array recovery through a dead param ring', () => {
     const fn = parse(DEAD_RING);
     expect(pruneDeadParams(fn)).toBe(2);
     verify(fn);
-    expect(recognizeStructArrays(fn)).toBe(1);
+    expect(recognizeStructArrays(fn, 1)).toBe(1);
   });
 
   test('the prune is load-bearing: the same function declines with the ring still on it', () => {
     const fn = parse(DEAD_RING);
-    expect(recognizeStructArrays(fn)).toBe(0);
+    expect(recognizeStructArrays(fn, 1)).toBe(0);
   });
 
   test('a carry a reader depends on still declines, prune or no prune', () => {
     const fn = parse(LIVE_RING);
     expect(pruneDeadParams(fn)).toBe(0);
     verify(fn);
-    expect(recognizeStructArrays(fn)).toBe(0);
+    expect(recognizeStructArrays(fn, 1)).toBe(0);
   });
 });

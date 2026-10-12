@@ -1923,9 +1923,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // (the `mov rD, sp`, `add rD, sp, #k` and `add rD, sp, rX` captures are the laddr capability —
     // their refusals carry their own attributed messages, from the frame-object audit)
     const addrComputed =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, r1\n\tstr\tr0, [r4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, r1\n\tstrh\tr0, [r4]\n\tstr\tr0, [r4]\n' +
+      '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(
-      /address-taken stack local — a runtime index into the object at \[sp,#0\) accesses 4 bytes/,
+      /address-taken stack local — a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide/,
     );
     const outgoing =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
@@ -3796,9 +3797,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ARMV4T_AGBCC,
       ),
     ).toThrow(laddr);
-    // a RUNTIME offset from sp is an index, and a word element is not the one modelled
-    expect(() => decompile('f', wrap('\tadd\tr4, sp, r1\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
-      /a runtime index into the object at \[sp,#0\) accesses 4 bytes/,
+    // a RUNTIME offset from sp is an index, read through a cast at its own width — so two widths
+    // are two alias sets over bytes the index names none of
+    expect(() => decompile('f', wrap('\tadd\tr4, sp, r1\n\tstrh\tr0, [r4]\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
+      /a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide/,
     );
   });
 
