@@ -20,7 +20,7 @@
 // One question about LOCAL storage sits beside them, because it is asked from the same lists:
 // which expressions are a local object's ADDRESS (`localAddresses`), the frame bytes a respelled
 // tree must keep reading as integers (contracts.ts `assertLocalStorageStaysInteger`).
-import { type Expr, type SFn, assignsIn, dotBase, taintOverAssigns } from './ast';
+import { type Expr, type SFn, type Stmt, assignsIn, dotBase, stmtChildren, taintOverAssigns, walkExprs } from './ast';
 
 export type Storage = 'local' | 'param' | 'global';
 
@@ -102,4 +102,44 @@ export function localAddresses(sfn: SFn): {
         ? e.base
         : (dotBase(e)?.base ?? (e.dot === true && e.base.k === 'var' ? { k: 'addr', name: e.base.name } : e.base)),
   };
+}
+
+/** Whether a local object's address LEAVES the function — passed to a call, stored to memory,
+ *  assigned to a non-local, or returned — AND the function itself writes local storage. Both
+ *  halves are what let a pointer the function obtains LATER (a call's result, a load) name bytes
+ *  the function also stores to: a callee that keeps the address can hand it back.
+ *
+ *  OVER-WIDE ON PURPOSE, and what it costs is measured: a store to a DEVICE register counts as an
+ *  escape, since the tree cannot tell a DMA source register (`REG_DMA3SAD = sp0;`, the GBA's fill
+ *  idiom) from memory a later load reads back. On kleod:PauseMenuScreenHandler that refuses all
+ *  560 of its `/ptr-field` candidates (8800 → 8240), none of which was its winner. */
+export function localStorageEscapesWritten(sfn: SFn): boolean {
+  const { isAddress, accessAddress } = localAddresses(sfn);
+  const storage = nameStorage(sfn);
+  const held = (n: string): boolean => storage.get(n) === 'local' || storage.get(n) === 'param';
+  let escapes = false;
+  let written = false;
+  const addressTaken = new Set<string>();
+  for (const e of walkExprs(sfn.body)) {
+    if (e.k === 'call' && e.args.some(isAddress)) {
+      escapes = true;
+    }
+    if (e.k === 'addr' && held(e.name)) {
+      addressTaken.add(e.name);
+    }
+  }
+  const visit = (s: Stmt): void => {
+    if (s.k === 'store') {
+      escapes ||= isAddress(s.value);
+      written ||= (s.lval.k === 'index' || s.lval.k === 'field') && isAddress(accessAddress(s.lval));
+    } else if (s.k === 'assign') {
+      escapes ||= !held(s.name) && isAddress(s.value);
+      written ||= addressTaken.has(s.name);
+    } else if (s.k === 'return' && s.value !== undefined) {
+      escapes ||= isAddress(s.value);
+    }
+    stmtChildren(s).forEach(visit);
+  };
+  sfn.body.forEach(visit);
+  return escapes && written;
 }

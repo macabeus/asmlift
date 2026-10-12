@@ -187,3 +187,59 @@ test('a field selected out of a local array declines', () => {
     ),
   ).not.toBeNull();
 });
+
+// A FIELD READ THROUGH A POINTER OBTAINED AFTER A FRAME ADDRESS ESCAPED may be read over the frame
+// itself: `k(buf); p = get(); x = p->a; buf[i] = v;` — get() can hand back what k() kept, and a
+// `void *` field over those bytes is an alias set of its own, so agbcc reuses `p->a` past the `int`
+// store (compiled at the corpus's flags: no second load). A param's pointer predates the frame, and
+// with nothing written to local storage there is no store to read stale past.
+test('a field read through a re-obtained pointer after a frame address escaped declines', () => {
+  const st: Extract<IrType, { kind: 'struct' }> = {
+    kind: 'struct',
+    name: 'Struct0',
+    fields: [{ off: 0, type: T.s(32), name: 'field_0' }],
+    size: 4,
+  };
+  const buf: Expr = { k: 'var', name: 'buf' };
+  const escape: Stmt = { k: 'exprstmt', value: { k: 'call', fn: 'k', args: [buf] } };
+  const write: Stmt = {
+    k: 'store',
+    lval: {
+      k: 'index',
+      base: { k: 'cast', to: T.ptr(T.s(32)), e: buf },
+      idx: { k: 'var', name: 'a1' },
+      width: 4,
+      signed: true,
+    },
+    value: { k: 'const', value: 1 },
+  };
+  const tree = (through: string, before: Stmt[], after: Stmt[]): SFn => ({
+    ...fn(st, [
+      ...before,
+      { k: 'assign', name: 'p', value: { k: 'call', fn: 'get', args: [] } },
+      { k: 'assign', name: 'v', value: { k: 'field', name: 'field_0', base: { k: 'var', name: through } } },
+      ...after,
+    ]),
+    params: [
+      { name: 'a1', type: T.s(32) },
+      { name: 'q', type: T.ptr(st) },
+    ],
+    locals: [
+      { name: 'v', type: T.s(32) },
+      { name: 'p', type: T.ptr(st) },
+      { name: 'buf', type: T.array(T.u(8), 8) },
+    ],
+  });
+  expect(pointerFields(tree('p', [escape], [write]))).toBeNull();
+  // the address stored to memory escapes as surely as one passed to a call
+  const stored: Stmt = {
+    k: 'store',
+    lval: { k: 'index', base: { k: 'var', name: 'q' }, idx: { k: 'const', value: 0 }, width: 4, signed: true },
+    value: buf,
+  };
+  expect(pointerFields(tree('p', [stored], [write]))).toBeNull();
+  // …while each half alone, or a param's pointer, stays admitted
+  expect(pointerFields(tree('p', [], [write]))).not.toBeNull();
+  expect(pointerFields(tree('p', [escape], []))).not.toBeNull();
+  expect(pointerFields(tree('q', [escape], [write]))).not.toBeNull();
+});

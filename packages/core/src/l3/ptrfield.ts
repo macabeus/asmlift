@@ -34,11 +34,16 @@
 // wrapped in a cast back to the field's own recovered integer type, so each use computes the same
 // value it did. The cast keeps the VALUE, not the read's alias set: the load is still of a pointer
 // type, which is the very freedom this variation exists to give agbcc, and which it uses to read
-// stale past an integer store to the same bytes. Over memory the body reaches only through a
-// pointer, no store the asm shows is tied to the field's bytes, and which spelling the original
-// had is what the differ referees. Over a local array the body IS that store: the frame audit
-// licenses a wider runtime index into those bytes as one integer type (frontend/frame-objects.ts
-// `indexedWidth`), so the `over-local-storage` gate refuses such a field.
+// stale past an integer store to the same bytes. Two such stores are knowable from the tree, and
+// each has a gate. Over a local array the body IS that store: the frame audit licenses a wider
+// runtime index into those bytes as one integer type (frontend/frame-objects.ts `indexedWidth`),
+// so `over-local-storage` refuses a field selected out of one. And once a local's address has LEFT
+// the function (a call argument, a stored or returned value) while the function writes local
+// storage, a pointer it obtains from anywhere but its params or a fixed address may be that same
+// address handed back (`k(buf); p = get(); x = p->a; buf[i] = v;`), so `frame-escaped` refuses a
+// field read through one. Past those, a store the asm shows is tied to the field's bytes only by
+// the caller's or a global's aliasing, which the tree cannot see — which spelling the original had
+// is then what the differ referees, and it is the only referee there.
 //
 // THE 32-BIT ASSUMPTION IS ASSERTED, NOT CHECKED — there is no pointer-width field on
 // TargetDescription to check it against, and the
@@ -60,8 +65,9 @@
 // integer; it must never be a store LVALUE (the write side would need a cast on the value, which
 // is a second question); it must never stand as the BASE of another access (a field the tree
 // already dereferences is one the recovery typed from its own use, not from a width); and it must
-// never be selected out of a local array's bytes (`over-local-storage`, the caveat above). Nothing
-// qualifying ⇒ decline (null).
+// never be selected out of a local array's bytes (`over-local-storage`, the caveat above); and
+// while a written local's address has escaped, it must be read through a param or a fixed address
+// (`frame-escaped`, the same caveat). Nothing qualifying ⇒ decline (null).
 //
 // SCOPE, because both of this table's blind spots look exactly like a gate refusing. First, THERE
 // IS NO PAD RULE, deliberately: `plan` builds a ctx only for fields the tree ACCESSES, so "a field
@@ -86,6 +92,7 @@ import {
   walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
+import { localAddresses, localStorageEscapesWritten, nameStorage } from './storage';
 import { declaredTypes, exprCType } from './typing';
 
 /** One recovered field as the gates read it — built only for fields the tree accesses. */
@@ -97,6 +104,10 @@ interface FieldCtx {
   dereferenced: boolean;
   /** some access to the field selects it out of a local array's bytes */
   overLocalStorage: boolean;
+  /** some access reads the field through a pointer that is neither a param nor a fixed address */
+  obtainedPointer: boolean;
+  /** a local's address leaves the function, and the function writes local storage */
+  frameEscaped: boolean;
 }
 
 export const PTR_FIELD_GATES: readonly Gate<FieldCtx>[] = [
@@ -131,6 +142,16 @@ export const PTR_FIELD_GATES: readonly Gate<FieldCtx>[] = [
     guardedBy: 'ptrfield.test.ts: a field selected out of a local array declines',
     rejects: (c) => c.overLocalStorage,
   },
+  {
+    id: 'frame-escaped',
+    why:
+      "once a written local's address has left the function, a pointer it obtains later may be that " +
+      'address handed back, and a pointer field read through it is then read stale past the integer ' +
+      'store to the same bytes',
+    sound: true,
+    guardedBy: 'ptrfield.test.ts: a field read through a re-obtained pointer after a frame address escaped declines',
+    rejects: (c) => c.frameEscaped && c.obtainedPointer,
+  },
 ];
 
 /** the struct a `field` node selects from, or null */
@@ -148,6 +169,9 @@ const keyOf = (structName: string, field: string): string => `${structName}.${fi
 function plan(sfn: SFn): Map<string, IrType> {
   const vt = declaredTypes(sfn);
   const storage = localStorageNames(sfn);
+  const frameEscaped = localStorageEscapesWritten(sfn);
+  const fixed = fixedPointer(sfn);
+  const { accessAddress } = localAddresses(sfn);
   const seen = new Map<string, FieldCtx & { type: IrType }>();
   const note = (base: Expr, name: string, edit: (c: FieldCtx) => void): void => {
     const st = structOf(base, vt);
@@ -161,6 +185,8 @@ function plan(sfn: SFn): Map<string, IrType> {
       written: false,
       dereferenced: false,
       overLocalStorage: false,
+      obtainedPointer: false,
+      frameEscaped,
       type: declared,
     };
     edit(cur);
@@ -171,6 +197,9 @@ function plan(sfn: SFn): Map<string, IrType> {
       note(e.base, e.name, (c) => {
         if (reachesStorage(e.base, storage)) {
           c.overLocalStorage = true;
+        }
+        if (!fixed(accessAddress(e))) {
+          c.obtainedPointer = true;
         }
       });
     }
@@ -207,6 +236,33 @@ function localStorageNames(sfn: SFn): { names: Set<string>; locals: Set<string> 
     (a, names) => locals.has(a.name) && reachesStorage(a.value, { names, locals }),
   );
   return { names, locals };
+}
+
+/** Does the expression hold a pointer the function did not OBTAIN — one no escaped frame address
+ *  can come back through? A constant address, a global's address, or a param nothing assigns (the
+ *  caller's value, which predates this frame), under casts and offsets. Anything else — a local, a
+ *  call's result, a value loaded from memory — may be the frame. */
+function fixedPointer(sfn: SFn): (e: Expr) => boolean {
+  const storage = nameStorage(sfn);
+  const assigned = new Set(assignsIn(sfn.body).map((a) => a.name));
+  const fixed = (e: Expr): boolean => {
+    switch (e.k) {
+      case 'const':
+        return true;
+      case 'addr':
+        return storage.get(e.name) !== 'local' && storage.get(e.name) !== 'param';
+      case 'var':
+        return storage.get(e.name) === 'param' && !assigned.has(e.name);
+      case 'cast':
+        return fixed(e.e);
+      // an offset from a fixed pointer stays in the object it points into
+      case 'bin':
+        return e.op === '+' ? fixed(e.l) || fixed(e.r) : e.op === '-' && fixed(e.l);
+      default:
+        return false;
+    }
+  };
+  return fixed;
 }
 
 /** does the expression name local storage, or take a local's address? */
