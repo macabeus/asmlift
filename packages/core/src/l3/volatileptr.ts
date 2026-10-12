@@ -27,7 +27,15 @@
 // mapped global through a volatile view the map never granted. No qualifying local ⇒ decline
 // (null), so the variation never emits a duplicate of the default.
 import { addrConst, cellAddress, inRange } from './address';
-import { type Expr, type SFn, type Stmt, mapExprChildren, rematerializableAddress, walkExprs } from './ast';
+import {
+  type Expr,
+  type SFn,
+  assignsIn,
+  mapExprChildren,
+  rematerializableAddress,
+  taintOverAssigns,
+  walkExprs,
+} from './ast';
 
 const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
   if (pred(e)) {
@@ -40,36 +48,6 @@ const exprHas = (e: Expr, pred: (x: Expr) => boolean): boolean => {
   });
   return hit;
 };
-
-function collectAssigns(stmts: Stmt[], out: { name: string; value: Expr }[]): void {
-  for (const s of stmts) {
-    switch (s.k) {
-      case 'assign':
-        out.push({ name: s.name, value: s.value });
-        break;
-      case 'if':
-        collectAssigns(s.then, out);
-        collectAssigns(s.else, out);
-        break;
-      case 'while':
-      case 'dowhile':
-        collectAssigns(s.body, out);
-        break;
-      case 'for':
-        collectAssigns([s.init, s.inc], out);
-        collectAssigns(s.body, out);
-        break;
-      case 'switch':
-        for (const c of s.cases) {
-          collectAssigns(c.body, out);
-        }
-        collectAssigns(s.default ?? [], out);
-        break;
-      default:
-        break;
-    }
-  }
-}
 
 /** How many of this tree's `volatile` claims land on a DEVICE REGISTER — the gate on rank.ts's
  *  volatility tie-break, so it is counted here beside the variation that mints the claims.
@@ -100,8 +78,7 @@ export function deviceVolatileClaims(sfn: SFn, window?: readonly [number, number
       underSubscript.add(e.base);
     }
   }
-  const assigns: { name: string; value: Expr }[] = [];
-  collectAssigns(sfn.body, assigns);
+  const assigns = assignsIn(sfn.body);
   for (const l of sfn.locals) {
     if (l.type.kind === 'ptr' && (l.pointeeVolatile !== undefined || l.volatile !== undefined)) {
       n += assigns.filter((a) => a.name === l.name && inWindow(a.value)).length;
@@ -143,27 +120,13 @@ export const volatileEligibleValue = (e: Expr): boolean => rematerializableAddre
 
 /** the shared eligibility predicate (the GATE in the header) for one function's locals */
 function eligibility(sfn: SFn): (l: SFn['locals'][number]) => boolean {
-  const assigns: { name: string; value: Expr }[] = [];
-  collectAssigns(sfn.body, assigns);
-  const numericFed = new Set<string>();
-  const tainted = new Set<string>();
-  for (const a of assigns) {
-    if (rematerializableAddress(a.value)) {
-      numericFed.add(a.name);
-    }
-    if (feedsSymbolAddress(a.value)) {
-      tainted.add(a.name);
-    }
-  }
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const a of assigns) {
-      if (!tainted.has(a.name) && exprHas(a.value, (x) => x.k === 'var' && tainted.has(x.name))) {
-        tainted.add(a.name);
-        grew = true;
-      }
-    }
-  }
+  const assigns = assignsIn(sfn.body);
+  const numericFed = new Set(assigns.filter((a) => rematerializableAddress(a.value)).map((a) => a.name));
+  const tainted = taintOverAssigns(
+    assigns,
+    assigns.filter((a) => feedsSymbolAddress(a.value)).map((a) => a.name),
+    (a, t) => exprHas(a.value, (x) => x.k === 'var' && t.has(x.name)),
+  );
   return (l) =>
     l.type.kind === 'ptr' &&
     l.volatile === undefined &&

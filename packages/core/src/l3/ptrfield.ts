@@ -77,10 +77,12 @@ import {
   type SFn,
   type Stmt,
   type StructType,
+  assignsIn,
   mapExprChildren,
   mapStmtExprs,
   mentionedName,
   stmtChildren,
+  taintOverAssigns,
   walkExprs,
 } from './ast';
 import { type Gate, firstRejection } from './gates';
@@ -198,18 +200,12 @@ function plan(sfn: SFn): Map<string, IrType> {
  *  design: a local holding `sp0[i]` (a value read OUT of the bytes) is swept in too, which only
  *  ever refuses a variation. */
 function localStorageNames(sfn: SFn): { names: Set<string>; locals: Set<string> } {
-  const names = new Set(sfn.locals.filter((l) => l.type.kind === 'array').map((l) => l.name));
   const locals = new Set(sfn.locals.map((l) => l.name));
-  const asg = [...assigns(sfn.body)];
-  for (let grew = true; grew;) {
-    grew = false;
-    for (const a of asg) {
-      if (locals.has(a.name) && !names.has(a.name) && reachesStorage(a.value, { names, locals })) {
-        names.add(a.name);
-        grew = true;
-      }
-    }
-  }
+  const names = taintOverAssigns(
+    assignsIn(sfn.body),
+    sfn.locals.filter((l) => l.type.kind === 'array').map((l) => l.name),
+    (a, names) => locals.has(a.name) && reachesStorage(a.value, { names, locals }),
+  );
   return { names, locals };
 }
 
@@ -222,15 +218,6 @@ function reachesStorage(
     const n = mentionedName(x);
     return n !== undefined && (storage.names.has(n) || (x.k === 'addr' && storage.locals.has(n)));
   });
-}
-
-function* assigns(body: readonly Stmt[]): Generator<Extract<Stmt, { k: 'assign' }>> {
-  for (const s of body) {
-    if (s.k === 'assign') {
-      yield s;
-    }
-    yield* assigns(stmtChildren(s));
-  }
 }
 
 /** Every `store` in the tree. ORDER-FREE by construction, which is what lets it use the shared

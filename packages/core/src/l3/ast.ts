@@ -920,6 +920,44 @@ function* subterms(e: Expr): Generator<Expr> {
   }
 }
 
+export type Assign = Extract<Stmt, { k: 'assign' }>;
+
+/** Every `assign` in the tree, at any nesting. ORDER-FREE: its callers ask what a name is ever
+ *  assigned, never which assignment comes first, so a switch default's position does not matter. */
+export function assignsIn(body: readonly Stmt[]): Assign[] {
+  const out: Assign[] = [];
+  const visit = (s: Stmt): void => {
+    if (s.k === 'assign') {
+      out.push(s);
+    }
+    stmtChildren(s).forEach(visit);
+  };
+  body.forEach(visit);
+  return out;
+}
+
+/** Grow `seed` over assignments to a fixpoint: an assignment adds its target when `propagates`
+ *  says its value carries what the set holds so far. A FLOW-INSENSITIVE taint, which is what each
+ *  caller wants — the question is what a name may EVER hold, so one assignment anywhere is
+ *  enough. Callers own the seed and the rule; this owns only the iteration. */
+export function taintOverAssigns(
+  assigns: readonly Assign[],
+  seed: Iterable<string>,
+  propagates: (a: Assign, tainted: ReadonlySet<string>) => boolean,
+): Set<string> {
+  const tainted = new Set(seed);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const a of assigns) {
+      if (!tainted.has(a.name) && propagates(a, tainted)) {
+        tainted.add(a.name);
+        grew = true;
+      }
+    }
+  }
+  return tainted;
+}
+
 /** The statements a statement DIRECTLY contains, in the order a backend prints them — a `switch`
  *  splices its default in at `defaultAt` for that reason. NOTE for document-order walks: a `for`'s
  *  init/inc are listed here while its cond is in stmtExprs — a walker visiting exprs-then-stmts
