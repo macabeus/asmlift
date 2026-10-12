@@ -88,8 +88,7 @@ export interface LocalObject {
   placement?: LocalObjectPlacement;
   /** Every address the initializer holds, in offset order — the words a relocation fills in at
    *  link time, which the bytes alone do not carry. Absent for an object holding none. The bytes
-   *  under one are whatever the target stored there (zero in a listing, the inline addend in an
-   *  object of REL relocations) and say nothing: the relocation's `addend` is the whole of it. */
+   *  under one say nothing: the relocation's `addend` is the whole of it. */
   relocs?: readonly LocalObjectReloc[];
   /** The object is the compiler's own, under a label the source never wrote (agbcc's `.LC0`): the
    *  constant image a local aggregate's initializer is copied from. `name` is then the label, no

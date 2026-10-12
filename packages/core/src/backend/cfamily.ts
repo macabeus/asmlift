@@ -650,8 +650,8 @@ function endsTerminated(body: Stmt[]): boolean {
 /** Is `e` a pointer to another pointee than the pointer slot `t` declares, as rendered? Its pointer
  *  type is its C type, or, for the address of a declared object (which `exprCType` leaves
  *  unknown), a pointer to that object or to an array's element, the way it decays. A `void *` slot
- *  takes every object pointer implicitly, and so does any slot a `void *` value in C (`cxx` false:
- *  mwcc's C takes `gp = (void *)x` into an `s32 *gp`, compiled), where C++ refuses it. An unknown
+ *  takes every object pointer implicitly. A `void *` value converts into any pointer slot in C
+ *  (mwcc's C takes `gp = (void *)x` into an `s32 *gp`, compiled) but not in C++ (`cxx`). An unknown
  *  type is no opinion. */
 function otherPointee(t: IrType | undefined, e: Expr, vt: (name: string) => IrType | undefined, cxx: boolean): boolean {
   if (t?.kind !== 'ptr' || t.to.kind === 'void') {

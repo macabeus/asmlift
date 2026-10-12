@@ -439,8 +439,9 @@ export interface SFn {
   slotOrder?: 'ascending' | 'descending';
   /** Each declared callee's parameter types (an entry the printer cannot spell is `undefined`):
    *  what an argument converts to. Read by the C-family printer where `dialect` says C++ or
-   *  `strictConversions` is set, either of which refuses three conversions C makes implicitly (backend/cfamily.ts `argConversion`), and by the
-   *  pointer-cell conversions in every dialect (l3/ptrcell.ts). */
+   *  `strictConversions` is set, either of which refuses three conversions C makes implicitly
+   *  (backend/cfamily.ts `argConversion`), and by the pointer-cell conversions in every dialect
+   *  (l3/ptrcell.ts). */
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
   /** Each declared callee's return type as the project spells it, never printed: whether a call a
    *  pointer cell is compared with returns a pointer (l3/ptrcell.ts). */
@@ -454,7 +455,8 @@ export interface SFn {
   designators?: true;
   /** The compiler refuses C's implicit pointer conversions in C as well, as C++ does — carried from
    *  `compilerBehaviors.strictPointerConversions`. An emission policy: the C-family printer casts an
-   *  argument to its declared parameter wherever it would for C++ (`declaredArgs`). */
+   *  argument to its declared parameter (`declaredArgs`), and a pointer of another pointee written
+   *  into a pointer slot, wherever it would for C++. */
   strictConversions?: true;
 }
 

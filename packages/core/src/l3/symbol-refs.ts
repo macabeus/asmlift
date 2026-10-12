@@ -68,11 +68,9 @@ export interface SymbolRef {
    *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
   holdsPointer?: true;
   /** A call target with NO spellable prototype whose address a function-scope static's (or an
-   *  anonymous image's) initializer holds. `declare.ts` prints C's own implicit declaration,
-   *  `int F();`, spelled out: the static's `(u32)&F` precedes every call in the body, so the
-   *  implicit declaration the call would make comes too late for the initializer, and `int F();`
-   *  is that same declaration made first — it states no parameter, so it binds the call exactly as
-   *  the implicit one did and changes nothing the compiler emits for it. */
+   *  anonymous image's) initializer holds. The static's `(u32)&F` precedes every call, so the
+   *  implicit declaration a call makes comes too late for it; `declare.ts` prints that same
+   *  declaration first, `int F();`, which states no parameter and so binds the call as before. */
   implicitCall?: true;
 }
 

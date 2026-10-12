@@ -365,7 +365,7 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
   // candidate is compiled against. The body also CALLS a function whose address the table holds, so
   // the static's `(u32)&h1` comes ahead of the call that would have declared `h1` implicitly — the
   // block must declare it, and as the implicit declaration (`int h1();`), not as a prototype nothing
-  // states. Every candidate failed to compile with "`h1' undeclared" before it did.
+  // states; undeclared, it is "`h1' undeclared".
   test('a table member the body also calls with no prototype is declared ahead of the static', () => {
     const c =
       'u8 h1(u8); u8 h2(u8);\n' +
@@ -436,7 +436,7 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
 
   test('a table member the body also calls with no prototype is declared ahead of the static', () => {
     // mwcc has no implicit declaration to fall back on inside an initializer either: "undefined
-    // identifier 'h1'" on every candidate until the block declared it (`int h1();`).
+    // identifier 'h1'" unless the block declares it (`int h1();`).
     const c =
       'extern s32 ga; extern s32 h1(s32);\n' +
       's32 q1(s32 i) { static s32 *const t[2] = { &ga, (s32 *)h1 }; return *t[i] + h1(i); }';

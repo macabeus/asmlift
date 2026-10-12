@@ -577,9 +577,7 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     if (why !== null) {
       return refused(why);
     }
-    // Every type ABSOLUTE_WORD admits is a RELA relocation: its addend is the entry's own and the
-    // linker REPLACES the word, so the bytes under it are never part of the address (mwcc writes them
-    // as zero; reading them as well would count an addend twice wherever an assembler did not).
+    // a RELA relocation (ABSOLUTE_WORD): the linker replaces the word, so its bytes add nothing
     relocs.push({ offset: at, symbol: r.sym, addend: r.addend | 0 });
   }
   return {

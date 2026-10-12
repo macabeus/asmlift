@@ -467,12 +467,14 @@ export interface TargetDescription {
     // Does this compiler's C front end REFUSE the three pointer conversions C makes implicitly — an
     // integer to a pointer, a pointer to an integer, and an object pointer to one of another
     // pointee — as C++ does? Every mwcc build the benchmark ships refuses all three in C, compiled
-    // with `-lang=c`: 2.4.2 and 2.4.7 ("illegal implicit conversion" of an `unsigned int` to an `int *`)
-    // and 2.3.3 ("cannot convert"). agbcc, IDO 7.1 and both gcc 2.7.2 builds compile the same three
-    // calls at their canonical flags. Read by the C-family printer (`SFn.strictConversions`), which then casts an
-    // argument to its callee's declared parameter exactly as it does for C++ (backend/cfamily.ts
-    // `argConversion`); the cast is the conversion the compiler would otherwise have made, so it
-    // changes no instruction. Absent ⇒ C's implicit conversions.
+    // with `-lang=c`: 2.4.2 and 2.4.7 ("illegal implicit conversion" of an `unsigned int` to an
+    // `int *`) and 2.3.3 ("cannot convert"). agbcc, IDO 7.1 and both gcc 2.7.2 builds compile the same three
+    // calls at their canonical flags. Read by the C-family printer (`SFn.strictConversions`), which
+    // then casts an argument to its callee's declared parameter and a pointer of another pointee
+    // into a pointer slot exactly as it does for C++ (backend/cfamily.ts `argConversion`,
+    // `legalizePointerWrites`), and by the store of an integer into a declared pointer cell
+    // (structure/pointer-spelling.ts `intoPtrCell`). Each cast is the conversion the compiler would
+    // otherwise have made, so it changes no instruction. Absent ⇒ C's implicit conversions.
     strictPointerConversions?: boolean;
     // Arguments past the argument registers are staged into an area this function RESERVES at the
     // BOTTOM of its own frame — `[sp,#0]` upward, one word each — rather than pushed at the call

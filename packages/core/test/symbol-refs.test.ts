@@ -5,8 +5,8 @@
 // recorded with its SymbolInfo; a CALL target is NEVER recorded — not even when the same symbol
 // is also value-referenced (prototyping a called symbol is C89 poison, verified fact 3 of the
 // research doc), unless a static's initializer names it ahead of the call, where it is recorded as
-// C's own implicit declaration; the '/raw-globals' variation names nothing so it carries no refs; and INERTNESS —
-// no map ⇒ the field is absent everywhere.
+// C's own implicit declaration; the '/raw-globals' variation names nothing so it carries no refs;
+// and INERTNESS — no map ⇒ the field is absent everywhere.
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';

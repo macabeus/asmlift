@@ -872,12 +872,10 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     // `needsIntSpelling` reads as a pointer already is one.
     //
     // Only where a declaration SAYS the cell is a pointer: the map's `shape: 'pointer'`, or a
-    // member it declares one. A cell read as a pointer only because the body dereferences it (no
-    // shape, `pointerLoaded`) may be the project's `u32 gSym;`, where `(void *)` is the one spelling
-    // mwcc refuses (an "illegal implicit conversion" of a `void *` to an `unsigned int`, compiled)
-    // and the bare value compiles. Nor a bare name no declaration this pass reads types (`gp = gq`, `gq` a
-    // shape-less global): its header may already declare it a pointer, and C++ refuses `void *`
-    // into a typed pointer where the bare copy compiles.
+    // member it declares one. A cell read as a pointer only because the body dereferences it may be
+    // the project's `u32 gSym;`, which mwcc refuses a `void *` (compiled) and takes the bare value.
+    // Nor a bare name no declaration this pass reads types (`gp = gq`, `gq` a shape-less global):
+    // its header may declare it a pointer, and C++ refuses `void *` into a typed pointer.
     const lv = roleOf(lval);
     const declaredCell = (lv.k === 'name' && !lv.facts.undeclared) || lv.k === 'member';
     const untypedName = value.k === 'var' && ctype(value) === undefined;
