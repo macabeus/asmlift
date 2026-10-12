@@ -40,8 +40,8 @@
 // integer type's or does not divide the size, when the loads disagree on the signedness, when the
 // definition is aligned narrower than its declaration here would be, when a bss static sits where
 // only a scalar initialized to zero is sure to land and it is no scalar (or the input does not
-// show where it sits), when an element holding an address is no pointer's width, when the
-// compiler's anonymous image holds one (l3/constinit.ts folds numbers only);
+// show where it sits), when an element holding an address — a static's or the compiler's
+// anonymous image's — is no pointer's width;
 // and, at the rename, when two statics share a source name (one block cannot declare both) or
 // when the function names anything else by it — a global, a callee, a parameter, a local, itself —
 // which the block-scope static would hide — and when a global an initializer holds the address of
@@ -284,9 +284,6 @@ export function localStaticShapes(
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
     if (obj.anonymous) {
-      if (obj.relocs !== undefined) {
-        return say(`whose image holds the address '${obj.relocs[0].symbol}' — a relocation inside the object`);
-      }
       // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
       // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
       // folds it into the local the copy fills, which is the declaration that placed it.
@@ -314,12 +311,23 @@ export function localStaticShapes(
       // compiler, which clears and stores where most of one is zero rather than copy an image
       // (expr.c `mostly_zeros_p`) — so the printer spells the element after a hole by designator,
       // where the compiler parses one (`SFn.designators`).
-      const init: (number | null)[] = elements(obj, unit, signed);
+      const init: (number | InitAddress | null)[] = elements(obj, unit, signed);
       for (const [from, n] of obj.directives!.gaps ?? []) {
         if (from % unit !== 0 || n % unit !== 0) {
           return say(`whose padding at byte ${from} does not fall on its ${unit}-byte elements`);
         }
         init.fill(null, from / unit, (from + n) / unit);
+      }
+      // An element the image relocates holds an address, as a static's does — an array of pointers
+      // (agbcc copies one with memcpy from 16 words, compiled).
+      for (const r of obj.relocs ?? []) {
+        if (unit !== LOCAL_OBJECT_ADDRESS_BYTES || r.offset % unit !== 0) {
+          return say(
+            `whose image holds the address '${r.symbol}', which its ${unit}-byte elements cannot — ` +
+              `an address is ${LOCAL_OBJECT_ADDRESS_BYTES}`,
+          );
+        }
+        init[r.offset / unit] = { symbol: r.symbol, addend: r.addend };
       }
       // A string literal's image is placed at the compiler's string alignment, which a brace list of
       // strings is not (agbcc: `.align 2, 0` ahead of a STRING_CST's label, none ahead of

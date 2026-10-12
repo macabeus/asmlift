@@ -582,7 +582,7 @@ test('a candidate declares the globals an initializer holds the address of, as i
   }
 });
 
-test('an address in an element narrower than a pointer, or in an anonymous image, declines', () => {
+test('an address in an element narrower than a pointer declines, and an image of them read but not copied', () => {
   // bytes, then a word: the directives agree on no width, so the byte loads say the element
   const mixed = thumbFn(
     '\t.section .rodata\n\t.align\t2, 0\nt.3:\n\t.byte\t1\n\t.byte\t2\n\t.byte\t3\n\t.byte\t4\n\t.word\tg',
@@ -593,14 +593,14 @@ test('an address in an element narrower than a pointer, or in an anonymous image
     "names a function-scope static ('t.3') whose initializer holds the address 'g', which its 1-byte elements " +
       'cannot — an address is 4',
   );
-  // a `.LC` image of addresses is read, and the fold it would need is not built
+  // a `.LC` image of addresses folds only into the local a block copy fills, as one of numbers does
   const image = thumbFn(
     '\t.section .rodata\n\t.align\t2, 0\n.LC0:\n\t.word\tg\n\t.word\th',
     '\tldr\tr1, .L3\n\tldr\tr0, [r1]',
     ['.LC0'],
   );
   expect(() => decompile('f', image, ARMV4T_AGBCC)).toThrow(
-    "reads the compiler's anonymous constant ('.LC0') whose image holds the address 'g' — a relocation inside the object",
+    "reads the compiler's anonymous constant ('.LC0') which no top-level block-copy call (memcpy) takes as its source",
   );
 });
 

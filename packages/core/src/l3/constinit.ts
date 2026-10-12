@@ -32,7 +32,9 @@
 //     frame audit reserves a frame's address-taken bytes as one local, so two arrays refuse at the
 //     size check, whether or not they share an image;
 //   • the image writes one element width (a struct's mixed widths, or padding alone, has no
-//     element type this pass could declare).
+//     element type this pass could declare). An element it relocates holds an address, spelled as
+//     the address constant it is (`u32 a[16] = { (u32)&h1, … }`, which agbcc copies from the same
+//     `.word h1` image as the pointer array the source declared, compiled).
 // The local keeps its own element type where the body reaches it by an offset or a cast — those
 // were spelled against it, so its width must be the image's — and takes the image's where only
 // its whole address and element accesses, which each print their own width, reach it.
@@ -44,7 +46,7 @@
 // read; no benchmark row has one, and the MIPS and PPC frontends refuse the address-taken frame
 // local before the copy is reached.
 import { type IrType, typeToString } from '../ir/types';
-import { type Expr, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
+import { type Expr, type InitAddress, type SFn, type SImage, type Stmt, mentionedName, walkExprs } from './ast';
 import { localMentions, mentionsAnyLocal } from './mentions';
 
 /** The block copies a compiler emits for an aggregate initializer, by callee: which argument is
@@ -129,7 +131,7 @@ interface Fold {
   at: number;
   local: string;
   type: IrType;
-  init: (number | null)[];
+  init: (number | InitAddress | null)[];
   string: boolean;
 }
 
@@ -245,7 +247,8 @@ function planCopy(sfn: SFn, image: SImage, at: number): Fold | string {
     at,
     local,
     type: { kind: 'array', elem: own, count },
-    init: image.init.map((v) => (v === null ? null : resign(v, elem.width / 8, own.signed))),
+    // an address is the address whatever the element's signedness: its cast spells that
+    init: image.init.map((v) => (typeof v === 'number' ? resign(v, elem.width / 8, own.signed) : v)),
     string: image.string === true && elem.width === 8,
   };
 }
