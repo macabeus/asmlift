@@ -3525,10 +3525,12 @@ function frameAddressesAtCalls(
 // cut, which is withheld for that site instead (it runs in the ranker, after the audit below). Where
 // the outgoing-argument verdict leans on an escape, the audit re-proves it of the lifted IR as well
 // (`escapesReliedOn`), which catches a shrink inside the lift that bypassed the question. A frame
-// address an EARLIER block left in a register `/setup-args` cuts is not asked here — that a leftover
-// is dead is the whole guess of that reading, and agbcc does leave a dead `mov r3, sp` base in a
-// call's argument registers (sa3 sub_805DADC) — but of the lifted IR: the reading is withheld where
-// the cut leaves the object it addresses with no reader (`frontend/ssa.ts` cutsUnreadFrameObjects).
+// address an EARLIER block left in a register `/setup-args` cuts is asked here only where the
+// function lifts under a licence main refused it (`lowerCall`'s `asksEveryCut`). Elsewhere that a
+// leftover is dead is the whole guess of that reading, and agbcc does leave a dead `mov r3, sp` base
+// in a call's argument registers (sa3 sub_805DADC). Those cuts are asked of the lifted IR instead:
+// the reading is withheld where the cut leaves the object it addresses with no reader
+// (`frontend/ssa.ts` cutsUnreadFrameObjects).
 //
 // A WORD `str` hands its source register to whoever reads the memory it writes, unless the base is
 // sp or any register that may hold a frame address (`registersThatMayHoldAFrameAddress`, whole-
@@ -4191,6 +4193,9 @@ function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmB
 interface ThumbFrameUses {
   readonly usedSlotOffsets: Set<number>;
   readonly movedCaptures: Set<Value>;
+  /** the blocks other than the entry that read an incoming stack argument
+   *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `asksEveryCut` reads */
+  readonly offEntryArgReads: Set<number>;
 }
 
 /** WHAT THE FILL OF A BLOCK READS: the records of the stages before it, the SSA builder it writes
@@ -4274,7 +4279,7 @@ function thumbFillOf(
     pairs,
     flags,
     statics,
-    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set() },
+    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set(), offEntryArgReads: new Set() },
   };
 }
 
@@ -5081,6 +5086,9 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   {
     const index = walk.argIndex({ base, off, regOff }, width);
     if (index !== null) {
+      if (bi !== 0) {
+        fill.frameUses.offEntryArgReads.add(bi);
+      }
       writeData(reg(a), bi, readVar(stackArgKey(index), bi));
       return;
     }
@@ -5235,6 +5243,15 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
         );
       }
     },
+    // …AND OF EVERY REGISTER THE `/setup-args` READING CUTS, where this function lifts only under a
+    // licence main refused it: an escape the outgoing-argument verdict leaned on (an escaped `sp+k`
+    // excuses every frame word from k up as the callee's to read), or an incoming stack argument
+    // read outside the entry block. Under either, a frame address an earlier block left in an
+    // argument register is no dead leftover to guess away: `if (a) g(n, w, e)` with `&w` left in r1
+    // by the entry block, and r0 and r2 (`ldr r2, [sp, #0x20]`) set up by the call's own, would
+    // narrow to `g(a3)`, dropping `w` and `e`. Elsewhere the lifted IR answers instead
+    // (`frontend/ssa.ts` cutsUnreadFrameObjects).
+    asksEveryCut: () => frame.escapesReliedOn.size > 0 || fill.frameUses.offEntryArgReads.size > 0,
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),

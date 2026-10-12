@@ -145,6 +145,121 @@ describe('a frame address an earlier block left in a register the narrower readi
     expect(cs.every((c) => /\bg\(a3, sp0, a4, 0\)/.test(c.source))).toBe(true);
   });
 
+  // `void f(int a, int b, int *q, int n, int e) { char w[8]; w[0] = b; w[1] = 0; if (a) g(n, w, e);
+  // else *q = w[0]; }` — as above, but w IS read elsewhere, so the lifted IR cannot tell `&w` in r1
+  // from a dead store base. The incoming stack argument read in the call's block is what main
+  // declined on, so no `/setup-args` reading is offered at all: every register it would cut is asked.
+  test('is kept in every candidate beside an incoming stack argument even where the object is read elsewhere', () => {
+    const readElsewhere = [
+      'f:',
+      '\tpush\t{r4, r5, lr}',
+      '\tadd\tsp, sp, #-0x8',
+      '\tadd\tr5, r2, #0',
+      '\tadd\tr4, r3, #0',
+      '\tmov\tr2, sp',
+      '\tmov\tr3, #0x0',
+      '\tstrb\tr1, [r2]',
+      '\tmov\tr1, sp',
+      '\tstrb\tr3, [r1, #0x1]',
+      '\tcmp\tr0, #0',
+      '\tbeq\t.L3',
+      '\tadd\tr0, r4, #0',
+      '\tldr\tr2, [sp, #0x14]',
+      '\tbl\tg',
+      '\tb\t.L4',
+      '.L3:',
+      '\tmov\tr0, sp',
+      '\tldrb\tr0, [r0]',
+      '\tstr\tr0, [r5]',
+      '.L4:',
+      '\tadd\tsp, sp, #0x8',
+      '\tpop\t{r4, r5}',
+      '\tpop\t{r0}',
+      '\tbx\tr0',
+      '',
+    ].join('\n');
+    const cs = enumerateCandidates('f', readElsewhere, ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.some((c) => hasVariation(c.variations, 'setup-args'))).toBe(false);
+    expect(cs.every((c) => /\bg\(a3, sp0, a4, 0\)/.test(c.source))).toBe(true);
+  });
+
+  // `void f(int a, int b, int *q, int n) { char w[8]; char u[8]; u[0] = n; u[1] = b; w[0] = b;
+  // w[1] = 0; if (a) g(n, w); else *q = u[1]; }` — the lift folds `add r4, sp, #0x8` into the
+  // accesses through r4 (one `laddr` at 0, then offsets 8 and 9), so u starts where something is
+  // accessed, not where an address is formed. The read of u[1] reads u, not the w the cut leaves.
+  test('is kept in every candidate where the other object starts at an offset only an access names', () => {
+    const folded = [
+      'f:',
+      '\tpush\t{r4, r5, r6, lr}',
+      '\tadd\tsp, sp, #-0x10',
+      '\tadd\tr6, r2, #0',
+      '\tadd\tr5, r3, #0',
+      '\tadd\tr4, sp, #0x8',
+      '\tmov\tr3, #0x0',
+      '\tstrb\tr5, [r4]',
+      '\tstrb\tr1, [r4, #0x1]',
+      '\tmov\tr2, sp',
+      '\tstrb\tr1, [r2]',
+      '\tmov\tr1, sp',
+      '\tstrb\tr3, [r1, #0x1]',
+      '\tcmp\tr0, #0',
+      '\tbeq\t.L3',
+      '\tadd\tr0, r5, #0',
+      '\tbl\tg',
+      '\tb\t.L4',
+      '.L3:',
+      '\tldrb\tr0, [r4, #0x1]',
+      '\tstr\tr0, [r6]',
+      '.L4:',
+      '\tadd\tsp, sp, #0x10',
+      '\tpop\t{r4, r5, r6}',
+      '\tpop\t{r0}',
+      '\tbx\tr0',
+      '',
+    ].join('\n');
+    const cs = enumerateCandidates('f', folded, ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.every((c) => /\bg\(a3, sp0, sp0, 0\)/.test(c.source))).toBe(true);
+  });
+
+  // `int f(int a, int b, int c) { int s[3]; char t[16]; ...; if (a) g(b, s, t); return
+  // ((char *)s)[c]; }` — the escape case above plus a read of s at a runtime index. An index stays
+  // in the object its base addresses, so it reads s, not the t the cut leaves.
+  test('is kept in every candidate where an indexed read of another object follows (one object behind an escape)', () => {
+    const indexed = [
+      'f:',
+      '\tpush\t{r4, lr}',
+      '\tadd\tsp, sp, #-0x1c',
+      '\tadd\tr3, r1, #0',
+      '\tadd\tr4, r2, #0',
+      '\tstr\tr0, [sp]',
+      '\tstr\tr3, [sp, #0x4]',
+      '\tadd\tr2, sp, #0xc',
+      '\tmov\tr1, #0x0',
+      '\tstrb\tr0, [r2]',
+      '\tstrb\tr3, [r2, #0x1]',
+      '\tstrb\tr1, [r2, #0x2]',
+      '\tcmp\tr0, #0',
+      '\tbeq\t.L3',
+      '\tadd\tr0, r3, #0',
+      '\tmov\tr1, sp',
+      '\tbl\tg',
+      '.L3:',
+      '\tmov\tr1, sp',
+      '\tadd\tr0, r1, r4',
+      '\tldrb\tr0, [r0]',
+      '\tadd\tsp, sp, #0x1c',
+      '\tpop\t{r4}',
+      '\tpop\t{r1}',
+      '\tbx\tr1',
+      '',
+    ].join('\n');
+    const cs = enumerateCandidates('f', indexed, ARMV4T_AGBCC);
+    expect(cs.length).toBeGreaterThan(0);
+    expect(cs.every((c) => /\bg\(a1, sp0, \(u32\)sp0 \+ 12, a1\)/.test(c.source))).toBe(true);
+  });
+
   // CONTROL: an object something else reads is still the dead store base the narrower reading
   // guesses it may be (sa3 sub_805DADC: `mov r3, sp` as a store base, reloaded after the call), and
   // that reading is still offered beside the default.
