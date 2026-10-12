@@ -887,8 +887,7 @@ describe('a context register return under a mapped signature', () => {
     expect(lifted).toContain('*v0 = 186;');
     expect(lifted).toContain('conv(v0 + 1, a2, 1, 3);');
     expect(lifted).toContain('print((u8)a0, 1, sp0, (u8)center(1, sp0, 56));');
-    // …and with the entry dropped whole, as before, nothing says `conv` is not handed a hidden
-    // struct-return pointer
+    // …and without the return, nothing says `conv` is not handed a hidden struct-return pointer
     expect(() =>
       decompile('f', `${HANDED}\n`, ARMV4T_AGBCC, {
         prototypes: { ...merged, ...others, conv: { params: merged.conv!.params! } },
