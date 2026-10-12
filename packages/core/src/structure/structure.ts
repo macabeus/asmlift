@@ -2068,15 +2068,15 @@ function isRet(blk: Block): boolean {
  *  CALLER that wants it (`hasDivergentSharedRet`), not here.
  *
  *  THE ANCHOR names a successor taken to reach the end the question is about, and leaves out
- *  every successor that shares no `ret` with it — unless two of those meet at a block that is no
- *  successor's entry, a second end the anchor does not rule out (`leftOutMeet`), where the answer
- *  is empty. The `switch_br` caller anchors on the dispatch's
- *  DEFAULT edge, whose target is the `default:` arm or the code after the switch: a `case` that
- *  `return`s on its own, or falls into one that does, then no longer empties the intersection for
- *  the arms that `break`. Leaving those successors out is sound for the follow the caller derives
- *  from the answer: the answer is a subset of the anchor's `ret`s, so a successor left out reaches
- *  none of them, hence no block that reaches one — in particular not the follow — and it is
- *  structured to its own `return`, as the source wrote. The `if` caller never anchors.
+ *  every successor that shares no `ret` with it (`leftOutOf`). The `switch_br` caller anchors on
+ *  the dispatch's DEFAULT edge, whose target is the `default:` arm or the code after the switch: a
+ *  `case` that `return`s on its own, or falls into one that does, then no longer empties the
+ *  intersection for the arms that `break`. Leaving those successors out is sound for the follow the
+ *  caller derives from the answer: the answer is a subset of the anchor's `ret`s, so a successor
+ *  left out reaches none of them, hence no block that reaches one — in particular not the follow —
+ *  and it is structured to its own `return`. It is a candidate and not evidence that the source
+ *  ended the construct there: a `default:` that `return`s on its own is an anchor too, and the
+ *  caller states what it reads to tell the two apart. The `if` caller never anchors.
  *
  *  THE DEDUP IS DEFENSIVE AND NO CALLER CAN REACH IT TODAY. It is what makes "two successors that
  *  are the same block" answer `[]` rather than "a branch with a shared `ret`". Both callers ask
@@ -2086,62 +2086,25 @@ function isRet(blk: Block): boolean {
  *  the reader over every row of the committed artifact (`decompile` per row, no compiling) emits
  *  byte-identical source with and without it. */
 function sharedRetsOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>, anchor: Block | null = null): Block[] {
-  const retsFrom = (x: Block): Block[] => [x, ...reachFrom(x)].filter(isRet);
-  let succs = [...new Set(successorsOf(b))];
-  if (anchor !== null) {
-    const anchored = new Set(retsFrom(anchor));
-    const leftOut = succs.filter((x) => !retsFrom(x).some((r) => anchored.has(r)));
-    if (leftOutMeet(b, leftOut, succs)) {
-      return [];
-    }
-    succs = succs.filter((x) => !leftOut.includes(x));
-  }
+  const left = anchor === null ? [] : leftOutOf(b, reachFrom, anchor);
+  const succs = [...new Set(successorsOf(b))].filter((x) => !left.includes(x));
   if (succs.length < 2) {
     return [];
   }
-  return succs.map(retsFrom).reduce((shared, rets) => {
-    const here = new Set(rets);
-    return shared.filter((r) => here.has(r));
-  });
+  return succs
+    .map((x) => retsFrom(x, reachFrom))
+    .reduce((shared, rets) => {
+      const here = new Set(rets);
+      return shared.filter((r) => here.has(r));
+    });
 }
-/** Do two of the successors the anchor leaves out meet at a block that is not itself a successor
- *  of `b`? That block is a SECOND END the source can have written — the anchor names one candidate,
- *  not evidence of where the construct ends — so `sharedRetsOf` answers nothing for that anchor.
- *
- *  The anchored reading takes the anchor's target to be where the construct ends or an arm that
- *  runs on to that end. A `default:` that `return`s on its own breaks that premise: its `ret` is
- *  the anchor's, every `break` arm is left out, and those arms all run into the code after the
- *  switch — one block, reached from several left-out successors, that is no arm's entry. Reading
- *  the anchor's end there would end the switch inside the `default:` arm and spell every `break`
- *  as a `return` (measured: KMC and gcc 2.7.2 lift `default: p[9]=7; return 5;` beside five
- *  `break`s that way, and the recompile is not the target).
- *
- *  Where the left-out successors meet only at a successor's ENTRY, that is one case falling into
- *  another (`case 1:` running on into a returning `case 2:`), not a join after the switch, so each
- *  successor's walk stops at the other successors. A single left-out successor meets nothing. */
-function leftOutMeet(b: Block, leftOut: Block[], succs: Block[]): boolean {
-  if (leftOut.length < 2) {
-    return false;
-  }
-  const arms = new Set(succs);
-  const owner = new Map<Block, Block>();
-  for (const s of leftOut) {
-    const seen = new Set<Block>([s]);
-    for (const stack = successorsOf(s); stack.length;) {
-      const x = stack.pop()!;
-      if (x === b || arms.has(x) || seen.has(x)) {
-        continue;
-      }
-      seen.add(x);
-      const prev = owner.get(x);
-      if (prev !== undefined && prev !== s) {
-        return true;
-      }
-      owner.set(x, s);
-      stack.push(...successorsOf(x));
-    }
-  }
-  return false;
+function retsFrom(x: Block, reachFrom: (x: Block) => ReadonlySet<Block>): Block[] {
+  return [x, ...reachFrom(x)].filter(isRet);
+}
+/** The successors of `b` that share no `ret` with `anchor` — the ones `sharedRetsOf` leaves out. */
+function leftOutOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>, anchor: Block): Block[] {
+  const anchored = new Set(retsFrom(anchor, reachFrom));
+  return [...new Set(successorsOf(b))].filter((x) => !retsFrom(x, reachFrom).some((r) => anchored.has(r)));
 }
 /** Is there an `if` whose arms reach no common block before EXIT but share a `ret` — the only shape
  *  `followEarlyReturns` changes? The enumeration gate of both shared-tail twins (rank.ts), asked of
@@ -5446,9 +5409,25 @@ export function structure(
       // edge, which goes to the `default:` arm or, where the source wrote none, straight to the
       // code after the switch. It keeps the successors that share a `ret` with the default edge's
       // target, and derives the follow from them alone. That is a candidate, not evidence: a
-      // `default:` that `return`s on its own has a `ret` of its own, and the `break` arms then
-      // meet somewhere else. Where the successors it leaves out meet at a block that is no arm's
-      // entry, that is a second end and `sharedRetsOf` answers nothing (`leftOutMeet`).
+      // `default:` that `return`s on its own has a `ret` of its own, and the follow it derives
+      // then sits inside that arm, with every `break` spelled as a `return` — the same program,
+      // and not the one the source wrote (KMC and gcc 2.7.2 recompile it to different code).
+      //
+      // THE LAYOUT TELLS THEM APART, and nothing in the graph does: `case 0: …; break;` beside
+      // returning arms and a returning `default:` is the same CFG as returning arms beside one
+      // arm that carries a value past the switch to a store the default edge shares. What
+      // differs is where the code the anchor leaves out sits. The code after a switch is laid
+      // out after every arm, so an arm the anchor leaves out — one that returns on its own, or
+      // reaches the switch's real end — sits above that end only if the candidate is the real
+      // end. Where any block a left-out successor reaches is laid out past the candidate, the
+      // candidate is inside an arm and the retry is refused.
+      //
+      // That reads `layoutIndex` at a strength of its own: only that no block of an arm was moved
+      // past the code after the switch — not the arm order `switchArmsFollowLayout` places, so it
+      // is not behind that declaration. Where it fails — PPC's synthetic return blocks sort after
+      // every real one — it can only refuse, so its cost is a decline the `stop` reading already
+      // made, never a spelling. Measured with real compiles of 28 jump-table shapes on agbcc, IDO,
+      // KMC, gcc 2.7.2 and mwcc, it refuses only where a returning `default:` named the end.
       //
       // A RETRY, NOT A THIRD LINK IN THE `??` CHAIN. Where the `stop` reading spells, it is legal
       // C already, and asking the anchored reading first re-spells three shapes whose `stop`
@@ -5468,7 +5447,11 @@ export function structure(
       // at the default block or past every arm.
       if (joined === null && read.declines) {
         const found = followOverReturns(b, stop, defEdge.block);
-        const over = found !== null && !armOf.has(found) ? found : null;
+        const pastEnd = (end: Block): boolean =>
+          leftOutOf(b, reachFrom, defEdge.block).some((s) =>
+            [s, ...reachFrom(s)].some((x) => x !== b && layoutIndex(x) > layoutIndex(end)),
+          );
+        const over = found !== null && !armOf.has(found) && !pastEnd(found) ? found : null;
         const retry = over === null ? null : readArms(over);
         if (retry !== null && !retry.declines) {
           hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(over!) });
