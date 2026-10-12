@@ -558,9 +558,35 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => lift(atTheIndexedRead('\tldrh\tr0, [r0]\n'))).toThrow(
           /a runtime index into the object at \[sp,#0\) accesses 2 bytes/,
         );
-        // …and the one object refuses it too: an index names no byte its width can be checked at
-        expect(() => lift(indexed('\tldrh\tr0, [r0]\n'))).toThrow(
-          /a runtime index into the bytes .* accesses more than a byte/,
+      });
+
+      // KEPT AS ONE OBJECT, a wider index is spelled through a cast on the bytes, as a member is.
+      // What it must agree with is every wider access it may reach — all of them, since it names
+      // no byte — and agbcc's alias sets say what agreeing is: one set per integer width,
+      // signedness shared, a character type in every set (`indexedWidth`).
+      test('kept as one object, a wider index reads through a cast at its own byte offset', () => {
+        // the index is not scaled, so the halfword is at byte `a0`, not element `a0`
+        expect(lift(indexed('\tldrh\tr0, [r0]\n')).source).toContain('return *(u16 *)((u32)sp0 + a0);');
+        // …a sign-extending read carries its own extension in the cast
+        expect(lift(indexed('\tldrsh\tr0, [r0]\n')).source).toContain('return *(s16 *)((u32)sp0 + a0);');
+        // …and a scaled one is an element of a halfword array over the same bytes
+        expect(lift(indexed('\tlsl\tr4, r4, #0x1\n\tadd\tr0, r1, r4\n\tldrh\tr0, [r0]\n')).source).toContain(
+          'return ((u16 *)sp0)[a0];',
+        );
+        // a member of the same width, or a byte, shares the index's alias set
+        const member = (store: string) => indexed(`\tldrh\tr0, [r0]\n\tmov\tr1, sp\n\t${store}\tr5, [r1, #0x4]\n`);
+        expect(lift(member('strh')).source).toContain('((u16 *)sp0)[2] = a1;');
+        expect(lift(member('strb')).source).toContain('((u8 *)sp0)[4] = a1;');
+      });
+
+      test('kept as one object, an index beside an access of another width declines', () => {
+        // a word member the halfword index may reach: two alias sets on one byte
+        expect(() => lift(indexed('\tldrh\tr0, [r0]\n\tmov\tr1, sp\n\tstr\tr5, [r1, #0x4]\n'))).toThrow(
+          /the byte at \[sp,#4\] of the bytes \[sp,#0\) to \[sp,#8\) kept as one object is accessed 4 bytes wide and by a runtime index 2 bytes wide/,
+        );
+        // …and two indexed widths, which name no byte at all
+        expect(() => lift(indexed('\tldrh\tr2, [r0]\n\tldr\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
+          /a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
         );
       });
 

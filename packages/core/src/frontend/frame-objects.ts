@@ -1091,6 +1091,31 @@ function indexedAccess(
   }
 }
 
+/** The one width wider than a byte that the runtime-indexed accesses of a frame take, or why
+ *  there is not one.
+ *
+ *  A runtime index names no byte, so the type an indexed access is spelled at must agree with
+ *  every access it may reach — and what "agree" means is what lets agbcc reorder two of them.
+ *  At -O2 it runs type-based alias analysis (toplev.c:3616), and its alias sets
+ *  (`c_get_alias_set`, c-common.c:1892-2005) give one set to the signed and unsigned integer of
+ *  one width, set 0 — conflicting with everything — to a character type, and set 0 to a struct
+ *  or union access. So a byte access reaches anything, and wider accesses of ONE width reach each
+ *  other whatever their signedness; only a second width is a second set, a store a load of the
+ *  other width may be moved past. Every such access is spelled as an INTEGER of its width through
+ *  a cast on the storage (`((s32 *)sp0)[i]`), so the one width is the one set. The storage stays
+ *  `u8 name[n]` whatever the width, and the stride is not the licence: the alias sets are. */
+function indexedWidth(indexed: FrameUses['indexed']): { width: number | null; refusal: string | null } {
+  const widths = [...new Set([...indexed.values()].flat().map((x) => x.width))].filter((w) => w !== 1);
+  return {
+    width: widths[0] ?? null,
+    refusal:
+      widths.length > 1
+        ? `accesses ${widths.join(' and ')} bytes wide, and agbcc at -O2 lets a read of one type pass a store ` +
+          'of the other (strict aliasing) — a cast spelling would read stale'
+        : null,
+  };
+}
+
 /** The bytes an escape may reach, `[lo, hi)` from the object's own offset, and how it reads them
  *  as a refusal words it. */
 interface ReadWindow {
@@ -1542,12 +1567,13 @@ function keepAsOneObject({
   if (writer !== null) {
     fail(`${kept} cannot hold every writer — ${writer}`);
   }
-  // A runtime index names no byte, so no access type can be checked against the others at the
-  // bytes it reaches — except a byte access, which needs none: character types alias every type.
-  if ([...uses.indexed.values()].some((xs) => xs.some((x) => x.width !== 1))) {
-    fail(
-      `a runtime index into ${kept} accesses more than a byte, and names no byte whose type it can be checked against`,
-    );
+  // A runtime index names no byte, so the rule below is asked of it at EVERY byte it may reach:
+  // all of them. Two indexed widths refuse here; an index beside a member of another width
+  // refuses after the members are checked against each other, so a member pair keeps naming its
+  // own byte (`indexedWidth` says why one width is enough).
+  const index = indexedWidth(uses.indexed);
+  if (index.refusal !== null) {
+    fail(`a runtime index into ${kept} ${index.refusal}`);
   }
   // ONE TYPE PER BYTE. agbcc at -O2 turns on type-based alias analysis (toplev.c:3616), and
   // compiled, a `u32` read through a cast is served the earlier `u32` store straight past a
@@ -1574,6 +1600,15 @@ function keepAsOneObject({
         );
       }
       widthAt.set(b, m.width);
+    }
+  }
+  for (const [b, had] of widthAt) {
+    if (index.width !== null && had !== index.width) {
+      fail(
+        `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${index.width} ` +
+          'bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a ' +
+          'cast spelling would read stale',
+      );
     }
   }
   // Rewritten onto one `laddr` at `from`: an access through a member at `k` becomes an access
