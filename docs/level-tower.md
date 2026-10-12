@@ -697,9 +697,12 @@ deref contract share `memberOf`, so they agree on which member access is well-ty
 memory where a device or a callee holds its address, or where nothing escapes and the per-object
 model refuses the frame (a by-value struct parameter, spilled word by word over the spill slots and
 read member by member through `mov rD, sp`, at two widths or two signednesses, or copied out a word
-at a time; `chooseFrameModel` offers it before any shape is judged — save a word reached through
-the copy beside a call no prototype states, which may be that call's stack argument and still
-refuses). Where two widths meet at one byte of it, the L1 audit stamps the `laddr`
+at a time; `chooseFrameModel` offers it before any shape is judged). In either model a store
+through a capture that reaches a call unread on every path, beneath the lowest word a load after a
+call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
+stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and no
+prototype bounds it — a stated list is a lower bound, a variadic callee's a prefix. Where two widths
+meet at one byte of it, the L1 audit stamps the `laddr`
 with the views its accesses use (`views`, frontend/frame-objects.ts `unionViews`), and structure
 declares the storage as that union — every view an array tiling it — and spells each access through
 its view on the object itself (`sp0.half[1]`). Element 0 is subscripted, never dereferenced:

@@ -158,7 +158,10 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
 \tpop\t{r1}
 \tbx\tr1
 `;
-    expect(() => lift(outgoing)).toThrow(CAPTURE);
+    // …so a store through a copy that reaches a call unread is refused as that call's argument
+    expect(() => lift(outgoing)).toThrow(
+      /the 4-byte store at \[sp,#4\) through a captured address reaches the call to `g` unread on every path/,
+    );
   });
 
   // A capture that was not split is refused with ITS OWN reason. Two captures here: [sp,#0]'s word
@@ -173,8 +176,14 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     expect(() => decompile('f', alsoPublished(two), ARMV4T_AGBCC, { prototypes })).toThrow(
       /a store at \[\+1\] through the captured address — only a scalar at the captured address is modelled/,
     );
-    // …and with the callee the only writer, both members are bytes of the one object
-    const kept = decompile('f', two, ARMV4T_AGBCC, { prototypes }).source;
+    // …and with the callee the only writer, the word nothing reads before `g` may be `g`'s stack
+    // argument — a stated parameter list is a lower bound…
+    expect(() => decompile('f', two, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /the 4-byte store at \[sp,#4\) through a captured address reaches the call to `g` unread on every path/,
+    );
+    // …and read back after the call it is a local, and both members are bytes of the one object
+    const readBack = two.replace('\tbl\tg\n', '\tbl\tg\n\tldr\tr0, [r4, #0x4]\n');
+    const kept = decompile('f', readBack, ARMV4T_AGBCC, { prototypes }).source;
     expect(kept).toContain('u8 sp0[16];');
     expect(kept).toContain('((u8 *)sp0)[9] = a1;');
     expect(kept).toContain('g((u32)sp0 + 8);');
@@ -931,36 +940,63 @@ describe('a frame nothing escapes from is one object where the slot model and an
     expect(src).toContain('    sp0.word[7] = v3;\n    return sp0.word[3] * v0 + v1 * v2 + v3;\n');
   });
 
-  // …EXCEPT A WORD THROUGH A CAPTURE BESIDE A CALL NO PROTOTYPE STATES. agbcc's own output for
-  // `struct W { int a[3]; }; int th(); int q7(struct W *p){ return th(1, 2, 3, 4, *p); }`: the
-  // struct ARGUMENT is block-copied into the outgoing words through `mov r1, sp`, and nothing
+  // …EXCEPT A STORE THAT REACHES A CALL UNREAD, ON EVERY PATH AND BENEATH EVERY PROVEN LOCAL.
+  // agbcc's own output for `struct W { int a[3]; }; int th(); int q7(struct W *p){ return th(1, 2, 3, 4, *p); }`:
+  // the struct ARGUMENT is block-copied into the outgoing words through `mov r1, sp`, and nothing
   // escapes. Kept as one object, the copy is a local's and `th` loses every stack word, silently.
   const STAGED_ARG =
     'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr1, sp\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n' +
     '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tth\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n' +
     '\tpop\t{r1}\n\tbx\tr1\n';
-
-  test('a word through a capture beside a guessed call is the outgoing-argument guard, and stands', () => {
-    expect(() => lift(STAGED_ARG)).toThrow(
-      /a store at \[\+4\] through the captured address — a WORD access through the copy, and `ldr`\/`str` have an `\[sp,#imm\]` form$/,
+  const storedUnread = (width: number, at: number, callee: string) =>
+    new RegExp(
+      `the ${width}-byte store at \\[sp,#${at}\\) through a captured address reaches the call to \`${callee}\` unread on every path`,
     );
+
+  test('a word copied through a capture and never read is the outgoing-argument guard, and stands', () => {
+    expect(() => lift(STAGED_ARG)).toThrow(storedUnread(4, 0, 'th'));
+    // …and a prototype holds no store through a capture: a stated list is a LOWER bound on the
+    // words a call takes. `int th(int, int, int, int, ...)` states four, and so does DWARF for it,
+    // which drops the `...` — the same refusal, where only the per-object word refusal stood before
+    const prefix = (params: number | string[]) =>
+      decompile('f', STAGED_ARG, ARMV4T_AGBCC, { prototypes: { th: { params } } });
+    expect(() => prefix(4)).toThrow(storedUnread(4, 0, 'th'));
+    expect(() => prefix(['s32', 's32', 's32', 's32'])).toThrow(storedUnread(4, 0, 'th'));
     // …and a prototype that states the stack words holds them to `[sp,#k]` stores, loudly
-    const declared = (params: number) => decompile('f', STAGED_ARG, ARMV4T_AGBCC, { prototypes: { th: { params } } });
-    expect(() => declared(7)).toThrow(/callee `th` is declared with 7 arguments, so its outgoing stack-argument block/);
+    expect(() => prefix(7)).toThrow(/callee `th` is declared with 7 arguments, so its outgoing stack-argument block/);
   });
 
-  // …AND ANY STORE NOTHING READS, BESIDE A GUESSED CALL, whatever refusal the per-object model meets
-  // or none at all. agbcc builds a compound-literal argument IN PLACE with `strb`/`strh` through
-  // `mov rD, sp` moved by `add rD, #k`, every access at +0 of its own capture, so the word guard
-  // above never sees it. Verbatim agbcc output, `th` undeclared.
+  test('a local stored after the only call, or read after a call, is no argument', () => {
+    // `int g(); int f(int x, int y){ unsigned char b[4]; g(); b[0] = x; b[1] = y; return b[0]; }` —
+    // `b[1]` is never read, but it reaches no call
+    const afterCall =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tg\n\tmov\tr0, sp\n' +
+      '\tstrb\tr4, [r0]\n\tstrb\tr5, [r0, #0x1]\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(lift(afterCall).source).toContain('    g(a0, a1);\n    sp0 = a0;\n    return sp0;\n');
+    // `int g(); int f(int n, int x){ u8 b[4]; int i, r = 0;
+    //   for (i = 0; i < n; i++) { if (g()) { b[1] = x + i; if (x > i) r += b[1]; } } return r; }` —
+    // the store reaches the next trip's call unread, but the first trip calls `g` before any store:
+    // an argument is staged on every path to its call
+    const loop =
+      'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr7, r0, #0\n\tadd\tr6, r1, #0\n\tmov\tr1, #0x0\n' +
+      '\tmov\tr4, #0x0\n\tcmp\tr1, r7\n\tbge\t.L4\n\tmov\tr5, sp\n.L6:\n\tstr\tr1, [sp, #0x4]\n\tbl\tg\n\tldr\tr1, [sp, #0x4]\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.L5\n\tadd\tr0, r6, r4\n\tstrb\tr0, [r5, #0x1]\n\tcmp\tr6, r4\n\tble\t.L5\n\tldrb\tr0, [r5, #0x1]\n' +
+      '\tadd\tr1, r1, r0\n.L5:\n\tadd\tr4, r4, #0x1\n\tcmp\tr4, r7\n\tblt\t.L6\n.L4:\n\tadd\tr0, r1, #0\n\tadd\tsp, sp, #0x8\n' +
+      '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(lift(loop).source).toContain('sp1 = a1 + v3;');
+  });
+
+  // …AND ANY STORE THAT REACHES A CALL UNREAD, whatever refusal the per-object model meets or none
+  // at all. agbcc builds a compound-literal argument IN PLACE with `strb`/`strh` through `mov rD, sp`
+  // moved by `add rD, #k`, every access at +0 of its own capture. Verbatim agbcc output, `th`
+  // undeclared.
   const inPlace = (calls: string) =>
     `f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n${calls}\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n`;
   const TH = '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tth\n';
   const BYTES_LITERAL =
     '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tmov\tr0, sp\n\tstrb\tr4, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n' +
     '\tmov\tr6, sp\n\tadd\tr6, r6, #0x2\n\tstrb\tr4, [r6]\n\tadd\tr0, r0, #0x2\n\tstrb\tr5, [r0]\n';
-  const STORED_NEVER_READ =
-    /the 1-byte store at \[sp,#0\) through a captured address is never read here, beside a call whose arity is guessed \(`th`\)/;
+  const STORED_NEVER_READ = storedUnread(1, 0, 'th');
 
   test('an argument built in place at two widths is not the one object', () => {
     // `struct S { s8 a[4]; }; struct T { u16 h[2]; }; int th();
@@ -983,5 +1019,12 @@ describe('a frame nothing escapes from is one object where the slot model and an
     expect(lift(inPlace(`${BYTES_LITERAL}\tmov\tr0, #0x0\n`)).source).not.toContain('th(');
     const readBack = '\tmov\tr0, sp\n\tstrb\tr1, [r0]\n' + TH + '\tmov\tr0, sp\n\tldrb\tr0, [r0]\n';
     expect(lift(inPlace(readBack)).source).toContain('th(1, 2, 3, 4);');
+    // …and the refusal names the call the bytes reach, not the first call in the function
+    // (`int f0(); int th(); int f(int x, int y){ f0(); return th(1, 2, 3, 4, (struct S){{x, y, x, y}}); }`)
+    const afterF0 =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tf0\n\tmov\tr0, sp\n' +
+      '\tstrb\tr4, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr4, [r0]\n' +
+      `\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n${TH}\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(() => lift(afterF0)).toThrow(STORED_NEVER_READ);
   });
 });

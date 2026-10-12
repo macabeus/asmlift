@@ -11,7 +11,7 @@
  *
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
-import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
+import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
@@ -37,11 +37,6 @@ export interface FrameObjectAudit {
   escapesReliedOn?: ReadonlySet<number>;
   /** every capture the add arm re-minted at a constant offset from it */
   movedCaptures: ReadonlySet<Value>;
-  /** every `call` whose arity no prototype states (`SsaBuilder.guessedCallOps`): it counts argument
-   *  registers alone, so a stack word such a callee takes is one the lift cannot see it take — and
-   *  agbcc stages a by-value struct argument into the outgoing words through `mov rD, sp` and
-   *  `stmia` (`chooseFrameModel`) */
-  guessedCalls: ReadonlySet<Op>;
   /** whether a callee's declaration rules out a struct returned through a hidden pointer at
    *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
    *  declarations */
@@ -265,8 +260,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     member at its own offset, a runtime index may reach it at a byte or at ONE wider
  *     width (`indexedWidth`), and two widths at one byte are the views of one union
  *     (`unionViews`), or refuse where no view names them (`unionRefusal`).
- *  In either model, beside a call whose arity is guessed, a store through a capture that nothing
- *  in the function reads declines: it may be that call's stack argument (`storedNeverRead`).
+ *  In either model, a store through a capture that reaches a call unread on every path, beneath
+ *  every word a load after a call proves a local's, declines: it may be that call's stack argument
+ *  (`storedNeverRead`).
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -295,7 +291,6 @@ export function auditFrameObjects({
   capturedObjectIsTheWholeFrame,
   escapesReliedOn = new Set(),
   movedCaptures,
-  guessedCalls,
   returnsWithoutHiddenPointer,
   symbols,
   target,
@@ -318,12 +313,12 @@ export function auditFrameObjects({
   const flow = addressFlow(irBlocks, objects, facts, fail);
   const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel({ oneObject, uses, windows, guessedCalls, returnsWithoutHiddenPointer, fail });
-  storedNeverRead(uses, guessedCalls, fail);
+  const model = chooseFrameModel({ oneObject, uses, windows, returnsWithoutHiddenPointer, fail });
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
   recheckEscapesReliedOn(escapesReliedOn, uses, fail);
+  storedNeverRead(irBlocks, uses, target, fail);
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
@@ -812,6 +807,7 @@ interface FrameUses {
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
   readonly fixed: readonly {
+    readonly op: Op;
     readonly at: number;
     readonly width: number;
     readonly isLoad: boolean;
@@ -926,12 +922,13 @@ function classifyFrameUses({
   // …and without it, the first such access, which the per-object model refuses once the model is
   // chosen (`chooseFrameModel`)
   let memberRefusal: string | undefined;
-  // …and in either model, every fixed-offset access as the frame bytes it touches, whether it
-  // reads them, and whether its address is this frame's on every path — what `storedNeverRead`
-  // asks of a frame beside a guessed call
-  const fixed: { at: number; width: number; isLoad: boolean; frameOnly: boolean }[] = [];
+  // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
+  // touches, whether it reads them, and whether its address is this frame's on every path — what
+  // `storedNeverRead` asks of a frame that makes a call
+  const fixed: { op: Op; at: number; width: number; isLoad: boolean; frameOnly: boolean }[] = [];
   const scalar = (kind: string, op: Op, off: number, v: Value): void => {
     fixed.push({
+      op,
       at: off + (op.attrs.off as number),
       width: op.attrs.width as number,
       isLoad: kind === 'load',
@@ -1351,30 +1348,22 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
  *  object by its own rules — two types at one byte are a union there, or refuse. Where the answer
  *  is not on offer, each refuses where it stands.
  *
- *  EXCEPT A WORD THROUGH A CAPTURE BESIDE A GUESSED CALL, where nothing escapes. That refusal
- *  (`memberRefusal`) is the outgoing-argument guard: `ldr`/`str` have an `[sp,#imm]` form, so a word
- *  reached through `mov rD, sp` is a block copy, and agbcc copies a by-value struct ARGUMENT into
- *  the outgoing words that way — `th(1, 2, 3, 4, *p)` is `mov r0, sp / ldmia r1! / stmia r0! /
- *  bl th`, the address escaping nowhere. Kept as one object, those stores are a local's and the
- *  call loses every stack word, silently, wherever `th`'s arity is guessed (registers alone,
- *  `guessedCalls`). A callee a prototype states is safe: the stack-argument analysis holds each
- *  word it takes to an `[sp,#k]` store, and the one object is declared above that block. So with
- *  no escape the word refusal is offered only where no call is guessed; where an address escapes,
- *  the answer is offered as it was before this rule. An argument built in place a byte or a
- *  halfword at a time is every access at +0 of its own capture and never meets this refusal —
- *  `storedNeverRead`, the stage after this one, refuses it in either model. */
+ *  A frame nothing escapes from can still hold a CALL'S STACK ARGUMENT: agbcc builds one it cannot
+ *  place with `str rX, [sp,#k]` through `mov rD, sp` — a by-value struct block-copied with
+ *  `ldmia`/`stmia`, a compound literal stored a byte or a halfword at a time — and the address
+ *  escapes nowhere. Kept here as a local, in either model, those stores outlive the call that took
+ *  them. That is `storedNeverRead`'s to refuse, the stage after this one, and it asks it of every
+ *  call, whatever a prototype says. */
 function chooseFrameModel({
   oneObject,
   uses,
   windows,
-  guessedCalls,
   returnsWithoutHiddenPointer,
   fail,
 }: {
   oneObject: FrameRange | undefined;
   uses: FrameUses;
   windows: ReadonlyMap<number, ReadWindow>;
-  guessedCalls: ReadonlySet<Op>;
   returnsWithoutHiddenPointer: (callee: string) => boolean;
   fail: Refuse;
 }): ModelChoice {
@@ -1397,49 +1386,191 @@ function chooseFrameModel({
     withheld: (why) => (writer === null ? why : `${why} — and the one object cannot hold every writer: ${writer}`),
   };
   if (uses.memberRefusal !== undefined) {
-    if (escapeFree && guessedCalls.size > 0) {
-      fail(uses.memberRefusal);
-    }
     model.shapeRefused(uses.memberRefusal);
   }
   return model;
 }
 
-/** A FRAME STORE NOTHING HERE READS, BESIDE A CALL WHOSE ARITY IS GUESSED, IS THAT CALL'S STACK
- *  ARGUMENT AS FAR AS ANYONE HERE CAN TELL — refuse. A guessed call (`guessedCalls`) counts
- *  argument registers alone, so the words it takes from the outgoing block are invisible to the
- *  lift, and agbcc builds an argument it cannot place with `str rX, [sp,#k]` IN PLACE through a
- *  capture: a by-value struct is `mov rD, sp` + `stmia`, a compound literal is `strb`/`strh`
- *  through `mov rD, sp` moved by `add rD, #k` — every access at +0 of its own capture, so
- *  `memberRefusal` never sees it. Whatever model then holds those bytes, a local per capture or
+/** A FRAME STORE THAT REACHES A CALL UNREAD, BENEATH EVERY WORD PROVEN A LOCAL, MAY BE THAT
+ *  CALL'S STACK ARGUMENT — refuse. agbcc builds an argument it cannot place with `str rX, [sp,#k]`
+ *  IN PLACE through a capture: a by-value struct is `mov rD, sp` + `stmia`, a compound literal is
+ *  `strb`/`strh` through `mov rD, sp` moved by `add rD, #k`. The stack-argument analysis
+ *  (stackargs.ts) sees `[sp,#k]` slot stores alone, so it never weighs these, and no prototype
+ *  bounds them: a callee no prototype states counts argument registers alone, and a stated list is
+ *  a LOWER bound on the words a call takes — a variadic callee's list is a prefix, and DWARF's
+ *  `symbolPrototype` drops the `...`. Whatever model then holds the bytes, a local per capture or
  *  the one object, keeps the stores and the call loses its stack words:
- *  `th(1, 2, 3, 4, (struct S){{x, y}})` lifts as `th(1, 2, 3, 4)`.
+ *  `th(1, 2, 3, 4, (struct S){{x, y}})` lifts as `th(1, 2, 3, 4)`. So this asks EVERY call.
  *
- *  What tells such a store from a local's is that nothing in this function reads it: no
- *  fixed-offset load covers any byte it wrote, no runtime index reaches it from an object at or
- *  below it, and no escaped address at or below it hands it to anyone who could. A store through a
- *  pointer that is the frame's on only some paths (`*(p ? p : &local) = x`) is not asked: it is
- *  not a store the outgoing block alone can own. A store into a local the source wrote and never
- *  read is the one honest shape this refuses too, and only beside a guessed call; a callee a
- *  prototype states is the stack-argument analysis' to judge, so with no guessed call this asks
- *  nothing. */
-function storedNeverRead(uses: FrameUses, guessedCalls: ReadonlySet<Op>, fail: Refuse): void {
-  if (guessedCalls.size === 0) {
+ *  A store is asked when it reaches a call PENDING — on some path from it to the call nothing loads
+ *  a byte it wrote, and on EVERY path from the entry some byte of it is written by such a store and
+ *  not loaded since — since a word the callee takes is one the caller wrote for it on every path
+ *  to the call and did not read back. A store through a pointer that is the
+ *  frame's on only some paths (`*(p ? p : &local) = x`) is not asked: it is not a store the
+ *  outgoing block alone can own. Nor is a store a runtime index or an escaped address reaches from
+ *  an object at or below it: whoever that hands the bytes to may read them.
+ *
+ *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND, the outgoing-argument theorem stackargs' own
+ *  `survivorBound` states. Under `localsAboveOutgoingArea` a compiler keeps one outgoing area at the
+ *  frame bottom, below every local, and never reads it back after a call; so a frame byte loaded
+ *  after a call before anything re-stores it held a value across that call, its word is a local's,
+ *  and so is every word above it. Every compiled outgoing-argument shape sits beneath any such
+ *  bound, and a local the source reads after a call does not: `g(); b[0] = x; b[1] = y;
+ *  return b[0];` reaches no call, `b[0] = x; g(); return b[0];` is above the bound. What this still
+ *  refuses that is honest is a local the source stores, never reads back, and calls past — a dead
+ *  local and an outgoing argument are the same machine code, and the lift cannot tell which.
+ *  The loads weighed are this audit's fixed accesses alone — a `[sp,#k]` slot load is the slot
+ *  model's and not seen here — so the bound sits at or above stackargs' own, which only asks more.
+ *  Without the premise the bound proves nothing, and every pending store is asked. */
+function storedNeverRead(irBlocks: readonly Block[], uses: FrameUses, target: TargetDescription, fail: Refuse): void {
+  const calls = irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'call'));
+  if (calls.length === 0) {
     return;
   }
-  const reachedFrom = Math.min(...uses.escaped, ...uses.indexed.keys());
+  const byOp = new Map(uses.fixed.map((a) => [a.op, a]));
   const bytes = (a: { at: number; width: number }): number[] => [...Array(a.width).keys()].map((i) => a.at + i);
-  const read = new Set(uses.fixed.filter((a) => a.isLoad).flatMap(bytes));
-  const unread = uses.fixed.find(
-    (a) => !a.isLoad && a.frameOnly && a.at + a.width <= reachedFrom && !bytes(a).some((b) => read.has(b)),
+  const index = new Map(irBlocks.map((b, i) => [b, i]));
+  const succs = irBlocks.map((b) => successorsOf(b).map((s) => index.get(s)!));
+  const live = new Set(irBlocks.length > 0 ? [0] : []);
+  for (const stack = [...live]; stack.length;) {
+    for (const s of succs[stack.pop()!]) {
+      if (!live.has(s)) {
+        live.add(s);
+        stack.push(s);
+      }
+    }
+  }
+
+  // THE SURVIVOR BOUND: a backward liveness over the frame bytes this function reads at fixed
+  // offsets through an address that is the frame's on every path. A load makes its bytes live, a
+  // store that writes them kills them, and a call is transparent but marks every byte live across
+  // it. A load whose address may be elsewhere proves nothing and a store that may write elsewhere
+  // kills nothing; nor does a block the entry cannot reach, as in `survivorBound`.
+  let bound = Infinity;
+  if (target.compilerBehaviors.localsAboveOutgoingArea === true) {
+    const liveIn = irBlocks.map(() => new Set<number>());
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let b = irBlocks.length - 1; b >= 0; b--) {
+        if (!live.has(b)) {
+          continue;
+        }
+        const cur = new Set(succs[b].flatMap((s) => [...liveIn[s]]));
+        for (const op of [...irBlocks[b].ops].reverse()) {
+          const a = byOp.get(op);
+          if (op.opcode === 'call') {
+            for (const o of cur) {
+              bound = Math.min(bound, o - (o % 4));
+            }
+          } else if (a?.frameOnly) {
+            for (const o of bytes(a)) {
+              if (a.isLoad) {
+                cur.add(o);
+              } else {
+                cur.delete(o);
+              }
+            }
+          }
+        }
+        if ([...cur].some((o) => !liveIn[b].has(o))) {
+          liveIn[b] = cur;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // THE PENDING STORES, two forward dataflows from the entry over the blocks it reaches. The MAY
+  // set is the stores this asks that some path brings to a point unread: a load of any byte a
+  // store wrote ends it — an argument is a word the caller writes and never reads, so a store
+  // with any byte read is a local's — as a frame store covering every byte it wrote does. The
+  // MUST set is the bytes every path brings to a point written by a store this asks and not
+  // loaded since: a load ends the bytes it reads, a frame store the bytes it writes, and a store
+  // that may write elsewhere ends nothing. An argument is staged on EVERY path to its call — a
+  // tail-merged call is staged in each predecessor — so a byte some path reaches the call without
+  // is not this call's to take: a loop's store that the first trip calls past is a local's.
+  const reachedFrom = Math.min(...uses.escaped, ...uses.indexed.keys());
+  type Fixed = FrameUses['fixed'][number];
+  const asked = (a: Fixed): boolean => !a.isLoad && a.frameOnly && a.at + a.width <= reachedFrom && a.at < bound;
+  interface Pending {
+    may: Set<Fixed>;
+    must: Set<number>;
+  }
+  const step = (op: Op, cur: Pending): void => {
+    const a = byOp.get(op);
+    if (a === undefined) {
+      return;
+    }
+    const touched = new Set(bytes(a));
+    for (const p of [...cur.may]) {
+      const mine = bytes(p);
+      if (a.isLoad ? mine.some((o) => touched.has(o)) : a.frameOnly && mine.every((o) => touched.has(o))) {
+        cur.may.delete(p);
+      }
+    }
+    if (a.isLoad || a.frameOnly) {
+      for (const o of touched) {
+        cur.must.delete(o);
+      }
+    }
+    if (asked(a)) {
+      cur.may.add(a);
+      for (const o of touched) {
+        cur.must.add(o);
+      }
+    }
+  };
+  const into: (Pending | undefined)[] = irBlocks.map((_, b) =>
+    b === 0 ? { may: new Set(), must: new Set() } : undefined,
   );
-  if (unread !== undefined) {
-    const call = [...guessedCalls][0].attrs.target;
-    fail(
-      `the ${unread.width}-byte store at [sp,#${unread.at}) through a captured address is never read here, beside ` +
-        `a call whose arity is guessed${typeof call === 'string' ? ` (\`${call}\`)` : ''} — it may be that ` +
-        "call's stack argument, which the lift would drop",
-    );
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 0; b < irBlocks.length; b++) {
+      const at = into[b];
+      if (!live.has(b) || at === undefined) {
+        continue;
+      }
+      const cur: Pending = { may: new Set(at.may), must: new Set(at.must) };
+      irBlocks[b].ops.forEach((op) => step(op, cur));
+      for (const s of succs[b]) {
+        const old = into[s];
+        if (s === 0) {
+          continue;
+        }
+        if (old === undefined) {
+          into[s] = { may: new Set(cur.may), must: new Set(cur.must) };
+          changed = true;
+          continue;
+        }
+        const may = new Set([...old.may, ...cur.may]);
+        const must = new Set([...old.must].filter((o) => cur.must.has(o)));
+        if (may.size !== old.may.size || must.size !== old.must.size) {
+          into[s] = { may, must };
+          changed = true;
+        }
+      }
+    }
+  }
+  for (let b = 0; b < irBlocks.length; b++) {
+    const at = into[b];
+    if (!live.has(b) || at === undefined) {
+      continue;
+    }
+    const cur: Pending = { may: new Set(at.may), must: new Set(at.must) };
+    for (const op of irBlocks[b].ops) {
+      if (op.opcode === 'call') {
+        const store = [...cur.may].filter((p) => bytes(p).some((o) => cur.must.has(o))).sort((x, y) => x.at - y.at)[0];
+        if (store !== undefined) {
+          const callee = calleeName(op);
+          fail(
+            `the ${store.width}-byte store at [sp,#${store.at}) through a captured address reaches the call to ` +
+              `${callee === undefined ? 'an indirect callee' : `\`${callee}\``} unread on every path, and no load ` +
+              "after a call proves it a local's — it may be that call's stack argument, which the lift would drop",
+          );
+        }
+      }
+      step(op, cur);
+    }
   }
 }
 

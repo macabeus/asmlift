@@ -77,7 +77,6 @@ const shape = (
     oneObject: undefined,
     uses,
     windows,
-    guessedCalls: new Set(),
     returnsWithoutHiddenPointer: declaresNoHiddenPointer,
     fail,
   });
@@ -288,7 +287,6 @@ describe('chooseFrameModel', () => {
       oneObject: undefined,
       uses,
       windows: escapeWindows([blk], uses, flow, facts, ARMV4T_AGBCC),
-      guessedCalls: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       fail,
     });
@@ -312,7 +310,6 @@ describe('chooseFrameModel', () => {
       oneObject: undefined,
       uses,
       windows,
-      guessedCalls: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       fail,
     });
@@ -352,7 +349,6 @@ describe('chooseFrameModel', () => {
       oneObject: undefined,
       uses,
       windows,
-      guessedCalls: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       fail,
     });
@@ -465,7 +461,6 @@ describe('keepAsOneObject', () => {
       usedSlotOffsets: new Set(),
       capturedObjectIsTheWholeFrame: false,
       movedCaptures: new Set(),
-      guessedCalls: new Set(),
       returnsWithoutHiddenPointer: declaresNoHiddenPointer,
       symbols: undefined,
       target: ARMV4T_AGBCC,

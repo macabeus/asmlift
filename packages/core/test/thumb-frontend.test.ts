@@ -3802,14 +3802,19 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tsub\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
-    // a word at a nonzero offset through the capture, beside a call no prototype states: it may be
-    // that callee's stack argument (frame-objects.ts `chooseFrameModel`)…
+    // a word at a nonzero offset through the capture that reaches a call unread: it may be that
+    // callee's stack argument, whether or not a prototype states it, since a stated list is a lower
+    // bound (frame-objects.ts `storedNeverRead`)…
     const wordAt4 = '\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n';
-    expect(() => decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(laddr);
-    // …and with no call, or with every call declared, it is a word of the one object
-    expect(decompile('f', wrap(wordAt4), ARMV4T_AGBCC).source).toContain('((s32 *)sp0)[1] = a0;');
     const g1 = { prototypes: { g: { params: 1 } } };
-    expect(decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC, g1).source).toContain('((s32 *)sp0)[1] = a0;');
+    expect(() => decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(laddr);
+    expect(() => decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC, g1)).toThrow(
+      /the 4-byte store at \[sp,#4\) through a captured address reaches the call to `g` unread on every path/,
+    );
+    // …and with no call, or read back after it, it is a word of the one object
+    expect(decompile('f', wrap(wordAt4), ARMV4T_AGBCC).source).toContain('((s32 *)sp0)[1] = a0;');
+    const readBack = `${wordAt4}\tbl\tg\n\tldr\tr0, [r4, #0x4]\n`;
+    expect(decompile('f', wrap(readBack), ARMV4T_AGBCC, g1).source).toContain('((s32 *)sp0)[1] = a0;');
     // overlap with an SSA slot: one byte, two models — refused where the address escapes to a
     // writer the one object cannot hold (a callee taking it at argument 0 with nothing said of its
     // return)…
@@ -3955,7 +3960,9 @@ describe('a frame address that escapes explains the stores it hands over', () =>
       '\tstmia\tr1!, {r2, r3, r4}\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n\tmov\tr0, #0x1\n' +
       '\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\ttw6\n\tadd\tsp, sp, #0x18\n\tpop\t{r4}\n' +
       '\tpop\t{r0}\n\tbx\tr0\n';
-    expect(() => decompile('q6', q6, ARMV4T_AGBCC)).toThrow(/a store at \[\+4\] through the captured address/);
+    expect(() => decompile('q6', q6, ARMV4T_AGBCC)).toThrow(
+      /the 4-byte store at \[sp,#0\) through a captured address reaches the call to `tw6` unread on every path/,
+    );
   });
 });
 
