@@ -589,7 +589,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
       // KEPT AS ONE OBJECT, a wider index is spelled through a cast on the bytes, as a member is.
       // What it must agree with is every wider access it may reach — all of them, since it names
-      // no byte — and agbcc's alias sets say what agreeing is: one set per integer width,
+      // no byte — and agbcc's alias sets say what agreeing is: one set per integer type,
       // signedness shared, a character type in every set (`indexedWidth`).
       test('kept as one object, a wider index reads through a cast at its own byte offset', () => {
         // the index is not scaled, so the halfword is at byte `a0`, not element `a0`

@@ -235,10 +235,8 @@ export function recognizeStructArrays(fn: Fn, aggregateBoundary: number | undefi
       maxAlign = Math.max(maxAlign, width);
     }
     // The DECLARED struct is rounded to its widest member AND to the compiler's aggregate
-    // boundary; a stride neither divides is one `sizeof` cannot reproduce. On agbcc a stride-6
-    // `u16 t[N][3]` row recompiled as an Elem struct indexes at 8 — a read from the wrong bytes
-    // and a store past a frame buffer sized from the asm (sa3 sub_8038910, `lsl r4, r1, #3`).
-    // An unmeasured boundary sizes no struct at all, so it declines every group.
+    // boundary; a stride neither divides is one `sizeof` cannot reproduce, and recompiled it reads
+    // the wrong bytes and stores past a frame buffer sized from the asm (sa3 sub_8038910).
     if (aggregateBoundary === undefined || stride % Math.max(maxAlign, aggregateBoundary) !== 0) {
       clean = false;
     }

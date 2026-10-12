@@ -111,8 +111,8 @@ export function localAddresses(sfn: SFn): {
  *
  *  OVER-WIDE ON PURPOSE, and what it costs is measured: a store to a DEVICE register counts as an
  *  escape, since the tree cannot tell a DMA source register (`REG_DMA3SAD = sp0;`, the GBA's fill
- *  idiom) from memory a later load reads back. On kleod:PauseMenuScreenHandler that refuses all
- *  560 of its `/ptr-field` candidates (8800 → 8240), none of which was its winner. */
+ *  idiom) from memory a later load reads back. On kleod:PauseMenuScreenHandler that refuses every
+ *  `/ptr-field` candidate, none of which was its winner. */
 export function localStorageEscapesWritten(sfn: SFn): boolean {
   const { isAddress, accessAddress } = localAddresses(sfn);
   const storage = nameStorage(sfn);

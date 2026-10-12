@@ -1094,30 +1094,21 @@ function indexedAccess(
 
 /** The one width wider than a byte that runtime-indexed accesses take, or why there is not one.
  *
- *  A runtime index names no byte, so the type an indexed access is spelled at must agree with
- *  every access it may reach — and what "agree" means is what lets agbcc reorder two of them.
- *  At -O2 it runs type-based alias analysis (toplev.c:3616), and its alias sets
- *  (`c_get_alias_set`, c-common.c:1892-2005) give the signed and unsigned integer of one width one
- *  set, a character type set 0 (which conflicts with every set), a member access its member's
- *  type's set, and any other type — a pointer included — a new set of its own. So a byte access
- *  reaches anything, and wider accesses of ONE width reach each other whatever their signedness.
+ *  A runtime index names no byte, so its access type must agree with every access it may reach,
+ *  and "agree" is what stops agbcc reordering two of them. At -O2 it runs type-based alias
+ *  analysis (toplev.c:3616), and `c_get_alias_set` (c-common.c:1892-2005) gives an integer type
+ *  and its unsigned twin one set, a character type set 0 (conflicting with every set), a
+ *  member access its member's type's set, and any other type — a pointer included — a new set.
  *  Compiled at the corpus's flags, `k(sp0); ((int *)sp0)[i] = 1; ((T *)sp0)[j] = 0; return
  *  ((int *)sp0)[i];` reloads the word for T = int, unsigned int and unsigned char, and returns the
  *  stale 1 for T = unsigned short, void * and long.
  *
- *  So ONE WIDTH IS ONE SET only while every access of that width is spelled as the same integer
- *  type, and it is the type the access READS AT that carries the set, not the cast that reaches
- *  it. Two spellings reach the bytes: a cast on the storage to the access's own `s32`/`u32` (`int`
- *  and `unsigned int` in every agbcc project's headers), and — for the indexed pairs
- *  raise/struct-arrays groups — a member of an element struct cast over the storage
- *  (`((struct Elem0 *)sp0)[i].field_0`), whose set is its FIELD's type. So both must be an
- *  integer, never the pointer an element may hold: the first is pinned over a whole fan by the
- *  pointer-array test in `frame-base-copy.test.ts`, the second by its element-struct fan test and
- *  by `/ptr-field`'s `over-local-storage` gate (l3/ptrfield.ts), which keeps a field selected out
- *  of a local array an integer. Every respelled tree is held to it by contracts.ts
- *  `assertLocalStorageStaysInteger`, so a later variation that re-types the bytes fails at its
- *  own stage rather than reading stale in a candidate. The storage stays `u8 name[n]` whatever
- *  the width, and the stride is not the licence: the alias sets are. */
+ *  So ONE WIDTH IS ONE SET only while every access of that width READS AT one integer type or its
+ *  twin: a cast on the storage to `s32`/`u32` (`int`/`unsigned int` in every agbcc project), or a
+ *  member of an element struct (raise/struct-arrays) whose FIELD is such an integer — never the pointer an element
+ *  may hold. `/ptr-field`'s `over-local-storage` gate keeps such a field an integer, and contracts.ts
+ *  `assertLocalStorageStaysInteger` holds every respelled tree to it. The storage stays
+ *  `u8 name[n]` whatever the width. */
 function indexedWidth(accesses: readonly { readonly width: number }[]): {
   width: number | null;
   refusal: string | null;
@@ -1802,10 +1793,8 @@ function objectShapes({
         continue;
       }
       // An indexed access reads THROUGH A CAST on the storage declared below, at its own width
-      // and signedness, as an access to the one object does (`keepAsOneObject`). So what must
-      // hold is what lets a cast spelling stand — the accesses wider than a byte are of one width,
-      // one alias set (`indexedWidth`) — and a wider element is not another array over the same
-      // bytes but the same bytes read wider.
+      // and signedness, as an access to the one object does (`keepAsOneObject`), so the accesses
+      // wider than a byte must be of one width, one alias set (`indexedWidth`).
       const index = indexedWidth(byIndex);
       if (index.refusal !== null) {
         model.shapeRefused(`a runtime index into the object at [sp,#${off}) ${index.refusal}`);
