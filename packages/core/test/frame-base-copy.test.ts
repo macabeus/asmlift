@@ -312,12 +312,16 @@ describe('the audit judges each frame object on its own bytes', () => {
     );
   });
 
-  test('an object overlapping an SSA slot declines', () => {
+  test('an object overlapping an SSA slot is never two models', () => {
     // the slot model keeps [sp,#4] in a register, so a store through the object would never be
-    // seen there — the two models would disagree about the same four bytes, silently
+    // seen there — the two models would disagree about the same four bytes, silently. Where an
+    // escape names a writer the one object cannot hold, that refuses (the next test, `atArg0`);
+    // where nothing escapes, the bytes are kept as one object in memory and judged by its rules —
+    // here a word and a halfword at one byte
     expect(() => lift(DISJOINT)).not.toThrow();
-    expect(() => lift(frame(`\tstr\tr0, [sp, #0x4]\n${OBJ}\tldr\tr2, [sp, #0x4]\n\tadd\tr0, r0, r2\n`))).toThrow(
-      /overlaps the SSA slot/,
+    const over = frame(`\tstr\tr0, [sp, #0x4]\n${OBJ}\tldr\tr2, [sp, #0x4]\n\tadd\tr0, r0, r2\n`);
+    expect(() => lift(over)).toThrow(
+      /the byte at \[sp,#4\] of the bytes \[sp,#0\) to \[sp,#8\) kept as one object is accessed 4 and 2 bytes wide/,
     );
   });
 
@@ -735,15 +739,16 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => liftWith(fill())).not.toThrow();
         const kept = `${STAGED}\tstr\tr4, [sp, #0x14]\n`;
         const keyed = fill('0x10', kept).replace('\tbl\th\n', '\tbl\th\n\tldr\tr0, [sp, #0x14]\n');
-        // judged per object where nothing reaches the frame without bound: the object only indexed
-        // here, never handed out, and `g` given its staged arguments alone
+        // and where nothing reaches the frame at all — the object only indexed here, never handed
+        // out, and `g` given its staged arguments alone — the slot is no second model either
         const indexedOnly = copy(
           `${kept}\tmov\tr0, #0x0\n\tmov\tr1, #0x0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x0\n\tbl\tg\n` +
             '\tadd\tr1, sp, #0x10\n\tldrb\tr0, [r1, r0]\n\tldr\tr1, [sp, #0x14]\n\tadd\tr0, r0, r1\n',
           '0x18',
         );
-        expect(() => liftWith(indexedOnly)).toThrow(
-          /the object at \[sp,#16\) overlaps the SSA slot at \[sp,#20\] — one byte, two models$/,
+        // …it is kept as one object, the slot a word of it, the uninitialised store kept
+        expect(liftWith(indexedOnly).source).toContain(
+          '((s32 *)sp16)[1] = uninit_r4;\n    return ((u8 *)sp16)[g(0, 0, 0, 0, 8, 2, 15, a0)] + ((s32 *)sp16)[1];',
         );
         expect(liftWith(keyed).source).toContain('return ((s32 *)sp16)[1];');
       });
@@ -816,5 +821,47 @@ describe('the audit judges each frame object on its own bytes', () => {
     ).source;
     expect(src).toContain('s32 sp0;');
     expect(src).toContain('u16 sp4;');
+  });
+});
+
+// A BY-VALUE STRUCT PARAMETER is spilled word by word — `str r0, [sp]`, a store the slot model keys —
+// and, Thumb having no sp-relative halfword or byte load, read member by member through `mov rD, sp`,
+// which the audit splits into objects. So the objects lie over slots, and nothing escapes: no call
+// takes a frame address and none is stored anywhere. With no writer and no reader but this
+// function's own accesses, the declared area is kept as ONE object in memory, every spill a store
+// to it, rather than declined as two models of one byte. Verbatim agbcc 2.9-arm-000512 at the
+// corpus's flags.
+describe('a frame nothing escapes from is one object where the slot model and an object meet', () => {
+  const byValue = (reads: string) =>
+    `f:\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n${reads}` +
+    '\tadd\tsp, sp, #0xc\n\tbx\tlr\n';
+  // `struct Q { u8 a[9]; }; int f(struct Q p, int i){ return p.a[1] + p.a[8]; }`
+  const BYTES = byValue(
+    '\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x1]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tadd\tr0, r0, r1\n',
+  );
+
+  test('word spills read back as bytes lift, every spill kept', () => {
+    const src = lift(BYTES).source;
+    expect(src).toContain('u8 sp0[12];');
+    expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;\n    return p1[1] + p1[8];');
+  });
+
+  test('an escape keeps the per-object refusal', () => {
+    // the same frame with its base handed to a callee nothing says the return of: a writer the one
+    // object cannot hold, so the overlap is refused where it stands
+    const handed = BYTES.replace('\tadd\tr0, r0, r1\n', '\tadd\tr0, r0, r1\n\tmov\tr0, sp\n\tbl\tg\n');
+    expect(handed).not.toBe(BYTES);
+    expect(() => lift(handed)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+  });
+
+  test('word spills read back as halfwords are two widths at one byte', () => {
+    // `struct P { u16 a, b, c, d; s8 e; }; int f(struct P p){ return p.a + p.c - p.e; }`
+    const halves = byValue(
+      '\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tmov\tr1, sp\n\tldrh\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1\n' +
+        '\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tlsl\tr1, r1, #24\n\tasr\tr1, r1, #24\n\tsub\tr0, r0, r1\n',
+    );
+    expect(() => lift(halves)).toThrow(
+      /the byte at \[sp,#0\] of the bytes \[sp,#0\) to \[sp,#12\) kept as one object is accessed 4 and 2 bytes wide/,
+    );
   });
 });

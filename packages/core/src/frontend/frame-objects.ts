@@ -254,8 +254,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     nothing else types — bytes, or ONE wider width, read through a cast on the bytes
  *     (`indexedWidth`) — and its bytes must belong to nothing else in the frame;
  *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
- *     that answer can hold (`writerNotKept`; `oneObject`, which this answers and the frontend
- *     lifts again with): the local area is one `u8` array in memory, every fixed-offset access in
+ *     that answer can hold (`writerNotKept`), or where no address escapes at all and an object
+ *     lies over a slot (`oneObject`, which this answers and the frontend lifts again with): the
+ *     local area is one `u8` array in memory, every fixed-offset access in
  *     it is a member at its own offset, a runtime index may reach it at a byte or at ONE wider
  *     width (`indexedWidth`), and two widths at one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
@@ -343,6 +344,18 @@ export function auditFrameObjects({
     e.hi === Infinity &&
     (e.objectReached !== undefined || e.slotReached !== undefined || e.unaccountedWord !== undefined);
   if (model.onOffer && (model.refused || shapes.overSlot.length > 0 || escapes.some(answered))) {
+    return { oneObject: { from: declared.from, to: declared.to } };
+  }
+  // …AND WHERE NO ADDRESS ESCAPES AT ALL, an object over a slot asks for the same answer. With no
+  // escape there is no writer and no reader but this function's own accesses, so keeping every word
+  // of the declared area in memory keeps every store and every load the machine made there — a
+  // spill kept in memory changes no value. That is the frame a by-value struct parameter leaves:
+  // agbcc spills its registers word by word (`str r1, [sp]`, the slot model's) and, Thumb having
+  // no sp-relative halfword or byte load, reads its members through `mov rD, sp` (the object's) —
+  // `int f(struct Q { u8 a[9]; } p){ return p.a[1] + p.a[8]; }`. Only an object over a slot: every
+  // other per-object refusal stands where nothing escapes, and the second audit judges the bytes
+  // by its own rules (`keepAsOneObject`), two widths at one byte included.
+  if (uses.escaped.size === 0 && shapes.overSlot.length > 0) {
     return { oneObject: { from: declared.from, to: declared.to } };
   }
   const failWithheld: Refuse = (why) => fail(model.withheld(why));
@@ -1711,8 +1724,9 @@ function slotKeys(usedSlotOffsets: ReadonlySet<number>, off: number, width: numb
  *  AN OBJECT OVER A SLOT IS REFUSED LAST, after the one-object answer is asked: that answer
  *  routes every word of the local area through `laddr`, so no slot is left for the object to
  *  overlap, and refusing first would decline exactly the frames it exists for — an object at
- *  [sp,#0] whose first member is a word stored `str rN, [sp]`. The other per-object refusals here
- *  go through `shapeRefused`, for the same reason. */
+ *  [sp,#0] whose first member is a word stored `str rN, [sp]`, or a by-value struct parameter
+ *  spilled word by word and read through `mov rD, sp` where nothing escapes. The other per-object
+ *  refusals here go through `shapeRefused`, for the same reason. */
 function objectShapes({
   objects,
   uses,
