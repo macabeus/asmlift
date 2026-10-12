@@ -1272,6 +1272,23 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'int sw_jtret(int,int*);',
   },
+  // …AND ONE WHOSE RETURNING ARM REACHES NO TAIL AT ALL. `case 2` returns unconditionally, so no
+  // other successor reaches its `ret` and the every-successor reading that ends `sw_jtret`'s switch
+  // has nothing to intersect: the default block joins the siblings and the seven `break`s all read
+  // as falling into it. The structurer's default-anchored retry ends the switch where the other arms
+  // meet, the source's `return 0;`. The arms write distinct slots, so no compiler sinks them into
+  // one shared store. `pokeemerald:SaveOnMysteryGiftMenu:agbcc` is the real inhabitant; this row
+  // keeps the step from being proven on Thumb alone. On KMC and gcc 2.7.2 that holds only with
+  // `return 0;` directly after the switch: given a tail statement (`p[8]=1;`) they cross-jump a
+  // `break` arm's delay-slot `li v0,1` into the middle of it, which declines — the cross-jumped-tail
+  // family, a different capability.
+  {
+    sym: 'sw_jtisoret',
+    src: 'int sw_jtisoret(int x,int *p){ switch(x){case 0:p[0]=1;break;case 1:p[1]+=2;break;case 2:p[2]=0;return 1;case 3:p[3]-=4;break;case 4:p[4]=5;break;case 5:p[5]^=6;break;case 6:p[6]=7;break;case 7:p[7]|=8;break;} return 0; }',
+    features: ['dense', 'switch-arms'],
+    toolchains: ALL,
+    ctx: 'int sw_jtisoret(int,int*);',
+  },
 
   // ── merged value chains (several values decided by several arms, joined at one point) ───────
   // What SSA destruction has to get right. Each arm computes the same set of values, so the join

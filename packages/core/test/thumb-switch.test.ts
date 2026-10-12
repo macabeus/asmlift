@@ -387,6 +387,181 @@ test('a jump table whose arms return still has an end', () => {
   expect(count(out, 'sideB();')).toBe(1);
 });
 
+// AN ARM THAT RETURNS UNCONDITIONALLY — `case 1: sideB(); return 1;` beside arms that `break` to a
+// shared tail. Its `ret` is reached by no other successor, so the every-successor reading above has
+// nothing to intersect, the merge falls back to the enclosing stop, and the two `break` arms then
+// both "fall into" the default block — which does not linearize, so the function declined.
+// `pokeemerald:SaveOnMysteryGiftMenu:agbcc` is that shape, and so is a switch compiled from the same
+// C by IDO, KMC, gcc 2.7.2 and mwcc. The default-anchored retry leaves the lone arm out and ends the
+// switch where the others meet.
+const UNCONDITIONAL_RETURN = '\tbl\tsideB\n\tmov\tr0, #1\n\tbx\tlr\n';
+
+test('a jump-table arm that returns on its own leaves the other arms an end', () => {
+  const out = decompile('f', returningArms(UNCONDITIONAL_RETURN), ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (');
+  // the two arms that reach the tail end in `break`; the returning arm ends in its own `return`
+  expect(count(out, 'break;')).toBe(2);
+  expect(out).toMatch(/sideB\([^)]*\);\s*return 1;/);
+  // the tail runs once, after the switch, and the returning arm does not reach it
+  expect(count(out, 'sideEnd(')).toBe(1);
+  expect(out.indexOf('sideEnd(')).toBeGreaterThan(out.lastIndexOf('break;'));
+  expect(out.indexOf('sideEnd(')).toBeGreaterThan(out.indexOf('return 1;'));
+});
+
+test('an arm that returns on its own does not re-spell a switch the stop reading already spells', () => {
+  // The retry is read only where the `stop` reading DECLINES. A real fall-through into the shared
+  // tail's default (one arm, so it linearizes) keeps the stop reading's spelling: the arm runs on
+  // into the default, which carries the tail.
+  const oneFalls = returningArms(UNCONDITIONAL_RETURN).replace(
+    '.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n',
+    '.Lc2:\n\tbl\tsideC\n\tbx\tlr\n',
+  );
+  const out = decompile('f', oneFalls, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('default:');
+  expect(count(out, 'sideEnd(')).toBe(1);
+});
+
+// THE RETRY IS ANCHORED ON THE DEFAULT EDGE, not on an arm being alone. Both shapes below are agbcc
+// `-O2` output (`.s` verbatim from the function label) of C with no `default:` label, so the
+// dispatch's default edge goes straight to the code after the switch, and the retry keeps exactly
+// the arms that share a `ret` with it. IDO, KMC and gcc 2.7.2 compile the same C to the same shape.
+//
+// `int f(int x,int *p){ switch(x){case 0:p[0]=1;break;case 1:p[1]=2;case 2:p[2]=0;return 1;
+//   case 3:p[3]=4;break;case 4:p[4]=5;break;case 5:p[5]=6;break;} return 0; }` — two arms share the
+// returning `ret`, so an arm is left out for sharing no `ret` with the default edge, not for being
+// alone.
+const FALLS_INTO_RETURN =
+  'f:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x5\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L13\n' +
+  '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
+  '\t.align\t2, 0\n.L10:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n' +
+  '.L4:\n\tmov\tr0, #0x1\n\tstr\tr0, [r2]\n\tb\t.L3\n.L5:\n\tmov\tr0, #0x2\n\tstr\tr0, [r2, #0x4]\n' +
+  '.L6:\n\tmov\tr0, #0x0\n\tstr\tr0, [r2, #0x8]\n\tmov\tr0, #0x1\n\tb\t.L12\n' +
+  '.L7:\n\tmov\tr0, #0x4\n\tstr\tr0, [r2, #0xc]\n\tb\t.L3\n.L8:\n\tmov\tr0, #0x5\n\tstr\tr0, [r2, #0x10]\n\tb\t.L3\n' +
+  '.L9:\n\tmov\tr0, #0x6\n\tstr\tr0, [r2, #0x14]\n.L3:\n\tmov\tr0, #0x0\n.L12:\n\tbx\tlr\n';
+
+test('a case that falls into a returning case leaves the other arms an end', () => {
+  const out = decompile('f', FALLS_INTO_RETURN, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  // the source's own fall-through, kept: case 1 runs on into case 2, which returns
+  expect(out).toMatch(/case 1:\s*\w+\[1\] = 2;\s*case 2:\s*\w+\[2\] = 0;\s*return 1;/);
+  expect(count(out, 'break;')).toBe(4);
+  expect(out).not.toContain('default:');
+  expect(count(out, 'return 0;')).toBe(1);
+  expect(out.indexOf('return 0;')).toBeGreaterThan(out.lastIndexOf('break;'));
+});
+
+// `int f(int x,int y,int *p){ int v=y*3; switch(x){case 0: v=y+7; break; case 1: p[1]=0; return 1;
+//   … case 4: p[4]=0; return 4;} p[0]=v; return 0; }` — the stop reading LINEARIZES this one (case 0
+// alone falls into the default block) and declines later, on the switch-edge copy the fall-through
+// would re-run, so the retry is read on every refusal, not on a null chain alone.
+const VALUE_PAST_RETURNS =
+  'f:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tadd\tr3, r1, #0\n\tlsl\tr0, r3, #0x1\n\tadd\tr0, r0, r3\n' +
+  '\tcmp\tr4, #0x4\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n\tldr\tr1, .L12\n\tadd\tr0, r0, r1\n' +
+  '\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L13:\n\t.align\t2, 0\n.L12:\n\t.word\t.L9\n\t.align\t2, 0\n\t.align\t2, 0\n' +
+  '.L9:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n\t.word\t.L8\n' +
+  '.L4:\n\tadd\tr0, r3, #0x7\n\tb\t.L3\n' +
+  '.L5:\n\tmov\tr0, #0x0\n\tstr\tr0, [r2, #0x4]\n\tmov\tr0, #0x1\n\tb\t.L11\n' +
+  '.L6:\n\tmov\tr0, #0x0\n\tstr\tr0, [r2, #0x8]\n\tmov\tr0, #0x2\n\tb\t.L11\n' +
+  '.L7:\n\tmov\tr0, #0x0\n\tstr\tr0, [r2, #0xc]\n\tmov\tr0, #0x3\n\tb\t.L11\n' +
+  '.L8:\n\tmov\tr0, #0x0\n\tstr\tr0, [r2, #0x10]\n\tmov\tr0, #0x4\n\tb\t.L11\n' +
+  '.L3:\n\tstr\tr0, [r2]\n\tmov\tr0, #0x0\n.L11:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+
+test('returning arms beside one arm that carries a value past the switch end the switch past them', () => {
+  const out = decompile('f', VALUE_PAST_RETURNS, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  // case 0 sets the value and breaks; the out-of-range path takes `y * 3` in the default arm
+  expect(out).toMatch(/case 0:\s*(\w+) = \w+ \+ 7;\s*break;/);
+  expect(out).toMatch(/default:\s*\w+ = \w+ \* 3;/);
+  for (const k of [1, 2, 3, 4]) {
+    expect(out).toMatch(new RegExp(`case ${k}:\\s*\\w+\\[${k}\\] = 0;\\s*return ${k};`));
+  }
+  // the store of the carried value runs once, after the switch
+  expect(count(out, 'return 0;')).toBe(1);
+  expect(out).toMatch(/\}\s*\*\w+ = \w+;\s*return 0;/);
+});
+
+test('a retry that does not spell either leaves the stop reading its own decline', () => {
+  // agbcc's `case 0: a(); case 1: b(); break; case 2: return 1; …` with `g(x)` after the switch:
+  // the retry ends the switch where the `break`s meet, and its case 0 → case 1 fall-through then
+  // re-runs a switch-edge copy, which it refuses. Adopting it anyway would only swap the reason
+  // the function declines for another one; the decline stays the stop reading's.
+  const asm =
+    'f:\n\tpush\t{r4, lr}\n\tadd\tr4, r0, #0\n\tcmp\tr4, #0x5\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r4, #0x2\n' +
+    '\tldr\tr1, .L13\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n' +
+    '\t.word\t.L10\n\t.align\t2, 0\n\t.align\t2, 0\n.L10:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L6\n' +
+    '\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n.L4:\n\tbl\ta\n.L5:\n\tbl\tb\n\tb\t.L3\n.L6:\n\tmov\tr0, #0x1\n' +
+    '\tb\t.L12\n.L7:\n\tbl\tc\n\tb\t.L3\n.L8:\n\tbl\td\n\tb\t.L3\n.L9:\n\tbl\te\n' +
+    '.L3:\n\tadd\tr0, r4, #0\n\tbl\tg\n\tmov\tr0, #0x0\n.L12:\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/case arms do not linearize/);
+});
+
+test('a default arm that returns on its own does not name where the switch ends', () => {
+  // KMC's and gcc 2.7.2's output for `switch(x){case 0:p[0]=1;break; … case 5:p[5]=6;break;
+  // default: p[9]=7; return 5;} return 0;` (case 2 unlisted), transliterated to Thumb block for
+  // block: the range check sets the stored value in its delay slot, so the default arm takes it
+  // from the switch edge, and case 2 sets it itself and falls into the default. The default edge's
+  // `ret` is the default arm's own `return 5`, and the five `break`s reach `return 0`, laid out
+  // past it. Anchoring on the default would end the switch inside the default arm and spell every
+  // `break` as `return 0;`, so the stop reading's decline stands.
+  const asm =
+    'f:\n\tmov\tr3, #0x7\n\tcmp\tr0, #0x5\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr2, .L13\n' +
+    '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
+    '\t.align\t2, 0\n.L10:\n\t.word\t.L3\n\t.word\t.L4\n\t.word\t.L8\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n' +
+    '.L3:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.L11\n.L4:\n\tmov\tr0, #0x2\n\tstr\tr0, [r1, #0x4]\n\tb\t.L11\n' +
+    '.L5:\n\tmov\tr0, #0x4\n\tstr\tr0, [r1, #0xc]\n\tb\t.L11\n.L6:\n\tmov\tr0, #0x5\n\tstr\tr0, [r1, #0x10]\n\tb\t.L11\n' +
+    '.L7:\n\tmov\tr0, #0x6\n\tstr\tr0, [r1, #0x14]\n\tb\t.L11\n' +
+    '.L8:\n\tmov\tr3, #0x7\n.L9:\n\tstr\tr3, [r1, #0x24]\n\tmov\tr0, #0x5\n\tb\t.L12\n' +
+    '.L11:\n\tmov\tr0, #0x0\n.L12:\n\tbx\tlr\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+});
+
+test('a default arm that returns on its own does not name the end beside one `break` either', () => {
+  // KMC's output for `switch(x){case 0:p[0]=1;break; case 1:p[1]=2;return 1; case 2:p[2]=3;return 2;
+  // case 3:p[3]=7;return 5; case 4:p[4]=5;return 4; default: p[3]=7; return 5;} return 0;`,
+  // transliterated block for block (case 3 cross-jumped into the default). The graph is the one
+  // a value carried past returning arms has (`VALUE_PAST_RETURNS` above); what differs is that
+  // case 0's `return 0` is laid out PAST the default's `return 5`, and the code after a switch is
+  // laid out after every arm, so the default is not where the switch ends.
+  const asm =
+    'f:\n\tmov\tr3, #0x7\n\tcmp\tr0, #0x4\n\tbhi\t.L64\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr2, .L13\n' +
+    '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
+    '\t.align\t2, 0\n.L10:\n\t.word\t.L24\n\t.word\t.L30\n\t.word\t.L40\n\t.word\t.L60\n\t.word\t.L50\n' +
+    '.L24:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.L70\n' +
+    '.L30:\n\tmov\tr0, #0x2\n\tstr\tr0, [r1, #0x4]\n\tmov\tr0, #0x1\n\tb\t.L74\n' +
+    '.L40:\n\tmov\tr0, #0x3\n\tstr\tr0, [r1, #0x8]\n\tmov\tr0, #0x2\n\tb\t.L74\n' +
+    '.L50:\n\tmov\tr0, #0x5\n\tstr\tr0, [r1, #0x10]\n\tmov\tr0, #0x4\n\tb\t.L74\n' +
+    '.L60:\n\tmov\tr3, #0x7\n.L64:\n\tstr\tr3, [r1, #0xc]\n\tmov\tr0, #0x5\n\tb\t.L74\n' +
+    '.L70:\n\tmov\tr0, #0x0\n.L74:\n\tbx\tlr\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+});
+
+test('two returning arms that share a cross-jumped tail still leave the `break` arms an end', () => {
+  // agbcc `-O2` for `switch(x){case 0:p[0]=1;break; … case 2:p[2]=1;p[9]=3;return 1; …
+  // case 5:p[5]=1;p[9]=3;return 1; case 6:p[6]=7;break; case 7:p[7]=8;break;} return 0;`. The two
+  // returning arms meet at their shared `p[9]=3; return 1` (.L15), a block that is no arm's entry,
+  // and both are laid out above the code after the switch, so that is still where it ends.
+  const asm =
+    'f:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x7\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L16\n' +
+    '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L17:\n\t.align\t2, 0\n.L16:\n\t.word\t.L12\n\t.align\t2, 0\n' +
+    '\t.align\t2, 0\n.L12:\n\t.word\t.L4\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n\t.word\t.L8\n\t.word\t.L9\n' +
+    '\t.word\t.L10\n\t.word\t.L11\n' +
+    '.L4:\n\tmov\tr0, #0x1\n\tstr\tr0, [r2]\n\tb\t.L3\n.L5:\n\tmov\tr0, #0x2\n\tstr\tr0, [r2, #0x4]\n\tb\t.L3\n' +
+    '.L6:\n\tmov\tr0, #0x1\n\tstr\tr0, [r2, #0x8]\n\tb\t.L15\n' +
+    '.L7:\n\tmov\tr0, #0x4\n\tstr\tr0, [r2, #0xc]\n\tb\t.L3\n.L8:\n\tmov\tr0, #0x5\n\tstr\tr0, [r2, #0x10]\n\tb\t.L3\n' +
+    '.L9:\n\tmov\tr0, #0x1\n\tstr\tr0, [r2, #0x14]\n' +
+    '.L15:\n\tmov\tr0, #0x3\n\tstr\tr0, [r2, #0x24]\n\tmov\tr0, #0x1\n\tb\t.L14\n' +
+    '.L10:\n\tmov\tr0, #0x7\n\tstr\tr0, [r2, #0x18]\n\tb\t.L3\n.L11:\n\tmov\tr0, #0x8\n\tstr\tr0, [r2, #0x1c]\n' +
+    '.L3:\n\tmov\tr0, #0x0\n.L14:\n\tbx\tlr\n';
+  const out = decompile('f', asm, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(count(out, 'break;')).toBe(6);
+  expect(count(out, 'return 1;')).toBe(2);
+  expect(count(out, 'return 0;')).toBe(1);
+  expect(out).toMatch(/\}\s*return 0;\s*\}\s*$/);
+});
+
 test('a table with no shared `ret` at all still falls back to the enclosing stop', () => {
   // EVERY arm returns by itself, so no `ret` is reachable from every successor and the follow is
   // null. That is the `?? stop` tail, and it must keep the shape it always had: the arms are
