@@ -3550,9 +3550,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t0x4000068\n';
     const src = decompile('f3', phiPoll, ARMV4T_AGBCC).source;
     expect(src).toContain('    u8 sp0[8];');
-    expect(src).toContain('((volatile struct Struct1 *)v1)->field_4 = 5;');
-    expect(src).toContain('} while (((volatile struct Struct1 *)v1)->field_0 != 0);');
-    expect(src).toContain('return ((volatile struct Struct1 *)v1)->field_4;');
+    expect(src).toContain('((volatile struct Struct0 *)v1)->field_4 = 5;');
+    expect(src).toContain('} while (((volatile struct Struct0 *)v1)->field_0 != 0);');
+    expect(src).toContain('return ((volatile struct Struct0 *)v1)->field_4;');
   });
 
   // A marked read executes once, as a call does: `v = REG_VCOUNT; return v * v;` is one `ldrh`,
@@ -3876,8 +3876,7 @@ describe('a frame address that escapes explains the stores it hands over', () =>
 
   test('a wide frame-base object filled for its callee lifts with every store', () => {
     expect(decompile('f0', f0, ARMV4T_AGBCC, { prototypes: G }).source).toBe(
-      'struct Struct0 { s32 field_0; s32 field_4; u8 field_8; u16 field_10; };\n' +
-        's32 f0(s32 a0, s32 a1) {\n    u8 sp0[12];\n    s32 *p0;\n    p0 = (s32 *)sp0;\n    *p0 = 0;\n' +
+      's32 f0(s32 a0, s32 a1) {\n    u8 sp0[12];\n    s32 *p0;\n    p0 = (s32 *)sp0;\n    *p0 = 0;\n' +
         '    p0[1] = a0;\n    ((u8 *)sp0)[8] = 0;\n    ((u16 *)sp0)[5] = a1;\n    return g(sp0);\n}\n',
     );
   });

@@ -409,6 +409,15 @@ export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined):
     if (base.type.kind !== 'unknown') {
       continue;
     } // already typed (not a bare recovery target)
+    // A FRAME OBJECT'S ADDRESS is never a recovery target: its declaration is the frame audit's
+    // stamp (structure.ts `laddrType` — a scalar, a `u8` array, a struct-return temp, or the union
+    // of the views its accesses use), and every access to it is spelled from that stamp, never
+    // through a type recovered here. Recovered anyway, the one-object area's accesses at several
+    // offsets and widths make a second, per-word union of the same bytes that nothing references
+    // and every candidate prints.
+    if (defs.get(base)?.opcode === 'laddr') {
+      continue;
+    }
 
     const accesses = accessesOf.get(base)!;
     if (isArray(accesses)) {

@@ -859,6 +859,9 @@ describe('a frame nothing escapes from is one object where the slot model and an
   test('word spills read back as bytes lift, every spill kept', () => {
     const src = lift(BYTES).source;
     expect(src).toContain('u8 sp0[12];');
+    // the declaration is the audit's alone: no struct is recovered over the frame object's address
+    // (raise/structs.ts), which nothing would reference
+    expect(src).not.toContain('struct Struct');
     expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;\n    return p1[1] + p1[8];');
   });
 
@@ -894,6 +897,7 @@ describe('a frame nothing escapes from is one object where the slot model and an
       '\tmov\tr0, sp\n\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n\tmov\tr1, sp\n\tldrh\tr1, [r1, #0x2]\n' +
         '\tadd\tr0, r0, r1\n\tmov\tr1, sp\n\tmov\tr2, #0x2\n\tldrsh\tr1, [r1, r2]\n\tadd\tr0, r0, r1\n',
     );
+    expect(lift(signs).source).not.toContain('struct Struct');
     expect(lift(signs).source).toContain(
       '    union { s32 word[3]; u16 uhalf[6]; s16 shalf[6]; } sp0;\n' +
         '    sp0.word[0] = a0;\n    sp0.word[1] = a1;\n    sp0.word[2] = a2;\n' +
