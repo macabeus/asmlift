@@ -758,8 +758,12 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  spells nothing either, the context entry stays.
  *
  *  AN ENTRY THAT YIELDS ITS PARAMETERS KEEPS THE RETURN IT STATES (`yieldedReturnOf`), because the
- *  map cannot state that return in the vocabulary its readers act on: `symbolPrototype` derives no
- *  `returns`, so an entry dropped whole leaves every non-void call to that name undeclared — and a
+ *  map's signature carries no `returns`. DWARF does say that a pointer, or a signed or unsigned base
+ *  type, comes back in a register; `symbolPrototype` chooses not to spell it (`FnProto.returns`: a
+ *  header states it and nothing derives it), because a spelled return also types the call's result
+ *  and prints in the candidate's declarations, and the map's `void *` is not the header's `u8 *` —
+ *  C++ does not convert it implicitly. So a map-only lift (no context) still declines this shape,
+ *  and a context entry dropped whole leaves every non-void call to that name undeclared — and a
  *  frame address handed to an undeclared callee may be its hidden struct-return pointer
  *  (`returnsWithoutHiddenPointer`). pokeemerald's `u8 *ConvertIntToDecimalStringN(u8 *, s32, enum
  *  StringConvertMode, u8)` is the measured case: its enum parameter has no width here, so the entry
@@ -804,10 +808,10 @@ function contextPrototypesUnder(
  *  definition's; the context is the header the candidate compiles against. A return the map calls
  *  `void` is that contradiction for every stated return — and the same goes for a stated `void` the
  *  map gives a value — so the map's signature is taken; so is a stated width the map's byte size
- *  disagrees with (`int` declared, `u8` defined, or a 64-bit pair against one word). That is the
- *  safe direction (`FnProto.returns`): it leaves the call as undeclared as it was before. A
- *  spelling with no width here (`enum E`) is kept and acts on nothing, as it did on the stated
- *  entry it came from. */
+ *  disagrees with (`int` declared, `u8` defined). That is the safe direction (`FnProto.returns`): it
+ *  leaves the call as undeclared as it was before. A spelling with no width here (`float`,
+ *  `double`; the context states no enum return) is kept and leaves the hidden pointer open, as it
+ *  did on the stated entry it came from. */
 function yieldedReturnOf(
   p: FnProto,
   returned: SymbolTypeFacts | null,

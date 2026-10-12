@@ -727,7 +727,7 @@ describe('a context register return under a mapped signature', () => {
   const ctx = prototypesFromContext(
     'typedef unsigned char u8; typedef signed int s32; enum Mode { M0, M1 };' +
       ' u8 *conv(u8 *dest, s32 value, enum Mode mode, u8 n); int count(enum Mode m);' +
-      ' long long wide(enum Mode m); void put(enum Mode m); u8 *gone(enum Mode m);',
+      ' int nar(enum Mode m); void put(enum Mode m); u8 *gone(enum Mode m);',
     'c',
   );
   const word = (pointer?: boolean) => ({ size: 4, signed: pointer ? null : true, ...(pointer ? { pointer } : {}) });
@@ -746,8 +746,11 @@ describe('a context register return under a mapped signature', () => {
       ],
     ],
     [0x1100, [{ name: 'count', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
-    // the definition's DWARF says one word where the header says a pair
-    [0x1200, [{ name: 'wide', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
+    // the definition's DWARF says one byte where the header says a word
+    [
+      0x1200,
+      [{ name: 'nar', kind: 'code' as const, signature: { returns: { size: 1, signed: false }, params: [word()] } }],
+    ],
     [0x1300, [{ name: 'put', kind: 'code' as const, signature: { returns: null, params: [word()] } }]],
     // the definition's DWARF says void where the header says a pointer
     [0x1400, [{ name: 'gone', kind: 'code' as const, signature: { returns: null, params: [word()] } }]],
@@ -762,7 +765,8 @@ describe('a context register return under a mapped signature', () => {
 
   test('a return the map contradicts is not kept', () => {
     // a width the definition disagrees with, and a value the definition calls void
-    expect(merged.wide).toBeUndefined();
+    expect(ctx.nar).toEqual({ params: ['enum Mode'], returns: 'int' });
+    expect(merged.nar).toBeUndefined();
     expect(merged.gone).toBeUndefined();
   });
 
