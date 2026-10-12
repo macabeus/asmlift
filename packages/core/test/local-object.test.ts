@@ -354,9 +354,9 @@ test('mwcc: an address relocation of another type, off the words, or naming no o
   expect(neg.relocs).toEqual([
     { section: '.sdata2', offset: 0, type: 'R_PPC_ADDR32', sym: 'garr', addend: 0xfffffffc },
   ]);
-  // a REL relocation's addend is the word it fills, which adds to a RELA addend (zero there)
-  expect(at('R_PPC_ADDR32', 0, 'ga', 0, [0xff, 0xff, 0xff, 0xfc])).toMatchObject({
-    relocs: [{ offset: 0, symbol: 'ga', addend: -4 }],
+  // R_PPC_ADDR32 is RELA: the linker replaces the word, so bytes under it are no part of the addend
+  expect(at('R_PPC_ADDR32', 0, 'ga', 8, [0, 0, 0, 4])).toMatchObject({
+    relocs: [{ offset: 0, symbol: 'ga', addend: 8 }],
   });
   expect(at('R_PPC_ADDR16_LO', 4, 'ga')).toEqual({
     refused: "whose initializer holds the address 'ga' by a R_PPC_ADDR16_LO relocation — no pointer's absolute address",

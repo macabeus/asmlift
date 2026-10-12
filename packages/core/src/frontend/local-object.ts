@@ -480,7 +480,8 @@ const OBJECT_SECTIONS: Readonly<Record<string, LocalObject['section']>> = {
 /** The relocations that fill a pointer-width word with a symbol's absolute address — the only kind
  *  an initializer's address constant is. Each is listed where a frontend reads its objects through
  *  this reader: mwcc's (frontend/ppc.ts); MIPS addresses a function-scope static section-relative
- *  and does not reach it. */
+ *  and does not reach it. RELA types only: the addend is read off the relocation entry alone, and a
+ *  REL type (whose addend is the word it fills) joins only with a reader of that word. */
 const ABSOLUTE_WORD: ReadonlySet<string> = new Set(['R_PPC_ADDR32']);
 
 /** Sections whose relocations describe the program for a debugger, not for the machine. */
@@ -576,13 +577,10 @@ export function readObjectLocalObject(ad: AsmData, symbol: string, fn: string): 
     if (why !== null) {
       return refused(why);
     }
-    // The word's own bytes add to the relocation's addend: they are zero under a RELA relocation and
-    // ARE the addend under a REL one (asmdata.ts reads a jump table's entries the same way).
-    const w = contents.subarray(r.offset, r.offset + POINTER_BYTES);
-    const inline = ad.bigEndian
-      ? (w[0] << 24) | (w[1] << 16) | (w[2] << 8) | w[3]
-      : (w[3] << 24) | (w[2] << 16) | (w[1] << 8) | w[0];
-    relocs.push({ offset: at, symbol: r.sym, addend: (r.addend + inline) | 0 });
+    // Every type ABSOLUTE_WORD admits is a RELA relocation: its addend is the entry's own and the
+    // linker REPLACES the word, so the bytes under it are never part of the address (mwcc writes them
+    // as zero; reading them as well would count an addend twice wherever an assembler did not).
+    relocs.push({ offset: at, symbol: r.sym, addend: r.addend | 0 });
   }
   return {
     name,
