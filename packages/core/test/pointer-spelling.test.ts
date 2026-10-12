@@ -191,7 +191,10 @@ describe('intoPtrCell', () => {
     });
     const elem: Expr = { k: 'index', base: v('t'), idx: v('a1'), width: 4, signed: false };
     expect(s.intoPtrCell(v('gP'), elem)).toEqual(cast(T.ptr(T.void()), elem));
-    expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(cast(T.ptr(T.void()), v('a1')));
+    // a cell only the body reads as a pointer may be declared `u32` (mwcc refuses `void *` into
+    // it), and a bare shape-less global's value is typed by a header this pass cannot read
+    expect(s.intoPtrCell(v('gCell'), v('a1'))).toEqual(v('a1'));
+    expect(s.intoPtrCell(v('gP'), v('gQ'))).toEqual(v('gQ'));
     // the null pointer, a `void *`, an address, and a cell that is no pointer value stay as spelled
     expect(s.intoPtrCell(v('gP'), c(0))).toEqual(c(0));
     expect(s.intoPtrCell(v('gP'), v('a0'))).toEqual(v('a0'));

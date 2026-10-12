@@ -17,7 +17,7 @@ import { renderDeclarations } from '@asmlift/core/declare';
 import { decompile } from '@asmlift/core/pipeline';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
-import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
   assembleTarget,
   compileCandAgbcc,
@@ -478,6 +478,37 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
     const r = decompile('mst', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mst'), prototypes, symbols });
     expect(r.source).toContain('gp = (void *)t[a0];');
     expect(scoreCPpc('mwcc_242_81', context + r.source, 'mst', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('a cell only the body reads as a pointer takes no cast: the project may declare it an integer', () => {
+    // The map names `gw` but gives no shape; the body dereferences it, so it reads as a pointer
+    // cell. `(void *)` into the project's `u32 gw` is "illegal implicit conversion from 'void *' to
+    // 'unsigned int'" on mwcc, where the bare value compiles.
+    const context = 'extern u32 gw;\n';
+    const c = 'void mcd(u32 x) { *(s32 *)gw = 1; gw = x * 3; }';
+    const symbols: SymbolMap = new Map([[0x80400000, [{ name: 'gw', kind: 'data', declared: true, size: 4 }]]]);
+    const prototypes = { mcd: { params: ['u32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mcd', FLAGS);
+    const r = decompile('mcd', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mcd'), prototypes, symbols });
+    expect(r.source).not.toContain('(void *)');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mcd', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('a pointer copied from a global no declaration types is stored bare, which C++ requires', () => {
+    // `gp = gq`: both pointers in the header, neither typed for asmlift. C++ refuses `(void *)gq`
+    // into an `int *` ("illegal implicit conversion from 'void *' to 'int *'").
+    const CXX = [...FLAGS, '-lang=c++'];
+    const context = 'extern s32 *gp, *gq;\n';
+    const c = 'extern "C" void cx(s32 n) { *gp = n; gp = gq; }';
+    const prototypes = { cx: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'cx', CXX);
+    const r = decompile('cx', asm, targetFor('mwcc_242_81', CXX).target, {
+      asmData: extractPpcAsmData(obj, 'cx'),
+      prototypes,
+    });
+    expect(r.source).toContain('gp = gq;');
+    const unit = `${context}extern "C" {\n${r.source}\n}`;
+    expect(scoreCPpc('mwcc_242_81', unit, 'cx', obj, CXX).match, r.source).toBe(true);
   });
 
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {
