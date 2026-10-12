@@ -99,7 +99,6 @@ import { macroDefinesUsedBy } from '@asmlift/core/macros';
 import { symbolMapToJson } from '@asmlift/core/symbols';
 import { spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
-import { cpus } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -112,6 +111,7 @@ import { REPO_ROOT, RESULTS_DIR } from './config';
 import { materializeScoringContext, writeScoreConfig } from './decomp-config';
 import { merge } from './report/merge';
 import { publish } from './report/publish';
+import { defaultJobs } from './run/default-jobs';
 import { acquireBenchLock, benchLockStatus, readBenchLock } from './run/lock';
 import { type Tier, emptySelectionError, orchestrate, tierIsFiltered } from './run/orchestrate';
 import { preflightRefusals, runIsWholeTier, runTakesTheBenchLock } from './run/preflight';
@@ -438,7 +438,7 @@ switch (command) {
       }
       reportCandCache();
     } else {
-      const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));
+      const jobs = Number(opts.jobs ?? defaultJobs());
       if (!Number.isInteger(jobs) || jobs < 1) {
         console.error(`bad --jobs ${opts.jobs}; want a positive integer`);
         process.exit(2);
@@ -709,7 +709,7 @@ switch (command) {
     break;
   }
   case 'fidelity': {
-    const jobs = Number(opts.jobs ?? Math.min(8, cpus().length));
+    const jobs = Number(opts.jobs ?? defaultJobs());
     if (!Number.isInteger(jobs) || jobs < 1) {
       console.error(`bad --jobs ${opts.jobs}`);
       process.exit(2);

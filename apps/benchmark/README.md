@@ -519,8 +519,9 @@ the `docker` group — the `asmlift-ppc` image must be built with `--platform li
 natively. KMC GCC, GCC 2.7.2 and CodeWarrior also COMPILE natively there, without a container per
 compile (`ASMLIFT_NATIVE`, same README); `bench setup` fetches the static wibo that needs, and Docker
 stays required for the snowboardkids2 build and the PowerPC objdump. A shard of `bench run` peaks at 1.3–1.7 GB on the largest candidate fans and the queue
-runs those rows first, so an 8 GB host wants `pnpm bench run --jobs 2` (the default runs
-`min(8, cpus)` shards). On macOS (verified empirically):
+runs those rows first. So without `--jobs` the run starts one shard per 2.5 GB of physical
+memory, capped at the CPU count and at 8 (`src/run/default-jobs.ts`). That is 3 on an 8 GB host,
+which needs zram or swap to absorb the peaks; pass `--jobs 2` if it has neither. On macOS (verified empirically):
 
 - Xcode CLT (`/usr/bin/cc` — host tools build with `/usr/bin` ahead of homebrew, several
   projects' host tools miscompile under homebrew gcc), plus homebrew `gmake`, `wget`, `libpng`
