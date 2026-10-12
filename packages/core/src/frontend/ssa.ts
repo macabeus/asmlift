@@ -1389,7 +1389,11 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
  *  above it is no dead leftover: `if (a) g(b, s, t)` leaves `&t` in r2 from the entry block, the call
  *  block writes only r0 and r1 (`mov r1, sp`), and cutting r2 lifts `g(a1, sp0)` with the stores to
  *  `t` excused only by the escape at offset 0. A refusal withholds this candidate for this site
- *  only; the default reading stands. */
+ *  only; the default reading stands.
+ *
+ *  NOT ASKED: a frame address an earlier block left, in a function whose verdict leans on no
+ *  escape. Where that leftover was an argument after all (`if (a) g(b, s)` with `s` left in r1),
+ *  this reading drops it, which nothing here can tell from the dead base above. */
 function narrowingKeepsFrameAddresses(s: GuessedCallSite, argRegs: readonly string[], local: number): boolean {
   const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => s.asksEveryCut || s.freshBefore.has(r));
   if (s.trimmed === undefined || cut.length === 0) {
