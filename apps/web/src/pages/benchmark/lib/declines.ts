@@ -525,13 +525,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // Keyed on the throw (`frontend/thumb.ts`, "literal-pool load of ${why} — not modelled") rather
-    // than on the one `why` the corpus printed. Seven `why`s reach it: an offset that is not
-    // spelled `+N`, an offset that is not a whole word in the pool, a numeric word that is not a
-    // 32-bit value, a symbolic word whose addend is not, a word that is not `symbol±offset` at
-    // all, and a magnitude with a leading zero (octal to the assembler) — which is TWO of the
-    // seven, once for a pool word and once for the offset its operand carries. Keying on
-    // `pool word` matched three of them, so the rest — the same capability at the same site —
-    // would arrive as unclassified.
+    // than on the one `why` the corpus printed. The pool word's shape reaches it seven ways: an
+    // offset that is not spelled `+N`, an offset that is not a whole word in the pool, a numeric
+    // word that is not a 32-bit value, a symbolic word whose addend is not, a word that is not
+    // `symbol±offset` at all, and a magnitude with a leading zero (octal to the assembler) — which
+    // is TWO of the seven, once for a pool word and once for the offset its operand carries. So does
+    // a word naming the compiler's anonymous data (agbcc's `.LC0`) that is no constant image a local
+    // is copied from: one whose initializer holds an address, or one the reader cannot define
+    // (frontend/local-object.ts `readGasAnonymousObject`). Keying on `pool word` matched three of the
+    // shapes, so the rest — the same capability at the same site — would arrive as unclassified.
     key: 'pool-word-shape',
     label: 'Literal-pool words the reader cannot resolve',
     pattern: /literal-pool load of/,
