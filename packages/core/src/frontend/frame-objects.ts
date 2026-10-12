@@ -1096,13 +1096,19 @@ function indexedAccess(
  *  A runtime index names no byte, so the type an indexed access is spelled at must agree with
  *  every access it may reach — and what "agree" means is what lets agbcc reorder two of them.
  *  At -O2 it runs type-based alias analysis (toplev.c:3616), and its alias sets
- *  (`c_get_alias_set`, c-common.c:1892-2005) give one set to the signed and unsigned integer of
- *  one width, set 0 — conflicting with everything — to a character type, and set 0 to a struct
- *  or union access. So a byte access reaches anything, and wider accesses of ONE width reach each
- *  other whatever their signedness; only a second width is a second set, a store a load of the
- *  other width may be moved past. Every such access is spelled as an INTEGER of its width through
- *  a cast on the storage (`((s32 *)sp0)[i]`), so the one width is the one set. The storage stays
- *  `u8 name[n]` whatever the width, and the stride is not the licence: the alias sets are. */
+ *  (`c_get_alias_set`, c-common.c:1892-2005) give the signed and unsigned integer of one width one
+ *  set, a character type set 0 (which conflicts with every set), a member access its member's
+ *  type's set, and any other type — a pointer included — a new set of its own. So a byte access
+ *  reaches anything, and wider accesses of ONE width reach each other whatever their signedness.
+ *  Compiled at the corpus's flags, `k(sp0); ((int *)sp0)[i] = 1; ((T *)sp0)[j] = 0; return
+ *  ((int *)sp0)[i];` reloads the word for T = int, unsigned int and unsigned char, and returns the
+ *  stale 1 for T = unsigned short, void * and long.
+ *
+ *  So ONE WIDTH IS ONE SET only while every access of that width is spelled as the same integer
+ *  type, which is what is spelled: a cast on the storage to the access's own `s32`/`u32` (`int`
+ *  and `unsigned int` in every agbcc project's headers), never the pointer an element may hold —
+ *  pinned over a whole fan by the pointer-array test in `frame-base-copy.test.ts`. The storage
+ *  stays `u8 name[n]` whatever the width, and the stride is not the licence: the alias sets are. */
 function indexedWidth(accesses: readonly { readonly width: number }[]): {
   width: number | null;
   refusal: string | null;

@@ -17,6 +17,7 @@
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC } from '../src/target';
 
 // A halfword spilled to the stack and reloaded — agbcc's shape when register pressure forces a
@@ -571,6 +572,13 @@ describe('the audit judges each frame object on its own bytes', () => {
         const src = lift(words).source;
         expect(src).toContain('p0 = (s32 *)sp0;\n    p0[a0] = a1;');
         expect(src).toContain('return *(u16 *)p0[a0];');
+        // …and so in every candidate of the fan: a candidate that typed the element as the pointer
+        // it holds would put the store and the load in two sets
+        const casts = enumerateCandidates('f', words, ARMV4T_AGBCC).flatMap((c) =>
+          [...c.source.matchAll(/\(([^()]+)\)\s*sp0\b/g)].map((m) => m[1]),
+        );
+        expect(casts.length).toBeGreaterThan(0);
+        expect(casts.filter((t) => !/^[us](8|16|32) \*$/.test(t))).toEqual([]);
       });
 
       test('two wider widths over the bytes are two alias sets, and decline naming both', () => {
