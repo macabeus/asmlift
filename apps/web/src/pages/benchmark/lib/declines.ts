@@ -524,16 +524,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /section-relative label/,
   },
   {
-    // Keyed on the throw (`frontend/thumb.ts`, "literal-pool load of ${why} — not modelled") rather
-    // than on the one `why` the corpus printed. The pool word's shape reaches it seven ways: an
-    // offset that is not spelled `+N`, an offset that is not a whole word in the pool, a numeric
-    // word that is not a 32-bit value, a symbolic word whose addend is not, a word that is not
-    // `symbol±offset` at all, and a magnitude with a leading zero (octal to the assembler) — which
-    // is TWO of the seven, once for a pool word and once for the offset its operand carries. So does
-    // a word naming the compiler's anonymous data (agbcc's `.LC0`) that is no constant image a local
-    // is copied from: one whose initializer holds an address, or one the reader cannot define
-    // (frontend/local-object.ts `readGasAnonymousObject`). Keying on `pool word` matched three of the
-    // shapes, so the rest — the same capability at the same site — would arrive as unclassified.
+    // Keyed on the text two `frontend/thumb.ts` throws share, "literal-pool load of", rather than
+    // on the one `why` the corpus printed. The first ("literal-pool load of ${why} — not modelled")
+    // is the pool word's shape, reached seven ways: an offset that is not spelled `+N`, an offset
+    // that is not a whole word in the pool, a numeric word that is not a 32-bit value, a symbolic
+    // word whose addend is not, a word that is not `symbol±offset` at all, and a magnitude with a
+    // leading zero (octal to the assembler) — which is TWO of the seven, once for a pool word and
+    // once for the offset its operand carries. The second is a word naming the compiler's anonymous
+    // data (agbcc's `.LC0`) that is no constant image a local is copied from: one whose initializer
+    // holds an address, or one the reader cannot define (frontend/local-object.ts
+    // `readGasAnonymousObject`). The function-scope-static refusals carry the same text but are
+    // taken first by `tu-scoped-name`. Keying on `pool word` matched three of the shapes, so the
+    // rest — the same capability at the same site — would arrive as unclassified.
     key: 'pool-word-shape',
     label: 'Literal-pool words the reader cannot resolve',
     pattern: /literal-pool load of/,

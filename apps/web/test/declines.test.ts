@@ -921,7 +921,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   //
   // `pool-word-shape` joins as `cross-block-flags` did: its one inhabitant, `kleod:sub_0804C898:agbcc`
   // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
-  // spells. The class still takes every other refusal at that throw — the pool-word shapes
+  // spells. The class still takes the other refusals keyed on its text — the pool-word shapes
   // declines.ts lists, and the compiler's anonymous data that is not such an image (one whose
   // initializer holds an address, `void (*a[4])(void) = {h1, h2, h1, h2}`, refuses with "names the
   // compiler's anonymous data ('.LC0') whose initializer holds the address 'h1'"); no benchmark row
