@@ -3,6 +3,7 @@
 // project's own headers, where a different type is a conflicting declaration.
 import { describe, expect, test } from 'vitest';
 
+import { decompile } from '../src/pipeline';
 import { declaredCallArgs, declaredWidth } from '../src/proto';
 import { prototypesFromContext, withContextPrototypes } from '../src/proto-context';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
@@ -715,6 +716,117 @@ describe('a context struct return under a stated or mapped signature', () => {
       ],
     ]);
     expect(withContextPrototypes(undefined, ctx, 'f', symbols, ARMV4T_AGBCC).mke).toEqual({ params: ['s32'], ...blob });
+  });
+});
+
+// An entry whose parameters the map sizes better yields them, and keeps the return it states: the
+// map derives no `returns`, so dropping the entry whole leaves a pointer-returning call undeclared,
+// and a frame address handed to it reads as a possible hidden struct-return pointer.
+// pokeemerald's ConvertIntToDecimalStringN is the shape: an enum parameter nothing here can size.
+describe('a context register return under a mapped signature', () => {
+  const ctx = prototypesFromContext(
+    'typedef unsigned char u8; typedef signed int s32; enum Mode { M0, M1 };' +
+      ' u8 *conv(u8 *dest, s32 value, enum Mode mode, u8 n); int count(enum Mode m);' +
+      ' long long wide(enum Mode m); void put(enum Mode m); u8 *gone(enum Mode m);',
+    'c',
+  );
+  const word = (pointer?: boolean) => ({ size: 4, signed: pointer ? null : true, ...(pointer ? { pointer } : {}) });
+  const symbols = new Map([
+    [
+      0x1000,
+      [
+        {
+          name: 'conv',
+          kind: 'code' as const,
+          signature: {
+            returns: word(true),
+            params: [word(true), word(), { size: 4, signed: null }, { size: 1, signed: false }],
+          },
+        },
+      ],
+    ],
+    [0x1100, [{ name: 'count', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
+    // the definition's DWARF says one word where the header says a pair
+    [0x1200, [{ name: 'wide', kind: 'code' as const, signature: { returns: word(), params: [word()] } }]],
+    [0x1300, [{ name: 'put', kind: 'code' as const, signature: { returns: null, params: [word()] } }]],
+    // the definition's DWARF says void where the header says a pointer
+    [0x1400, [{ name: 'gone', kind: 'code' as const, signature: { returns: null, params: [word()] } }]],
+  ]);
+  const merged = withContextPrototypes(undefined, ctx, 'f', symbols, ARMV4T_AGBCC);
+
+  test('a pointer return is kept over the parameters the map sizes', () => {
+    expect(declaredCallArgs(ctx.conv!, ARMV4T_AGBCC)).toBeUndefined();
+    expect(merged.conv).toEqual({ params: ['void *', 's32', 's32', 'u8'], returns: 'u8 *' });
+    expect(merged.count).toEqual({ params: ['s32'], returns: 'int' });
+  });
+
+  test('a return the map contradicts is not kept', () => {
+    // a width the definition disagrees with, and a value the definition calls void
+    expect(merged.wide).toBeUndefined();
+    expect(merged.gone).toBeUndefined();
+  });
+
+  test("a void return is the map's to state", () => {
+    expect(merged.put).toBeUndefined();
+  });
+
+  // agbcc -O2 of `void f(s32 w, s32 i, s32 m) { u8 buf[16]; u8 *p = conv(buf, i, 1, 3); *p++ = 0xBA;
+  // conv(p, m, 1, 3); print(w, 1, buf, center(1, buf, 56)); }`, the shape of pokeemerald's
+  // DrawListIndexNumber: the frame buffer is argument 0 of a call whose result is used
+  const HANDED = [
+    'f:',
+    'push\t{r4, r5, lr}',
+    'add\tsp, sp, #-0x10',
+    'add\tr4, r0, #0',
+    'add\tr5, r2, #0',
+    'mov\tr0, sp',
+    'mov\tr2, #0x1',
+    'mov\tr3, #0x3',
+    'bl\tconv',
+    'mov\tr1, #0xba',
+    'strb\tr1, [r0]',
+    'add\tr0, r0, #0x1',
+    'add\tr1, r5, #0',
+    'mov\tr2, #0x1',
+    'mov\tr3, #0x3',
+    'bl\tconv',
+    'lsl\tr4, r4, #0x18',
+    'lsr\tr4, r4, #0x18',
+    'mov\tr0, #0x1',
+    'mov\tr1, sp',
+    'mov\tr2, #0x38',
+    'bl\tcenter',
+    'add\tr3, r0, #0',
+    'lsl\tr3, r3, #0x18',
+    'lsr\tr3, r3, #0x18',
+    'add\tr0, r4, #0',
+    'mov\tr1, #0x1',
+    'mov\tr2, sp',
+    'bl\tprint',
+    'add\tsp, sp, #0x10',
+    'pop\t{r4, r5}',
+    'pop\t{r0}',
+    'bx\tr0',
+  ].join('\n\t');
+  const others = prototypesFromContext(
+    'typedef unsigned char u8; int center(int f, const u8 *s, int w); void print(u8 a, u8 b, const u8 *s, u8 x);',
+    'c',
+  );
+
+  test("a frame buffer handed to the kept return's callee lifts with every store and argument", () => {
+    const lifted = decompile('f', `${HANDED}\n`, ARMV4T_AGBCC, { prototypes: { ...merged, ...others } }).source;
+    expect(lifted).toContain('u8 sp0[16];');
+    expect(lifted).toContain('v0 = conv(sp0, a1, 1, 3);');
+    expect(lifted).toContain('*v0 = 186;');
+    expect(lifted).toContain('conv(v0 + 1, a2, 1, 3);');
+    expect(lifted).toContain('print((u8)a0, 1, sp0, (u8)center(1, sp0, 56));');
+    // …and with the entry dropped whole, as before, nothing says `conv` is not handed a hidden
+    // struct-return pointer
+    expect(() =>
+      decompile('f', `${HANDED}\n`, ARMV4T_AGBCC, {
+        prototypes: { ...merged, ...others, conv: { params: merged.conv!.params! } },
+      }),
+    ).toThrow(/`conv` takes it at argument 0 and nothing says what that callee returns/);
   });
 });
 

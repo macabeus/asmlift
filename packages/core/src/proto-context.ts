@@ -22,12 +22,13 @@ import {
   declaredCallArgs,
   declaredWidth,
   declaresAggregateReturn,
+  declaresVoidReturn,
   isFloatingSpelling,
   statesNoReturn,
   symbolPrototype,
   validatePrototypes,
 } from './proto';
-import type { SymbolMap } from './symbols';
+import type { SymbolMap, SymbolTypeFacts } from './symbols';
 import type { TargetDescription } from './target';
 
 // asmlift — callee prototypes read out of a DECLARATION CONTEXT: the preprocessed headers a
@@ -754,7 +755,15 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  declaration the candidate is compiled against, and its spellings are the ones a C++ call's casts
  *  need; an entry that cannot size one yields to a map signature that can be spelled, which sizes by
  *  byte count what a declaration names (a by-value struct of a register's width); and where the map
- *  spells nothing either, the context entry stays. */
+ *  spells nothing either, the context entry stays.
+ *
+ *  AN ENTRY THAT YIELDS ITS PARAMETERS KEEPS THE RETURN IT STATES (`yieldedReturnOf`), because the
+ *  map cannot state that return in the vocabulary its readers act on: `symbolPrototype` derives no
+ *  `returns`, so an entry dropped whole leaves every non-void call to that name undeclared — and a
+ *  frame address handed to an undeclared callee may be its hidden struct-return pointer
+ *  (`returnsWithoutHiddenPointer`). pokeemerald's `u8 *ConvertIntToDecimalStringN(u8 *, s32, enum
+ *  StringConvertMode, u8)` is the measured case: its enum parameter has no width here, so the entry
+ *  yielded and took its `u8 *` with it, and a call handed a frame buffer declined. */
 function contextPrototypesUnder(
   context: Prototypes,
   symbols: SymbolMap | undefined,
@@ -763,26 +772,56 @@ function contextPrototypesUnder(
   if (symbols === undefined) {
     return context;
   }
-  const mapped = new Map<string, FnProto>();
+  const mapped = new Map<string, { signed: FnProto; returned: SymbolTypeFacts | null }>();
   for (const infos of symbols.values()) {
     for (const info of infos) {
       const signed = symbolPrototype(info);
-      if (signed?.params !== undefined && !mapped.has(info.name)) {
-        mapped.set(info.name, signed);
+      if (signed?.params !== undefined && info.signature !== undefined && !mapped.has(info.name)) {
+        mapped.set(info.name, { signed, returned: info.signature.returns });
       }
     }
   }
-  // An entry that yields keeps a struct return it states, over the map's parameters: DWARF names no
-  // struct, so the map states one only by its size (`symbolPrototype`), and never its members.
   return Object.fromEntries(
     Object.entries(context).flatMap(([name, p]): [string, FnProto][] => {
-      const signed = mapped.get(name);
-      if (declaredCallArgs(p, target) !== undefined || signed === undefined) {
+      const map = mapped.get(name);
+      if (declaredCallArgs(p, target) !== undefined || map === undefined) {
         return [[name, p]];
       }
-      return declaresAggregateReturn(p) && signed.returnsVoid !== true
-        ? [[name, { ...signed, ...aggregateReturnOf(p) }]]
-        : [];
+      const kept = yieldedReturnOf(p, map.returned);
+      return kept === undefined ? [] : [[name, { ...map.signed, ...kept }]];
     }),
   );
+}
+
+/** The return a context entry that yields its parameters to the map keeps over them — or `undefined`
+ *  when it keeps none, and the map's signature is taken as it stands.
+ *
+ *  A STRUCT RETURN is kept as stated: DWARF names no struct, so the map states one only by its size
+ *  (`symbolPrototype`), and never its members.
+ *
+ *  ANY OTHER STATED RETURN is kept only where the map does not contradict it, because the two are
+ *  one fact and a table that holds a contradiction acts on half of it. The map's DWARF is the
+ *  definition's; the context is the header the candidate compiles against. A return the map calls
+ *  `void` is that contradiction for every stated return — and the same goes for a stated `void` the
+ *  map gives a value — so the map's signature is taken; so is a stated width the map's byte size
+ *  disagrees with (`int` declared, `u8` defined, or a 64-bit pair against one word). That is the
+ *  safe direction (`FnProto.returns`): it leaves the call as undeclared as it was before. A
+ *  spelling with no width here (`enum E`) is kept and acts on nothing, as it did on the stated
+ *  entry it came from. */
+function yieldedReturnOf(
+  p: FnProto,
+  returned: SymbolTypeFacts | null,
+): Pick<FnProto, 'returns' | 'returnLayout'> | undefined {
+  if (returned === null || statesNoReturn(p) || declaresVoidReturn(p)) {
+    return undefined;
+  }
+  const kept = {
+    ...(p.returns !== undefined ? { returns: p.returns } : {}),
+    ...(p.returnLayout !== undefined ? { returnLayout: p.returnLayout } : {}),
+  };
+  if (declaresAggregateReturn(p)) {
+    return kept;
+  }
+  const width = p.returns === undefined ? undefined : declaredWidth(p.returns);
+  return width !== undefined && returned.size !== null && returned.size * 8 !== width ? undefined : kept;
 }
