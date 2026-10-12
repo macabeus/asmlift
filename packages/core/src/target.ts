@@ -473,7 +473,8 @@ export interface TargetDescription {
     // then casts an argument to its callee's declared parameter and a pointer of another pointee
     // into a pointer slot exactly as it does for C++ (backend/cfamily.ts `argConversion`,
     // `legalizePointerWrites`), and by the store of an integer into a declared pointer cell
-    // (structure/pointer-spelling.ts `intoPtrCell`). Each cast is the conversion the compiler would
+    // (structure/pointer-spelling.ts `intoPtrCell`, which declines that store under C++, where only a
+    // cast to the cell's own type converts). Each cast is the conversion the compiler would
     // otherwise have made, so it changes no instruction. Absent ⇒ C's implicit conversions.
     strictPointerConversions?: boolean;
     // Arguments past the argument registers are staged into an area this function RESERVES at the

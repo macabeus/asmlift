@@ -480,6 +480,44 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
     expect(scoreCPpc('mwcc_242_81', context + r.source, 'mst', obj, FLAGS).match, r.source).toBe(true);
   });
 
+  test('a global the map declares an integer, stored into a pointer global, is cast as an address element is', () => {
+    // `gw` is typed by the map, so the store is an integer's conversion like `t[i]`'s: bare, mwcc's C
+    // refuses it ("illegal implicit conversion from 'unsigned int' to 'int *'").
+    const context = 'extern u32 gw; extern s32 *gp;\n';
+    const c = 'void mgw(void) { gp = (s32 *)gw; }';
+    const symbols: SymbolMap = new Map([
+      [0x80400000, [{ name: 'gp', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+      [0x80400004, [{ name: 'gw', kind: 'data', declared: true, shape: 'scalar', signed: false, size: 4 }]],
+    ]);
+    const prototypes = { mgw: { params: [], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mgw', FLAGS);
+    const r = decompile('mgw', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mgw'), prototypes, symbols });
+    expect(() => compileCandPpc('mwcc_242_81', `${context}void bare(void) { gp = gw; }`, FLAGS)).toThrow(
+      /illegal implicit conversion/,
+    );
+    expect(r.source).toContain('gp = (void *)gw;');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mgw', obj, FLAGS).match, r.source).toBe(true);
+  });
+
+  test('an integer stored into a declared pointer global declines under C++, which converts it only to the declared type', () => {
+    // C++ refuses the bare `u32` and the `(void *)` alike into the header's `int *gp` ("illegal
+    // implicit conversion from 'void *' to 'int *'", compiled), and the map names no pointee type.
+    const CXX = [...FLAGS, '-lang=c++'];
+    const context = 'extern s32 ga, gb; extern s32 *gp;\n';
+    const c = 'extern "C" void cst(s32 i) { static s32 *const t[2] = { &ga, &gb }; gp = t[i]; }';
+    const symbols: SymbolMap = new Map([
+      [0x80400000, [{ name: 'gp', kind: 'data', declared: true, shape: 'pointer', size: 4 }]],
+    ]);
+    const prototypes = { cst: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'cst', CXX);
+    const target = targetFor('mwcc_242_81', CXX).target;
+    const voidCast = 'extern "C" void k(u32 *t, s32 i) { gp = (void *)t[i]; }';
+    expect(() => compileCandPpc('mwcc_242_81', context + voidCast, CXX)).toThrow(/illegal implicit conversion/);
+    expect(() =>
+      decompile('cst', asm, target, { asmData: extractPpcAsmData(obj, 'cst'), prototypes, symbols }),
+    ).toThrow(/C\+\+/);
+  });
+
   test('a cell only the body reads as a pointer takes no cast: the project may declare it an integer', () => {
     // The map names `gw` but gives no shape; the body dereferences it, so it reads as a pointer
     // cell. `(void *)` into the project's `u32 gw` is "illegal implicit conversion from 'void *' to

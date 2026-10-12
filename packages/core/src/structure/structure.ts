@@ -2930,6 +2930,10 @@ export function structure(
     varType,
     compiler: opts,
     strictPointerConversions,
+    ...(dialect !== undefined ? { dialect } : {}),
+    refuse: (why) => {
+      throw new StructureError(`cannot structure '${fn.name}': ${why}`);
+    },
     useSitesOf,
     isNamed: (v) => varName.has(v),
   });

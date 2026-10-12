@@ -57,6 +57,12 @@ export interface PointerSpellingDeps {
    *  `strictPointerConversions`, mwcc), so an integer stored into a pointer cell is cast
    *  (`intoPtrCell`); absent ⇒ C's implicit conversion. */
   strictPointerConversions?: boolean;
+  /** the emitted C is compiled as C++ (`SFn.dialect`), which converts an integer into a typed
+   *  pointer cell only by a cast to that cell's own type (`intoPtrCell`); absent ⇒ C. */
+  dialect?: 'c++';
+  /** declines the function with `why` (structure.ts throws its `StructureError`); absent ⇒ throws a
+   *  plain Error. */
+  refuse?: (why: string) => never;
   /** each value's readers (analysis.ts `useSitesOf`); absent ⇒ none. */
   useSitesOf?: ReadonlyMap<Value, readonly { op: Op }[]>;
   /** whether a name holds the value — LIVE, read at call time; absent ⇒ none does. */
@@ -445,6 +451,10 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     varType,
     compiler = {},
     strictPointerConversions = false,
+    dialect,
+    refuse = (why: string): never => {
+      throw new Error(why);
+    },
     useSitesOf,
     isNamed = () => false,
   } = deps;
@@ -875,11 +885,21 @@ export function makePointerSpelling(deps: PointerSpellingDeps): PointerSpelling 
     // member it declares one. A cell read as a pointer only because the body dereferences it may be
     // the project's `u32 gSym;`, which mwcc refuses a `void *` (compiled) and takes the bare value.
     // Nor a bare name no declaration this pass reads types (`gp = gq`, `gq` a shape-less global):
-    // its header may declare it a pointer, and C++ refuses `void *` into a typed pointer.
+    // its header may declare it a pointer, and C++ refuses `void *` into a typed pointer. A global
+    // the map declares a scalar IS typed — an integer, cast like `t[i]` (`gp = (void *)gw`, compiled).
+    //
+    // C++ takes neither spelling into the header's `int *gp` ("illegal implicit conversion from
+    // 'void *' to 'int *'", compiled): only a cast to the cell's own type converts, and the map
+    // names no pointee type to cast to. So C++ declines here rather than publish either.
     const lv = roleOf(lval);
     const declaredCell = (lv.k === 'name' && !lv.facts.undeclared) || lv.k === 'member';
-    const untypedName = value.k === 'var' && ctype(value) === undefined;
+    const untypedName = value.k === 'var' && ctype(value) === undefined && declaredShape(value.name) !== 'scalar';
     const integer = !(value.k === 'const' && value.value === 0) && !needsIntSpelling(value) && !untypedName;
+    if (dialect === 'c++' && declaredCell && integer) {
+      refuse(
+        'stores an integer into a declared pointer cell, which C++ converts only by a cast to the cell’s own type, and no declaration this pass reads names it',
+      );
+    }
     return strictPointerConversions && declaredCell && integer ? pointerCellValue(value) : value;
   };
 
