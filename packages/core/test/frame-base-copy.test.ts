@@ -536,7 +536,7 @@ describe('the audit judges each frame object on its own bytes', () => {
 
     // A RUNTIME INDEX into the untyped storage. agbcc's own output for `u32 pick(u32 i){ u8 a[8];
     // memcpy(a, tbl, 8); return a[i]; }` (and `a[i] = v` for the store), at the corpus's flags.
-    describe('a runtime index reads one byte element of the untyped storage', () => {
+    describe('a runtime index reads an element of the untyped storage', () => {
       const indexed = (access: string) =>
         copy(
           '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tmov\tr2, #0x8\n\tbl\tmemcpy\n' +
@@ -553,10 +553,29 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(lift(indexed('\tstrb\tr5, [r0]\n\tmov\tr0, #0x0\n')).source).toContain('((u8 *)sp0)[a0] = a1;');
       });
 
-      test('a wider element is another array over the same bytes, and declines naming its width', () => {
-        // `u16 a[4]; … return a[i];` — agbcc scales the index and reads a halfword
-        expect(() => lift(atTheIndexedRead('\tldrh\tr0, [r0]\n'))).toThrow(
-          /a runtime index into the object at \[sp,#0\) accesses 2 bytes/,
+      // A WIDER ELEMENT is the same bytes read wider, through a cast at its own width and sign, so
+      // the storage stays `u8` and the index stays a byte offset unless the asm scaled it.
+      test('a wider element is read through a cast on the bytes', () => {
+        // the bytes are written one at a time, which every type aliases, and read a halfword
+        expect(lift(atTheIndexedRead('\tldrh\tr0, [r0]\n')).source).toContain('return *(u16 *)((u32)sp0 + a0);');
+        // …and a sign-extending read, of any width, carries its own extension in the cast
+        expect(lift(atTheIndexedRead('\tldrsb\tr0, [r0]\n')).source).toContain('return ((s8 *)sp0)[a0];');
+        expect(lift(atTheIndexedRead('\tldrsh\tr0, [r0]\n')).source).toContain('return *(s16 *)((u32)sp0 + a0);');
+        // agbcc's own output for `void g(void); u16 f(int i, void *q){ void *p[2]; p[i] = q; g();
+        // return *(u16 *)p[i]; }` — a POINTER element, written and read by index. Both are spelled
+        // as one integer type: agbcc gives every pointer type an alias set of its own
+        // (c-common.c:2000), so an integer store beside a pointer load would be two sets.
+        const words =
+          'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tlsl\tr4, r4, #0x2\n\tadd\tr4, r4, sp\n' +
+          '\tstr\tr1, [r4]\n\tbl\tg\n\tldr\tr0, [r4]\n\tldrh\tr0, [r0]\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+        const src = lift(words).source;
+        expect(src).toContain('p0 = (s32 *)sp0;\n    p0[a0] = a1;');
+        expect(src).toContain('return *(u16 *)p0[a0];');
+      });
+
+      test('two wider widths over the bytes are two alias sets, and decline naming both', () => {
+        expect(() => lift(atTheIndexedRead('\tldrh\tr2, [r0]\n\tldr\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
+          /a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other/,
         );
       });
 

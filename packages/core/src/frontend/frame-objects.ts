@@ -1091,8 +1091,7 @@ function indexedAccess(
   }
 }
 
-/** The one width wider than a byte that the runtime-indexed accesses of a frame take, or why
- *  there is not one.
+/** The one width wider than a byte that runtime-indexed accesses take, or why there is not one.
  *
  *  A runtime index names no byte, so the type an indexed access is spelled at must agree with
  *  every access it may reach — and what "agree" means is what lets agbcc reorder two of them.
@@ -1104,8 +1103,11 @@ function indexedAccess(
  *  other width may be moved past. Every such access is spelled as an INTEGER of its width through
  *  a cast on the storage (`((s32 *)sp0)[i]`), so the one width is the one set. The storage stays
  *  `u8 name[n]` whatever the width, and the stride is not the licence: the alias sets are. */
-function indexedWidth(indexed: FrameUses['indexed']): { width: number | null; refusal: string | null } {
-  const widths = [...new Set([...indexed.values()].flat().map((x) => x.width))].filter((w) => w !== 1);
+function indexedWidth(accesses: readonly { readonly width: number }[]): {
+  width: number | null;
+  refusal: string | null;
+} {
+  const widths = [...new Set(accesses.map((x) => x.width))].filter((w) => w !== 1);
   return {
     width: widths[0] ?? null,
     refusal:
@@ -1571,7 +1573,7 @@ function keepAsOneObject({
   // all of them. Two indexed widths refuse here; an index beside a member of another width
   // refuses after the members are checked against each other, so a member pair keeps naming its
   // own byte (`indexedWidth` says why one width is enough).
-  const index = indexedWidth(uses.indexed);
+  const index = indexedWidth([...uses.indexed.values()].flat());
   if (index.refusal !== null) {
     fail(`a runtime index into ${kept} ${index.refusal}`);
   }
@@ -1784,26 +1786,20 @@ function objectShapes({
         // …asked for the one object instead, which sizes no object of its own
         continue;
       }
-      // An indexed access reads ONE ELEMENT of the storage declared below, so it must be one:
-      // an unsigned byte. A wider element is a different array over the same bytes, and a
-      // sign-extending read is not what `u8` spells.
-      for (const a of byIndex) {
-        if (a.width !== 1) {
-          model.shapeRefused(
-            `a runtime index into the object at [sp,#${off}) accesses ${a.width} bytes, and the storage ` +
-              'nothing else types is declared as bytes — only a byte element is modelled',
-          );
-        }
-        if (a.signed) {
-          model.shapeRefused(
-            `a runtime index into the object at [sp,#${off}) sign-extends, and the storage is declared unsigned`,
-          );
-        }
+      // An indexed access reads THROUGH A CAST on the storage declared below, at its own width
+      // and signedness, as an access to the one object does (`keepAsOneObject`). So what must
+      // hold is what lets a cast spelling stand — the accesses wider than a byte are of one width,
+      // one alias set (`indexedWidth`) — and a wider element is not another array over the same
+      // bytes but the same bytes read wider.
+      const index = indexedWidth(byIndex);
+      if (index.refusal !== null) {
+        model.shapeRefused(`a runtime index into the object at [sp,#${off}) ${index.refusal}`);
       }
       // STORAGE, NOT A TYPE. The reservation says how many bytes the frame holds and the
       // conjuncts above say they are all this object's, so the declaration commits to an EXTENT
       // and to nothing else: `u8 name[n]` over the declared range, unsigned bytes because no
       // access named an element type and inventing one is the guess this refuses everywhere else.
+      // An indexed access names only its own width, which its cast spells where it reads.
       //
       // THE EXTENT IS A ROUNDED ONE, stated because it is not a defect. agbcc reserves the
       // local area in whole words, so a source object of 13, 14, 15 or 16 bytes all reserve
