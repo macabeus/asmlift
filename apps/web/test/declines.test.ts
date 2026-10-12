@@ -918,11 +918,16 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
   // row's own context declares, and that declaration now reaches the lift. A call no declaration
   // covers still declines there.
+  //
+  // `pool-word-shape` joins as `cross-block-flags` did: its one inhabitant, `kleod:sub_0804C898:agbcc`
+  // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
+  // spells. The seven `why`s above still refuse; no compiled row reaches them.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'no-prototype-args',
+    'pool-word-shape',
     'store-class',
     'structs',
     'unread-data-directive',
