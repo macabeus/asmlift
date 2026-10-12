@@ -192,6 +192,14 @@ export type Expr =
       operandOff?: number;
       baseOrdered?: true;
       baseAdvanced?: number;
+      /** Spell element 0 as `base[0]`, never `*base`. The two are one lvalue to C and NOT to
+       *  agbcc's alias analysis: `u.half[0]` is an ARRAY_REF of a union member, alias set 0
+       *  (c-common.c `c_get_alias_set`), while `*u.half` dereferences the member's decay — an
+       *  INDIRECT_REF typed by its pointee, which a compiled `*u.half = 1; *u.word = x; return
+       *  *u.half;` returns stale (`mov r0, #0x1`) where the subscript reloads. Set by the one
+       *  producer whose access rests on that set, a view of a frame union (structure.ts
+       *  `frameUnionAccess`). */
+      subscript?: true;
     }
   // A named struct-field access `base->name` (raise/structs.ts recovered `base` as a struct
   // pointer, so the byte offset resolves to a named field instead of a scaled array index).

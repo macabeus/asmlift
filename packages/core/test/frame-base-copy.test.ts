@@ -203,9 +203,12 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     ).toThrow(
       /a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled — and the one object cannot hold every writer: the captured address at \[sp,#4\): `g` takes it at argument 0/,
     );
-    // …and kept as one object, the word, the byte and the halfword at one address are refused by
-    // that answer's own rule
-    expect(() => decompile('e1', e1, ARMV4T_AGBCC, { prototypes })).toThrow(/is accessed 4 and 2 bytes wide/);
+    // …and kept as one object, the word, the byte and the halfword at one address are the views
+    // of one union, each access made through its own
+    const kept = decompile('e1', e1, ARMV4T_AGBCC, { prototypes }).source;
+    expect(kept).toContain('    union { s32 word; u16 half[2]; u8 byte[4]; } sp4;');
+    expect(kept).toContain('g(&sp4);');
+    expect(kept).toContain('sp4.half[1]');
   });
 
   test('a capture that ESCAPES keeps the frame base', () => {
@@ -317,11 +320,12 @@ describe('the audit judges each frame object on its own bytes', () => {
     // seen there — the two models would disagree about the same four bytes, silently. Where an
     // escape names a writer the one object cannot hold, that refuses (the next test, `atArg0`);
     // where nothing escapes, the bytes are kept as one object in memory and judged by its rules —
-    // here a word and a halfword at one byte
+    // here a word and a halfword at one byte, the two views of one union, every store kept
     expect(() => lift(DISJOINT)).not.toThrow();
     const over = frame(`\tstr\tr0, [sp, #0x4]\n${OBJ}\tldr\tr2, [sp, #0x4]\n\tadd\tr0, r0, r2\n`);
-    expect(() => lift(over)).toThrow(
-      /the byte at \[sp,#4\] of the bytes \[sp,#0\) to \[sp,#8\) kept as one object is accessed 4 and 2 bytes wide/,
+    expect(lift(over).source).toContain(
+      '    union { s32 word[2]; u16 half[4]; } sp0;\n    sp0.word[1] = a0;\n    sp0.half[2] = a1;\n' +
+        '    return sp0.half[2] + sp0.word[1];',
     );
   });
 
@@ -854,14 +858,17 @@ describe('a frame nothing escapes from is one object where the slot model and an
     expect(() => lift(handed)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
   });
 
-  test('word spills read back as halfwords are two widths at one byte', () => {
-    // `struct P { u16 a, b, c, d; s8 e; }; int f(struct P p){ return p.a + p.c - p.e; }`
+  test('word spills read back as halfwords are the views of one union', () => {
+    // `struct P { u16 a, b, c, d; s8 e; }; int f(struct P p){ return p.a + p.c - p.e; }` — two
+    // widths at one byte, which a cast on bytes would let agbcc read stale and a union does not
     const halves = byValue(
       '\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tmov\tr1, sp\n\tldrh\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1\n' +
         '\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tlsl\tr1, r1, #24\n\tasr\tr1, r1, #24\n\tsub\tr0, r0, r1\n',
     );
-    expect(() => lift(halves)).toThrow(
-      /the byte at \[sp,#0\] of the bytes \[sp,#0\) to \[sp,#12\) kept as one object is accessed 4 and 2 bytes wide/,
+    expect(lift(halves).source).toContain(
+      's32 f(s32 a0, s32 a1, s32 a2) {\n    union { s32 word[3]; u16 half[6]; u8 byte[12]; } sp0;\n' +
+        '    sp0.word[0] = a0;\n    sp0.word[1] = a1;\n    sp0.word[2] = a2;\n' +
+        '    return sp0.half[0] + sp0.half[2] - (s8)sp0.byte[8];\n}\n',
     );
   });
 });

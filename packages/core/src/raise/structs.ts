@@ -50,7 +50,7 @@
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { nextStructIndex } from '../ir/struct-names';
-import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
+import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
 import { storeSigned } from './storesign';
@@ -261,10 +261,6 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
   return T.struct(name, fields);
 }
 
-/** The member name of each view a union holds, by access width. A width with no entry has no view
- *  (the deref contract admits no other scalar width either), and its overlap still declines. */
-const VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 'word' };
-
 /** The struct for a base whose accesses OVERLAP — `buildStruct` refused it with
  *  `StructOverlapError` — with each overlap declared as a UNION member: the same bytes read or
  *  written at more than one width are views of one cell, and a union is the C that says so.
@@ -319,7 +315,7 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
     const start = c[0].off;
     const members = [...new Set(c.map((a) => a.width))].flatMap((width): StructField[] => {
       const group = c.filter((a) => a.width === width);
-      const name = VIEW_NAMES[width];
+      const name = UNION_VIEW_NAMES[width];
       if (name === undefined) {
         throw new RaiseUnsupportedError(
           `cannot recover struct '${structName}': no union view for a ${width}-byte access at offset ${group[0].off}`,

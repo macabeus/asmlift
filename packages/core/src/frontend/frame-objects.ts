@@ -258,7 +258,8 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     lies over a slot (`oneObject`, which this answers and the frontend lifts again with): the
  *     local area is one `u8` array in memory, every fixed-offset access in
  *     it is a member at its own offset, a runtime index may reach it at a byte or at ONE wider
- *     width (`indexedWidth`), and two widths at one byte refuse.
+ *     width (`indexedWidth`), and two widths at one byte are the views of one union
+ *     (`unionViews`), or refuse where no view names them (`unionRefusal`).
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -1325,7 +1326,7 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
  *  or two signednesses at one address, a runtime index, overlapping objects, a second object
  *  beside an untyped one, an object over a slot. So there each of those refusals asks for that
  *  answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
- *  object by its own rules — two types at one byte still refuse there. Where the answer is not on offer, each refuses where it stands. */
+ *  object by its own rules — two types at one byte are a union there, or refuse. Where the answer is not on offer, each refuses where it stands. */
 function chooseFrameModel(
   oneObject: FrameRange | undefined,
   uses: FrameUses,
@@ -1550,7 +1551,8 @@ function failIfSlotKeysIt(
  *  instead of a refusal (`oneObject`, requested by the relift test where the escapes are judged).
  *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
  *  holds (`writerNotKept` says which writers it can hold), and every access inside it is a
- *  cast-spelled access to that array — so each store the machine made there is a store the
+ *  cast-spelled access to that array, or a view of the union it is declared as where two widths
+ *  meet at one byte — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
  *  store in the same block overwrites it). And it is right whichever the source had there: a
@@ -1596,15 +1598,25 @@ function keepAsOneObject({
   if (index.refusal !== null) {
     fail(`a runtime index into ${kept} ${index.refusal}`);
   }
-  // ONE TYPE PER BYTE. agbcc at -O2 turns on type-based alias analysis (toplev.c:3616), and
-  // compiled, a `u32` read through a cast is served the earlier `u32` store straight past a
-  // `u16` store to the same bytes — a stale value. So a byte two accesses of different widths
-  // reach cannot be spelled through casts. A byte access is exempt, since character types
-  // alias everything, and so is a signedness difference, since the signed and unsigned types
-  // of one width share an alias set (c-common.c:1962-1974). The first audit asks for this
-  // answer rather than refusing two widths — an object read at both, or a `strh` member through
-  // the captured address over a word the slot model had — so this is where they refuse.
+  // ONE TYPE PER BYTE, OR ONE UNION. agbcc at -O2 turns on type-based alias analysis
+  // (toplev.c:3616), and compiled, a `u32` read through a cast is served the earlier `u32` store
+  // straight past a `u16` store to the same bytes — a stale value. So a byte two accesses of
+  // different widths reach cannot be spelled through casts. A byte access is exempt, since
+  // character types alias everything, and so is a signedness difference, since the signed and
+  // unsigned types of one width share an alias set (c-common.c:1962-1974). The first audit asks
+  // for this answer rather than refusing two widths — an object read at both, or a `strh` member
+  // through the captured address over a word the slot model had — so this is where they are judged.
+  //
+  // What two widths at one byte CAN be spelled as is a UNION of per-width views, every access made
+  // directly through it (`sp0.half[1]`): c_get_alias_set gives any access through a member of a
+  // union alias set 0 (c-common.c, the COMPONENT_REF walk), which conflicts with every set, so no
+  // read moves past a store to the same bytes — compiled, a `u16` read, a `u32` store and the same
+  // read again reloads through the union and returns the stale value through casts. So the object
+  // is stamped with the views its accesses use (`unionViews`) and declared as that union
+  // (structure.ts `laddrType`), where every access to it is a fixed offset on the object itself,
+  // aligned to its own width — the cases `unionRefusal` names refuse as before.
   const widthAt = new Map<number, number>();
+  let twoWidths: { b: number; had: number; width: number } | undefined;
   for (const m of uses.members) {
     if (m.at < from || m.at + m.width > to) {
       fail(`an access of ${m.width} bytes at [sp,#${m.at}) reaches past ${kept}`);
@@ -1615,12 +1627,19 @@ function keepAsOneObject({
     for (let b = m.at; b < m.at + m.width; b++) {
       const had = widthAt.get(b);
       if (had !== undefined && had !== m.width) {
-        fail(
-          `the byte at [sp,#${b}] of ${kept} is accessed ${had} and ${m.width} bytes wide, and agbcc at -O2 ` +
-            'lets a read of one type pass a store of the other (strict aliasing) — a cast spelling would read stale',
-        );
+        twoWidths ??= { b, had, width: m.width };
       }
       widthAt.set(b, m.width);
+    }
+  }
+  if (twoWidths !== undefined) {
+    const why = unionRefusal({ from, to, uses, indexed: index.width !== null });
+    if (why !== null) {
+      fail(
+        `the byte at [sp,#${twoWidths.b}] of ${kept} is accessed ${twoWidths.had} and ${twoWidths.width} bytes ` +
+          'wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a cast ' +
+          `spelling would read stale, and ${why}`,
+      );
     }
   }
   for (const [b, had] of widthAt) {
@@ -1694,7 +1713,80 @@ function keepAsOneObject({
       ];
     });
   }
+  if (twoWidths !== undefined) {
+    // …every access is now a fixed offset on the object itself, which is what a view spells; one
+    // that is not was carried there by a phi, as a pointer, and a pointer to the union's bytes is
+    // read through a cast again
+    for (const op of uses.accessOps.keys()) {
+      if (op.operands[0] !== base) {
+        fail(
+          `the bytes [sp,#${from}) to [sp,#${to}) are accessed at two widths, which only a union of views ` +
+            'spells without a stale read — and an access reaches them through a pointer a phi carries, which ' +
+            'no view of the union names',
+        );
+      }
+    }
+    object.attrs = { ...object.attrs, views: unionViews(irBlocks, base) };
+  }
   irBlocks[0].ops.unshift(object);
+}
+
+/** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width
+ *  views, or null. A view names an ELEMENT, so every access must sit at a multiple of its own width
+ *  from the object's start and every view must tile the object; and it names it at a constant
+ *  index, so a runtime index into the object — whose element width a view could carry, but whose
+ *  spelling nothing here builds — keeps the refusal, and so does a qualifier on the accesses
+ *  (`publishedToWriter`), which a member access of an unqualified union cannot carry. */
+function unionRefusal({
+  from,
+  to,
+  uses,
+  indexed,
+}: {
+  from: number;
+  to: number;
+  uses: FrameUses;
+  indexed: boolean;
+}): string | null {
+  if (indexed) {
+    return 'a runtime index reaches them too, which no view of a union is spelled for';
+  }
+  if (uses.publishedToWriter.size > 0) {
+    return 'the address is stored where a writer may hold it, and a view of a union carries no per-access qualifier';
+  }
+  for (const m of uses.members) {
+    if ((m.at - from) % m.width !== 0) {
+      return `the ${m.width}-byte access at [sp,#${m.at}) is not aligned to its width, so no view of a union names it`;
+    }
+    if ((to - from) % m.width !== 0) {
+      return `the ${to - from} bytes are not a whole number of ${m.width}-byte elements, so no view of a union tiles them`;
+    }
+  }
+  return null;
+}
+
+/** The views a union object's accesses use, as `laddr`'s `views` attr: one entry per view, its
+ *  element width in bytes, NEGATIVE for a signed narrow view. A word is one view whatever its loads
+ *  say (`scalarTypeForAccess`); a narrower width gets a view per extension it is LOADED with —
+ *  the signed and unsigned views of one width are two members, as raise/structs.ts
+ *  `buildUnionStruct` declares them — and an unsigned one where it is only stored. Widest first,
+ *  unsigned before signed. */
+function unionViews(irBlocks: readonly Block[], base: Value): number[] {
+  const loaded = new Map<number, Set<boolean>>();
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    if ((op.opcode === 'load' || op.opcode === 'store') && op.operands[0] === base) {
+      const signs = loaded.get(op.attrs.width as number) ?? new Set<boolean>();
+      if (op.opcode === 'load') {
+        signs.add((op.attrs.signed as boolean) ?? false);
+      }
+      loaded.set(op.attrs.width as number, signs);
+    }
+  }
+  return [...loaded]
+    .sort(([a], [b]) => b - a)
+    .flatMap(([w, signs]) =>
+      w === 4 ? [w] : signs.size === 0 ? [w] : [false, true].filter((sg) => signs.has(sg)).map((sg) => (sg ? -w : w)),
+    );
 }
 
 /** One object's shape: `count` elements of `width` bytes. */

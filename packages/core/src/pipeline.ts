@@ -5,6 +5,7 @@ import {
   ContractError,
   assertDerefsTyped,
   assertEffectsPreserved,
+  assertFrameUnionsViewed,
   assertLocalsWritten,
   assertPostIncrUnshared,
   assertResolved,
@@ -431,6 +432,7 @@ export function structureChecked(
   // re-validate deref typing on the rewritten tree.
   const sfn = readabilityRewrites(raw);
   assertDerefsTyped(sfn);
+  assertFrameUnionsViewed(sfn);
   assertPostIncrUnshared(sfn);
   // Re-checked after the readability rewrites for the same reason deref typing is: a pass that
   // merges arms or drops statements must not be able to lose or duplicate a call.

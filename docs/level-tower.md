@@ -693,6 +693,18 @@ the `/ptr-field` flip) reaches it. **Structure** reads an access through the vie
 width and extension (`p->field_0.half[1]`, `p->field_0.shalf`; `ir/types.ts` `unionViewAt`); the type walk and the
 deref contract share `memberOf`, so they agree on which member access is well-typed.
 
+**A frame object is the second inhabitant.** The frame audit keeps a local area as one object in
+memory where a device or a callee holds its address, or where nothing escapes and an object lies
+over a spill slot (a by-value struct parameter, spilled word by word and read member by member
+through `mov rD, sp`). Where two widths meet at one byte of it, the L1 audit stamps the `laddr`
+with the views its accesses use (`views`, frontend/frame-objects.ts `unionViews`), and structure
+declares the storage as that union — every view an array tiling it — and spells each access through
+its view on the object itself (`sp0.half[1]`). Element 0 is subscripted, never dereferenced:
+`*u.half` is an INDIRECT_REF agbcc types by its pointee, and compiled it reads stale exactly as the
+cast does, where `u.half[0]` reloads. `contracts.ts` `assertFrameUnionsViewed` holds the default and
+every respelled tree to that. Where no view names an access — misaligned to its width, a runtime
+index, a qualifier the accesses need — the two widths still refuse.
+
 **Not built:** a declared address (a named global, a literal) read at two widths keeps the cast
 spelling, and the aliasing argument above applies to it too; no row has a narrow re-read across a
 store there, and a union would be the wrong declaration for its inhabitants (agbcc fusing two byte

@@ -11,6 +11,7 @@ import { type IrType, memberOf, typeToString } from './ir/types';
 import { cellAddress, qualifiedBase } from './l3/address';
 import { type BinOp, type Expr, type SFn, type Stmt, calleeOf } from './l3/ast';
 import {
+  assignsIn,
   exprChildren,
   fieldSpellsDot,
   gapReasonFor,
@@ -19,6 +20,7 @@ import {
   stmtChildren,
   stmtExprs,
   stmtLists,
+  taintOverAssigns,
   walkExprs,
 } from './l3/ast';
 import { mentionedLocals } from './l3/mentions';
@@ -893,6 +895,7 @@ function localStorageNonIntegers(sfn: SFn): Set<string> {
  *  answer, and a type it gives a local object (a header-typed out-parameter's pointer member, say)
  *  is the source's own spelling, not a variation's claim. */
 export function assertLocalStorageStaysInteger(before: SFn, after: SFn): void {
+  assertFrameUnionsViewed(after);
   const had = localStorageNonIntegers(before);
   const added = [...localStorageNonIntegers(after)].filter((t) => !had.has(t));
   if (added.length) {
@@ -903,6 +906,85 @@ export function assertLocalStorageStaysInteger(before: SFn, after: SFn): void {
         .join(', ')} — not an integer, so agbcc may read it stale past an integer store to the same bytes`,
     );
   }
+}
+
+/** A FRAME UNION IS READ AND WRITTEN ONLY THROUGH ITS VIEWS. The frame audit declares storage
+ *  accessed at two widths over one byte as a union of per-width views (frontend/frame-objects.ts
+ *  `unionViews`, structure.ts `laddrType`), because agbcc gives an access through a union member
+ *  alias set 0 and reorders nothing past it — where a cast on the same bytes is read stale past a
+ *  store of the other width. That licence holds only while EVERY access is a member access:
+ *    - the union's name appears only as the base of a view (`u.half`), and an element of an array
+ *      view is subscripted, element 0 included — `*u.half` dereferences the view's decay, an
+ *      INDIRECT_REF agbcc types by its pointee and reads stale exactly as the cast (compiled);
+ *    - nothing is accessed through its ADDRESS: `&u`, under casts and `+`/`-`, or a local ever
+ *      assigned such a value, as the base of a subscript, an arrow or a deref is the cast
+ *      spelling again. The address itself may go anywhere a value goes — a call's argument, a
+ *      device's source register — since handing it on accesses nothing.
+ *  ABSOLUTE, not a differential: the default tree satisfies it by construction, so any tree that
+ *  does not was made by a variation. Checked on the default tree (pipeline.ts) and on every
+ *  respelled one (`assertLocalStorageStaysInteger`). */
+export function assertFrameUnionsViewed(sfn: SFn): void {
+  const unions = new Map(sfn.locals.filter((l) => l.type.kind === 'union').map((l) => [l.name, l.type]));
+  if (unions.size === 0) {
+    return;
+  }
+  const bad = (why: string): never => {
+    throw new ContractError(`'${sfn.name}' ${why} — agbcc may read the frame union stale through it`);
+  };
+  const reaches = (e: Expr, held: ReadonlySet<string>): boolean => {
+    switch (e.k) {
+      case 'addr':
+        return unions.has(e.name);
+      case 'var':
+        return held.has(e.name);
+      case 'cast':
+        return reaches(e.e, held);
+      case 'bin':
+        return (e.op === '+' || e.op === '-') && (reaches(e.l, held) || reaches(e.r, held));
+      default:
+        return false;
+    }
+  };
+  const held = taintOverAssigns(assignsIn(sfn.body), [], (a, t) => reaches(a.value, t));
+  const isView = (e: Expr): boolean =>
+    e.k === 'field' && e.dot === true && e.base.k === 'var' && unions.has(e.base.name);
+  const visit = (e: Expr): void => {
+    if (e.k === 'field' && isView(e)) {
+      if (memberOf(unions.get((e.base as { name: string }).name), e.name) === undefined) {
+        bad(`names '${e.name}', which is no view of the frame union`);
+      }
+      return;
+    }
+    if (e.k === 'index' && isView(e.base)) {
+      if (e.idx.k === 'const' && e.idx.value === 0 && e.subscript !== true) {
+        bad('dereferences a view of a frame union (`*u.view`) instead of subscripting it');
+      }
+      visit(e.base);
+      visit(e.idx);
+      return;
+    }
+    if ((e.k === 'index' || (e.k === 'field' && e.dot !== true)) && reaches(e.base, held)) {
+      bad('accesses a frame union through a pointer to its bytes');
+    }
+    if (e.k === 'var' && unions.has(e.name)) {
+      bad(`uses the frame union '${e.name}' other than through a view`);
+    }
+    exprChildren(e).forEach(visit);
+  };
+  const walk = (list: readonly Stmt[]): void => {
+    for (const st of list) {
+      if (st.k === 'assign' && unions.has(st.name)) {
+        bad(`assigns the frame union '${st.name}' whole`);
+      }
+      stmtExprs(st).forEach(visit);
+      // a `for`'s init and inc are statements of their own, outside both lists
+      stmtLists(st).forEach(walk);
+      if (st.k === 'for') {
+        walk([st.init, st.inc]);
+      }
+    }
+  };
+  walk(sfn.body);
 }
 
 /** After a respell variation: every read of a MINTED local — its ADDRESS being taken included — must sit where

@@ -1034,14 +1034,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // …but a slot word and a narrower member through the captured address at the same bytes are
-    // two types at one byte, which the one object refuses rather than cast-spell
-    test('a slot word under a halfword member is refused as two widths at one byte', () => {
+    // …and a slot word and a narrower member through the captured address at the same bytes are
+    // two types at one byte, which the one object declares as the views of one union rather than
+    // cast-spell — every access a view, the address handed to the device as a value
+    test('a slot word under a halfword member is the views of one union', () => {
       const twoWidths =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr2, sp\n' +
         '\tstrh\tr0, [r2]\n\tldr\tr3, .L9\n\tstr\tr2, [r3]\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n' +
         '\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\t0x040000D4\n';
-      expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow('is accessed 4 and 2 bytes wide');
+      expect(decompile('f', twoWidths, ARMV4T_AGBCC).source).toContain(
+        '    union { s32 word[2]; u16 half[4]; } sp0;\n    sp0.word[0] = a1;\n    sp0.word[1] = a1;\n' +
+          '    sp0.half[0] = a0;\n    *(volatile s32 *)67109076 = &sp0;\n    return sp0.word[0] + sp0.word[1];',
+      );
+      // …and a halfword member misaligned to its width names no element of a view, so it refuses
+      const misaligned = twoWidths.replace('\tstrh\tr0, [r2]\n', '\tstrh\tr0, [r2, #0x1]\n');
+      expect(misaligned).not.toBe(twoWidths);
+      expect(() => decompile('f', misaligned, ARMV4T_AGBCC)).toThrow(/is not aligned to its width/);
     });
 
     // THE MODEL IS CHOSEN BEFORE THE SHAPE: where a device read nothing bounds is the only escape,

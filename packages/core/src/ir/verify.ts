@@ -181,6 +181,25 @@ export function verify(fn: Fn): void {
                   `got width ${String(op.attrs.width)}, signed ${String(op.attrs.signed)}`,
               );
             }
+            // …and storage accessed at two widths over one byte names the VIEWS a union of it
+            // declares (frame-objects.ts `unionViews`): one per element width in bytes, negative
+            // for a signed narrow one, each tiling the storage — so at least two, distinct, of a
+            // width a view is named for, and a word never signed-marked (it has one view).
+            const views = op.attrs.views;
+            if (views !== undefined) {
+              const ok =
+                Array.isArray(views) &&
+                count > 1 &&
+                views.length >= 2 &&
+                new Set(views).size === views.length &&
+                views.every((v) => [1, 2, 4, -1, -2].includes(v) && count % Math.abs(v) === 0);
+              if (!ok) {
+                throw new VerifyError(
+                  `'laddr' views must be two or more distinct element widths (1, 2, 4; negative for a signed ` +
+                    `narrow view) tiling its ${String(count)} bytes, got ${JSON.stringify(views)}`,
+                );
+              }
+            }
           }
           // A 64-bit value is BUILT and TAKEN APART by exactly these three, so their shape is
           // checked here rather than left to whoever reads a half. `concat` is the only producer.

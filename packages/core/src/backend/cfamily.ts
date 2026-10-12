@@ -385,7 +385,7 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
         }
         return `${rec(base, 1)}${e.lead.map((l) => `[${rec(l, 99)}]`).join('')}[${rec(e.idx, 99)}]`;
       }
-      if (e.idx.k === 'const' && e.idx.value === 0) {
+      if (e.idx.k === 'const' && e.idx.value === 0 && e.subscript !== true) {
         const s = `*${rec(base, 2)}`;
         return parentPrec < 2 ? `(${s})` : s;
       }
