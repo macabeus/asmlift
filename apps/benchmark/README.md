@@ -153,13 +153,16 @@ _Favouring m2c._
    honest C declaration omits a return type, and `FnProto` has no field for one (residual 9 is the
    same hole from the other side). The one row on that path today,
    `ac-decomp:JW_JUTGamePad_read`, declares `OSTime OSGetTime(void)` — so m2c is told the callee
-   returns 64 bits, where asmlift's `proto` says only `{"params": []}`, and m2c's output uses it
-   (`s64 temp_ret = OSGetTime();`). It is on that path because its unit is C++: the vendored
+   returns 64 bits, and m2c's output uses it (`s64 temp_ret = OSGetTime();`). Here the cap would
+   withhold nothing asmlift lacks: the manifest's `proto` says only `{"params": []}`, but a stated
+   entry that says nothing of the return keeps the one the vendored context declares
+   (`withContextPrototypes`), so asmlift's lift reads `s64` too and declines on it — a 64-bit
+   return the frontend does not build from its register pair. It is on that path because its unit is C++: the vendored
    context is not C, so m2c's parser cannot be given it. A C++ row's other option is to be given no
    project context — only the callee declarations asmlift's lift read, as C (`m2cDeclarations`) —
    and infer its own signature from the asm as asmlift does, which is what pikmin's 42 take;
    `authored-facts.test.ts` pins each path by itself, and which of the two a C++ row should take is
-   open. Both tools decline the row on other causes today. The callee
+   open. Both tools decline the row today. The callee
    NAMES either side is told are already held equal by `test/authored-facts.test.ts`, and the same
    test pins the rows on this path by name.
 
