@@ -17,10 +17,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { toolchainFileChain } from '../../src/candcache';
+import { benchCommand, benchCommandRefusal } from '../../src/candcache-bench';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
 // several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
@@ -76,56 +77,6 @@ const object = (bytes: string): string => {
 };
 
 describe('a TU whose object is not a function of its own bytes is refused PER KEY', () => {
-  // The regex this replaces ran on RAW text, and the preprocessor gets there first: phase 2
-  // splices backslash-newlines, phase 3 replaces comments. Six spellings were demonstrated as
-  // real includes that the guard passed — each one a header the namespace cannot see.
-  test.each([
-    ['plain', '#include "k.h"\nint f(void);\n'],
-    ['backslash-newline inside the word', '#in\\\nclude "k.h"\nint f(void);\n'],
-    ['backslash-newline after the #', '#\\\ninclude "k.h"\nint f(void);\n'],
-    ['form feed before the #', '\f#include "k.h"\nint f(void);\n'],
-    ['vertical tab before the #', '\v#include "k.h"\nint f(void);\n'],
-    ['#import', '#import "k.h"\nint f(void);\n'],
-    ['a comment between the # and the directive', '#/*c*/include "k.h"\nint f(void);\n'],
-    ['#include_next', '#include_next "k.h"\nint f(void);\n'],
-    ['the trigraph for #', '??=include "k.h"\nint f(void);\n'],
-    // A comment is replaced by ONE SPACE, newlines and all — so this comment JOINS the two
-    // physical lines into a single directive. Measured against the preprocessor that will read it:
-    // `arm-none-eabi-cpp -nostdinc -I.` on this TU resolves `k.h` and substitutes its macro
-    // (`int f(int x){return x*3;}`). A phase-3 normalisation that keeps the newlines "so line
-    // starts survive" answers `undefined` here, which is the one spelling a raw `/^#include/`
-    // cannot see either.
-    ['a comment spanning the newline', '#/*\n*/include "k.h"\nint f(void);\n'],
-    ['a comment spanning several newlines', '#/*\n\n*/include "k.h"\nint f(void);\n'],
-  ])('a TU that reads a file is refused: %s', async (_name, tu) => {
-    const r = await load({}, (m) => m.candidateCacheRefusal(tu));
-    expect(r, 'the preprocessor resolves this include; the guard must see it too').toBe('the-TU-reads-a-file');
-  });
-
-  test.each([['__FILE__'], ['__DATE__'], ['__TIME__'], ['__TIMESTAMP__'], ['__BASE_FILE__']])(
-    'a TU that bakes its path or the clock in is refused: %s',
-    async (macro) => {
-      // MEASURED before this existed: three uncached compiles of a `__FILE__` TU produced three
-      // different 836-byte objects through the production namespace, and the stamp probe — one
-      // fixed TU that uses neither macro — certified the pipeline pure and froze the first.
-      const r = await load({}, (m) => m.candidateCacheRefusal(`const char *s = ${macro};\n`));
-      expect(r).toBe('the-TU-bakes-its-path-or-the-clock-into-the-object');
-    },
-  );
-
-  test('an ordinary candidate is NOT refused — the refusal is per key, not a switch', async () => {
-    const tu = 's32 f(s32 a0) { /* not an #include, just prose */ return a0 + 1; }\n';
-    expect(await load({}, (m) => m.candidateCacheRefusal(tu))).toBeUndefined();
-  });
-
-  test('a #include written INSIDE a multi-line comment is not one — the comment takes it with it', async () => {
-    // The other direction of the same rule, and the one that keeps collapsing comments from
-    // refusing every candidate whose prose mentions a header. Measured: this TU preprocesses to
-    // `int f(int x){return x*2;}`, no include resolved.
-    const tu = '/* a comment mentioning\n#include "k.h"\nspanning lines */\nint f(int x){return x*2;}\n';
-    expect(await load({}, (m) => m.candidateCacheRefusal(tu))).toBeUndefined();
-  });
-
   test('the per-key refusal is COUNTED, not only said — once per reason, every time', async () => {
     // Hole 2's entire protection reported nothing: `noteKeyRefused` said one line per reason and
     // bumped no counter, so a 16-shard run where an emitter change armed `#include` printed one
@@ -514,8 +465,7 @@ describe('a store this process cannot prepare is a COLD store, never a dropped c
   // `stamp()`, so the throw escaped `get`/`put`/`warm` into the candidate compile — where
   // compile-command.ts and compile/agbcc.ts read ANY exception as "this spelling does not compile"
   // and delete it from the fan. MEASURED end to end against a read-only store: `1 dropped`, the
-  // published winner moved `unsigned` -> `signed` on the one line docs/ranked-repro.md tells
-  // readers to quote, and the `[candcache]` line still read a clean `{"hit":1}`.
+  // published winner moved `unsigned` -> `signed`, and the `[candcache]` line still read a clean `{"hit":1}`.
   const captureAll = async (
     env: Record<string, string | undefined>,
     fn: (m: CandCacheModule) => void,
@@ -577,7 +527,7 @@ describe('the matching gate upgrades to verify off ONE list of off-words, never 
   // runs have filled, so its globalSetup forces `verify`. It decided that with
   // `asked !== '0' && asked !== 'off'` — a two-element copy of a list candcache.ts already owns —
   // and therefore forced `verify` for `false`, `no`, `disable` and the SET-AND-EMPTY state, every
-  // one of which the module calls OFF and docs/ranked-repro.md describes as "touches no disk".
+  // one of which the module calls OFF and apps/benchmark/README.md describes as "touches no disk".
   // Under a forced `verify` such a run stores every key and appends to the SHARED
   // `MISMATCHES.log`, which a neighbour worktree's lines can then fail the teardown on.
   //
@@ -685,17 +635,12 @@ describe("a wrapper script's PROSE is not its program", () => {
   });
 });
 
-describe('THE RESIDUAL: a wrapper that OPENS a file it locates for itself', () => {
-  // Said out loud because 48ecc3fb moved whole SCRIPTS across this line, not only constructs. The
-  // chain follows what a script EXECS, never what it OPENS, so a wrapper that reads a project data
-  // file — a linked ELF whose symbol table its output depends on — is SERVED with that file
-  // outside the namespace, and rebuilding the file does not invalidate.
-  //
-  // What the pin is here to keep honest: the delegate refusal was never the guard for this. A
-  // wrapper whose ENGLISH happens to contain a backtick refused; the identical wrapper whose
-  // English does not was served on origin/main too, and both are served now. The remedy is one
-  // token in the compile TEMPLATE — pass the file as an argument, and `templatePathOperands`
-  // measures it by content. `docs/ranked-repro.md` carries the recipe and its cost.
+describe('a wrapper that OPENS a file it locates for itself', () => {
+  // The chain follows what a script EXECS, never what it OPENS, so a wrapper that reads a project
+  // data file — a linked ELF whose symbol table its output depends on — has that file outside the
+  // namespace, prose or no prose, and rebuilding the file would not invalidate. The command path
+  // keys no such wrapper: it admits a script only when its whole program is `exec <program> "$@"`
+  // (src/candcache-bench.ts).
   const wrapper = (body: string): string => {
     const dir = scratch();
     writeFileSync(join(dir, 'game.elf'), 'symbols v1');
@@ -717,8 +662,16 @@ describe('THE RESIDUAL: a wrapper that OPENS a file it locates for itself', () =
       expect(chain, `${label}: served, not refused`).toContain(NODE);
       expect(
         chain.some((e) => e.endsWith('game.elf')),
-        `${label}: the data input is the documented residual`,
+        `${label}: the data input is not in the chain`,
       ).toBe(false);
     }
+  });
+
+  test('so the benchmark command run through it is not keyed', () => {
+    const p = wrapper(`#!/bin/sh\n${READS_A_FILE}`);
+    const bench = { toolchain: 'ido7.1', placeholders: { ASMLIFT_IDO_CC: p } };
+    expect(benchCommandRefusal(benchCommand(bench), bench, { cwd: dirname(p), env: process.env })).toBe(
+      `the-bench-command-runs-what-the-store-cannot-key: it runs ${p}, a script that is not a flagless #!/bin/sh exec of a program with its own arguments`,
+    );
   });
 });

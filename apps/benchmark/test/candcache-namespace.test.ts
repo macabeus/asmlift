@@ -18,8 +18,9 @@
 //      so it is an input to every candidate compile although nothing on the command line names it.
 //
 // The assertions are on the two exported halves of the namespace rather than on a live compile:
-// `candCacheNamespaceFiles()` is the LIST (a dropped entry is an input the cache stops noticing)
-// and `candCacheStaticStamp(cflags, files)` is the digest over it (content, not paths). The pipeline's own
+// `candCacheNamespaceFiles()` and `SHAPING_SOURCES` are the LISTS (a dropped entry is an input the cache
+// stops noticing) and `candCacheStaticStamp(cflags, files, sources)` is the digest over them (content, not
+// paths; the sources' as this process loaded them). The pipeline's own
 // object bytes are the third half, measured by the two-directory probe, which needs agbcc and is
 // exercised by the matching suite.
 //
@@ -28,10 +29,11 @@
 // guess when the binary is not installed — so the two tests that call it are skipped where agbcc
 // is absent, which is every hosted runner. What must not be lost there is the dropped-entry guard,
 // so `SHAPING_SOURCES` is asserted directly: that half is a constant and needs no toolchain.
-import { toolchainFileChain } from '@asmlift/cli/candcache';
+import { refuseUnkeyedEnv, sha, toolchainFileChain } from '@asmlift/cli/candcache';
+import { loadedCodeDigest } from '@asmlift/cli/loaded-code';
 import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { TOOLCHAIN } from '@asmlift/toolchains';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -45,6 +47,8 @@ const HARNESS = join(import.meta.dirname, '../src/compile');
 const HAVE_AGBCC = existsSync(TOOLCHAIN.agbcc);
 const scratch = (): string => mkdtempSync(join(tmpdir(), 'candcache-ns-'));
 const CANONICAL = TOOLCHAIN_TARGETS.agbcc.canonicalFlags;
+const CLT_CLANG = '/Library/Developer/CommandLineTools/usr/bin/clang';
+const OLD_SDK = '/Library/Developer/CommandLineTools/SDKs/MacOSX12.3.sdk';
 
 describe('hole 1 — the namespace hashes the harness code that shapes the compiler input', () => {
   test('agbcc.ts and util.ts are shaping sources, and they exist', () => {
@@ -55,26 +59,56 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
     }
   });
 
-  test.skipIf(!HAVE_AGBCC)('…and the list the namespace hashes ends with exactly those two', () => {
-    expect(candCacheNamespaceFiles().slice(-SHAPING_SOURCES.length)).toEqual([...SHAPING_SOURCES]);
+  test("core's compiler-diagnostics.ts is one: it words the message a stored rejection is served with", () => {
+    const hit = SHAPING_SOURCES.find(
+      (f) => f === join(HARNESS, '../../../../packages/core/src/compiler-diagnostics.ts'),
+    );
+    expect(hit, 'errorsFirst orders the diagnostic lines `stepFailed` keeps').toBeDefined();
+    expect(readFileSync(hit!, 'utf8')).toMatch(/export function errorsFirst\b/);
   });
 
-  test('patching the .s tail agbcc.ts appends MOVES the digest — the exact stale-object repro', () => {
-    const dir = scratch();
-    const copy = join(dir, 'agbcc.ts');
-    copyFileSync(join(HARNESS, 'agbcc.ts'), copy);
+  test("the CLI's candcache-reads.ts is one: it decides, after the compile, which answers are kept", () => {
+    const hit = SHAPING_SOURCES.find((f) => f === join(HARNESS, '../../../../packages/cli/src/candcache-reads.ts'));
+    expect(hit, 'a stricter classifier must never serve what a looser one kept').toBeDefined();
+    expect(readFileSync(hit!, 'utf8')).toMatch(/export function candidateReadsRefusal\b/);
+  });
 
-    const before = candCacheStaticStamp(CANONICAL, [copy]);
-    const src = readFileSync(copy, 'utf8');
+  test('…and the namespace hashes each of them as this process loaded it', () => {
+    for (const f of SHAPING_SOURCES) {
+      expect(loadedCodeDigest(f), f).toBe(sha(readFileSync(f)));
+    }
+  });
+
+  test('patching the .s tail agbcc.ts appends MOVES the digest — the exact stale-object repro', async () => {
+    const before = join(scratch(), 'agbcc.ts');
+    const after = join(scratch(), 'agbcc.ts');
+    copyFileSync(join(HARNESS, 'agbcc.ts'), before);
+    const src = readFileSync(before, 'utf8');
     expect(src, 'this test pins the real tail; if the pipeline changed it, re-pin it here').toContain(
       "'\\n.text\\n\\t.align\\t2, 0\\n'",
     );
-    writeFileSync(copy, src.replace("'\\n.text\\n\\t.align\\t2, 0\\n'", "'\\n.text\\n\\t.align\\t4, 0\\n'"));
-
-    expect(
-      candCacheStaticStamp(CANONICAL, [copy]),
-      'a harness edit that changes the object must re-namespace',
-    ).not.toBe(before);
+    writeFileSync(after, src.replace("'\\n.text\\n\\t.align\\t2, 0\\n'", "'\\n.text\\n\\t.align\\t4, 0\\n'"));
+    // Stamped in a process that starts after both copies were written, by more than the slack a
+    // coarse file system gets: this one refuses a source written after it started.
+    await new Promise((r) => setTimeout(r, 2_100));
+    const [b, a] = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          '--import',
+          'tsx',
+          '--input-type=module',
+          '-e',
+          [
+            `const { candCacheStaticStamp } = await import(${JSON.stringify(join(HARNESS, 'agbcc.ts'))});`,
+            `const canonical = ${JSON.stringify(CANONICAL)};`,
+            `console.log(JSON.stringify([${JSON.stringify(before)}, ${JSON.stringify(after)}].map((p) => candCacheStaticStamp(canonical, [], [p]))));`,
+          ].join('\n'),
+        ],
+        { encoding: 'utf8', cwd: join(HARNESS, '../..') },
+      ),
+    ) as [string, string];
+    expect(a, 'a harness edit that changes the object must re-namespace').not.toBe(b);
   });
 
   test('it is CONTENT, not the path: identical bytes at two paths agree, different bytes do not', () => {
@@ -92,6 +126,17 @@ describe('hole 1 — the namespace hashes the harness code that shapes the compi
 
   test('an input that cannot be READ throws — the cache refuses, it never guesses', () => {
     expect(() => candCacheStaticStamp(CANONICAL, [join(scratch(), 'absent.ts')])).toThrow(/ENOENT|no such file/i);
+    expect(() => candCacheStaticStamp(CANONICAL, [], [join(scratch(), 'absent.ts')])).toThrow(
+      /cannot read .*absent\.ts/,
+    );
+  });
+});
+
+describe('R310-43: the harness code is hashed as this process loaded it', () => {
+  test('a source changed after this process started refuses the namespace', () => {
+    const src = join(scratch(), 'util.ts');
+    copyFileSync(join(HARNESS, 'util.ts'), src);
+    expect(() => candCacheStaticStamp(CANONICAL, [], [src])).toThrow(/util\.ts changed after this process started/);
   });
 });
 
@@ -100,17 +145,16 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
     'the assembler and the preprocessor are on the list, resolved or explicitly UNRESOLVED',
     () => {
       const files = candCacheNamespaceFiles();
-      // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO, then the two shaping
-      // sources. The count is not the claim (a chain is as long as the toolchain makes it); every
-      // entry being a real file or an explicit marker is.
-      expect(files.length).toBeGreaterThanOrEqual(5);
-      for (const entry of files.slice(0, -2)) {
+      // agbcc, the assembler, the preprocessor AND WHATEVER THOSE DELEGATE TO. The count is not
+      // the claim (a chain is as long as the toolchain makes it); every entry being a real file or
+      // an explicit marker is.
+      expect(files.length).toBeGreaterThanOrEqual(3);
+      for (const entry of files) {
         expect(
           entry.startsWith('/') || entry.startsWith('UNRESOLVED:'),
           `a bare command name must resolve to a file to hash, or say it did not: ${entry}`,
         ).toBe(true);
       }
-      expect(files.slice(-2)).toEqual([join(HARNESS, 'agbcc.ts'), join(HARNESS, 'util.ts')]);
     },
   );
 
@@ -189,9 +233,9 @@ describe('hole 4 — the namespace hashes the BINARIES, not their version banner
   test('a variable the script ASSIGNS itself is not an external input', () => {
     const dir = scratch();
     const w = join(dir, 'wrapper-selfassign');
-    writeFileSync(w, '#!/bin/sh\nCC=/usr/bin/true\nexec "$CC" "$@"\n');
+    writeFileSync(w, '#!/bin/sh\nASMLIFT_TOOL=/usr/bin/true\nexec "$ASMLIFT_TOOL" "$@"\n');
     chmodSync(w, 0o755);
-    expect(toolchainFileChain(w).some((e) => e.startsWith('ENV:CC='))).toBe(false);
+    expect(toolchainFileChain(w).some((e) => e.startsWith('ENV:ASMLIFT_TOOL='))).toBe(false);
   });
 
   test('the file half is keyed by CONTENT, not by the absolute path it sits at', () => {
@@ -238,12 +282,49 @@ describe('hole 5 — the compile environment is an input to every candidate comp
     }
   };
 
-  test('CPATH and C_INCLUDE_PATH move the digest — cpp honours them even under -nostdinc', () => {
+  test('CPATH and C_INCLUDE_PATH refuse the namespace — cpp honours them even under -nostdinc', () => {
     for (const v of ['CPATH', 'C_INCLUDE_PATH']) {
-      const bare = withEnv(v, undefined, () => candCacheStaticStamp(CANONICAL, []));
-      const set = withEnv(v, '/private/tmp/candcache-ns-probe-inc', () => candCacheStaticStamp(CANONICAL, []));
-      expect(set, `${v} is an include-path input and must re-namespace`).not.toBe(bare);
+      withEnv(v, '/private/tmp/candcache-ns-probe-inc', () => {
+        expect(() => refuseUnkeyedEnv(), `${v} names directories, not what is in them`).toThrow(v);
+        return '';
+      });
     }
+  });
+
+  test('the locale moves the digest — it words the rejections the store keeps', () => {
+    for (const v of ['LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES']) {
+      const c = withEnv(v, 'C', () => candCacheStaticStamp(CANONICAL, []));
+      const de = withEnv(v, 'de_DE.UTF-8', () => candCacheStaticStamp(CANONICAL, []));
+      expect(de, `${v} picks a message's language`).not.toBe(c);
+    }
+  });
+
+  test('the diagnostic variables move the digest — they word the rejections the store keeps', () => {
+    for (const v of ['GCC_COLORS', 'GCC_URLS', 'TERM_URLS', 'GCC_EXTRA_DIAGNOSTIC_OUTPUT', 'COLUMNS']) {
+      const bare = withEnv(v, undefined, () => candCacheStaticStamp(CANONICAL, []));
+      const set = withEnv(v, '40', () => candCacheStaticStamp(CANONICAL, []));
+      expect(set, `${v} shapes a diagnostic's colours, links, fix-it lines or width`).not.toBe(bare);
+    }
+  });
+
+  test('the SDK a clang reads its predefines from moves the digest', () => {
+    for (const v of ['SDKROOT', 'DEVELOPER_DIR']) {
+      const bare = withEnv(v, undefined, () => candCacheStaticStamp(CANONICAL, []));
+      const set = withEnv(v, '/Library/Developer/CommandLineTools', () => candCacheStaticStamp(CANONICAL, []));
+      expect(set, `${v} picks the SDK`).not.toBe(bare);
+    }
+  });
+
+  test.runIf(existsSync(CLT_CLANG) && existsSync(OLD_SDK))('…because a clang predefines from SDKROOT', () => {
+    const predefined = (sdk: string | undefined): string =>
+      withEnv('SDKROOT', sdk, () =>
+        execSync(`${CLT_CLANG} -E -P -nostdinc -`, {
+          input: 'int v = __ENVIRONMENT_MAC_OS_X_VERSION_MIN_REQUIRED__;\n',
+          encoding: 'utf8',
+        }).trim(),
+      );
+    expect(predefined(OLD_SDK)).toBe('int v = 120300;');
+    expect(predefined(undefined)).not.toBe(predefined(OLD_SDK));
   });
 
   test('an unrelated variable does NOT move it — the list is the claim, not "the whole environment"', () => {
@@ -287,16 +368,9 @@ describe("a script's PROSE is not its program", () => {
     expect(toolchainFileChain(p), 'the interpreter is a delegate').toContain(realpathSync('/bin/sh'));
   });
 
-  test('…and `#!/usr/bin/env sh` names TWO programs, both of which run', () => {
-    // The stripper removes the shebang like any other `#` line, so it is re-added from the raw
-    // bytes — and re-adding only the FIRST token drops the real interpreter out of the namespace
-    // for every `env` shebang. Swap the interpreter behind `env` and the cache would serve objects
-    // built by a different program.
-    const sh = realpathSync(execSync('command -v sh', { shell: '/bin/sh' }).toString().trim());
+  test('…and a script under `#!/usr/bin/env sh` is refused: `env` runs whatever interpreter it finds', () => {
     const p = wrapper('#!/usr/bin/env sh\n# a comment\nexec /usr/bin/true "$@"\n');
-    const chain = toolchainFileChain(p);
-    expect(chain, 'env itself').toContain(realpathSync('/usr/bin/env'));
-    expect(chain, 'and the interpreter env goes on to run').toContain(sh);
+    expect(() => toolchainFileChain(p)).toThrow(/runs under \/usr\/bin\/env sh, not a flagless \/bin\/sh/);
   });
 });
 

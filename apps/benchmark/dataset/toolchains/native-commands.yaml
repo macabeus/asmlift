@@ -1,0 +1,12 @@
+# The compile commands the benchmark runs in place of a toolchain's committed `docker run` one on a
+# host that runs the toolchain's 32-bit Linux binaries natively (src/decomp-config.ts): the same
+# compiler and words over the host paths the container's mounts stood for, run in the candidate's
+# directory as the container ran in /work. `$ASMLIFT_*` and `{{…}}` read as in each toolchain's
+# decomp.yaml. The candidate store keys these commands too (packages/cli/src/candcache-bench.ts).
+gcc2.7.2: >-
+  cd "$(dirname {{outputPath}})" && COMPILER_PATH="$ASMLIFT_GCC272_DIR" "$ASMLIFT_GCC272_DIR"/gcc
+  -B "$ASMLIFT_GCC272_DIR"/ -nostdinc {{flags}} -c -o {{outputPath}} {{inputPath}}
+mwcc_233_163n: &mwcc >-
+  cd "$(dirname {{outputPath}})" && "$ASMLIFT_NATIVE_WIBO" "$ASMLIFT_MWCC_DIR"/mwcceppc.exe
+  '-pragma' 'msg_show_realref off' '-c' '-nostdinc' '-stderr' {{flags}} -o {{outputPath}} {{inputPath}}
+mwcc_247_107: *mwcc

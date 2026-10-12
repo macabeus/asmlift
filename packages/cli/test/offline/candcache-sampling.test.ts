@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
+import { benchAgbcc } from './bench-command-double';
+
 // A BLOCKING-spawnSync suite in a pool whose config says there are none — the same hazard the rest
 // of the candcache family carries the same guard for: the end-to-end cases below drive real `sh`
 // compiles through `compileFromCommand`, and this file's neighbours in `test:offline` run in
@@ -234,13 +236,11 @@ describe('the whole mechanism is inside the module — neither call site changes
   // `compile-command.ts` and `apps/benchmark/src/compile/agbcc.ts` both already spell it
   // `get` → compile → `verify` → `put` (and `verifyFail` → `putFail`), which is exactly the order
   // sampling needs. This drives the REAL ranked-path seam end to end, with a poisoned store, and
-  // nothing in it knows sampling exists.
-  // No side effect in `cwd`: the neighbouring suites' template appends to a `runs` file so a hit
-  // is observable as an execution that did not happen, and that file is a TOKEN of the template.
-  // It does not exist when the first run stamps the namespace and does exist when the second one
-  // does, so the namespace MOVES between them and the second run is cold — a rig artifact that
-  // reads exactly like "sampling found nothing".
-  const TEMPLATE = 'cat "{{inputPath}}" > "{{outputPath}}"';
+  // nothing in it knows sampling exists — through the benchmark's own command, the only one the
+  // store keys (bench-command-double.ts).
+  const BENCH = benchAgbcc();
+  const compileIn = (m: typeof import('../../src/compile-command'), cwd: string) =>
+    m.compileFromCommand(BENCH.command, { cwd, cflags: ['-O2'], bench: BENCH.bench });
   const CAND = 's32 f(s32 a0) { return a0 + 1; }\n';
 
   async function withCompile<T>(
@@ -293,9 +293,8 @@ describe('the whole mechanism is inside the module — neither call site changes
     const cwd = scratch();
     const store = scratch();
     // 1. a cold run stores this template's answer for one candidate
-    await withCompile(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store },
-      ({ compileFromCommand }) => compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c'),
+    await withCompile({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store }, (m) =>
+      compileIn(m, cwd)(CAND, 'f', 'c'),
     );
     const objs = storedObjects(store);
     expect(objs.length).toBe(1);
@@ -316,8 +315,8 @@ describe('the whole mechanism is inside the module — neither call site changes
     try {
       await withCompile(
         { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '100', ASMLIFT_CANDCACHE_DIR: store },
-        async ({ compileFromCommand }) => {
-          served = await compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c');
+        async (m) => {
+          served = await compileIn(m, cwd)(CAND, 'f', 'c');
           mismatches = (await import('../../src/candcache')).cacheMismatches();
         },
       );
@@ -331,7 +330,7 @@ describe('the whole mechanism is inside the module — neither call site changes
     // found by the repair's own store write). The second names a different set of victims, so it
     // is reported rather than swallowed as "already known".
     expect(said).toContain('OBJECT STORE CORRUPT');
-    expect(mismatches, 'nonzero is what makes the run exit CACHE_MISMATCH_EXIT in main.ts and cli.ts').toBe(2);
+    expect(mismatches, 'nonzero is what makes a bench shard exit CACHE_MISMATCH_EXIT (apps/benchmark cli.ts)').toBe(2);
     // and the candidate the row is scored on is the TRUTH, not the poison
     expect(readFileSync(served, 'utf8')).toContain('a0 + 1');
   });
@@ -341,15 +340,14 @@ describe('the whole mechanism is inside the module — neither call site changes
     // and no outcome-comparing gate anywhere can tell.
     const cwd = scratch();
     const store = scratch();
-    await withCompile(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store },
-      ({ compileFromCommand }) => compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c'),
+    await withCompile({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store }, (m) =>
+      compileIn(m, cwd)(CAND, 'f', 'c'),
     );
     writeFileSync(storedObjects(store)[0], 'NOT-WHAT-THIS-TOOLCHAIN-PRODUCES\n');
     const { served, mismatches } = await withCompile(
       { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: store },
-      async ({ compileFromCommand }) => ({
-        served: await compileFromCommand(TEMPLATE, { cwd })(CAND, 'f', 'c'),
+      async (m) => ({
+        served: await compileIn(m, cwd)(CAND, 'f', 'c'),
         mismatches: (await import('../../src/candcache')).cacheMismatches(),
       }),
     );
@@ -744,150 +742,5 @@ describe('an audit whose REPAIR did not land must not be served — sampling may
       (m) => m.candCache('t', () => NS_A).get('k', 'f'),
     );
     expect(next, 'a miss recompiles, which is always correct').toBeUndefined();
-  });
-});
-
-describe('a reported mismatch reaches the EXIT STATUS, which is the only thing a wrapper reads', () => {
-  // `[candcache]` lines and MISMATCHES.log are for whoever is watching. A published reproduction
-  // script, an orchestration loop and `bench fidelity` read the status, and `match && mismatches
-  // === 0 ? 0 : 1` carried no signal for the case this repo publishes: LoadBGTilemapData has been
-  // a nonmatch at 386 for twenty rounds, so a clean run and a poisoned run of it both exit 1.
-  const poison = async (root: string): Promise<void> => {
-    await load(seedEnv(root), (m) => m.candCache('t', () => NS_A).put('k', 'f', object('WRONG-BYTES')));
-  };
-
-  test('BOTH ranked returns carry it: a match, and the decline a total cache defect produces', async () => {
-    const root = scratch();
-    await poison(root);
-    const saved = { ...process.env };
-    Object.assign(process.env, {
-      ASMLIFT_CANDCACHE: '1',
-      ASMLIFT_CANDCACHE_SAMPLE: '100',
-      ASMLIFT_CANDCACHE_DIR: root,
-    });
-    vi.resetModules();
-    const spy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    try {
-      const m = await import('../../src/candcache');
-      compileAndStore(
-        m.candCache('t', () => NS_A),
-        'k',
-        'THE-TRUTH',
-      );
-      expect(m.cacheMismatches()).toBeGreaterThan(0);
-      const { rankedExitCode } = await import('../../src/main');
-      expect(rankedExitCode(false), 'the failure return — serving stale objects is WHY nothing scored').toBe(
-        m.CACHE_MISMATCH_EXIT,
-      );
-      expect(rankedExitCode(true), 'and a MATCH published off a store that lied is not a 0').toBe(
-        m.CACHE_MISMATCH_EXIT,
-      );
-    } finally {
-      spy.mockRestore();
-      for (const k of ['ASMLIFT_CANDCACHE', 'ASMLIFT_CANDCACHE_SAMPLE', 'ASMLIFT_CANDCACHE_DIR']) {
-        if (saved[k] === undefined) {
-          delete process.env[k];
-        } else {
-          process.env[k] = saved[k];
-        }
-      }
-    }
-  });
-
-  test('END TO END through runCli: the same score, the same stdout, a DIFFERENT status', async () => {
-    // The whole discrimination, on one store. A poisoned run and a clean one produce byte-identical
-    // `[ranked]` lines — that is what makes `bench regression` and `bench diff` blind — so the exit
-    // status is the only place the difference can land, and 1 was already taken by "no match".
-    const fixture = (f: string): string => join(import.meta.dirname, 'fixtures', 'objdiff', f);
-    const root = scratch();
-    const store = scratch();
-    const asm = join(root, 'add_one.s');
-    writeFileSync(asm, '\t.text\n\t.code\t16\n\t.globl\tadd_one\n\t.thumb_func\nadd_one:\n\tadd\tr0, #1\n\tbx\tlr\n');
-    // A "compiler" that is a pure function of its input, which is all the namespace asks of it.
-    const template = `cat {{inputPath}} > /dev/null && cp ${fixture('candidate-diff.o')} {{outputPath}}`;
-    writeFileSync(
-      join(root, 'decomp.yaml'),
-      `name: test\nplatform: gba\nversions: []\ntools:\n  asmlift:\n    compiler: ${JSON.stringify(template)}\n`,
-    );
-    const args = [
-      asm,
-      '--name',
-      'add_one',
-      '--score-against',
-      fixture('target.o'),
-      '--config',
-      join(root, 'decomp.yaml'),
-    ];
-
-    const run = async (sample: string): Promise<{ code: number; stdout: string; stderr: string }> => {
-      const saved = { ...process.env };
-      Object.assign(process.env, {
-        ASMLIFT_CANDCACHE: '1',
-        ASMLIFT_CANDCACHE_SAMPLE: sample,
-        ASMLIFT_CANDCACHE_DIR: store,
-      });
-      vi.resetModules();
-      try {
-        return await (await import('../../src/main')).runCli(args);
-      } finally {
-        for (const k of ['ASMLIFT_CANDCACHE', 'ASMLIFT_CANDCACHE_SAMPLE', 'ASMLIFT_CANDCACHE_DIR']) {
-          if (saved[k] === undefined) {
-            delete process.env[k];
-          } else {
-            process.env[k] = saved[k];
-          }
-        }
-      }
-    };
-    /** Replace every stored object with the TARGET's own bytes — a store that answers, wrongly,
-     *  and whose wrong answer is a byte-exact MATCH. */
-    const poisonStore = (): number => {
-      const objs: string[] = [];
-      const walk = (d: string): void => {
-        for (const e of readdirSync(d, { withFileTypes: true })) {
-          if (e.name === '.live') {
-            continue;
-          }
-          const p = join(d, e.name);
-          if (e.isDirectory()) {
-            walk(p);
-          } else if (e.name.endsWith('.o')) {
-            objs.push(p);
-          }
-        }
-      };
-      walk(join(store, 'ns'));
-      for (const o of objs) {
-        writeFileSync(o, readFileSync(fixture('target.o')));
-      }
-      return objs.length;
-    };
-
-    const cold = await run('0');
-    expect(cold.code, 'a nonmatching ranked run: the status this project publishes').toBe(1);
-    expect(poisonStore()).toBeGreaterThan(0);
-
-    const audited = await run('100');
-    expect(audited.stderr).toContain('STORED ANSWER(S) DISAGREED WITH A FRESH COMPILE');
-    expect(audited.code, 'a mismatch outranks "no match", or the status says nothing').toBe(3);
-    expect(audited.stdout, 'the audit repaired the entry, so the published source is unchanged').toBe(cold.stdout);
-
-    // THE CONTROL, and it is the whole argument: the same poisoned store with the audit off
-    // publishes the target's own bytes as this candidate's, scores them byte-exact, and exits 0.
-    // A silent wrong answer, from a run `bench regression` and `bench diff` both pass.
-    poisonStore();
-    const silent = await run('0');
-    expect(silent.stderr).not.toContain('DISAGREED');
-    expect(silent.stderr).toContain('(match)');
-    expect(silent.code, 'a MATCH published off a store nobody audited').toBe(0);
-  });
-
-  test('and a clean run still says match-or-not, which is what every other reader depends on', async () => {
-    vi.resetModules();
-    const m = await import('../../src/candcache');
-    expect(m.cacheMismatches()).toBe(0);
-    const { rankedExitCode } = await import('../../src/main');
-    expect(rankedExitCode(true)).toBe(0);
-    expect(rankedExitCode(false)).toBe(1);
   });
 });

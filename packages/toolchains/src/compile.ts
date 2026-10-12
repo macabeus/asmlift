@@ -7,6 +7,7 @@
 // already evaluated this module. (An index-only side effect would be bypassed by subpath
 // imports, silently leaving @asmlift/cli's registry empty — and the benchmark's gcc/mwcc
 // rows would record "noncompile" instead of failing loud.)
+import { type PreprocessorReport, cppReport } from '@asmlift/cli/candcache-reads';
 import { scopedObjectPath } from '@asmlift/cli/elf-section';
 import { type CandidateCompiler, registerCandidateCompiler } from '@asmlift/cli/score';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
@@ -297,8 +298,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
   }
   const w = hostTmp(dir);
   if (w) {
-    const name = poolName('gcc272', `${t.image}|${t.dir}`);
-    const mounts = ['-v', `${t.dir}:/gcc272:ro`, '-v', '/tmp:/host-tmp'];
+    const { name, mounts } = gcc272PoolCfg();
     const cc = poolExec(t.docker, t.image, name, mounts, [
       '-w',
       w,
@@ -322,7 +322,7 @@ export function gcc272Compile(dir: string, srcC: string, outObj: string, flags: 
       return;
     }
   }
-  const cc = run(t.docker, [
+  const cc = oneShot(t.docker, [
     'run',
     '--rm',
     '--platform',
@@ -477,8 +477,42 @@ export function contentShareableDir(prefix: string, flags: readonly string[], so
 const poolEnabled = () => process.env.ASMLIFT_DOCKER_POOL !== '0';
 const poolReady = new Set<string>(); // container names this process has confirmed running
 
+// Counts, over this process, of the two things a containerized compile can do besides `docker exec`
+// in a pool it already knew: confirm or start a pool container (which runs whatever image its tag
+// names at that moment), and compile in a one-shot `docker run` (which runs whatever image the tag
+// names at that moment, and writes `/work`, not the scratch directory, into an object). A store
+// keyed on one route and one image reads them around each compile.
+const poolStartCounts = new Map<string, number>();
+let oneShotCount = 0;
+/** How many times this process confirmed or started the pool container `name`. */
+export const poolStarts = (name: string): number => poolStartCounts.get(name) ?? 0;
+/** How many compiles this process ran in a one-shot `docker run`. */
+export const oneShots = (): number => oneShotCount;
+
+/** `docker run` for a compile that did not get a pool, counted in `oneShots`. */
+function oneShot(docker: string, args: string[]) {
+  oneShotCount++;
+  return run(docker, args);
+}
+
 function poolName(kind: string, cfg: string): string {
   return `asmlift-pool-${kind}-${createHash('sha256').update(cfg).digest('hex').slice(0, 8)}`;
+}
+
+/** The KMC GCC pool container's identity, its name and mounts kept together as `ppcPoolCfg` keeps
+ *  them. Exported for the benchmark's candidate store, which checks which image that container runs. */
+export function kmcPoolCfg(): { name: string; mounts: string[] } {
+  const t = GCC_KMC_TOOLCHAIN;
+  return { name: poolName('kmc', `${t.image}|${t.dir}`), mounts: ['-v', `${t.dir}:/kmc:ro`, '-v', '/tmp:/host-tmp'] };
+}
+
+/** The GCC 2.7.2 pool container's identity, as `kmcPoolCfg`. */
+export function gcc272PoolCfg(): { name: string; mounts: string[] } {
+  const t = GCC272_TOOLCHAIN;
+  return {
+    name: poolName('gcc272', `${t.image}|${t.dir}`),
+    mounts: ['-v', `${t.dir}:/gcc272:ro`, '-v', '/tmp:/host-tmp'],
+  };
 }
 
 /** Map a host path under /tmp to its path under the pool's /host-tmp mount (null ⇒ not poolable). */
@@ -494,20 +528,23 @@ function ensurePooled(docker: string, image: string, name: string, mounts: strin
   if (poolReady.has(name)) {
     return true;
   }
-  const ins = run(docker, ['container', 'inspect', '-f', '{{.State.Running}}', name]);
-  if (ins.status === 0 && ins.stdout.trim() === 'true') {
-    poolReady.add(name);
-    return true;
+  const running = (): boolean => {
+    const ins = run(docker, ['container', 'inspect', '-f', '{{.State.Running}}', name]);
+    if (ins.status === 0 && ins.stdout.trim() === 'true') {
+      return true;
+    }
+    if (ins.status === 0) {
+      run(docker, ['rm', '-f', name]);
+    } // exists but exited (expired sleep)
+    const r = run(docker, ['run', '-d', '--name', name, '--platform', 'linux/386', ...mounts, image, 'sleep', '86400']);
+    return r.status === 0 || /already in use/i.test(r.stderr ?? '');
+  };
+  if (!running()) {
+    return false; // no docker daemon / image → caller cold-runs (surfacing the real error there)
   }
-  if (ins.status === 0) {
-    run(docker, ['rm', '-f', name]);
-  } // exists but exited (expired sleep)
-  const r = run(docker, ['run', '-d', '--name', name, '--platform', 'linux/386', ...mounts, image, 'sleep', '86400']);
-  if (r.status === 0 || /already in use/i.test(r.stderr ?? '')) {
-    poolReady.add(name);
-    return true;
-  }
-  return false; // no docker daemon / image → caller cold-runs (surfacing the real error there)
+  poolReady.add(name);
+  poolStartCounts.set(name, poolStarts(name) + 1);
+  return true;
 }
 
 /** `docker exec` in the pool. Returns null when the pool itself is unusable (caller cold-runs);
@@ -532,9 +569,10 @@ export function poolExec(docker: string, image: string, name: string, mounts: st
 
 /** Compile `srcC` (a basename in `dir`) at `flags` to the object `outObj` with KMC GCC inside the
  *  container — pooled `docker exec` when `dir` is under /tmp, single-shot `docker run` otherwise.
- *  Throws on failure. Exported for the benchmark's real-tier compile
- *  (apps/benchmark/src/compile/kmc.ts), so it pools through the same helper. */
-export function kmcCompile(dir: string, srcC: string, outObj: string, flags: readonly string[]): void {
+ *  Returns the source's path as the compiler was handed it; throws on failure. Exported for the
+ *  benchmark's real-tier compile (apps/benchmark/src/compile/kmc.ts), so it pools through the same
+ *  helper. */
+export function kmcCompile(dir: string, srcC: string, outObj: string, flags: readonly string[]): string {
   const t = GCC_KMC_TOOLCHAIN;
   if (kmcNative()) {
     const cc = run(
@@ -546,12 +584,11 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
     if (cc.status !== 0) {
       throw refused('kmc gcc (native)', cc);
     }
-    return;
+    return join(dir, srcC);
   }
   const w = hostTmp(dir);
   if (w) {
-    const name = poolName('kmc', `${t.image}|${t.dir}`);
-    const mounts = ['-v', `${t.dir}:/kmc:ro`, '-v', '/tmp:/host-tmp'];
+    const { name, mounts } = kmcPoolCfg();
     const cc = poolExec(t.docker, t.image, name, mounts, [
       '-w',
       w,
@@ -570,10 +607,10 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
       if (cc.status !== 0) {
         throw containerRefused('kmc gcc (docker)', cc);
       }
-      return;
+      return `${w}/${srcC}`;
     }
   }
-  const cc = run(t.docker, [
+  const cc = oneShot(t.docker, [
     'run',
     '--rm',
     '--platform',
@@ -598,6 +635,7 @@ export function kmcCompile(dir: string, srcC: string, outObj: string, flags: rea
   if (cc.status !== 0) {
     throw containerRefused('kmc gcc (docker)', cc);
   }
+  return `/work/${srcC}`;
 }
 
 /** Compile reference C with KMC GCC at `flags` → {obj (scoring target), asm (disassembly, frontend
@@ -625,6 +663,25 @@ export function compileCandKmc(cSource: string, flags: readonly string[]): strin
   writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
   kmcCompile(dir, 'cand.c', 'cand.o', flags);
   return join(dir, 'cand.o');
+}
+
+/** The words that make KMC GCC's driver report what its preprocessor read. */
+export const KMC_REPORT_FLAGS = ['-MD', '-save-temps'] as const;
+
+/** `compileCandKmc`'s object, with what KMC GCC's own preprocessor read: `-MD`'s dependency list and
+ *  the text `-save-temps` keeps, both beside the object (MEASURED: the object is byte for byte the
+ *  one the plain compile writes). A compile that failed throws, with no report. */
+export function compileCandKmcReported(
+  cSource: string,
+  flags: readonly string[],
+): { obj: string; report: PreprocessorReport } {
+  const dir = mkShareableTmp('asmlift-mgcc-score-');
+  writeFileSync(join(dir, 'cand.c'), C_TYPEDEFS + cSource);
+  const source = kmcCompile(dir, 'cand.c', 'cand.o', [...flags, ...KMC_REPORT_FLAGS]);
+  return {
+    obj: join(dir, 'cand.o'),
+    report: cppReport(join(dir, 'cand.d'), join(dir, 'cand.i'), source, 'cand.o'),
+  };
 }
 
 /** KMC GCC's candidate compiler at `flags`. The registry holds it at gcc2.7.2kmc's canonical flags. */
@@ -708,7 +765,7 @@ function ppcExec(
       return done(r, 'pooled');
     }
   }
-  const r = run(t.docker, [
+  const r = oneShot(t.docker, [
     'run',
     '--rm',
     '--platform',

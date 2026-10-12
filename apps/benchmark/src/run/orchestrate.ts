@@ -7,6 +7,7 @@
 // pipeline, and the Docker container pool is shared by name across processes.
 import type { BenchOutput } from '@asmlift/bench-schema';
 import { CACHE_MISMATCH_EXIT } from '@asmlift/cli/candcache';
+import { loadedCodeArgv } from '@asmlift/cli/loaded-code';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -61,9 +62,10 @@ export interface ShardOutcome {
   skips: number; // rows this shard could not measure (toolchain unavailable)
 }
 
-/** One shard child (a tsx subprocess), stdout streamed with a shard prefix. Resolves on exit. */
+/** One shard child (TypeScript under tsx, hashing the code it loads), stdout streamed with a shard
+ *  prefix. Resolves on exit. */
 function runShard(tier: Tier, shard: string, extra: string[]): Promise<ShardOutcome> {
-  const child = spawn('tsx', [CLI, 'run', '--tier', tier, '--shard', shard, ...extra], {
+  const child = spawn(process.execPath, [...loadedCodeArgv(), CLI, 'run', '--tier', tier, '--shard', shard, ...extra], {
     cwd: join(import.meta.dirname, '..', '..', '..', '..'),
     stdio: ['ignore', 'pipe', 'inherit'],
     env: { ...process.env, [ORCHESTRATOR_PID_ENV]: String(process.pid) },

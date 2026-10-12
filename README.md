@@ -117,7 +117,7 @@ asmlift: [flags] -mthumb-interwork -O2 -fhex-asm (compiler command)
 asmlift: [score] unsigned: 0/6 (match)
 ```
 
-The run also ends with a `[ranked]` summary naming the winner and a `[candcache]` line; drop
+The run also ends with a `[ranked]` summary naming the winner; drop
 `target:` from the config above and the `[config]` trace becomes `platform 'gba'` instead.
 
 > 📚 Check [`packages/cli`](./packages/cli/README.md#cli-reference) to learn about all the configuration options and flags of `asmlift`.

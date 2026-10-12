@@ -15,26 +15,34 @@
 // pools Docker containers, an optimization the one-shot `docker run` template cannot express, or
 // runs the compiler natively where the host can (@asmlift/toolchains' native.ts). The other three
 // dockerized toolchains (GCC 2.7.2 and two CodeWarrior builds) keep the user-command path, and on a
-// host that runs their 32-bit binaries natively that command is NATIVE_COMMANDS' instead of the
-// committed `docker run` one: the same compiler and words over host paths, so the same code, at
-// the cost of one process instead of one container per candidate. The reproduction scripts
-// (`bench target`) get the committed command intact on every toolchain.
+// host that runs their 32-bit binaries natively that command is the toolchain's entry in
+// dataset/toolchains/native-commands.yaml instead of the committed `docker run` one: the same
+// compiler and words over host paths, so the same code, at the cost of one process instead of one
+// container per candidate. The reproduction scripts (`bench target`) get the committed command
+// intact on every toolchain.
+import { type BenchCommand, benchCommand, renderBenchPlaceholders } from '@asmlift/cli/candcache-bench';
 import { type CandidateCompiler, compileFromCommand } from '@asmlift/cli/compile-command';
 import { asmliftBlock, resolveTarget } from '@asmlift/cli/config';
 import { type MatchScore, scoreObjects } from '@asmlift/cli/score';
-import { TOOLCHAIN_TARGETS } from '@asmlift/core/target';
+import { C_TYPEDEFS, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import {
   GCC272_TOOLCHAIN,
   GCC_KMC_TOOLCHAIN,
   IDO_TOOLCHAIN,
+  KMC_REPORT_FLAGS,
   MWCC_PPC_TOOLCHAIN,
   TOOLCHAIN,
+  compileCandKmcReported,
+  compileCandPpc,
   gcc272Native,
   isMwccToolchainId,
   kmcCandidateCompiler,
+  kmcNative,
+  kmcPoolCfg,
   mwccCandidateCompiler,
   mwccDir,
   mwccNative,
+  ppcPoolCfg,
 } from '@asmlift/toolchains';
 import { createRunner } from '@match-kit/compiler';
 import { loadDecompYaml } from '@match-kit/decomp-yaml/files';
@@ -44,7 +52,14 @@ import { fileURLToPath } from 'node:url';
 import { threadId } from 'node:worker_threads';
 import YAML from 'yaml';
 
-import { shq } from './compile/util';
+import {
+  DOCKER_COMPILE_SOURCES,
+  type DockerCacheSpec,
+  GCC_MIPS_HOST_SPECS,
+  dockerCachedBy,
+  gccRefused,
+  mwccRefused,
+} from './compile/docker-cache';
 import type { ToolchainId } from './toolchains';
 
 const SRC_DIR = dirname(fileURLToPath(import.meta.url));
@@ -80,47 +95,110 @@ const PLACEHOLDER_VALUES: Record<string, string> = {
   ASMLIFT_NATIVE_WIBO: MWCC_PPC_TOOLCHAIN.nativeWibo,
 };
 
-// The committed `docker run` commands of dataset/toolchains/<id>/decomp.yaml with the container
-// taken out: each mounts the candidate's directory at /work and runs there, so the native command
-// runs in that directory too, over the host paths the mounts stood for.
-const MWCC_NATIVE_COMMAND =
-  `cd "$(dirname {{outputPath}})" && "$ASMLIFT_NATIVE_WIBO" "$ASMLIFT_MWCC_DIR"/mwcceppc.exe ` +
-  `'-pragma' 'msg_show_realref off' '-c' '-nostdinc' '-stderr' {{flags}} -o {{outputPath}} {{inputPath}}`;
-
-const NATIVE_COMMANDS: Partial<Record<ToolchainId, { native: () => boolean; command: string }>> = {
-  'gcc2.7.2': {
-    native: gcc272Native,
-    command:
-      `cd "$(dirname {{outputPath}})" && COMPILER_PATH="$ASMLIFT_GCC272_DIR" "$ASMLIFT_GCC272_DIR"/gcc ` +
-      `-B "$ASMLIFT_GCC272_DIR"/ -nostdinc {{flags}} -c -o {{outputPath}} {{inputPath}}`,
-  },
-  mwcc_233_163n: { native: () => mwccNative('mwcc_233_163n'), command: MWCC_NATIVE_COMMAND },
-  mwcc_247_107: { native: () => mwccNative('mwcc_247_107'), command: MWCC_NATIVE_COMMAND },
+/** Whether this host runs a toolchain natively, for each toolchain that has a native command. */
+const NATIVE: Partial<Record<ToolchainId, () => boolean>> = {
+  'gcc2.7.2': gcc272Native,
+  mwcc_233_163n: () => mwccNative('mwcc_233_163n'),
+  mwcc_247_107: () => mwccNative('mwcc_247_107'),
 };
 
-/** The native command for `id`, materialized, when this host runs it natively; else undefined. */
-export function nativeScoreCommand(id: ToolchainId): string | undefined {
-  const n = NATIVE_COMMANDS[id];
-  return n !== undefined && n.native() ? substitutePlaceholders(n.command, id) : undefined;
+/** What decides the command a toolchain's candidates compile with: whether the host runs the
+ *  toolchain natively, and the value of each `$ASMLIFT_*` placeholder. */
+export interface BenchHost {
+  native: (id: ToolchainId) => boolean;
+  placeholders: (id: ToolchainId) => Record<string, string>;
 }
+
+const THIS_HOST: BenchHost = { native: (id) => NATIVE[id]?.() ?? false, placeholders: placeholderValues };
+
+/** The command `id`'s candidates compile with on `host`, placeholders rendered, and the name the
+ *  candidate store knows it by: the toolchain's native command where the host runs it natively,
+ *  else its committed decomp.yaml command. */
+export function benchCommandFor(
+  id: ToolchainId,
+  host: BenchHost = THIS_HOST,
+): { command: string; bench: BenchCommand } {
+  const bench: BenchCommand = {
+    toolchain: id,
+    placeholders: host.placeholders(id),
+    ...(host.native(id) ? { native: true } : {}),
+  };
+  try {
+    return { command: benchCommand(bench), bench };
+  } catch (e) {
+    throw new Error(`${(e as Error).message} (dataset/toolchains)`);
+  }
+}
+
+/** The pooled pair's C compiles behind the candidate store, keyed as compile/docker-cache.ts says.
+ *  A Pascal candidate goes straight to the toolchain's own compiler, which refuses it. KMC GCC's
+ *  own preprocessor reports what it read; CodeWarrior's reports nothing, so its TU's text is read. */
+export const pooledKmcSpec = (flags: readonly string[]): DockerCacheSpec => ({
+  label: 'bench-pooled-kmc',
+  native: kmcNative,
+  docker: GCC_KMC_TOOLCHAIN.docker,
+  image: GCC_KMC_TOOLCHAIN.image,
+  pool: kmcPoolCfg().name,
+  dirs: [GCC_KMC_TOOLCHAIN.dir],
+  words: [...GCC_KMC_TOOLCHAIN.harnessFlags, ...flags, ...KMC_REPORT_FLAGS],
+  prelude: C_TYPEDEFS,
+  hostCommands: [],
+  sources: DOCKER_COMPILE_SOURCES,
+  hostFiles: GCC_MIPS_HOST_SPECS,
+  refused: gccRefused,
+  gnuAs: true,
+});
+export const pooledMwccSpec = (flags: readonly string[]): DockerCacheSpec => ({
+  label: 'bench-pooled-mwcc_242_81',
+  native: () => mwccNative('mwcc_242_81'),
+  docker: MWCC_PPC_TOOLCHAIN.docker,
+  image: MWCC_PPC_TOOLCHAIN.image,
+  pool: ppcPoolCfg('mwcc_242_81').name,
+  dirs: [mwccDir('mwcc_242_81')],
+  words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...flags],
+  prelude: C_TYPEDEFS,
+  hostCommands: mwccNative('mwcc_242_81') ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
+  sources: DOCKER_COMPILE_SOURCES,
+  hostFiles: [],
+  refused: mwccRefused,
+  gnuAs: false,
+});
+const pooledKmc = dockerCachedBy(pooledKmcSpec, (flags: readonly string[]) => (tu, _sym, seen) => {
+  const { obj, report } = compileCandKmcReported(tu, flags);
+  seen.report = report;
+  return obj;
+});
+const pooledMwcc = dockerCachedBy(
+  pooledMwccSpec,
+  (flags: readonly string[]) => (tu) => compileCandPpc('mwcc_242_81', tu, flags),
+);
+const cachedPooled =
+  (
+    uncached: (flags: readonly string[]) => CandidateCompiler,
+    cached: (flags: readonly string[]) => (tu: string, sym: string) => string,
+  ) =>
+  (flags: readonly string[]): CandidateCompiler => {
+    const pascal = uncached(flags);
+    return async (source, symbol, backendId, declarations) =>
+      backendId === 'pascal' ? pascal(source, symbol, backendId, declarations) : cached(flags)(source, symbol);
+  };
 
 /** The pooled pair: candidates compile through @asmlift/toolchains' own compiler (long-lived
  *  containers), bound at the row's flags. */
 const POOLED: Partial<Record<ToolchainId, (flags: readonly string[]) => CandidateCompiler>> = {
-  'gcc2.7.2kmc': kmcCandidateCompiler,
-  mwcc_242_81: mwccCandidateCompiler('mwcc_242_81'),
+  'gcc2.7.2kmc': cachedPooled(kmcCandidateCompiler, pooledKmc),
+  mwcc_242_81: cachedPooled(mwccCandidateCompiler('mwcc_242_81'), pooledMwcc),
 };
 
-/** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim.
- *  Unknown $ASMLIFT_* names are a loud error — a typo would otherwise reach sh unexpanded. */
+/** `"$VAR"` becomes the shell-quoted machine value; a bare `$VAR` substitutes verbatim — the rendering
+ *  the candidate store matches a command against (@asmlift/cli/candcache-bench). Unknown $ASMLIFT_*
+ *  names are a loud error — a typo would otherwise reach sh unexpanded. */
 function substitutePlaceholders(cmd: string, id: ToolchainId): string {
-  return cmd.replace(/"\$(ASMLIFT_[A-Z0-9_]+)"|\$(ASMLIFT_[A-Z0-9_]+)/g, (_, quoted, bare) => {
-    const value = placeholderValues(id)[quoted ?? bare];
-    if (value === undefined) {
-      throw new Error(`unknown placeholder $${quoted ?? bare} in dataset/toolchains/${id}/decomp.yaml`);
-    }
-    return quoted !== undefined ? shq(value) : value;
-  });
+  try {
+    return renderBenchPlaceholders(cmd, placeholderValues(id));
+  } catch (e) {
+    throw new Error(`${(e as Error).message} in dataset/toolchains/${id}/decomp.yaml`);
+  }
 }
 
 interface BenchDoc {
@@ -169,10 +247,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
 
   const pooled = POOLED[id];
   const doc = benchDoc(id, `asmlift benchmark (${id})`);
-  if (pooled !== undefined) {
+  const scored = pooled === undefined ? benchCommandFor(id) : undefined;
+  if (scored === undefined) {
     delete doc.tools.asmlift.compiler;
   } else {
-    doc.tools.asmlift.compiler = nativeScoreCommand(id) ?? doc.tools.asmlift.compiler;
+    doc.tools.asmlift.compiler = scored.command;
   }
   const dir = join(CONFIG_ROOT, id);
   mkdirSync(dir, { recursive: true });
@@ -190,7 +269,11 @@ export function benchCompilerFor(id: ToolchainId, cflags: readonly string[]): Ca
   if ('error' in res || res.targetKey !== id) {
     throw new Error(`benchmark decomp.yaml for ${id} did not resolve to ${id}: ${JSON.stringify(res)}`);
   }
-  const compile = pooled !== undefined ? pooled(cflags) : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags });
+  // The command names itself to the candidate store, which keys no command but the benchmark's own.
+  const compile =
+    pooled !== undefined
+      ? pooled(cflags)
+      : compileFromCommand(toolCfg.compiler!, { cwd: dir, cflags, bench: scored!.bench });
   memo.set(memoKey, compile);
   return compile;
 }
@@ -230,11 +313,9 @@ export interface ScoreConfigParts {
  *  it. `elf` (absolute path — symbol-fed rows) lands as tools.asmlift.elf so the CLI loads the
  *  project's symbol map exactly as the benchmark did.
  *
- *  Nothing here decides whether a reproduction CACHES. The candidate-object cache needs no
- *  per-project declaration — everything the command reads is measured — and it is on by default,
- *  so a reader running one of these scripts gets the same store the harness does unless they say
- *  ASMLIFT_CANDCACHE=0. Sound either way: a cache changes throughput and never a result, so a miss is
- *  indistinguishable in RESULT from no cache at all. */
+ *  A reproduction compiles every candidate: the CLI keys no command a `decomp.yaml` hands it (the
+ *  candidate store keys only the benchmark's own, @asmlift/cli/candcache-bench). A cache changes
+ *  throughput and never a result, so this costs a reader time and nothing else. */
 export function writeScoreConfig(
   id: ToolchainId,
   cflags: readonly string[],

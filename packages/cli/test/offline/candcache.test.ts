@@ -1,27 +1,25 @@
 // The cross-run candidate-object cache on the RANKED path — the seam every published score comes
-// from (src/compile-command.ts + src/candcache.ts). Offline: the "compilers" here are plain sh
-// commands, exactly as in compile-command.test.ts.
+// from (src/compile-command.ts + src/candcache.ts). The store keys only the benchmark's own
+// commands (src/candcache-bench.ts), so every store case here compiles through the benchmark's agbcc
+// command with a test double in its compiler slots (bench-command-double.ts).
 //
 // A stale cached object is this repo's banned failure mode in its purest form: it compiles, it
 // scores, and it is a claim about a toolchain that no longer produced it. Two holes were
 // reproduced on this seam before the code below existed, and both served one:
 //
-//   HOLE 2 — an input reached through a DIRECTORY. The namespace scans the template's TOKENS
-//     (files it names, commands on $PATH, variables it reads) plus one probe object. `-I ./inc`
-//     names a directory, the candidate's `#include "k.h"` names a file inside it, and neither is
-//     in any token set nor visible to the probe TU. Editing `k.h` between two cache-on runs
-//     served the old object. First closed by REFUSING — a `tools.asmlift.cacheInputs`
-//     declaration the cache would not start without — and now by MEASURING: every path a flag
-//     names and every glob's directory is hashed by content (candcache-dirflags.test.ts), so the
-//     declaration is gone and the cache runs on a project's own command.
+//   HOLE 2 — an input reached through a DIRECTORY or a file the candidate names. A TU that reads a
+//     file is refused per key, and a project's command, which can reach a directory through a
+//     path it computes, is not keyed at all.
 //   HOLE 3 — the purity premise is FALSE for some toolchains. "A candidate object is a pure
 //     function of (TU bytes, symbol)" holds for agbcc and fails for `ido7.1`, which writes the
 //     absolute path of its input `.c` into the object. Closed by a MEASUREMENT, not a list: the
 //     stamp probe compiles in two different directories and the compiler answers.
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+
+import { benchAgbcc } from './bench-command-double';
 
 // A BLOCKING-spawnSync suite in a pool whose config says there are none: every case here drives
 // several `spawnSync` compiles, and the file's neighbours in `test:offline` run in parallel worker
@@ -41,31 +39,38 @@ afterEach(() => {
   vi.resetModules();
 });
 
-/** A throwaway project: `inc/k.h` (the input reached through a directory), a template that is a
- *  pure function of (candidate bytes, k.h bytes), and a counter file the template appends to on
- *  every execution — so a cache HIT is observable as an execution that did not happen. */
-function project(k = 3): { cwd: string; store: string; setK: (v: number) => void; runs: () => number } {
+/** A throwaway project: `inc/k.h`, a private store, and a tally file the double appends to on every
+ *  execution — so a cache HIT is observable as an execution that did not happen. */
+function project(k = 3): {
+  cwd: string;
+  store: string;
+  tallyFile: string;
+  setK: (v: number) => void;
+  runs: () => number;
+} {
   const cwd = mkdtempSync(join(tmpdir(), 'candcache-proj-'));
   const store = mkdtempSync(join(tmpdir(), 'candcache-store-'));
   roots.push(cwd, store);
   mkdirSync(join(cwd, 'inc'));
   const setK = (v: number): void => writeFileSync(join(cwd, 'inc/k.h'), `#define K ${v}\n`);
   setK(k);
+  const tallyFile = join(cwd, 'runs');
   return {
     cwd,
     store,
+    tallyFile,
     setK,
-    runs: () => (existsSync(join(cwd, 'runs')) ? readFileSync(join(cwd, 'runs'), 'utf8').trim().split('\n').length : 0),
+    runs: () => (existsSync(tallyFile) ? readFileSync(tallyFile, 'utf8').trim().split('\n').length : 0),
   };
 }
-// The faithful shape of `-I ./inc` plus a candidate's `#include "k.h"`, in one sh line. Two
-// properties make it the real hole rather than an easy one:
-//   • the header is reached through a GLOB, so `inc/k.h` is not a token any scan can find — the
-//     declaration used to be the only way to name it, and the glob's DIRECTORY is now measured
-//     in its place (`templatePathOperands`);
-//   • it is pulled in only for a candidate that ASKS for it, so the fixed stamp probe TU (which
-//     does not) compiles to bytes that are independent of `k.h`. That is precisely why the probe
-//     backstop cannot see this input, and why hole 2 needed a fix of its own.
+
+const BENCH = benchAgbcc();
+const FLAGS = ['-O2'];
+/** The benchmark's command, as the benchmark hands it to the store. */
+const benchCompile = (m: CompileCommandModule, cwd: string, cflags: readonly string[] = FLAGS) =>
+  m.compileFromCommand(BENCH.command, { cwd, cflags, bench: BENCH.bench });
+
+/** A project's own command: it reads `inc/*.h`, which no word of it names, for a candidate that asks. */
 const TEMPLATE =
   'echo x >> runs; cat "{{inputPath}}" > "{{outputPath}}"; ' +
   'if grep -q USES_K "{{inputPath}}"; then cat inc/*.h >> "{{outputPath}}"; fi';
@@ -122,82 +127,81 @@ function storedKeys(store: string): string[] {
   return out;
 }
 
-/** A candidate whose object does NOT depend on the declared directory. */
 const CAND = 's32 f(s32 a0) { return a0 + 1; }\n';
-/** A candidate whose object DOES — the template pulls the header in for it, and for nothing the
- *  namespace's probe compiles. Its `#include` is spelled the way a preprocessor would reach the
- *  file; `USES_K` is this rig's stand-in for what `-I ./inc` resolves. */
 const CAND_K = '/* USES_K */\ns32 f(s32 a0) { return a0 + K; }\n';
-const CAND_INCLUDE = '#include "k.h" /* USES_K */\ns32 f(s32 a0) { return a0 + K; }\n';
 
 describe('the flags a command renders', () => {
   test('one command at two flag sets never serves one set the other’s object', async () => {
     const p = project();
-    const template = 'echo x >> runs; { printf "%s " {{flags}}; cat "{{inputPath}}"; } > "{{outputPath}}"';
     const seen = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE_TALLY: p.tallyFile },
+      async (m) => {
         const at = async (cflags: string[]) =>
-          readFileSync(await compileFromCommand(template, { cwd: p.cwd, cflags })(CAND, 'f', 'c'), 'utf8');
+          readFileSync(await benchCompile(m, p.cwd, cflags)(CAND, 'f', 'c'), 'utf8');
         const o2 = await at(['-O2']);
         const afterO2 = p.runs();
         const o1 = await at(['-O1']);
         return { o2, o1, compiledAgain: p.runs() > afterO2, o2Again: await at(['-O2']) };
       },
     );
-    expect(seen.o2.startsWith('-O2 ')).toBe(true);
-    expect(seen.o1.startsWith('-O1 '), 'the -O1 compile must not be served the -O2 object').toBe(true);
+    expect(seen.o2).toContain(' -O2\n');
+    expect(seen.o1, 'the -O1 compile must not be served the -O2 object').toContain(' -O1\n');
     expect(seen.compiledAgain).toBe(true);
     expect(seen.o2Again).toBe(seen.o2);
+    expect(storedKeys(p.store).length, 'one key per flag set').toBe(2);
   });
 });
 
-describe('hole 2 — an input reached through a DIRECTORY', () => {
+describe('hole 2 — an input the namespace cannot see', () => {
   test('the cache runs, and a hit is an execution that did not happen', async () => {
     const p = project();
-    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd: p.cwd });
-      expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
-      const afterFirst = p.runs();
-      expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
-      expect(p.runs(), 'the same TU a second time must be served, not compiled').toBe(afterFirst);
-    });
+    await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE_TALLY: p.tallyFile },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
+        expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+        const afterFirst = p.runs();
+        expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+        expect(p.runs(), 'the same TU a second time must be served, not compiled').toBe(afterFirst);
+      },
+    );
     expect(storedKeys(p.store).length).toBeGreaterThan(0);
   });
 
-  test('editing a file inside a directory the command GLOBS re-namespaces — no stale object', async () => {
+  test('a project command that reads a directory it never names never reaches the store, so an edit there reaches the compile', async () => {
     const p = project();
-    const seen = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        const first = readFileSync(await compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
-        p.setK(999);
-        // A NEW compiler instance, as a second run of asmlift would build: same store, same key,
-        // and only the declared directory's contents have moved.
-        const second = readFileSync(await compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
-        return { first, second };
-      },
-    );
+    const seen = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      const first = readFileSync(await m.compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      p.setK(999);
+      // A NEW compiler instance, as a second run of asmlift would build: same store, same key.
+      const second = readFileSync(await m.compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND_K, 'f', 'c'), 'utf8');
+      return { first, second, stats: (await import('../../src/candcache')).cacheStats() };
+    });
     expect(seen.first).toContain('#define K 3');
-    expect(seen.second, 'the declared directory moved; the stored object is not the answer').toContain('#define K 999');
-    // Two namespaces, one per state of `inc/` — the mechanism, not just the outcome.
-    expect(readdirSync(join(p.store, 'ns')).length).toBe(2);
+    expect(seen.second, 'the directory moved; no stored object may answer').toContain('#define K 999');
+    expect(seen.stats, 'a command without `bench` is never asked about').toEqual({});
+    expect(existsSync(join(p.store, 'ns')), 'a command the store does not key is never stamped').toBe(false);
   });
 
   test('a candidate carrying #include is REFUSED per key: it reads a file the namespace cannot name', async () => {
     const p = project();
-    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd: p.cwd });
-      await compile(CAND, 'f', 'c'); // a plain candidate: cached
-      const keysAfterPlain = storedKeys(p.store).length;
-      expect(keysAfterPlain).toBeGreaterThan(0);
+    const candInclude = `#include "${join(p.cwd, 'inc/k.h')}"\ns32 f(s32 a0) { return a0 + K; }\n`;
+    await withCache(
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE_TALLY: p.tallyFile },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
+        await compile(CAND, 'f', 'c'); // a plain candidate: cached
+        const keysAfterPlain = storedKeys(p.store).length;
+        expect(keysAfterPlain).toBeGreaterThan(0);
 
-      await compile(CAND_INCLUDE, 'f', 'c');
-      const afterFirstInclude = p.runs();
-      await compile(CAND_INCLUDE, 'f', 'c');
-      expect(p.runs(), 'an #include-carrying TU must be recompiled every time').toBeGreaterThan(afterFirstInclude);
-      expect(storedKeys(p.store).length, 'and it must never be stored').toBe(keysAfterPlain);
-    });
+        expect(readFileSync(await compile(candInclude, 'f', 'c'), 'utf8')).toContain('a0 + 3');
+        const afterFirstInclude = p.runs();
+        p.setK(999);
+        expect(readFileSync(await compile(candInclude, 'f', 'c'), 'utf8')).toContain('a0 + 999');
+        expect(p.runs(), 'an #include-carrying TU must be recompiled every time').toBeGreaterThan(afterFirstInclude);
+        expect(storedKeys(p.store).length, 'and it must never be stored').toBe(keysAfterPlain);
+      },
+    );
   });
 });
 
@@ -216,14 +220,13 @@ describe('hole 3 — the object must be a PURE FUNCTION of its input, and that i
     return out;
   };
 
-  test('a template that bakes its input PATH into the object is NOT_CACHEABLE, said out loud', async () => {
+  test('a compiler that bakes its input PATH into the object is NOT_CACHEABLE, said out loud', async () => {
     const p = project();
-    // The `ido7.1` shape, in one line: the object carries the scratch path it was compiled at,
-    // so two directories give two objects for one input.
-    const baked = 'cat "{{inputPath}}" > "{{outputPath}}"; echo "{{inputPath}}" >> "{{outputPath}}"';
+    // The `ido7.1` shape: the object carries the scratch path it was compiled at, so two
+    // directories give two objects for one input.
     const err = await stderrOf(async () => {
-      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(baked, { cwd: p.cwd });
+      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE: 'bake' }, async (m) => {
+        const compile = benchCompile(m, p.cwd);
         // A refusal is not a failure: the compile still happens and still answers.
         expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
         await compile(CAND, 'f', 'c');
@@ -236,39 +239,38 @@ describe('hole 3 — the object must be a PURE FUNCTION of its input, and that i
 
   test('a probe that will not COMPILE refuses too — the conservative direction', async () => {
     const p = project();
-    // A template that rejects the stamp probe specifically. A pipeline that cannot compile the
+    // A compiler that rejects the stamp probe specifically. A pipeline that cannot compile the
     // simplest possible TU is not one whose answers may be stored.
-    const hostile = `echo x >> runs; ! grep -q asmlift_candcache_stamp "{{inputPath}}" && cat "{{inputPath}}" > "{{outputPath}}"`;
     const err = await stderrOf(async () => {
-      await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(hostile, { cwd: p.cwd });
-        expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
-      });
+      await withCache(
+        { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE: 'reject-probe' },
+        async (m) => {
+          expect(readFileSync(await benchCompile(m, p.cwd)(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+        },
+      );
     });
     expect(err).toContain('reason=object-is-not-a-pure-function-of-its-input');
     expect(storedKeys(p.store)).toEqual([]);
   });
 
-  test('a path-independent template PASSES the same measurement — the probe is not a blanket no', async () => {
+  test('a path-independent compiler PASSES the same measurement — the probe is not a blanket no', async () => {
     const p = project();
-    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-      await compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND, 'f', 'c');
+    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      await benchCompile(m, p.cwd)(CAND, 'f', 'c');
     });
     expect(storedKeys(p.store).length).toBeGreaterThan(0);
   });
 });
 
 describe('a miss is indistinguishable from no cache, and ON is the default', () => {
-  test("ASMLIFT_CANDCACHE UNSET: the cache runs, on a project's own command, with nothing declared", async () => {
-    // This asserted the opposite until the default flipped, and the flip is the whole point: the
-    // variable was set in no shell profile, no `.envrc` and no CI job, so an off-by-default cache
-    // was an inert one. `undefined` here DELETES the variable — `vitest.config.ts` pins it to `0`
-    // for every other suite, and this case is one of the few that must see the real default.
+  test("ASMLIFT_CANDCACHE UNSET: the cache runs on the benchmark's command, with nothing declared", async () => {
+    // `undefined` here DELETES the variable — `vitest.config.ts` pins it to `0` for every other
+    // suite, and this case is one of the few that must see the real default.
     const p = project();
     await withCache(
-      { ASMLIFT_CANDCACHE: undefined, ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(TEMPLATE, { cwd: p.cwd });
+      { ASMLIFT_CANDCACHE: undefined, ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE_TALLY: p.tallyFile },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
         expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
         const afterFirst = p.runs();
         expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
@@ -282,8 +284,8 @@ describe('a miss is indistinguishable from no cache, and ON is the default', () 
     // The one state the flip splits in two. `ASMLIFT_CANDCACHE=` is both a deliberate one-shot
     // bypass and an unexpanded `$SOMETHING`, so it lands on the side whose cost is a cold start.
     const p = project();
-    await withCache({ ASMLIFT_CANDCACHE: '', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(TEMPLATE, { cwd: p.cwd });
+    await withCache({ ASMLIFT_CANDCACHE: '', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      const compile = benchCompile(m, p.cwd);
       await compile(CAND, 'f', 'c');
       await compile(CAND, 'f', 'c');
     });
@@ -296,8 +298,8 @@ describe('a miss is indistinguishable from no cache, and ON is the default', () 
     const p = project();
     await withCache(
       { ASMLIFT_CANDCACHE: undefined, ASMLIFT_BENCH_CACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        await compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND, 'f', 'c');
+      async (m) => {
+        await benchCompile(m, p.cwd)(CAND, 'f', 'c');
       },
     );
     expect(existsSync(join(p.store, 'ns'))).toBe(false);
@@ -305,28 +307,32 @@ describe('a miss is indistinguishable from no cache, and ON is the default', () 
 
   test('ASMLIFT_CANDCACHE=0 is the documented bypass, and it touches no disk', async () => {
     const p = project();
-    const mode = await withCache(
-      { ASMLIFT_CANDCACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        await compileFromCommand(TEMPLATE, { cwd: p.cwd })(CAND, 'f', 'c');
-        return (await import('../../src/candcache')).cacheMode();
-      },
-    );
+    const mode = await withCache({ ASMLIFT_CANDCACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      await benchCompile(m, p.cwd)(CAND, 'f', 'c');
+      return (await import('../../src/candcache')).cacheMode();
+    });
     expect(mode).toBe('off');
     expect(existsSync(join(p.store, 'ns'))).toBe(false);
   });
 
   test('cold and warm produce the same bytes, and the async worker path shares the store', async () => {
     const p = project();
-    const [cold, warm] = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compilersFromCommand }) => {
-        const a = await compilersFromCommand(TEMPLATE, { cwd: p.cwd }).worker()(CAND, 'f', 'c');
-        const b = await compilersFromCommand(TEMPLATE, { cwd: p.cwd }).worker()(CAND, 'f', 'c');
-        return [readFileSync(a, 'utf8'), readFileSync(b, 'utf8')];
-      },
-    );
-    expect(warm).toBe(cold);
+    const seen = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      const opts = { cwd: p.cwd, cflags: FLAGS, bench: BENCH.bench };
+      const a = await m.compilersFromCommand(BENCH.command, opts).worker()(CAND, 'f', 'c');
+      const b = await m.compilersFromCommand(BENCH.command, opts).worker()(CAND, 'f', 'c');
+      return {
+        cold: readFileSync(a, 'utf8'),
+        warm: readFileSync(b, 'utf8'),
+        stats: (await import('../../src/candcache')).cacheStats(),
+      };
+    });
+    expect(seen.stats, 'the second worker was served what the first stored').toMatchObject({
+      miss: 1,
+      stored: 1,
+      hit: 1,
+    });
+    expect(seen.warm).toBe(seen.cold);
   });
 });
 
@@ -339,55 +345,36 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
   // the point the message is built, which makes cached and uncached identical AND takes a machine
   // path out of published output.
   //
-  // Both templates below reject (or die) only for a candidate that ASKS for it. A template that
-  // fails unconditionally fails the stamp probe too, which is NOT_CACHEABLE — the cache then
-  // refuses for the process and every assertion about what the store did is vacuously true.
-  const REJECTS =
-    'echo x >> runs; if grep -q REJECTME "{{inputPath}}"; then echo "no." >&2; exit 1; fi; ' +
-    'cat "{{inputPath}}" > "{{outputPath}}"';
+  // The double rejects only a candidate that ASKS for it. A compiler that fails unconditionally
+  // fails the stamp probe too, which is NOT_CACHEABLE — the cache then refuses for the process and
+  // every assertion about what the store did is vacuously true.
   const CAND_REJECT = 's32 f(s32 a0) { REJECTME }\n';
   /** Every negative entry on disk: what `putFail` actually wrote, as opposed to what a message says. */
-  const failEntries = (store: string): string[] => {
-    const out: string[] = [];
-    const walk = (d: string): void => {
-      for (const e of readdirSync(d, { withFileTypes: true })) {
-        if (e.isDirectory()) {
-          walk(join(d, e.name));
-        } else if (e.name.endsWith('.fail')) {
-          out.push(join(d, e.name));
-        }
-      }
-    };
-    if (existsSync(join(store, 'ns'))) {
-      walk(join(store, 'ns'));
-    }
-    return out;
-  };
+  const failEntries = (store: string): string[] => storedKeys(store).filter((k) => k.endsWith('.fail'));
 
   test('the message carries no scratch path, cached or not', async () => {
     const p = project();
-    const errors = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(REJECTS, { cwd: p.cwd });
-        const out: string[] = [];
-        for (let i = 0; i < 2; i++) {
-          try {
-            await compile(CAND_REJECT, 'f', 'c');
-          } catch (e) {
-            out.push((e as Error).message);
-          }
+    const errors = await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      const compile = benchCompile(m, p.cwd);
+      const out: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        try {
+          await compile(CAND_REJECT, 'f', 'c');
+        } catch (e) {
+          out.push((e as Error).message);
         }
-        return out;
-      },
-    );
+      }
+      return out;
+    });
     expect(errors.length).toBe(2);
     expect(failEntries(p.store).length, 'the rejection really is in the store').toBe(1);
     const [cold, warm] = errors;
     expect(warm, 'the second run was served from the store').toBe(cold);
     expect(cold).toContain('<compile-dir>');
     expect(cold, 'no mkdtemp directory reaches a published error').not.toMatch(/match-kit-compile-/);
-    expect(cold).not.toMatch(/\/var\/folders|\/private\/tmp|\/tmp\//);
+    // The double itself lives in a temporary directory, as a compiler's own path is in its command.
+    const doubleDir = dirname(BENCH.bench.placeholders.ASMLIFT_AGBCC);
+    expect(cold.replaceAll(doubleDir, '<double>')).not.toMatch(/\/var\/folders|\/private\/tmp|\/tmp\//);
   });
 
   // A compiler this machine KILLED never gave a verdict, and `sh` is what hides that on this
@@ -396,16 +383,16 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
   // the candidate would be missing from every future run's fan under that namespace. Reach:
   // candidate compiles have no timeout, an OOM-killed `docker run` exits 137, and a bench run
   // forks 8-16 shards.
-  const KILLED =
-    'if grep -q KILLME "{{inputPath}}"; then sh -c \'kill -9 $$\'; fi; cat "{{inputPath}}" > "{{outputPath}}"';
-  const CAND_KILL = 's32 f(s32 a0) { KILLME }\n';
+  const CAND_KILL = 's32 f(s32 a0) { return a0 - 1; }\n';
 
   test('a KILLED compile is never stored as a rejection, however ordinary its exit code looks', async () => {
     const p = project();
     const message = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(KILLED, { cwd: p.cwd });
+      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store, BENCH_DOUBLE: undefined },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
+        await compile(CAND, 'f', 'c'); // measures the namespace
+        process.env.BENCH_DOUBLE = 'kill';
         try {
           await compile(CAND_KILL, 'f', 'c');
         } catch (e) {
@@ -421,10 +408,9 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
 
   test('…while a compiler that RAN and said no is stored — the guard is not "never store"', async () => {
     const p = project();
-    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async ({ compileFromCommand }) => {
-      const compile = compileFromCommand(REJECTS, { cwd: p.cwd });
+    await withCache({ ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
       try {
-        await compile(CAND_REJECT, 'f', 'c');
+        await benchCompile(m, p.cwd)(CAND_REJECT, 'f', 'c');
       } catch {
         /* expected */
       }
@@ -434,21 +420,18 @@ describe('a cached REJECTION is equal in RESULT to an uncached one', () => {
 
   test('and the uncached spelling is the SAME string — a miss is indistinguishable in RESULT', async () => {
     const p = project();
-    const uncached = await withCache(
-      { ASMLIFT_CANDCACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(REJECTS, { cwd: p.cwd });
-        const out: string[] = [];
-        for (let i = 0; i < 2; i++) {
-          try {
-            await compile(CAND_REJECT, 'f', 'c');
-          } catch (e) {
-            out.push((e as Error).message);
-          }
+    const uncached = await withCache({ ASMLIFT_CANDCACHE: '0', ASMLIFT_CANDCACHE_DIR: p.store }, async (m) => {
+      const compile = benchCompile(m, p.cwd);
+      const out: string[] = [];
+      for (let i = 0; i < 2; i++) {
+        try {
+          await compile(CAND_REJECT, 'f', 'c');
+        } catch (e) {
+          out.push((e as Error).message);
         }
-        return out;
-      },
-    );
+      }
+      return out;
+    });
     expect(uncached[0], 'two uncached runs of the identical failure used to differ').toBe(uncached[1]);
   });
 });
@@ -462,30 +445,23 @@ describe('the sampled audit must never cost a candidate the store could have ans
   // table, and it is strictly worse than the uncached run the doc compares against: an uncached
   // run at least has no correct answer sitting on disk.
   //
-  // ONE module load, and the compiler is made flaky mid-load. That is not a shortcut around a
-  // second run — it is the only spelling that holds the NAMESPACE fixed. Every shell variable a
-  // template reads without assigning is hashed INTO the stamp (`compile-command.ts`, "(3) every
-  // shell variable the template READS"), so flipping `$TESTKILL` between two module loads
-  // re-namespaces the store and the second phase is a miss, not a warm serve — measured, and it
-  // is why this file's first attempt at the case was testing nothing. `namespace()` memoizes,
-  // so a mutation AFTER the first compile leaves the namespace exactly where it was.
-  const KILL_ON_DEMAND =
-    'if [ -n "$TESTKILL" ] && grep -q KILLME "{{inputPath}}"; then sh -c \'kill -9 $$\'; fi; ' +
-    'cat "{{inputPath}}" > "{{outputPath}}"';
-  const REJECT_ON_DEMAND =
-    'if [ -n "$TESTKILL" ] && grep -q KILLME "{{inputPath}}"; then echo "no." >&2; exit 1; fi; ' +
-    'cat "{{inputPath}}" > "{{outputPath}}"';
-  const CAND_K9 = 's32 f(s32 a0) { /* KILLME */ return a0 + 1; }\n';
-
+  // ONE module load, and the compiler is made flaky mid-load: `namespace()` memoizes, and so does
+  // the command's refusal, so a mutation AFTER the first compile leaves both exactly where they
+  // were, and the double reads `BENCH_DOUBLE` afresh on every run.
   test('a transient on a WITHHELD key takes the withheld answer back instead of dropping it', async () => {
     const p = project();
     const { first, second, stats } = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '100', ASMLIFT_CANDCACHE_DIR: p.store, TESTKILL: undefined },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(KILL_ON_DEMAND, { cwd: p.cwd });
-        const first = await compile(CAND_K9, 'f', 'c'); // a MISS: compiled for real, and stored
-        process.env.TESTKILL = '1'; // …and now every compile of it dies without a verdict
-        const second = await compile(CAND_K9, 'f', 'c'); // withheld at 100%, killed, abandoned
+      {
+        ASMLIFT_CANDCACHE: '1',
+        ASMLIFT_CANDCACHE_SAMPLE: '100',
+        ASMLIFT_CANDCACHE_DIR: p.store,
+        BENCH_DOUBLE: undefined,
+      },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
+        const first = await compile(CAND, 'f', 'c'); // a MISS: compiled for real, and stored
+        process.env.BENCH_DOUBLE = 'kill'; // …and now every compile of it dies without a verdict
+        const second = await compile(CAND, 'f', 'c'); // withheld at 100%, killed, abandoned
         return { first, second, stats: (await import('../../src/candcache')).cacheStats() };
       },
     );
@@ -498,12 +474,17 @@ describe('the sampled audit must never cost a candidate the store could have ans
   test('the control: with the audit OFF the same flaky compiler is never even asked', async () => {
     const p = project();
     const stats = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '0', ASMLIFT_CANDCACHE_DIR: p.store, TESTKILL: undefined },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(KILL_ON_DEMAND, { cwd: p.cwd });
-        await compile(CAND_K9, 'f', 'c');
-        process.env.TESTKILL = '1';
-        expect(readFileSync(await compile(CAND_K9, 'f', 'c'), 'utf8')).toContain('a0 + 1');
+      {
+        ASMLIFT_CANDCACHE: '1',
+        ASMLIFT_CANDCACHE_SAMPLE: '0',
+        ASMLIFT_CANDCACHE_DIR: p.store,
+        BENCH_DOUBLE: undefined,
+      },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
+        await compile(CAND, 'f', 'c');
+        process.env.BENCH_DOUBLE = 'kill';
+        expect(readFileSync(await compile(CAND, 'f', 'c'), 'utf8')).toContain('a0 + 1');
         return (await import('../../src/candcache')).cacheStats();
       },
     );
@@ -517,12 +498,17 @@ describe('the sampled audit must never cost a candidate the store could have ans
     // direction, a stored OBJECT for a TU that no longer compiles.
     const p = project();
     const stats = await withCache(
-      { ASMLIFT_CANDCACHE: '1', ASMLIFT_CANDCACHE_SAMPLE: '100', ASMLIFT_CANDCACHE_DIR: p.store, TESTKILL: undefined },
-      async ({ compileFromCommand }) => {
-        const compile = compileFromCommand(REJECT_ON_DEMAND, { cwd: p.cwd });
-        await compile(CAND_K9, 'f', 'c');
-        process.env.TESTKILL = '1';
-        await expect(compile(CAND_K9, 'f', 'c')).rejects.toThrow(/no\./);
+      {
+        ASMLIFT_CANDCACHE: '1',
+        ASMLIFT_CANDCACHE_SAMPLE: '100',
+        ASMLIFT_CANDCACHE_DIR: p.store,
+        BENCH_DOUBLE: undefined,
+      },
+      async (m) => {
+        const compile = benchCompile(m, p.cwd);
+        await compile(CAND, 'f', 'c');
+        process.env.BENCH_DOUBLE = 'reject';
+        await expect(compile(CAND, 'f', 'c')).rejects.toThrow(/error: rejected/);
         return (await import('../../src/candcache')).cacheStats();
       },
     );

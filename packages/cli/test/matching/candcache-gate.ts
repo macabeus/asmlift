@@ -12,19 +12,16 @@
 //
 // WHAT THIS IS AND IS NOT. Essentially every test in the suite compiles through
 // `@asmlift/toolchains` (`scoreC`, `compileTargetAsm`, `compileMipsTarget`), which contains ZERO
-// references to this cache — so those are not audited. Four files reach `compileFromCommand`
-// (`ranked-parallel`, `self-declared-ab`, `decl-scope-variation`, `candcache-verify`); with no
-// per-project opt-in to withhold, all of them compile through a live `verify` cache against the
-// default store, and a disagreement fails the run for real. MEASURED, the whole suite against an
-// empty private store (`ASMLIFT_CANDCACHE_DIR=<empty> pnpm test:matching`): 327 tests passed, 3
-// namespaces holding 2 / 2 / 133 keys, and no `MISMATCHES.log` written at all. So this is a REAL
-// gate over those files plus a self-test, and still forward defence for the toolchains path; what
-// would make it a gate over the whole suite is threading the cache through `@asmlift/toolchains`.
+// references to this cache — so those are not audited. Of the files that reach
+// `compileFromCommand`, only `candcache-verify` compiles the benchmark's own command, the one kind
+// the store keys (src/candcache-bench.ts); it compiles through a live `verify` cache against the
+// default store, and a disagreement fails the run for real. So this is a REAL gate over that file,
+// and forward defence for the rest.
 //
-// AND IT REFUSES, measured rather than reasoned. Re-run against that same store with every stored
-// object overwritten by a fixed 19-byte string: every test STILL PASSES — verify mode never
-// serves, so no assertion can move — and the run fails from the teardown below with 133
-// disagreements in `MISMATCHES.log`. That is the shape to expect from this gate: it does not
+// AND IT REFUSES. Re-run against a store with every stored object overwritten by a fixed string:
+// every test STILL PASSES — verify mode never serves, so no assertion can move — and the run fails
+// from the teardown below with the disagreements in `MISMATCHES.log`. That is the shape to expect
+// from this gate: it does not
 // change what the suite decides, it decides whether the store was entitled to be believed. The
 // status is vitest's own, not `CACHE_MISMATCH_EXIT`: the teardown runs in the vitest parent, which
 // owns the exit code, while the counters live in the forked worker that compiled.
@@ -53,7 +50,7 @@ import { MISMATCH_LOG, OFF_WORDS, ON_WORDS } from '../../src/candcache';
 export default function setup(): () => void {
   // ASK THE MODULE'S OWN LIST, not a two-element copy of it. `asked !== '0' && asked !== 'off'`
   // forced `verify` for `false`, `no`, `disable`, and the SET-AND-EMPTY state — every one of which
-  // candcache.ts calls OFF and docs/ranked-repro.md describes as "touches no disk". Under a forced
+  // candcache.ts calls OFF and apps/benchmark/README.md describes as "touches no disk". Under a forced
   // `verify` such a run stores every key and appends to the SHARED `MISMATCHES.log`, so a
   // neighbour worktree's lines could then fail the teardown below. UNSET is deliberately NOT off
   // here: `process.env.ASMLIFT_CANDCACHE` being undefined means the module's default, which is

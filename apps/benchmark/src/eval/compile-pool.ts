@@ -12,17 +12,16 @@
 // `workerFanFor`).
 import { absorbCacheStats, cacheSampleSeed } from '@asmlift/cli/candcache';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
+import { withLoadedCodeArgv } from '@asmlift/cli/loaded-code';
 import { CompilerRejection } from '@asmlift/core/compiler-diagnostics';
 import { type ChildProcess, fork } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const WORKER = fileURLToPath(new URL('./compile-worker.ts', import.meta.url));
 
-/** A worker process loads TypeScript the way this process does: a `bench run` shard runs under tsx,
- *  whose loader it hands on; a process that did not load it (vitest) hands it over. */
-const WORKER_EXEC_ARGV = process.execArgv.some((a) => a.includes('tsx'))
-  ? process.execArgv
-  : [...process.execArgv, '--import', 'tsx'];
+/** A worker process loads TypeScript under tsx, hashing the code it loads (loaded-code.ts) for the
+ *  namespaces it stamps; the rest of this process's flags are handed on. */
+const WORKER_EXEC_ARGV = withLoadedCodeArgv(process.execArgv);
 
 /** The row a worker rebuilds its case from. */
 export interface RowRef {

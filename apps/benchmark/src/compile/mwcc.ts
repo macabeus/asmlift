@@ -14,19 +14,25 @@
 // rule runs it under.
 import { unitLanguage } from '@asmlift/core/codegen-flags';
 import {
+  MWCC_PPC_TOOLCHAIN,
   type MwccToolchainId,
+  mwccDir,
+  mwccNative,
   ppcCompile,
+  ppcPoolCfg,
   ppcPreprocess,
   ppcSectionScoped,
   ppcSymbolTableText,
 } from '@asmlift/toolchains';
 import { mkdtempSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { unitCompileWrapper } from '../cases/dtk-project';
 import { functionDisassembly } from '../eval/function-scope';
 import type { BuiltTarget } from '../toolchains';
 import { declarationsOnly } from './declarations';
+import { type DockerCacheSpec, dockerCachedBy, dockerSources, mwccRefused } from './docker-cache';
 import type { RealCompile, RealProjectCfg } from './types';
 import { compilerDiagnostics, contentDir, restated } from './util';
 
@@ -117,6 +123,45 @@ export function noPrototypeCalls(output: string, tu: string): string[] {
   return [...names].sort();
 }
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+const SOURCES = dockerSources(join(HERE, 'mwcc.ts'));
+/** The candidate store's key for one CodeWarrior build at `cflags` (compile/docker-cache.ts). */
+export const mwccCacheSpec = (
+  mwcc: MwccToolchainId,
+  cflags: readonly string[],
+  language: 'c' | 'c++',
+): DockerCacheSpec => ({
+  label: `bench-${mwcc}`,
+  native: () => mwccNative(mwcc),
+  docker: MWCC_PPC_TOOLCHAIN.docker,
+  image: MWCC_PPC_TOOLCHAIN.image,
+  pool: ppcPoolCfg(mwcc).name,
+  dirs: [mwccDir(mwcc)],
+  words: [MWCC_PPC_TOOLCHAIN.wibo, ...MWCC_PPC_TOOLCHAIN.harnessFlags, ...cflags, langFlag(language)],
+  prelude: '',
+  hostCommands: mwccNative(mwcc) ? [MWCC_PPC_TOOLCHAIN.nativeWibo] : [],
+  sources: SOURCES,
+  hostFiles: [],
+  refused: mwccRefused,
+  // CodeWarrior assembles inline asm itself, and refuses `.include` and `.incbin` there (MEASURED:
+  // "end of line expected" for both).
+  gnuAs: false,
+});
+const cachedCandidate = dockerCachedBy(
+  mwccCacheSpec,
+  (mwcc: MwccToolchainId, cflags: readonly string[], language: 'c' | 'c++') => (tu) => {
+    // ONE DIRECTORY PER CANDIDATE, leak and all — the rule kmc.ts and gcc272.ts follow, for the same
+    // measured reason: a path reused across compiles that the container reaches through the shared
+    // /tmp mount fails ~30% of the time with `c.o: No such file or directory`.
+    const dir = mkdtempSync(join('/tmp', 'bench-ppc-cand-'));
+    // The TU arrives whole: the ladder (compile/real.ts `scoringLadder`) decides what a context keeps of
+    // the function's own prototype, and a unit context has to keep it.
+    writeFileSync(join(dir, 'c.c'), tu);
+    compile(mwcc, dir, 'c.c', 'c.o', [...cflags, langFlag(language)], false);
+    return join(dir, 'c.o');
+  },
+);
+
 /** The real tier for ONE CodeWarrior build. Three of them compile GameCube rows and they differ in
  *  codegen, so the build is bound here rather than defaulted: a row's target and its candidates
  *  must be the same compiler, and a scratch directory keyed by flags and text alone would let two
@@ -132,16 +177,8 @@ export const mwccReal = (mwcc: MwccToolchainId): RealCompile => ({
     // the function alone.
     return { obj: join(dir, 'u.o'), asm: functionDisassembly(ppcSectionScoped(mwcc, dir, 'u.o', sym, asm), sym) };
   },
-  compileCandidate(tu, _sym, cflags, language): string {
-    // ONE DIRECTORY PER CANDIDATE, leak and all — the rule kmc.ts and gcc272.ts follow, for the same
-    // measured reason: a path reused across compiles that the container reaches through the shared
-    // /tmp mount fails ~30% of the time with `c.o: No such file or directory`.
-    const dir = mkdtempSync(join('/tmp', 'bench-ppc-cand-'));
-    // The TU arrives whole: the ladder (compile/real.ts `scoringLadder`) decides what a context keeps of
-    // the function's own prototype, and a unit context has to keep it.
-    writeFileSync(join(dir, 'c.c'), tu);
-    compile(mwcc, dir, 'c.c', 'c.o', [...cflags, langFlag(language)], false);
-    return join(dir, 'c.o');
+  compileCandidate(tu, sym, cflags, language): string {
+    return cachedCandidate(mwcc, cflags, language)(tu, sym);
   },
   undeclaredCallees(tu, cflags, language): string[] {
     // C++ has no implicit declaration to find: the front end refuses the call outright, and the target
