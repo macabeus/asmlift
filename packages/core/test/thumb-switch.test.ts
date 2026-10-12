@@ -496,6 +496,27 @@ test('a retry that does not spell either leaves the stop reading its own decline
   expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/case arms do not linearize/);
 });
 
+test('a default arm that returns on its own does not name where the switch ends', () => {
+  // KMC's and gcc 2.7.2's output for `switch(x){case 0:p[0]=1;break; … case 5:p[5]=6;break;
+  // default: p[9]=7; return 5;} return 0;` (case 2 unlisted), transliterated to Thumb block for
+  // block: the range check sets the stored value in its delay slot, so the default arm takes it
+  // from the switch edge, and case 2 sets it itself and falls into the default. The default edge's
+  // `ret` is the default arm's own `return 5`, and the five `break`s meet at `return 0`, a block
+  // that is no arm's entry. Anchoring on the default would end the switch inside the default arm
+  // and spell every `break` as `return 0;`; there are two ends here and the anchor is not evidence
+  // for either, so the stop reading's decline stands.
+  const asm =
+    'f:\n\tmov\tr3, #0x7\n\tcmp\tr0, #0x5\n\tbhi\t.L9\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr2, .L13\n' +
+    '\tadd\tr0, r0, r2\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L14:\n\t.align\t2, 0\n.L13:\n\t.word\t.L10\n\t.align\t2, 0\n' +
+    '\t.align\t2, 0\n.L10:\n\t.word\t.L3\n\t.word\t.L4\n\t.word\t.L8\n\t.word\t.L5\n\t.word\t.L6\n\t.word\t.L7\n' +
+    '.L3:\n\tmov\tr0, #0x1\n\tstr\tr0, [r1]\n\tb\t.L11\n.L4:\n\tmov\tr0, #0x2\n\tstr\tr0, [r1, #0x4]\n\tb\t.L11\n' +
+    '.L5:\n\tmov\tr0, #0x4\n\tstr\tr0, [r1, #0xc]\n\tb\t.L11\n.L6:\n\tmov\tr0, #0x5\n\tstr\tr0, [r1, #0x10]\n\tb\t.L11\n' +
+    '.L7:\n\tmov\tr0, #0x6\n\tstr\tr0, [r1, #0x14]\n\tb\t.L11\n' +
+    '.L8:\n\tmov\tr3, #0x7\n.L9:\n\tstr\tr3, [r1, #0x24]\n\tmov\tr0, #0x5\n\tb\t.L12\n' +
+    '.L11:\n\tmov\tr0, #0x0\n.L12:\n\tbx\tlr\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/takes a value from the switch edge/);
+});
+
 test('a table with no shared `ret` at all still falls back to the enclosing stop', () => {
   // EVERY arm returns by itself, so no `ret` is reachable from every successor and the follow is
   // null. That is the `?? stop` tail, and it must keep the shape it always had: the arms are
