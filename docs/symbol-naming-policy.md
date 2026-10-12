@@ -36,6 +36,14 @@ Party 4, Pikmin), classified by `classifyRelocSymbol` itself rather than by eye.
   is a different capability: 257 of the 362 sites take the pool's ADDRESS (`lis`/`addi`/`li`, which
   needs a `static const` object, not a literal) and the other 105 are float loads.
 
+  The same kind covers gcc's anonymous constant, the GNU as local label `.LC0` (agbcc writes it for
+  a string literal and for a local aggregate's initializer image). The Thumb frontend READS that
+  one rather than refusing it: where the image is the source of a block copy that fills a local
+  array, it is spelled back as the local's initializer (`l3/constinit.ts`), and refused there where
+  it is not. The kind is decided once, in `reloc-symbol.ts`; only what a frontend does with it
+  differs, and ppc still refuses `@N`, since every `@N` a lift reaches there is a literal no fold
+  spells and mwcc's frame local is refused first.
+
 - **Section-relative label** `...bss.0` — denotes an offset into a section, not an object. There is
   nothing to declare.
 

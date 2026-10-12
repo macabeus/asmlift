@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 186 distinct decline messages (the texts reached by
+// `packages/core/src` throws 188 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 98 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 99 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -44,10 +44,12 @@
 //                               returns into anything but a local, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
-//   structure/structure.ts  20  twelve loop and post-loop naming refusals beside the two
+//   structure/structure.ts  21  twelve loop and post-loop naming refusals beside the two
 //                               `loop-exit-values` claims, an unsupported terminator, a volatile read
 //                               behind a `&&`/`||`, a pinned device access reached through a pointer
 //                               with no type to qualify, the pass-through of a recovered switch's own `why`,
+//                               the compiler's anonymous constant read other than as the
+//                               initializer of the locals its copies fill,
 //                               an access whose byte offset is not a whole number of its own elements
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
@@ -110,7 +112,8 @@
 // calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
 // gotos / register tail calls". So are two kinds of the naming family: `reloc-symbol.ts`
 // `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not
-// a C identifier" and "names the function's predefined name" have none. They have no rows, so they
+// a C identifier" and "names the function's predefined name" have none (a Thumb pool word naming
+// the predefined name is the exception: `pool-word-shape` takes it). They have no rows, so they
 // wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
@@ -522,14 +525,20 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /section-relative label/,
   },
   {
-    // Keyed on the throw (`frontend/thumb.ts`, "literal-pool load of ${why} — not modelled") rather
-    // than on the one `why` the corpus printed. Seven `why`s reach it: an offset that is not
-    // spelled `+N`, an offset that is not a whole word in the pool, a numeric word that is not a
-    // 32-bit value, a symbolic word whose addend is not, a word that is not `symbol±offset` at
-    // all, and a magnitude with a leading zero (octal to the assembler) — which is TWO of the
-    // seven, once for a pool word and once for the offset its operand carries. Keying on
-    // `pool word` matched three of them, so the rest — the same capability at the same site —
-    // would arrive as unclassified.
+    // Keyed on "literal-pool load of", the text four `frontend/thumb.ts` throws carry, rather than
+    // on the one `why` the corpus printed. One ("literal-pool load of ${why} — not modelled") is the
+    // pool word's shape, reached seven ways: an offset that is not spelled `+N`, an offset that is
+    // not a whole word in the pool, a numeric word that is not a 32-bit value, a symbolic word whose
+    // addend is not, a word that is not `symbol±offset` at all, and a magnitude with a leading zero
+    // (octal to the assembler) — which is TWO of the seven, once for a pool word and once for the
+    // offset its operand carries. A pool word naming the function's predefined name (`__func__.N`)
+    // reaches it too. Another is a word naming the compiler's anonymous data (agbcc's `.LC0`) that is
+    // no constant image a local is copied from: one whose initializer holds an address, or one the
+    // reader cannot define (frontend/local-object.ts `readGasAnonymousObject`). Earlier classes take
+    // the rest first: `tu-scoped-name` the two function-scope-static throws, and
+    // `unread-data-directive` a data label whose directive is not read as words (a `why` of the
+    // not-modelled throw). Keying on `pool word` matched three of the shapes, so the rest — the same
+    // capability at the same site — would arrive as unclassified.
     key: 'pool-word-shape',
     label: 'Literal-pool words the reader cannot resolve',
     pattern: /literal-pool load of/,

@@ -86,6 +86,11 @@ export interface LocalObject {
   /** What an object FILE records of where the object sits, absent for an assembler listing, whose
    *  `.align` is among its directives. */
   placement?: LocalObjectPlacement;
+  /** The object is the compiler's own, under a label the source never wrote (agbcc's `.LC0`): the
+   *  constant image a local aggregate's initializer is copied from. `name` is then the label, no
+   *  declaration spells it, and it reaches the C only as that local's initializer
+   *  (l3/constinit.ts). */
+  anonymous?: true;
 }
 
 /** What an object file records of where a static sits. */
@@ -112,6 +117,12 @@ export interface LocalObjectDirectives {
   /** every value directive writes a string (`.ascii`), as the compiler writes a string literal —
    *  whole, or as the elements of an array or struct of strings */
   string: boolean;
+  /** every run of padding among the value directives, as [byte offset, byte length], when there
+   *  is one: in an array, the elements its brace initializer left out — the compiler writes every
+   *  element the source spelled, zero or not, as a value, and each run it left out as a `.space`
+   *  (varasm.c `output_constructor`), wherever the run falls: after the last value, ahead of the
+   *  first, or between two (a designator, a nested brace's short row). In a struct, alignment too. */
+  gaps?: [number, number][];
 }
 
 /** The function-scope statics a function DEFINES, keyed by {@link LocalObject.symbol} — the object a

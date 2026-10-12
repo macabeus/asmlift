@@ -33,7 +33,13 @@ import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import { FRAME_OBJECT_AUDIT, type FrameObjectAudit, type FrameObjectRelift, type FrameRange } from './frame-objects';
 import type { Frontend } from './frontend';
-import { type LocalStatics, gasPoolReferrers, makeLocalStatics, readGasLocalObject } from './local-object';
+import {
+  type LocalStatics,
+  gasPoolReferrers,
+  makeLocalStatics,
+  readGasAnonymousObject,
+  readGasLocalObject,
+} from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
@@ -1994,6 +2000,7 @@ type PoolRef =
   | { kind: 'const'; value: number }
   | { kind: 'gaddr'; sym: string; addend: number }
   | { kind: 'local-static'; symbol: string; addend: number }
+  | { kind: 'anonymous'; label: string }
   | { kind: 'unmodelled'; why: string };
 
 /** Classify a word-load operand `LABEL[+N]` against the captured literal pools. Returns null when
@@ -2125,6 +2132,13 @@ function poolRef(
       kind: 'unmodelled',
       why: `pool word '${w}' has a leading-zero magnitude, which is octal to the assembler`,
     };
+  }
+  // A bare `.L` label in a pool word is the address of something the compiler placed and the
+  // source never named (reloc-symbol.ts `anon-pool`): agbcc's `.LC0` is the constant image a local
+  // aggregate's initializer is copied from. The caller reads it as an anonymous object, or refuses
+  // naming why it is not one.
+  if (classifyRelocSymbol(w) === 'anon-pool') {
+    return { kind: 'anonymous', label: w };
   }
   return { kind: 'unmodelled', why: `pool word '${w}' is not a symbol, symbol±offset, or number` };
 }
@@ -3482,6 +3496,7 @@ function prologueSavedRegs(entry: AsmBlock): ReadonlySet<string> {
  *  being read or written as a register, and the function-scope statics a pool word names. */
 interface ThumbOperands {
   localStatic(symbol: string): string;
+  anonymousObject(label: string): string;
   constVal(n: number, b: number): Value;
   spAsDataError(): FrontendUnsupportedError;
   readData(r: string, b: number): Value;
@@ -3518,6 +3533,22 @@ function thumbOperands({
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': literal-pool load of a pool word that names a function-scope static ` +
           `('${symbol}') that ${others.join(', ')} also names — it is not this function's alone`,
+      );
+    }
+    return statics.define(read);
+  };
+
+  /** The compiler's anonymous constant a pool word names (agbcc's `.LC0`), read out of this same
+   *  asm and recorded beside the statics — or a decline naming why it is not one. Unlike a static,
+   *  it need not be this function's alone: agbcc places one image for every identical constant in
+   *  a unit (varasm.c `output_constant_def` hashes them), and each function that copies it spells
+   *  its own initializer, which the recompiled unit shares again. */
+  const anonymousObject = (label: string): string => {
+    const read = readGasAnonymousObject(asm, label);
+    if ('refused' in read) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': literal-pool load of a pool word that names the compiler's anonymous data ` +
+          `('${label}') ${read.refused}`,
       );
     }
     return statics.define(read);
@@ -3632,7 +3663,7 @@ function thumbOperands({
     }
     writeVar(r, b, v);
   };
-  return { localStatic, constVal, spAsDataError, readData, writeData };
+  return { localStatic, anonymousObject, constVal, spAsDataError, readData, writeData };
 }
 
 /** One half of a 64-bit value this lift projected into a register. */
@@ -4665,7 +4696,7 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   const { name, symbols, text, frame, ssa } = fill;
   const { readVar } = ssa;
   const { usedSlotOffsets } = fill.frameUses;
-  const { localStatic, readData, writeData } = fill.operands;
+  const { localStatic, anonymousObject, readData, writeData } = fill.operands;
   const { bi, irb, walk } = cur;
   const [a, b] = ins.ops;
   // A word load whose operand NAMES a literal pool is a pool reference, not a memory base:
@@ -4677,7 +4708,11 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // A function-scope static is the address of an object this function DEFINES: the
     // `gaddr` below under its linker name, with the definition recorded beside the Fn.
     const pr: PoolRef | null =
-      ref?.kind === 'local-static' ? { kind: 'gaddr', sym: localStatic(ref.symbol), addend: ref.addend } : ref;
+      ref?.kind === 'local-static'
+        ? { kind: 'gaddr', sym: localStatic(ref.symbol), addend: ref.addend }
+        : ref?.kind === 'anonymous'
+          ? { kind: 'gaddr', sym: anonymousObject(ref.label), addend: 0 }
+          : ref;
     if (pr?.kind === 'const') {
       // Numeric-pool PROMOTION (symbols.ts): a pool-loaded word whose value the
       // project's symbol map knows becomes the NAMED global's address — the same

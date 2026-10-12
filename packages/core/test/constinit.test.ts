@@ -1,0 +1,258 @@
+// l3/constinit.ts: the copy of the compiler's anonymous constant image folds into the initializer
+// of the local it fills — only where the declaration and the copy are one program. The end-to-end
+// half, through the real agbcc, is packages/cli/test/matching/const-init.test.ts.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { expect, test } from 'vitest';
+
+import { cBackend } from '../src/backend/c';
+import { emitCFamily } from '../src/backend/cfamily';
+import { pascalBackend } from '../src/backend/pascal';
+import { T } from '../src/ir/types';
+import type { Expr, SFn, SImage, Stmt } from '../src/l3/ast';
+import { constantImageRefusal, foldConstantImages } from '../src/l3/constinit';
+import { decompile } from '../src/pipeline';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription, structureOptionsFor } from '../src/target';
+
+const v = (name: string): Expr => ({ k: 'var', name });
+const c = (value: number): Expr => ({ k: 'const', value });
+const copy = (dst: string, src: string, n: number): Stmt => ({
+  k: 'exprstmt',
+  value: { k: 'call', fn: 'memcpy', args: [v(dst), { k: 'addr', name: src }, c(n)] },
+});
+const image = (init: (number | null)[], width = 1, signed = false, extra: Partial<SImage> = {}): SImage => ({
+  name: '.LC0',
+  type: T.array(T.int(8 * width, signed), init.length),
+  init,
+  ...extra,
+});
+const fn = (body: Stmt[], locals: SFn['locals'], img: SImage = image([1, 2, 3, 4])): SFn => ({
+  name: 'f',
+  params: [],
+  locals,
+  images: [img],
+  retType: T.void(),
+  body,
+});
+const bytes4 = [{ name: 'sp0', type: T.array(T.u(8), 4) }];
+const use = (e: Expr): Stmt => ({ k: 'exprstmt', value: { k: 'call', fn: 'g', args: [e] } });
+
+test('the copy folds into the declaration, and the image and the copy are gone', () => {
+  const sfn = fn([copy('sp0', '.LC0', 4), use(v('sp0'))], bytes4);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  const out = foldConstantImages(sfn);
+  expect(out.images).toBeUndefined();
+  expect(out.body).toEqual([use(v('sp0'))]);
+  expect(cBackend.emit(sfn)).toBe('void f(void) {\n    u8 sp0[4] = { 1, 2, 3, 4 };\n    g(sp0);\n}\n');
+});
+
+test('a local handed on whole takes the image’s element; one reached by an offset keeps its own', () => {
+  const halves = image([1, -1, 3], 2, true);
+  const wide = [{ name: 'sp0', type: T.array(T.u(8), 8) }];
+  // a 6-byte image in the 8 bytes the frame rounded the reservation to
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 6), use(v('sp0'))], wide, halves))).toContain(
+    '    s16 sp0[3] = { 1, -1, 3 };\n',
+  );
+  // the offset was spelled against the declared `u8`, so a signed image's values are read as that
+  const bytes = image([1, -1, 3, 4], 1, true);
+  const offset = use({ k: 'bin', op: '+', l: v('sp0'), r: c(1) });
+  expect(cBackend.emit(fn([copy('sp0', '.LC0', 4), offset], bytes4, bytes))).toContain(
+    '    u8 sp0[4] = { 1, 0xff, 3, 4 };\n',
+  );
+  // …where an element read, which prints its own width, leaves the image's signedness standing
+  const read: Stmt = { k: 'return', value: { k: 'index', base: v('sp0'), idx: c(1), width: 1, signed: false } };
+  expect(cBackend.emit({ ...fn([copy('sp0', '.LC0', 4), read], bytes4, bytes), retType: T.u(8) })).toContain(
+    '    s8 sp0[4] = { 1, -1, 3, 4 };\n',
+  );
+});
+
+test('a local holding only the address, assigned ahead of the copy, is the local reached by another name', () => {
+  // the readability hoist's head placement: `p0 = (u8 *)&sp0;` before the copy, elements read off p0
+  const alias: Stmt = {
+    k: 'assign',
+    name: 'p0',
+    value: { k: 'cast', to: T.ptr(T.u(8)), e: { k: 'addr', name: 'sp0' } },
+  };
+  const at = (k: number): Expr => ({ k: 'index', base: v('p0'), idx: c(k), width: 1, signed: false });
+  const locals = [...bytes4, { name: 'p0', type: T.ptr(T.u(8)) }];
+  const sfn = fn([alias, copy('sp0', '.LC0', 4), use(v('sp0')), use(at(1)), use(at(3))], locals);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(foldConstantImages(sfn).body).toEqual([alias, use(v('sp0')), use(at(1)), use(at(3))]);
+  // …and only that: read through ahead of the copy, past it, or pointed elsewhere later, it refuses
+  expect(constantImageRefusal(fn([alias, use(v('p0')), copy('sp0', '.LC0', 4)], locals))?.refused).toContain(
+    'not the first thing the body does with it',
+  );
+  expect(constantImageRefusal(fn([alias, copy('sp0', '.LC0', 4), use(at(4))], locals))?.refused).toContain(
+    'which the body indexes past the 4 bytes copied',
+  );
+  const moved: Stmt = { k: 'assign', name: 'p0', value: v('gBuf') };
+  expect(constantImageRefusal(fn([alias, copy('sp0', '.LC0', 4), moved], locals))?.refused).toContain(
+    'not the first thing the body does with it',
+  );
+});
+
+test('a local reached only by elements takes the image’s element, and the signedness its reads say', () => {
+  // the frame audit types an untyped reservation by bytes (`u8[4]`); the reads carry their own width
+  const halves = image([1, 0xffff], 2, false);
+  const read = (k: number): Expr => ({ k: 'index', base: v('sp0'), idx: c(k), width: 2, signed: true });
+  const sfn = { ...fn([copy('sp0', '.LC0', 4), use(v('sp0')), { k: 'return', value: read(1) }], bytes4, halves) };
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(cBackend.emit({ ...sfn, retType: T.s(16) })).toContain('    s16 sp0[2] = { 1, -1 };\n');
+});
+
+test('an image written as a string literal is spelled as one', () => {
+  const str = image([0x68, 0x69, 0], 1, false, { string: true });
+  expect(
+    cBackend.emit(fn([copy('sp0', '.LC0', 3), use(v('sp0'))], [{ name: 'sp0', type: T.array(T.u(8), 4) }], str)),
+  ).toContain('    u8 sp0[3] = "hi";\n');
+});
+
+test('an element the source left out is a hole, and the next one is spelled by designator', () => {
+  // `u8 a[8] = {[2] = 1, 2, [6] = 3}`: agbcc writes `.space 2; .byte 1; .byte 2; .space 3; .byte 3;
+  // .space 1`. Spelled as zeros, most of the constructor is zero and agbcc clears and stores instead
+  const holed = image([null, null, 1, 2, null, null, 3], 1, false, { type: T.array(T.u(8), 8) });
+  const wide = [{ name: 'sp0', type: T.array(T.u(8), 8) }];
+  const sfn = { ...fn([copy('sp0', '.LC0', 8), use(v('sp0'))], wide, holed), designators: true as const };
+  expect(cBackend.emit(sfn)).toContain('    u8 sp0[8] = { [2] = 1, 2, [6] = 3 };\n');
+  // C++ has no array designator: the holes are the zeros they hold
+  expect(emitCFamily('void f()', sfn, undefined, false)).toContain('    u8 sp0[8] = { 0, 0, 1, 2, 0, 0, 3 };\n');
+  // …and neither does a C compiler whose front end cannot parse one (IDO's cfe, mwcc)
+  const { designators: _, ...plain } = sfn;
+  expect(cBackend.emit(plain)).toContain('    u8 sp0[8] = { 0, 0, 1, 2, 0, 0, 3 };\n');
+});
+
+test('which compilers parse a designated initializer is a fact of each target, not of C', () => {
+  const opts = (t: TargetDescription) => structureOptionsFor(t, true).designatedInitializers === true;
+  expect([ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC].map(opts)).toEqual([true, true, false, false]);
+});
+
+test('one image copied into two locals initializes each', () => {
+  // agbcc places one image per identical constant, and loads its address once for both copies
+  const locals = [...bytes4, { name: 'sp4', type: T.array(T.u(8), 4) }];
+  const sfn = fn([copy('sp0', '.LC0', 4), copy('sp4', '.LC0', 4), use(v('sp0')), use(v('sp4'))], locals);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(cBackend.emit(sfn)).toBe(
+    'void f(void) {\n    u8 sp0[4] = { 1, 2, 3, 4 };\n    u8 sp4[4] = { 1, 2, 3, 4 };\n    g(sp0);\n    g(sp4);\n}\n',
+  );
+});
+
+test('a count built by a shift is the constant it computes', () => {
+  // agbcc spells 256 and up as an 8-bit immediate shifted: `mov r2,#0x80; lsl r2,r2,#1`
+  const shifted: Stmt = {
+    k: 'exprstmt',
+    value: {
+      k: 'call',
+      fn: 'memcpy',
+      args: [v('sp0'), { k: 'addr', name: '.LC0' }, { k: 'bin', op: '<<', l: c(2), r: c(1) }],
+    },
+  };
+  const sfn = fn([shifted, use(v('sp0'))], bytes4);
+  expect(constantImageRefusal(sfn)).toBeNull();
+  expect(cBackend.emit(sfn)).toContain('    u8 sp0[4] = { 1, 2, 3, 4 };\n');
+  const short: Stmt = {
+    k: 'exprstmt',
+    value: {
+      k: 'call',
+      fn: 'memcpy',
+      args: [v('sp0'), { k: 'addr', name: '.LC0' }, { k: 'bin', op: '<<', l: c(1), r: c(1) }],
+    },
+  };
+  expect(constantImageRefusal(fn([short, use(v('sp0'))], bytes4))?.refused).toContain(
+    'does not move its whole 4 bytes',
+  );
+});
+
+test.each<[string, SFn, string]>([
+  [
+    'read other than by a copy',
+    fn([copy('sp0', '.LC0', 4), use({ k: 'addr', name: '.LC0' })], bytes4),
+    'reads other than as the source of a block copy',
+  ],
+  [
+    'copied twice into one local',
+    fn([copy('sp0', '.LC0', 4), use(v('sp0')), copy('sp0', '.LC0', 4)], bytes4),
+    "whose copy into 'sp0' is not the first thing the body does with it",
+  ],
+  [
+    'copied inside a branch',
+    fn([{ k: 'if', cond: v('x'), then: [copy('sp0', '.LC0', 4)], else: [] }], bytes4),
+    'which no top-level block-copy call (memcpy) takes as its source',
+  ],
+  ['copied in part', fn([copy('sp0', '.LC0', 2)], bytes4), 'does not move its whole 4 bytes'],
+  ['into a global', fn([copy('gBuf', '.LC0', 4)], bytes4), 'does not fill a local'],
+  [
+    'into a volatile local',
+    fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 4), volatile: true }]),
+    'which is volatile',
+  ],
+  [
+    'into a local of another size',
+    fn([copy('sp0', '.LC0', 4)], [{ name: 'sp0', type: T.array(T.u(8), 8) }]),
+    'not an integer array of its 4 bytes',
+  ],
+  [
+    'into a local the body touched first',
+    fn([use(v('sp0')), copy('sp0', '.LC0', 4)], bytes4),
+    'not the first thing the body does with it',
+  ],
+  [
+    'into a local reached by an offset of another element',
+    fn(
+      [copy('sp0', '.LC0', 4), use({ k: 'bin', op: '+', l: v('sp0'), r: c(1) })],
+      [{ name: 'sp0', type: T.array(T.u(16), 2) }],
+    ),
+    'are not the 2-byte elements the body reaches',
+  ],
+  [
+    'into a local reached past the copy',
+    fn([copy('sp0', '.LC0', 3), use({ k: 'bin', op: '+', l: v('sp0'), r: c(3) })], bytes4, image([1, 2, 3])),
+    'the body reaches past the 3 bytes copied',
+  ],
+  [
+    'into a local indexed past the copy',
+    fn(
+      [
+        copy('sp0', '.LC0', 3),
+        { k: 'return', value: { k: 'index', base: v('sp0'), idx: c(3), width: 1, signed: false } },
+      ],
+      bytes4,
+      image([1, 2, 3]),
+    ),
+    'indexes past the 3 bytes copied',
+  ],
+])('%s: refuses, and the emitter will not print it', (_, sfn, why) => {
+  expect(constantImageRefusal(sfn)?.refused).toContain(why);
+  expect(() => cBackend.emit(sfn)).toThrow(why);
+});
+
+test('an image of mixed widths has no element type to declare', () => {
+  const asm =
+    '\t.section .rodata\n\t.align\t2, 0\n.LC0:\n\t.short\t0x1\n\t.byte\t0x2\n\t.byte\t0x3\n.text\n' +
+    '\t.align\t2, 0\n\t.globl\tf\n\t.thumb_func\nf:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr1, .L2\n' +
+    '\tmov\tr0, sp\n\tmov\tr2, #0x4\n\tbl\tmemcpy\n\tadd\tsp, sp, #0x4\n\tpop\t{r0}\n\tbx\tr0\n' +
+    '\t.align\t2, 0\n.L2:\n\t.word\t.LC0\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(
+    "reads the compiler's anonymous constant ('.LC0') whose image writes no one element width",
+  );
+});
+
+test('the Pascal backend has no spelling for the image, and says which object it is', () => {
+  expect(() => pascalBackend.emit(fn([copy('sp0', '.LC0', 4)], bytes4))).toThrow(
+    "the compiler's anonymous constant '.LC0' a local is initialized from has no IDO Pascal spelling yet",
+  );
+});
+
+test('agbcc: kleod sub_0804C898 — a dead local array keeps its initializer', () => {
+  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-const-init.s'), 'utf8');
+  expect(decompile('dead16', asm, ARMV4T_AGBCC).source).toBe(
+    'void dead16(void) {\n    u8 sp0[16] = {\n        0, 1, 2, 4, 6, 4, 2, 1,\n' +
+      '        0, 0xff, 0xfe, 0xfc, 0xfa, 0xfc, 0xfe, 0xff,\n    };\n}\n',
+  );
+});
+
+test('agbcc: an element read through the local’s address keeps the image inside the copy', () => {
+  // int fread(int i) { u8 a[6] = {9, 8, 7, 6, 5, 4}; return a[i]; } — the frame rounds the 6
+  // bytes to 8, and the read is an index off `&sp0`, which carries its own width
+  const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-const-init.s'), 'utf8');
+  expect(decompile('fread', asm, ARMV4T_AGBCC).source).toContain('    u8 sp0[6] = { 9, 8, 7, 6, 5, 4 };\n');
+});

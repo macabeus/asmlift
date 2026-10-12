@@ -454,6 +454,16 @@ export interface TargetDescription {
     // says so, but nothing in this bag could express it if they did not. Any behavior that can
     // differ between two toolchains sharing one description is mis-keyed by construction.
     spillSlotOrder?: 'ascending' | 'descending' | 'unknown';
+    // Does this compiler's C front end take a DESIGNATED array element in an initializer —
+    // `u8 a[16] = { 1, [8] = 2 };`? A fact about the dialect the compiler parses, not about C or
+    // C++ as languages: GNU C had it long before C99, and agbcc and gcc 2.7.2 (KMC's build and the
+    // plain one) compile the line above, while IDO 7.1's cfe ("Syntax Error") and every mwcc build
+    // the benchmark ships, 2.3.3, 2.4.2 and 2.4.7 ("expression syntax error"), refuse it — each
+    // compiled. Read by the C-family printer (`SFn.designators`) where a constant image
+    // (l3/constinit.ts) leaves elements out: it spells the element after a run of them by index,
+    // and without this spells the run as zeros, which a compiler that cannot parse the index takes.
+    // Absent ⇒ zeros, the spelling every C compiler parses.
+    designatedInitializers?: boolean;
     // Arguments past the argument registers are staged into an area this function RESERVES at the
     // BOTTOM of its own frame — `[sp,#0]` upward, one word each — rather than pushed at the call
     // site. It is GCC's ACCUMULATE_OUTGOING_ARGS target macro, and it is what makes an outgoing
@@ -951,6 +961,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // operand rows and nothing else, from two locals declared the other way round) and its
     // control `synthetic:spillorder_rev` (the same body in the order asmlift already emits, which
     // must stay a MATCH), plus `synthetic:dma_fill_uninit`, a row this did not author.
+    designatedInitializers: true, // agbcc compiles `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'ascending',
     // agbcc reserves the outgoing area with the rest of the frame (`add sp, sp, #-N` covers both)
     // and stages arguments 5+ into it at [sp,#0] upward — thumb.h's ACCUMULATE_OUTGOING_ARGS.
@@ -1161,6 +1172,7 @@ export const MIPS_GCC: TargetDescription = {
     // The two agreeing is not a formality. The value is per DESCRIPTION and TWO toolchains map
     // here, so a toolchain whose direction differed from its description's would need a
     // per-toolchain override this bag cannot express — see the note at `compilerBehaviors`.
+    designatedInitializers: true, // both gcc 2.7.2 builds compile `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'unknown',
   },
 };

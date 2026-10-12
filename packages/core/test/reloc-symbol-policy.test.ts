@@ -20,6 +20,10 @@ test('every corpus spelling classifies as the kind the policy names', () => {
     // the four unspellable kinds
     ['@193', 'anon-pool'],
     ['@1135', 'anon-pool'],
+    // gcc's (and so agbcc's) anonymous constant is a GNU as local label: the same kind, not a section
+    ['.LC0', 'anon-pool'],
+    ['.LC12', 'anon-pool'],
+    ['.rodata', 'section-local'],
     ['...bss.0', 'section-local'],
     ['...data.0', 'section-local'],
     ['sprHideTbl$797', 'local-static'],

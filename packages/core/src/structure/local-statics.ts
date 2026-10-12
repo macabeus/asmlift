@@ -43,6 +43,7 @@ import { type IrType, T } from '../ir/types';
 import {
   type Expr,
   type SFn,
+  type SImage,
   type SStatic,
   type Stmt,
   mapExprChildren,
@@ -123,6 +124,8 @@ function zeroInitialized(
 export interface LocalStaticShapes {
   infos: Map<string, SymbolInfo>;
   statics: SStatic[];
+  /** the compiler's anonymous constant images, which no declaration spells (l3/constinit.ts) */
+  images: SImage[];
 }
 
 /** One access through a static's address: the width it reads or writes, and a load's extension. */
@@ -234,8 +237,9 @@ export function localStaticShapes(
   const objs = fn.localObjects;
   const infos = new Map<string, SymbolInfo>();
   const statics: SStatic[] = [];
+  const images: SImage[] = [];
   if (objs === undefined) {
-    return { infos, statics };
+    return { infos, statics, images };
   }
   if (layout === undefined) {
     const [first] = objs.keys();
@@ -262,6 +266,64 @@ export function localStaticShapes(
   // it places in the order it first uses them: the candidate's code decides that, no declaration.
   for (const obj of [...objs.values()].sort((a, b) => a.order - b.order)) {
     const say = (why: string) => ({ symbol: obj.symbol, refused: why });
+    if (obj.anonymous) {
+      // The compiler's own image of a local aggregate's initializer: typed by its directives alone,
+      // since nothing but the copy reads it, and never declared where it sits — l3/constinit.ts
+      // folds it into the local the copy fills, which is the declaration that placed it.
+      const unit = obj.directives?.unit;
+      if (unit === undefined || obj.bytes === undefined) {
+        return say('whose image writes no one element width — a struct, or padding alone');
+      }
+      if (![1, 2, 4].includes(unit) || obj.size % unit !== 0) {
+        return say(`whose ${unit}-byte elements are no integer array of its ${obj.size} bytes`);
+      }
+      const signed = obj.directives!.negative;
+      const count = obj.size / unit;
+      infos.set(obj.symbol, {
+        name: obj.symbol,
+        kind: 'data',
+        size: obj.size,
+        shape: 'array',
+        elemSize: unit,
+        elemSigned: signed,
+        dims: [count],
+        const: true,
+      });
+      // Only the elements the source spelled: an element it left out is a hole, and the holes after
+      // the last value are dropped. Spelled out as zeros, the initializer is a different one to the
+      // compiler, which clears and stores where most of one is zero rather than copy an image
+      // (expr.c `mostly_zeros_p`) — so the printer spells the element after a hole by designator,
+      // where the compiler parses one (`SFn.designators`).
+      const init: (number | null)[] = elements(obj, unit, signed);
+      for (const [from, n] of obj.directives!.gaps ?? []) {
+        if (from % unit !== 0 || n % unit !== 0) {
+          return say(`whose padding at byte ${from} does not fall on its ${unit}-byte elements`);
+        }
+        init.fill(null, from / unit, (from + n) / unit);
+      }
+      // A string literal's image is placed at the compiler's string alignment, which a brace list of
+      // strings is not (agbcc: `.align 2, 0` ahead of a STRING_CST's label, none ahead of
+      // `{"abcde"}`'s) — the same bytes, but spelled as a literal the image moves to a stricter
+      // alignment and shifts the unit's `.rodata`. Nor has it a padding run: one shorter than its
+      // array is copied at the literal's length and the tail cleared (`char a[16] = "abc…hijklm"` is
+      // memcpy 15 + memset 1), so a `.space` after the `.ascii` is a brace list's image copied whole.
+      // So the test is asked before the trailing holes are dropped, not after.
+      const string =
+        obj.directives!.string === true &&
+        unit === 1 &&
+        obj.directives!.align >= layout.stringAlign &&
+        !init.includes(null);
+      while (init.length > 0 && init[init.length - 1] === null) {
+        init.pop();
+      }
+      images.push({
+        name: obj.symbol,
+        type: T.array(T.int(unit * 8, signed), count),
+        init,
+        ...(string ? { string: true as const } : {}),
+      });
+      continue;
+    }
     const accesses = access.get(obj.symbol) ?? [];
     const dir = obj.directives;
     // the alignment the target shows
@@ -320,7 +382,7 @@ export function localStaticShapes(
       ...(string ? { string: true as const } : {}),
     });
   }
-  return { infos, statics };
+  return { infos, statics, images };
 }
 
 /** `sfn` with each static's linker name replaced by its source name — every reference, assignment
@@ -342,6 +404,9 @@ export function nameLocalStatics(sfn: SFn, objs: LocalObjects): SFn | { symbol: 
   const rename = new Map<string, string>();
   const bySource = new Map<string, string>();
   for (const obj of objs.values()) {
+    if (obj.anonymous) {
+      continue; // no source name: folded into a local's initializer at emission (l3/constinit.ts)
+    }
     const say = (why: string) => ({ symbol: obj.symbol, refused: `whose source name '${obj.name}' ${why}` });
     const other = bySource.get(obj.name);
     if (other !== undefined) {

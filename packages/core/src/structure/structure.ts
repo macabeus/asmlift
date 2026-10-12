@@ -79,6 +79,7 @@ import {
   stmtsEqual,
   walkExprs,
 } from '../l3/ast';
+import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, renderedIntSignedness } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
@@ -1577,6 +1578,9 @@ export interface StructureOptions extends ArithCompilerFacts {
   declaredReturns?: Readonly<Record<string, string>>;
   // The emitted C is compiled as C++ (`SFn.dialect`).
   dialect?: 'c++';
+  // The compiler parses a designated initializer element (`SFn.designators`; the compiler behavior
+  // of the same name says which do).
+  designatedInitializers?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -2215,6 +2219,7 @@ export function structure(
     declaredArgs,
     declaredReturns,
     dialect,
+    designatedInitializers = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -2268,6 +2273,11 @@ export function structure(
   // shape is its definition's, never the one raise/globalshape.ts infers from its accesses.
   const localStatics = localStaticShapes(fn, staticLayout);
   if ('refused' in localStatics) {
+    if (fn.localObjects?.get(localStatics.symbol)?.anonymous) {
+      throw new StructureError(
+        `cannot structure '${fn.name}': reads the compiler's anonymous constant ('${localStatics.symbol}') ${localStatics.refused}`,
+      );
+    }
     throw new StructureError(
       `cannot structure '${fn.name}': names a function-scope static ('${localStatics.symbol}') ${localStatics.refused}`,
     );
@@ -6801,6 +6811,7 @@ export function structure(
         }
       : {}),
     ...(localStatics.statics.length ? { statics: localStatics.statics } : {}),
+    ...(localStatics.images.length ? { images: localStatics.images } : {}),
     retType: returnsVoid ? T.void() : returnType(fn),
     body,
     ...(structs.length ? { structs } : {}),
@@ -6809,6 +6820,7 @@ export function structure(
     ...(spillSlotOrder !== undefined ? { slotOrder: spillSlotOrder } : {}),
     ...calledOnly({ declaredArgs, declaredReturns }, body),
     ...(dialect !== undefined ? { dialect } : {}),
+    ...(designatedInitializers ? { designators: true as const } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;
@@ -6817,6 +6829,15 @@ export function structure(
   if ('refused' in named) {
     throw new StructureError(
       `cannot structure '${fn.name}': names a function-scope static ('${named.symbol}') ${named.refused}`,
+    );
+  }
+  // The compiler's anonymous constant is spelled only as the initializer of the locals its copies
+  // fill, which the emitter folds (l3/constinit.ts says why there). Asked here, so a function
+  // whose image cannot fold declines loudly rather than reaching an emitter that cannot print it.
+  const image = constantImageRefusal(named);
+  if (image !== null) {
+    throw new StructureError(
+      `cannot structure '${fn.name}': reads the compiler's anonymous constant ('${image.image}') ${image.refused}`,
     );
   }
   return named;

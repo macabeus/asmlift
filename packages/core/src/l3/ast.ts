@@ -399,6 +399,13 @@ export interface SFn {
      *  one are deliberately left unstamped even where the offset is in hand — see the refusal at
      *  the structurer's build site for the measurement that decided it. */
     slots?: number[];
+    /** The declaration's initializer, element by element, null where the source left one out
+     *  (`SImage.init`) — present only on the copy the C-family emitter prints, where
+     *  l3/constinit.ts folded the block copy of the compiler's anonymous constant image into it
+     *  (`u8 sp0[16] = { … };`). Never on a tree a pass sees. */
+    init?: (number | null)[];
+    /** that initializer is spelled as a string literal — the image was written as one */
+    initString?: true;
   }[];
   /** project globals referenced with a known declaration shape (symbol map) — typed for the
    *  legalization env (exprCType) but NEVER declared by a backend: the project's own headers
@@ -408,6 +415,11 @@ export interface SFn {
    *  the top of its body ahead of the locals. Unlike `globals`, the backend declares these: no
    *  header does, because the source defined them here. */
   statics?: SStatic[];
+  /** The compiler's own constant images this function copies a local's initializer from
+   *  (structure/local-statics.ts), under labels the source never wrote. Not statics: no declaration
+   *  may spell one, so the C-family emitter folds each into the initializer of the local its copy
+   *  fills (l3/constinit.ts), and a backend that cannot refuses. */
+  images?: SImage[];
   retType: IrType;
   body: Stmt[];
   /** Struct types this function's fields reference, declared above it by the backend. Empty
@@ -435,6 +447,11 @@ export interface SFn {
   declaredReturns?: Readonly<Record<string, string>>;
   /** The emitted C is compiled AS C++. An emission policy like `slotOrder`. */
   dialect?: 'c++';
+  /** The compiler parses a designated element in an initializer (`[8] = 2`) — a fact of its
+   *  dialect, carried from `compilerBehaviors.designatedInitializers`. An emission policy: the
+   *  C-family printer spells an initializer's left-out run by index where present, as zeros where
+   *  not. */
+  designators?: true;
 }
 
 /** One function-scope static's definition: `static [const] T name[count] = { init };`. `init` is
@@ -448,6 +465,18 @@ export interface SStatic {
   init?: number[];
   /** the initializer is spelled as a string literal — a byte array the compiler aligns as a
    *  string (structure/local-statics.ts) */
+  string?: true;
+}
+
+/** One constant image of the compiler's own (ir/core.ts `LocalObject.anonymous`), named by its
+ *  label: an integer array typed by the directives that wrote it, and its initializer element by
+ *  element — null where the source left one out (padding in the image, which C supplies as zero),
+ *  and ending at the last one it spelled, so it may be shorter than `type`. */
+export interface SImage {
+  name: string;
+  type: IrType;
+  init: (number | null)[];
+  /** the image was written as a string literal (`.ascii`) */
   string?: true;
 }
 

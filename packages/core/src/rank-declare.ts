@@ -255,6 +255,8 @@ export function makeRefCollector(ctx: {
     // A function-scope static is declared in the body beside the locals, so it shares their
     // namespace: one the emitter's own names can reach dies with the spelling, as below.
     const statics = new Set((tree.statics ?? []).map((st) => st.name));
+    // …and the compiler's anonymous images, which reach the C only as a local's initializer
+    const images = new Set((tree.images ?? []).map((im) => im.name));
     for (const st of statics) {
       if (bound.has(st) || EMITTER_NAME.test(st)) {
         refuse(st, 'emitter-name');
@@ -265,7 +267,7 @@ export function makeRefCollector(ctx: {
       }
     }
     const refs = collectSymbolRefs(tree, declSymbols, prototypes, target, refuse).flatMap((r) => {
-      if (statics.has(r.name)) {
+      if (statics.has(r.name) || images.has(r.name)) {
         return []; // defined in the body — the map's global of the same name is another object
       }
       // THE ONE REFUSAL THAT IS NOT A REFUSAL — a name the emitted C uses for its OWN storage

@@ -303,10 +303,16 @@ export const pascalBackend: LanguageBackend = {
     // in its shared assembler — owned by `emit`, never by a `.emit(` call site (l3/slotorder.ts).
     const fn = orderSlotLocals(fn0);
     // A function-scope static is a definition the MIPS frontends never recover, and IDO Pascal's
-    // spelling of one (a typed constant, or a unit-level var) has not been measured — loud.
+    // spelling of one (a typed constant, or a unit-level var) has not been measured — loud. So is
+    // the compiler's anonymous constant a local's initializer is copied from (l3/constinit.ts).
     if (fn.statics?.length) {
       throw new Error(
         `pascal backend: the function-scope static '${fn.statics[0].name}' has no IDO Pascal spelling yet`,
+      );
+    }
+    if (fn.images?.length) {
+      throw new Error(
+        `pascal backend: the compiler's anonymous constant '${fn.images[0].name}' a local is initialized from has no IDO Pascal spelling yet`,
       );
     }
     // Same env discipline as the C family (cfamily.ts cFamilyBody): the printer judges derefs

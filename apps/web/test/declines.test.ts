@@ -918,11 +918,20 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `no-prototype-args` joins on the same reading: its inhabitants were calls whose callee a real
   // row's own context declares, and that declaration now reaches the lift. A call no declaration
   // covers still declines there.
+  //
+  // `pool-word-shape` joins as `cross-block-flags` did: its one inhabitant, `kleod:sub_0804C898:agbcc`
+  // (pool word `.LC0`), is the anonymous image of a local's initializer, which l3/constinit.ts now
+  // spells. The class still takes the refusals keyed on its text that no earlier class claims —
+  // the pool-word shapes declines.ts lists, and the compiler's anonymous data that is not such an
+  // image (one whose initializer holds an address, `void (*a[4])(void) = {h1, h2, h1, h2}`, refuses
+  // with "names the compiler's anonymous data ('.LC0') whose initializer holds the address 'h1'");
+  // no benchmark row reaches any of them.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
     'cross-block-flags',
     'no-prototype-args',
+    'pool-word-shape',
     'store-class',
     'structs',
     'unread-data-directive',
@@ -1201,7 +1210,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 30],
-    ['structure/structure.ts', 20],
+    ['structure/structure.ts', 21],
     ['frontend/mips.ts', 16],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
@@ -1211,7 +1220,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 98;
+  const RESIDUE_TOTAL = 99;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
