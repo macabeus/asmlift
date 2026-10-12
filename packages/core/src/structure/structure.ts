@@ -1851,9 +1851,11 @@ export interface StructureHooks {
    *  has decided both arms are real, so it cannot be computed ahead of the pass. */
   onBranchSenseSite?: (site: { block: number; ordinal: number; joined: boolean; negated: boolean }) => void;
   /** Every branch `followOverReturns` gave a follow: the branch's block and the follow's. Both
-   *  callers fire it — a divergent `if` under `followEarlyReturns`, and EVERY jump table whose arms
-   *  all return, unconditionally — so the sites it reports are not the enumeration domain of the
-   *  shared-tail twins (that domain is `hasDivergentSharedRet`, which asks for a `cond_br`). */
+   *  callers fire it — a divergent `if` under `followEarlyReturns`, EVERY jump table whose arms all
+   *  return, unconditionally, and a jump table whose default-anchored RETRY is adopted (some arms
+   *  return, the rest reach the code after it) — so the sites it reports are not the enumeration
+   *  domain of the shared-tail twins (that domain is `hasDivergentSharedRet`, which asks for a
+   *  `cond_br`). */
   onEarlyReturnFollow?: (site: { block: number; follow: number }) => void;
 }
 
@@ -2055,14 +2057,24 @@ interface EarlyReturnArmDeps {
 function isRet(blk: Block): boolean {
   return blk.ops[blk.ops.length - 1]?.opcode === 'ret';
 }
-/** The `ret`s reachable from EVERY successor of `b` — the region `followOverReturns` keeps. Empty
- *  when there is none, and when `b` does not branch at all. `reachFrom` is forward reachability,
- *  the start block excluded.
+/** The `ret`s reachable from EVERY successor of `b` — the region `followOverReturns` keeps — or,
+ *  given an `anchor`, from every successor that shares a `ret` with the anchor. Empty when there
+ *  is none, and when `b` does not branch at all. `reachFrom` is forward reachability, the start
+ *  block excluded.
  *
  *  THE QUESTION IS ABOUT A BRANCH, not about an `if`: "the arms all return, so post-dominance gives
  *  this block no join — where does the construct end?" is asked by a jump table exactly as by a
  *  two-way branch, and the answer is derived the same way. The `if`-shaped reading belongs to the
  *  CALLER that wants it (`hasDivergentSharedRet`), not here.
+ *
+ *  THE ANCHOR names a successor that must reach the end the question is about, and leaves out
+ *  every successor that shares no `ret` with it. The `switch_br` caller anchors on the dispatch's
+ *  DEFAULT edge, whose target is the `default:` arm or the code after the switch: a `case` that
+ *  `return`s on its own, or falls into one that does, then no longer empties the intersection for
+ *  the arms that `break`. Leaving those successors out is sound for the follow the caller derives
+ *  from the answer: the answer is a subset of the anchor's `ret`s, so a successor left out reaches
+ *  none of them, hence no block that reaches one — in particular not the follow — and it is
+ *  structured to its own `return`, as the source wrote. The `if` caller never anchors.
  *
  *  THE DEDUP IS DEFENSIVE AND NO CALLER CAN REACH IT TODAY. It is what makes "two successors that
  *  are the same block" answer `[]` rather than "a branch with a shared `ret`". Both callers ask
@@ -2071,24 +2083,12 @@ function isRet(blk: Block): boolean {
  *  to this function rather than to its callers' guards, and dropping it is a no-op on the corpus:
  *  the reader over every row of the committed artifact (`decompile` per row, no compiling) emits
  *  byte-identical source with and without it. */
-function sharedRetsOf(
-  b: Block,
-  reachFrom: (x: Block) => ReadonlySet<Block>,
-  overIsolated: 'every-successor' | 'over-isolated' = 'every-successor',
-): Block[] {
+function sharedRetsOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>, anchor: Block | null = null): Block[] {
   const retsFrom = (x: Block): Block[] => [x, ...reachFrom(x)].filter(isRet);
   let succs = [...new Set(successorsOf(b))];
-  // OVER ISOLATED ARMS: leave out every successor whose `ret`s no OTHER successor reaches, and ask
-  // the question of the rest. A jump-table arm that ends in a `return` of its own (`case 4: …
-  // return TRUE;` beside four `break`s and a `return FALSE;` after the switch) reaches only its own
-  // `ret`, so the every-successor intersection is empty although the other arms plainly share an
-  // end. Leaving it out is sound for the follow the caller derives from the answer: a successor
-  // left out reaches no `ret` any kept successor reaches, so it reaches no block that reaches one —
-  // in particular not the follow — and it is structured to its own `return`, as the source wrote.
-  // `switch_br` asks it, and only as a RETRY (see that caller); the `if` caller never does.
-  if (overIsolated === 'over-isolated') {
-    const retSets = new Map(succs.map((x) => [x, new Set(retsFrom(x))]));
-    succs = succs.filter((x) => succs.some((y) => y !== x && retsFrom(y).some((r) => retSets.get(x)!.has(r))));
+  if (anchor !== null) {
+    const anchored = new Set(retsFrom(anchor));
+    succs = succs.filter((x) => retsFrom(x).some((r) => anchored.has(r)));
   }
   if (succs.length < 2) {
     return [];
@@ -2407,7 +2407,9 @@ export function structure(
   // rank.ts's `/shared-ret` twin, and as its `/shared-tail` twin after the store-tail sink: as a
   // default it costs rows, measured there.
   //
-  // WHICH REGION: the `ret`s reachable from EVERY successor. Every block that cannot reach one of
+  // WHICH REGION: the `ret`s reachable from EVERY successor — or, given an `anchor`, from every
+  // successor that shares a `ret` with the anchor (`sharedRetsOf`; only the `switch_br` caller's
+  // retry passes one, the dispatch's default edge). Every block that cannot reach one of
   // them is an early-return region and is deleted; the follow is `b`'s post-dominator over what is
   // left. Sound for the same reason an ordinary follow is: every kept path from `b` passes it, and a
   // deleted block reaches no kept `ret` and so never the follow, so each arm structures up to the
@@ -2424,7 +2426,8 @@ export function structure(
   // PER `if`, never function-wide: the deletion set is a function of that `if`'s own shared `ret`s
   // (memoized on them), because a nested `if` shares a different set, or none.
   //
-  // REFUSES (keeping the divergent arms) when no `ret` is reachable from every successor, when the
+  // REFUSES (keeping the divergent arms) when that reading leaves no `ret` — none reachable from
+  // every successor, or from every successor the anchor keeps — when the
   // kept graph gives `b` no post-dominator but EXIT, and when the enclosing region's `stop` is
   // reachable from `b` without passing the follow — that path must reach `stop`, and structuring
   // the arms towards a different follow would emit `stop`'s region inside an arm.
@@ -2436,14 +2439,15 @@ export function structure(
   // an in-loop branch reach is reachable from the latch too, so the intersection keeps the whole
   // graph, `pd` is `ipdom` itself — and the caller only asks when `ipdom.get(b)` is already null,
   // so the answer comes back null and the `?? stop` fallback stands. That is an observation about
-  // the shape rather than a check, which is why it is written down here.
+  // the shape rather than a check, which is why it is written down here. The anchored RETRY that
+  // caller adds is no exception in practice: inside a loop the latch carries every arm to every
+  // `ret`, so the arm that returns shares one with the default edge and is kept, and nothing is
+  // left out. Measured on five in-loop switches with one returning arm, compiled with agbcc and
+  // IDO: wherever the retry is asked it keeps every successor, and each of the nine that declined
+  // before declines with the same message. That is a reach this does not have, not a guard.
   const followsByShared = new Map<string, Map<Block, Block | null>>();
-  const followOverReturns = (
-    b: Block,
-    stop: Block | null,
-    overIsolated: 'every-successor' | 'over-isolated' = 'every-successor',
-  ): Block | null => {
-    const shared = sharedRetsOf(b, reachFrom, overIsolated);
+  const followOverReturns = (b: Block, stop: Block | null, anchor: Block | null = null): Block | null => {
+    const shared = sharedRetsOf(b, reachFrom, anchor);
     if (shared.length === 0) {
       return null;
     }
@@ -2461,7 +2465,7 @@ export function structure(
     if (follow === null || (stop !== null && follow !== stop && reachesAvoiding(b, stop, follow))) {
       return null;
     }
-    if (overIsolated === 'every-successor') {
+    if (anchor === null) {
       hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(follow) });
     }
     return follow;
@@ -5221,7 +5225,7 @@ export function structure(
       // more functions therefore has to BE the default, and it is the DIVERGENT reading that a
       // variation would have to offer back — a candidate nothing mints today, and the one thing
       // this line costs. `?? stop` keeps the shape where no `ret` is reachable from every
-      // successor — and where that reading declines, the over-isolated RETRY below gets one try.
+      // successor — and where that reading declines, the default-anchored RETRY below gets one try.
       const joined = ipdom.get(b) ?? followOverReturns(b, stop);
       let merge = joined ?? stop;
       const succ = term.successors;
@@ -5278,7 +5282,8 @@ export function structure(
       // declaration, rather than a whole-switch gate on every arm being closed.
       const preChain = arms.map((a) => a.entry);
       // Everything below that depends on WHERE THE SWITCH ENDS, read for one candidate merge: the
-      // arms' exits and their linearization. Read twice at most — see the retry after it.
+      // arms' exits, their linearization, and whether the emission below would decline them. Read
+      // twice at most — see the retry after it.
       const readArms = (at: Block | null) => {
         // The blocks an arm could fall INTO. The default block counts only when it is a block of
         // its own: when it IS the merge, "the default" is just where the switch ends, and an arm
@@ -5302,38 +5307,74 @@ export function structure(
         // one: it is already in `preChain`, and `defaultLayoutPos` withholds the label's position.
         const dflt = defEdge.block !== at && !armOf.has(defEdge.block) ? defEdge.block : null;
         const chain = !spellSwitchFallthrough && falls ? null : chainArms(preChain, dflt, exits);
-        return { exits, falls, chain };
+        return { exits, falls, chain, declines: chain === null || emissionDeclines(exits, chain) };
+      };
+      // WOULD THE EMISSION DECLINE THIS READING? Every refusal the emission below throws: a null
+      // chain (which a fall-through in a language without one forces too — `readArms` reads that
+      // one), and three asked here per arm, in emission order, without emitting anything — an arm
+      // whose exit is unstructurable, a fall-through into an arm that is not the next one emitted,
+      // and a fall-through into an arm that opens with switch-edge copies. The emission still
+      // throws them itself, and in its own order, so a reading this says declines fails with
+      // exactly the message it always did.
+      //
+      // `edgeCopyRecords` stands in for `argAssignsFor` because it mints no swap-cycle temp — a
+      // name minted here would change the output of every arm emitted after it — but it is not a
+      // pure query either: an `undef` copy it drops is recorded in `droppedUndefCopies`, which a
+      // postcondition reads. So the records this question leaves are rolled back, as the
+      // speculative dispatch hoist does with its own.
+      const emissionDeclines = (exits: Map<Block, ArmExit>, chain: Block[]): boolean => {
+        const order = [...chain.map((e) => armOf.get(e)!), { entry: defEdge.block, edge: defEdge }];
+        const auditMark = droppedUndefCopies.length;
+        try {
+          return order.some((a, i) => {
+            const exit = exits.get(a.entry)!;
+            if (exit.kind === 'unstructurable') {
+              return true;
+            }
+            const next = order[i + 1];
+            return exit.kind === 'fallthrough' && (next?.entry !== exit.to || edgeCopyRecords(b, next.edge).length > 0);
+          });
+        } finally {
+          droppedUndefCopies.length = auditMark;
+        }
       };
       let read = readArms(merge);
-      // THE RETRY: A SWITCH WHOSE ONLY RETURNING ARMS ARE ISOLATED. When neither post-dominance nor
-      // the every-successor reading gives the table an end, the `?? stop` reading above puts the
-      // default block among the siblings, so every plain `break` reads as falling INTO it — and
-      // when that does not linearize, the function declines. One arm that `return`s on its own is
-      // enough to cause it (`case 4: …; return TRUE;` beside four `break`s and a `return FALSE;`
-      // after the switch): its `ret` is reached by no other successor, so the every-successor
-      // intersection is empty although the rest plainly share an end. The over-isolated reading
-      // (`sharedRetsOf`) leaves such arms out and derives the follow from the others.
+      // THE RETRY: A SWITCH WHOSE ARMS DO NOT ALL REACH THE CODE AFTER IT. When neither
+      // post-dominance nor the every-successor reading gives the table an end, the `?? stop`
+      // reading above puts the default block among the siblings, so every plain `break` reads as
+      // falling INTO it — and the function declines wherever that does not spell. One arm that
+      // `return`s on its own is enough to cause it (`case 4: …; return TRUE;` beside four `break`s
+      // and a `return FALSE;` after the switch): its `ret` is reached by no other successor, so
+      // the every-successor intersection is empty although the rest plainly share an end. So is a
+      // `case 1:` that falls into a returning `case 2:`, and so are four returning arms beside one
+      // `break` that carries a value to the code after the switch.
       //
-      // A RETRY, NOT A THIRD LINK IN THE `??` CHAIN. Where the `stop` reading linearizes it is
-      // legal C already, and asking the over-isolated reading first re-spells three shapes whose
-      // `stop` spelling is published (a real fall-through moved after the switch, a value-carrying
+      // The DEFAULT-ANCHORED reading (`sharedRetsOf`) names that end by the one successor that
+      // must reach it: the dispatch's DEFAULT edge, which goes to the `default:` arm or, where the
+      // source wrote none, straight to the code after the switch. It keeps the successors that
+      // share a `ret` with the default edge's target, and derives the follow from them alone.
+      //
+      // A RETRY, NOT A THIRD LINK IN THE `??` CHAIN. Where the `stop` reading spells, it is legal
+      // C already, and asking the anchored reading first re-spells three shapes whose `stop`
+      // spelling is published (a real fall-through moved after the switch, a value-carrying
       // fall-through edge lifted where it declined, a Pascal decline re-worded) with no row asking
-      // for it. So it is read only where the `stop` reading DECLINES — a fall-through it cannot
-      // spell, or a chain it cannot linearize — and adopted only where it linearizes, so it can
-      // turn a decline into a lift and never one lift into another.
+      // for it. So it is read only where the `stop` reading DECLINES — any refusal `readArms`
+      // reports, which is every refusal the emission below throws — and adopted only where it
+      // declines nothing, so it can turn a decline into a lift and never one lift into another,
+      // nor one decline's stated reason into another's.
       //
       // NEVER AT A CASE ARM. Where the arms that return on their own are the many and the arms that
       // share an end are one arm and the arm it falls into (`case 0: …` running on into `case 1:`,
-      // every other arm its own `return`), the follow the over-isolated reading derives is that
+      // every other arm its own `return`), the follow the anchored reading can derive is that
       // second arm's ENTRY. Ending the switch there spells `case 1:` as an empty arm and moves its
       // body after the switch — the same program, but a spelling no source writes and the one the
       // `stop` reading's own refusal is the honest answer for. So the retry ends the switch only
       // at the default block or past every arm.
-      if (joined === null && read.chain === null) {
-        const found = followOverReturns(b, stop, 'over-isolated');
+      if (joined === null && read.declines) {
+        const found = followOverReturns(b, stop, defEdge.block);
         const over = found !== null && !armOf.has(found) ? found : null;
         const retry = over === null ? null : readArms(over);
-        if (retry !== null && retry.chain !== null) {
+        if (retry !== null && !retry.declines) {
           hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(over!) });
           merge = over;
           read = retry;

@@ -1276,10 +1276,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // `ret` is one no other successor reaches: the every-successor shared-`ret` reading that ends
   // `sw_jtret`'s switch has nothing to intersect, the default block joins the siblings, and the seven
   // `break`s all "fall into" it — declined on every toolchain below, compiled for real (and on
-  // gcc 2.7.2 too). The over-isolated retry in the structurer leaves `case 2` out and ends the switch
-  // where the others meet, which is the source's `return 0;`. The arms write distinct slots, so no
-  // compiler sinks them into one shared store. `pokeemerald:SaveOnMysteryGiftMenu:agbcc` is the real
-  // inhabitant; this row is what keeps the neutral step from being proven on Thumb alone.
+  // gcc 2.7.2 too). The structurer's default-anchored retry keeps the arms that share a `ret` with
+  // the dispatch's default edge, which leaves `case 2` out and ends the switch where the others
+  // meet, the source's `return 0;`. The arms write distinct slots, so no compiler sinks them into one
+  // shared store. `pokeemerald:SaveOnMysteryGiftMenu:agbcc` is the real inhabitant; this row is what
+  // keeps the neutral step from being proven on Thumb alone — and on the MIPS GCCs only because
+  // `return 0;` follows the switch directly. Give it a tail statement (`p[8]=1;`) and KMC and
+  // gcc 2.7.2 cross-jump a `break` arm's delay-slot `li v0,1` into the middle of that tail, which
+  // still declines: the cross-jumped-tail family, a different capability (compiled for real).
   {
     sym: 'sw_jtisoret',
     src: 'int sw_jtisoret(int x,int *p){ switch(x){case 0:p[0]=1;break;case 1:p[1]+=2;break;case 2:p[2]=0;return 1;case 3:p[3]-=4;break;case 4:p[4]=5;break;case 5:p[5]^=6;break;case 6:p[6]=7;break;case 7:p[7]|=8;break;} return 0; }',
