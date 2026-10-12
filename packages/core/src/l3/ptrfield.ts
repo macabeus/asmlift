@@ -29,10 +29,19 @@
 // `*(volatile s32 *)0x040000D4/D8/DC` device writes — `volatile` restricts what may be done with
 // THOSE accesses and does not merge their type into the pointer's alias set.
 //
-// SEMANTICS ARE PRESERVED BY CONSTRUCTION on a target whose pointers are 32 bits: the declaration
-// changes, and every read is wrapped in a cast back to the field's own recovered integer type, so
-// each use computes the same value it did. Nothing else moves. THE 32-BIT ASSUMPTION IS ASSERTED,
-// NOT CHECKED — there is no pointer-width field on TargetDescription to check it against, and the
+// SEMANTICS ARE PRESERVED BY CONSTRUCTION on a target whose pointers are 32 bits — WHILE NO STORE
+// OF ANOTHER ALIAS SET REACHES THE FIELD'S BYTES: the declaration changes, and every read is
+// wrapped in a cast back to the field's own recovered integer type, so each use computes the same
+// value it did. The cast keeps the VALUE, not the read's alias set: the load is still of a pointer
+// type, which is the very freedom this variation exists to give agbcc, and which it uses to read
+// stale past an integer store to the same bytes. Over memory the body reaches only through a
+// pointer, no store the asm shows is tied to the field's bytes, and which spelling the original
+// had is what the differ referees. Over a local array the body IS that store: the frame audit
+// licenses a wider runtime index into those bytes as one integer type (frontend/frame-objects.ts
+// `indexedWidth`), so the `over-local-storage` gate refuses such a field.
+//
+// THE 32-BIT ASSUMPTION IS ASSERTED, NOT CHECKED — there is no pointer-width field on
+// TargetDescription to check it against, and the
 // assumption is already tower-wide (`l3/typing.ts`'s `ptrElemBytes` returns 4 for any pointee). On
 // a 64-bit target this variation would change a struct's LAYOUT rather than only its spelling, so the
 // width field is what that target's first row must add, and this note is where to start.
@@ -49,8 +58,9 @@
 //
 // GATE (PTR_FIELD_GATES, read once per field): the field's recovered type must be a 32-bit
 // integer; it must never be a store LVALUE (the write side would need a cast on the value, which
-// is a second question); and it must never stand as the BASE of another access (a field the tree
-// already dereferences is one the recovery typed from its own use, not from a width). Nothing
+// is a second question); it must never stand as the BASE of another access (a field the tree
+// already dereferences is one the recovery typed from its own use, not from a width); and it must
+// never be selected out of a local array's bytes (`over-local-storage`, the caveat above). Nothing
 // qualifying ⇒ decline (null).
 //
 // SCOPE, because both of this table's blind spots look exactly like a gate refusing. First, THERE

@@ -250,13 +250,14 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *  anywhere as a VALUE — into an MMIO register (the DMA-fill idiom), a call, a phi — and it is
  *  judged in one of two models, chosen before any shape is:
  *   - PER OBJECT, the default: every MEMORY access through it must be at offset 0, with one agreed
- *     width and one agreed extension, or a byte read or written through a runtime index into
- *     storage nothing else types, and its bytes must belong to nothing else in the frame;
+ *     width and one agreed extension, or a read or write through a runtime index into storage
+ *     nothing else types — bytes, or ONE wider width, read through a cast on the bytes
+ *     (`indexedWidth`) — and its bytes must belong to nothing else in the frame;
  *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
  *     that answer can hold (`writerNotKept`; `oneObject`, which this answers and the frontend
  *     lifts again with): the local area is one `u8` array in memory, every fixed-offset access in
- *     it is a member at its own offset, a runtime index may reach a byte of it, and two widths at
- *     one byte refuse.
+ *     it is a member at its own offset, a runtime index may reach it at a byte or at ONE wider
+ *     width (`indexedWidth`), and two widths at one byte refuse.
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
