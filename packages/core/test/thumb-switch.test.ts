@@ -387,6 +387,42 @@ test('a jump table whose arms return still has an end', () => {
   expect(count(out, 'sideB();')).toBe(1);
 });
 
+// AN ARM THAT RETURNS UNCONDITIONALLY — `case 1: sideB(); return 1;` beside arms that `break` to a
+// shared tail. Its `ret` is reached by no other successor, so the every-successor reading above has
+// nothing to intersect, the merge falls back to the enclosing stop, and the two `break` arms then
+// both "fall into" the default block — which does not linearize, so the function declined.
+// `pokeemerald:SaveOnMysteryGiftMenu:agbcc` is that shape, and so is a switch compiled from the same
+// C by IDO, KMC, gcc 2.7.2 and mwcc. The over-isolated retry leaves the lone arm out and ends the
+// switch where the others meet.
+const UNCONDITIONAL_RETURN = '\tbl\tsideB\n\tmov\tr0, #1\n\tbx\tlr\n';
+
+test('a jump-table arm that returns on its own leaves the other arms an end', () => {
+  const out = decompile('f', returningArms(UNCONDITIONAL_RETURN), ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (');
+  // the two arms that reach the tail end in `break`; the returning arm ends in its own `return`
+  expect(count(out, 'break;')).toBe(2);
+  expect(out).toMatch(/sideB\([^)]*\);\s*return 1;/);
+  // the tail runs once, after the switch, and the returning arm does not reach it
+  expect(count(out, 'sideEnd(')).toBe(1);
+  expect(out.indexOf('sideEnd(')).toBeGreaterThan(out.lastIndexOf('break;'));
+  expect(out.indexOf('sideEnd(')).toBeGreaterThan(out.indexOf('return 1;'));
+});
+
+test('an arm that returns on its own does not re-spell a switch the stop reading already spells', () => {
+  // The retry is read only where the `stop` reading DECLINES. A real fall-through into the shared
+  // tail's default (one arm, so it linearizes) keeps the spelling it had before the retry existed:
+  // the arm runs on into the default, which carries the tail.
+  const oneFalls = returningArms(UNCONDITIONAL_RETURN).replace(
+    '.Lc2:\n\tbl\tsideC\n\tb\t.Lend\n',
+    '.Lc2:\n\tbl\tsideC\n\tbx\tlr\n',
+  );
+  const out = decompile('f', oneFalls, ARMV4T_AGBCC).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('default:');
+  expect(count(out, 'sideEnd(')).toBe(1);
+});
+
 test('a table with no shared `ret` at all still falls back to the enclosing stop', () => {
   // EVERY arm returns by itself, so no `ret` is reachable from every successor and the follow is
   // null. That is the `?? stop` tail, and it must keep the shape it always had: the arms are
