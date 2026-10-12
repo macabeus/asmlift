@@ -124,13 +124,14 @@ export interface SsaBuilder {
    *  argument registers that were actually set up on every path (see {@link trimClobberedCallArgs}).
    *  `abi` is the target's argument-register order and its return register. It snapshots what the
    *  caller wrote, so it comes before the call's result is written ({@link noteCall}).
-   *  `passesCalleeResult` and `trimmed`: see {@link GuessedCallSite}. */
+   *  `passesCalleeResult`, `trimmed` and `asksEveryCut`: see {@link GuessedCallSite}. */
   recordGuessedCall(
     op: Op,
     b: number,
     abi: { argRegs: string[]; returnReg: string },
     passesCalleeResult?: (result: Value) => boolean,
     trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
+    asksEveryCut?: boolean,
   ): void;
   /** Remove trivial phis and enforce the frontend's postconditions; call once every block is
    *  filled. Throws FrontendUnsupportedError if a stack slot escaped as an entry parameter. */
@@ -868,6 +869,7 @@ export function makeSsaBuilder(
       abi: { argRegs: string[]; returnReg: string },
       passesCalleeResult?: (result: Value) => boolean,
       trimmed?: (cut: readonly string[], kept: readonly string[]) => void,
+      asksEveryCut?: boolean,
     ) => {
       abiSeen = abi;
       guessedCalls.push({
@@ -875,6 +877,7 @@ export function makeSsaBuilder(
         op,
         passesCalleeResult,
         trimmed,
+        asksEveryCut,
         freshBefore: new Set(writtenSinceCall[b]),
         afterCallInBlock: callsIn.has(b), // `noteCall` runs after this, so this means an EARLIER call
         returnRegBefore: clobberedLocal[b].has(abi.returnReg)
@@ -1075,9 +1078,15 @@ export interface GuessedCallSite {
    *  keeps — the lowering's `CallSite.leftOut` question, asked again where the arity shrinks a
    *  second time. An unfresh cut is the trim's own proof; a fresh one went with a hole below it
    *  (see {@link trimClobberedCallArgs}), which proves nothing. The `/setup-args` reading asks it a
-   *  third time, of the cut registers the call's own block wrote, and a refusal there withholds that
-   *  reading for the site instead of declining. Absent where nothing is asked. */
+   *  third time, of the cut registers the call's own block wrote (of every one it cuts, where
+   *  `asksEveryCut`), and a refusal there withholds that reading for the site instead of declining.
+   *  Absent where nothing is asked. */
   trimmed?: (cut: readonly string[], kept: readonly string[]) => void;
+  /** the frontend's frame verdict leaned on what this function's calls are HANDED, every argument
+   *  register a guessed arity may read included — so a frame address an earlier block left in one is
+   *  not the dead leftover the `/setup-args` reading guesses it is, and that reading asks `trimmed`
+   *  of every register it cuts ({@link narrowingKeepsFrameAddresses}). Absent where it did not. */
+  asksEveryCut?: boolean;
 }
 
 export interface CallArgTrim {
@@ -1367,15 +1376,22 @@ export function trimClobberedCallArgs(inp: CallArgTrim): void {
  *  argument that came from an earlier one, and the cut lifts `g(a, b, s)` as `g(a)`, leaving the
  *  stores to `s` dead.
  *
- *  ONLY WHAT THE CALL'S OWN BLOCK WROTE is asked (`freshBefore`). That a value an earlier block left
- *  in a register is dead is this reading's whole guess, and a frame address is no exception: agbcc
- *  keeps `mov r3, sp` as a store base across blocks and calls `TransformSprite(s, t)` with it still
- *  in r3 (sa3 sub_805DADC), where the cut is the right arity. A register this block wrote is not
- *  that guess — the block set it up for the call — so where it may hold a frame address the call
- *  passes, the cut would drop an argument. A refusal withholds this candidate for this site only;
- *  the default reading stands. */
+ *  WHAT THE CALL'S OWN BLOCK WROTE is asked (`freshBefore`). That a value an earlier block left in a
+ *  register is dead is this reading's whole guess, and a frame address is no exception: agbcc keeps
+ *  `mov r3, sp` as a store base across blocks and calls `TransformSprite(s, t)` with it still in r3
+ *  (sa3 sub_805DADC), where the cut is the right arity. A register this block wrote is not that
+ *  guess — the block set it up for the call — so where it may hold a frame address the call passes,
+ *  the cut would drop an argument.
+ *
+ *  …AND EVERY REGISTER IT CUTS, where the frontend's frame verdict leaned on what the calls are
+ *  handed (`GuessedCallSite.asksEveryCut`; Thumb's relied-on escapes). An escaped `sp+k` excuses
+ *  every frame word from k up as the callee's to read, so a frame address an earlier block left
+ *  above it is no dead leftover: `if (a) g(b, s, t)` leaves `&t` in r2 from the entry block, the call
+ *  block writes only r0 and r1 (`mov r1, sp`), and cutting r2 lifts `g(a1, sp0)` with the stores to
+ *  `t` excused only by the escape at offset 0. A refusal withholds this candidate for this site
+ *  only; the default reading stands. */
 function narrowingKeepsFrameAddresses(s: GuessedCallSite, argRegs: readonly string[], local: number): boolean {
-  const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => s.freshBefore.has(r));
+  const cut = argRegs.slice(local, callArgs(s.op).length).filter((r) => s.asksEveryCut || s.freshBefore.has(r));
   if (s.trimmed === undefined || cut.length === 0) {
     return true;
   }

@@ -5234,6 +5234,10 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
         );
       }
     },
+    // …AND A FRAME VERDICT THAT LEANED ON AN ESCAPE read every argument register as handed over,
+    // a leftover from an earlier block included, so the ranked `/setup-args` reading asks the
+    // question above of every register it cuts, not only of those this block wrote.
+    asksEveryCut: frame.escapesReliedOn.size > 0,
     pairs: {
       fuse: (lo, hi) => pairs.fuseHalves(irb, lo, hi),
       project: (whole, half) => pairs.projectHalf(irb, whole, half, ins),
