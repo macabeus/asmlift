@@ -50,7 +50,7 @@
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { nextStructIndex } from '../ir/struct-names';
-import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess } from '../ir/types';
+import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess, unionViewSigns } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
 import { storeSigned } from './storesign';
@@ -321,17 +321,10 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
           `cannot recover struct '${structName}': no union view for a ${width}-byte access at offset ${group[0].off}`,
         );
       }
-      // The extensions this width is LOADED with, unsigned first; a word has one type whatever its
-      // loads say, and a width only stored gets the signed view when a stamped store reads it
-      // (raise/storesign.ts), as `buildStruct` prefers it, and the unsigned one otherwise.
-      const loaded = new Set(group.filter((a) => a.isLoad).map((a) => a.signed));
-      const signs =
-        width === 4
-          ? [true]
-          : loaded.size === 0 && group.some((a) => isStamped(a) && a.signed)
-            ? [true]
-            : [false, true].filter((sg) => loaded.has(sg));
-      const views = signs.length === 0 ? [false] : signs;
+      const views = unionViewSigns(
+        width,
+        group.map((a) => ({ isLoad: a.isLoad, signed: a.signed, stamped: isStamped(a) })),
+      );
       const viewOf = (a: Access): boolean => (views.length === 1 ? views[0] : a.isLoad ? a.signed : false);
       return views.map((signed): StructField => {
         const reads = group.filter((a) => viewOf(a) === signed);

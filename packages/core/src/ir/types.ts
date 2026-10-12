@@ -98,6 +98,26 @@ export const T = {
  *  narrow width loaded with both extensions has a view per extension, `u`/`s` prefixed. */
 export const UNION_VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 'word' };
 
+/** The extensions a union declares a view of `width` bytes in, from the accesses of that width:
+ *  THE one rule raise/structs.ts `buildUnionStruct` and the frame audit (frontend/frame-objects.ts
+ *  `unionViews`) both declare by, so a struct member's union and a frame object's cannot disagree
+ *  on their views. A word has one view whatever its loads say (`scalarTypeForAccess`); a narrower
+ *  width a view per extension it is LOADED with, unsigned first; a width only stored the signed
+ *  view where a stamped store says signed (raise/storesign.ts) and the unsigned one otherwise. */
+export function unionViewSigns(
+  width: number,
+  accesses: readonly { readonly isLoad: boolean; readonly signed: boolean; readonly stamped: boolean }[],
+): boolean[] {
+  if (width === 4) {
+    return [true];
+  }
+  const loaded = new Set(accesses.filter((a) => a.isLoad).map((a) => a.signed));
+  if (loaded.size === 0) {
+    return [accesses.some((a) => a.stamped && a.signed)];
+  }
+  return [false, true].filter((sg) => loaded.has(sg));
+}
+
 /** The byte width of a union view's element (an array view's element, or the scalar itself). */
 function viewBytes(t: IrType): number {
   const e = t.kind === 'array' ? t.elem : t;

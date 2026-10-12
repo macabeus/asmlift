@@ -12,7 +12,7 @@
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
 import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
-import { type IrType, T, typeEquals, typeToString } from '../ir/types';
+import { type IrType, T, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
@@ -1854,27 +1854,25 @@ function unionRefusal({
 }
 
 /** The views a union object's accesses use, as `laddr`'s `views` attr: one entry per view, its
- *  element width in bytes, NEGATIVE for a signed narrow view. A word is one view whatever its loads
- *  say (`scalarTypeForAccess`); a narrower width gets a view per extension it is LOADED with —
- *  the signed and unsigned views of one width are two members, as raise/structs.ts
- *  `buildUnionStruct` declares them — and an unsigned one where it is only stored. Widest first,
- *  unsigned before signed. */
+ *  element width in bytes, NEGATIVE for a signed narrow view — which views, by the rule
+ *  raise/structs.ts declares a struct member's union by (ir/types.ts `unionViewSigns`). A word's
+ *  one view is `s32` whichever sign it carries, so it is entered unsigned. Widest first, unsigned
+ *  before signed. */
 function unionViews(irBlocks: readonly Block[], base: Value): number[] {
-  const loaded = new Map<number, Set<boolean>>();
+  const byWidth = new Map<number, { isLoad: boolean; signed: boolean; stamped: boolean }[]>();
   for (const op of irBlocks.flatMap((b) => b.ops)) {
     if ((op.opcode === 'load' || op.opcode === 'store') && op.operands[0] === base) {
-      const signs = loaded.get(op.attrs.width as number) ?? new Set<boolean>();
-      if (op.opcode === 'load') {
-        signs.add((op.attrs.signed as boolean) ?? false);
-      }
-      loaded.set(op.attrs.width as number, signs);
+      const w = op.attrs.width as number;
+      (byWidth.get(w) ?? byWidth.set(w, []).get(w)!).push({
+        isLoad: op.opcode === 'load',
+        signed: (op.attrs.signed as boolean) ?? false,
+        stamped: op.opcode === 'store' && op.attrs.signed !== undefined,
+      });
     }
   }
-  return [...loaded]
+  return [...byWidth]
     .sort(([a], [b]) => b - a)
-    .flatMap(([w, signs]) =>
-      w === 4 ? [w] : signs.size === 0 ? [w] : [false, true].filter((sg) => signs.has(sg)).map((sg) => (sg ? -w : w)),
-    );
+    .flatMap(([w, accesses]) => unionViewSigns(w, accesses).map((sg) => (sg && w !== 4 ? -w : w)));
 }
 
 /** One object's shape: `count` elements of `width` bytes. */
