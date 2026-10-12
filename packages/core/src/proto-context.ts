@@ -715,10 +715,13 @@ function parameterType(p: Parameter, tokens: Tokens, typedefs: ReadonlyMap<strin
  *  fact, and only what the caller states about it is kept.
  *
  *  A stated entry that says nothing of the return (`statesNoReturn`, which counts `returnsVoid:
- *  false` as nothing) keeps the return the context's entry states, by the rule a context entry that
- *  yields its parameters to the map keeps it (`contextReturnUnder`): a struct return is what says
- *  argument 0 may be a hidden pointer, and an entry stating only the arity would otherwise hand that
- *  pointer to the call as its first argument; a register return is what says it is not one. */
+ *  false` as nothing) keeps the return the context's entry states where `contextReturnUnder` says it
+ *  may, by the rule a context entry that yields its parameters to the map meets: a struct return is
+ *  always kept — it is what says argument 0 may be a hidden pointer, and an entry stating only the
+ *  arity would otherwise hand that pointer to the call as its first argument; a register return,
+ *  which says it is not one, is kept only where the stated entry gives `params` (an arity or a list)
+ *  as many as the header states. An entry with no `params` — `{ returnsVoid: false }` alone — states
+ *  no arity, so it keeps no register return and the call stays undeclared. */
 export function withContextPrototypes(
   stated: Prototypes | undefined,
   context: Prototypes,

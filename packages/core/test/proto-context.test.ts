@@ -829,6 +829,10 @@ describe('a context register return under a mapped signature', () => {
     expect(withContextPrototypes({ conv: { params: 3 } }, ctx, 'f', symbols, ARMV4T_AGBCC).conv).toEqual({
       params: 3,
     });
+    // an entry with no `params` states no arity, so it keeps no register return
+    expect(withContextPrototypes({ conv: { returnsVoid: false } }, ctx, 'f', symbols, ARMV4T_AGBCC).conv).toEqual({
+      returnsVoid: false,
+    });
     const va = prototypesFromContext('int pr(char *buf, const char *fmt, ...);', 'c');
     expect(withContextPrototypes({ pr: { params: 2 } }, va, 'f', undefined, ARMV4T_AGBCC).pr).toEqual({ params: 2 });
   });
