@@ -451,6 +451,18 @@ describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate d
     expect(scores).toContain(0);
   });
 
+  test('an address element passed to a declared pointer parameter is cast, which mwcc’s C requires', () => {
+    // The element is held as `u32`; mwcc refuses the implicit `u32` → `s32 *` at the call ("illegal
+    // implicit conversion from 'const unsigned int' to 'int *'") where agbcc converts it.
+    const context = 'extern s32 ga, gb; void g(s32 *);\n';
+    const c = 'void mdp(s32 i) { static s32 *const t[2] = { &ga, &gb }; g(t[i]); }';
+    const prototypes = { g: { params: ['s32 *'], returnsVoid: true }, mdp: { params: ['s32'], returnsVoid: true } };
+    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, 'mdp', FLAGS);
+    const r = decompile('mdp', asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, 'mdp'), prototypes });
+    expect(r.source).toContain('g((s32 *)t[a0]);');
+    expect(scoreCPpc('mwcc_242_81', context + r.source, 'mdp', obj, FLAGS).match, r.source).toBe(true);
+  });
+
   test('without the object’s data the static declines rather than lifting a name with no definition', () => {
     const { asm } = compilePpcTarget('mwcc_242_81', CASES[0].c, CASES[0].sym, FLAGS);
     expect(() => decompile(CASES[0].sym, asm, PPC_MWCC)).toThrow(

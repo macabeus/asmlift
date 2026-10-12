@@ -253,7 +253,8 @@ function pinnedOperands(e0: Extract<Expr, { k: 'bin' }>, wantSigned: boolean, vt
  *  made and the compiled code is C's: an object pointer to a pointer of another pointee (a conversion
  *  to `void *`, or one that only adds a qualifier, is implicit in C++ too), an integer to a pointer
  *  (the literal `0` is the one integer that converts), and a pointer to an integer. Only reached on a
- *  function compiled as C++ (`SFn.dialect`). */
+ *  function compiled as C++ (`SFn.dialect`), or by a C front end that refuses the same three
+ *  (`SFn.strictConversions` — mwcc). */
 function argConversion(a: Expr, to: string, vt: PrintEnv): boolean {
   const from = exprCType(a, vt.type);
   // qualifiers never decide it: a `T * const` parameter is a pointer parameter

@@ -438,8 +438,8 @@ export interface SFn {
    *  and `l3/slotorder.ts` is the identity — never "ascending by default". */
   slotOrder?: 'ascending' | 'descending';
   /** Each declared callee's parameter types (an entry the printer cannot spell is `undefined`):
-   *  what an argument converts to. Read by the C-family printer where `dialect` says C++, which
-   *  refuses three conversions C makes implicitly (backend/cfamily.ts `argConversion`), and by the
+   *  what an argument converts to. Read by the C-family printer where `dialect` says C++ or
+   *  `strictConversions` is set, either of which refuses three conversions C makes implicitly (backend/cfamily.ts `argConversion`), and by the
    *  pointer-cell conversions in every dialect (l3/ptrcell.ts). */
   declaredArgs?: Readonly<Record<string, readonly (string | undefined)[]>>;
   /** Each declared callee's return type as the project spells it, never printed: whether a call a
@@ -452,6 +452,10 @@ export interface SFn {
    *  C-family printer spells an initializer's left-out run by index where present, as zeros where
    *  not. */
   designators?: true;
+  /** The compiler refuses C's implicit pointer conversions in C as well, as C++ does — carried from
+   *  `compilerBehaviors.strictPointerConversions`. An emission policy: the C-family printer casts an
+   *  argument to its declared parameter wherever it would for C++ (`declaredArgs`). */
+  strictConversions?: true;
 }
 
 /** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s

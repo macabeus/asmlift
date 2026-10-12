@@ -1581,6 +1581,9 @@ export interface StructureOptions extends ArithCompilerFacts {
   // The compiler parses a designated initializer element (`SFn.designators`; the compiler behavior
   // of the same name says which do).
   designatedInitializers?: boolean;
+  // The compiler's C refuses C's implicit pointer conversions (`SFn.strictConversions`; the compiler
+  // behavior `strictPointerConversions` says which does).
+  strictPointerConversions?: boolean;
   // Commutative load pairs re-spell in def (evaluation) order — see the swap in lowerDef. Default
   // true; verified byte-exact on agbcc and IDO. A compiler behavior declared in
   // TargetDescription.compilerBehaviors: the first compiler whose scheduler is shown re-ordering
@@ -2220,6 +2223,7 @@ export function structure(
     declaredReturns,
     dialect,
     designatedInitializers = false,
+    strictPointerConversions = false,
     defOrderLoadPairs = true,
     anchorConstCopies = false,
     anchorLoopEntryConsts = false,
@@ -6821,6 +6825,7 @@ export function structure(
     ...calledOnly({ declaredArgs, declaredReturns }, body),
     ...(dialect !== undefined ? { dialect } : {}),
     ...(designatedInitializers ? { designators: true as const } : {}),
+    ...(strictPointerConversions ? { strictConversions: true as const } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;
