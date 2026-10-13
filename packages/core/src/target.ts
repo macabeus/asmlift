@@ -515,7 +515,9 @@ export interface TargetDescription {
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
     // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
-    // re-staging and the callee's write. NOT set anywhere else, for the reason above.
+    // re-staging and the callee's write. Set on the three MIPS toolchains off their own probe
+    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. NOT set
+    // on mwcc, for the reason above.
     localsAboveOutgoingArea?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
@@ -559,6 +561,25 @@ export interface TargetDescription {
     // (stackargs.ts). `oneWordFrameIsTheCapturedObject` is the flow-insensitive licence, sound only
     // where no block copy fits.
     escapedFrameAddressNamesALocal?: boolean;
+    // WHERE AN O32 FUNCTION KEEPS ITS LOCALS in the one frame `addiu sp,sp,-N` reserves — the area
+    // the MIPS frontend hands the frame-object audit as `ownedLocals`/`declaredLocals`. Below it
+    // lies the OUTGOING area, the 16-byte home of a0..a3 every calling function reserves and then
+    // the stack words its widest call takes (none in a function that makes no call); the saved
+    // registers and the locals share the rest, and which way round is the compiler's:
+    //   'above-outgoing-area'   — from the outgoing area's end, rounded up to the 8-byte stack
+    //                             alignment, to the lowest saved register;
+    //   'above-saved-registers' — from just above the highest saved register (or the outgoing
+    //                             area's end, where that is higher) to the frame top N.
+    // Spill temps live in the same area on both, so it is the locals' and the spills' together.
+    //
+    // MEASURED off `corpus/probe-o32-frame.c` (`scripts/regen-o32-frame-probes.ts`, read by
+    // `o32-frame-probes.test.ts`): a leaf's array at sp+0 on all three MIPS toolchains; with a call
+    // taking no stack word, gcc 2.7.2 (both builds) at sp+16 under the saves and IDO at the frame top
+    // above `ra`; with one stack word, gcc at sp+24 (20 rounded) and IDO still at the top; and IDO's
+    // spill of a value live across a call between `ra` and the array.
+    //
+    // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
+    o32LocalArea?: 'above-outgoing-area' | 'above-saved-registers';
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
     // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
@@ -1096,6 +1117,12 @@ export const MIPS_IDO: TargetDescription = {
     // O32's caller-owned home area `[0,16)` would be read as this function's first four
     // declaration ranks. Shipping a direction before the partition orders by argument index.
     spillSlotOrder: 'unknown',
+    // MEASURED, the probe at the field: the local ends at the frame top, above `ra` and the spills.
+    o32LocalArea: 'above-saved-registers',
+    // MEASURED off the same probe (`twice`, `owns`): O32's outgoing area is the frame bottom, an
+    // unchanged argument is staged again before each call, and a callee assigns to its stack
+    // parameter in place. Read by the frame-object audit alone here (`storedNeverRead`).
+    localsAboveOutgoingArea: true,
   },
 };
 
@@ -1213,6 +1240,11 @@ export const MIPS_GCC: TargetDescription = {
     // per-toolchain override this bag cannot express — see the note at `compilerBehaviors`.
     designatedInitializers: true, // both gcc 2.7.2 builds compile `{ 1, [8] = 2 }` (see the field)
     spillSlotOrder: 'unknown',
+    // MEASURED on BOTH toolchains this description serves, the probe at the field: identical
+    // layouts, the local right above the 8-aligned outgoing area and under the saves.
+    o32LocalArea: 'above-outgoing-area',
+    // MEASURED on BOTH toolchains this description serves, the probe at `o32LocalArea` (`twice`).
+    localsAboveOutgoingArea: true,
   },
 };
 

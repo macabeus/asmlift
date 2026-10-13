@@ -242,7 +242,9 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // store outright. One sub-word sp access disables slot modelling for the entire function.
   expect(mips('   0:\tsw\ta0,4(sp)\n   4:\tlbu\tv0,4(sp)\n')).toThrow(/stack pointer used as data/);
   expect(mips('   0:\taddu\tv0,sp,a0\n')).toThrow(/stack pointer used as data/); // &local
-  expect(mips('   0:\tlw\tv0,16(sp)\n')).toThrow(/never stored/); // a slot no store defined
+  // a slot no store defined, in the caller's home of a0..a3 (16(sp) up is an incoming stack
+  // argument, frontend/mips.ts `emitLoad`)
+  expect(mips('   0:\tlw\tv0,4(sp)\n')).toThrow(/never stored/);
   // …and the case that guard MISSES, found while porting the model to Thumb: `hasReachingDef` asks
   // whether a store reaches on SOME path, so a slot stored on one arm of a diamond and reloaded at
   // the join passes it. readVar then recurses into the unstored predecessor and mints an entry
@@ -271,8 +273,10 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '',
   ].join('\n');
   expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
-  // the ARGUMENT-HOME case that makes the decline necessary rather than merely conservative: with a
-  // 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a def-less read is argument 5.
+  // the ARGUMENT-HOME case: with a 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a
+  // def-less read is argument 5. MIPS keys that word `@sarg4` for its store as well as its load
+  // (frontend/mips.ts `incomingStackKey`), so the read is argument 5 on the path that does not store
+  // it and the stored value on the other: IDO's own spelling of `if (a) e = b; return e + 1;`.
   const homeSlot = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',
@@ -286,7 +290,9 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  20:\taddiu\tsp,sp,24',
     '',
   ].join('\n');
-  expect(() => decompile('f', homeSlot, MIPS_IDO)).toThrow(/sp@40 is read on a path that never stores it/);
+  expect(decompile('f', homeSlot, MIPS_IDO).source).toBe(
+    's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    if (a0 != 0) a4 = a1;\n    return a4 + 1;\n}\n',
+  );
   // …and the same fabrication when the entry block is ITSELF the loop header, where the slot
   // arrives as a PHI rather than a live-in. `paramReg` only covers live-ins, so the escape check
   // was blind to it and the phantom parameter survived — on MIPS, which has no preheader to make

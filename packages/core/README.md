@@ -125,14 +125,15 @@ properly nested, in-body `break`/early-`return`), comparison-tree and jump-table
 direct calls, constant-offset and variable-index memory (`*p`, `p[n]`, `a[i]`, struct fields),
 magic-number and soft division, short-circuit booleans, width casts, PowerPC small-data access
 through its `R_PPC_EMB_SDA21` relocation, a call's outgoing stack arguments on agbcc, where the
-declaration and the code agree (`stagesOutgoingArgsInFrame`; MIPS still declines the same shape),
+declaration and the code agree (`stagesOutgoingArgsInFrame`; MIPS lifts a declared callee's too),
 a compare read by a branch in a later block that only its own block enters (Thumb and
 PowerPC, `frontend/flags-edge.ts`), and a MIPS likely branch's nullified delay slot. Still DECLINED (loud,
-never wrong code): **local stack frames** beyond what the models prove (Thumb lifts an
+never wrong code): **local stack frames** beyond what the models prove (Thumb and MIPS lift an
 address-taken local the frame-object audit can bound — a scalar, or an untyped buffer that fills
-the frame — and declines the rest; MIPS models word `sp` slots and PPC elides callee-saved save
-slots, so a spill/reload pair is modelled on those two — anything the narrow models cannot honour
-declines),
+the frame — and decline the rest, MIPS inside the O32 local area its compiler's measured layout
+draws; MIPS also models word `sp` slots and reads an incoming stack word as a parameter, and PPC
+elides callee-saved save slots, so a spill/reload pair is modelled on those two — anything the
+narrow models cannot honour declines),
 **condition flags at a join** (a compare two or more edges bring to one branch, or one the caller
 set), computed tail calls, PIC and `gp`-relative access outside PowerPC's
 small-data relocation — MIPS refuses `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` alike —

@@ -17,7 +17,7 @@ import { frontendFor } from './frontend/registry';
 import { type Fn, reachableBlocks } from './ir/core';
 import { print } from './ir/print';
 import { firstTrivialPhi } from './ir/simplify';
-import { T } from './ir/types';
+import { T, intWidth } from './ir/types';
 import { VerifyError, verify } from './ir/verify';
 import { LanguageBackend, SFn, gapReasonFor, walkExprs } from './l3/ast';
 import { BASECSE_GATES, hoistBaseLocals } from './l3/basecse';
@@ -25,7 +25,7 @@ import { eliminateDeadStores } from './l3/dce';
 import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
+import { type FnProto, type Prototypes, declaresVoidReturn, ownReturnWidth, prototypesFromSymbols } from './proto';
 import { stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
@@ -242,8 +242,38 @@ export function liftStamped(
 ): Fn {
   const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols);
   verify(fn);
+  refuseNarrowReturnsOfWideDeclaration(fn, name, prototypes[name]);
   stampDeclaredVolatileUnder(fn, symbols, target.compilerBehaviors);
   return fn;
+}
+
+/** A FUNCTION DECLARED TO RETURN AN INTEGER WIDER THAN A REGISTER, whose lift returns one word or
+ *  none, refuses — on every frontend, since this reads only the lifted `ret`s.
+ *
+ *  Only the declaration can decide this. A `long long` comes back in a register pair (Thumb r0:r1,
+ *  O32 v0:v1, PowerPC r3:r4), and where the body never reads the pair's second register back, the
+ *  asm of `long long f(long long *p, long long *q) { long long x = *p; *q = x; return x; }` is
+ *  byte-identical to that of the `s32` function storing the same two words (kmc-gcc and gcc 2.7.2
+ *  compile both to one object). A frontend that builds the pair returns one 64-bit value and
+ *  passes; one that lowered a word would print `s32 f(...)` against the project's own `long long
+ *  f(...)` — a candidate the compiler rejects as conflicting types. The frontends' asm rules
+ *  (Thumb's `refuseWordReturns`, O32's `v1MayHoldLowWord`) stay as the backstop for a function
+ *  nothing declares, and that byte-identical shape is their blind spot. */
+function refuseNarrowReturnsOfWideDeclaration(fn: Fn, name: string, own: FnProto | undefined): void {
+  const width = ownReturnWidth(own);
+  if (width === undefined || width <= 32) {
+    return;
+  }
+  for (const blk of fn.blocks) {
+    for (const op of blk.ops) {
+      if (op.opcode === 'ret' && !op.operands.some((v) => (intWidth(v.type) ?? 0) > 32)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': its declaration returns a ${width}-bit integer, which comes back as the halves of a ` +
+            '64-bit pair, and this lowering returns one word',
+        );
+      }
+    }
+  }
 }
 
 // ── the shared raising tower ────────────────────────────────────────────────────────────────

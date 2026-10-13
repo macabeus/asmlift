@@ -9,8 +9,11 @@
  *  every ISA — the level-tower split for this frame model: the frontend supplies the PARTITION,
  *  the shared pass applies the rule. Messages name the frame base `sp`.
  *
- *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
- *  compiler every rule was measured against. */
+ *  Two frontends call it: Thumb, and MIPS, which lowers `addiu rD,sp,k` and `addu rD,sp,rX` to an
+ *  `laddr` and hands over the O32 local area as both ranges (`frontend/mips.ts` `measureO32Frame`).
+ *  The worked examples below are agbcc's, because agbcc is the compiler every rule was first
+ *  measured against; IDO and gcc 2.7.2 reload past every store of another type (strict aliasing
+ *  does not reorder there), so the cast and union refusals below are only more cautious on MIPS. */
 import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
@@ -62,6 +65,28 @@ export interface FrameRange {
 export interface FrameObjectRelift {
   readonly oneObject: FrameRange;
 }
+
+/** THE RELIFT PROTOCOL, AT MOST TWICE, the one copy every frontend that runs the audit calls: lift,
+ *  and where the audit answers with bytes to keep as one object (`FrameObjectRelift`), lift once
+ *  more with them routed through an `laddr`. The second audit judges them as one object and refuses
+ *  rather than asking again, so a second request is an internal error, not a third lift. */
+export function liftWithRelift<F>(
+  name: string,
+  liftOnce: (oneObject: FrameRange | undefined) => F | FrameObjectRelift,
+): F {
+  const first = liftOnce(undefined);
+  if (!isRelift(first)) {
+    return first;
+  }
+  const again = liftOnce(first.oneObject);
+  if (isRelift(again)) {
+    throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
+  }
+  return again;
+}
+
+const isRelift = <F>(x: F | FrameObjectRelift): x is FrameObjectRelift =>
+  typeof x === 'object' && x !== null && 'oneObject' in x;
 
 /** What an audit answers: lift again (`FrameObjectRelift`), the device pin the accepted function
  *  owes (`DevicePins`, applied by `pinDeviceAccesses`), or nothing, when no frame address was
@@ -660,8 +685,16 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
   // saved register's — `g(&e)` for a fifth parameter `e` is `add r0, sp, #0x8` over a one-word
   // local area — and no other rule of the audit is about that gap. The TOP itself is also C's
   // one-past-the-end pointer, `g(buf, buf + 8)` over an 8-byte array, and the refusal names both
-  // readings.
+  // readings. BELOW IT is the outgoing block a call's stack words are staged in, and on O32 also
+  // the saves IDO keeps under its locals: an address there is no local's either. Every object's
+  // extent is held to the area again below; this says why, for the frontend that supplied it.
   for (const off of objects.keys()) {
+    if (off < owned.from) {
+      fail(
+        `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}) — ` +
+          'an outgoing stack argument word or a saved register, whose address is not modelled',
+      );
+    }
     if (off === owned.to) {
       fail(
         `the captured address at [sp,#${off}) is the top of the reserved local area of ${owned.to - owned.from} bytes — ` +
@@ -1118,6 +1151,15 @@ function indexedAccess(
   }
 }
 
+/** Why two access types on one byte refuse, as every refusal of it words it. THE RULE IS AGBCC'S
+ *  AND IS HELD ON EVERY TARGET: agbcc at -O2 serves a read of one type past a store of the other
+ *  (`indexedWidth` has the compiled cases), while IDO 7.1, KMC gcc and gcc 2.7.2 reload past every such
+ *  store, so on MIPS it is only more cautious than it has to be. The text names no compiler of the
+ *  input, since the audit is handed none. */
+const STALE_ACROSS_TYPES =
+  'and type-based alias analysis can let a read of one type pass a store of the other (agbcc at -O2 does, ' +
+  'and the audit refuses it on every target) — a cast spelling could read stale';
+
 /** The one width wider than a byte that runtime-indexed accesses take, or why there is not one.
  *
  *  A runtime index names no byte, so its access type must agree with every access it may reach,
@@ -1142,11 +1184,7 @@ function indexedWidth(accesses: readonly { readonly width: number }[]): {
   const widths = [...new Set(accesses.map((x) => x.width))].filter((w) => w !== 1);
   return {
     width: widths[0] ?? null,
-    refusal:
-      widths.length > 1
-        ? `accesses ${widths.join(' and ')} bytes wide, and agbcc at -O2 lets a read of one type pass a store ` +
-          'of the other (strict aliasing) — a cast spelling would read stale'
-        : null,
+    refusal: widths.length > 1 ? `accesses ${widths.join(' and ')} bytes wide, ${STALE_ACROSS_TYPES}` : null,
   };
 }
 
@@ -1856,8 +1894,7 @@ function keepAsOneObject({
     if (why !== null) {
       fail(
         `the byte at [sp,#${twoWidths.b}] of ${kept} is accessed ${twoWidths.had} and ${twoWidths.width} bytes ` +
-          'wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a cast ' +
-          `spelling would read stale, and ${why}`,
+          `wide, ${STALE_ACROSS_TYPES}, and ${why}`,
       );
     }
   }
@@ -1865,8 +1902,7 @@ function keepAsOneObject({
     if (index.width !== null && had !== index.width) {
       fail(
         `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${index.width} ` +
-          'bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a ' +
-          'cast spelling would read stale',
+          `bytes wide, ${STALE_ACROSS_TYPES}`,
       );
     }
   }

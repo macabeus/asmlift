@@ -271,6 +271,18 @@ export function declaresVoidReturn(p: FnProto | undefined): boolean {
   return p?.returnsVoid === true || p?.returns?.trim() === 'void';
 }
 
+/** The bit width of the scalar the function UNDER DECOMPILATION declares it returns, or `undefined`
+ *  where its declaration states none this can read: no `returns`, a struct or union by value, a
+ *  floating type or a project typedef (`declaredWidth`'s "no opinion"). A pointer answers 32,
+ *  `long long` 64.
+ *
+ *  Not {@link declaredReturnWidth}, which answers for a CALLEE and only where the candidate can
+ *  print its declaration: the lifted function's own signature is the one the candidate defines,
+ *  so whether its parameters are spellable says nothing about what it returns. */
+export function ownReturnWidth(p: FnProto | undefined): number | undefined {
+  return p?.returns === undefined || declaresAggregateReturn(p) ? undefined : declaredWidth(p.returns);
+}
+
 /** Whether a declaration says nothing any reader acts on about the return — no spelling, no
  *  layout, and no `returnsVoid: true`. `returnsVoid: false` is silence (`declaresVoidReturn`), and
  *  it is how a manifest spells a callee it knows only the parameters of. Such an entry can take a

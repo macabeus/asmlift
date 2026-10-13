@@ -31,7 +31,13 @@ import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { FRAME_OBJECT_AUDIT, type FrameObjectAudit, type FrameObjectRelift, type FrameRange } from './frame-objects';
+import {
+  FRAME_OBJECT_AUDIT,
+  type FrameObjectAudit,
+  type FrameObjectRelift,
+  type FrameRange,
+  liftWithRelift,
+} from './frame-objects';
 import type { Frontend } from './frontend';
 import {
   type LocalStatics,
@@ -43,11 +49,13 @@ import {
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
-  type ArgSlots,
   type SsaBuilder,
   abiSortEntryParams,
   makeSsaBuilder,
   mintArgSlotHoles,
+  registerArgSlots,
+  stackArgKey,
+  stackArgSlots,
   stackSlotKey,
 } from './ssa';
 import { type OutgoingArgs, type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
@@ -634,18 +642,6 @@ const isFrameAdjust = (
   isSpReg(dest) &&
   (base === undefined || isSpReg(base)) &&
   (off?.startsWith('#') ?? false);
-
-// A virtual register key per incoming stack argument. Reading it goes through the ordinary Braun
-// live-in path (frontend/ssa.ts), which turns a read with no reaching def into a function
-// parameter — so this needs NO new representation, opcode or pass. The `@` cannot appear in a
-// real register token, so the key cannot collide with one.
-const stackArgKey = (index: number) => `@sarg${index}`;
-// Defined beside its mint site on purpose: the format string and its parser drifted 650 lines
-// apart in the first version, with the convention explained only at one end.
-const stackArgIndex = (key: string): number | null => {
-  const m = /^@sarg(\d+)$/.exec(key);
-  return m ? +m[1] : null;
-};
 
 // INCOMING STACK ARGUMENTS (AAPCS). Args 1-4 arrive in r0-r3; args 5+ are pushed by the CALLER,
 // so the callee reads them at `[sp, #N]` where N is at or above its own frame. Those are
@@ -2421,15 +2417,7 @@ export function lift(
   asmData?: AsmData,
   symbols?: SymbolMap,
 ): Fn {
-  const first = liftOnce(name, asm, target, prototypes, asmData, symbols, undefined);
-  if (!('oneObject' in first)) {
-    return first;
-  }
-  const again = liftOnce(name, asm, target, prototypes, asmData, symbols, first.oneObject);
-  if ('oneObject' in again) {
-    throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
-  }
-  return again;
+  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, symbols, oneObject));
 }
 
 /** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: every stage before the fill (`thumbFillOf`: the
@@ -2465,17 +2453,7 @@ function liftOnce(
   // One word per argument, which is what this frontend assumes everywhere: an 8-byte argument,
   // which AAPCS may align into r1 or straddle across r3 and the stack, would break the index-slot
   // correspondence, and recovering one is its own capability.
-  const slotOf = (key: string): number | null => {
-    const i = target.argRegs.indexOf(key);
-    return i >= 0 ? i : stackArgIndex(key);
-  };
-  const argSlots: ArgSlots = {
-    slotOf,
-    holes: (readKeys) =>
-      Array.from({ length: Math.max(0, ...readKeys.map((k) => slotOf(k) ?? -1)) }, (_, k) =>
-        k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k),
-      ),
-  };
+  const argSlots = stackArgSlots(registerArgSlots(target.argRegs), target.argRegs);
   mintArgSlotHoles(ssa, cfg.preds[0].length > 0, argSlots);
   ssa.finish();
 

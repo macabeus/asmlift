@@ -64,7 +64,9 @@ describe('the audit reads the frame partition as ranges', () => {
 
   test('an address below the owned range is not a local', () => {
     const { blk } = frame(8, 'g', true);
-    expect(() => audit(blk, [16, 24], [16, 24])).toThrow('the object at [sp,#8) of width 4 lies outside');
+    expect(() => audit(blk, [16, 24], [16, 24])).toThrow(
+      'the captured address at [sp,#8) is below the reserved local area, which starts at [sp,#16)',
+    );
   });
 });
 
