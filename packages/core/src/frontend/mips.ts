@@ -21,7 +21,7 @@
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, wordsOf } from '../proto';
+import { type Prototypes, declaresAggregateReturn, declaresVoidReturn, declaredWidth, wordsOf } from '../proto';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
@@ -486,6 +486,116 @@ function checkDelaySlots(name: string, instrs: Instr[]): void {
 }
 
 
+/** WHETHER THE RETURN ENDING BLOCK `bi` MAY HAND BACK A 64-BIT PAIR, read off the asm: O32 returns
+ *  one in v0:v1, the low word in v1, and v1 is also ordinary scratch, so the question is what each
+ *  write of v1 that reaches the return was made for. Two answers say "the low word":
+ *
+ *  - NOTHING IN THE FUNCTION READS IT, on any path from it. An optimising compiler computes no
+ *    dead value, so a write no instruction reads is one the caller reads (`lw v0,16(sp);
+ *    lw v1,20(sp)` for `return e;`, `mflo v1` for a product). A loop's induction update is read
+ *    round the back edge, and a value one arm of a branch reads is read, so neither counts.
+ *  - IT IS AN `addu`/`addiu` WHOSE SUM IS COMPARED, unsigned, against what it added: the carry out
+ *    of a 64-bit add's low word into its high one (`addu v1,a3,a0; sltu t,v1,a0`, `addiu v1,a1,5;
+ *    sltiu t,v1,5`). A pointer bound check compares the sum against something else (`addu v1,a1,a0;
+ *    sltu v0,v0,v1`). A function that computes a carry and returns only the high word is declined
+ *    with the pairs — loud, and the price of one rule.
+ *  - IT IS A COPY OF A REGISTER THAT STILL HOLDS THE SAME VALUE wherever v1 is read: the reads
+ *    could have named the source, so the copy is made for the caller (`move v1,a3; jr ra;
+ *    sw v1,4(a0)` for `*p = x; return x;`). A copy made because its source is about to be
+ *    overwritten (a swap, a pointer bumped after its old value is kept), or read past a join, is
+ *    scratch.
+ *
+ *  A call ends a path either way: it destroys v1 (`clobberedByCall`), and its delay slot runs
+ *  before it. The entry ends the backward walk, since what v1 held there is no value this
+ *  function computed. */
+function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonly number[])[], bi: number): boolean {
+  const isCall = (ins: Instr) => /^(jal|jalr|bal|bgezal|bltzal)$/.test(ins.mnemonic);
+  const readsV1 = (ins: Instr) => {
+    const dest = writtenReg(ins) !== null && writtenReg(ins) === ins.ops[0];
+    return ins.ops.some((o, k) => !(dest && k === 0) && (o === 'v1' || /\(v1\)$/.test(o)));
+  };
+  // Each block in execution order: a call's delay slot runs before the call.
+  const runs = blocks.map((b) => {
+    const seq = [...b.body, ...(b.branch ? [b.branch] : []), ...(b.delay ? [b.delay] : [])];
+    for (let k = 0; k + 1 < seq.length; k++) {
+      if (isCall(seq[k])) {
+        [seq[k], seq[k + 1]] = [seq[k + 1], seq[k]];
+        k++;
+      }
+    }
+    return seq;
+  });
+  const succs = blocks.map((): number[] => []);
+  preds.forEach((ps, to) => ps.forEach((from) => succs[from].push(to)));
+  // What follows the write at `runs[at][k]` on every path, up to a call or the next write of v1:
+  // the instructions that read it, and whether register `src` is written meanwhile.
+  const after = (at: number, k: number, src: string | undefined) => {
+    const readers: Instr[] = [];
+    let srcWritten = false;
+    const seen = new Set<number>();
+    const from = (blk: number, start: number) => {
+      for (const ins of runs[blk].slice(start)) {
+        if (readsV1(ins)) {
+          readers.push(ins);
+        }
+        if (isCall(ins) || writtenReg(ins) === 'v1') {
+          return;
+        }
+        srcWritten ||= src !== undefined && writtenReg(ins) === src;
+      }
+      for (const n of succs[blk]) {
+        if (!seen.has(n)) {
+          seen.add(n);
+          from(n, 0);
+        }
+      }
+    };
+    from(at, k + 1);
+    return { readers, srcWritten };
+  };
+  const lowWord = (at: number, k: number): boolean => {
+    const ins = runs[at][k];
+    const [, x, y] = ins.ops;
+    // A register copy (`move v1,X`, `addu`/`or` with zero): its source, unless that is zero.
+    const copied =
+      ins.mnemonic === 'move'
+        ? x
+        : /^(addu|or)$/.test(ins.mnemonic) && (isZero(x ?? '') || isZero(y ?? ''))
+          ? isZero(x ?? '')
+            ? y
+            : x
+          : undefined;
+    const src = copied === undefined || isZero(copied) ? undefined : copied;
+    const { readers, srcWritten } = after(at, k, src);
+    // The carry compares the sum against what was added: `sltu t,v1,X` for `addu v1,X,Y` (either
+    // addend other than v1 itself), `sltiu t,v1,k` for `addiu v1,X,k`.
+    const carries = (r: Instr) =>
+      r.ops[1] === 'v1' &&
+      ((ins.mnemonic === 'addu' && r.mnemonic === 'sltu' && r.ops[2] !== 'v1' && [x, y].includes(r.ops[2])) ||
+        (ins.mnemonic === 'addiu' && r.mnemonic === 'sltiu' && parseImm(r.ops[2] ?? '') === parseImm(y ?? '')));
+    // A copy is judged only where its every read follows it in its own block: a read past a join
+    // is where a compiler coalesces each arm's value into one register (`addu v1,a1,zero` on one
+    // arm, `ori v1,a1,0xe000` on the other), which is scratch.
+    const local = readers.every((r) => runs[at].indexOf(r) > k);
+    return readers.length === 0 || readers.some(carries) || (src !== undefined && !srcWritten && local);
+  };
+  // Every write of v1 that reaches the end of `bi`, walking back.
+  const seen = new Set<number>();
+  const back = (at: number, end: number): boolean => {
+    for (let k = end - 1; k >= 0; k--) {
+      const ins = runs[at][k];
+      if (isCall(ins)) {
+        return false;
+      }
+      if (writtenReg(ins) === 'v1') {
+        return lowWord(at, k);
+      }
+    }
+    return preds[at].some((p) => !seen.has(p) && (seen.add(p), back(p, runs[p].length)));
+  };
+  return back(bi, runs[bi].length);
+}
+
 /** THE FRAME DEPTH AT EACH INSTRUCTION: how many bytes below the `sp` the function was entered
  *  with it runs, so an `off(sp)` it makes names entry-relative byte `off - depth`. Exact or absent —
  *  null wherever one number per instruction is not proven, and every reader then keeps its refusal.
@@ -831,6 +941,11 @@ function liftOnce(
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
+  // Whether this function's own declaration says its return fits one word (`v1MayHoldLowWord`):
+  // void, or a scalar or pointer no wider than 32 bits. An aggregate says nothing here.
+  const own = prototypes[name];
+  const ownWidth = own?.returns === undefined || declaresAggregateReturn(own) ? undefined : declaredWidth(own.returns);
+  const ownReturnFitsAWord = declaresVoidReturn(own) || (ownWidth !== undefined && ownWidth <= 32);
   const ARG_REGS = target.argRegs;
   const fpu = target.fpu;
   const floatReturn = writesFloatReturn(
@@ -1863,11 +1978,20 @@ function liftOnce(
       }
       // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and
       // then `v0` is scratch like any other integer register.
-      const retOps = floatReturn
-        ? [read(fpu!.returnReg)]
-        : ssa.holdsValue(RET, bi, (v) => !highHalves.has(v))
-          ? [readVar(RET, bi)]
-          : [];
+      const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !highHalves.has(v));
+      // A 64-BIT INTEGER RETURN COMES BACK IN v0:v1, the high word in v0, and this lowering returns
+      // one word: returning v0 alone hands back the high word with the low one dropped, a function
+      // that compiles and returns the wrong value (`long long f(int a, int b, int c, int d,
+      // long long e) { return e; }` read as `return a4;`). Where v1 was last written for the caller
+      // (`v1MayHoldLowWord`) this refuses, unless the function's own declaration says the return
+      // fits a word. Modelling the pair is the capability this stands in for.
+      if (returnsWord && !ownReturnFitsAWord && v1MayHoldLowWord(blocks, preds, bi)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the return at 0x${br.addr.toString(16)} may hand back a 64-bit value in v0:v1 ` +
+            '(v1 is written for it and nothing declares a word-wide return), and a 64-bit return is not modelled',
+        );
+      }
+      const retOps = floatReturn ? [read(fpu!.returnReg)] : returnsWord ? [readVar(RET, bi)] : [];
       ops.push(mkOp('ret', { operands: retOps }));
       return;
     }
