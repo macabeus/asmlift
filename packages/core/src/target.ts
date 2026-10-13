@@ -231,6 +231,22 @@ export interface TargetDescription {
    *  is classified with no evidence at all, which is the defect the save half exists to close. Every
    *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
+  /** Of `scratchRegs`, the ones this compiler's RUNTIME hands a hidden input in, outside the C
+   *  calling convention. mwcc's register save routines take their frame address in r11
+   *  (`addi r11,r1,N; bl _savegpr_NN`, and `_savegpr_31` is `stw r31,-4(r11); blr`), and
+   *  `__ptmf_scall` takes its member-function pointer in r12 (`lwz r0,0(r12)`). Hand-written asm
+   *  that reads one of these first is being handed a value, not reading an uninitialised local.
+   *
+   *  What separates the two is MEASURED on 2.4.2 and 2.3.3: the uninitialised local the compiler
+   *  homes in r11 or r12 is assigned on SOME path (`uninit_r12`: `if (s) { x = a*b; ... }`), so its
+   *  entry value reaches the body only through a join. A def-less read of one of these registers
+   *  that is USED DIRECTLY — the entry value with no path's definition beside it — refuses
+   *  (frontend/ssa.ts `LiveInModel.hiddenInputRegs`). r0 is not listed: the same compilers read a
+   *  never-assigned local straight out of r0 (`int x; return x + a;` is `add r3,r0,r3`), and the
+   *  runtime passes nothing there.
+   *
+   *  Every entry must appear in `scratchRegs`; the frontend refuses a target where one does not. */
+  hiddenInputRegs?: readonly string[];
   /** Registers a CALL destroys: after one, they hold whatever the callee left there, and no value
    *  this function computed. The frontends hand this to the SSA builder so a read of one past a
    *  call refuses instead of resolving to the pre-call definition (frontend/ssa.ts).
@@ -1283,6 +1299,9 @@ export const PPC_MWCC: TargetDescription = {
   // `mulli r0,r4,3; add r3,r0,r4`, and with all eight argument registers live two such locals land
   // in r11 and r12. 2.4.7 at MP4's flags puts them in saved registers instead.
   scratchRegs: ['r0', 'r11', 'r12'],
+  // r11 is the save routines' frame address and r12 `__ptmf_scall`'s member-function pointer: a
+  // read of either that no path's definition joins refuses instead of minting `uninit_r11`.
+  hiddenInputRegs: ['r11', 'r12'],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
   // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third

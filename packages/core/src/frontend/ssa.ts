@@ -232,6 +232,11 @@ export interface LiveInModel {
    *
    *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
   uninitRegs?: readonly string[];
+  /** Of `uninitRegs`, the ones a runtime hands a hidden input in (`target.hiddenInputRegs`). The
+   *  entry value of one may reach the body only THROUGH A JOIN, beside some path's definition —
+   *  the shape of a local the compiler assigned on one arm. Used directly, it is the input, and
+   *  `finish` refuses rather than spell it `uninit_<reg>`. */
+  hiddenInputRegs?: readonly string[];
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
    *  both of its sides and refuses an offset in neither; this one declares both and refuses a key
@@ -302,16 +307,23 @@ export function registerLiveIns(
     argRegs: readonly string[];
     nonArgRegs?: readonly string[];
     scratchRegs?: readonly string[];
+    hiddenInputRegs?: readonly string[];
   },
   savedRegs: ReadonlySet<string>,
-): Pick<LiveInModel, 'uninitRegs' | 'argRegs'> {
+): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs'> {
   const scratchRegs = assertScratchRegsPartitioned(target);
+  for (const r of target.hiddenInputRegs ?? []) {
+    if (!scratchRegs.has(r)) {
+      throw new Error(`target '${target.id}': hidden-input register ${r} is not among the scratch registers`);
+    }
+  }
   if (target.nonArgRegs === undefined) {
     return {};
   }
   return {
     uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
     argRegs: target.argRegs,
+    hiddenInputRegs: target.hiddenInputRegs,
   };
 }
 
@@ -393,6 +405,9 @@ export function makeSsaBuilder(
   // arrives as a PHI — which is what happens when the entry block is itself a loop header — is
   // invisible to the escape check below. Braun's construction gives no other way to tell.
   const phiKey = new Map<Value, string>();
+  // The entry value of a register a runtime hands a hidden input in (`LiveInModel.hiddenInputRegs`),
+  // minted as an uninitialised local, for `finish` to check it reached nothing but joins.
+  const hiddenEntryValues = new Map<Value, string>();
   const paramReg = new Map<Value, string>();
   // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
   // `defs`: a parameter asserted because a calling convention proves it exists is not evidence that
@@ -651,6 +666,9 @@ export function makeSsaBuilder(
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
         defs[b].set(reg, op.results[0]);
+        if (off === null && model().hiddenInputRegs?.includes(reg)) {
+          hiddenEntryValues.set(op.results[0], reg);
+        }
         return op.results[0];
       }
       // an incoming argument register → function parameter.
@@ -1005,6 +1023,24 @@ export function makeSsaBuilder(
       refuseStaleCallerSavedReads();
       simplifyTrivialPhis(fn, dropPhiRecord);
       pruneDeadParams(fn, dropPhiRecord);
+      // A HIDDEN INPUT IS NO UNINITIALISED LOCAL (`LiveInModel.hiddenInputRegs`). After the
+      // trivial-phi pass, so a join every path of which arrives undefined counts as the direct use
+      // it now is. An edge arg is the one use allowed: the compiler's local, assigned on another
+      // path, meets its entry value there.
+      if (hiddenEntryValues.size > 0) {
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            const reg = op.operands.map((v) => hiddenEntryValues.get(v)).find((r) => r !== undefined);
+            if (reg !== undefined) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': ${reg} is read before anything writes it, and no path's ` +
+                  `definition joins it — a hidden input this compiler's runtime passes there ` +
+                  `(a save routine's frame address, a member-function pointer), not an uninitialised local`,
+              );
+            }
+          }
+        }
+      }
       // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the
       // write, because `pruneDeadParams` above is the last thing that can retire an entry
       // parameter, and an observation about a value no longer in the signature is one the reader

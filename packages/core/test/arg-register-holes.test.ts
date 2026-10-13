@@ -57,7 +57,7 @@ test('a live-in no argument arrives in ranks after every argument', () => {
     '10:\tcmpwi   r0,0\n14:\tble     20 <lp2+0x20>\n18:\taddi    r3,r3,4\n1c:\tbdnz    c <lp2+0xc>\n' +
     '20:\tcmpwi   r0,0\n24:\tli      r3,9\n28:\tbnelr\n2c:\tli      r3,7\n30:\tblr\n';
   expect(decompile('lp2', lp2, PPC_MWCC).source).toContain('lp2(s32 *a0, s32 a1) {');
-  expect(decompile('lp2', lp2, { ...PPC_MWCC, scratchRegs: undefined }).source).toContain(
+  expect(decompile('lp2', lp2, { ...PPC_MWCC, scratchRegs: undefined, hiddenInputRegs: undefined }).source).toContain(
     'lp2(s32 *a0, s32 a1, s32 a2)',
   );
 });

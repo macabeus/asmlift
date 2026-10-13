@@ -580,14 +580,38 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and
     // in r11 and r12 when every argument register is live. Each is volatile and passes no argument,
     // so no caller hands a value over there.
-    for (const r of ['r0', 'r11', 'r12']) {
-      expect(dis('sc', `0:\tadd     r3,r3,${r}\n4:\tblr\n`)).toBe(
-        `s32 sc(s32 a0) {\n    s32 uninit_${r};\n    return a0 + uninit_${r};\n}\n`,
+    expect(dis('sc', '0:\tadd     r3,r3,r0\n4:\tblr\n')).toBe(
+      's32 sc(s32 a0) {\n    s32 uninit_r0;\n    return a0 + uninit_r0;\n}\n',
+    );
+    // r11 and r12 carry the runtime's hidden inputs (PPC_MWCC.hiddenInputRegs), so their entry
+    // value may reach the body only through a join, beside a path that assigned the local — the
+    // shape mwcc gives `uninit_r12`. Read directly, it is the input, and the lift refuses.
+    for (const r of ['r11', 'r12']) {
+      expect(
+        dis(
+          'sj',
+          `0:\tcmpwi   r3,0\n4:\tbeq     c <sj+0xc>\n8:\tmulli   ${r},r4,3\nc:\tadd     r3,${r},r4\n10:\tblr\n`,
+        ),
+      ).toBe('s32 sj(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 != 0) v0 = a1 * 3;\n    return v0 + a1;\n}\n');
+      expect(() => dis('sc', `0:\tadd     r3,r3,${r}\n4:\tblr\n`)).toThrow(
+        new RegExp(`${r} is read before anything writes it, and no path's definition joins it`),
       );
     }
+    // The runtime's own `_savegpr_31` stores through its frame address, r11; `__ptmf_scall` loads
+    // through r12 before overwriting it. Neither is an uninitialised local.
+    expect(() => dis('_savegpr_31', '0:\tstw     r31,-4(r11)\n4:\tblr\n')).toThrow(
+      /r11 is read before anything writes it/,
+    );
+    expect(() => dis('ps', '0:\tlwz     r0,0(r12)\n4:\tlwz     r12,8(r12)\n8:\tadd     r3,r0,r12\nc:\tblr\n')).toThrow(
+      /r12 is read before anything writes it/,
+    );
+    const hiddenOutside = { ...PPC_MWCC, hiddenInputRegs: ['r13'] };
+    expect(() => decompile('sh', '0 <sh>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', hiddenOutside)).toThrow(
+      /hidden-input register r13 is not among the scratch registers/,
+    );
     // A target stating no scratch registers keeps the parameter, and one that lists a scratch
     // register outside its non-argument registers is a target bug, refused before any lift.
-    const none = { ...PPC_MWCC, scratchRegs: undefined };
+    const none = { ...PPC_MWCC, scratchRegs: undefined, hiddenInputRegs: undefined };
     expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none).source).toBe(
       's32 sn(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     );

@@ -1342,7 +1342,8 @@ def-less read a LOCAL is that the compiler was free to home one there, which it 
 saving the register. So the classification is an intersection — the target's list against a save set
 the frontend measures (`frontend/ssa.ts`'s `LiveInModel.uninitRegs`, fed by Thumb's `savedRegs` and
 PPC's `prologueSavedRegs`; `registerLiveIns` composes it for both, with the target's
-`scratchRegs`, which need no save) —
+`scratchRegs`, which need no save, less the `hiddenInputRegs` a runtime passes a value in, whose
+entry value may reach the body only through a join) —
 and it is not the elision the sentence feared, only a read of the prologue that was already
 happening for the frame.
 
