@@ -282,6 +282,9 @@ interface MipsJT {
   caseAddrs: number[];
   defaultAddr: number;
   jrAddr: number;
+  /** The addresses of a loop-hoisted `lui`/`addiu` table base, which only the pruned dispatch reads:
+   *  `lift` drops them from their block, as the pruning drops an in-block base. */
+  hoistedBase: number[];
 }
 
 /** Whether any branch lands in a dispatch block — after its bounds branch at `boundsAddr`, up to the
@@ -360,6 +363,71 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     return { sym: r.sym, addend: r.addend };
   };
 
+  /** A LOOP-HOISTED table base `lui rB,%hi ; addiu rB,rB,%lo` for the dispatch whose `addu` at `ai`
+   *  reads rB and whose `jr` is at `i`: the table it addresses and the `lui`'s index, or null. The
+   *  pair is dropped from its block once the table is recovered, so it must be dead everywhere
+   *  else; it is refused unless:
+   *  - the two are adjacent, neither is a delay slot, they are the function's only writes of rB, and
+   *    their HI16/LO16 relocations name one symbol in a data section;
+   *  - nothing but the `addiu` and that `addu` names rB, rB is a temporary or saved register, and
+   *    a temporary only in a function that makes no call;
+   *  - every path from entry to the `addu` runs the `lui` first, walked over the instructions with
+   *    their delay slots — and a second indirect jump, whose targets the walk cannot follow, refuses.
+   *  The table's offset is the pair's own `%hi`/`%lo` halves, as REL relocations carry it. */
+  const hoistedBase = (rB: string, ai: number, i: number): { sym: string; addend: number; at: number } | null => {
+    if (!/^(t\d|s[0-8])$/.test(rB) || (rB.startsWith('t') && instrs.some(isCallInstr))) {
+      return null;
+    }
+    const writes = instrs.flatMap((x, k) => (writtenReg(x) === rB ? [k] : []));
+    const [p, q] = writes;
+    const esc = rB.replace(/[$]/g, '\\$');
+    const mentions = (x: Instr) => x.ops.some((o) => new RegExp(`(^|[^\\w$])${esc}\\b`).test(o));
+    if (
+      writes.length !== 2 ||
+      q !== p + 1 ||
+      instrs[p].mnemonic !== 'lui' ||
+      instrs[q].mnemonic !== 'addiu' ||
+      instrs[q].ops[1] !== rB ||
+      (p > 0 && isControlTransfer(instrs[p - 1])) ||
+      instrs.some((x, k) => k !== p && k !== q && k !== ai && mentions(x)) ||
+      instrs.some((x, k) => k !== i && x.mnemonic === 'jr' && x.ops[0] !== 'ra')
+    ) {
+      return null;
+    }
+    const hi = tableBaseOf(instrs[p]);
+    const lo = textRelocAt(ad, instrs[q].addr);
+    if (!hi || lo?.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
+      return null;
+    }
+    // Every path reaches the `addu` through the `lui`? A transfer's successor is its delay slot, and
+    // the slot's are the transfer's: its target, and the word after the slot unless it is a jump.
+    const at = new Map(instrs.map((x, k) => [x.addr, k]));
+    const after = (t: number): number[] => {
+      const x = instrs[t];
+      const to = x.target === undefined ? [] : [at.get(x.target)].filter((n): n is number => n !== undefined);
+      if (x.mnemonic === 'jr' || x.mnemonic === 'j' || x.mnemonic === 'b') {
+        return x.mnemonic === 'jr' ? [] : to;
+      }
+      return isCallInstr(x) ? [t + 2] : [...to, t + 2];
+    };
+    const succ = (k: number): number[] =>
+      (k > 0 && isControlTransfer(instrs[k - 1]) ? after(k - 1) : [k + 1]).filter((n) => n < instrs.length);
+    const seen = new Set<number>([p]);
+    for (const stack = p === 0 ? [] : [0]; stack.length;) {
+      const k = stack.pop()!;
+      if (k === ai) {
+        return null;
+      }
+      if (!seen.has(k)) {
+        seen.add(k);
+        stack.push(...succ(k));
+      }
+    }
+    const half = (o: string) => parseImm(o) & 0xffff;
+    const addend = hi.addend + ((half(instrs[p].ops[1]) << 16) + ((half(instrs[q].ops[2]) << 16) >> 16));
+    return { sym: hi.sym, addend, at: p };
+  };
+
   const out = new Map<number, MipsJT>();
   for (let i = 0; i < instrs.length; i++) {
     const jr = instrs[i];
@@ -394,27 +462,32 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     let scrutReg: string | null = null,
       table: { sym: string; addend: number } | null = null,
       sllIdx = -1,
-      baseIdx = -1;
+      baseIdx = -1,
+      hoistedAt: number[] = [];
     for (const [idxCand, baseCand] of [
       [oa, ob],
       [ob, oa],
     ] as const) {
       const si = defBefore(idxCand, aIdx);
       const bi2 = defBefore(baseCand, aIdx);
-      if (si < 0 || bi2 < 0) {
+      // A base the dispatch's block does not form is a LOOP-HOISTED one (KMC and gcc 2.7.2 put
+      // `lui rB ; addiu rB,rB` in the loop's preheader): accepted only as `hoistedBase` states it.
+      const hoisted = bi2 < 0 && si >= 0 ? hoistedBase(baseCand, aIdx, i) : null;
+      if (si < 0 || (bi2 < 0 && !hoisted)) {
         continue;
       }
       const sll = instrs[si];
       if (sll.mnemonic !== 'sll' || (sll.ops[2] !== '0x2' && sll.ops[2] !== '2')) {
         continue;
       } // index*4
-      const tb = tableBaseOf(instrs[bi2]);
+      const tb = hoisted ?? tableBaseOf(instrs[bi2]);
       if (!tb) {
         continue;
       }
       scrutReg = sll.ops[1];
       table = tb;
       [sllIdx, baseIdx] = [si, bi2];
+      hoistedAt = hoisted ? [instrs[hoisted.at].addr, instrs[hoisted.at + 1].addr] : [];
       break;
     }
     if (!scrutReg || !table) {
@@ -445,7 +518,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     if (!caseAddrs) {
       continue;
     }
-    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, jrAddr: jr.addr });
+    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, jrAddr: jr.addr, hoistedBase: hoistedAt });
   }
   return out;
 }
@@ -942,6 +1015,11 @@ function liftOnce(
   }
   checkDelaySlots(name, instrs);
   const { blocks, succAddrs } = toBlocks(instrs, jts, likelyAddrs);
+  // A loop-hoisted table base is the pruned dispatch's alone (`hoistedBase`), so it goes with it.
+  const hoistedBase = new Set([...jts.values()].flatMap((j) => j.hoistedBase));
+  for (const b of blocks) {
+    b.body = b.body.filter((x) => !hoistedBase.has(x.addr));
+  }
   // PREHEADER, as in frontend/ppc.ts: an entry that is a branch target gets an empty block ahead of
   // it, whose live-ins are the function's parameters. One word below the function, so it falls
   // through to it.

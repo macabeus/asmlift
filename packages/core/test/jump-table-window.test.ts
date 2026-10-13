@@ -140,13 +140,16 @@ test('the PPC dispatch block holds the idiom and nothing else', () => {
 const MIPS_HEAD = '\ncorpus.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n00000000 <f>:';
 
 /** The `.rodata` side table of a MIPS jump table `jt` addressed by the `lui` at `luiAddr`. */
-const mipsTable = (luiAddr: number, cases: number[]): AsmData => {
+const mipsTable = (luiAddr: number, cases: number[], loAddr?: number): AsmData => {
   const bytes = new Uint8Array(cases.length * 4);
   cases.forEach((a, k) => new DataView(bytes.buffer).setUint32(k * 4, a));
   return {
     sections: new Map([['.rodata', bytes]]),
     relocs: [
       { section: '.text', offset: luiAddr, type: 'R_MIPS_HI16', sym: 'jt', addend: 0 },
+      ...(loAddr === undefined
+        ? []
+        : [{ section: '.text', offset: loAddr, type: 'R_MIPS_LO16', sym: 'jt', addend: 0 }]),
       ...cases.map((_, k) => ({ section: '.rodata', offset: k * 4, type: 'R_MIPS_32', sym: '.text', addend: 0 })),
     ],
     symbols: new Map([
@@ -331,4 +334,96 @@ test('a `bgtlr` bound sends the default to a return of what r3 holds', () => {
   // the bound is still the `cmplwi` the conditional return reads
   const cr1 = asm.replace(/bgt-\s+\S+ <f\+0x\w+>/, 'bgtlr-').replace('cmplwi  r3,3', 'cmplwi  cr1,r3,3');
   expect(() => liftPpc({ asm: cr1, at })).toThrow(/unmodelled control transfer 'bctr'/);
+});
+
+/** KMC's / gcc 2.7.2's loop with the table base hoisted into the preheader: `lui t6 ; addiu t6,t6`
+ *  before the loop, the dispatch adding t6 inside it. `pre` runs before the pair, `mid` inside it,
+ *  `post` after it,
+ *  `arm` is case 3's body. */
+const mipsLoop = (o: { pre?: string[]; mid?: string[]; post?: string[]; arm?: string[]; base?: string } = {}) => {
+  const b = o.base ?? 't6';
+  return listing(
+    [
+      'blez\ta0,@END',
+      'sll\tv0,a0,0x2',
+      ...(o.pre ?? []),
+      'LUI:',
+      `lui\t${b},0x0`,
+      ...(o.mid ?? []),
+      `addiu\t${b},${b},0`,
+      ...(o.post ?? []),
+      'addu\ta0,v0,a1',
+      'LOOP:',
+      'lw\tv1,0(a1)',
+      'sltiu\tv0,v1,4',
+      'beqz\tv0,@NEXT',
+      'sll\tv0,v1,0x2',
+      `addu\tv0,v0,${b}`,
+      'lw\tv0,0(v0)',
+      'jr\tv0',
+      'nop',
+      'C0:',
+      'j\t@NEXT',
+      'sw\ta2,0(a1)',
+      'C1:',
+      'j\t@NEXT',
+      'sw\ta3,0(a1)',
+      'C2:',
+      'j\t@NEXT',
+      'sw\tzero,0(a1)',
+      'C3:',
+      ...(o.arm ?? ['sw\ta2,4(a1)']),
+      'NEXT:',
+      'addiu\ta1,a1,4',
+      'slt\tv0,a1,a0',
+      'bnez\tv0,@LOOP',
+      'nop',
+      'END:',
+      'jr\tra',
+      'nop',
+    ],
+    MIPS_HEAD,
+  );
+};
+
+const liftMipsLoop = ({ asm, at }: ReturnType<typeof listing>) =>
+  decompile('f', asm, MIPS_GCC, {
+    asmData: mipsTable(
+      at.get('LUI')!,
+      ['C0', 'C1', 'C2', 'C3'].map((k) => at.get(k)!),
+      at.get('LUI')! + 4,
+    ),
+  }).source;
+
+test('a MIPS table base hoisted into the loop preheader lifts when only the dispatch reads it', () => {
+  for (const shape of [{}, { base: 's1' }]) {
+    const src = liftMipsLoop(mipsLoop(shape));
+    expect(src).toContain('switch (');
+    expect(src).toMatch(/case 2:\s*\n\s*\*\w+ = 0;/);
+  }
+});
+
+test('…and refuses a hoisted MIPS base anything else could see or skip', () => {
+  const jr = /indirect jump 'jr v0'/;
+  // a path around the pair reaches the dispatch with whatever t6 held
+  expect(() => liftMipsLoop(mipsLoop({ pre: ['bnez\ta3,@LOOP', 'nop'] }))).toThrow(jr);
+  // another reader of the base: dropping the pair would change what it reads
+  expect(() => liftMipsLoop(mipsLoop({ arm: ['sw\tt6,4(a1)'] }))).toThrow(jr);
+  // a second write of the base
+  expect(() => liftMipsLoop(mipsLoop({ arm: ['li\tt6,4'] }))).toThrow(jr);
+  // a temporary base in a function that calls
+  expect(() => liftMipsLoop(mipsLoop({ arm: ['jal\t0 <f>', 'nop'] }))).toThrow(jr);
+  // the pair split by another instruction
+  const split = mipsLoop({ mid: ['nop'] });
+  expect(() =>
+    decompile('f', split.asm, MIPS_GCC, {
+      asmData: mipsTable(
+        split.at.get('LUI')!,
+        ['C0', 'C1', 'C2', 'C3'].map((k) => split.at.get(k)!),
+        split.at.get('LUI')! + 8,
+      ),
+    }),
+  ).toThrow(jr);
+  // a base in an argument register
+  expect(() => liftMipsLoop(mipsLoop({ base: 'a2' }))).toThrow(jr);
 });
