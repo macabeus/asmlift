@@ -1270,6 +1270,9 @@ export const PPC_MWCC: TargetDescription = {
   // and r12 are the linker's stub scratch, r13 is the small-data base and r14 upward are
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
+  // Every GPR but r1 (the stack pointer, never an SSA register here) and the eight argument
+  // registers. The frontend narrows it to the ones the prologue saved (`prologueSavedRegs`).
+  nonArgRegs: ['r0', 'r2', ...Array.from({ length: 21 }, (_, i) => `r${i + 11}`)],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
   // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third

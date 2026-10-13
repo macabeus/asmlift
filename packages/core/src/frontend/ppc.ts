@@ -417,6 +417,47 @@ const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
     ? registerSaveRoutineOf(target.registerSaveRoutines, ins.reloc.sym)
     : null;
 
+/** WHAT THE PROLOGUE SAVED — the save half of the register partition (frontend/ssa.ts,
+ *  `LiveInModel.uninitRegs`), measured as Thumb's `prologueSavedRegs` measures its own. A register the
+ *  ABI passes no argument in is an uninitialised local only where the compiler could home a local
+ *  there, which it may do only after saving it; without this, an uninitialised local in a callee-saved
+ *  register lifts as an extra PARAMETER (`int x; if (s) x = k(a); return k(a) + x;` grew a third).
+ *
+ *  Read off the ENTRY block, the one every path starts with: `stmw rS,D(r1)` saves rS..r31, a GPR
+ *  save routine rNN..r31, and `stw rN,D(r1)` rN. A register the block wrote before the store is not
+ *  saved by it (`stw` of a written register is a spill). "Written" is read off the operand text: every
+ *  instruction but a store counts its first operand as written, which can only under-state the set —
+ *  the direction that keeps a parameter. */
+function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
+  const saved = new Set<string>();
+  const written = new Set<string>();
+  const save = (first: number) => {
+    for (let k = first; k <= 31; k++) {
+      if (!written.has(`r${k}`)) {
+        saved.add(`r${k}`);
+      }
+    }
+  };
+  for (const ins of entry) {
+    const [d, s] = ins.ops;
+    const routine = saveRoutineOf(target, ins);
+    if (routine) {
+      if (!routine.restore && !routine.fpr) {
+        save(routine.first);
+      }
+    } else if (ins.mnemonic === 'stmw' && s !== undefined && parseMem(s).base === 'r1') {
+      save(Number(d.slice(1)));
+    } else if (ins.mnemonic === 'stw' && s !== undefined && parseMem(s).base === 'r1') {
+      if (!written.has(d)) {
+        saved.add(d);
+      }
+    } else if (!ins.mnemonic.startsWith('st') && d !== undefined) {
+      written.add(d);
+    }
+  }
+  return saved;
+}
+
 /** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
  *  (0 before the frame push, -N after `stwu r1,-N(r1)`), or why it is not known there.
  *
@@ -564,6 +605,7 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  const savedRegs = prologueSavedRegs(blocks[0].body, target);
   // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
   // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
   // of it becomes the entry, and its live-ins are the function's parameters (frontend/ssa.ts
@@ -595,8 +637,19 @@ export function lift(
   const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
-    isFpKey(k) ? (fpType ?? T.f32()) : undefined,
+  // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
+  // def-less read of a register the ABI passes no argument in AND the prologue saved is an
+  // uninitialised local, as on Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
+  // the treatment a target claiming no partition gets.
+  const ssa = makeSsaBuilder(
+    name,
+    blocks.length,
+    preds,
+    () =>
+      target.nonArgRegs
+        ? { uninitRegs: target.nonArgRegs.filter((r) => savedRegs.has(r)), argRegs: target.argRegs }
+        : {},
+    (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   /** This frontend's refusal, for the shared code that refuses on its behalf. */

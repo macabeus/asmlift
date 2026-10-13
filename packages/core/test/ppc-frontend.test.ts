@@ -468,6 +468,27 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       's32 saverestore(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
     );
   });
+  test('a register the prologue saved and the body reads first is an uninitialised local, not a parameter', () => {
+    // mwcc homes `int x; if (s) x = k(a); return k(...) + x;` in a callee-saved register, and on the
+    // path that skips the assignment reads what the caller left there. Each save form names the
+    // register: a `stw`, a `stmw`, and the save routine.
+    const uninit = (sym: string) => `s32 ${sym}(s32 a0) {\n    s32 uninit_r31;\n    return a0 + uninit_r31;\n}\n`;
+    expect(dis('us', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r31\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
+      uninit('us'),
+    );
+    expect(dis('um', '0:\tstmw    r30,8(r1)\n4:\tadd     r3,r3,r31\n8:\tlmw     r30,8(r1)\nc:\tblr\n')).toBe(
+      uninit('um'),
+    );
+    const routine =
+      '0:\taddi    r11,r1,0\n4:\tbl      4 <ur+0x4>\n\t\t\t4: R_PPC_REL24\t_savegpr_31\n8:\tadd     r3,r3,r31\nc:\tblr\n';
+    expect(dis('ur', routine)).toBe(uninit('ur'));
+    // Saved nowhere, or saved only after the function wrote it (a spill): no compiler homed a local
+    // there, so the entry value stays what the caller handed over.
+    expect(dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toBe('s32 un(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    expect(
+      dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
+    ).toBe('s32 uw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+  });
   test('`lmw` checks every word it restores, not just the offset the `stmw` recorded', () => {
     // `stmw r30,8(r1)` saves r30,r31 into 8(r1),12(r1); `lmw r29,8(r1)` would restore r29,r30,r31
     // from 8(r1),12(r1),16(r1) — a different register range over the same slots.

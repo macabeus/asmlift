@@ -49,6 +49,26 @@ const PAIRS = {
     '    return v4 + k(v4, v3);\n}\n',
 };
 
+// AN UNINITIALISED LOCAL IN A SAVED REGISTER. `x` is assigned on one arm and lives across the calls,
+// so every build homes it in r31 and saves r31 first: 2.4.7 at MP4's DOL flags with a single `stw`,
+// 2.3.3 at Pikmin's `-O4,p` with `stmw`. The path that skips the assignment reads the caller's r31.
+// The frontend takes the prologue's save set as its live-in model (`prologueSavedRegs`), so that read
+// is `s32 v0;` and not a seventh parameter. mwcc_242_81 is the synthetic row `uninit_saved`.
+const UNINIT = {
+  sym: 'uninit_saved',
+  c: 'int k(int); int uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a); return k(k(k(k(b)+c)+d)+e) + x; }',
+  proto: { k: { params: 1 } },
+  expect:
+    's32 uninit_saved(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n    s32 v0;\n' +
+    '    if (a0 != 0) v0 = k(a1);\n    return v0 + k(a5 + k(a4 + k(a3 + k(a2))));\n}\n',
+};
+/** Pikmin's set in C: the row's level, with a C body the lift can name. */
+const PIKMIN_C = [...PIKMIN.filter((f) => f !== '-lang=c++'), '-lang=c'];
+const UNINIT_CASES: [MwccToolchainId, string, readonly string[], RegExp][] = [
+  ['mwcc_247_107', 'Mario Party 4 DOL flags', MP4_DOL, /\bstw\s+r31,/],
+  ['mwcc_233_163n', "Pikmin's -O4,p", PIKMIN_C, /\bstmw\s+r\d+,/],
+];
+
 const CASES: [MwccToolchainId, string, readonly string[]][] = [
   ['mwcc_247_107', 'Mario Party 4 DOL flags', MP4_DOL],
   ['mwcc_233_163n', '-O0,p (no row uses it)', PIKMIN_O0],
@@ -84,4 +104,20 @@ describe('the register save routine, lifted and recompiled on each build that em
     },
     BUDGET,
   );
+
+  for (const [mwcc, label, flags, save] of UNINIT_CASES) {
+    test.runIf(ppcDockerGate('ppc-save-routines', mwcc))(
+      `${mwcc} at ${label}: an uninitialised local in a saved register is no parameter`,
+      () => {
+        const { obj, asm } = compilePpcTarget(mwcc, UNINIT.c, UNINIT.sym, flags);
+        expect(asm).toMatch(save);
+        const r = decompile(UNINIT.sym, asm, targetFor(mwcc, flags).target, { prototypes: UNINIT.proto });
+        expect(r.source).toBe(UNINIT.expect);
+        const s = scoreCPpc(mwcc, r.source, UNINIT.sym, obj, flags);
+        expect(s.score, JSON.stringify(s)).toBe(0);
+        expect(s.match).toBe(true);
+      },
+      BUDGET,
+    );
+  }
 });
