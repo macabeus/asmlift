@@ -1931,15 +1931,19 @@ function liftOnce(
       return { block: irBlocks[j], args: [] };
     };
 
-    // Recovered dense switch: run the `beqz` delay slot first — on IDO it computes the DEFAULT
-    // return value (`li v0,-1`, read by the default block); on KMC it is the now-dead index shift —
-    // then dispatch a `switch_br` over the scrutinee (N case blocks, dense 0..N-1, + default).
+    // Recovered dense switch: dispatch a `switch_br` over the scrutinee (N case blocks, dense
+    // 0..N-1, + default). The scrutinee is the value the `sltiu` bounded, so it is read BEFORE the
+    // `beqz` delay slot runs, as a conditional branch reads its operands: IDO can scale the index
+    // IN PLACE there (`sll t6,t6,2`), and reading after the slot would switch on `k << 2` over the
+    // unscaled labels 0..N-1. The slot still runs, because it can also compute the DEFAULT value
+    // (IDO's `li v0,-1`, read by the default block).
     const jt = br ? jts.get(br.addr) : undefined;
     if (jt) {
+      const scrut = readVar(jt.scrutReg, bi);
       if (b.delay) {
         decode(b.delay);
       }
-      pushSwitchBr(ops, readVar(jt.scrutReg, bi), [...jt.caseAddrs, jt.defaultAddr].map(succ));
+      pushSwitchBr(ops, scrut, [...jt.caseAddrs, jt.defaultAddr].map(succ));
       return;
     }
 
