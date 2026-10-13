@@ -252,7 +252,9 @@ describe('a frame word that is not a local refuses', () => {
 
   // The ADDRLOC shape: a by-value struct argument staged in place through a copy base the
   // compiler names with a register. Nothing reads those words back, so they may be the call's
-  // stack argument, and keeping them as a local would drop them from the call.
+  // stack argument, and keeping them as a local would drop them from the call. Declared with one
+  // word, so the extent says the area starts at sp+16: the audit is what refuses (undeclared, the
+  // frame measurement refuses first, below).
   test('a store through a capture that reaches a call unread may be its stack argument', () => {
     expect(
       lift(
@@ -270,7 +272,7 @@ describe('a frame word that is not a local refuses', () => {
         ],
         [[0x14, 'R_MIPS_26', 'tb']],
         MIPS_GCC,
-        {},
+        { tb: { params: 1 } },
       ),
     ).toThrow(/may be that call's stack argument/);
   });
@@ -289,7 +291,25 @@ describe('a frame word that is not a local refuses', () => {
       '24:\tjr\tra',
       '28:\taddiu\tsp,sp,40',
     ];
+    // gcc's area starts where the outgoing words end, so the frame measurement refuses first
     expect(lift(fills, [[0x14, 'R_MIPS_26', 'tb']], MIPS_GCC, {})).toThrow(
+      /nothing declares the callee of the `jal` at 0x14, so how many stack words it takes is unknown/,
+    );
+    // IDO's starts above the saves, so the area stands and the call's guess is what refuses
+    const idoFills = [
+      '0:\taddiu\tsp,sp,-40',
+      '4:\tsw\tra,20(sp)',
+      '8:\tli\ta1,1',
+      'c:\tli\ta2,2',
+      '10:\tli\ta3,3',
+      '14:\tjal\t0 <f>',
+      '18:\taddiu\ta0,sp,24',
+      '1c:\tlw\tv0,24(sp)',
+      '20:\tlw\tra,20(sp)',
+      '24:\tjr\tra',
+      '28:\taddiu\tsp,sp,40',
+    ];
+    expect(lift(idoFills, [[0x14, 'R_MIPS_26', 'tb']], MIPS_IDO, {})).toThrow(
       /fills a0\.\.a3 in a frame whose local area/,
     );
   });
@@ -421,15 +441,19 @@ describe('the outgoing extent is computed only where every call can be sized', (
     ins(0x10, 'sw\ts0,16(sp)'),
     ins(0x14, 'jalr\tt9'),
   ];
-  const measure = (calls: typeof code) =>
+  const measure = (
+    calls: typeof code,
+    stackWordsOf: (callee: string | undefined) => number | null = () => 0,
+    rule: 'above-outgoing-area' | 'above-saved-registers' = 'above-outgoing-area',
+  ) =>
     measureO32Frame({
       name: 'f',
       code: calls,
       entry: calls.slice(0, 2),
       depthAt: new Map(calls.map((i, k) => [i, k === 0 ? 0 : 40])),
       frameSize: 40,
-      rule: 'above-outgoing-area',
-      outgoingEnd: () => 16,
+      rule,
+      stackWordsOf,
       savedByCallee: (r) => r === 'ra' || /^s\d$/.test(r),
       splat: false,
     });
@@ -440,5 +464,26 @@ describe('the outgoing extent is computed only where every call can be sized', (
 
   test('without it the area is drawn from the declared callees', () => {
     expect(measure(code.slice(0, 5))?.area.from).toBe(16);
+  });
+
+  // `int ta(int x){ int a[2]; fill(a); return tl(1,2,3,(long long)x) + a[0]; }` with `tl()`
+  // unprototyped, at gcc2.7.2kmc: a3 is skipped, x is staged at sp+16..24 and `a` sits at sp+24. A
+  // guess of the call fills a0..a2 and sees no stack word, so nothing but a declaration can say
+  // where gcc's local area starts.
+  test('an undeclared `jal` refuses where the area starts past the outgoing words', () => {
+    expect(() => measure(code.slice(0, 5), () => null)).toThrow(
+      /nothing declares the callee of the `jal` at 0xc, so how many stack words it takes is unknown/,
+    );
+  });
+
+  test("IDO's area starts above the saves, whatever the undeclared call's extent", () => {
+    // `int f(void){ int a[4]; fill(a); return a[0]; }` at ido7.1: `ra` at sp+20, the array above it
+    const ido = [
+      ins(0x0, 'addiu\tsp,sp,-40'),
+      ins(0x4, 'sw\tra,20(sp)'),
+      ins(0x8, 'addiu\ta0,sp,24'),
+      ins(0xc, 'jal\t0'),
+    ];
+    expect(measure(ido, () => null, 'above-saved-registers')?.area).toEqual({ from: 24, to: 40 });
   });
 });

@@ -1044,16 +1044,10 @@ function liftOnce(
     depthAt,
     frameSize,
     rule: target.compilerBehaviors.o32LocalArea,
-    outgoingEnd: (callees) =>
-      callees.length === 0
-        ? 0
-        : Math.max(
-            ...callees.map((callee) => {
-              const declared = callee === undefined ? null : calls.declaredCall(callee);
-              const words = declared === null ? 0 : wordsOf(declared.widths) - ARG_REGS.length;
-              return STACK_ARGS_AT + 4 * Math.max(0, words);
-            }),
-          ),
+    stackWordsOf: (callee) => {
+      const declared = callee === undefined ? null : calls.declaredCall(callee);
+      return declared === null ? null : Math.max(0, wordsOf(declared.widths) - ARG_REGS.length);
+    },
     savedByCallee,
     splat,
   });
@@ -2110,13 +2104,17 @@ function takesFrameAddress(ins: Instr): boolean {
  *  raw offset would then misname.
  *
  *  The outgoing area ends past the widest call's stack words, read off each callee's declaration
- *  (`outgoingEnd`); an undeclared callee counts as taking none, and its lowering refuses a guess
- *  that fills a0..a3. A CALL NO DECLARATION CAN SIZE — through a register (`jalr`) or a linking
- *  branch — refuses here, where the number is computed, rather than relying on its own lowering
- *  to refuse it: gcc stages `fp(1, 2, 3, 4, x)`'s fifth word at sp+16 and puts the local at sp+24,
- *  so an extent read without that call would draw the area over the staged word. The saves are
- *  the prologue's: a store of `ra` or a callee-saved register in the entry block before anything
- *  writes it. */
+ *  (`stackWordsOf`). A CALL NO DECLARATION SIZES refuses here, where the number is computed, rather
+ *  than relying on its own lowering to refuse it: gcc stages `fp(1, 2, 3, 4, x)`'s fifth word at
+ *  sp+16 and puts the local at sp+24, so an extent read without that call would draw the area over
+ *  the staged word. A call through a register (`jalr`) or a linking branch always refuses. A `jal`
+ *  to an undeclared callee refuses where the area depends on its extent — where drawing the
+ *  outgoing area up to the lowest save would move it. That is gcc's layout, whose locals start
+ *  where the outgoing area ends: `tl(1, 2, 3, (long long)x)` to an unprototyped `tl` skips a3 and
+ *  stages x at sp+16..24, which no guess of a0..a3 sees. IDO's area starts above the saves, which
+ *  the outgoing area lies below whatever its extent, so there the undeclared call costs nothing.
+ *  The saves are the prologue's: a store of `ra` or a callee-saved register in the entry block
+ *  before anything writes it. */
 export function measureO32Frame({
   name,
   code,
@@ -2124,7 +2122,7 @@ export function measureO32Frame({
   depthAt,
   frameSize,
   rule,
-  outgoingEnd,
+  stackWordsOf,
   savedByCallee,
   splat,
 }: {
@@ -2134,7 +2132,8 @@ export function measureO32Frame({
   depthAt: ReadonlyMap<Instr, number> | null;
   frameSize: number | undefined;
   rule: TargetDescription['compilerBehaviors']['o32LocalArea'];
-  outgoingEnd: (callees: readonly (string | undefined)[]) => number;
+  /** The stack words a `jal`'s callee takes, by its declaration; null where nothing declares it. */
+  stackWordsOf: (callee: string | undefined) => number | null;
   savedByCallee: (r: string) => boolean;
   splat: boolean;
 }): { area: FrameRange; size: number } | null {
@@ -2163,10 +2162,27 @@ export function measureO32Frame({
       written.add(writtenReg(ins)!);
     }
   }
-  const callees = code.filter((ins) => ins.mnemonic === 'jal').map((ins) => jalCallee(ins, splat));
-  const area = o32LocalArea(rule, { frameSize, outgoingEnd: outgoingEnd(callees), saves });
+  const jals = code.filter((ins) => ins.mnemonic === 'jal');
+  const words = jals.map((ins) => stackWordsOf(jalCallee(ins, splat)));
+  const outgoingEnd = jals.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0));
+  const area = o32LocalArea(rule, { frameSize, outgoingEnd, saves });
   if (area === null) {
     return null;
+  }
+  const undeclared = jals.find((_, k) => words[k] === null);
+  if (undeclared !== undefined) {
+    const widest = o32LocalArea(rule, {
+      frameSize,
+      outgoingEnd: Math.max(outgoingEnd, Math.min(frameSize, ...saves)),
+      saves,
+    });
+    if (widest?.from !== area.from || widest.to !== area.to) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': outgoing stack arguments not modelled — nothing declares the callee of the \`jal\` at ` +
+          `0x${undeclared.addr.toString(16)}, so how many stack words it takes is unknown, and this compiler's local ` +
+          'area starts past them',
+      );
+    }
   }
   for (const ins of code) {
     const last = ins.ops[ins.ops.length - 1] ?? '';
