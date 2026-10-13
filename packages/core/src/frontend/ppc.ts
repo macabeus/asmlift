@@ -260,42 +260,59 @@ const entersDispatch = (instrs: Instr[], boundsAddr: number, jumpAddr: number): 
   instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= jumpAddr);
 
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
-// deviation from the exact idiom, or a table that doesn't resolve to N in-function targets, declines
+// deviation from the idiom, or a table that doesn't resolve to N in-function targets, declines
 // (→ the `bctr` loud-fail fires). Index IDENTITY guard: `slwi rIdx,rS,2` must be the bounds-checked
 // scrutinee scaled only by <<2 — no xor/neg/extra op.
 function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> {
   const out = new Map<number, PpcJT>();
-  for (let i = 5; i < instrs.length; i++) {
+  for (let i = 0; i < instrs.length; i++) {
     if (instrs[i].mnemonic !== 'bctr') {
       continue;
     }
-    const [lis, lwzx, mtctr] = [instrs[i - 5], instrs[i - 2], instrs[i - 1]];
-    // The index is scaled and the table's low half formed in either order: mwcc 2.4.2 emits the
-    // `slwi` first, GC/1.2.5n the `addi`. The two instructions are independent.
-    const [slwi, addi] =
-      instrs[i - 4].mnemonic === 'slwi' ? [instrs[i - 4], instrs[i - 3]] : [instrs[i - 3], instrs[i - 4]];
-    if (
-      lis.mnemonic !== 'lis' ||
-      slwi.mnemonic !== 'slwi' ||
-      addi.mnemonic !== 'addi' ||
-      lwzx.mnemonic !== 'lwzx' ||
-      mtctr.mnemonic !== 'mtctr'
-    ) {
+    // THE DISPATCH BLOCK: after the bounds branch, the nearest transfer before the `bctr`.
+    let j = i - 1;
+    while (j >= 0 && !isXfer(instrs[j])) {
+      j--;
+    }
+    const bgt = instrs[j];
+    if (!bgt || bgt.mnemonic !== 'bgt' || bgt.target === undefined) {
       continue;
     }
-    const rV = mtctr.ops[0];
-    if (lwzx.ops[0] !== rV) {
+    // Each piece of the idiom is the LAST write of its register inside the block, so nothing between
+    // a def and its reader can have changed it. The order varies: mwcc 2.4.2 scales the index first,
+    // GC/1.2.5n forms the table's low half first.
+    const defIn = (r: string, before: number): number => {
+      for (let k = before - 1; k > j; k--) {
+        if (mayWriteGpr(instrs[k], r)) {
+          return k;
+        }
+      }
+      return -1;
+    };
+    const mi = i - 1;
+    const mtctr = instrs[mi];
+    if (mtctr?.mnemonic !== 'mtctr' || mi <= j) {
       continue;
-    } // rV = mem[rB + rIdx]
+    }
+    const li = defIn(mtctr.ops[0], mi); // rV = mem[rB + rIdx]
+    const lwzx = instrs[li];
+    if (lwzx?.mnemonic !== 'lwzx') {
+      continue;
+    }
     const [rB, rIdx] = [lwzx.ops[1], lwzx.ops[2]];
-    if (slwi.ops[0] !== rIdx || (slwi.ops[2] !== '2' && slwi.ops[2] !== '0x2')) {
+    const si = defIn(rIdx, li);
+    const slwi = instrs[si];
+    if (slwi?.mnemonic !== 'slwi' || (slwi.ops[2] !== '2' && slwi.ops[2] !== '0x2')) {
       continue;
     } // identity: rIdx = rS<<2
     const scrutReg = slwi.ops[1];
-    if (addi.ops[0] !== rB || parseImm(addi.ops[2]) !== 0) {
+    const ai = defIn(rB, li);
+    const addi = instrs[ai];
+    if (addi?.mnemonic !== 'addi' || parseImm(addi.ops[2]) !== 0) {
       continue;
     } // rB = &table (lo) + 0
-    const rT = addi.ops[1];
+    const lisI = defIn(addi.ops[1], ai);
+    const lis = instrs[lisI];
     // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the same
     // evidence — both relocation types, one symbol, one addend — so a dispatch is never recovered
     // from two instructions that never addressed the table together. It stays a separate pairing:
@@ -303,9 +320,9 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     // address. It skips the naming policy deliberately — a table base is read here as data, never
     // written into the candidate as an identifier — so the `@N` and `.`-prefixed symbols the
     // address fold must refuse (292 of the corpus's `ADDR16` relocations) are harmless here.
-    const tableSym = lis.reloc?.sym;
+    const tableSym = lis?.reloc?.sym;
     if (
-      lis.ops[0] !== rT ||
+      lis?.mnemonic !== 'lis' ||
       !tableSym ||
       lis.reloc?.type !== 'R_PPC_ADDR16_HA' ||
       addi.reloc?.type !== 'R_PPC_ADDR16_LO' ||
@@ -314,28 +331,26 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     ) {
       continue;
     }
-    // The idiom must not read the scrutinee after one of its own instructions wrote it: the
-    // `switch_br` reads it at the bounds branch, and the `slwi` would scale a different value.
-    if (lis.ops[0] === scrutReg || (instrs.indexOf(addi) < instrs.indexOf(slwi) && addi.ops[0] === scrutReg)) {
+    // The block is pruned unread once the table is recovered, so it may hold the idiom and nothing
+    // else, nothing may branch into it past the bounds check, and none of the idiom may rewrite the
+    // scrutinee before the `slwi` scales it — the `switch_br` reads it at the bounds branch.
+    const idiom = new Set([lisI, si, ai, li, mi]);
+    if (
+      instrs.slice(j + 1, i).some((_, o) => !idiom.has(j + 1 + o)) ||
+      instrs.slice(j + 1, si).some((x) => mayWriteGpr(x, scrutReg)) ||
+      entersDispatch(instrs, bgt.addr, instrs[i].addr)
+    ) {
       continue;
     }
-    // Bounds: `cmplwi scrutReg,N-1 ; bgt DEF` directly before the dispatch. The dispatch block is
-    // pruned unread once the table is recovered, so it may hold nothing but the idiom, and nothing
-    // may branch into it past the bounds check.
-    const bgt = instrs[i - 6];
-    if (!bgt || bgt.mnemonic !== 'bgt' || bgt.target === undefined || entersDispatch(instrs, bgt.addr, instrs[i].addr)) {
+    const n = boundsCompare(instrs, j, scrutReg);
+    if (n === null || n < 2) {
       continue;
     }
-    const n = boundsCompare(instrs, i - 6, scrutReg);
-    const bounds = n === null ? null : { addr: bgt.addr, n, def: bgt.target };
-    if (!bounds || bounds.n < 2) {
-      continue;
-    }
-    const caseAddrs = readJumpTable(ad, tableSym, lis.reloc.addend, bounds.n);
+    const caseAddrs = readJumpTable(ad, tableSym, lis.reloc.addend, n);
     if (!caseAddrs) {
       continue;
     }
-    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, bctrAddr: instrs[i].addr });
+    out.set(bgt.addr, { scrutReg, caseAddrs, defaultAddr: bgt.target, bctrAddr: instrs[i].addr });
   }
   return out;
 }

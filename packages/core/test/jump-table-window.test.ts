@@ -238,3 +238,23 @@ test('the MIPS dispatch block holds the idiom and nothing else', () => {
   // a branch into the dispatch block skips the bounds check
   expect(() => liftMips(mipsSwitch({ def: ['b\t@LUI', 'nop'] }))).toThrow(jr);
 });
+
+test('the PPC idiom is found by register, in whatever order the block holds it', () => {
+  const [lis, slwi, addi] = ['lis     r4,0 #HA tbl', 'slwi    r0,r3,2', 'addi    r4,r4,0 #LO tbl'];
+  const tail = ['lwzx    r0,r4,r0', 'mtctr   r0'];
+  // mwcc 2.4.2's order, GC/1.2.5n's (the low half first), and the index scaled ahead of both halves
+  for (const order of [
+    [lis, slwi, addi],
+    [lis, addi, slwi],
+    [slwi, lis, addi],
+  ]) {
+    expect(liftPpc(ppcSwitch([], [...order, ...tail]))).toContain('switch (a0)');
+  }
+  const bctr = /unmodelled control transfer 'bctr'/;
+  // a second, dead `slwi` is not part of the idiom the block may hold
+  expect(() => liftPpc(ppcSwitch([], ['slwi    r5,r3,2', lis, slwi, addi, ...tail]))).toThrow(bctr);
+  // the index scaled from a register the block wrote first is not the bounded scrutinee
+  expect(() => liftPpc(ppcSwitch([], ['lis     r3,0 #HA tbl', 'addi    r4,r3,0 #LO tbl', slwi, ...tail]))).toThrow(
+    bctr,
+  );
+});
