@@ -1468,6 +1468,30 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int k(int);',
     proto: { k: { params: 1 } },
   },
+  // The SCRATCH half of the same rule on CodeWarrior: a LEAF needs no saved register, so mwcc 2.4.2
+  // homes its uninitialised local in a volatile register no argument travels in, with no save
+  // (PPC_MWCC.scratchRegs). `uninit_r0` puts `x` in r0 (`mulli r0,r4,3; add r3,r0,r4`); in
+  // `uninit_r12`, all eight argument registers are live, so `x` and `y` land in r11 and r12
+  // (`mullw r11,r4,r5; mullw r12,r7,r8` on one arm, `subf r4,r12,r11` after the join). Before
+  // the PPC live-in model took the target's scratch registers, each def-less read lifted as one more
+  // PARAMETER — a third for a two-parameter source, and a ninth and tenth past the eight argument
+  // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and both
+  // MIPS frontends claim no register partition. mwcc_233_163n is pinned by
+  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  {
+    sym: 'uninit_r0',
+    src: 'int uninit_r0(int s,int a){ int x; if (s) x = a*3; return x + a; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['mwcc_242_81'],
+  },
+  {
+    sym: 'uninit_r12',
+    src:
+      'int uninit_r12(int s,int a,int b,int c,int d,int e,int f,int g){ int x,y; if (s) { x = a*b; y = d*e; }' +
+      ' return x - y + (a ^ b ^ c ^ d ^ e ^ f ^ g ^ s); }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['mwcc_242_81'],
+  },
 
   // SPILL-SLOT ORDER — the one property of a declaration list the allocator answers by a law, and
   // the one asmlift now places by reading the target's own frame order (l3/slotorder.ts). When
