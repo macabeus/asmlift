@@ -240,7 +240,7 @@ export function stampBehaviorsFor(
 ): StampBehaviors {
   return {
     volatileReadsExtendInRegister: target.compilerBehaviors.volatileReadsExtendInRegister,
-    ...(contextGlobals ? { contextGlobals } : {}),
+    contextGlobals,
   };
 }
 

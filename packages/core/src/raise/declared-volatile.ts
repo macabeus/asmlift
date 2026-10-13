@@ -29,9 +29,13 @@ import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from
 import { type TargetDescription, readCouldBeVolatile } from '../target';
 import { valueNumberOf } from './gvn';
 
-/** The compiler fact the stamp reads, and the declaration context's globals when there is one. */
+/** The compiler fact the stamp reads, and the declaration context's globals when there is one.
+ *  The context is a REQUIRED key, `undefined` when there is none: the stamp clears every stamp it
+ *  does not re-derive, so a re-stamp that left it out — the compiler behaviors alone, which an
+ *  optional key accepted — silently unplaced every read the context made volatile. Build one with
+ *  pipeline.ts `stampBehaviorsFor`. */
 export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'> & {
-  readonly contextGlobals?: ContextGlobals;
+  readonly contextGlobals: ContextGlobals | undefined;
 };
 
 /** Does the map lay out this object's volatility itself? A layout answers per member, which is

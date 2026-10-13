@@ -2315,7 +2315,10 @@ export function structure(
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
   // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
   // branch, which is right only for one no fold could move, so this read declines instead.
-  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, opts);
+  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, {
+    volatileReadsExtendInRegister: opts.volatileReadsExtendInRegister,
+    contextGlobals,
+  });
   if (stampedLate.length > 0) {
     const defsNow = defOpMap(fn);
     const guarded = shortCircuitGuardedValues(fn, defsNow);
