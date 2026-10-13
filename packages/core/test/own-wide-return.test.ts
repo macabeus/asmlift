@@ -1,7 +1,7 @@
 // A FUNCTION DECLARED TO RETURN A 64-BIT INTEGER (pipeline.ts `refuseNarrowReturnsOfWideDeclaration`):
 // a lift that returns one word refuses, on every frontend. The declaration is the only witness —
 // `long long d64(long long *p) { long long x = *p; p[1] = x; return x; }` never reads the pair's
-// second register back, so its asm is the `s32` function's — and the lift used to print
+// second register back, so its asm is the `s32` function's — and a one-word lift prints
 // `s32 d64(s32 *a0)` against the project's own `long long d64(long long *p)`, which the compiler
 // rejects as conflicting types. A frontend that builds the pair (Thumb's `__muldi3` return) still
 // lifts. Asm compiled at canonical flags.

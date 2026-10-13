@@ -41,8 +41,8 @@ describe('soundness regressions — short-circuit hoisting, stack-passed args, r
 
   // FINDING 2 (frontend/mips.ts): a word `lw` from an sp slot that was never stored is an incoming
   // stack-passed argument (5th+ param) — asmlift must not fabricate a phantom parameter that
-  // scrambles the signature and returns the wrong argument. It now reads it as argument 5 by its
-  // O32 position (`@sarg4`), with a0..a3 before it, rather than declining.
+  // scrambles the signature and returns the wrong argument. It reads as argument 5 by its O32
+  // position (`@sarg4`), with a0..a3 before it.
   test('MIPS load of an incoming stack word (5th arg) is argument 5, every register before it', () => {
     const { asm } = compileMipsTarget(
       'int f5(int a,int b,int c,int d,int e){ return e; }',

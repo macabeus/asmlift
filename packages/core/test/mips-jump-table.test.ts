@@ -47,7 +47,7 @@ const dispatch = (slot: string, index: string) =>
 test('the switch scrutinee is the index the bounds check tested, not the delay slot’s scaled copy', () => {
   // IDO scales the index IN PLACE in the bounds branch's delay slot (`sll t6,t6,0x2`, here on a0).
   // The `sltiu` bounded the unscaled value, and the case labels are 0..N-1, so the switch reads it
-  // before the slot runs. Read after the slot, this lifted `switch (a0 << 2)`, which compiles and
+  // before the slot runs. Read after the slot, it would be `switch (a0 << 2)`, which compiles and
   // returns -1 for k = 1.
   const inPlace = decompile('f', dispatch('sll\ta0,a0,0x2', 'a0'), MIPS_IDO, { asmData }).source;
   expect(inPlace).toContain('switch (a0)');

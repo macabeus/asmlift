@@ -273,11 +273,10 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '',
   ].join('\n');
   expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
-  // the ARGUMENT-HOME case that made the decline necessary rather than merely conservative: with a
-  // 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a def-less read is argument 5.
-  // MIPS now keys that word `@sarg4` for its store as well as its load (frontend/mips.ts
-  // `incomingStackKey`), so the read is argument 5 on the path that does not store it and the
-  // stored value on the other: IDO's own spelling of `if (a) e = b; return e + 1;`.
+  // the ARGUMENT-HOME case: with a 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a
+  // def-less read is argument 5. MIPS keys that word `@sarg4` for its store as well as its load
+  // (frontend/mips.ts `incomingStackKey`), so the read is argument 5 on the path that does not store
+  // it and the stored value on the other: IDO's own spelling of `if (a) e = b; return e + 1;`.
   const homeSlot = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',

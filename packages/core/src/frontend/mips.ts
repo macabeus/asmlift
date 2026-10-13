@@ -772,7 +772,7 @@ function toBlocks(
 /** Lift disassembled MIPS text → an L1 Fn with block-argument SSA. `prototypes` declares each
  *  callee's arity (`frontend/call-plan.ts`).
  *
- *  AT MOST TWICE, as on Thumb (`frontend/thumb.ts` `lift`): where the frame-object audit answers
+ *  AT MOST TWICE, as on Thumb (`frontend/frame-objects.ts` `liftWithRelift`): where the frame-object audit answers
  *  that a callee may write the local area without bound, or that nothing escapes and the per-object
  *  model does not describe it, it asks for the area kept as one object, and the second lift's audit
  *  judges it so and refuses rather than asking again. */
@@ -1128,10 +1128,10 @@ function liftOnce(
         return constVal(0);
       }
       // Reading `sp` as a DATA operand means frame-pointer arithmetic or an address-taken local
-      // (`addiu a0,sp,8` = `&local`) — not modellable without a stack abstraction. Fabricating a
-      // value for `sp` invents a PHANTOM leading parameter that shifts every real argument — a
-      // silent miscompile. Fail LOUD instead, mirroring the PPC frontend's r1. Frame setup/teardown
-      // (`addiu sp,sp,±N`) and word spill/reload slots are handled before `read`.
+      // (`addiu a0,sp,8` = `&local`). Fabricating a value for `sp` invents a PHANTOM leading
+      // parameter that shifts every real argument — a silent miscompile. Fail LOUD instead,
+      // mirroring the PPC frontend's r1. Frame setup/teardown (`addiu sp,sp,±N`), word spill/reload
+      // slots and, where `measureO32Frame` drew a local area, frame captures are handled before `read`.
       if (isStackPtr(r)) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': stack pointer used as data (address-taken local / frame arithmetic) — local stack frames not supported`,
@@ -1168,10 +1168,9 @@ function liftOnce(
     // it says which object it indexes, since `lw v0,24(v0)` after `addu v0,sp,t6` is `a[i]` on an
     // array at sp+24 (IDO), not at sp+0. So the register holds a `FrameSum`, and each use builds
     // `laddr(base + displacement) + index` there — an access at its displacement, any other use at
-    // 0. A capture or sum moved by a constant is the same capture at the sum. Below the local area
-    // there is no local, so an address there refuses (`emitLaddr`); above it the audit refuses.
-    // A frame address, at post-push offset `k`. Where it lies against the local area is the shared
-    // audit's to judge (`FRAME_OBJECT_AUDIT`, frontend/frame-objects.ts `frameObjects`), as on Thumb.
+    // 0. A capture or sum moved by a constant is the same capture at the sum. Where a frame address
+    // lies against the local area is the shared audit's to judge (`FRAME_OBJECT_AUDIT`,
+    // frontend/frame-objects.ts `frameObjects`), as on Thumb: below it or above it refuses.
     const emitLaddr = (k: number): Value => {
       const v = mkValue(T.unk(32));
       ops.push(mkOp('laddr', { results: [v], attrs: { off: k } }));
