@@ -155,6 +155,28 @@ describe('a captured local lifts as one object in the local area', () => {
     expect(src(leaf('or\ta1,sp,zero'))).toBe(move);
   });
 
+  test('a capture moved by a constant is the capture at the sum, and the base only the move read names nothing', () => {
+    // `addiu v1,v0,8` off `addiu v0,sp,0` is `addiu v1,sp,8`: both spellings lift the same
+    // per-object frame. The base `laddr(0)` is handed to the audit as moved, so it is dropped rather
+    // than judged a capture, which would keep the whole frame as one blob.
+    const leaf = (...capture: string[]) => [
+      '0:\taddiu\tsp,sp,-16',
+      ...capture.map((c, i) => `${(4 + 4 * i).toString(16)}:\t${c}`),
+      ...[
+        'sw\ta0,0(v1)',
+        'sw\ta1,4(sp)',
+        'lw\tv0,8(sp)',
+        'lw\tv1,4(sp)',
+        'addu\tv0,v0,v1',
+        'jr\tra',
+        'addiu\tsp,sp,16',
+      ].map((c, i) => `${(4 + 4 * (capture.length + i)).toString(16)}:\t${c}`),
+    ];
+    const direct = src(leaf('addiu\tv1,sp,8'));
+    expect(direct).toContain('s32 sp8;');
+    expect(src(leaf('addiu\tv0,sp,0', 'addiu\tv1,v0,8'))).toBe(direct);
+  });
+
   test('an access before the push is placed by its depth, not its raw offset', () => {
     // `lw t6,16(sp)` before `addiu sp,sp,-24` is the fifth argument (entry + 16), not the word at
     // post-push sp+16 inside the local area; the store at 0(sp) after the push is the local.

@@ -1108,6 +1108,11 @@ function liftOnce(
   // (`emitLaddr`, `materialize`) — function-scoped, since a register holding one crosses blocks.
   const laddrAt = new Map<Value, number>();
   const frameSums = new Map<Value, FrameSum>();
+  // Every capture this lift moved into another (`addiu rD,rCapture,k` re-minted as the `laddr` of
+  // the sum, or `addu` deferring one into a `FrameSum`), handed to the audit as Thumb hands its
+  // own: a base only the move read names no object, so the audit drops it rather than judging a
+  // dead `laddr` as a capture (`foldMovedCaptures`).
+  const movedCaptures = new Set<Value>();
 
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
@@ -1325,6 +1330,7 @@ function liftOnce(
             const raw = rawFrame(s)!;
             const at = raw === undefined ? undefined : laddrAt.get(raw);
             if (at !== undefined) {
+              movedCaptures.add(raw!);
               write(d, emitLaddr(at + imm(ins, t)));
               break;
             }
@@ -1366,6 +1372,7 @@ function liftOnce(
           const capturedAt = (v: Value | undefined) => (v === undefined ? undefined : laddrAt.get(v));
           const [cs, ct] = [capturedAt(rs), capturedAt(rt)];
           if ((cs === undefined) !== (ct === undefined)) {
+            movedCaptures.add((cs === undefined ? rt : rs)!);
             write(d, deferSum((cs ?? ct)!, read(cs === undefined ? s : t)));
             break;
           }
@@ -2043,7 +2050,7 @@ function liftOnce(
       declaredLocals: frame.area,
       usedSlotOffsets: new Set([...valueSlots].filter((o) => o < frame.size)),
       capturedObjectIsTheWholeFrame: false,
-      movedCaptures: new Set(),
+      movedCaptures,
       returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
       symbols,
       target,
