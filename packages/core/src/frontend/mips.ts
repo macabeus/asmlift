@@ -21,7 +21,7 @@
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaredWidth, declaresAggregateReturn, declaresVoidReturn, wordsOf } from '../proto';
+import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
@@ -938,9 +938,11 @@ function liftOnce(
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
   // Whether this function's own declaration says its return fits one word (`v1MayHoldLowWord`):
-  // void, or a scalar or pointer no wider than 32 bits. An aggregate says nothing here.
+  // void, or a scalar or pointer no wider than 32 bits. An aggregate says nothing here. A declared
+  // WIDER return is refused for every frontend after the lift (pipeline.ts
+  // `refuseNarrowReturnsOfWideDeclaration`), so this only clears the asm rule, never requires it.
   const own = prototypes[name];
-  const ownWidth = own?.returns === undefined || declaresAggregateReturn(own) ? undefined : declaredWidth(own.returns);
+  const ownWidth = ownReturnWidth(own);
   const ownReturnFitsAWord = declaresVoidReturn(own) || (ownWidth !== undefined && ownWidth <= 32);
   const ARG_REGS = target.argRegs;
   const fpu = target.fpu;
