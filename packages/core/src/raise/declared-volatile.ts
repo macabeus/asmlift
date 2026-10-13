@@ -5,7 +5,8 @@
 // declaration context's globals and the compiler, and nothing else: an access whose base reaches a
 // global the map qualifies, at the byte the access names (`declaresVolatile`), or one the context
 // declares with a volatile byte and the map does not lay out (`ContextGlobals.volatiles`, which is
-// per object, not per byte) — and, for a read, one the compiler could have made of a `volatile`
+// per object, not per byte), or one through the value of a pointer the context declares to point at
+// a volatile (`ContextGlobals.pointeeVolatiles`) — and, for a read, one the compiler could have made of a `volatile`
 // (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
 // lift is made (pipeline.ts `liftStamped`), before the first pass that asks whether a read may be
 // deleted, folded or moved, and re-derived by every pass that changes which object an access names
@@ -13,9 +14,11 @@
 // has none — re-runs it, and an op the new map does not qualify loses the stamp, so a structuring
 // never answers for a map it was not given. The context is not the map: every candidate compiles
 // against it whichever names it spells, so it is read in both settings. The base is read as the structurer will read it: a join
-// whose every edge passes one address is that address (`addressThroughJoins`). A base that reaches
-// no name is a pointer parameter, a raw address or a genuine join: no declaration is in evidence,
-// and the access stays unplaced unless the lift pinned it (`device`).
+// whose every edge passes one address is that address (`addressThroughJoins`), and one every edge of
+// which reaches one object — two of its addresses, or a pointer a loop steps through it — is an
+// access of that object (`objectThroughJoins`). A base that reaches no name is a pointer parameter,
+// a raw address or a join of two objects: no declaration is in evidence, and the access stays
+// unplaced unless the lift pinned it (`device`).
 //
 // A read structuring stamps that the earlier stamps left plain was plain to every raising pass, and a
 // short-circuit fold may have lifted it out of the arm it ran in. structure.ts declines on such a
