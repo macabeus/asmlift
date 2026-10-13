@@ -9490,7 +9490,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'volpoll',
     src: 'struct V { u16 a; u16 b; };\nextern volatile struct V gV;\nvoid volpoll(void){ while (gV.a == 0) ; }',
-    features: ['global', 'struct', 'loop'],
+    features: ['global', 'struct'],
     toolchains: ALL,
     ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V gV; void volpoll(void);',
     proto: { volpoll: { returnsVoid: true } },
@@ -9498,7 +9498,7 @@ export const SYNTHETIC: SynthSpec[] = [
   {
     sym: 'volpollb',
     src: 'struct V { u16 a; u16 b; };\nextern volatile struct V gV;\nvoid volpollb(void){ while (gV.b == 0) ; }',
-    features: ['global', 'struct', 'loop'],
+    features: ['global', 'struct'],
     toolchains: ALL,
     ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V gV; void volpollb(void);',
     proto: { volpollb: { returnsVoid: true } },
@@ -9512,7 +9512,7 @@ export const SYNTHETIC: SynthSpec[] = [
     src:
       'extern s32 ga, gb, gc;\nvoid take(const void *p);\n' +
       'void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }',
-    features: ['static-local', 'pointer', 'call'],
+    features: ['pointer'],
     toolchains: ['agbcc', 'mwcc_242_81'],
     ctx: 'extern s32 ga, gb, gc; void take(const void *p); void tabesc(void);',
     proto: { take: { params: ['const void *'], returnsVoid: true }, tabesc: { returnsVoid: true } },
