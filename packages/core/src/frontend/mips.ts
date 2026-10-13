@@ -1171,14 +1171,9 @@ function liftOnce(
     // `laddr(base + displacement) + index` there — an access at its displacement, any other use at
     // 0. A capture or sum moved by a constant is the same capture at the sum. Below the local area
     // there is no local, so an address there refuses (`emitLaddr`); above it the audit refuses.
+    // A frame address, at post-push offset `k`. Where it lies against the local area is the shared
+    // audit's to judge (`FRAME_OBJECT_AUDIT`, frontend/frame-objects.ts `frameObjects`), as on Thumb.
     const emitLaddr = (k: number): Value => {
-      const from = frame?.area.from ?? Infinity;
-      if (k < from) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': address-taken stack local — the frame address sp+${k} lies below the local area, which starts at sp+${from} — ` +
-            'an outgoing argument word or a saved register, whose address is not modelled',
-        );
-      }
       const v = mkValue(T.unk(32));
       ops.push(mkOp('laddr', { results: [v], attrs: { off: k } }));
       laddrAt.set(v, k);
@@ -2046,7 +2041,6 @@ function liftOnce(
 
   if (frame !== null) {
     refuseEscapedFrameSums(name, irBlocks, frameSums);
-    refuseConstantMovesBelow(name, irBlocks, frame.area);
     // Prove every `laddr` names storage of this frame at a shape the machine states, or decline
     // (`auditFrameObjects`); an accepted function then gets the device pin the audit answers.
     const verdict = FRAME_OBJECT_AUDIT.run({
@@ -2089,28 +2083,6 @@ function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: 
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': address-taken stack local — a frame address plus a runtime index reaches \`${op.opcode}\` across a join, ` +
             'which object it indexes is not known there',
-        );
-      }
-    }
-  }
-}
-
-/** The audit folds a capture moved by a constant into the capture at the sum
- *  (`foldMovedCaptures`), and below the local area that names an outgoing word or a save, not a
- *  local — so a move the fill did not fold itself (`addu rD, rCapture, rK` with rK a constant)
- *  refuses here when it lands there. */
-function refuseConstantMovesBelow(name: string, irBlocks: readonly Block[], area: FrameRange): void {
-  const defOf = new Map(irBlocks.flatMap((b) => b.ops.flatMap((op) => op.results.map((r) => [r, op] as const))));
-  for (const op of irBlocks.flatMap((b) => b.ops)) {
-    const [x, y] = op.operands.map((v) => defOf.get(v));
-    const capture = x?.opcode === 'laddr' ? x : y?.opcode === 'laddr' ? y : undefined;
-    const by = capture === x ? y : x;
-    if (op.opcode === 'add' && capture !== undefined && by?.opcode === 'const') {
-      const off = (capture.attrs.off as number) + (by.attrs.value as number);
-      if (off < area.from) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': address-taken stack local — the frame address sp+${off} lies below the local area, which starts at sp+${area.from} — ` +
-            'an outgoing argument word or a saved register, whose address is not modelled',
         );
       }
     }

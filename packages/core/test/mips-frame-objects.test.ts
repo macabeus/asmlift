@@ -228,7 +228,7 @@ describe('a frame word that is not a local refuses', () => {
           [0x28, 'R_MIPS_26', 'h5'],
         ],
       ),
-    ).toThrow(/sp\+16 lies below the local area, which starts at sp\+24/);
+    ).toThrow(/\[sp,#16\) is below the reserved local area, which starts at \[sp,#24\)/);
   });
 
   test('the address of an incoming stack argument is above the area — `g(&e)` for a fifth `e`', () => {

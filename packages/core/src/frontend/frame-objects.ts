@@ -663,8 +663,16 @@ function frameObjects(laddrs: readonly Op[], owned: FrameRange, fail: Refuse): M
   // saved register's — `g(&e)` for a fifth parameter `e` is `add r0, sp, #0x8` over a one-word
   // local area — and no other rule of the audit is about that gap. The TOP itself is also C's
   // one-past-the-end pointer, `g(buf, buf + 8)` over an 8-byte array, and the refusal names both
-  // readings.
+  // readings. BELOW IT is the outgoing block a call's stack words are staged in, and on O32 also
+  // the saves IDO keeps under its locals: an address there is no local's either. Every object's
+  // extent is held to the area again below; this says why, for the frontend that supplied it.
   for (const off of objects.keys()) {
+    if (off < owned.from) {
+      fail(
+        `the captured address at [sp,#${off}) is below the reserved local area, which starts at [sp,#${owned.from}) — ` +
+          'an outgoing stack argument word or a saved register, whose address is not modelled',
+      );
+    }
     if (off === owned.to) {
       fail(
         `the captured address at [sp,#${off}) is the top of the reserved local area of ${owned.to - owned.from} bytes — ` +
