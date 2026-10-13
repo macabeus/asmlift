@@ -3960,7 +3960,7 @@ export function structure(
   // through a cast on its storage: a cast there is the spelling agbcc may read stale, and the
   // union is declared because it does not. The audit admitted only accesses at a fixed offset on
   // the object and aligned to their own width (frame-objects.ts `unionRefusal`), so a view names
-  // each one; an access with none is an internal error (a plain `Error`, not a decline), not a spelling to fall back from.
+  // each one; an access with none is an internal error, not a decline to fall back from.
   const frameUnionAccess = (base: Value, off: number, width: number, signed: boolean, isStore: boolean) => {
     const d = defs.get(base);
     if (d?.opcode !== 'laddr' || d.attrs.views === undefined) {

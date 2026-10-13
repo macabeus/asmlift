@@ -90,9 +90,9 @@ describe('what assertLocalStorageStaysInteger leaves alone', () => {
 });
 
 // A FRAME UNION (frontend/frame-objects.ts `unionViews`) is alias-safe only while every access is a
-// member access: `assertFrameUnionsViewed`, which rank.ts runs on every respelled tree beside
-// `assertLocalStorageStaysInteger`. Compiled, agbcc returns a stale `mov r0, #0x1` for `*u.half = 1; u.word[0] = x;
-// return *u.half;` and for the cast twin, and reloads for `u.half[0]`.
+// member access: `assertFrameUnionsViewed`, checked on the default tree and on every respelled one.
+// Compiled, agbcc returns a stale `mov r0, #0x1` for `*u.half = 1; u.word[0] = x; return *u.half;`
+// and for the cast twin, and reloads for `u.half[0]`.
 describe('a frame union is accessed only through its views', () => {
   const U: IrType = {
     kind: 'union',

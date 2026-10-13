@@ -957,7 +957,7 @@ describe('a frame nothing escapes from is one object where the slot model and an
     expect(() => lift(STAGED_ARG)).toThrow(storedUnread(4, 0, 'th'));
     // …and a prototype holds no store through a capture: a stated list is a LOWER bound on the
     // words a call takes. `int th(int, int, int, int, ...)` states four, and so does DWARF for it,
-    // which drops the `...` — the same refusal, where only the per-object word refusal stood before
+    // which drops the `...` — the same refusal
     const prefix = (params: number | string[]) =>
       decompile('f', STAGED_ARG, ARMV4T_AGBCC, { prototypes: { th: { params } } });
     expect(() => prefix(4)).toThrow(storedUnread(4, 0, 'th'));
