@@ -49,3 +49,29 @@ describe('a context-declared aggregate the map does not describe — real agbcc'
     expect(bareScore, bare).not.toBe(0);
   });
 });
+
+// A VOLATILE AGGREGATE stays out of the set (proto-context.ts `hasVolatileStorage`). `*(u16 *)&gV`
+// drops the qualifier: agbcc then loads `gV.a` once and spins on the register forever (score 8), and
+// merges the two reads of `gV.a + gV.a`. Left out, the read keeps the bare spelling, which the header
+// refuses: a lift that does not compile, never one that compiles to other code.
+describe('a context-declared volatile aggregate keeps the bare spelling — real agbcc', () => {
+  const V =
+    'struct V { u16 a; u16 b; }; extern volatile struct V gV;\n' +
+    'struct V2 { volatile u16 a; u16 b; }; extern struct V2 gV2;\n' +
+    'typedef volatile struct V VV; extern VV gVV;\n' +
+    'typedef struct { volatile u16 a; u16 b; } VW; extern VW gVW;\n';
+  test.each([
+    { sym: 'vloop', c: 'void vloop(void){ while (gV.a == 0) ; }', g: 'gV' },
+    { sym: 'vmember', c: 'void vmember(void){ while (gV2.a == 0) ; }', g: 'gV2' },
+    { sym: 'vtypedef', c: 'void vtypedef(void){ while (gVV.a == 0) ; }', g: 'gVV' },
+    { sym: 'vtwice', c: 'int vtwice(void){ return gV.a + gV.a; }', g: 'gV' },
+    { sym: 'vbodytypedef', c: 'void vbodytypedef(void){ while (gVW.a == 0) ; }', g: 'gVW' },
+  ])('$sym does not cast $g and does not compile against the header', ({ sym, c, g }) => {
+    const asm = compileTargetAsm(V + c, FLAGS);
+    const aggregateGlobals = aggregateObjectsFromContext(V, 'c');
+    expect(aggregateGlobals.has(g)).toBe(false);
+    const r = decompile(sym, asm, ARMV4T_AGBCC, { aggregateGlobals });
+    expect(r.source).not.toContain(`*)&${g}`);
+    expect(() => scoreC(V + r.source, sym, assembleTarget(asm), FLAGS), r.source).toThrow();
+  });
+});
