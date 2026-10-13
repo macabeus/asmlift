@@ -348,9 +348,13 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
         .map((a, i) => {
           const to = declared?.[i];
           // A parameter type this cannot spell is an object pointer (target.ts `declaredArgTypes`),
-          // reached through `void *`.
-          return to !== undefined && argConversion(a, to, vt)
-            ? `(${spellableType(to) ? to : 'void *'})${rec(a, 2)}`
+          // reached through `void *` from an argument whose own type is known to differ — a value
+          // this function types, or the address of an object it declares (a static) — never from
+          // `&gW` of a global only the project declares, which may already be the parameter's type.
+          const opaque = to !== undefined && !spellableType(to);
+          const typed = exprCType(a, vt.type) !== undefined || (a.k === 'addr' && vt.type(a.name) !== undefined);
+          return to !== undefined && (!opaque || typed) && argConversion(a, to, vt)
+            ? `(${opaque ? 'void *' : to})${rec(a, 2)}`
             : printConverted(a, vt, leaf);
         })
         .join(', ')})`;
