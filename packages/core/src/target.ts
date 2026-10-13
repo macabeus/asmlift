@@ -515,7 +515,9 @@ export interface TargetDescription {
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
     // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
-    // re-staging and the callee's write. NOT set anywhere else, for the reason above.
+    // re-staging and the callee's write. Set on the three MIPS toolchains off their own probe
+    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. NOT set
+    // on mwcc, for the reason above.
     localsAboveOutgoingArea?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
@@ -1117,6 +1119,10 @@ export const MIPS_IDO: TargetDescription = {
     spillSlotOrder: 'unknown',
     // MEASURED, the probe at the field: the local ends at the frame top, above `ra` and the spills.
     o32LocalArea: 'above-saved-registers',
+    // MEASURED off the same probe (`twice`, `owns`): O32's outgoing area is the frame bottom, an
+    // unchanged argument is staged again before each call, and a callee assigns to its stack
+    // parameter in place. Read by the frame-object audit alone here (`storedNeverRead`).
+    localsAboveOutgoingArea: true,
   },
 };
 
@@ -1237,6 +1243,8 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves, the probe at the field: identical
     // layouts, the local right above the 8-aligned outgoing area and under the saves.
     o32LocalArea: 'above-outgoing-area',
+    // MEASURED on BOTH toolchains this description serves, the probe at `o32LocalArea` (`twice`).
+    localsAboveOutgoingArea: true,
   },
 };
 

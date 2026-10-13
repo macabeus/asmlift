@@ -80,18 +80,60 @@ Disassembly of section .text:
   f0:	jr	ra
   f4:	addiu	sp,sp,48
 
-000000f8 <in9>:
-  f8:	addiu	sp,sp,-24
-  fc:	sw	s0,16(sp)
- 100:	lw	s0,40(sp)
- 104:	move	v0,a1
- 108:	beqz	a0,120 <in9+0x28>
- 10c:	sw	ra,20(sp)
- 110:	lw	a0,56(sp)
- 114:	jal	0 <leafarr>
- 118:	nop
- 11c:	addu	v0,v0,s0
- 120:	lw	ra,20(sp)
- 124:	lw	s0,16(sp)
- 128:	jr	ra
- 12c:	addiu	sp,sp,24
+000000f8 <twice>:
+  f8:	addiu	sp,sp,-32
+  fc:	sw	s0,24(sp)
+ 100:	move	s0,a0
+ 104:	li	a0,1
+ 108:	li	a1,2
+ 10c:	li	a2,3
+ 110:	li	a3,4
+ 114:	sw	ra,28(sp)
+ 118:	jal	0 <leafarr>
+ 11c:	sw	s0,16(sp)
+ 120:	li	a0,1
+ 124:	li	a1,2
+ 128:	li	a2,3
+ 12c:	li	a3,4
+ 130:	sw	s0,16(sp)
+ 134:	jal	0 <leafarr>
+ 138:	move	s0,v0
+ 13c:	addu	v0,s0,v0
+ 140:	lw	ra,28(sp)
+ 144:	lw	s0,24(sp)
+ 148:	jr	ra
+ 14c:	addiu	sp,sp,32
+
+00000150 <owns>:
+ 150:	addiu	sp,sp,-32
+ 154:	sw	s0,16(sp)
+ 158:	lw	s0,48(sp)
+ 15c:	sw	s1,20(sp)
+ 160:	move	s1,a1
+ 164:	sw	ra,24(sp)
+ 168:	addu	s0,s0,a0
+ 16c:	jal	0 <leafarr>
+ 170:	move	a0,s0
+ 174:	addu	v0,s0,s1
+ 178:	lw	ra,24(sp)
+ 17c:	lw	s1,20(sp)
+ 180:	lw	s0,16(sp)
+ 184:	jr	ra
+ 188:	addiu	sp,sp,32
+
+0000018c <in9>:
+ 18c:	addiu	sp,sp,-24
+ 190:	sw	s0,16(sp)
+ 194:	lw	s0,40(sp)
+ 198:	move	v0,a1
+ 19c:	beqz	a0,1b4 <in9+0x28>
+ 1a0:	sw	ra,20(sp)
+ 1a4:	lw	a0,56(sp)
+ 1a8:	jal	0 <leafarr>
+ 1ac:	nop
+ 1b0:	addu	v0,v0,s0
+ 1b4:	lw	ra,20(sp)
+ 1b8:	lw	s0,16(sp)
+ 1bc:	jr	ra
+ 1c0:	addiu	sp,sp,24
+	...

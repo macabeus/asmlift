@@ -156,3 +156,46 @@ test.each(['gcc272kmc-o32frame.txt', 'gcc272-o32frame.txt'])(
     }
   },
 );
+
+// `localsAboveOutgoingArea`: the outgoing area is the frame bottom and the caller never reads a
+// word of it back after a call, so a word loaded after a call is a local's (`frame-objects.ts`
+// `storedNeverRead`). Measured as the agbcc fact is (`outgoing-area-probes.test.ts`): an unchanged
+// argument is staged again before the second call, and a callee writes its stack parameters.
+describe.each(['ido71-o32frame.txt', 'gcc272kmc-o32frame.txt', 'gcc272-o32frame.txt'])('%s', (fixture) => {
+  const text = readFileSync(join(import.meta.dirname, 'corpus', fixture), 'utf8');
+  const body = (fn: string) => {
+    const from = text.indexOf(`<${fn}>:`);
+    const to = text.indexOf('\n\n', from);
+    return text
+      .slice(from, to < 0 ? undefined : to)
+      .split('\n')
+      .slice(1)
+      .map((l) => l.replace(/^\s*[0-9a-f]+:\t/, ''));
+  };
+
+  test('twice: the fifth argument is stored to 16(sp) again between the two calls', () => {
+    const lines = body('twice');
+    const jals = lines.flatMap((l, i) => (l.startsWith('jal') ? [i] : []));
+    expect(jals).toHaveLength(2);
+    // past the first call's delay slot, up to and including the second call's
+    const between = lines.slice(jals[0] + 2, jals[1] + 2);
+    expect(between.some((l) => /^sw\t\w+,16\(sp\)$/.test(l))).toBe(true);
+  });
+
+  test('no probe reads a word of its outgoing area', () => {
+    for (const [fn, outgoingEnd] of Object.entries({ ...OUTGOING_END, twice: 20, owns: 16, in9: 16 })) {
+      const loads = body(fn).flatMap((l) => {
+        const m = /^l[bhw]u?\t\w+,(\d+)\(sp\)$/.exec(l);
+        return m ? [Number(m[1])] : [];
+      });
+      expect(loads.filter((o) => o < outgoingEnd)).toEqual([]);
+    }
+  });
+});
+
+test("IDO's `owns` assigns to its fifth parameter in its caller's outgoing word", () => {
+  const text = readFileSync(join(import.meta.dirname, 'corpus', 'ido71-o32frame.txt'), 'utf8');
+  const owns = text.slice(text.indexOf('<owns>:'), text.indexOf('<in9>:'));
+  const size = Number(/addiu\tsp,sp,-(\d+)/.exec(owns)![1]);
+  expect(owns).toContain(`sw\ta0,${size + 16}(sp)`);
+});
