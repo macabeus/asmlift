@@ -109,7 +109,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
         continue;
       }
       const t = declaredType(d.specifiers, x.derivations);
-      if (isAggregate(t, table)) {
+      if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
       }
       if (hasVolatileStorage(t, scope, 0)) {
@@ -328,8 +328,11 @@ function once(scope: VolatileScope, key: string, read: () => boolean): boolean {
   return v;
 }
 
-/** Whether `t` is a struct, union, class or array type, through the typedef names it is built on. */
-function isAggregate(t: DeclaredType, table: TypeTable): boolean {
+/** Whether `t` is a struct, union, class or array type, through the typedef names it is built on.
+ *  A typedef the type table does not read — one of an array, `typedef u16 Arr4[4];` — is followed
+ *  as written (`typedefTypes`): left out, `extern Arr4 gTB;` read as a scalar, and its offset-0
+ *  read was spelled `gTB`, the array's address. */
+function isAggregate(t: DeclaredType, table: TypeTable, written: ReadonlyMap<string, DeclaredType>): boolean {
   let cur = t;
   for (let hops = 0; hops < 16; hops++) {
     const [first] = cur.derivations;
@@ -346,7 +349,7 @@ function isAggregate(t: DeclaredType, table: TypeTable): boolean {
     if (table.named.has(name)) {
       return true;
     }
-    const next = table.typedefs.get(name);
+    const next = table.typedefs.get(name) ?? written.get(name);
     if (next === undefined || nameOf(next) === name) {
       return false;
     }

@@ -63,6 +63,17 @@ u8 gArrFn(void);
     }
   });
 
+  test('an array through a typedef is an aggregate, volatile or not', () => {
+    // The type table reads no typedef of an array; left out, `gTB`'s offset-0 read was spelled
+    // `gTB`, its address, and `gTC`'s poll compared the address with 0.
+    const td =
+      'typedef unsigned short u16;\ntypedef u16 Arr4[4];\ntypedef volatile u16 VArr4[4];\n' +
+      'typedef Arr4 Arr4b;\nextern Arr4 gTB;\nextern VArr4 gTC;\nextern Arr4b gTD;\nextern Arr4 *gTP;\n';
+    const { aggregates, volatiles } = globalsFromContext(td, 'c');
+    expect([...aggregates].sort()).toEqual(['gTB', 'gTC', 'gTD']);
+    expect([...volatiles]).toEqual(['gTC']);
+  });
+
   test('a C++ class is an aggregate', () => {
     expect([...plainAggregates('class Obj { int a; }; extern Obj gObj;', 'c++')]).toEqual(['gObj']);
   });
