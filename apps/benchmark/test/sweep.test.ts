@@ -326,7 +326,7 @@ describe('the record carries its INPUT, not only its output', () => {
     // base tree lifted every row without the aggregates it always read, and its moved `src` read
     // as a decompiler change. An old driver handed this tree refuses on the count instead.
     const aggregates = new Set(['gInfo']);
-    const contextGlobals = { aggregates, volatiles: new Set<string>() };
+    const contextGlobals = { aggregates, volatiles: new Set<string>(), pointeeVolatiles: new Set<string>() };
     expect(contextArgument(LEGACY_RANK_OPTIONS_ARITY, { aggregateGlobals: aggregates })).toBe(aggregates);
     expect(contextArgument(RANK_OPTIONS_ARITY, { contextGlobals, aggregateGlobals: aggregates })).toBe(contextGlobals);
     expect(LEGACY_RANK_OPTIONS_ARITY).not.toBe(RANK_OPTIONS_ARITY);

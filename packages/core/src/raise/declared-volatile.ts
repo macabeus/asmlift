@@ -139,6 +139,23 @@ function objectThroughJoins(fn: Fn, defs: Map<Value, Op>): (v: Value) => string 
   };
 }
 
+/** The global whose VALUE an address is taken from: a word read from the global's own first byte,
+ *  moved by address arithmetic (`*gP`, `gQ->b`, `gP[i]`). Null for any other address. */
+function heldBy(defs: Map<Value, Op>, addr: Value): string | null {
+  const d = defs.get(addr);
+  if (d?.opcode === 'load' && ((d.attrs.off as number | undefined) ?? 0) === 0) {
+    const g = defs.get(d.operands[0]);
+    return g?.opcode === 'gaddr' ? (g.attrs.sym as string) : null;
+  }
+  if (d?.opcode === 'add' && d.operands.length === 2) {
+    return heldBy(defs, d.operands[0]) ?? heldBy(defs, d.operands[1]);
+  }
+  if (d?.opcode === 'sub' && d.operands.length === 2) {
+    return heldBy(defs, d.operands[0]);
+  }
+  return null;
+}
+
 /** Stamp every memory access of `fn` to an object `symbols` or `behaviors.contextGlobals` declares
  *  volatile — a read only where a compiler behaving as `behaviors` says could have made it of one —
  *  and clear the stamp from every other op. Returns the ops it stamped that were not stamped before. */
@@ -149,7 +166,11 @@ export function stampDeclaredVolatile(
 ): Op[] {
   const added: Op[] = [];
   const contextVolatiles = behaviors.contextGlobals?.volatiles;
-  const reads = symbols !== undefined || (contextVolatiles !== undefined && contextVolatiles.size > 0);
+  const pointees = behaviors.contextGlobals?.pointeeVolatiles;
+  const reads =
+    symbols !== undefined ||
+    (contextVolatiles !== undefined && contextVolatiles.size > 0) ||
+    (pointees !== undefined && pointees.size > 0);
   const defs = reads ? defOpMap(fn) : undefined;
   const addressOf = reads ? addressThroughJoins(fn) : undefined;
   const objectOf = reads ? objectThroughJoins(fn, defs!) : undefined;
@@ -164,10 +185,12 @@ export function stampDeclaredVolatile(
           ? globalCellOf(defs!, addr!, op.attrs.off as number)
           : null;
       const info = base !== null ? symbols?.get(base) : undefined;
+      const pointer = addr !== undefined && base === null && pointees !== undefined ? heldBy(defs!, addr) : null;
       const declared =
-        base !== null &&
-        (declaresVolatile(info, cell === null ? null : cell.byte) ||
-          (contextVolatiles?.has(base) === true && !laysOut(info)));
+        (base !== null &&
+          (declaresVolatile(info, cell === null ? null : cell.byte) ||
+            (contextVolatiles?.has(base) === true && !laysOut(info)))) ||
+        (pointer !== null && pointees!.has(pointer));
       // A fresh record either way: a rebuilder may hand two ops one `attrs` object.
       if (declared && op.attrs[DECLARED_VOLATILE] !== true) {
         op.attrs = { ...op.attrs, [DECLARED_VOLATILE]: true };

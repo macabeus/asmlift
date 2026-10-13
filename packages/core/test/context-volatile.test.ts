@@ -16,7 +16,11 @@ import { ARMV4T_AGBCC } from '../src/target';
 const HDR = 'typedef unsigned short u16; typedef int s32;\nstruct V { u16 a; u16 b; }; extern volatile struct V gV;\n';
 const CTX = globalsFromContext(HDR, 'c');
 /** the same context with its volatility withheld: what the aggregate spelling alone prints */
-const AGGREGATES_ONLY: ContextGlobals = { aggregates: CTX.aggregates, volatiles: new Set() };
+const AGGREGATES_ONLY: ContextGlobals = {
+  aggregates: CTX.aggregates,
+  volatiles: new Set(),
+  pointeeVolatiles: new Set(),
+};
 
 /** agbcc -O2 of `void vpoll(void){ while (gV.a == 0); }` */
 const VPOLL =
@@ -178,5 +182,33 @@ describe('an access of a context-declared volatile object through a pointer that
     expect(src).not.toMatch(/= \*v\d+;/);
     // without the context nothing says the array is volatile, and the read stays plain
     expect(decompile('varrsum', VARRSUM, ARMV4T_AGBCC, {}).source).not.toContain('volatile');
+  });
+});
+
+describe('a context-declared pointer to volatile', () => {
+  // agbcc -O2 of `void pvq(void){ while (gQ->b == 0) ; }` over `extern volatile struct V *gQ;`: the
+  // pointer is plain (read once, ahead of the loop), what it points at is not.
+  const PVQ =
+    'pvq:\n\tldr\tr0, .L7\n\tldr\tr1, [r0]\n.L3:\n\tldrh\tr0, [r1, #0x2]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tbx\tlr\n' +
+    '.L7:\n\t.word\tgQ\n';
+  const ctx = globalsFromContext(
+    'typedef unsigned short u16; struct V { u16 a; u16 b; }; extern volatile struct V *gQ;',
+    'c',
+  );
+  const VOIDQ = { pvq: { params: [], returnsVoid: true } };
+
+  test('is read as a pointer to volatile, not a volatile object', () => {
+    expect([...ctx.pointeeVolatiles]).toEqual(['gQ']);
+    expect([...ctx.volatiles]).toEqual([]);
+  });
+
+  test('an access through its value reads through a qualified cast, and the pointer read stays plain', () => {
+    const src = decompile('pvq', PVQ, ARMV4T_AGBCC, { prototypes: VOIDQ, contextGlobals: ctx }).source;
+    expect(src).toContain('while (((volatile u16 *)gQ)[1] == 0)');
+    // the context's volatility withheld: a plain read the compiler hoists out of the loop
+    const none: ContextGlobals = { ...ctx, pointeeVolatiles: new Set() };
+    expect(decompile('pvq', PVQ, ARMV4T_AGBCC, { prototypes: VOIDQ, contextGlobals: none }).source).toContain(
+      'while (((u16 *)gQ)[1] == 0)',
+    );
   });
 });

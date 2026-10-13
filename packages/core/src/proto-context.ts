@@ -91,6 +91,12 @@ export interface ContextGlobals {
    *  `gReg` where it is spelled bare, and the stamp keeps the raising passes from merging two of its
    *  reads. */
   volatiles: ReadonlySet<string>;
+  /** The objects declared as a pointer whose pointee has a volatile byte, read as `volatiles` reads
+   *  an object: `extern volatile u16 *gP;`, `extern volatile struct V *gQ;`. The pointer itself is
+   *  plain, so a read of `gP` is not placed; an access through the value it holds is, and the
+   *  structurer puts the qualifier on the cast it is spelled through (`*(volatile u16 *)gP`).
+   *  Without it, `while (*gP == 0);` lifts as a plain read the compiler hoists out of the loop. */
+  pointeeVolatiles: ReadonlySet<string>;
 }
 
 /** The globals a preprocessed declaration context declares, read for {@link ContextGlobals}. */
@@ -100,6 +106,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   const scope: VolatileScope = { table, typedefs: typedefTypes(ctx), bodies: tagBodies(ctx), ctx, read: new Map() };
   const aggregates = new Set<string>();
   const volatiles = new Set<string>();
+  const pointeeVolatiles = new Set<string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
@@ -115,9 +122,16 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       if (hasVolatileStorage(t, scope, 0)) {
         volatiles.add(x.name);
       }
+      // derivations run outermost first: the object is a pointer, and what it points at is the rest
+      if (t.derivations[0]?.kind === 'pointer') {
+        const pointee = { ...t, derivations: t.derivations.slice(1) };
+        if (hasVolatileStorage(pointee, scope, 0)) {
+          pointeeVolatiles.add(x.name);
+        }
+      }
     }
   }
-  return { aggregates, volatiles };
+  return { aggregates, volatiles, pointeeVolatiles };
 }
 
 /** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare

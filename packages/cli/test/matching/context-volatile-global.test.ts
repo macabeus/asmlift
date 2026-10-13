@@ -3,7 +3,9 @@
 // synthetic rows (`volpoll`/`volpollb` pin agbcc, ido7.1, gcc2.7.2kmc and mwcc_242_81). The context's
 // volatile objects reach the declared-volatile stamp (core raise/declared-volatile.ts), so the cast
 // an aggregate is read through carries the qualifier: `*(volatile u16 *)&gV`. A plain cast lets the
-// compiler hoist a poll's load out of its loop and merge two reads of one member.
+// compiler hoist a poll's load out of its loop and merge two reads of one member. A pointer the
+// context declares to point at a volatile (`volatile u16 *gP`) qualifies the access through its value
+// the same way.
 //
 // Each candidate is compiled against the same header the target was, as a project's would be.
 import { decompile } from '@asmlift/core/pipeline';
@@ -25,9 +27,15 @@ import { ppcDockerGate } from './docker-gate';
 const H =
   'struct V { u16 a; u16 b; }; extern volatile struct V gV;\n' +
   'struct W { s32 a; s32 b; }; extern volatile struct W gW;\n' +
-  'void vpoll(void); void vpollb(void); s32 vtwb(void);\n';
+  'extern volatile u16 *gP; extern volatile struct V *gQ;\n' +
+  'void vpoll(void); void vpollb(void); s32 vtwb(void); void pvp(void); void pvq(void);\n';
 const CTX = globalsFromContext(H, 'c');
-const PROTOS = { vpoll: { params: [], returnsVoid: true }, vpollb: { params: [], returnsVoid: true } };
+const PROTOS = {
+  vpoll: { params: [], returnsVoid: true },
+  vpollb: { params: [], returnsVoid: true },
+  pvp: { params: [], returnsVoid: true },
+  pvq: { params: [], returnsVoid: true },
+};
 
 const CASES = [
   // a poll at offset 0: a dereference of the cast
@@ -36,6 +44,10 @@ const CASES = [
   { sym: 'vpollb', c: 'void vpollb(void){ while (gV.b == 0) ; }', spelled: '((volatile u16 *)&gV)[1]', reads: 1 },
   // two reads of one member, which a plain cast merges into one
   { sym: 'vtwb', c: 's32 vtwb(void){ return gW.b + gW.b; }', spelled: '((volatile s32 *)&gW)[1]', reads: 2 },
+  // polls through a pointer the context declares to point at a volatile: the pointer is plain, the
+  // access through its value is qualified on the cast it is spelled through
+  { sym: 'pvp', c: 'void pvp(void){ while (*gP == 0) ; }', spelled: '*(volatile u16 *)gP', reads: 1 },
+  { sym: 'pvq', c: 'void pvq(void){ while (gQ->b == 0) ; }', spelled: '((volatile u16 *)gQ)[1]', reads: 1 },
 ];
 
 interface Build {
@@ -101,7 +113,11 @@ describe.each(BUILDS)('a context-declared volatile aggregate — $name', ({ have
     'with the volatility withheld, the plain cast merges the two reads',
     () => {
       const { c, sym } = CASES[2];
-      const { t, source, cand } = lift(sym, c, { aggregates: CTX.aggregates, volatiles: new Set() });
+      const { t, source, cand } = lift(sym, c, {
+        aggregates: CTX.aggregates,
+        volatiles: new Set(),
+        pointeeVolatiles: new Set(),
+      });
       expect(source).not.toContain('volatile');
       expect(loads(cand.asm, load), source).toBeLessThan(loads(t.asm, load));
     },
