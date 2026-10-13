@@ -21,7 +21,7 @@
 import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import { type Prototypes, declaresAggregateReturn, declaresVoidReturn, declaredWidth, wordsOf } from '../proto';
+import { type Prototypes, declaredWidth, declaresAggregateReturn, declaresVoidReturn, wordsOf } from '../proto';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
@@ -497,7 +497,6 @@ function checkDelaySlots(name: string, instrs: Instr[]): void {
     }
   }
 }
-
 
 /** WHETHER THE RETURN ENDING BLOCK `bi` MAY HAND BACK A 64-BIT PAIR, read off the asm: O32 returns
  *  one in v0:v1, the low word in v1, and v1 is also ordinary scratch, so the question is what each

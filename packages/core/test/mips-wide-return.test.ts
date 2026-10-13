@@ -45,12 +45,21 @@ describe('a v1 written for the caller refuses', () => {
 
   test('the carry against a register addend: `return x + a`', () => {
     expect(
-      lift(['0:\tsra\tv0,a0,0x1f', '4:\taddu\tv1,a3,a0', '8:\tsltu\tt6,v1,a0', 'c:\taddu\tv0,a2,v0', '10:\tjr\tra', '14:\taddu\tv0,v0,t6']),
+      lift([
+        '0:\tsra\tv0,a0,0x1f',
+        '4:\taddu\tv1,a3,a0',
+        '8:\tsltu\tt6,v1,a0',
+        'c:\taddu\tv0,a2,v0',
+        '10:\tjr\tra',
+        '14:\taddu\tv0,v0,t6',
+      ]),
     ).toThrow(WIDE);
   });
 
   test('a copy whose source still holds it where it is read: `*p = x; return x`', () => {
-    expect(lift(['0:\tmove\tv0,a2', '4:\tmove\tv1,a3', '8:\tsw\tv0,0(a0)', 'c:\tjr\tra', '10:\tsw\tv1,4(a0)'])).toThrow(WIDE);
+    expect(lift(['0:\tmove\tv0,a2', '4:\tmove\tv1,a3', '8:\tsw\tv0,0(a0)', 'c:\tjr\tra', '10:\tsw\tv1,4(a0)'])).toThrow(
+      WIDE,
+    );
   });
 
   test('a declaration of a 64-bit return does not clear it', () => {
@@ -66,7 +75,15 @@ describe('a v1 written as scratch lifts', () => {
   test('a bound check compares the sum against something else', () => {
     // `char *q = p + n; if (q > end) return 0; return q;` shape: linearAlloc at gcc2.7.2kmc
     expect(
-      lift(['0:\taddu\tv1,a0,a1', '4:\tsltu\tv0,a2,v1', '8:\tbnez\tv0,14 <f+0x14>', 'c:\tmove\tv0,zero', '10:\tmove\tv0,v1', '14:\tjr\tra', '18:\tnop']),
+      lift([
+        '0:\taddu\tv1,a0,a1',
+        '4:\tsltu\tv0,a2,v1',
+        '8:\tbnez\tv0,14 <f+0x14>',
+        'c:\tmove\tv0,zero',
+        '10:\tmove\tv0,v1',
+        '14:\tjr\tra',
+        '18:\tnop',
+      ]),
     ).not.toThrow();
   });
 
