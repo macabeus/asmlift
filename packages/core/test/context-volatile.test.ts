@@ -84,6 +84,22 @@ describe('a context-declared volatile aggregate the map does not describe', () =
     expect(src).not.toContain('volatile');
   });
 
+  test('an array subscripted through its own name keeps it: the declaration already qualifies the element', () => {
+    // agbcc -O2 of `void vidxp(int i){ while (gVA[i] == 0); }` over `extern volatile u16 gVA[8];`.
+    // The printer spells the subscript through the name, and the qualifier the stamp would put on a
+    // cast there is a spelling agbcc compiles differently (the ranked best went MATCH -> 2).
+    const VIDXP =
+      'vidxp:\n\tldr\tr1, .L7\n\tlsl\tr0, r0, #0x1\n\tadd\tr1, r0, r1\n.L3:\n\tldrh\tr0, [r1]\n\tcmp\tr0, #0\n' +
+      '\tbeq\t.L3\n\tbx\tlr\n.L7:\n\t.word\tgVA\n';
+    const ctx = globalsFromContext('typedef unsigned short u16; extern volatile u16 gVA[8];', 'c');
+    const opts = { prototypes: { vidxp: { params: ['s32' as const], returnsVoid: true } }, contextGlobals: ctx };
+    const lifted = liftStamped('vidxp', VIDXP, ARMV4T_AGBCC, opts.prototypes, undefined, undefined, ctx);
+    expect(lifted.blocks.flatMap((b) => b.ops).some((op) => op.attrs[DECLARED_VOLATILE] === true)).toBe(true);
+    const src = decompile('vidxp', VIDXP, ARMV4T_AGBCC, opts).source;
+    expect(src).toContain('while (gVA[a0] == 0)');
+    expect(src).not.toContain('(volatile u16 *)');
+  });
+
   test('every ranked candidate keeps the qualifier, with the map and in the raw-globals setting', () => {
     // a map that knows another name, so the raw-globals setting is enumerated
     const map: SymbolMap = new Map([[0x3000000, [{ name: 'gOther', kind: 'data', shape: 'scalar', size: 1 }]]]);

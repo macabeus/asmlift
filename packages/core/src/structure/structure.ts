@@ -3946,12 +3946,21 @@ export function structure(
   // hoist. It carries it where ir/discipline.ts `qualifiedBy` says: on its cast, or through the
   // object's declaration and on its cast where it reaches the object through one, since a cast's
   // pointee drops the declaration's qualifiers.
+  //
+  // Whether a cast stands between the access and the object is the PRINTER's question
+  // (backend/cfamily.ts `legalizedIndexBase`), so it is asked of the env the printer judges by:
+  // the declared variables over the globals this structuring typed for the tree (`SFn.globals`,
+  // l3/typing.ts `declaredTypes`). Asked of the variables alone, a global subscript the printer
+  // spells through its own name (`gVA[i]`, already volatile by its declaration) reads as one it
+  // casts, and the qualified cast agbcc compiles differently is put on a name that needed none.
+  const printedType = (n: string): IrType | undefined => varType.get(n) ?? shapedGlobalTypes.get(n);
+  const printedCType = (e0: Expr): IrType | undefined => exprCType(e0, printedType);
   const pinnedAccess = (op: Op, access: Expr): Expr => {
     const by = qualifiedBy(op);
-    if (by === null || (by === 'declaration' && !castOffDeclaration(access, ctype))) {
+    if (by === null || (by === 'declaration' && !castOffDeclaration(access, printedCType))) {
       return access;
     }
-    const q = qualifiedMemoryAccess(access, ctype);
+    const q = qualifiedMemoryAccess(access, printedCType);
     if (q === null) {
       throw new StructureError(
         `cannot structure '${fn.name}': a ${placedAt(op)} ${op.opcode} that must stay volatile is reached through a ` +
