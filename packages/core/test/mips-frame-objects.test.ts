@@ -131,6 +131,30 @@ describe('a captured local lifts as one object in the local area', () => {
     expect(gcc).toMatch(/return p0\[a0\];/);
   });
 
+  test('an access before the push is placed by its depth, not its raw offset', () => {
+    // `lw t6,16(sp)` before `addiu sp,sp,-24` is the fifth argument (entry + 16), not the word at
+    // post-push sp+16 inside the local area; the store at 0(sp) after the push is the local.
+    const out = src(
+      [
+        '0:\tlw\tt6,16(sp)',
+        '4:\taddiu\tsp,sp,-24',
+        '8:\tsw\tt6,0(sp)',
+        'c:\tsw\ta0,4(sp)',
+        '10:\tsw\ta0,8(sp)',
+        '14:\tsw\ta0,12(sp)',
+        '18:\tsll\tt7,a1,0x2',
+        '1c:\taddu\tv0,sp,t7',
+        '20:\tlw\tv0,0(v0)',
+        '24:\tjr\tra',
+        '28:\taddiu\tsp,sp,24',
+      ],
+      [],
+      MIPS_IDO,
+    );
+    expect(out).toMatch(/^s32 f\(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4\)/);
+    expect(out).toContain('*p0 = a4;');
+  });
+
   test('a byte and a halfword member beside each other are one object', () => {
     // `short h[2]; h[0] = x; h[1] = x + 1; k(h); return h[1];` at gcc2.7.2kmc
     const out = src(

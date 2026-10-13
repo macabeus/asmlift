@@ -1061,7 +1061,15 @@ function liftOnce(
   /** Whether `off(sp)` at `ins` is an access inside the local area, refusing one that straddles its
    *  edge: half memory and half slot is neither. */
   const inLocalArea = (ins: Instr, off: number, width: number): boolean => {
-    if (frame === null || off >= frame.area.to || off + width <= frame.area.from) {
+    // The area is in post-push offsets, and `off` is the access's own: before the push (IDO's
+    // leaves load first) or after the pop it names the byte `size - depth` higher, so an incoming
+    // stack word read at entry as `lw t6,16(sp)` is not the local a later `0(sp)` stores, whatever
+    // the raw numbers say. `measureO32Frame` refuses an access at another depth whose TRUE position
+    // lies in the area, so one at another depth is never in it.
+    if (frame === null || depthAt?.get(ins) !== frame.size) {
+      return false;
+    }
+    if (off >= frame.area.to || off + width <= frame.area.from) {
       return false;
     }
     if (off < frame.area.from || off + width > frame.area.to) {
