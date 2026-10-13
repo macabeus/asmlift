@@ -407,6 +407,19 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
  *  `N+4(r1)` after it (`r1Displacements`). */
 const LR_SAVE_WORD = 4;
 
+/** The register file and first register a `bl` to one of CodeWarrior's out-of-line register save
+ *  or restore routines moves, read off the routine's name in the call's `R_PPC_REL24`, or null for
+ *  any other `bl`. `_savegpr_NN` stores rNN..r31 into the 4*(32-NN) bytes just below r11, and
+ *  `_savefpr_NN` stores fNN..f31 into the 8*(32-NN) bytes below it; `_restgpr_NN`/`_restfpr_NN`
+ *  load the same ranges back. They write no register but the link register, and the frame address
+ *  in r11 is the only thing they read (mwcc 2.4.x at every level, 2.3.3 at `-O0`/`-O4,s`). The
+ *  name is the runtime's, so a number outside r14..r31 is not one of them and refuses at the call. */
+const saveRoutineOf = (ins: Instr): { sym: string; restore: boolean; fpr: boolean; first: number } | null => {
+  const m =
+    ins.mnemonic === 'bl' && ins.reloc?.type === 'R_PPC_REL24' && /^_(save|rest)(gpr|fpr)_(\d+)$/.exec(ins.reloc.sym);
+  return m ? { sym: m[0], restore: m[1] === 'rest', fpr: m[2] === 'fpr', first: Number(m[3]) } : null;
+};
+
 /** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
  *  (0 before the frame push, -N after `stwu r1,-N(r1)`), or why it is not known there.
  *
@@ -622,7 +635,28 @@ export function lift(
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
-  const readReg = (r: string, at: number): Value => highHalves.guardRead(name, r, readVar(r, at));
+  const readReg = (r: string, at: number): Value => {
+    const v = highHalves.guardRead(name, r, readVar(r, at));
+    if (frameAddresses.has(v)) {
+      throw r1AsData();
+    }
+    return v;
+  };
+  /** Reading r1 (the stack pointer) as a DATA operand means frame-pointer arithmetic or an
+   *  address-taken local (`addi r3,r1,8` = `&local`) — not modellable without a stack abstraction,
+   *  and fabricating a value for r1 silently miscompiles. */
+  const r1AsData = () =>
+    new PpcUnsupportedError(
+      `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
+    );
+  /** The FRAME ADDRESS `addi r11,r1,N` forms, per value standing for one: its offset from the entry
+   *  r1 (or why that is not known there) and the address of the `addi`. Like a return address it is
+   *  a definition and not a value. Its one consumer is a register save or restore routine
+   *  (`saveRoutineOf`), which takes it in r11, so r11 is the only destination deferred; every other
+   *  `addi rD,r1,N` refuses where it stands. Any other use of it is the frame read as data, and
+   *  refuses as the `addi` itself would: at a read, or once the function is built for a use that
+   *  reaches through a join. */
+  const frameAddresses = new Map<Value, { off: number | string; addr: number }>();
   /** The return address `mflr rD` copies out of the link register, per value standing for one, with
    *  the address of the `mflr`. Like a high half it is a definition and not a value: storing it to
    *  the link register's save word is the LR save (`frameStore`), and moving it back with `mtlr` is
@@ -711,15 +745,11 @@ export function lift(
     // `lastDef` is the value most recently written to a register in this instruction — used to
     // wire a record-form op's implicit cr0 side effect (see the `rc` handling in `decode`).
     let lastDef: Value | null = null;
-    // Reading r1 (the stack pointer) as a DATA operand means frame-pointer arithmetic or an
-    // address-taken local (`addi r3,r1,8` = `&local`) — not modellable without a stack abstraction,
-    // and fabricating a value for r1 silently miscompiles. Fail LOUD. (Frame bookkeeping never
-    // reaches here: stwu / addi r1 / mflr / mtlr / r1-relative spills are handled before `read`.)
+    // r1 read as data fails LOUD (`r1AsData`). Frame bookkeeping never reaches here: stwu / addi r1
+    // / mflr / mtlr / r1-relative spills / the save routines' frame address are handled before `read`.
     const read = (r: string): Value => {
       if (r === 'r1') {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
-        );
+        throw r1AsData();
       }
       return readReg(r, bi);
     };
@@ -1022,6 +1052,13 @@ export function lift(
         // and it has a reaching definition all the same.
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
+          const routine = saveRoutineOf(ins);
+          if (routine) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': the 'bl' at 0x${ins.addr.toString(16)} enters the register save routine ` +
+                `'${routine.sym}' — not modelled`,
+            );
+          }
           const sym = ins.reloc?.sym ?? 'func';
           calls.lower({
             callee: sym,
@@ -1209,6 +1246,16 @@ export function lift(
                   `adjust — an address built in r1 is not a shape this frontend models`,
               );
             }
+            break;
+          }
+          if (mnem === 'addi' && d === 'r11' && s === 'r1' && !ins.reloc) {
+            const v = mkValue(T.unk(32));
+            const depth = r1At.get(ins);
+            frameAddresses.set(v, {
+              off: typeof depth === 'number' ? depth + parseImm(t) : (depth ?? 'the instruction is unreachable'),
+              addr: ins.addr,
+            });
+            write(d, v);
             break;
           }
           // `addi rD,rHi,SYM@l` completes the address a `lis` began: rD = &SYM (+ the relocation's
@@ -1665,10 +1712,15 @@ export function lift(
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
   // Checked on the finished function, after `finish` pruned the joins nothing reads, because a
-  // return address reaches a use through a join's incoming arguments as well as directly.
+  // return address or a frame address reaches a use through a join's incoming arguments as well as
+  // directly.
   for (const b of irBlocks) {
     for (const op of b.ops) {
-      const lr = [...op.operands, ...op.successors.flatMap((s) => s.args)].find((v) => returnAddresses.has(v));
+      const used = [...op.operands, ...op.successors.flatMap((s) => s.args)];
+      if (used.some((v) => frameAddresses.has(v))) {
+        throw r1AsData();
+      }
+      const lr = used.find((v) => returnAddresses.has(v));
       if (lr !== undefined) {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': the return address the 'mflr' at 0x${returnAddresses.get(lr)!.toString(16)} ` +

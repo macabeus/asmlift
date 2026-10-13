@@ -273,6 +273,24 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // `addi r3,r1,8` = `&local` — reading the stack pointer as data (silently `return a0 + 8;` otherwise).
     expect(() => dis('addrtaken', '0:\taddi    r3,r1,8\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
   });
+  test('the frame address `addi r11,r1,N` forms is no value: any use of it still refuses', () => {
+    // r11 is deferred for mwcc's register save routines, which take it there. Read directly, as a
+    // memory base, or through a join, it is the frame read as data.
+    const asData = /stack pointer r1 used as data/;
+    expect(() => dis('fa', '0:\taddi    r11,r1,8\n4:\tmr      r3,r11\n8:\tblr\n')).toThrow(asData);
+    expect(() => dis('fabase', '0:\taddi    r11,r1,8\n4:\tlwz     r3,0(r11)\n8:\tblr\n')).toThrow(asData);
+    const join =
+      '0:\taddi    r11,r1,8\n4:\tcmpwi   r4,0\n8:\tbeq-    10 <faj+0x10>\nc:\tmr      r11,r3\n' +
+      '10:\tlwz     r3,0(r11)\n14:\tblr\n';
+    expect(() => dis('faj', join)).toThrow(asData);
+    // A `bl` into a save routine is not a call to lift with a guessed arity.
+    const save = '0:\taddi    r11,r1,8\n4:\tbl      4 <fasave+0x4>\n\t\t\t4: R_PPC_REL24\t_savegpr_30\n8:\tblr\n';
+    expect(() => dis('fasave', save)).toThrow(/enters the register save routine '_savegpr_30'/);
+    // Nothing reads it: a dead address, which no C names either.
+    expect(dis('fadead', '0:\taddi    r11,r1,8\n4:\tli      r3,0\n8:\tblr\n')).toBe(
+      's32 fadead(void) {\n    return 0;\n}\n',
+    );
+  });
   test('REGISTER-INDEXED frame access (`lwzx rD,r1,rB`) fails loud — r1 in either operand', () => {
     // PPC is asmlift's only frontend with a register-indexed addressing mode, so this is the exact
     // structural analogue of the case that broke m2c's stack-frame model (`ldr rX, [sp, rY]`,
