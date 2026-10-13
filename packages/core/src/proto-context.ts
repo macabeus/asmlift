@@ -74,22 +74,118 @@ export function prototypesFromContext(src: string, language: Language): Prototyp
  *  error, and over `extern u8 gBuf[];` it reads the address. A project whose symbol map does not
  *  describe a global (one its linker script places has no DWARF) states it here, so the structurer
  *  reads this set where it would read the map's `shape`. A type this cannot resolve — an unexpanded
- *  macro, a typedef of an array — is left out, which keeps the usage-inferred spelling. */
+ *  macro, a typedef of an array — is left out, which keeps the usage-inferred spelling.
+ *
+ *  AN OBJECT WITH VOLATILE STORAGE IS LEFT OUT too (`hasVolatileStorage`): the structurer spells it
+ *  `*(T *)&g`, and that cast drops the qualifier, so the compiler may merge the reads or hoist one
+ *  out of a polling loop (`while (gV.a == 0);` becomes one load and an endless loop). The volatility
+ *  the lift prints comes from the symbol map alone (raise/declared-volatile.ts); left out, such an
+ *  object keeps the bare spelling, which the header refuses for a struct. */
 export function aggregateObjectsFromContext(src: string, language: Language): Set<string> {
   const ctx = parseDeclarations(src, language);
   const table = typeTable(ctx);
+  const bodies = tagBodies(ctx);
   const out = new Set<string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
     }
     for (const x of d.declarators) {
-      if (x.name !== undefined && WORD.test(x.name) && isAggregate(declaredType(d.specifiers, x.derivations), table)) {
+      const t = declaredType(d.specifiers, x.derivations);
+      if (
+        x.name !== undefined &&
+        WORD.test(x.name) &&
+        isAggregate(t, table) &&
+        !hasVolatileStorage(t, table, bodies, ctx, 0)
+      ) {
         out.add(x.name);
       }
     }
   }
   return out;
+}
+
+/** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare
+ *  tag, as C++ spells one), attributed or not, at the top level and nested in another body. */
+function tagBodies(ctx: ParsedContext): Map<string, Range> {
+  const out = new Map<string, Range>();
+  const visit = (ds: readonly Declaration[], depth: number): void => {
+    for (const d of ds) {
+      const t = d.specifiers.type;
+      if (t.kind !== 'tag' || t.keyword === 'enum' || t.body === undefined) {
+        continue;
+      }
+      if (t.tag !== undefined && WORD.test(t.tag)) {
+        out.set(`${t.keyword} ${t.tag}`, t.body);
+        if (ctx.language === 'c++') {
+          out.set(t.tag, t.body);
+        }
+      }
+      const members = depth < 8 ? memberDeclarations(ctx, t.body) : undefined;
+      if (members !== undefined) {
+        visit(members, depth + 1);
+      }
+    }
+  };
+  visit(ctx.declarations, 0);
+  return out;
+}
+
+/** Whether any byte of an object of type `t` is volatile: the type or an array's element is
+ *  qualified, through the typedef names it is built on, or a struct or union in it has such a member.
+ *  A pointer ends the walk at its own qualifiers, since what it points at is no byte of the object.
+ *  A body that cannot be read, or a type nested past the bound, is read as volatile: leaving the
+ *  object out only keeps the earlier spelling. A tag with no body here has no member to qualify. */
+function hasVolatileStorage(
+  t: DeclaredType,
+  table: TypeTable,
+  bodies: ReadonlyMap<string, Range>,
+  ctx: ParsedContext,
+  depth: number,
+): boolean {
+  if (depth > 16) {
+    return true;
+  }
+  for (const x of t.derivations) {
+    if (x.kind === 'pointer') {
+      return x.qualifiers.includes('volatile');
+    }
+    if (x.kind !== 'array') {
+      return false;
+    }
+  }
+  if (t.qualifiers.includes('volatile')) {
+    return true;
+  }
+  let body: Range | undefined;
+  if (t.type.kind === 'tag') {
+    if (t.type.keyword === 'enum') {
+      return false;
+    }
+    body = t.type.body ?? (t.type.tag !== undefined ? bodies.get(`${t.type.keyword} ${t.type.tag}`) : undefined);
+  } else if (t.type.words.length === 1) {
+    const name = t.type.words[0];
+    const next = table.typedefs.get(name);
+    if (next !== undefined) {
+      const resolves = next.type.kind === 'words' && next.type.words.length === 1 && next.type.words[0] === name;
+      return !resolves && hasVolatileStorage(next, table, bodies, ctx, depth + 1);
+    }
+    body = table.named.get(name)?.body ?? bodies.get(name);
+  }
+  if (body === undefined) {
+    return false;
+  }
+  const members = memberDeclarations(ctx, body);
+  if (members === undefined) {
+    return true;
+  }
+  return members.some((m) =>
+    m.declarators.length === 0
+      ? hasVolatileStorage(declaredType(m.specifiers, []), table, bodies, ctx, depth + 1)
+      : m.declarators.some((x) =>
+          hasVolatileStorage(declaredType(m.specifiers, x.derivations), table, bodies, ctx, depth + 1),
+        ),
+  );
 }
 
 /** Whether `t` is a struct, union, class or array type, through the typedef names it is built on. */

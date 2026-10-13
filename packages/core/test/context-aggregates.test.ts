@@ -62,6 +62,81 @@ u8 gArrFn(void);
   });
 });
 
+describe('an aggregate object with volatile storage is left out', () => {
+  // `*(T *)&g` drops the qualifier, so the compiler may merge the reads or hoist one out of a
+  // polling loop: left out, the object keeps the bare spelling, which the header refuses for a struct
+  const ctx = `
+typedef unsigned char u8;
+typedef unsigned short u16;
+struct V { u16 a; u16 b; };
+struct V2 { volatile u16 a; u16 b; };
+struct Outer { struct V2 in; u16 c; };
+struct Later;
+struct Anon { struct { volatile u8 x; } s; u8 y; };
+struct Nested { struct NestedIn { volatile u8 x; } in; };
+struct PtrMember { volatile u8 *p; u8 *volatile q; };
+struct PtrOnly { volatile u8 *p; };
+typedef volatile struct V VV;
+typedef VV VVAlias;
+typedef volatile u16 VU16;
+typedef u8 *volatile VPtr;
+typedef volatile u8 *PtrToV;
+union VU { volatile u16 h; u8 b; };
+extern volatile struct V gV;
+extern struct V volatile gVPost;
+extern struct V2 gV2;
+extern struct Outer gOuter;
+extern VV gVV;
+extern VVAlias gVVAlias;
+extern volatile u16 gVArr[4];
+extern VU16 gVTArr[4];
+extern volatile struct V gVStructArr[2];
+extern struct Anon gAnon;
+extern struct NestedIn gNestedIn;
+extern struct PtrMember gPtrMember;
+extern VPtr gVPtrs[4];
+extern u8 *volatile gVPtrs2[4];
+extern union VU gVU;
+extern struct V gPlain;
+extern struct PtrOnly gPtrOnly;
+extern volatile u8 *gPtrsToV[4];
+extern PtrToV gPtrsToV2[4];
+extern const struct V gConst;
+extern struct Later gLater;
+`;
+  const found = aggregateObjectsFromContext(ctx, 'c');
+
+  test('a volatile object, member, typedef, element or nested member is not an aggregate here', () => {
+    for (const n of [
+      'gV',
+      'gVPost',
+      'gV2',
+      'gOuter',
+      'gVV',
+      'gVVAlias',
+      'gVArr',
+      'gVTArr',
+      'gVStructArr',
+      'gAnon',
+      'gNestedIn',
+      'gPtrMember',
+      'gVPtrs',
+      'gVPtrs2',
+      'gVU',
+    ]) {
+      expect(found.has(n), n).toBe(false);
+    }
+  });
+
+  test('a pointer to volatile is no volatile byte of the object, and const is no volatile', () => {
+    expect([...found].sort()).toEqual(['gConst', 'gLater', 'gPlain', 'gPtrOnly', 'gPtrsToV', 'gPtrsToV2'].sort());
+  });
+
+  test('a C++ class with a volatile member is left out', () => {
+    expect([...aggregateObjectsFromContext('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
+  });
+});
+
 /** `ldrb` of a pool-addressed global at offset 0, and nothing else: the bare spelling's only reader */
 const READ = 'f:\n\tldr\tr0, .L1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgInfo\n';
 const STORE = 'f:\n\tldr\tr1, .L1\n\tstrb\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgInfo\n';
