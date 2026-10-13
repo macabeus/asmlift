@@ -66,6 +66,28 @@ export interface FrameObjectRelift {
   readonly oneObject: FrameRange;
 }
 
+/** THE RELIFT PROTOCOL, AT MOST TWICE, the one copy every frontend that runs the audit calls: lift,
+ *  and where the audit answers with bytes to keep as one object (`FrameObjectRelift`), lift once
+ *  more with them routed through an `laddr`. The second audit judges them as one object and refuses
+ *  rather than asking again, so a second request is an internal error, not a third lift. */
+export function liftWithRelift<F>(
+  name: string,
+  liftOnce: (oneObject: FrameRange | undefined) => F | FrameObjectRelift,
+): F {
+  const first = liftOnce(undefined);
+  if (!isRelift(first)) {
+    return first;
+  }
+  const again = liftOnce(first.oneObject);
+  if (isRelift(again)) {
+    throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
+  }
+  return again;
+}
+
+const isRelift = <F>(x: F | FrameObjectRelift): x is FrameObjectRelift =>
+  typeof x === 'object' && x !== null && 'oneObject' in x;
+
 /** What an audit answers: lift again (`FrameObjectRelift`), the device pin the accepted function
  *  owes (`DevicePins`, applied by `pinDeviceAccesses`), or nothing, when no frame address was
  *  taken. */

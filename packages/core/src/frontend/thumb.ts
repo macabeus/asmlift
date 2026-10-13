@@ -31,7 +31,13 @@ import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
-import { FRAME_OBJECT_AUDIT, type FrameObjectAudit, type FrameObjectRelift, type FrameRange } from './frame-objects';
+import {
+  FRAME_OBJECT_AUDIT,
+  type FrameObjectAudit,
+  type FrameObjectRelift,
+  type FrameRange,
+  liftWithRelift,
+} from './frame-objects';
 import type { Frontend } from './frontend';
 import {
   type LocalStatics,
@@ -2411,15 +2417,7 @@ export function lift(
   asmData?: AsmData,
   symbols?: SymbolMap,
 ): Fn {
-  const first = liftOnce(name, asm, target, prototypes, asmData, symbols, undefined);
-  if (!('oneObject' in first)) {
-    return first;
-  }
-  const again = liftOnce(name, asm, target, prototypes, asmData, symbols, first.oneObject);
-  if ('oneObject' in again) {
-    throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
-  }
-  return again;
+  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, symbols, oneObject));
 }
 
 /** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: every stage before the fill (`thumbFillOf`: the
