@@ -143,7 +143,7 @@ export interface SsaBuilder {
 /** `preds` is per-EDGE (see the module header): one entry per CFG edge into each block. */
 // VARIABLE NAMES ARE NOT ALWAYS MACHINE REGISTERS. `readVar`/`writeVar` key on an arbitrary string,
 // and frontends mint VIRTUAL keys for storage the ISA has no register for — MIPS `sp@<off>` for a
-// stack slot (frontend/mips.ts), Thumb `@sarg<k>` for an incoming stack argument (frontend/thumb.ts).
+// stack slot (frontend/mips.ts), `@sarg<k>` for an incoming stack argument (`stackArgKey`).
 // A virtual key must be outside its ISA's register grammar so it cannot collide with a real one, and
 // a key read with no reaching def becomes a function PARAMETER by the live-in path below — which is
 // how both of those capabilities get their parameters without a new opcode or pass.
@@ -1656,6 +1656,19 @@ export const stackSlotKey = (off: number): string => `${SLOT_PREFIX}${off}`;
  *  coordinate, so the classification rule can be generic. */
 export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
+
+/** The virtual key of incoming stack argument `index` (its ABI argument rank, the registers
+ *  counted), which the Thumb and MIPS frontends read an incoming stack word through. Reading it goes
+ *  through the ordinary Braun live-in path, which turns a read with no reaching def into a function
+ *  parameter — so it needs NO new representation, opcode or pass. The `@` cannot appear in a real
+ *  register token, so the key cannot collide with one. */
+export const stackArgKey = (index: number): string => `@sarg${index}`;
+/** The argument rank a {@link stackArgKey} names, or null for any other key. Defined beside its mint
+ *  site on purpose: the format string and its parser once drifted 650 lines apart. */
+export const stackArgIndex = (key: string): number | null => {
+  const m = /^@sarg(\d+)$/.exec(key);
+  return m ? +m[1] : null;
+};
 
 /** Where a live-in of the entry block sits in the calling convention: `slotOf` gives its ABI
  *  argument rank (a register or an incoming stack word), or null for a live-in no argument arrives

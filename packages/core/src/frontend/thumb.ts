@@ -48,6 +48,8 @@ import {
   abiSortEntryParams,
   makeSsaBuilder,
   mintArgSlotHoles,
+  stackArgIndex,
+  stackArgKey,
   stackSlotKey,
 } from './ssa';
 import { type OutgoingArgs, type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
@@ -634,18 +636,6 @@ const isFrameAdjust = (
   isSpReg(dest) &&
   (base === undefined || isSpReg(base)) &&
   (off?.startsWith('#') ?? false);
-
-// A virtual register key per incoming stack argument. Reading it goes through the ordinary Braun
-// live-in path (frontend/ssa.ts), which turns a read with no reaching def into a function
-// parameter — so this needs NO new representation, opcode or pass. The `@` cannot appear in a
-// real register token, so the key cannot collide with one.
-const stackArgKey = (index: number) => `@sarg${index}`;
-// Defined beside its mint site on purpose: the format string and its parser drifted 650 lines
-// apart in the first version, with the convention explained only at one end.
-const stackArgIndex = (key: string): number | null => {
-  const m = /^@sarg(\d+)$/.exec(key);
-  return m ? +m[1] : null;
-};
 
 // INCOMING STACK ARGUMENTS (AAPCS). Args 1-4 arrive in r0-r3; args 5+ are pushed by the CALLER,
 // so the callee reads them at `[sp, #N]` where N is at or above its own frame. Those are
