@@ -665,6 +665,11 @@ export function lift(
    *  refuses as the `addi` itself would: at a read, or once the function is built for a use that
    *  reaches through a join. */
   const frameAddresses = new Map<Value, { off: number | string; addr: number }>();
+  /** The frame addresses a recognised save or restore routine took. One no routine took is the
+   *  stack pointer read as data even where nothing reads it: a `bl` to the routine that carries no
+   *  relocation (a linked image, or objdump without `-r`) is lowered as an ordinary call, which
+   *  never reads r11 and destroys the registers the routine preserves. */
+  const consumedFrames = new Set<Value>();
   /** The caller's value a restore routine puts back in a callee-saved register, per value standing
    *  for one (`saveRoutine`). No C value names it, so any use refuses. */
   const restoredRegs = new Map<Value, { reg: string; addr: number }>();
@@ -860,7 +865,8 @@ export function lift(
     // destroyed and r0 keeps the return address `mflr` put there. A SAVE records a save slot per
     // word, at the routine's fixed offsets below the frame address in r11; a RESTORE must find the
     // same register in every word it reloads. It refuses where:
-    //   • r11 does not hold one frame address on every path into the call;
+    //   • r11 does not hold one frame address on every path into the call (and a frame address no
+    //     routine takes refuses at the end of `lift`);
     //   • r1's displacement at the `addi` is not known, so no slot can be named;
     //   • the routine's number is outside r14..r31 (no such runtime routine);
     //   • a register it saves was written first — the word would hold a value, not the caller's;
@@ -880,6 +886,7 @@ export function lift(
           `cannot lift '${name}': ${at} does not find one frame address ('addi ${fr},r1,N') in ${fr} on every path`,
         );
       }
+      consumedFrames.add(base!);
       if (typeof frame.off !== 'number') {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': ${at} saves below the frame address formed at 0x${frame.addr.toString(16)}, where ` +
@@ -1805,6 +1812,10 @@ export function lift(
         );
       }
     }
+  }
+
+  if ([...frameAddresses.keys()].some((v) => !consumedFrames.has(v))) {
+    r1AsData();
   }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);

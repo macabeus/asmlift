@@ -283,10 +283,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '0:\taddi    r11,r1,8\n4:\tcmpwi   r4,0\n8:\tbeq-    10 <faj+0x10>\nc:\tmr      r11,r3\n' +
       '10:\tlwz     r3,0(r11)\n14:\tblr\n';
     expect(() => dis('faj', join)).toThrow(asData);
-    // Nothing reads it: a dead address, which no C names either.
-    expect(dis('fadead', '0:\taddi    r11,r1,8\n4:\tli      r3,0\n8:\tblr\n')).toBe(
-      's32 fadead(void) {\n    return 0;\n}\n',
-    );
+    // Nothing takes it: only a save routine may, so a dead one refuses too, as the `addi` always did.
+    expect(() => dis('fadead', '0:\taddi    r11,r1,8\n4:\tli      r3,0\n8:\tblr\n')).toThrow(asData);
   });
   // mwcc 2.4.x's out-of-line register saves: `addi r11,r1,N; bl _savegpr_NN` stores rNN..r31 into
   // the words just below r11, and `_restgpr_NN` reloads them. The `addi` need not sit next to the `bl`.
@@ -309,6 +307,25 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       expect(fn('gs', 'add     r31,r3,r4', 'addi    r11,r1,32', 'mr      r3,r31', bl('_restgpr_30'))).toBe(
         's32 gs(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
       );
+    });
+    test('a routine call with no relocation is no routine, and its frame address refuses', () => {
+      // A linked image, or objdump without `-r`: `bl <_savegpr_NN>` names its target only in the
+      // text, so it is lowered as an ordinary call that destroys r3..r12 and never reads r11. Lifted
+      // that way, the routine's "return value" would stand for the argument it preserves.
+      const bare = (sym: string) => `bl      200 <${sym}>`;
+      const asm = lines(
+        'stwu    r1,-32(r1)',
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'addi    r11,r1,32',
+        bare('_savegpr_30'),
+        'mr      r31,r3',
+        'mr      r3,r31',
+        'addi    r11,r1,32',
+        bare('_restgpr_30'),
+        ...EPI,
+      );
+      expect(() => dis('bare', asm)).toThrow(/stack pointer r1 used as data/);
     });
     test('the routine preserves r0: the return address `mflr` left there is still read as one', () => {
       // synthetic uninit_spill: a path that reads r0 with nothing else written reads the return
