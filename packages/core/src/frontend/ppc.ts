@@ -593,7 +593,8 @@ export function lift(
   // handed to one in f1 — would resolve to a value the callee overwrote or be dropped. Both scans
   // read the blocks the entry reaches: a `bl` on no path makes no call.
   const reached = blocks.flatMap((b) => b.body);
-  const callInsn = reached.find((ins) => ins.mnemonic === 'bl');
+  // A register save routine is no call: it moves only the registers it saves (`saveRoutine`).
+  const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(ins));
   const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
@@ -640,7 +641,17 @@ export function lift(
     if (frameAddresses.has(v)) {
       throw r1AsData();
     }
+    if (restoredRegs.has(v)) {
+      throw restoredRead(v);
+    }
     return v;
+  };
+  const restoredRead = (v: Value) => {
+    const { reg, addr } = restoredRegs.get(v)!;
+    return new PpcUnsupportedError(
+      `cannot lift '${name}': ${reg} is read after the restore routine at 0x${addr.toString(16)} put the ` +
+        `caller's ${reg} back — no C value names it`,
+    );
   };
   /** Reading r1 (the stack pointer) as a DATA operand means frame-pointer arithmetic or an
    *  address-taken local (`addi r3,r1,8` = `&local`) — not modellable without a stack abstraction,
@@ -657,6 +668,9 @@ export function lift(
    *  refuses as the `addi` itself would: at a read, or once the function is built for a use that
    *  reaches through a join. */
   const frameAddresses = new Map<Value, { off: number | string; addr: number }>();
+  /** The caller's value a restore routine puts back in a callee-saved register, per value standing
+   *  for one (`saveRoutine`). No C value names it, so any use refuses. */
+  const restoredRegs = new Map<Value, { reg: string; addr: number }>();
   /** The return address `mflr rD` copies out of the link register, per value standing for one, with
    *  the address of the `mflr`. Like a high half it is a definition and not a value: storing it to
    *  the link register's save word is the LR save (`frameStore`), and moving it back with `mtlr` is
@@ -843,6 +857,69 @@ export function lift(
     const write = (r: string, v: Value) => {
       writeVar(r, bi, v);
       lastDef = v;
+    };
+    // A `bl` into a register save or restore routine is frame bookkeeping, not a call: it writes no
+    // register this function reads (only the link register, already saved), so nothing is
+    // destroyed and r0 keeps the return address `mflr` put there. A SAVE records a save slot per
+    // word, at the routine's fixed offsets below the frame address in r11; a RESTORE must find the
+    // same register in every word it reloads. It refuses where:
+    //   • r11 does not hold one frame address on every path into the call;
+    //   • r1's displacement at the `addi` is not known, so no slot can be named;
+    //   • the routine's number is outside r14..r31 (no such runtime routine);
+    //   • a register it saves was written first — the word would hold a value, not the caller's;
+    //   • a word it restores was not saved from that register (`a slot rN was saved into`).
+    // A restored register holds the caller's value again, which no C value names, so a read of it
+    // afterwards refuses (`restoredRegs`).
+    const saveRoutine = (ins: Instr, r: NonNullable<ReturnType<typeof saveRoutineOf>>) => {
+      const at = `the 'bl' to '${r.sym}' at 0x${ins.addr.toString(16)}`;
+      if (r.first < 14 || r.first > 31 || ins.reloc!.addend !== 0) {
+        throw new PpcUnsupportedError(`cannot lift '${name}': ${at} names no register save routine of the runtime`);
+      }
+      const base = ssa.hasReachingDef('r11', bi, (v) => !frameAddresses.has(v)) ? undefined : readVar('r11', bi);
+      const frame = base === undefined ? undefined : frameAddresses.get(base);
+      if (frame === undefined) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${at} does not find one frame address ('addi r11,r1,N') in r11 on every path`,
+        );
+      }
+      if (typeof frame.off !== 'number') {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${at} saves below the frame address formed at 0x${frame.addr.toString(16)}, where ` +
+            `the stack pointer's offset from its entry value is not known: ${frame.off}`,
+        );
+      }
+      const width = r.fpr ? 8 : 4;
+      for (let k = r.first; k <= 31; k++) {
+        const reg = `${r.fpr ? 'f' : 'r'}${k}`;
+        const disp = -width * (32 - k);
+        const mem = `${disp}(r11)`;
+        const words = r.fpr ? [frame.off + disp, frame.off + disp + 4] : [frame.off + disp];
+        if (!r.restore) {
+          if (ssa.hasReachingDef(reg, bi)) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': ${at} saves ${reg} after this function wrote it, so '${mem}' holds a value, ` +
+                `not the caller's ${reg}`,
+            );
+          }
+          for (const w of words) {
+            refuseMixedSlot(ins, mem, w, 'save');
+            saveSlots.set(w, reg);
+          }
+          continue;
+        }
+        for (const w of words) {
+          const saved = saveSlots.get(w);
+          if (saved !== reg) {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': ${at} reloads ${reg} out of '${mem}', ` +
+                `${saved === undefined ? 'a word no save routine or store saved it into' : `a slot ${saved} was saved into`}`,
+            );
+          }
+        }
+        const caller = mkValue(T.unk(32));
+        restoredRegs.set(caller, { reg, addr: ins.addr });
+        writeVar(reg, bi, caller);
+      }
     };
     // Shared emitter kit (frontend/emit.ts) — the ISA-specific readers/guards stay above.
     const kit = mkEmitKit(ops, write);
@@ -1054,10 +1131,8 @@ export function lift(
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
           const routine = saveRoutineOf(ins);
           if (routine) {
-            throw new PpcUnsupportedError(
-              `cannot lift '${name}': the 'bl' at 0x${ins.addr.toString(16)} enters the register save routine ` +
-                `'${routine.sym}' — not modelled`,
-            );
+            saveRoutine(ins, routine);
+            break;
           }
           const sym = ins.reloc?.sym ?? 'func';
           calls.lower({
@@ -1719,6 +1794,10 @@ export function lift(
       const used = [...op.operands, ...op.successors.flatMap((s) => s.args)];
       if (used.some((v) => frameAddresses.has(v))) {
         throw r1AsData();
+      }
+      const restored = used.find((v) => restoredRegs.has(v));
+      if (restored !== undefined) {
+        throw restoredRead(restored);
       }
       const lr = used.find((v) => returnAddresses.has(v));
       if (lr !== undefined) {

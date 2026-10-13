@@ -283,13 +283,93 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '0:\taddi    r11,r1,8\n4:\tcmpwi   r4,0\n8:\tbeq-    10 <faj+0x10>\nc:\tmr      r11,r3\n' +
       '10:\tlwz     r3,0(r11)\n14:\tblr\n';
     expect(() => dis('faj', join)).toThrow(asData);
-    // A `bl` into a save routine is not a call to lift with a guessed arity.
-    const save = '0:\taddi    r11,r1,8\n4:\tbl      4 <fasave+0x4>\n\t\t\t4: R_PPC_REL24\t_savegpr_30\n8:\tblr\n';
-    expect(() => dis('fasave', save)).toThrow(/enters the register save routine '_savegpr_30'/);
     // Nothing reads it: a dead address, which no C names either.
     expect(dis('fadead', '0:\taddi    r11,r1,8\n4:\tli      r3,0\n8:\tblr\n')).toBe(
       's32 fadead(void) {\n    return 0;\n}\n',
     );
+  });
+  // mwcc 2.4.x's out-of-line register saves: `addi r11,r1,N; bl _savegpr_NN` stores rNN..r31 into
+  // the words just below r11, and `_restgpr_NN` reloads them. The `addi` need not sit next to the `bl`.
+  describe('register save routines', () => {
+    // `@` in a line stands for its own address, which the call's relocation names.
+    const lines = (...ls: string[]) =>
+      ls.map((l, i) => `${(i * 4).toString(16)}:\t${l.replaceAll('@', (i * 4).toString(16))}\n`).join('');
+    const bl = (sym: string) => `bl      @ <x+0x@>\n\t\t\t@: R_PPC_REL24\t${sym}`;
+    const PRO = ['stwu    r1,-32(r1)', 'mflr    r0', 'stw     r0,36(r1)', 'addi    r11,r1,32', bl('_savegpr_30')];
+    const EPI = ['lwz     r0,36(r1)', 'mtlr    r0', 'addi    r1,r1,32', 'blr'];
+    const fn = (sym: string, ...body: string[]) => dis(sym, lines(...PRO, ...body, ...EPI));
+    test('a save and its restore are frame bookkeeping, not calls', () => {
+      expect(fn('gs', 'add     r31,r3,r4', 'addi    r11,r1,32', 'mr      r3,r31', bl('_restgpr_30'))).toBe(
+        's32 gs(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+      );
+    });
+    test('the routine preserves r0: the return address `mflr` left there is still read as one', () => {
+      // synthetic uninit_spill: a path that reads r0 with nothing else written reads the return
+      // address. As a call the bytes would read as destroyed, or as the callee's.
+      expect(() => fn('ra', 'add     r3,r3,r0', 'addi    r11,r1,32', bl('_restgpr_30'))).toThrow(
+        /the return address the 'mflr' at 0x4 copies out is used as a value/,
+      );
+    });
+    test('an FPR save and a GPR save below it, each from its own `addi r11`', () => {
+      // mwcc 2.4.x -O4,s: `addi r11,r1,64; bl _savefpr_28` then `addi r11,r1,32; bl _savegpr_28`.
+      const asm = lines(
+        'stwu    r1,-48(r1)',
+        'mflr    r0',
+        'stw     r0,52(r1)',
+        'addi    r11,r1,48',
+        bl('_savefpr_30'),
+        'addi    r11,r1,32',
+        bl('_savegpr_30'),
+        'add     r3,r3,r4',
+        'addi    r11,r1,48',
+        bl('_restfpr_30'),
+        'addi    r11,r1,32',
+        bl('_restgpr_30'),
+        'lwz     r0,52(r1)',
+        'mtlr    r0',
+        'addi    r1,r1,48',
+        'blr',
+      );
+      expect(dis('fg', asm)).toBe('s32 fg(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    });
+    test('each way the routine is not the bookkeeping it looks like refuses', () => {
+      // A restore over other words, or another register range, than the save filled.
+      expect(() => fn('skew', 'addi    r11,r1,36', bl('_restgpr_30'))).toThrow(
+        /reloads r30 out of '-8\(r11\)', a slot r31 was saved/,
+      );
+      expect(() => fn('wide', 'addi    r11,r1,32', bl('_restgpr_29'))).toThrow(
+        /reloads r29 out of '-12\(r11\)', a word no save/,
+      );
+      // r11 is not a frame address, or is one on only one path.
+      expect(() => dis('nofa', lines('mr      r11,r3', bl('_savegpr_30'), 'blr'))).toThrow(
+        /one frame address \('addi r11,r1,N'\) in r11/,
+      );
+      const mixed = lines(
+        'addi    r11,r1,0',
+        'cmpwi   r4,0',
+        'beq-    10 <x+0x10>',
+        'mr      r11,r3',
+        bl('_savegpr_30'),
+        'blr',
+      );
+      expect(() => dis('mixfa', mixed)).toThrow(/one frame address \('addi r11,r1,N'\) in r11/);
+      // A register written before it is saved: the word holds a value.
+      expect(() => dis('late', lines('li      r31,0', 'addi    r11,r1,0', bl('_savegpr_30'), 'blr'))).toThrow(
+        /saves r31 after this function wrote it/,
+      );
+      // A word the function also stores a value to.
+      expect(() => dis('both', lines('stw     r3,-8(r1)', 'addi    r11,r1,0', bl('_savegpr_30'), 'blr'))).toThrow(
+        /both saves a register in and stores a value to/,
+      );
+      // No runtime routine saves r5.
+      expect(() => dis('r5', lines('addi    r11,r1,0', bl('_savegpr_5'), 'blr'))).toThrow(
+        /names no register save routine/,
+      );
+      // A restored register holds the caller's value again.
+      expect(() => fn('after', 'addi    r11,r1,32', bl('_restgpr_30'), 'mr      r3,r31')).toThrow(
+        /r31 is read after the restore routine at 0x\w+ put the caller's r31 back/,
+      );
+    });
   });
   test('REGISTER-INDEXED frame access (`lwzx rD,r1,rB`) fails loud — r1 in either operand', () => {
     // PPC is asmlift's only frontend with a register-indexed addressing mode, so this is the exact
