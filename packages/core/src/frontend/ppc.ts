@@ -41,6 +41,7 @@ import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import type { Prototypes } from '../proto';
+import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { callDeclarations } from './call-plan';
@@ -407,18 +408,14 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
  *  `N+4(r1)` after it (`r1Displacements`). */
 const LR_SAVE_WORD = 4;
 
-/** The register file and first register a `bl` to one of CodeWarrior's out-of-line register save
- *  or restore routines moves, read off the routine's name in the call's `R_PPC_REL24`, or null for
- *  any other `bl`. `_savegpr_NN` stores rNN..r31 into the 4*(32-NN) bytes just below r11, and
- *  `_savefpr_NN` stores fNN..f31 into the 8*(32-NN) bytes below it; `_restgpr_NN`/`_restfpr_NN`
- *  load the same ranges back. They write no register but the link register, and the frame address
- *  in r11 is the only thing they read (mwcc 2.4.x at every level, 2.3.3 at `-O0`/`-O4,s`). The
- *  name is the runtime's, so a number outside r14..r31 is not one of them and refuses at the call. */
-const saveRoutineOf = (ins: Instr): { sym: string; restore: boolean; fpr: boolean; first: number } | null => {
-  const m =
-    ins.mnemonic === 'bl' && ins.reloc?.type === 'R_PPC_REL24' && /^_(save|rest)(gpr|fpr)_(\d+)$/.exec(ins.reloc.sym);
-  return m ? { sym: m[0], restore: m[1] === 'rest', fpr: m[2] === 'fpr', first: Number(m[3]) } : null;
-};
+/** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
+ *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
+ *  none — a linked image, or an objdump without `-r` — is an ordinary call to an unnamed target, and
+ *  the frame address its routine would have consumed then refuses at the end of `lift`. */
+const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
+  ins.mnemonic === 'bl' && ins.reloc?.type === 'R_PPC_REL24'
+    ? registerSaveRoutineOf(target.registerSaveRoutines, ins.reloc.sym)
+    : null;
 
 /** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
  *  (0 before the frame push, -N after `stwu r1,-N(r1)`), or why it is not known there.
@@ -594,7 +591,7 @@ export function lift(
   // read the blocks the entry reaches: a `bl` on no path makes no call.
   const reached = blocks.flatMap((b) => b.body);
   // A register save routine is no call: it moves only the registers it saves (`saveRoutine`).
-  const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(ins));
+  const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
   const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
@@ -663,8 +660,8 @@ export function lift(
   /** The FRAME ADDRESS `addi r11,r1,N` forms, per value standing for one: its offset from the entry
    *  r1 (or why that is not known there) and the address of the `addi`. Like a return address it is
    *  a definition and not a value. Its one consumer is a register save or restore routine
-   *  (`saveRoutineOf`), which takes it in r11, so r11 is the only destination deferred; every other
-   *  `addi rD,r1,N` refuses where it stands. Any other use of it is the frame read as data, and
+   *  (`saveRoutineOf`), which takes it in the target's `registerSaveRoutines.frameReg`, so that
+   *  register is the only destination deferred; every other `addi rD,r1,N` refuses where it stands. Any other use of it is the frame read as data, and
    *  refuses as the `addi` itself would: at a read, or once the function is built for a use that
    *  reaches through a join. */
   const frameAddresses = new Map<Value, { off: number | string; addr: number }>();
@@ -875,11 +872,12 @@ export function lift(
       if (r.first < 14 || r.first > 31 || ins.reloc!.addend !== 0) {
         throw new PpcUnsupportedError(`cannot lift '${name}': ${at} names no register save routine of the runtime`);
       }
-      const base = ssa.hasReachingDef('r11', bi, (v) => !frameAddresses.has(v)) ? undefined : readVar('r11', bi);
+      const fr = target.registerSaveRoutines!.frameReg;
+      const base = ssa.hasReachingDef(fr, bi, (v) => !frameAddresses.has(v)) ? undefined : readVar(fr, bi);
       const frame = base === undefined ? undefined : frameAddresses.get(base);
       if (frame === undefined) {
         throw new PpcUnsupportedError(
-          `cannot lift '${name}': ${at} does not find one frame address ('addi r11,r1,N') in r11 on every path`,
+          `cannot lift '${name}': ${at} does not find one frame address ('addi ${fr},r1,N') in ${fr} on every path`,
         );
       }
       if (typeof frame.off !== 'number') {
@@ -892,7 +890,7 @@ export function lift(
       for (let k = r.first; k <= 31; k++) {
         const reg = `${r.fpr ? 'f' : 'r'}${k}`;
         const disp = -width * (32 - k);
-        const mem = `${disp}(r11)`;
+        const mem = `${disp}(${fr})`;
         const words = r.fpr ? [frame.off + disp, frame.off + disp + 4] : [frame.off + disp];
         if (!r.restore) {
           if (ssa.hasReachingDef(reg, bi)) {
@@ -1129,7 +1127,7 @@ export function lift(
         // and it has a reaching definition all the same.
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
-          const routine = saveRoutineOf(ins);
+          const routine = saveRoutineOf(target, ins);
           if (routine) {
             saveRoutine(ins, routine);
             break;
@@ -1323,7 +1321,7 @@ export function lift(
             }
             break;
           }
-          if (mnem === 'addi' && d === 'r11' && s === 'r1' && !ins.reloc) {
+          if (mnem === 'addi' && d === target.registerSaveRoutines?.frameReg && s === 'r1' && !ins.reloc) {
             const v = mkValue(T.unk(32));
             const depth = r1At.get(ins);
             frameAddresses.set(v, {

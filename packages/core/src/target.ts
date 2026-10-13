@@ -70,6 +70,8 @@ import {
   IDO_RUNTIME_HELPERS,
   MIPS_GCC_RUNTIME_HELPERS,
   PPC_MWCC_RUNTIME_HELPERS,
+  PPC_MWCC_SAVE_ROUTINES,
+  type RegisterSaveRoutines,
   type RuntimeHelper,
 } from './runtime-helpers';
 import type { StaticLayout } from './structure/local-statics';
@@ -256,6 +258,10 @@ export interface TargetDescription {
    *  `__`-prefixed function by spelling — but it buys nothing on a target whose runtime has simply
    *  not been enumerated. */
   runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
+  /** The runtime's OUT-OF-LINE REGISTER SAVE ROUTINES (runtime-helpers.ts `RegisterSaveRoutines`).
+   *  ABSENT ⇒ none is recognised: a `bl` to one is an ordinary call, and the frame address it would
+   *  have consumed is the stack pointer read as data, which refuses. */
+  registerSaveRoutines?: RegisterSaveRoutines;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -1265,6 +1271,7 @@ export const PPC_MWCC: TargetDescription = {
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
+  registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
   // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third
   // float argument in f3, and the GPR/FPR order of mixed parameters absent from the object.
   fpu: { argRegs: ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8'], returnReg: 'f1', slots: 'separate' },

@@ -11,6 +11,7 @@
 //               synthetic spec runs on four.
 //   judgement — a human call. Authored in the dataset, and held to the floor below.
 import { type FeatureDef, KNOWN_FEATURES, featuresByEvidence } from '@asmlift/bench-schema';
+import { PPC_MWCC_SAVE_ROUTINES } from '@asmlift/core/runtime-helpers';
 
 const idsOf = (kind: Parameters<typeof featuresByEvidence>[0]): Set<string> =>
   new Set(featuresByEvidence(kind).map((f: FeatureDef) => f.id));
@@ -547,8 +548,8 @@ const SOFT_FLOAT_COMPARE = /^__(?:eq|ne|lt|le|gt|ge|cmp|unord)[sd]f2$/;
 const LIBM =
   /^(?:sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|exp|log|log10|pow|sqrt|fmod|ceil|floor|fabs|ldexp|frexp|modf|hypot)[fl]?$/;
 
-/** The PowerPC EABI's out-of-line prologue helpers. */
-const SAVE_GPR_HELPER = /^_(?:save|rest)(?:gpr|fpr)_\d+$/;
+/** CodeWarrior's out-of-line register save and restore routines — the frontend's own definition. */
+const SAVE_GPR_HELPER = PPC_MWCC_SAVE_ROUTINES.name;
 
 /** A floating-point comparison in hardware: PowerPC into a condition register, MIPS into the FP
  *  condition flag the `bc1` branches read (`bc1tl`/`bc1fl` are the likely forms). */
