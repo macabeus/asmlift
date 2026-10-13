@@ -1305,6 +1305,32 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'int sw_jtisoret(int,int*);',
   },
+  // A DENSE TABLE WHOSE BOUNDS PAIR HAS AN INSTRUCTION SCHEDULED INTO IT. Every arm calls, so the
+  // function saves LR, and mwcc 2.4.2 puts that store between the bound and its branch:
+  // `cmplwi r3,7 ; stw r0,20(r1) ; bgt-`. The PowerPC recognizer finds the compare past it — past
+  // anything that writes neither a CR field nor the scrutinee (frontend/ppc.ts `boundsCompare`).
+  {
+    sym: 'sw_jtsched',
+    src: 'int jg(int);\nvoid jh(int);\nint sw_jtsched(int x,int *p){ switch(x){case 0:jh(1);break;case 1:jh(2);break;case 2:return jg(p[0]);case 3:jh(4);break;case 4:jh(5);break;case 5:jh(6);break;case 6:jh(7);break;case 7:jh(9);break;} return -1; }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'int jg(int); void jh(int); int sw_jtsched(int,int*);',
+    proto: { jg: { params: 1 }, jh: { params: 1, returnsVoid: true } },
+  },
+  // A DENSE TABLE INSIDE A LOOP, whose base KMC forms ONCE, in the loop's preheader
+  // (`lui t6,%hi ; addiu t6,t6,%lo`), and adds to the scaled index inside the loop — so the
+  // dispatch's own block holds no `lui`. The MIPS recognizer accepts that pair only where nothing
+  // but the dispatch reads it and every path to the dispatch runs it (frontend/mips.ts
+  // `hoistedBase`). mwcc 2.4.2 forms the base inside the loop; mwcc 2.3.3, which hoists it too, has
+  // no synthetic tier, and packages/cli/test/matching/jump-table-window.test.ts pins it there.
+  {
+    sym: 'sw_jtloop',
+    src: 'void sw_jtloop(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){case 0:p[i]=1;break;case 1:p[i]=5;break;case 2:p[i]=6;break;case 3:p[i]=7;break;case 4:p[i]=3;break;case 5:p[i]=2;break;case 6:p[i]=9;break;case 7:p[i]=4;break;} } }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'void sw_jtloop(int,int*);',
+    proto: { sw_jtloop: { returnsVoid: true } },
+  },
 
   // ── merged value chains (several values decided by several arms, joined at one point) ───────
   // What SSA destruction has to get right. Each arm computes the same set of values, so the join
