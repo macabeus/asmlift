@@ -66,12 +66,12 @@
 //                               return address `mflr` copies out stored anywhere but the link
 //                               register's save word, the reaching-compare throw whose reason is
 //                               interpolated (as Thumb's), the two-armed branch denylist, whose
-//                               template is interpolation end to end, the caller's value a register
-//                               restore routine puts back read as a value, and five ways a `bl` into
-//                               a register save or restore routine is not the bookkeeping it looks
-//                               like (a number no runtime routine has, no single frame address in
-//                               r11, r1's depth unknown there, a register saved after it was written,
-//                               a word restored that was not saved from that register)
+//                               template is interpolation end to end, the caller's value a restore
+//                               puts back read as a value, a `stmw` or save routine saving a register
+//                               this function already wrote, and four ways a `bl` into a register
+//                               save or restore routine is not the bookkeeping it looks like (a
+//                               number no runtime routine has, the floating-point routines, no
+//                               single frame address in r11, r1's depth unknown there)
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
