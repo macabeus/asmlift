@@ -357,13 +357,32 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       );
       expect(() => dis('fg', asm)).toThrow(/'_savefpr_30' at 0x10 saves or restores floating-point registers/);
     });
+    test('`stmw`, a single `stw` and the routine keep one save rule and one restore rule', () => {
+      // A restore puts the caller's register back, whichever instruction does it: reading it after
+      // is no C value (the hardware returns the caller's r31, not a0).
+      const after = /r31 is read after the restore at 0x8 put the caller's r31 back/;
+      expect(() =>
+        dis('stmA', lines('stmw    r31,28(r1)', 'mr      r31,r3', 'lmw     r31,28(r1)', 'mr      r3,r31', 'blr')),
+      ).toThrow(after);
+      expect(() =>
+        dis('stwA', lines('stw     r31,28(r1)', 'mr      r31,r3', 'lwz     r31,28(r1)', 'mr      r3,r31', 'blr')),
+      ).toThrow(after);
+      // A `stmw` of a register already written saves a value, which no compiler's prologue does (the
+      // hardware returns 5 here, not 7).
+      expect(() =>
+        dis(
+          'stm5',
+          lines('li      r31,5', 'stmw    r31,28(r1)', 'li      r31,7', 'lmw     r31,28(r1)', 'mr      r3,r31', 'blr'),
+        ),
+      ).toThrow(/the 'stmw' at 0x4 saves r31 after this function wrote it/);
+    });
     test('each way the routine is not the bookkeeping it looks like refuses', () => {
       // A restore over other words, or another register range, than the save filled.
       expect(() => fn('skew', 'addi    r11,r1,36', bl('_restgpr_30'))).toThrow(
-        /reloads r30 out of '-8\(r11\)', a slot r31 was saved/,
+        /reload of '-8\(r11\)' into r30, a slot r31 was saved/,
       );
       expect(() => fn('wide', 'addi    r11,r1,32', bl('_restgpr_29'))).toThrow(
-        /reloads r29 out of '-12\(r11\)', a word no save/,
+        /reload of '-12\(r11\)' into r29, a word nothing saved/,
       );
       // r11 is not a frame address, or is one on only one path.
       expect(() => dis('nofa', lines('mr      r11,r3', bl('_savegpr_30'), 'blr'))).toThrow(
@@ -392,7 +411,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       );
       // A restored register holds the caller's value again.
       expect(() => fn('after', 'addi    r11,r1,32', bl('_restgpr_30'), 'mr      r3,r31')).toThrow(
-        /r31 is read after the restore routine at 0x\w+ put the caller's r31 back/,
+        /r31 is read after the restore at 0x\w+ put the caller's r31 back/,
       );
     });
   });

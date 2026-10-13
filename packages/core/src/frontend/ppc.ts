@@ -646,7 +646,7 @@ export function lift(
   const restoredRead = (v: Value): never => {
     const { reg, addr } = restoredRegs.get(v)!;
     return fail(
-      `cannot lift '${name}': ${reg} is read after the restore routine at 0x${addr.toString(16)} put the ` +
+      `cannot lift '${name}': ${reg} is read after the restore at 0x${addr.toString(16)} put the ` +
         `caller's ${reg} back — no C value names it`,
     );
   };
@@ -670,8 +670,8 @@ export function lift(
    *  relocation (a linked image, or objdump without `-r`) is lowered as an ordinary call, which
    *  never reads r11 and destroys the registers the routine preserves. */
   const consumedFrames = new Set<Value>();
-  /** The caller's value a restore routine puts back in a callee-saved register, per value standing
-   *  for one (`saveRoutine`). No C value names it, so any use refuses. */
+  /** The caller's value a restore puts back in a callee-saved register, per value standing for one
+   *  (`restoreFrom`). No C value names it, so any use refuses. */
   const restoredRegs = new Map<Value, { reg: string; addr: number }>();
   /** The return address `mflr rD` copies out of the link register, per value standing for one, with
    *  the address of the `mflr`. Like a high half it is a definition and not a value: storing it to
@@ -688,9 +688,15 @@ export function lift(
   //
   // A SAVE holds an entry value that is no C value: a callee-saved register's, the link register's
   // word, or the back chain the frame push stores (the caller's r1). Nothing but the caller reads it
-  // back, so its restore — a load into the register it was saved from — is dropped, and a load into
-  // any other register refuses. Function-scoped, so a save in the prologue matches a restore in any
-  // epilogue.
+  // back. Its restore — a load into the register it was saved from — puts the caller's value back,
+  // which no C value names, so a read of the register after it refuses (`restoredRegs`); a load
+  // into any other register refuses at once. Function-scoped, so a save in the prologue matches a
+  // restore in any epilogue.
+  //
+  // ONE SAVE AND ONE RESTORE, whichever instruction does it: `stmw`/`lmw`, a single `stw`/`lwz`
+  // and a register save routine all go through `saveInto` and `restoreFrom`. A single `stw` is the
+  // one save that may also be a spill: of a register this function already wrote, it stores a
+  // value. A `stmw` or a routine has no such reading, and saving a written register refuses.
   //
   // Every other word store is a VALUE — an argument's home, or a live value spilled — and it is the
   // shared stack-slot variable (`stackSlotKey`, frontend/ssa.ts) MIPS and Thumb use. A reload into
@@ -786,6 +792,40 @@ export function lift(
         );
       }
     };
+    /** The instruction a save or restore refusal names. */
+    const site = (ins: Instr) =>
+      `the '${ins.mnemonic}'${ins.mnemonic === 'bl' && ins.reloc ? ` to '${ins.reloc.sym}'` : ''} at 0x${ins.addr.toString(16)}`;
+    /** Save `reg`'s entry value into the save slot at entry offset `off`, named `mem` in `ins`. */
+    const saveInto = (ins: Instr, reg: string, off: number, mem: string) => {
+      if (ssa.hasReachingDef(reg, bi)) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${site(ins)} saves ${reg} after this function wrote it, so '${mem}' holds a ` +
+            `value, not the caller's ${reg}`,
+        );
+      }
+      refuseMixedSlot(ins, mem, off, 'save');
+      saveSlots.set(off, reg);
+    };
+    /** Restore `reg` from the save slot at `off`: it must be the slot `reg` was saved into, and `reg`
+     *  then holds the caller's value again. r1 is no SSA register: its reload is the back chain the
+     *  frame push stored, and `r1Displacements` tracks it instead. */
+    const restoreFrom = (ins: Instr, reg: string, off: number, mem: string) => {
+      const saved = saveSlots.get(off);
+      if (saved !== reg) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': reload of '${mem}' into ${reg}, ` +
+            (saved === undefined
+              ? `a word nothing saved it into (${site(ins)})`
+              : `a slot ${saved} was saved into — the word holds the caller's ${saved}, which no C value ` +
+                `names (${site(ins)})`),
+        );
+      }
+      if (reg !== 'r1') {
+        const caller = mkValue(T.unk(32));
+        restoredRegs.set(caller, { reg, addr: ins.addr });
+        writeVar(reg, bi, caller);
+      }
+    };
     // A word store/load based on r1: a SAVE or a VALUE slot (see `saveSlots` above). Returns false
     // for any other base, which is ordinary memory.
     const frameStore = (ins: Instr, srcReg: string, mem: string): boolean => {
@@ -818,8 +858,7 @@ export function lift(
       // Any other save stores what the register held at entry: nothing defined it on any path. An
       // argument register nothing defined holds the argument, which is a value.
       if (!isArg && !ssa.hasReachingDef(srcReg, bi)) {
-        refuseMixedSlot(ins, mem, off, 'save');
-        saveSlots.set(off, srcReg);
+        saveInto(ins, srcReg, off, mem);
         return true;
       }
       refuseMixedSlot(ins, mem, off, 'value');
@@ -836,15 +875,9 @@ export function lift(
         return false;
       }
       const off = entryOffset(ins, mem);
-      const saved = saveSlots.get(off);
-      if (saved === dstReg) {
+      if (saveSlots.has(off)) {
+        restoreFrom(ins, dstReg, off, mem);
         return true;
-      }
-      if (saved !== undefined) {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': reload of '${mem}' into ${dstReg}, a slot ${saved} was saved into — the ` +
-            `word holds the caller's ${saved}, which no C value names`,
-        );
       }
       const slot = valueSlots.get(off);
       if (slot === undefined || !ssa.hasReachingDef(stackSlotKey(off), bi)) {
@@ -869,10 +902,9 @@ export function lift(
     //     routine takes refuses at the end of `lift`);
     //   • r1's displacement at the `addi` is not known, so no slot can be named;
     //   • the routine's number is outside r14..r31 (no such runtime routine);
-    //   • a register it saves was written first — the word would hold a value, not the caller's;
-    //   • a word it restores was not saved from that register (`a slot rN was saved into`).
-    // A restored register holds the caller's value again, which no C value names, so a read of it
-    // afterwards refuses (`restoredRegs`).
+    //   • it moves floating-point registers (named, not modelled);
+    //   • a register it saves was written first, or a word it restores was not saved from that
+    //     register — `saveInto` and `restoreFrom`, the rules every save and restore keeps.
     const saveRoutine = (ins: Instr, r: NonNullable<ReturnType<typeof saveRoutineOf>>) => {
       const at = `the 'bl' to '${r.sym}' at 0x${ins.addr.toString(16)}`;
       if (r.first < 14 || r.first > 31 || ins.reloc!.addend !== 0) {
@@ -903,35 +935,8 @@ export function lift(
         );
       }
       for (let k = r.first; k <= 31; k++) {
-        const reg = `r${k}`;
         const disp = -4 * (32 - k);
-        const mem = `${disp}(${fr})`;
-        const words = [frame.off + disp];
-        if (!r.restore) {
-          if (ssa.hasReachingDef(reg, bi)) {
-            throw new PpcUnsupportedError(
-              `cannot lift '${name}': ${at} saves ${reg} after this function wrote it, so '${mem}' holds a value, ` +
-                `not the caller's ${reg}`,
-            );
-          }
-          for (const w of words) {
-            refuseMixedSlot(ins, mem, w, 'save');
-            saveSlots.set(w, reg);
-          }
-          continue;
-        }
-        for (const w of words) {
-          const saved = saveSlots.get(w);
-          if (saved !== reg) {
-            throw new PpcUnsupportedError(
-              `cannot lift '${name}': ${at} reloads ${reg} out of '${mem}', ` +
-                `${saved === undefined ? 'a word no save routine or store saved it into' : `a slot ${saved} was saved into`}`,
-            );
-          }
-        }
-        const caller = mkValue(T.unk(32));
-        restoredRegs.set(caller, { reg, addr: ins.addr });
-        writeVar(reg, bi, caller);
+        (r.restore ? restoreFrom : saveInto)(ins, `r${k}`, frame.off + disp, `${disp}(${fr})`);
       }
     };
     // Shared emitter kit (frontend/emit.ts) — the ISA-specific readers/guards stay above.
@@ -1249,9 +1254,10 @@ export function lift(
           break;
         case 'stmw':
           if (parseMem(s).base === 'r1') {
-            for (const slot of frameRange(d, entryOffset(ins, s))) {
-              refuseMixedSlot(ins, s, slot.off, 'save');
-              saveSlots.set(slot.off, slot.reg);
+            const off = entryOffset(ins, s);
+            const depth = off - parseMem(s).off;
+            for (const slot of frameRange(d, off)) {
+              saveInto(ins, slot.reg, slot.off, `${slot.off - depth}(r1)`);
             }
             break;
           }
