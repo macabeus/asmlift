@@ -92,6 +92,7 @@ export interface TraceOptions {
   prototypes?: Prototypes; // header facts (callee arities + void-ness), keyed by symbol
   asmData?: AsmData; // data-section side table (Regime-B jump tables), as in decompile()
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
+  aggregateGlobals?: ReadonlySet<string>; // context-declared aggregates, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
    *  scores. One call per boundary: pattern N's after-source is pattern N+1's before-source. Absent ⇒
@@ -321,6 +322,7 @@ function traceTower(
     spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
+    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
     ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });

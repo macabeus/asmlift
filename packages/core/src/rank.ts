@@ -164,6 +164,8 @@ export interface EnumerateOptions {
   asmData?: AsmData;
   /** address→symbol map (symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
+  /** same contract as DecompileOptions.aggregateGlobals */
+  aggregateGlobals?: ReadonlySet<string>;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -489,6 +491,7 @@ export function enumerateCandidates(
     // every candidate carries it, the whole row).
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
   };
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the

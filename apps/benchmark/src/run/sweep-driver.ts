@@ -463,6 +463,7 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         c.proto,
         c.compile,
         withMap ? c.symbols : undefined,
+        c.aggregateGlobals,
       ),
     );
     const fanAllowed = sel.force === true || overLimit[c.id] === undefined;

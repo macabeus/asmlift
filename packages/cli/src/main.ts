@@ -19,7 +19,7 @@ import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
-import { prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
+import { aggregateObjectsFromContext, prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
@@ -143,7 +143,8 @@ Gaps are annotated in-source as ASMLIFT_ERROR markers, diagnostics on stderr.
   --context        a preprocessed header (a decomp project's ctx.h): every
                    function it declares is a callee prototype, under --proto
                    and the symbol map, so a call is lifted at the arity the
-                   compiler checks it against
+                   compiler checks it against; a global it declares as a
+                   struct, union or array is never read by its bare name
   --jobs           with --score-against: compile n candidates at a time (default 1)
   --progress       with --score-against: stream a liveness line to stderr while
                    scoring; the [score] table it prints at the end is unchanged
@@ -707,6 +708,7 @@ export async function runCli(
   // --context: the declarations in the headers the candidate compiles against, under --proto and
   // the symbol map's signatures (`withContextPrototypes`).
   const contextFlag = flags.get('context') as string | undefined;
+  let aggregateGlobals: ReadonlySet<string> | undefined;
   if (contextFlag !== undefined) {
     let text: string;
     try {
@@ -725,6 +727,7 @@ export async function runCli(
       symbols,
       unitTarget,
     );
+    aggregateGlobals = aggregateObjectsFromContext(text, unitTarget.dialect ?? 'c');
   }
 
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the
@@ -816,6 +819,7 @@ export async function runCli(
         asmData,
         prototypes,
         symbols,
+        aggregateGlobals,
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -855,7 +859,7 @@ export async function runCli(
 
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
-    const result = decompile(name, asm, unitTarget, { backend, onGap, asmData, prototypes, symbols });
+    const result = decompile(name, asm, unitTarget, { backend, onGap, asmData, prototypes, symbols, aggregateGlobals });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
     // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's
     // bytes under ANY declaration of that name, so the source alone is the whole answer. A bare

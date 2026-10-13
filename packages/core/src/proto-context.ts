@@ -69,6 +69,56 @@ export function prototypesFromContext(src: string, language: Language): Prototyp
   return functionPrototypes(ctx, table, layoutReader(ctx, table));
 }
 
+/** The objects a preprocessed declaration context declares as a struct, a union or an array. Such an
+ *  object has no value a bare name reads: `v = gInfo;` over `extern struct Info gInfo;` is a compile
+ *  error, and over `extern u8 gBuf[];` it reads the address. A project whose symbol map does not
+ *  describe a global (one its linker script places has no DWARF) states it here, so the structurer
+ *  reads this set where it would read the map's `shape`. A type this cannot resolve — an unexpanded
+ *  macro, a typedef of an array — is left out, which keeps the usage-inferred spelling. */
+export function aggregateObjectsFromContext(src: string, language: Language): Set<string> {
+  const ctx = parseDeclarations(src, language);
+  const table = typeTable(ctx);
+  const out = new Set<string>();
+  for (const d of ctx.declarations) {
+    if (d.specifiers.typedef || d.body !== undefined) {
+      continue;
+    }
+    for (const x of d.declarators) {
+      if (x.name !== undefined && WORD.test(x.name) && isAggregate(declaredType(d.specifiers, x.derivations), table)) {
+        out.add(x.name);
+      }
+    }
+  }
+  return out;
+}
+
+/** Whether `t` is a struct, union, class or array type, through the typedef names it is built on. */
+function isAggregate(t: DeclaredType, table: TypeTable): boolean {
+  let cur = t;
+  for (let hops = 0; hops < 16; hops++) {
+    const [first] = cur.derivations;
+    if (first !== undefined) {
+      return first.kind === 'array';
+    }
+    if (cur.type.kind === 'tag') {
+      return cur.type.keyword !== 'enum';
+    }
+    const name = nameOf(cur);
+    if (name === undefined) {
+      return false;
+    }
+    if (table.named.has(name)) {
+      return true;
+    }
+    const next = table.typedefs.get(name);
+    if (next === undefined || nameOf(next) === name) {
+      return false;
+    }
+    cur = next;
+  }
+  return false;
+}
+
 const WORD = /^[A-Za-z_]\w*$/;
 
 /** `mode(…)` in an attribute, in either spelling: it retypes what it is written on */

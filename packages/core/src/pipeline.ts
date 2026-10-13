@@ -74,6 +74,10 @@ export interface DecompileOptions {
    *  declaration shapes (DWARF types-sidecar). Drives the Thumb numeric-pool promotion and the
    *  byte-sensitive global spellings. Absent ⇒ byte-identical to today. */
   symbols?: SymbolMap;
+  /** the globals the project's declaration context states are structs, unions or arrays
+   *  (proto-context.ts `aggregateObjectsFromContext`): none of them is spelled as a bare scalar
+   *  name. */
+  aggregateGlobals?: ReadonlySet<string>;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
 }
@@ -202,6 +206,7 @@ function runTower(
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
+    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
     ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });

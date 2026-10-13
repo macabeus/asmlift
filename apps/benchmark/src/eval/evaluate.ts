@@ -38,6 +38,8 @@ interface EvalSpecFields {
   ctxRef?: string; // published on the row in place of large vendored ctx text
   ctxProto?: string; // the one line appended after the vendored blob, published verbatim
   proto?: Prototypes; // asmlift prototypes
+  /** the globals the context declares as aggregates (cases/types.ts) — asmlift-only */
+  aggregateGlobals?: ReadonlySet<string>;
   /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
   symbols?: SymbolMap;
   /** the flags this row's target and candidates compile at, and asmlift's description from them */
@@ -281,6 +283,7 @@ export async function evaluate(
     compile,
     spec.symbols,
     onRankProgress,
+    spec.aggregateGlobals,
   );
   // A real row m2c is not given its project's context for gets the callee declarations asmlift's lift
   // read, as C its parser reads — the same facts through each tool's own channel.

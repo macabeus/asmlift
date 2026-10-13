@@ -1816,6 +1816,10 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  they would read the map's `shape:'pointer'`. The operand-order rules do not read it: no element
    *  or field spelling folds from a name with no pointee. */
   pointerGlobals?: ReadonlySet<string>;
+  /** The globals the declaration context states are structs, unions or arrays
+   *  (proto-context.ts `aggregateObjectsFromContext`). Read with the map setting and without it: a
+   *  context declaration is what every candidate compiles against, whichever names it spells. */
+  aggregateGlobals?: ReadonlySet<string>;
 }
 
 /** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
@@ -2303,6 +2307,7 @@ export function structure(
     inferredSymbols,
     orderLicensedGlobals,
     pointerGlobals,
+    aggregateGlobals,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -2664,17 +2669,16 @@ export function structure(
         }
       }
     }
-    // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
-    // AGGREGATE whatever the usage inference saw — a lone off-0 access to `extern u16 tbl[]`
-    // must still spell through the aggregate/array forms, never the bare scalar `tbl`.
+    // Declaration-shape OVERRIDE (symbol map, or the declaration context for a global the map does
+    // not describe): a project-declared array/struct global is an AGGREGATE whatever the usage
+    // inference saw — a lone off-0 access to `extern u16 tbl[]` must still spell through the
+    // aggregate/array forms, never the bare scalar `tbl`.
     // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
-    if (symbols) {
-      for (const n of [...scalarGlobals]) {
-        const shape = symbols.get(n)?.shape;
-        if (shape === 'array' || shape === 'struct') {
-          scalarGlobals.delete(n);
-        }
+    for (const n of [...scalarGlobals]) {
+      const shape = symbols?.get(n)?.shape;
+      if (shape === 'array' || shape === 'struct' || aggregateGlobals?.has(n) === true) {
+        scalarGlobals.delete(n);
       }
     }
   }

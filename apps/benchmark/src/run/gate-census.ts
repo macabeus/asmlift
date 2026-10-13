@@ -286,7 +286,7 @@ export function gateCensus(o: GateCensusOptions): number {
           c.sym,
           scrubObjectHeader(asm),
           c.codegen.target,
-          rankOptionsFor(c.toolchain, c.codegen, obj, c.sym, c.proto, c.compile, c.symbols),
+          rankOptionsFor(c.toolchain, c.codegen, obj, c.sym, c.proto, c.compile, c.symbols, c.aggregateGlobals),
         );
       } catch {
         unlifted++;

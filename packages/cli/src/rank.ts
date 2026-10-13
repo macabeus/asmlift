@@ -35,6 +35,8 @@ export interface RankOptions {
   asmData?: AsmData;
   /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
+  /** same contract as DecompileOptions.aggregateGlobals */
+  aggregateGlobals?: ReadonlySet<string>;
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
@@ -76,6 +78,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     prototypes: opts.prototypes,
     asmData: opts.asmData,
     symbols: opts.symbols,
+    ...(opts.aggregateGlobals ? { aggregateGlobals: opts.aggregateGlobals } : {}),
     ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
   });
