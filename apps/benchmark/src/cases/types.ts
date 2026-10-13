@@ -33,6 +33,9 @@ interface CaseFields {
   /** the project's vendored symbol map — threaded into asmlift only (m2c has its ctx) */
   symbols?: SymbolMap;
   proto?: Prototypes; // asmlift prototypes
+  /** real tier: the globals the vendored context declares as structs, unions or arrays (core
+   *  `aggregateObjectsFromContext`) — asmlift-only, as `proto` is */
+  aggregateGlobals?: ReadonlySet<string>;
   note?: string;
   toolchain: Toolchain;
   /** the flags the target and every candidate compile at, and the description asmlift decompiles

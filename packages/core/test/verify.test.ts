@@ -122,6 +122,28 @@ test('accepts: the two shapes an laddr may carry', () => {
   expect(() => verify(fnOf([block]))).not.toThrow();
 });
 
+// …and storage accessed at two widths carries the views a union of it declares
+// (frontend/frame-objects.ts `unionViews`): two or more distinct element widths, each tiling it
+test('views: a union of storage is two or more widths that tile it', () => {
+  const withViews = (views: number[], count = 8): Fn => {
+    const x = mkValue(T.unk(32));
+    return fnOf([
+      {
+        params: [],
+        ops: [
+          mkOp('laddr', { results: [x], attrs: { off: 0, width: 1, signed: false, count, views } }),
+          mkOp('ret', { operands: [x] }),
+        ],
+      },
+    ]);
+  };
+  expect(() => verify(withViews([4, 2, -1]))).not.toThrow();
+  expect(() => verify(withViews([4]))).toThrow(/two or more distinct element widths/);
+  expect(() => verify(withViews([4, 4]))).toThrow(/two or more distinct element widths/);
+  expect(() => verify(withViews([4, -4]))).toThrow(/two or more distinct element widths/);
+  expect(() => verify(withViews([4, 2], 6))).toThrow(/tiling its 6 bytes/);
+});
+
 test('rejects: use before def within a block', () => {
   const a = mkValue(T.s());
   const b = mkValue(T.s());

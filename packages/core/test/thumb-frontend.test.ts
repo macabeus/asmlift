@@ -1034,14 +1034,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       );
     });
 
-    // …but a slot word and a narrower member through the captured address at the same bytes are
-    // two types at one byte, which the one object refuses rather than cast-spell
-    test('a slot word under a halfword member is refused as two widths at one byte', () => {
+    // …and a slot word and a narrower member through the captured address at the same bytes are
+    // two types at one byte, which the one object declares as the views of one union rather than
+    // cast-spell — every access a view, the address handed to the device as a value
+    test('a slot word under a halfword member is the views of one union', () => {
       const twoWidths =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tstr\tr1, [sp]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr2, sp\n' +
         '\tstrh\tr0, [r2]\n\tldr\tr3, .L9\n\tstr\tr2, [r3]\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n' +
         '\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\t0x040000D4\n';
-      expect(() => decompile('f', twoWidths, ARMV4T_AGBCC)).toThrow('is accessed 4 and 2 bytes wide');
+      expect(decompile('f', twoWidths, ARMV4T_AGBCC).source).toContain(
+        '    union { s32 word[2]; u16 half[4]; } sp0;\n    sp0.word[0] = a1;\n    sp0.word[1] = a1;\n' +
+          '    sp0.half[0] = a0;\n    *(volatile s32 *)67109076 = &sp0;\n    return sp0.word[0] + sp0.word[1];',
+      );
+      // …and a halfword member misaligned to its width names no element of a view, so it refuses
+      const misaligned = twoWidths.replace('\tstrh\tr0, [r2]\n', '\tstrh\tr0, [r2, #0x1]\n');
+      expect(misaligned).not.toBe(twoWidths);
+      expect(() => decompile('f', misaligned, ARMV4T_AGBCC)).toThrow(/is not aligned to its width/);
     });
 
     // THE MODEL IS CHOSEN BEFORE THE SHAPE: where a device read nothing bounds is the only escape,
@@ -1926,7 +1934,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, sp, r1\n\tstrh\tr0, [r4]\n\tstr\tr0, [r4]\n' +
       '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', addrComputed, ARMV4T_AGBCC)).toThrow(
-      /address-taken stack local — a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide/,
+      /address-taken stack local — a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
     );
     const outgoing =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
@@ -2304,10 +2312,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       });
 
       // NOT A BLANKET. Each of these is the same function with ONE fact removed, and each must
-      // still decline on the byte the two models disagree about — otherwise the licence is not
-      // "the address escaped", it is "there is a capture".
-      test('with nothing consuming the capture the refusal stands', () => {
-        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC)).toThrow(TWO_MODELS);
+      // still not take the licence — otherwise the licence is not "the address escaped", it is
+      // "there is a capture". Where the address then escapes nowhere, the byte the two models
+      // disagree about is kept as one object in memory instead (frame-objects.ts, no escape at
+      // all): an untyped array with the store in it, never the licence's `volatile u32` scalar.
+      const NOT_THE_LICENCE = 's32 f(s32 a0) {\n    u8 sp0[4];\n    *(s32 *)sp0 = a0;\n    return a0;\n}\n';
+      test('with nothing consuming the capture the licence stands down', () => {
+        expect(decompile('f', PUBLISH.replace('\tstr\tr1, [r2]\n', ''), ARMV4T_AGBCC).source).toBe(NOT_THE_LICENCE);
       });
 
       // BOTH HALVES OF ONE RULE — "through a base that is neither sp nor another held capture" —
@@ -2316,9 +2327,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // row green, which is exactly how a load-bearing guard comes to read as one.
       test('a capture stored back into its OWN frame publishes nothing', () => {
         // the address never leaves: `[sp]` is storage this function already owns, so the store
-        // proves nothing about who else can reach the word
+        // proves nothing about who else can reach the word. The first audit sees no escape (the
+        // store is a slot's), and kept as one object the store writes the address into memory
+        // nothing declares a reader of — so it still declines, on that writer
         expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr1, [sp]'), ARMV4T_AGBCC)).toThrow(
-          TWO_MODELS,
+          /kept as one object cannot hold every writer — the captured address at \[sp,#0\): the address is published rather than passed/,
         );
         // …and the SAME frame reached through a second capture of it: `mov r2, sp` makes r2 the
         // frame base too, so `str r1, [r2]` writes the address into the very word it names
@@ -2339,8 +2352,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       // hands the device is `r0` — the incoming argument, not the frame base — so nothing outside
       // this function learns where the object is.
       test('a word store through a pool address publishes nothing when the VALUE is not the capture', () => {
-        expect(() => decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr0, [r2]'), ARMV4T_AGBCC)).toThrow(
-          TWO_MODELS,
+        expect(decompile('f', PUBLISH.replace('\tstr\tr1, [r2]', '\tstr\tr0, [r2]'), ARMV4T_AGBCC).source).toBe(
+          's32 f(s32 a0) {\n    u8 sp0[4];\n    *(s32 *)sp0 = a0;\n    *(s32 *)67109076 = a0;\n    return a0;\n}\n',
         );
       });
 
@@ -3537,9 +3550,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t0x4000068\n';
     const src = decompile('f3', phiPoll, ARMV4T_AGBCC).source;
     expect(src).toContain('    u8 sp0[8];');
-    expect(src).toContain('((volatile struct Struct1 *)v1)->field_4 = 5;');
-    expect(src).toContain('} while (((volatile struct Struct1 *)v1)->field_0 != 0);');
-    expect(src).toContain('return ((volatile struct Struct1 *)v1)->field_4;');
+    expect(src).toContain('((volatile struct Struct0 *)v1)->field_4 = 5;');
+    expect(src).toContain('} while (((volatile struct Struct0 *)v1)->field_0 != 0);');
+    expect(src).toContain('return ((volatile struct Struct0 *)v1)->field_4;');
   });
 
   // A marked read executes once, as a call does: `v = REG_VCOUNT; return v * v;` is one `ldrh`,
@@ -3778,29 +3791,45 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         ARMV4T_AGBCC,
       ),
     ).toThrow(laddr);
-    // accesses disagreeing on width: no single declared type reproduces both
-    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n'), ARMV4T_AGBCC)).toThrow(
-      laddr,
-    );
+    // accesses disagreeing on width: no single declared type reproduces both — refused where the
+    // address escapes to a writer the one object cannot hold, and where nothing escapes, the views
+    // of one union, both stores kept
+    const twoWidths = '\tmov\tr4, sp\n\tstrh\tr0, [r4]\n\tstr\tr1, [r4]\n';
+    expect(() => decompile('f', wrap(`${twoWidths}\tmov\tr0, r4\n\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(laddr);
+    expect(decompile('f', wrap(twoWidths), ARMV4T_AGBCC).source).toContain('sp0.half[0] = a0;\n    sp0.word[0] = a1;');
     // address arithmetic on the capture that is not a constant move: the object's extent stops
     // being one scalar
     expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tsub\tr4, r4, #0x4\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
       laddr,
     );
-    // an access at a nonzero offset through the capture
-    expect(() => decompile('f', wrap('\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n'), ARMV4T_AGBCC)).toThrow(laddr);
-    // overlap with an SSA slot: one byte, two models
-    expect(() =>
-      decompile(
-        'f',
-        wrap('\tmov\tr4, sp\n\tstr\tr0, [r4]\n\tstr\tr1, [sp]\n\tldr\tr2, [sp]\n\tadd\tr0, r2, #0\n'),
-        ARMV4T_AGBCC,
-      ),
-    ).toThrow(laddr);
+    // a word at a nonzero offset through the capture that reaches a call unread: it may be that
+    // callee's stack argument, whether or not a prototype states it, since a stated list is a lower
+    // bound (frame-objects.ts `storedNeverRead`)…
+    const wordAt4 = '\tmov\tr4, sp\n\tstr\tr0, [r4, #0x4]\n';
+    const g1 = { prototypes: { g: { params: 1 } } };
+    expect(() => decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(laddr);
+    expect(() => decompile('f', wrap(`${wordAt4}\tbl\tg\n`), ARMV4T_AGBCC, g1)).toThrow(
+      /the 4-byte store at \[sp,#4\) through a captured address reaches the call to `g` unread on every path/,
+    );
+    // …and with no call, or read back after it, it is a word of the one object
+    expect(decompile('f', wrap(wordAt4), ARMV4T_AGBCC).source).toContain('((s32 *)sp0)[1] = a0;');
+    const readBack = `${wordAt4}\tbl\tg\n\tldr\tr0, [r4, #0x4]\n`;
+    expect(decompile('f', wrap(readBack), ARMV4T_AGBCC, g1).source).toContain('((s32 *)sp0)[1] = a0;');
+    // overlap with an SSA slot: one byte, two models — refused where the address escapes to a
+    // writer the one object cannot hold (a callee taking it at argument 0 with nothing said of its
+    // return)…
+    const overSlot = '\tmov\tr4, sp\n\tstr\tr0, [r4]\n\tstr\tr1, [sp]\n\tldr\tr2, [sp]\n\tadd\tr0, r2, #0\n';
+    expect(() => decompile('f', wrap(`${overSlot}\tmov\tr0, r4\n\tbl\tg\n`), ARMV4T_AGBCC)).toThrow(
+      /the object at \[sp,#0\) overlaps the SSA slot at \[sp,#0\] — one byte, two models/,
+    );
+    // …and where nothing escapes, kept as one object in memory, every store in it
+    expect(decompile('f', wrap(overSlot), ARMV4T_AGBCC).source).toContain(
+      '*(s32 *)sp0 = a0;\n    *(s32 *)sp0 = a1;\n    return *(s32 *)sp0;',
+    );
     // a RUNTIME offset from sp is an index, read through a cast at its own width — so two widths
-    // are two alias sets over bytes the index names none of
+    // are two alias sets over bytes the index names none of, refused by the one object too
     expect(() => decompile('f', wrap('\tadd\tr4, sp, r1\n\tstrh\tr0, [r4]\n\tstr\tr0, [r4]\n'), ARMV4T_AGBCC)).toThrow(
-      /a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide/,
+      /a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
     );
   });
 
@@ -3852,8 +3881,7 @@ describe('a frame address that escapes explains the stores it hands over', () =>
 
   test('a wide frame-base object filled for its callee lifts with every store', () => {
     expect(decompile('f0', f0, ARMV4T_AGBCC, { prototypes: G }).source).toBe(
-      'struct Struct0 { s32 field_0; s32 field_4; u8 field_8; u16 field_10; };\n' +
-        's32 f0(s32 a0, s32 a1) {\n    u8 sp0[12];\n    s32 *p0;\n    p0 = (s32 *)sp0;\n    *p0 = 0;\n' +
+      's32 f0(s32 a0, s32 a1) {\n    u8 sp0[12];\n    s32 *p0;\n    p0 = (s32 *)sp0;\n    *p0 = 0;\n' +
         '    p0[1] = a0;\n    ((u8 *)sp0)[8] = 0;\n    ((u16 *)sp0)[5] = a1;\n    return g(sp0);\n}\n',
     );
   });
@@ -3932,7 +3960,9 @@ describe('a frame address that escapes explains the stores it hands over', () =>
       '\tstmia\tr1!, {r2, r3, r4}\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n\tmov\tr0, #0x1\n' +
       '\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\ttw6\n\tadd\tsp, sp, #0x18\n\tpop\t{r4}\n' +
       '\tpop\t{r0}\n\tbx\tr0\n';
-    expect(() => decompile('q6', q6, ARMV4T_AGBCC)).toThrow(/a store at \[\+4\] through the captured address/);
+    expect(() => decompile('q6', q6, ARMV4T_AGBCC)).toThrow(
+      /the 4-byte store at \[sp,#0\) through a captured address reaches the call to `tw6` unread on every path/,
+    );
   });
 });
 

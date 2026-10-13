@@ -199,12 +199,70 @@ describe('an unbounded device read keeps the local area as one object', () => {
     expect(members.every((op) => op.attrs.volatile === true)).toBe(true);
   });
 
-  test('a byte two widths reach is refused, since agbcc reads through casts by type', () => {
+  // agbcc reads a cast spelling of two widths stale by type, and never a union member access
+  test('a byte two widths reach is a union of their views', () => {
     const { blk } = published([
       { off: 0, width: 4 },
       { off: 2, width: 2 },
     ]);
-    expect(() => run(blk, [], { from: 0, to: 8 })).toThrow('accessed 4 and 2 bytes wide');
+    expect(run(blk, [], { from: 0, to: 8 })).toEqual({ policy: 'one-object', sinks: [0x040000d4] });
+    expect(blk.ops[0].attrs).toMatchObject({ off: 0, width: 1, signed: false, count: 8, views: [4, 2] });
+  });
+
+  test('a narrow width loaded both ways is two views, and a signed one is marked', () => {
+    const { blk, object } = published([{ off: 0, width: 4 }]);
+    const ret = blk.ops.pop()!;
+    const load = (signed: boolean) =>
+      mkOp('load', {
+        operands: [object.results[0]],
+        results: [mkValue(T.unk(32))],
+        attrs: { off: 2, width: 2, signed },
+      });
+    blk.ops.push(load(false), load(true), ret);
+    run(blk, [], { from: 0, to: 8 });
+    expect(blk.ops[0].attrs.views).toEqual([4, 2, -2]);
+  });
+
+  test('two widths a union of views cannot spell still refuse', () => {
+    // an access misaligned to its own width names no element of a view
+    const misaligned = published([
+      { off: 0, width: 4 },
+      { off: 1, width: 2 },
+    ]).blk;
+    expect(() => run(misaligned, [], { from: 0, to: 8 })).toThrow(
+      /accessed 4 and 2 bytes wide, .* and the 2-byte access at \[sp,#1\) is not aligned to its width/,
+    );
+    // …and an address stored where a writer may hold it needs a qualifier on each access, which a
+    // view of an unqualified union does not carry
+    const held = published([
+      { off: 0, width: 4 },
+      { off: 2, width: 2 },
+    ]).blk;
+    const a = held.ops[0].results[0];
+    const gp = mkValue(T.unk(32));
+    const ret = held.ops.pop()!;
+    held.ops.push(
+      mkOp('const', { results: [gp], attrs: { value: 0x03000000 } }),
+      mkOp('store', { operands: [gp, a], attrs: { off: 0, width: 4 } }),
+      mkOp('call', { operands: [a], attrs: { target: 'g' } }),
+      ret,
+    );
+    expect(() => run(held, [], { from: 0, to: 8 })).toThrow(/a view of a union carries no per-access qualifier/);
+    // …and a runtime index, at either width, is spelled for no view
+    const indexed = published([
+      { off: 0, width: 4 },
+      { off: 2, width: 2 },
+    ]).blk;
+    const base = indexed.ops[0].results[0];
+    const [i, at, got] = [mkValue(T.unk(32)), mkValue(T.unk(32)), mkValue(T.unk(32))];
+    indexed.params.push(i);
+    const end = indexed.ops.pop()!;
+    indexed.ops.push(
+      mkOp('add', { operands: [base, i], results: [at] }),
+      mkOp('load', { operands: [at], results: [got], attrs: { off: 0, width: 2, signed: false } }),
+      end,
+    );
+    expect(() => run(indexed, [], { from: 0, to: 8 })).toThrow(/a runtime index reaches them too/);
   });
 
   // The device's source register is a reader, so the store into it adds no writer to the callee's

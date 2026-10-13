@@ -50,7 +50,7 @@
 import { constAddressOf, globalCellOf } from '../ir/alias';
 import { Fn, Op, Value, defOpMap } from '../ir/core';
 import { nextStructIndex } from '../ir/struct-names';
-import { IrType, StructField, T, scalarTypeForAccess } from '../ir/types';
+import { IrType, StructField, T, UNION_VIEW_NAMES, scalarTypeForAccess, unionViewSigns } from '../ir/types';
 import type { StructType } from '../l3/ast';
 import { RaiseUnsupportedError, StructOverlapError } from './errors';
 import { storeSigned } from './storesign';
@@ -261,10 +261,6 @@ function placeFields(name: string, dataFields: StructField[]): IrType {
   return T.struct(name, fields);
 }
 
-/** The member name of each view a union holds, by access width. A width with no entry has no view
- *  (the deref contract admits no other scalar width either), and its overlap still declines. */
-const VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 'word' };
-
 /** The struct for a base whose accesses OVERLAP — `buildStruct` refused it with
  *  `StructOverlapError` — with each overlap declared as a UNION member: the same bytes read or
  *  written at more than one width are views of one cell, and a union is the C that says so.
@@ -319,23 +315,16 @@ function buildUnionStruct(structName: string, accesses: Access[], aggregateBound
     const start = c[0].off;
     const members = [...new Set(c.map((a) => a.width))].flatMap((width): StructField[] => {
       const group = c.filter((a) => a.width === width);
-      const name = VIEW_NAMES[width];
+      const name = UNION_VIEW_NAMES[width];
       if (name === undefined) {
         throw new RaiseUnsupportedError(
           `cannot recover struct '${structName}': no union view for a ${width}-byte access at offset ${group[0].off}`,
         );
       }
-      // The extensions this width is LOADED with, unsigned first; a word has one type whatever its
-      // loads say, and a width only stored gets the signed view when a stamped store reads it
-      // (raise/storesign.ts), as `buildStruct` prefers it, and the unsigned one otherwise.
-      const loaded = new Set(group.filter((a) => a.isLoad).map((a) => a.signed));
-      const signs =
-        width === 4
-          ? [true]
-          : loaded.size === 0 && group.some((a) => isStamped(a) && a.signed)
-            ? [true]
-            : [false, true].filter((sg) => loaded.has(sg));
-      const views = signs.length === 0 ? [false] : signs;
+      const views = unionViewSigns(
+        width,
+        group.map((a) => ({ isLoad: a.isLoad, signed: a.signed, stamped: isStamped(a) })),
+      );
       const viewOf = (a: Access): boolean => (views.length === 1 ? views[0] : a.isLoad ? a.signed : false);
       return views.map((signed): StructField => {
         const reads = group.filter((a) => viewOf(a) === signed);
@@ -413,6 +402,15 @@ export function recognizeStructs(fn: Fn, aggregateBoundary: number | undefined):
     if (base.type.kind !== 'unknown') {
       continue;
     } // already typed (not a bare recovery target)
+    // A FRAME OBJECT'S ADDRESS is never a recovery target: its declaration is the frame audit's
+    // stamp (structure.ts `laddrType` — a scalar, a `u8` array, a struct-return temp, or the union
+    // of the views its accesses use), and every access to it is spelled from that stamp, never
+    // through a type recovered here. Recovered anyway, the one-object area's accesses at several
+    // offsets and widths make a second, per-word union of the same bytes that nothing references
+    // and every candidate prints.
+    if (defs.get(base)?.opcode === 'laddr') {
+      continue;
+    }
 
     const accesses = accessesOf.get(base)!;
     if (isArray(accesses)) {

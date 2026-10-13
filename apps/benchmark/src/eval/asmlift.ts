@@ -59,6 +59,9 @@ export function rankOptionsFor(
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
+  // A default, so `Function.length` stays the 7 `bench sweep --base` checks a tree by: an older
+  // tree's builder ignores the trailing argument, and lifts as that tree always did.
+  aggregateGlobals: ReadonlySet<string> | undefined = undefined,
 ): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover, reading the section that defines `sym` — a CodeWarrior object
@@ -79,6 +82,7 @@ export function rankOptionsFor(
     // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
     // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
+    ...(aggregateGlobals ? { aggregateGlobals } : {}),
   };
 }
 
@@ -243,8 +247,9 @@ export async function runAsmlift(
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
   onProgress?: RankOptions['onProgress'],
+  aggregateGlobals?: ReadonlySet<string>,
 ): Promise<DecompilerResult> {
-  const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols);
+  const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols, aggregateGlobals);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).

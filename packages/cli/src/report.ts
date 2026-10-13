@@ -77,6 +77,7 @@ export async function decompileWithReport(
           prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
           inferredSymbols,
           mapSymbols,
+          opts.aggregateGlobals,
         )
     : undefined;
 
@@ -160,6 +161,7 @@ function probedSource(
   prototypes: Prototypes,
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
+  aggregateGlobals: ReadonlySet<string> | undefined,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -180,6 +182,7 @@ function probedSource(
       ...structureOptionsFor(target, returnsVoid, prototypes),
       spellSwitchFallthrough: backend.spellsSwitchFallthrough,
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
+      ...(aggregateGlobals?.size ? { aggregateGlobals } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),
     });
     return backend.emit(sfn);

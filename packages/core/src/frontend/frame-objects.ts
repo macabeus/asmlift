@@ -11,8 +11,8 @@
  *
  *  Thumb is the only caller today; the worked examples below are agbcc's, because agbcc is the
  *  compiler every rule was measured against. */
-import { type Block, type Op, type Value, mkOp, mkValue } from '../ir/core';
-import { type IrType, T, typeEquals, typeToString } from '../ir/types';
+import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
+import { type IrType, T, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
@@ -254,10 +254,15 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     nothing else types — bytes, or ONE wider width, read through a cast on the bytes
  *     (`indexedWidth`) — and its bytes must belong to nothing else in the frame;
  *   - ONE OBJECT, where a device reads or a callee writes without bound and every writer is one
- *     that answer can hold (`writerNotKept`; `oneObject`, which this answers and the frontend
- *     lifts again with): the local area is one `u8` array in memory, every fixed-offset access in
- *     it is a member at its own offset, a runtime index may reach it at a byte or at ONE wider
- *     width (`indexedWidth`), and two widths at one byte refuse.
+ *     that answer can hold (`writerNotKept`), or where no address escapes at all and the
+ *     per-object model refuses (`oneObject`, which this answers and the frontend lifts again
+ *     with): the local area is one `u8` array in memory, every fixed-offset access in it is a
+ *     member at its own offset, a runtime index may reach it at a byte or at ONE wider
+ *     width (`indexedWidth`), and two widths at one byte are the views of one union
+ *     (`unionViews`), or refuse where no view names them (`unionRefusal`).
+ *  In either model, a store through a capture that reaches a call unread on every path, beneath
+ *  every word a load after a call proves a local's, declines: it may be that call's stack argument
+ *  (`storedNeverRead`).
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -308,11 +313,12 @@ export function auditFrameObjects({
   const flow = addressFlow(irBlocks, objects, facts, fail);
   const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
-  const model = chooseFrameModel(oneObject, uses, windows, returnsWithoutHiddenPointer, fail);
+  const model = chooseFrameModel({ oneObject, uses, windows, returnsWithoutHiddenPointer, fail });
   if (capturedObjectIsTheWholeFrame) {
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
   recheckEscapesReliedOn(escapesReliedOn, uses, fail);
+  storedNeverRead(irBlocks, uses, target, fail);
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
@@ -330,11 +336,12 @@ export function auditFrameObjects({
     fail,
   });
   const escapes = frameEscapes({ irBlocks, uses, windows, shapes, owned, declared, usedSlotOffsets });
-  // THE ONE-OBJECT ANSWER, where it is on offer (one escape reaches without bound, and every
-  // writer is one it can hold) and the per-object model does not describe the frame: it refused a
-  // shape, an object sits over a slot, or the unbounded reach meets another object, a slot or a
-  // word nothing accounts for. Then what the device may read or the callee may write is kept
-  // rather than refused: lift again with the local area as one object in memory
+  // THE ONE-OBJECT ANSWER, where it is on offer (`chooseFrameModel`: one escape reaches without
+  // bound and every writer is one it can hold, or no address escapes at all) and the per-object
+  // model does not describe the frame: it refused a shape, an object sits over a slot, or the
+  // unbounded reach meets another object, a slot or a word nothing accounts for. Then what the
+  // device may read or the callee may write — or, with no escape, only this function's own
+  // accesses — is kept rather than refused: lift again with the local area as one object in memory
   // (`keepAsOneObject`). Below the local area are the outgoing arguments and above it the saved
   // registers, neither of them an object. Where the per-object model does describe the frame —
   // one object and nothing else in reach — it stands, and the object keeps its own type.
@@ -799,6 +806,13 @@ interface FrameUses {
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
   readonly memberRefusal: string | undefined;
+  readonly fixed: readonly {
+    readonly op: Op;
+    readonly at: number;
+    readonly width: number;
+    readonly isLoad: boolean;
+    readonly frameOnly: boolean;
+  }[];
 }
 
 /** Did the address at `off` reach something that may write the frame back: a callee that is not a
@@ -908,7 +922,18 @@ function classifyFrameUses({
   // …and without it, the first such access, which the per-object model refuses once the model is
   // chosen (`chooseFrameModel`)
   let memberRefusal: string | undefined;
+  // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
+  // touches, whether it reads them, and whether its address is this frame's on every path — what
+  // `storedNeverRead` asks of a frame that makes a call
+  const fixed: { op: Op; at: number; width: number; isLoad: boolean; frameOnly: boolean }[] = [];
   const scalar = (kind: string, op: Op, off: number, v: Value): void => {
+    fixed.push({
+      op,
+      at: off + (op.attrs.off as number),
+      width: op.attrs.width as number,
+      isLoad: kind === 'load',
+      frameOnly: frameOnEveryPath.has(v),
+    });
     if (oneObject !== undefined) {
       members.push({ at: off + (op.attrs.off as number), width: op.attrs.width as number });
       return;
@@ -1035,6 +1060,7 @@ function classifyFrameUses({
     indexed,
     members,
     memberRefusal,
+    fixed,
   };
 }
 
@@ -1305,25 +1331,47 @@ function writerNotKept(uses: FrameUses, returnsWithoutHiddenPointer: (callee: st
   return null;
 }
 
-/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. Where one escape reaches without bound and the
- *  one-object answer can hold every writer (`writerNotKept`), that answer is on offer — two
- *  out-parameters handed to one callee as readily as a device read — and the shapes the
- *  per-object model refuses are ones it can hold: a member at [+k] through a capture, two widths
- *  or two signednesses at one address, a runtime index, overlapping objects, a second object
- *  beside an untyped one, an object over a slot. So there each of those refusals asks for that
- *  answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
- *  object by its own rules — two types at one byte still refuse there. Where the answer is not on offer, each refuses where it stands. */
-function chooseFrameModel(
-  oneObject: FrameRange | undefined,
-  uses: FrameUses,
-  windows: ReadonlyMap<number, ReadWindow>,
-  returnsWithoutHiddenPointer: (callee: string) => boolean,
-  fail: Refuse,
-): ModelChoice {
+/** THE MODEL IS CHOSEN BEFORE ANY SHAPE IS JUDGED. The one-object answer is on offer in two
+ *  frames. Where one escape reaches without bound and that answer can hold every writer
+ *  (`writerNotKept`) — two out-parameters handed to one callee as readily as a device read. And
+ *  where NO ADDRESS ESCAPES AT ALL: then there is no writer and no reader but this function's own
+ *  accesses, so keeping every word of the declared area in memory keeps every store and every load
+ *  the machine made there, and a spill kept in memory changes no value. That second frame is the
+ *  one a by-value struct parameter leaves: agbcc spills its registers word by word (`str r1, [sp]`,
+ *  the slot model's) and, Thumb having no sp-relative halfword or byte load, reads its members
+ *  through `mov rD, sp` (the object's) — `int f(struct Q { u8 a[9]; } p){ return p.a[1] + p.a[8]; }`,
+ *  or a member read signed and unsigned, or the struct copied out a word at a time. The shapes the
+ *  per-object model refuses are ones that answer can hold: a member at [+k] through a capture, two
+ *  widths or two signednesses at one address, a runtime index, overlapping objects, a second
+ *  object beside an untyped one, an object over a slot. So there each of those refusals asks for
+ *  that answer instead of declining (`shapeRefused`), and the second audit judges the bytes as one
+ *  object by its own rules — two types at one byte are a union there, or refuse. Where the answer
+ *  is not on offer, each refuses where it stands.
+ *
+ *  A frame nothing escapes from can still hold a CALL'S STACK ARGUMENT: agbcc builds one it cannot
+ *  place with `str rX, [sp,#k]` through `mov rD, sp` — a by-value struct block-copied with
+ *  `ldmia`/`stmia`, a compound literal stored a byte or a halfword at a time — and the address
+ *  escapes nowhere. Kept here as a local, in either model, those stores outlive the call that took
+ *  them. That is `storedNeverRead`'s to refuse, the stage after this one, and it asks it of every
+ *  call, whatever a prototype says. */
+function chooseFrameModel({
+  oneObject,
+  uses,
+  windows,
+  returnsWithoutHiddenPointer,
+  fail,
+}: {
+  oneObject: FrameRange | undefined;
+  uses: FrameUses;
+  windows: ReadonlyMap<number, ReadWindow>;
+  returnsWithoutHiddenPointer: (callee: string) => boolean;
+  fail: Refuse;
+}): ModelChoice {
   const unbounded =
     oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
   const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
-  const onOffer = unbounded && writer === null;
+  const escapeFree = oneObject === undefined && uses.escaped.size === 0;
+  const onOffer = (unbounded && writer === null) || escapeFree;
   const model: ModelChoice = {
     onOffer,
     refused: false,
@@ -1341,6 +1389,189 @@ function chooseFrameModel(
     model.shapeRefused(uses.memberRefusal);
   }
   return model;
+}
+
+/** A FRAME STORE THAT REACHES A CALL UNREAD, BENEATH EVERY WORD PROVEN A LOCAL, MAY BE THAT
+ *  CALL'S STACK ARGUMENT — refuse. agbcc builds an argument it cannot place with `str rX, [sp,#k]`
+ *  IN PLACE through a capture: a by-value struct is `mov rD, sp` + `stmia`, a compound literal is
+ *  `strb`/`strh` through `mov rD, sp` moved by `add rD, #k`. The stack-argument analysis
+ *  (stackargs.ts) sees `[sp,#k]` slot stores alone, so it never weighs these, and no prototype
+ *  bounds them: a callee no prototype states counts argument registers alone, and a stated list is
+ *  a LOWER bound on the words a call takes — a variadic callee's list is a prefix, and DWARF's
+ *  `symbolPrototype` drops the `...`. Whatever model then holds the bytes, a local per capture or
+ *  the one object, keeps the stores and the call loses its stack words:
+ *  `th(1, 2, 3, 4, (struct S){{x, y}})` lifts as `th(1, 2, 3, 4)`. So this asks EVERY call.
+ *
+ *  A store is asked when it reaches a call PENDING — on some path from it to the call nothing loads
+ *  a byte it wrote, and on EVERY path from the entry some byte of it is written by such a store and
+ *  not loaded since — since a word the callee takes is one the caller wrote for it on every path
+ *  to the call and did not read back. A store through a pointer that is the
+ *  frame's on only some paths (`*(p ? p : &local) = x`) is not asked: it is not a store the
+ *  outgoing block alone can own. Nor is a store a runtime index or an escaped address reaches from
+ *  an object at or below it: whoever that hands the bytes to may read them.
+ *
+ *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND, the outgoing-argument theorem stackargs' own
+ *  `survivorBound` states. Under `localsAboveOutgoingArea` a compiler keeps one outgoing area at the
+ *  frame bottom, below every local, and never reads it back after a call; so a frame byte loaded
+ *  after a call before anything re-stores it held a value across that call, its word is a local's,
+ *  and so is every word above it. Every compiled outgoing-argument shape sits beneath any such
+ *  bound, and a local the source reads after a call does not: `g(); b[0] = x; b[1] = y;
+ *  return b[0];` reaches no call, `b[0] = x; g(); return b[0];` is above the bound. What this still
+ *  refuses that is honest is a local the source stores, never reads back, and calls past — a dead
+ *  local and an outgoing argument are the same machine code, and the lift cannot tell which.
+ *  The loads weighed are this audit's fixed accesses alone — a `[sp,#k]` slot load is the slot
+ *  model's and not seen here — so the bound sits at or above stackargs' own, which only asks more.
+ *  Without the premise the bound proves nothing, and every pending store is asked. */
+function storedNeverRead(irBlocks: readonly Block[], uses: FrameUses, target: TargetDescription, fail: Refuse): void {
+  const calls = irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'call'));
+  if (calls.length === 0) {
+    return;
+  }
+  const byOp = new Map(uses.fixed.map((a) => [a.op, a]));
+  const bytes = (a: { at: number; width: number }): number[] => [...Array(a.width).keys()].map((i) => a.at + i);
+  const index = new Map(irBlocks.map((b, i) => [b, i]));
+  const succs = irBlocks.map((b) => successorsOf(b).map((s) => index.get(s)!));
+  const live = new Set(irBlocks.length > 0 ? [0] : []);
+  for (const stack = [...live]; stack.length;) {
+    for (const s of succs[stack.pop()!]) {
+      if (!live.has(s)) {
+        live.add(s);
+        stack.push(s);
+      }
+    }
+  }
+
+  // THE SURVIVOR BOUND: a backward liveness over the frame bytes this function reads at fixed
+  // offsets through an address that is the frame's on every path. A load makes its bytes live, a
+  // store that writes them kills them, and a call is transparent but marks every byte live across
+  // it. A load whose address may be elsewhere proves nothing and a store that may write elsewhere
+  // kills nothing; nor does a block the entry cannot reach, as in `survivorBound`.
+  let bound = Infinity;
+  if (target.compilerBehaviors.localsAboveOutgoingArea === true) {
+    const liveIn = irBlocks.map(() => new Set<number>());
+    for (let changed = true; changed;) {
+      changed = false;
+      for (let b = irBlocks.length - 1; b >= 0; b--) {
+        if (!live.has(b)) {
+          continue;
+        }
+        const cur = new Set(succs[b].flatMap((s) => [...liveIn[s]]));
+        for (const op of [...irBlocks[b].ops].reverse()) {
+          const a = byOp.get(op);
+          if (op.opcode === 'call') {
+            for (const o of cur) {
+              bound = Math.min(bound, o - (o % 4));
+            }
+          } else if (a?.frameOnly) {
+            for (const o of bytes(a)) {
+              if (a.isLoad) {
+                cur.add(o);
+              } else {
+                cur.delete(o);
+              }
+            }
+          }
+        }
+        if ([...cur].some((o) => !liveIn[b].has(o))) {
+          liveIn[b] = cur;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // THE PENDING STORES, two forward dataflows from the entry over the blocks it reaches. The MAY
+  // set is the stores this asks that some path brings to a point unread: a load of any byte a
+  // store wrote ends it — an argument is a word the caller writes and never reads, so a store
+  // with any byte read is a local's — as a frame store covering every byte it wrote does. The
+  // MUST set is the bytes every path brings to a point written by a store this asks and not
+  // loaded since: a load ends the bytes it reads, a frame store the bytes it writes, and a store
+  // that may write elsewhere ends nothing. An argument is staged on EVERY path to its call — a
+  // tail-merged call is staged in each predecessor — so a byte some path reaches the call without
+  // is not this call's to take: a loop's store that the first trip calls past is a local's.
+  const reachedFrom = Math.min(...uses.escaped, ...uses.indexed.keys());
+  type Fixed = FrameUses['fixed'][number];
+  const asked = (a: Fixed): boolean => !a.isLoad && a.frameOnly && a.at + a.width <= reachedFrom && a.at < bound;
+  interface Pending {
+    may: Set<Fixed>;
+    must: Set<number>;
+  }
+  const step = (op: Op, cur: Pending): void => {
+    const a = byOp.get(op);
+    if (a === undefined) {
+      return;
+    }
+    const touched = new Set(bytes(a));
+    for (const p of [...cur.may]) {
+      const mine = bytes(p);
+      if (a.isLoad ? mine.some((o) => touched.has(o)) : a.frameOnly && mine.every((o) => touched.has(o))) {
+        cur.may.delete(p);
+      }
+    }
+    if (a.isLoad || a.frameOnly) {
+      for (const o of touched) {
+        cur.must.delete(o);
+      }
+    }
+    if (asked(a)) {
+      cur.may.add(a);
+      for (const o of touched) {
+        cur.must.add(o);
+      }
+    }
+  };
+  const into: (Pending | undefined)[] = irBlocks.map((_, b) =>
+    b === 0 ? { may: new Set(), must: new Set() } : undefined,
+  );
+  for (let changed = true; changed;) {
+    changed = false;
+    for (let b = 0; b < irBlocks.length; b++) {
+      const at = into[b];
+      if (!live.has(b) || at === undefined) {
+        continue;
+      }
+      const cur: Pending = { may: new Set(at.may), must: new Set(at.must) };
+      irBlocks[b].ops.forEach((op) => step(op, cur));
+      for (const s of succs[b]) {
+        const old = into[s];
+        if (s === 0) {
+          continue;
+        }
+        if (old === undefined) {
+          into[s] = { may: new Set(cur.may), must: new Set(cur.must) };
+          changed = true;
+          continue;
+        }
+        const may = new Set([...old.may, ...cur.may]);
+        const must = new Set([...old.must].filter((o) => cur.must.has(o)));
+        if (may.size !== old.may.size || must.size !== old.must.size) {
+          into[s] = { may, must };
+          changed = true;
+        }
+      }
+    }
+  }
+  for (let b = 0; b < irBlocks.length; b++) {
+    const at = into[b];
+    if (!live.has(b) || at === undefined) {
+      continue;
+    }
+    const cur: Pending = { may: new Set(at.may), must: new Set(at.must) };
+    for (const op of irBlocks[b].ops) {
+      if (op.opcode === 'call') {
+        const store = [...cur.may].filter((p) => bytes(p).some((o) => cur.must.has(o))).sort((x, y) => x.at - y.at)[0];
+        if (store !== undefined) {
+          const callee = calleeName(op);
+          fail(
+            `the ${store.width}-byte store at [sp,#${store.at}) through a captured address reaches the call to ` +
+              `${callee === undefined ? 'an indirect callee' : `\`${callee}\``} unread on every path, and no load ` +
+              "after a call proves it a local's — it may be that call's stack argument, which the lift would drop",
+          );
+        }
+      }
+      step(op, cur);
+    }
+  }
 }
 
 /** THE ACCEPTANCE'S PREMISE, RE-ASKED OF THE IR. `capturedObjectIsTheWholeFrame` is a reading
@@ -1537,7 +1768,8 @@ function failIfSlotKeysIt(
  *  instead of a refusal (`oneObject`, requested by the relift test where the escapes are judged).
  *  Every byte of `[from, to)` is declared one `u8` array whose address the device or the callee
  *  holds (`writerNotKept` says which writers it can hold), and every access inside it is a
- *  cast-spelled access to that array — so each store the machine made there is a store the
+ *  cast-spelled access to that array, or a view of the union it is declared as where two widths
+ *  meet at one byte — so each store the machine made there is a store the
  *  recompile makes too. That is what agbcc does for an object whose address escaped: it keeps
  *  every store to it, in order (flow.c deletes a memory store only when an identical later
  *  store in the same block overwrites it). And it is right whichever the source had there: a
@@ -1583,15 +1815,25 @@ function keepAsOneObject({
   if (index.refusal !== null) {
     fail(`a runtime index into ${kept} ${index.refusal}`);
   }
-  // ONE TYPE PER BYTE. agbcc at -O2 turns on type-based alias analysis (toplev.c:3616), and
-  // compiled, a `u32` read through a cast is served the earlier `u32` store straight past a
-  // `u16` store to the same bytes — a stale value. So a byte two accesses of different widths
-  // reach cannot be spelled through casts. A byte access is exempt, since character types
-  // alias everything, and so is a signedness difference, since the signed and unsigned types
-  // of one width share an alias set (c-common.c:1962-1974). The first audit asks for this
-  // answer rather than refusing two widths — an object read at both, or a `strh` member through
-  // the captured address over a word the slot model had — so this is where they refuse.
+  // ONE TYPE PER BYTE, OR ONE UNION. agbcc at -O2 turns on type-based alias analysis
+  // (toplev.c:3616), and compiled, a `u32` read through a cast is served the earlier `u32` store
+  // straight past a `u16` store to the same bytes — a stale value. So a byte two accesses of
+  // different widths reach cannot be spelled through casts. A byte access is exempt, since
+  // character types alias everything, and so is a signedness difference, since the signed and
+  // unsigned types of one width share an alias set (c-common.c:1962-1974). The first audit asks
+  // for this answer rather than refusing two widths — an object read at both, or a `strh` member
+  // through the captured address over a word the slot model had — so this is where they are judged.
+  //
+  // What two widths at one byte CAN be spelled as is a UNION of per-width views, every access made
+  // directly through it (`sp0.half[1]`): c_get_alias_set gives any access through a member of a
+  // union alias set 0 (c-common.c, the COMPONENT_REF walk), which conflicts with every set, so no
+  // read moves past a store to the same bytes — compiled, a `u16` read, a `u32` store and the same
+  // read again reloads through the union and returns the stale value through casts. So the object
+  // is stamped with the views its accesses use (`unionViews`) and declared as that union
+  // (structure.ts `laddrType`), where every access to it is a fixed offset on the object itself,
+  // aligned to its own width — the cases `unionRefusal` names refuse as before.
   const widthAt = new Map<number, number>();
+  let twoWidths: { b: number; had: number; width: number } | undefined;
   for (const m of uses.members) {
     if (m.at < from || m.at + m.width > to) {
       fail(`an access of ${m.width} bytes at [sp,#${m.at}) reaches past ${kept}`);
@@ -1602,12 +1844,21 @@ function keepAsOneObject({
     for (let b = m.at; b < m.at + m.width; b++) {
       const had = widthAt.get(b);
       if (had !== undefined && had !== m.width) {
-        fail(
-          `the byte at [sp,#${b}] of ${kept} is accessed ${had} and ${m.width} bytes wide, and agbcc at -O2 ` +
-            'lets a read of one type pass a store of the other (strict aliasing) — a cast spelling would read stale',
-        );
+        twoWidths ??= { b, had, width: m.width };
       }
       widthAt.set(b, m.width);
+    }
+  }
+  if (twoWidths !== undefined) {
+    // any runtime index, a byte one too: `indexedWidth` leaves width 1 out because a char access
+    // agrees with every width, but a union view is still spelled for fixed offsets alone
+    const why = unionRefusal({ from, to, uses, indexed: uses.indexed.size > 0 });
+    if (why !== null) {
+      fail(
+        `the byte at [sp,#${twoWidths.b}] of ${kept} is accessed ${twoWidths.had} and ${twoWidths.width} bytes ` +
+          'wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a cast ' +
+          `spelling would read stale, and ${why}`,
+      );
     }
   }
   for (const [b, had] of widthAt) {
@@ -1681,7 +1932,78 @@ function keepAsOneObject({
       ];
     });
   }
+  if (twoWidths !== undefined) {
+    // …every access is now a fixed offset on the object itself, which is what a view spells; one
+    // that is not was carried there by a phi, as a pointer, and a pointer to the union's bytes is
+    // read through a cast again
+    for (const op of uses.accessOps.keys()) {
+      if (op.operands[0] !== base) {
+        fail(
+          `the bytes [sp,#${from}) to [sp,#${to}) are accessed at two widths, which only a union of views ` +
+            'spells without a stale read — and an access reaches them through a pointer a phi carries, which ' +
+            'no view of the union names',
+        );
+      }
+    }
+    object.attrs = { ...object.attrs, views: unionViews(irBlocks, base) };
+  }
   irBlocks[0].ops.unshift(object);
+}
+
+/** Why the one object's bytes, accessed at two widths, cannot be spelled as a union of per-width
+ *  views, or null. A view names an ELEMENT, so every access must sit at a multiple of its own width
+ *  from the object's start and every view must tile the object; and it names it at a constant
+ *  index, so a runtime index into the object — whose element width a view could carry, but whose
+ *  spelling nothing here builds — keeps the refusal, and so does a qualifier on the accesses
+ *  (`publishedToWriter`), which a member access of an unqualified union cannot carry. */
+function unionRefusal({
+  from,
+  to,
+  uses,
+  indexed,
+}: {
+  from: number;
+  to: number;
+  uses: FrameUses;
+  indexed: boolean;
+}): string | null {
+  if (indexed) {
+    return 'a runtime index reaches them too, which no view of a union is spelled for';
+  }
+  if (uses.publishedToWriter.size > 0) {
+    return 'the address is stored where a writer may hold it, and a view of a union carries no per-access qualifier';
+  }
+  for (const m of uses.members) {
+    if ((m.at - from) % m.width !== 0) {
+      return `the ${m.width}-byte access at [sp,#${m.at}) is not aligned to its width, so no view of a union names it`;
+    }
+    if ((to - from) % m.width !== 0) {
+      return `the ${to - from} bytes are not a whole number of ${m.width}-byte elements, so no view of a union tiles them`;
+    }
+  }
+  return null;
+}
+
+/** The views a union object's accesses use, as `laddr`'s `views` attr: one entry per view, its
+ *  element width in bytes, NEGATIVE for a signed narrow view — which views, by the rule
+ *  raise/structs.ts declares a struct member's union by (ir/types.ts `unionViewSigns`). A word's
+ *  one view is `s32` whichever sign it carries, so it is entered unsigned. Widest first, unsigned
+ *  before signed. */
+function unionViews(irBlocks: readonly Block[], base: Value): number[] {
+  const byWidth = new Map<number, { isLoad: boolean; signed: boolean; stamped: boolean }[]>();
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    if ((op.opcode === 'load' || op.opcode === 'store') && op.operands[0] === base) {
+      const w = op.attrs.width as number;
+      (byWidth.get(w) ?? byWidth.set(w, []).get(w)!).push({
+        isLoad: op.opcode === 'load',
+        signed: (op.attrs.signed as boolean) ?? false,
+        stamped: op.opcode === 'store' && op.attrs.signed !== undefined,
+      });
+    }
+  }
+  return [...byWidth]
+    .sort(([a], [b]) => b - a)
+    .flatMap(([w, accesses]) => unionViewSigns(w, accesses).map((sg) => (sg && w !== 4 ? -w : w)));
 }
 
 /** One object's shape: `count` elements of `width` bytes. */
@@ -1711,8 +2033,10 @@ function slotKeys(usedSlotOffsets: ReadonlySet<number>, off: number, width: numb
  *  AN OBJECT OVER A SLOT IS REFUSED LAST, after the one-object answer is asked: that answer
  *  routes every word of the local area through `laddr`, so no slot is left for the object to
  *  overlap, and refusing first would decline exactly the frames it exists for — an object at
- *  [sp,#0] whose first member is a word stored `str rN, [sp]`. The other per-object refusals here
- *  go through `shapeRefused`, for the same reason. */
+ *  [sp,#0] whose first member is a word stored `str rN, [sp]`, or a by-value struct parameter
+ *  spilled word by word and read through `mov rD, sp` where nothing escapes. The other per-object
+ *  refusals here go through `shapeRefused`, for the same reason: where nothing escapes, each of
+ *  them asks for that answer too (`chooseFrameModel`). */
 function objectShapes({
   objects,
   uses,

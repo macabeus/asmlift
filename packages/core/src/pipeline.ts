@@ -5,6 +5,7 @@ import {
   ContractError,
   assertDerefsTyped,
   assertEffectsPreserved,
+  assertFrameUnionsViewed,
   assertLocalsWritten,
   assertPostIncrUnshared,
   assertResolved,
@@ -73,6 +74,10 @@ export interface DecompileOptions {
    *  declaration shapes (DWARF types-sidecar). Drives the Thumb numeric-pool promotion and the
    *  byte-sensitive global spellings. Absent ⇒ byte-identical to today. */
   symbols?: SymbolMap;
+  /** the globals the project's declaration context states are structs, unions or arrays
+   *  (proto-context.ts `aggregateObjectsFromContext`): none of them is spelled as a bare scalar
+   *  name. */
+  aggregateGlobals?: ReadonlySet<string>;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
 }
@@ -201,6 +206,7 @@ function runTower(
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
+    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
     ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });
@@ -431,6 +437,7 @@ export function structureChecked(
   // re-validate deref typing on the rewritten tree.
   const sfn = readabilityRewrites(raw);
   assertDerefsTyped(sfn);
+  assertFrameUnionsViewed(sfn);
   assertPostIncrUnshared(sfn);
   // Re-checked after the readability rewrites for the same reason deref typing is: a pass that
   // merges arms or drops statements must not be able to lose or duplicate a call.

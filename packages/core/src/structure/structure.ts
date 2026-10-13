@@ -59,7 +59,17 @@ import {
 } from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
 import { CAST_WIDTHS, opSig } from '../ir/opcodes';
-import { type IrType, T, intWidth, scalarTypeForAccess, typeEquals, unionViewAt } from '../ir/types';
+import {
+  type IrType,
+  type StructField,
+  T,
+  UNION_VIEW_NAMES,
+  intWidth,
+  scalarTypeForAccess,
+  typeEquals,
+  unionView,
+  unionViewAt,
+} from '../ir/types';
 import {
   BinOp,
   Expr,
@@ -263,12 +273,30 @@ function spellsAccessType(declared: boolean | undefined, width: number, signed: 
  *  elements of `width` bytes, signed or not. ONE element is a SCALAR typed by the access every
  *  access agreed on. More is STORAGE the frontend's frame-object audit sized without typing —
  *  no access pins an element type there, so the audit stamps bytes and this declares the array
- *  that spells them. Both arms are the audit's own facts; neither infers anything here. */
+ *  that spells them. Both arms are the audit's own facts; neither infers anything here.
+ *
+ *  …and storage the audit found accessed at two widths over one byte carries the VIEWS those
+ *  accesses use (`views`, frame-objects.ts `unionViews`), and is declared the union of them —
+ *  each view an array tiling the whole storage, `union { s32 word[3]; u16 half[6]; u8 byte[12]; }`
+ *  — because a union member access is the one spelling of two widths agbcc never reads stale. */
 function laddrType(op: Op): IrType {
   // a call's struct-return storage: the audit typed its address as a pointer to that struct
   const t = op.results[0].type;
   if (op.attrs.aggregate === true && t.kind === 'ptr') {
     return t.to;
+  }
+  const views = op.attrs.views as number[] | undefined;
+  if (views !== undefined) {
+    const count = op.attrs.count as number;
+    const widths = views.map(Math.abs);
+    const members = views.map((v): StructField => {
+      const w = Math.abs(v);
+      const elem = scalarTypeForAccess(w, v < 0);
+      const name =
+        widths.filter((x) => x === w).length > 1 ? `${v < 0 ? 's' : 'u'}${UNION_VIEW_NAMES[w]}` : UNION_VIEW_NAMES[w];
+      return { off: 0, type: count === w ? elem : T.array(elem, count / w), name };
+    });
+    return { kind: 'union', members, size: count };
   }
   const elem = T.int((op.attrs.width as number) * 8, op.attrs.signed as boolean);
   const count = op.attrs.count as number;
@@ -1788,6 +1816,10 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  they would read the map's `shape:'pointer'`. The operand-order rules do not read it: no element
    *  or field spelling folds from a name with no pointee. */
   pointerGlobals?: ReadonlySet<string>;
+  /** The globals the declaration context states are structs, unions or arrays
+   *  (proto-context.ts `aggregateObjectsFromContext`). Read with the map setting and without it: a
+   *  context declaration is what every candidate compiles against, whichever names it spells. */
+  aggregateGlobals?: ReadonlySet<string>;
 }
 
 /** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
@@ -2275,6 +2307,7 @@ export function structure(
     inferredSymbols,
     orderLicensedGlobals,
     pointerGlobals,
+    aggregateGlobals,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -2636,17 +2669,16 @@ export function structure(
         }
       }
     }
-    // Declaration-shape OVERRIDE (symbol map): a project-declared array/struct global is an
-    // AGGREGATE whatever the usage inference saw — a lone off-0 access to `extern u16 tbl[]`
-    // must still spell through the aggregate/array forms, never the bare scalar `tbl`.
+    // Declaration-shape OVERRIDE (symbol map, or the declaration context for a global the map does
+    // not describe): a project-declared array/struct global is an AGGREGATE whatever the usage
+    // inference saw — a lone off-0 access to `extern u16 tbl[]` must still spell through the
+    // aggregate/array forms, never the bare scalar `tbl`.
     // Driven from the FUNCTION's own globals, for the same reason the name minter above consults
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
-    if (symbols) {
-      for (const n of [...scalarGlobals]) {
-        const shape = symbols.get(n)?.shape;
-        if (shape === 'array' || shape === 'struct') {
-          scalarGlobals.delete(n);
-        }
+    for (const n of [...scalarGlobals]) {
+      const shape = symbols?.get(n)?.shape;
+      if (shape === 'array' || shape === 'struct' || aggregateGlobals?.has(n) === true) {
+        scalarGlobals.delete(n);
       }
     }
   }
@@ -3927,6 +3959,42 @@ export function structure(
     return q;
   };
 
+  // A FRAME OBJECT DECLARED AS A UNION (`laddrType`) is read and written through the view of each
+  // access's own width and extension — `sp0.half[1]`, `sp0.word[0]` — on the object itself, never
+  // through a cast on its storage: a cast there is the spelling agbcc may read stale, and the
+  // union is declared because it does not. The audit admitted only accesses at a fixed offset on
+  // the object and aligned to their own width (frame-objects.ts `unionRefusal`), so a view names
+  // each one; an access with none is an internal error, not a decline to fall back from.
+  const frameUnionAccess = (base: Value, off: number, width: number, signed: boolean, isStore: boolean) => {
+    const d = defs.get(base);
+    if (d?.opcode !== 'laddr' || d.attrs.views === undefined) {
+      return null;
+    }
+    const u = laddrType(d);
+    const { view, index } =
+      u.kind === 'union' ? unionView(u, off, width, signed, isStore) : { view: undefined, index: null };
+    if (view === undefined || off % width !== 0) {
+      throw new Error(
+        `internal: a ${width}-byte ${isStore ? 'store' : 'load'} at byte ${off} of the frame union '${laddrName.get(d)}' has no view`,
+      );
+    }
+    const cell: Expr = { k: 'field', base: { k: 'var', name: laddrName.get(d)! }, name: view.name, dot: true };
+    return index === null
+      ? cell
+      : ({ k: 'index', base: cell, idx: { k: 'const', value: index }, width, signed, subscript: true } as const);
+  };
+  // …and with no qualifier: `pinnedAccess` would put one on through a cast, the very spelling, and
+  // the audit refuses the union where its accesses would need one (`unionRefusal`)
+  const unqualifiedView = (op: Op, viewed: Expr): Expr => {
+    if (qualifiedBy(op) !== null) {
+      throw new Error(
+        `internal: '${fn.name}': a ${placedAt(op)} ${op.opcode} on a frame union must stay volatile, ` +
+          'which no view of the union carries',
+      );
+    }
+    return viewed;
+  };
+
   // Lower ONE def's operation to an Expr, rendering operands through `e`. Shared between the
   // inline-at-use path (exprWith) and the materialized-temp path (sideEffects), so both spell a
   // given op identically.
@@ -4319,6 +4387,16 @@ export function structure(
       return { k: 'addr', name: d.attrs.sym as string };
     }
     if (d.opcode === 'load') {
+      const viewed = frameUnionAccess(
+        d.operands[0],
+        d.attrs.off as number,
+        d.attrs.width as number,
+        (d.attrs.signed as boolean) ?? false,
+        false,
+      );
+      if (viewed !== null) {
+        return unqualifiedView(d, viewed);
+      }
       const access = memAccess(
         d.operands[0],
         e(d.operands[0]),
@@ -4906,6 +4984,12 @@ export function structure(
         const width = op.attrs.width as number;
         const off = op.attrs.off as number;
         const stamp = op.attrs.signed as boolean | undefined;
+        const viewed = frameUnionAccess(op.operands[0], off, width, storeView(op, width), true);
+        if (viewed !== null) {
+          const lval = unqualifiedView(op, viewed);
+          out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
+          continue;
+        }
         const baseExpr = expr(op.operands[0]);
         const lval0 = memAccess(
           op.operands[0],

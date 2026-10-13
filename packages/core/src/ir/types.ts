@@ -93,6 +93,31 @@ export const T = {
   void: (): IrType => ({ kind: 'void' }),
 };
 
+/** The member name of each view a union holds, by access width. A width with no entry has no view
+ *  (the deref contract admits no other scalar width either), and its overlap still declines. A
+ *  narrow width loaded with both extensions has a view per extension, `u`/`s` prefixed. */
+export const UNION_VIEW_NAMES: Readonly<Record<number, string>> = { 1: 'byte', 2: 'half', 4: 'word' };
+
+/** The extensions a union declares a view of `width` bytes in, from the accesses of that width:
+ *  THE one rule raise/structs.ts `buildUnionStruct` and the frame audit (frontend/frame-objects.ts
+ *  `unionViews`) both declare by, so a struct member's union and a frame object's cannot disagree
+ *  on their views. A word has one view whatever its loads say (`scalarTypeForAccess`); a narrower
+ *  width a view per extension it is LOADED with, unsigned first; a width only stored the signed
+ *  view where a stamped store says signed (raise/storesign.ts) and the unsigned one otherwise. */
+export function unionViewSigns(
+  width: number,
+  accesses: readonly { readonly isLoad: boolean; readonly signed: boolean; readonly stamped: boolean }[],
+): boolean[] {
+  if (width === 4) {
+    return [true];
+  }
+  const loaded = new Set(accesses.filter((a) => a.isLoad).map((a) => a.signed));
+  if (loaded.size === 0) {
+    return [accesses.some((a) => a.stamped && a.signed)];
+  }
+  return [false, true].filter((sg) => loaded.has(sg));
+}
+
 /** The byte width of a union view's element (an array view's element, or the scalar itself). */
 function viewBytes(t: IrType): number {
   const e = t.kind === 'array' ? t.elem : t;
@@ -131,8 +156,21 @@ export function unionViewAt(
   if (member === undefined || member.type.kind !== 'union') {
     return undefined;
   }
+  return { member, ...unionView(member.type, off - member.off, width, signed, isStore) };
+}
+
+/** The view of a union an access of `width` bytes at byte `at` of it reads — the rule
+ *  `unionViewAt` states, asked of a union that is not a struct's member (a frame object declared
+ *  as one, structure.ts `laddrType`). */
+export function unionView(
+  u: Extract<IrType, { kind: 'union' }>,
+  at: number,
+  width: number,
+  signed: boolean,
+  isStore: boolean,
+): { view: StructField | undefined; index: number | null } {
   const elemOf = (t: IrType): IrType => (t.kind === 'array' ? t.elem : t);
-  const wide = member.type.members.filter((m) => intWidth(elemOf(m.type)) === width * 8);
+  const wide = u.members.filter((m) => intWidth(elemOf(m.type)) === width * 8);
   const signOf = (m: StructField): boolean | undefined => {
     const e = elemOf(m.type);
     return e.kind === 'int' ? e.signed : undefined;
@@ -141,7 +179,7 @@ export function unionViewAt(
     width === 4 || (isStore && wide.length === 1)
       ? wide[0]
       : wide.find((m) => signOf(m) === (isStore ? false : signed));
-  return { member, view, index: view?.type.kind === 'array' ? (off - member.off) / width : null };
+  return { view, index: view?.type.kind === 'array' ? at / width : null };
 }
 
 export function typeToString(t: IrType): string {

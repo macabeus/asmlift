@@ -21,6 +21,7 @@
 import { cBackend } from './backend/c';
 import {
   assertDerefsTyped,
+  assertFrameUnionsViewed,
   assertLocalStorageStaysInteger,
   assertLocalsWritten,
   assertNoOrphanedLocals,
@@ -163,6 +164,8 @@ export interface EnumerateOptions {
   asmData?: AsmData;
   /** address→symbol map (symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
+  /** same contract as DecompileOptions.aggregateGlobals */
+  aggregateGlobals?: ReadonlySet<string>;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -488,6 +491,7 @@ export function enumerateCandidates(
     // every candidate carries it, the whole row).
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
+    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
   };
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the
@@ -1096,6 +1100,7 @@ export function enumerateCandidates(
         assertPostIncrUnshared(alt);
         assertNoOrphanedLocals(sfn, alt);
         assertLocalStorageStaysInteger(sfn, alt);
+        assertFrameUnionsViewed(alt);
         sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape or declaration-width fact
@@ -1140,6 +1145,7 @@ export function enumerateCandidates(
                 assertPostIncrUnshared(shaped.out);
                 assertNoOrphanedLocals(alt, shaped.out);
                 assertLocalStorageStaysInteger(alt, shaped.out);
+                assertFrameUnionsViewed(shaped.out);
                 assertPlacementSurvives(alt, shaped.out, minted);
                 sources.push({
                   variations: [...variations, ...shaped.variations],
@@ -2290,6 +2296,7 @@ export function enumerateCandidates(
                 assertPostIncrUnshared(made);
                 assertNoOrphanedLocals(sfn, made);
                 assertLocalStorageStaysInteger(sfn, made);
+                assertFrameUnionsViewed(made);
                 // A backend refusal on this REWRITTEN tree is not a refusal of the row's own
                 // tree, so it never becomes the row's stated cause: `TreeSources.emit` is dropped
                 // here and only the call over the row's own tree above records one.

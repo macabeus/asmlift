@@ -158,7 +158,10 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
 \tpop\t{r1}
 \tbx\tr1
 `;
-    expect(() => lift(outgoing)).toThrow(CAPTURE);
+    // …so a store through a copy that reaches a call unread is refused as that call's argument
+    expect(() => lift(outgoing)).toThrow(
+      /the 4-byte store at \[sp,#4\) through a captured address reaches the call to `g` unread on every path/,
+    );
   });
 
   // A capture that was not split is refused with ITS OWN reason. Two captures here: [sp,#0]'s word
@@ -173,8 +176,14 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     expect(() => decompile('f', alsoPublished(two), ARMV4T_AGBCC, { prototypes })).toThrow(
       /a store at \[\+1\] through the captured address — only a scalar at the captured address is modelled/,
     );
-    // …and with the callee the only writer, both members are bytes of the one object
-    const kept = decompile('f', two, ARMV4T_AGBCC, { prototypes }).source;
+    // …and with the callee the only writer, the word nothing reads before `g` may be `g`'s stack
+    // argument — a stated parameter list is a lower bound…
+    expect(() => decompile('f', two, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /the 4-byte store at \[sp,#4\) through a captured address reaches the call to `g` unread on every path/,
+    );
+    // …and read back after the call it is a local, and both members are bytes of the one object
+    const readBack = two.replace('\tbl\tg\n', '\tbl\tg\n\tldr\tr0, [r4, #0x4]\n');
+    const kept = decompile('f', readBack, ARMV4T_AGBCC, { prototypes }).source;
     expect(kept).toContain('u8 sp0[16];');
     expect(kept).toContain('((u8 *)sp0)[9] = a1;');
     expect(kept).toContain('g((u32)sp0 + 8);');
@@ -203,9 +212,12 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     ).toThrow(
       /a load at \[\+2\] through the captured address — only a scalar at the captured address is modelled — and the one object cannot hold every writer: the captured address at \[sp,#4\): `g` takes it at argument 0/,
     );
-    // …and kept as one object, the word, the byte and the halfword at one address are refused by
-    // that answer's own rule
-    expect(() => decompile('e1', e1, ARMV4T_AGBCC, { prototypes })).toThrow(/is accessed 4 and 2 bytes wide/);
+    // …and kept as one object, the word, the byte and the halfword at one address are the views
+    // of one union, each access made through its own
+    const kept = decompile('e1', e1, ARMV4T_AGBCC, { prototypes }).source;
+    expect(kept).toContain('    union { s32 word; u16 half[2]; u8 byte[4]; } sp4;');
+    expect(kept).toContain('g(&sp4);');
+    expect(kept).toContain('sp4.half[1]');
   });
 
   test('a capture that ESCAPES keeps the frame base', () => {
@@ -219,9 +231,12 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
 
   test('a REGISTER-offset access through a capture keeps the frame base', () => {
     // the offset is not known, so which frame bytes the access names is not known either; the
-    // lowering makes the capture flow into an `add`, which the audit refuses
+    // lowering makes the capture flow into an `add`, which the per-object model refuses…
     expect(() => lift(SPILL)).not.toThrow();
-    expect(() => lift(edit('\tstrh\tr2, [r3, #0x4]\n', '\tstrh\tr2, [r3, r1]\n'))).toThrow(CAPTURE);
+    const indexedStore = edit('\tstrh\tr2, [r3, #0x4]\n', '\tstrh\tr2, [r3, r1]\n');
+    expect(() => lift(alsoPublished(indexedStore))).toThrow(CAPTURE);
+    // …and where nothing escapes, the frame is one object the store indexes at a byte offset
+    expect(lift(indexedStore).source).toContain('*(u16 *)((u32)sp0 + a1) = v0;');
   });
 
   test('a capture that reaches a block PARAMETER keeps the frame base', () => {
@@ -264,7 +279,10 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
 \tpop\t{r1}
 \tbx\tr1
 `;
-    expect(() => lift(bothSigns)).toThrow(/disagree on signedness/);
+    expect(() => lift(alsoPublished(bothSigns, 4))).toThrow(/disagree on signedness/);
+    // …and where nothing escapes, one object whose byte is read through both character types,
+    // which alias everything
+    expect(lift(bothSigns).source).toContain('return ((s8 *)sp0)[4] - ((u8 *)sp0)[4];');
   });
 
   test('an escape alongside a SECOND object declines', () => {
@@ -312,12 +330,17 @@ describe('the audit judges each frame object on its own bytes', () => {
     );
   });
 
-  test('an object overlapping an SSA slot declines', () => {
+  test('an object overlapping an SSA slot is never two models', () => {
     // the slot model keeps [sp,#4] in a register, so a store through the object would never be
-    // seen there — the two models would disagree about the same four bytes, silently
+    // seen there — the two models would disagree about the same four bytes, silently. Where an
+    // escape names a writer the one object cannot hold, that refuses (the next test, `atArg0`);
+    // where nothing escapes, the bytes are kept as one object in memory and judged by its rules —
+    // here a word and a halfword at one byte, the two views of one union, every store kept
     expect(() => lift(DISJOINT)).not.toThrow();
-    expect(() => lift(frame(`\tstr\tr0, [sp, #0x4]\n${OBJ}\tldr\tr2, [sp, #0x4]\n\tadd\tr0, r0, r2\n`))).toThrow(
-      /overlaps the SSA slot/,
+    const over = frame(`\tstr\tr0, [sp, #0x4]\n${OBJ}\tldr\tr2, [sp, #0x4]\n\tadd\tr0, r0, r2\n`);
+    expect(lift(over).source).toContain(
+      '    union { s32 word[2]; u16 half[4]; } sp0;\n    sp0.word[1] = a0;\n    sp0.half[2] = a1;\n' +
+        '    return sp0.half[2] + sp0.word[1];',
     );
   });
 
@@ -351,14 +374,16 @@ describe('the audit judges each frame object on its own bytes', () => {
   test('two objects sharing a byte decline', () => {
     // a word at [sp,#0] and a halfword at [sp,#2] are two declared locals over the same storage
     expect(() => lift(DISJOINT)).not.toThrow();
-    expect(() =>
-      lift(
-        frame(
-          '\tmov\tr3, sp\n\tstr\tr1, [r3]\n\tmov\tr3, sp\n\tldr\tr0, [r3]\n' +
-            '\tmov\tr2, sp\n\tstrh\tr1, [r2, #0x2]\n\tmov\tr2, sp\n\tldrh\tr2, [r2, #0x2]\n\tadd\tr0, r0, r2\n',
-        ),
-      ),
-    ).toThrow(/overlap — one byte, two models/);
+    const sharing = frame(
+      '\tmov\tr3, sp\n\tstr\tr1, [r3]\n\tmov\tr3, sp\n\tldr\tr0, [r3]\n' +
+        '\tmov\tr2, sp\n\tstrh\tr1, [r2, #0x2]\n\tmov\tr2, sp\n\tldrh\tr2, [r2, #0x2]\n\tadd\tr0, r0, r2\n',
+    );
+    expect(() => lift(alsoPublished(sharing))).toThrow(/overlap — one byte, two models/);
+    // …and where nothing escapes, they are the views of one union, the halfword store between the
+    // word's load and the halfword's own
+    expect(lift(sharing).source).toContain(
+      '    sp0.word[0] = a1;\n    v0 = sp0.word[0];\n    sp0.half[1] = a1;\n    return v0 + sp0.half[1];',
+    );
   });
 
   // THE RESERVATION AS AN EXTENT. An object with no access of its own is untyped, but a frame
@@ -582,8 +607,10 @@ describe('the audit judges each frame object on its own bytes', () => {
       });
 
       test('two wider widths over the bytes are two alias sets, and decline naming both', () => {
+        // the per-object model refuses the two widths, and kept as one object (nothing escapes) the
+        // second audit refuses them by its own rule
         expect(() => lift(atTheIndexedRead('\tldrh\tr2, [r0]\n\tldr\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
-          /a runtime index into the object at \[sp,#0\) accesses 2 and 4 bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other/,
+          /a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other/,
         );
       });
 
@@ -636,9 +663,11 @@ describe('the audit judges each frame object on its own bytes', () => {
       test('an object an access of its own types as a scalar is not indexed', () => {
         const typed = indexed('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n');
         const typedHere = atTheIndexedRead('\tldrb\tr0, [r0]\n\tmov\tr1, sp\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n');
-        expect(() => lift(typedHere)).toThrow(
+        expect(() => lift(alsoPublished(typedHere))).toThrow(
           /a runtime index into the object at \[sp,#0\), which an access of its own types as one scalar/,
         );
+        // …and where nothing escapes, so is the one object here: the scalar a byte of it
+        expect(lift(typedHere).source).toContain('return ((u8 *)sp0)[a0] + *(u8 *)sp0;');
         // …while kept as one object, the scalar is its byte 0 and the index another byte of it
         expect(lift(typed).source).toContain('u8 sp0[8];');
       });
@@ -735,15 +764,16 @@ describe('the audit judges each frame object on its own bytes', () => {
         expect(() => liftWith(fill())).not.toThrow();
         const kept = `${STAGED}\tstr\tr4, [sp, #0x14]\n`;
         const keyed = fill('0x10', kept).replace('\tbl\th\n', '\tbl\th\n\tldr\tr0, [sp, #0x14]\n');
-        // judged per object where nothing reaches the frame without bound: the object only indexed
-        // here, never handed out, and `g` given its staged arguments alone
+        // and where nothing reaches the frame at all — the object only indexed here, never handed
+        // out, and `g` given its staged arguments alone — the slot is no second model either
         const indexedOnly = copy(
           `${kept}\tmov\tr0, #0x0\n\tmov\tr1, #0x0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x0\n\tbl\tg\n` +
             '\tadd\tr1, sp, #0x10\n\tldrb\tr0, [r1, r0]\n\tldr\tr1, [sp, #0x14]\n\tadd\tr0, r0, r1\n',
           '0x18',
         );
-        expect(() => liftWith(indexedOnly)).toThrow(
-          /the object at \[sp,#16\) overlaps the SSA slot at \[sp,#20\] — one byte, two models$/,
+        // …it is kept as one object, the slot a word of it, the uninitialised store kept
+        expect(liftWith(indexedOnly).source).toContain(
+          '((s32 *)sp16)[1] = uninit_r4;\n    return ((u8 *)sp16)[g(0, 0, 0, 0, 8, 2, 15, a0)] + ((s32 *)sp16)[1];',
         );
         expect(liftWith(keyed).source).toContain('return ((s32 *)sp16)[1];');
       });
@@ -816,5 +846,185 @@ describe('the audit judges each frame object on its own bytes', () => {
     ).source;
     expect(src).toContain('s32 sp0;');
     expect(src).toContain('u16 sp4;');
+  });
+});
+
+// A BY-VALUE STRUCT PARAMETER is spilled word by word — `str r0, [sp]`, a store the slot model keys —
+// and, Thumb having no sp-relative halfword or byte load, read member by member through `mov rD, sp`,
+// which the audit splits into objects. So the objects lie over slots, and nothing escapes: no call
+// takes a frame address and none is stored anywhere. With no writer and no reader but this
+// function's own accesses, the declared area is kept as ONE object in memory, every spill a store
+// to it, rather than declined as two models of one byte. Verbatim agbcc 2.9-arm-000512 at the
+// corpus's flags.
+describe('a frame nothing escapes from is one object where the slot model and an object meet', () => {
+  const byValue = (reads: string) =>
+    `f:\n\tadd\tsp, sp, #-0xc\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr2, [sp, #0x8]\n${reads}` +
+    '\tadd\tsp, sp, #0xc\n\tbx\tlr\n';
+  // `struct Q { u8 a[9]; }; int f(struct Q p, int i){ return p.a[1] + p.a[8]; }`
+  const BYTES = byValue(
+    '\tmov\tr0, sp\n\tldrb\tr0, [r0, #0x1]\n\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tadd\tr0, r0, r1\n',
+  );
+
+  test('word spills read back as bytes lift, every spill kept', () => {
+    const src = lift(BYTES).source;
+    expect(src).toContain('u8 sp0[12];');
+    // the declaration is the audit's alone: no struct is recovered over the frame object's address
+    // (raise/structs.ts), which nothing would reference
+    expect(src).not.toContain('struct Struct');
+    expect(src).toContain('*p0 = a0;\n    p0[1] = a1;\n    p0[2] = a2;\n    return p1[1] + p1[8];');
+  });
+
+  test('an escape keeps the per-object refusal', () => {
+    // the same frame with its base handed to a callee nothing says the return of: a writer the one
+    // object cannot hold, so the overlap is refused where it stands
+    const handed = BYTES.replace('\tadd\tr0, r0, r1\n', '\tadd\tr0, r0, r1\n\tmov\tr0, sp\n\tbl\tg\n');
+    expect(handed).not.toBe(BYTES);
+    expect(() => lift(handed)).toThrow(/overlaps the SSA slot at \[sp,#0\] — one byte, two models/);
+  });
+
+  test('word spills read back as halfwords are the views of one union', () => {
+    // `struct P { u16 a, b, c, d; s8 e; }; int f(struct P p){ return p.a + p.c - p.e; }` — two
+    // widths at one byte, which a cast on bytes would let agbcc read stale and a union does not
+    const halves = byValue(
+      '\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tmov\tr1, sp\n\tldrh\tr1, [r1, #0x4]\n\tadd\tr0, r0, r1\n' +
+        '\tmov\tr1, sp\n\tldrb\tr1, [r1, #0x8]\n\tlsl\tr1, r1, #24\n\tasr\tr1, r1, #24\n\tsub\tr0, r0, r1\n',
+    );
+    expect(lift(halves).source).toContain(
+      's32 f(s32 a0, s32 a1, s32 a2) {\n    union { s32 word[3]; u16 half[6]; u8 byte[12]; } sp0;\n' +
+        '    sp0.word[0] = a0;\n    sp0.word[1] = a1;\n    sp0.word[2] = a2;\n' +
+        '    return sp0.half[0] + sp0.half[2] - (s8)sp0.byte[8];\n}\n',
+    );
+  });
+
+  test('two widths and a byte runtime index refuse, as the index', () => {
+    // `struct P { u16 a, b; u8 c[8]; }; int f(struct P p, int i){ return p.a + p.c[i]; }` — a char
+    // index agrees with every width (`indexedWidth`), but no view of a union is spelled for one
+    const indexed = byValue(
+      '\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tadd\tr1, sp, #0x4\n\tadd\tr1, r1, r3\n\tldrb\tr1, [r1]\n\tadd\tr0, r0, r1\n',
+    );
+    expect(() => lift(indexed)).toThrow(/accessed 4 and 2 bytes wide, .* and a runtime index reaches them too/);
+  });
+
+  // EVERY PER-OBJECT REFUSAL, not only the overlap: with nothing escaping, the one-object answer is
+  // on offer before any shape is judged (frame-objects.ts `chooseFrameModel`), so which refusal the
+  // per-object model would have reached first does not decide whether the frame lifts.
+  test('a member read signed and unsigned is the views of one union', () => {
+    // `struct P { s16 a, b, c, d; s8 e; }; int f(struct P p){ return (s16)p.a + p.b + (s16)p.b; }` —
+    // the per-object model refuses the signedness disagreement before it reaches the overlap
+    const signs = byValue(
+      '\tmov\tr0, sp\n\tmov\tr1, #0x0\n\tldrsh\tr0, [r0, r1]\n\tmov\tr1, sp\n\tldrh\tr1, [r1, #0x2]\n' +
+        '\tadd\tr0, r0, r1\n\tmov\tr1, sp\n\tmov\tr2, #0x2\n\tldrsh\tr1, [r1, r2]\n\tadd\tr0, r0, r1\n',
+    );
+    expect(lift(signs).source).not.toContain('struct Struct');
+    expect(lift(signs).source).toContain(
+      '    union { s32 word[3]; u16 uhalf[6]; s16 shalf[6]; } sp0;\n' +
+        '    sp0.word[0] = a0;\n    sp0.word[1] = a1;\n    sp0.word[2] = a2;\n' +
+        '    return sp0.shalf[0] + sp0.uhalf[1] + sp0.shalf[1];\n',
+    );
+  });
+
+  test('a word stored through the captured address is a member of the one object', () => {
+    // the parameter copied into a local `struct S { u32 x, y, z, w, v; }` a word at a time through
+    // `add r1, sp, #0xc` — the per-object model refuses a word at [+4] through a capture before any
+    // shape is judged
+    const copied =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x20\n\tstr\tr0, [sp]\n\tstr\tr1, [sp, #0x4]\n' +
+      '\tstr\tr2, [sp, #0x8]\n\tadd\tr1, sp, #0xc\n\tmov\tr0, sp\n\tldrh\tr0, [r0]\n\tstr\tr0, [sp, #0xc]\n' +
+      '\tmov\tr0, sp\n\tldrh\tr5, [r0, #0x2]\n\tstr\tr5, [r1, #0x4]\n\tldrh\tr4, [r0, #0x4]\n\tstr\tr4, [r1, #0x8]\n' +
+      '\tldrh\tr3, [r0, #0x6]\n\tstr\tr3, [r1, #0xc]\n\tmov\tr2, #0x8\n\tldrsb\tr2, [r0, r2]\n\tstr\tr2, [r1, #0x10]\n' +
+      '\tldr\tr0, [sp, #0xc]\n\tmul\tr0, r0, r5\n\tmov\tr1, r4\n\tmul\tr1, r1, r3\n\tadd\tr0, r0, r1\n' +
+      '\tadd\tr0, r0, r2\n\tadd\tsp, sp, #0x20\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const src = lift(copied).source;
+    expect(src).toContain('    union { s32 word[8]; u16 half[16]; s8 byte[32]; } sp0;\n');
+    expect(src).toContain('    sp0.word[3] = sp0.half[0];\n');
+    expect(src).toContain('    sp0.word[7] = v3;\n    return sp0.word[3] * v0 + v1 * v2 + v3;\n');
+  });
+
+  // …EXCEPT A STORE THAT REACHES A CALL UNREAD, ON EVERY PATH AND BENEATH EVERY PROVEN LOCAL.
+  // agbcc's own output for `struct W { int a[3]; }; int th(); int q7(struct W *p){ return th(1, 2, 3, 4, *p); }`:
+  // the struct ARGUMENT is block-copied into the outgoing words through `mov r1, sp`, and nothing
+  // escapes. Kept as one object, the copy is a local's and `th` loses every stack word, silently.
+  const STAGED_ARG =
+    'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr1, sp\n\tldmia\tr0!, {r2, r3, r4}\n\tstmia\tr1!, {r2, r3, r4}\n' +
+    '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tth\n\tadd\tsp, sp, #0xc\n\tpop\t{r4}\n' +
+    '\tpop\t{r1}\n\tbx\tr1\n';
+  const storedUnread = (width: number, at: number, callee: string) =>
+    new RegExp(
+      `the ${width}-byte store at \\[sp,#${at}\\) through a captured address reaches the call to \`${callee}\` unread on every path`,
+    );
+
+  test('a word copied through a capture and never read is the outgoing-argument guard, and stands', () => {
+    expect(() => lift(STAGED_ARG)).toThrow(storedUnread(4, 0, 'th'));
+    // …and a prototype holds no store through a capture: a stated list is a LOWER bound on the
+    // words a call takes. `int th(int, int, int, int, ...)` states four, and so does DWARF for it,
+    // which drops the `...` — the same refusal
+    const prefix = (params: number | string[]) =>
+      decompile('f', STAGED_ARG, ARMV4T_AGBCC, { prototypes: { th: { params } } });
+    expect(() => prefix(4)).toThrow(storedUnread(4, 0, 'th'));
+    expect(() => prefix(['s32', 's32', 's32', 's32'])).toThrow(storedUnread(4, 0, 'th'));
+    // …and a prototype that states the stack words holds them to `[sp,#k]` stores, loudly
+    expect(() => prefix(7)).toThrow(/callee `th` is declared with 7 arguments, so its outgoing stack-argument block/);
+  });
+
+  test('a local stored after the only call, or read after a call, is no argument', () => {
+    // `int g(); int f(int x, int y){ unsigned char b[4]; g(); b[0] = x; b[1] = y; return b[0]; }` —
+    // `b[1]` is never read, but it reaches no call
+    const afterCall =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tg\n\tmov\tr0, sp\n' +
+      '\tstrb\tr4, [r0]\n\tstrb\tr5, [r0, #0x1]\n\tldrb\tr0, [r0]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(lift(afterCall).source).toContain('    g(a0, a1);\n    sp0 = a0;\n    return sp0;\n');
+    // `int g(); int f(int n, int x){ u8 b[4]; int i, r = 0;
+    //   for (i = 0; i < n; i++) { if (g()) { b[1] = x + i; if (x > i) r += b[1]; } } return r; }` —
+    // the store reaches the next trip's call unread, but the first trip calls `g` before any store:
+    // an argument is staged on every path to its call
+    const loop =
+      'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr7, r0, #0\n\tadd\tr6, r1, #0\n\tmov\tr1, #0x0\n' +
+      '\tmov\tr4, #0x0\n\tcmp\tr1, r7\n\tbge\t.L4\n\tmov\tr5, sp\n.L6:\n\tstr\tr1, [sp, #0x4]\n\tbl\tg\n\tldr\tr1, [sp, #0x4]\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.L5\n\tadd\tr0, r6, r4\n\tstrb\tr0, [r5, #0x1]\n\tcmp\tr6, r4\n\tble\t.L5\n\tldrb\tr0, [r5, #0x1]\n' +
+      '\tadd\tr1, r1, r0\n.L5:\n\tadd\tr4, r4, #0x1\n\tcmp\tr4, r7\n\tblt\t.L6\n.L4:\n\tadd\tr0, r1, #0\n\tadd\tsp, sp, #0x8\n' +
+      '\tpop\t{r4, r5, r6, r7}\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(lift(loop).source).toContain('sp1 = a1 + v3;');
+  });
+
+  // …AND ANY STORE THAT REACHES A CALL UNREAD, whatever refusal the per-object model meets or none
+  // at all. agbcc builds a compound-literal argument IN PLACE with `strb`/`strh` through `mov rD, sp`
+  // moved by `add rD, #k`, every access at +0 of its own capture. Verbatim agbcc output, `th`
+  // undeclared.
+  const inPlace = (calls: string) =>
+    `f:\n\tpush\t{r4, r5, r6, lr}\n\tadd\tsp, sp, #-0x4\n${calls}\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n`;
+  const TH = '\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n\tmov\tr3, #0x4\n\tbl\tth\n';
+  const BYTES_LITERAL =
+    '\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tmov\tr0, sp\n\tstrb\tr4, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n' +
+    '\tmov\tr6, sp\n\tadd\tr6, r6, #0x2\n\tstrb\tr4, [r6]\n\tadd\tr0, r0, #0x2\n\tstrb\tr5, [r0]\n';
+  const STORED_NEVER_READ = storedUnread(1, 0, 'th');
+
+  test('an argument built in place at two widths is not the one object', () => {
+    // `struct S { s8 a[4]; }; struct T { u16 h[2]; }; int th();
+    //  int f(int x, int y){ th(1, 2, 3, 4, (struct S){{x, y, x, y}}); return th(1, 2, 3, 4, (struct T){{x, y}}); }`
+    // — the width disagreement asks for the one object, which would keep both literals as a local's
+    // stores and call `th(1, 2, 3, 4)` twice
+    const twoWidths = inPlace(`${BYTES_LITERAL}${TH}\tmov\tr0, sp\n\tstrh\tr4, [r0]\n\tstrh\tr5, [r6]\n${TH}`);
+    expect(() => lift(twoWidths)).toThrow(STORED_NEVER_READ);
+    // …and a prototype that states the stack words leaves it to the stack-argument analysis, loudly
+    expect(() => decompile('f', twoWidths, ARMV4T_AGBCC, { prototypes: { th: { params: 5 } } })).toThrow(
+      /callee `th` is declared with 5 arguments, so its outgoing stack-argument block is \[sp,#0\]/,
+    );
+  });
+
+  test('an argument built in place at one width is not a dead local', () => {
+    // `struct S { u8 a[4]; }; int th(); int f(int x, int y){ return th(1, 2, 3, 4, (struct S){{x, y, x, y}}); }`
+    // — the per-object model refuses nothing here, and would drop four dead locals and the argument
+    expect(() => lift(inPlace(`${BYTES_LITERAL}${TH}`))).toThrow(STORED_NEVER_READ);
+    // with no call there is nothing to take the bytes, and a store read back is a local's
+    expect(lift(inPlace(`${BYTES_LITERAL}\tmov\tr0, #0x0\n`)).source).not.toContain('th(');
+    const readBack = '\tmov\tr0, sp\n\tstrb\tr1, [r0]\n' + TH + '\tmov\tr0, sp\n\tldrb\tr0, [r0]\n';
+    expect(lift(inPlace(readBack)).source).toContain('th(1, 2, 3, 4);');
+    // …and the refusal names the call the bytes reach, not the first call in the function
+    // (`int f0(); int th(); int f(int x, int y){ f0(); return th(1, 2, 3, 4, (struct S){{x, y, x, y}}); }`)
+    const afterF0 =
+      'f:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr4, r0, #0\n\tadd\tr5, r1, #0\n\tbl\tf0\n\tmov\tr0, sp\n' +
+      '\tstrb\tr4, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n\tadd\tr0, r0, #0x1\n\tstrb\tr4, [r0]\n' +
+      `\tadd\tr0, r0, #0x1\n\tstrb\tr5, [r0]\n${TH}\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(() => lift(afterF0)).toThrow(STORED_NEVER_READ);
   });
 });
