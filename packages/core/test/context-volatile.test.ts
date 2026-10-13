@@ -212,3 +212,43 @@ describe('a context-declared pointer to volatile', () => {
     );
   });
 });
+
+describe('an access through a context-declared pointer to volatile, reached through a join or a loop pointer', () => {
+  // The pointee path reads the base as the object path does: a join every edge of which moves the
+  // pointer's value, and a loop pointer seeded with it and stepped, are accesses of its pointee.
+  const ctx = globalsFromContext('typedef unsigned short u16; extern volatile u16 *gP; extern u16 gS;', 'c');
+  const none: ContextGlobals = { ...ctx, pointeeVolatiles: new Set() };
+
+  test('a join of two offsets from the pointer polls through a qualified cast', () => {
+    // agbcc -O2 of `void pvjoin2(int c){ volatile u16 *p = c ? gP + 1 : gP + 2; while (*p == 0) ; }`
+    const PVJOIN2 =
+      'pvjoin2:\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tldr\tr0, .L9\n\tldr\tr0, [r0]\n\tadd\tr1, r0, #0x2\n\tb\t.L4\n' +
+      '.L9:\n\t.word\tgP\n.L3:\n\tldr\tr0, .L11\n\tldr\tr0, [r0]\n\tadd\tr1, r0, #0x4\n.L4:\n.L5:\n\tldrh\tr0, [r1]\n' +
+      '\tcmp\tr0, #0\n\tbeq\t.L5\n\tbx\tlr\n.L11:\n\t.word\tgP\n';
+    const protos = { pvjoin2: { params: 1, returnsVoid: true } };
+    expect(decompile('pvjoin2', PVJOIN2, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: ctx }).source).toMatch(
+      /while \(\*\(volatile u16 \*\)v\d+ == 0\)/,
+    );
+    expect(
+      decompile('pvjoin2', PVJOIN2, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: none }).source,
+    ).not.toContain('volatile');
+  });
+
+  test('a loop pointer seeded with the pointer and stepped reads through a qualified cast', () => {
+    // agbcc -O2 of `void pvloop(int n){ u16 s = 0; volatile u16 *p = gP; while (n-- != 0) s += *p++; gS = s; }`
+    const PVLOOP =
+      'pvloop:\n\tpush\t{r4, r5, lr}\n\tadd\tr1, r0, #0\n\tmov\tr3, #0x0\n\tldr\tr0, .L7\n\tldr\tr2, [r0]\n' +
+      '\tsub\tr1, r1, #0x1\n\tmov\tr0, #0x1\n\tneg\tr0, r0\n\tldr\tr5, .L7+0x4\n\tcmp\tr1, r0\n\tbeq\t.L4\n' +
+      '\tadd\tr4, r0, #0\n.L5:\n\tldrh\tr0, [r2]\n\tadd\tr0, r3, r0\n\tlsl\tr0, r0, #0x10\n\tlsr\tr3, r0, #0x10\n' +
+      '\tadd\tr2, r2, #0x2\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, r4\n\tbne\t.L5\n.L4:\n\tstrh\tr3, [r5]\n' +
+      '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.word\tgP\n\t.word\tgS\n';
+    const protos = { pvloop: { params: 1, returnsVoid: true } };
+    const src = decompile('pvloop', PVLOOP, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: ctx }).source;
+    expect(src).toMatch(/\*\(volatile u16 \*\)v\d+/);
+    // the store to the plain gS stays plain
+    expect(src).toMatch(/gS = v\d+;/);
+    expect(
+      decompile('pvloop', PVLOOP, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: none }).source,
+    ).not.toContain('volatile');
+  });
+});

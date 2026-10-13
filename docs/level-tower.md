@@ -922,7 +922,9 @@ pass asks whether a read may be deleted. The map answers per byte where it lays 
 context answers per object (`ContextGlobals.volatiles`), and only for an object the map does not lay
 out. The object is read through a join every edge of which reaches it, a pointer a loop steps
 through it included. The context also names the pointers whose pointee is volatile
-(`ContextGlobals.pointeeVolatiles`), and an access through such a pointer's value is placed. An access
+(`ContextGlobals.pointeeVolatiles`), and an access through such a pointer's value is placed, read
+through the same joins and loop steps by the same reader, so the object and pointee paths cannot
+reach different shapes. An access
 that does not reach its object through the object's own name carries the qualifier on a cast. A read the
 compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
 by this stamp and by the device pin alike, through the one predicate both ask. Every
