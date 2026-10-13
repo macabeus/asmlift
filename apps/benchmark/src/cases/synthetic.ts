@@ -2,6 +2,7 @@
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
 import { onlySelects } from '@asmlift/bench-schema';
 import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
+import { globalsFromContext } from '@asmlift/core/proto-context';
 import { canonicalFlagsOf } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
@@ -43,6 +44,20 @@ const withMapDeclarations = (ctx: string | undefined, symbols: NonNullable<Case[
   return `${selfDeclaredContext(renderDeclarations(refs))}\n${ctx ?? ''}`;
 };
 
+/** WHAT THE ROW'S CONTEXT STATES ABOUT ITS GLOBALS, read as the real tier reads a project's
+ *  (`context-proto.ts` `rowContextGlobals`): which are structs, unions or arrays, and which are
+ *  volatile. Without it a synthetic row's `ctx` reached m2c alone, so a row whose global the ctx
+ *  declares and no map describes measured a lift that had never been told the declaration every
+ *  candidate is meant to compile against. Read from the ctx as m2c is handed it, map declarations
+ *  included; a name the map describes answers from the map first (structure.ts, the stamp). */
+const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] => {
+  if (ctx === undefined || ctx === '') {
+    return undefined;
+  }
+  const found = globalsFromContext(ctx, language);
+  return found.aggregates.size > 0 || found.volatiles.size > 0 ? found : undefined;
+};
+
 export interface SyntheticFilter {
   only?: string; // substring match on the symbol
   toolchain?: ToolchainId;
@@ -70,6 +85,8 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       }
       const tc = TOOLCHAINS[tcId];
       const codegen = codegenFor(tcId, cflags);
+      const ctx = spec.symbols ? withMapDeclarations(spec.ctx, spec.symbols) : spec.ctx;
+      const contextGlobals = contextGlobalsOf(ctx, spec.lang ?? 'c');
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',
@@ -79,8 +96,9 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         features: spec.features,
         loc: spec.src.split('\n').length,
         refSource: spec.src,
-        ctx: spec.symbols ? withMapDeclarations(spec.ctx, spec.symbols) : spec.ctx,
+        ctx,
         proto: spec.proto,
+        ...(contextGlobals ? { contextGlobals } : {}),
         ...(spec.symbols ? { symbols: spec.symbols } : {}),
         note: spec.note,
         toolchain: tc,
