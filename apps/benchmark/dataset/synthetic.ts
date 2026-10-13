@@ -9503,6 +9503,17 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V gV; void volpollb(void);',
     proto: { volpollb: { returnsVoid: true } },
   },
+  // …and through a POINTER the context declares to point at a volatile struct: the pointer itself is
+  // plain, read once ahead of the loop, while the member read through its value must keep the
+  // qualifier the context states on the pointee (`((volatile u16 *)gQ)[1]`), or the poll is hoisted.
+  {
+    sym: 'volpollp',
+    src: 'struct V { u16 a; u16 b; };\nextern volatile struct V *gQ;\nvoid volpollp(void){ while (gQ->b == 0) ; }',
+    features: ['global', 'struct', 'pointer'],
+    toolchains: ALL,
+    ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V *gQ; void volpollp(void);',
+    proto: { volpollp: { returnsVoid: true } },
+  },
   // A FUNCTION-SCOPE TABLE OF ADDRESSES ONLY HANDED TO A CALLEE: nothing reads an element, so only
   // the relocations in it say how wide its elements are, which matters where the compiler writes no
   // directive that would (mwcc). Not on MIPS, which addresses a function-scope static
@@ -9516,6 +9527,23 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc', 'mwcc_242_81'],
     ctx: 'extern s32 ga, gb, gc; void take(const void *p); void tabesc(void);',
     proto: { take: { params: ['const void *'], returnsVoid: true }, tabesc: { returnsVoid: true } },
+  },
+  // …handed to a callee taking a STRUCT pointer: the bytes type the static `u32 s[2]`, which mwcc's C
+  // will not pass as a `struct S *` implicitly, and the prelude cannot print that type, so the
+  // argument is cast through `void *`.
+  {
+    sym: 'tabstr',
+    src:
+      'struct S { u8 k; void (*p)(void); };\nvoid use2(struct S *);\nvoid f0(void);\n' +
+      'void tabstr(void) { static struct S s = { 1, f0 }; use2(&s); }',
+    features: ['pointer', 'struct'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'struct S { u8 k; void (*p)(void); }; void use2(struct S *); void f0(void); void tabstr(void);',
+    proto: {
+      use2: { params: ['struct S *'], returnsVoid: true },
+      f0: { returnsVoid: true },
+      tabstr: { returnsVoid: true },
+    },
   },
 ];
 
