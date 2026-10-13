@@ -206,6 +206,53 @@ interface PpcJT {
   bctrAddr: number;
 }
 
+/** The `cr` field a compare writes or a conditional branch reads: its first operand when it names
+ *  one, else cr0. */
+const crFieldOf = (ins: Instr): string => (ins.ops[0]?.startsWith('cr') ? ins.ops[0] : 'cr0');
+
+/** Whether `ins` may write a CR field. A DENY-LIST, so an unknown writer stops the reader rather
+ *  than being stepped past: the compares, the record forms (`.`), the CR-logical and move-to-CR
+ *  forms, and every branch — a `bl` destroys the volatile fields. */
+const mayWriteCr = (ins: Instr): boolean =>
+  /^(cmp|fcmp|cr|mcr|mtcr|b)/.test(ins.mnemonic) || ins.mnemonic.endsWith('.');
+
+/** Whether `ins` may write GPR `r`. A DENY-LIST like mips.ts's `writtenReg`: an instruction writes
+ *  its first operand unless it is a store, compare, trap, move-to-special or cache op; an update form
+ *  (`lwzu`, `stwux`) also writes its base, `lmw rD` writes rD..r31, and any branch may (a call
+ *  clobbers the volatile registers). */
+const mayWriteGpr = (ins: Instr, r: string): boolean => {
+  const m = ins.mnemonic;
+  if (m.startsWith('b')) {
+    return true;
+  }
+  if (m === 'lmw') {
+    return /^r\d+$/.test(r) && Number(r.slice(1)) >= Number(ins.ops[0]?.slice(1));
+  }
+  if (/^(l|st)\w*ux?$/.test(m) && ins.ops.slice(1).some((o) => new RegExp(`\\b${r}\\b`).test(o))) {
+    return true;
+  }
+  return !/^(st|cmp|fcmp|tw|mt|dc|ic|sync|isync|eieio)/.test(m) && ins.ops[0] === r;
+};
+
+/** The case count a jump table's bounds compare states, or null: the `cmplwi rS,N-1` the bounds
+ *  branch at `j` reads. Scanned back inside the branch's block, past instructions that write neither
+ *  a CR field nor `rS` — mwcc schedules the default's value or the LR save between the two — and
+ *  it must set the CR field the branch tests. The first CR writer met decides: any other one, or a
+ *  write of `rS` after the compare, declines. */
+function boundsCompare(instrs: Instr[], j: number, scrutReg: string): number | null {
+  const crField = crFieldOf(instrs[j]);
+  for (let k = j - 1; k >= 0 && !isXfer(instrs[k]); k--) {
+    const c = instrs[k];
+    if (c.mnemonic === 'cmplwi' && c.ops[c.ops.length - 2] === scrutReg && crFieldOf(c) === crField) {
+      return parseImm(c.ops[c.ops.length - 1]) + 1;
+    }
+    if (mayWriteCr(c) || mayWriteGpr(c, scrutReg)) {
+      return null;
+    }
+  }
+  return null;
+}
+
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
 // deviation from the exact idiom, or a table that doesn't resolve to N in-function targets, declines
 // (→ the `bctr` loud-fail fires). Index IDENTITY guard: `slwi rIdx,rS,2` must be the bounds-checked
@@ -261,16 +308,16 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     ) {
       continue;
     }
-    // Bounds: the nearest preceding `cmplwi scrutReg,N-1 ; bgt DEF` guard. The `bgt` is itself a
-    // transfer, so match the pair directly (the cmplwi sits one instruction behind it); a different
-    // transfer before the guard ⇒ decline.
+    // Bounds: the nearest preceding `cmplwi scrutReg,N-1 ; bgt DEF` guard (a different transfer
+    // before it ⇒ decline). mwcc schedules into the pair — the default's `li r6,0`, the LR save
+    // `stw r0,20(r1)` — so the `cmplwi` is found by `boundsCompare`.
     let bounds: { addr: number; n: number; def: number } | null = null;
     for (let j = i - 6; j >= 1; j--) {
       const bgt = instrs[j];
       if (bgt.mnemonic === 'bgt' && bgt.target !== undefined) {
-        const c = instrs[j - 1];
-        if (c && c.mnemonic === 'cmplwi' && c.ops[c.ops.length - 2] === scrutReg) {
-          bounds = { addr: bgt.addr, n: parseImm(c.ops[c.ops.length - 1]) + 1, def: bgt.target };
+        const n = boundsCompare(instrs, j, scrutReg);
+        if (n !== null) {
+          bounds = { addr: bgt.addr, n, def: bgt.target };
         }
         break;
       }
