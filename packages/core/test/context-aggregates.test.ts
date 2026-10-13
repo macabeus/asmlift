@@ -8,7 +8,7 @@ import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
-import { aggregateObjectsFromContext } from '../src/proto-context';
+import { aggregateObjectsFromContext, globalsFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC } from '../src/target';
@@ -206,6 +206,43 @@ extern struct HoldsBuf gHoldsBuf;
 
   test('a C++ class with a volatile member is left out', () => {
     expect([...aggregateObjectsFromContext('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
+  });
+});
+
+describe('the volatile objects a declaration context declares', () => {
+  const ctx = `
+typedef unsigned char u8;
+typedef unsigned short u16;
+typedef volatile u16 vu16;
+struct V { u16 a; u16 b; };
+struct V2 { vu16 a; u16 b; };
+typedef struct { volatile u8 x; } Anon;
+extern volatile struct V gV;
+extern struct V2 gV2;
+extern Anon gAnon;
+extern volatile u16 gVArr[4];
+extern vu16 gReg;
+extern u8 *volatile gVPtr;
+extern volatile u8 *gPtrToV;
+extern struct V gPlain;
+extern u16 gScalar;
+extern struct Unread gUnread;
+struct Opaque { UNREADABLE_MACRO(x) };
+extern struct Opaque gOpaque;
+volatile int gFn(void);
+`;
+  const { aggregates, volatiles } = globalsFromContext(ctx, 'c');
+
+  test('every object with a volatile byte, aggregate or scalar, is volatile', () => {
+    expect([...volatiles].sort()).toEqual(['gAnon', 'gOpaque', 'gReg', 'gV', 'gV2', 'gVArr', 'gVPtr'].sort());
+  });
+
+  test('a volatile aggregate is still an aggregate', () => {
+    expect([...aggregates].sort()).toEqual(['gAnon', 'gOpaque', 'gPlain', 'gUnread', 'gV', 'gV2', 'gVArr'].sort());
+  });
+
+  test('the cast-only reader keeps no volatile aggregate', () => {
+    expect([...aggregateObjectsFromContext(ctx, 'c')].sort()).toEqual(['gPlain', 'gUnread']);
   });
 });
 

@@ -69,35 +69,62 @@ export function prototypesFromContext(src: string, language: Language): Prototyp
   return functionPrototypes(ctx, table, layoutReader(ctx, table));
 }
 
-/** The objects a preprocessed declaration context declares as a struct, a union or an array. Such an
- *  object has no value a bare name reads: `v = gInfo;` over `extern struct Info gInfo;` is a compile
- *  error, and over `extern u8 gBuf[];` it reads the address. A project whose symbol map does not
- *  describe a global (one its linker script places has no DWARF) states it here, so the structurer
- *  reads this set where it would read the map's `shape`. A type this cannot resolve — an unexpanded
- *  macro, a typedef of an array — is left out, which keeps the usage-inferred spelling.
- *
- *  AN OBJECT WITH VOLATILE STORAGE IS LEFT OUT too (`hasVolatileStorage`): the structurer spells it
- *  `*(T *)&g`, and that cast drops the qualifier, so the compiler may merge the reads or hoist one
- *  out of a polling loop (`while (gV.a == 0);` becomes one load and an endless loop). The volatility
- *  the lift prints comes from the symbol map alone (raise/declared-volatile.ts); left out, such an
- *  object keeps the bare spelling, which the header refuses for a struct. */
-export function aggregateObjectsFromContext(src: string, language: Language): Set<string> {
+/** What a preprocessed declaration context states about the globals it declares, beyond their
+ *  prototypes. Both sets are read together and travel together: the aggregate spelling `*(T *)&g`
+ *  is a cast, which drops the declaration's qualifiers, so a reader handed the aggregates without
+ *  the volatile objects would print a plain read of a volatile one. */
+export interface ContextGlobals {
+  /** The objects declared as a struct, a union or an array. Such an object has no value a bare name
+   *  reads: `v = gInfo;` over `extern struct Info gInfo;` is a compile error, and over
+   *  `extern u8 gBuf[];` it reads the address. A project whose symbol map does not describe a
+   *  global (one its linker script places has no DWARF) states it here, so the structurer reads
+   *  this set where it would read the map's `shape`. A type this cannot resolve — an unexpanded
+   *  macro, a typedef of an array — is left out, which keeps the usage-inferred spelling. */
+  aggregates: ReadonlySet<string>;
+  /** The objects any byte of which is volatile (`hasVolatileStorage`): the object, an array's
+   *  element, a typedef in its chain, or a member of a struct or union in it, nested or anonymous.
+   *  A body this cannot read counts as volatile. The set is not per byte: a read of the plain member
+   *  of `struct { vu16 a; u16 b; }` is placed too, which costs at most a read the compiler kept that
+   *  the source did not ask it to, never one it may drop. raise/declared-volatile.ts stamps every
+   *  access to such an object the map does not lay out, and the structurer then puts the qualifier
+   *  on the cast (`*(volatile u16 *)&gV`). Scalars are in it too: the header already qualifies
+   *  `gReg` where it is spelled bare, and the stamp keeps the raising passes from merging two of its
+   *  reads. */
+  volatiles: ReadonlySet<string>;
+}
+
+/** The globals a preprocessed declaration context declares, read for {@link ContextGlobals}. */
+export function globalsFromContext(src: string, language: Language): ContextGlobals {
   const ctx = parseDeclarations(src, language);
   const table = typeTable(ctx);
   const scope: VolatileScope = { table, typedefs: typedefTypes(ctx), bodies: tagBodies(ctx), ctx, read: new Map() };
-  const out = new Set<string>();
+  const aggregates = new Set<string>();
+  const volatiles = new Set<string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
     }
     for (const x of d.declarators) {
+      if (x.name === undefined || !WORD.test(x.name)) {
+        continue;
+      }
       const t = declaredType(d.specifiers, x.derivations);
-      if (x.name !== undefined && WORD.test(x.name) && isAggregate(t, table) && !hasVolatileStorage(t, scope, 0)) {
-        out.add(x.name);
+      if (isAggregate(t, table)) {
+        aggregates.add(x.name);
+      }
+      if (hasVolatileStorage(t, scope, 0)) {
+        volatiles.add(x.name);
       }
     }
   }
-  return out;
+  return { aggregates, volatiles };
+}
+
+/** The context's aggregates with no volatile byte: what a reader that is handed no volatility may
+ *  spell through a cast. */
+export function aggregateObjectsFromContext(src: string, language: Language): Set<string> {
+  const { aggregates, volatiles } = globalsFromContext(src, language);
+  return new Set([...aggregates].filter((n) => !volatiles.has(n)));
 }
 
 /** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare
@@ -162,8 +189,9 @@ interface VolatileScope {
 /** Whether any byte of an object of type `t` is volatile: the type or an array's element is
  *  qualified, through the typedef names it is built on, or a struct or union in it has such a member.
  *  A pointer ends the walk at its own qualifiers, since what it points at is no byte of the object.
- *  A body that cannot be read, or bodies nested past the bound, is read as volatile: leaving the
- *  object out only keeps the earlier spelling. A tag with no body here has no member to qualify.
+ *  A body that cannot be read, or bodies nested past the bound, is read as volatile: a qualifier
+ *  placed where none was declared only keeps a read the compiler may have dropped. A tag with no
+ *  body here has no member to qualify.
  *  A name met again while it is being read is a cycle, read as volatile (`once`). */
 function hasVolatileStorage(t: DeclaredType, scope: VolatileScope, depth: number): boolean {
   if (depth > 32) {
@@ -294,8 +322,8 @@ const TAG_KEYWORDS: ReadonlySet<string> = new Set(['struct', 'class', 'union', '
 const BASE_WORDS: ReadonlySet<string> = new Set(['public', 'protected', 'private', 'virtual']);
 
 /** `read()`, remembered under `key`. A key met again while it is being read is a cycle no compiler
- *  lays out (`typedef T U; typedef U T;`, which C11 and C++ accept), read as volatile: that leaves
- *  the object out and keeps the earlier spelling. */
+ *  lays out (`typedef T U; typedef U T;`, which C11 and C++ accept), read as volatile, for the same
+ *  reason as an unreadable body. */
 function once(scope: VolatileScope, key: string, read: () => boolean): boolean {
   const known = scope.read.get(key);
   if (known !== undefined) {
