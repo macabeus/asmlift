@@ -167,6 +167,21 @@ extern struct HoldsBuf gHoldsBuf;
     expect([...aggregateObjectsFromContext(deep, 'c')]).toEqual(['gDeep']);
   });
 
+  test('a typedef cycle is read as volatile, and a restated typedef keeps its body', () => {
+    const cyc = 'typedef struct S { volatile int a; } T; typedef T U; typedef U T; extern T gCyc; extern U gCycU;';
+    expect([...aggregateObjectsFromContext(cyc, 'c')]).toEqual([]);
+    const self = 'typedef struct { volatile int a; } T; typedef T T; extern T gSelf;';
+    expect([...aggregateObjectsFromContext(self, 'c')]).toEqual([]);
+    expect([...aggregateObjectsFromContext('struct S { volatile int a; }; typedef S S; extern S gS;', 'c++')]).toEqual(
+      [],
+    );
+  });
+
+  test('a C++ member typedef or static member is no byte of the object', () => {
+    const cpp = 'struct S { static volatile int s; typedef S Self; int a; }; extern S gStatic;';
+    expect([...aggregateObjectsFromContext(cpp, 'c++')]).toEqual(['gStatic']);
+  });
+
   test('a C++ class with a volatile member is left out', () => {
     expect([...aggregateObjectsFromContext('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
   });

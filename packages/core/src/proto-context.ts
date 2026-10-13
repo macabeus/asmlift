@@ -137,8 +137,11 @@ function typedefTypes(ctx: ParsedContext): Map<string, DeclaredType> {
       continue;
     }
     for (const x of d.declarators) {
-      if (x.name !== undefined && WORD.test(x.name)) {
-        out.set(x.name, declaredType(d.specifiers, x.derivations));
+      const t = declaredType(d.specifiers, x.derivations);
+      // `typedef S S;` restates a name and keeps the type it already stands for
+      const restates = t.type.kind === 'words' && t.type.words.length === 1 && t.type.words[0] === x.name;
+      if (x.name !== undefined && WORD.test(x.name) && !(restates && t.derivations.length === 0)) {
+        out.set(x.name, t);
       }
     }
   }
@@ -161,7 +164,7 @@ interface VolatileScope {
  *  A pointer ends the walk at its own qualifiers, since what it points at is no byte of the object.
  *  A body that cannot be read, or bodies nested past the bound, is read as volatile: leaving the
  *  object out only keeps the earlier spelling. A tag with no body here has no member to qualify.
- *  A name met again while it is being read (a cycle, which no C type has) is read as not volatile. */
+ *  A name met again while it is being read is a cycle, read as volatile (`once`). */
 function hasVolatileStorage(t: DeclaredType, scope: VolatileScope, depth: number): boolean {
   if (depth > 32) {
     return true;
@@ -204,20 +207,25 @@ function hasVolatileStorage(t: DeclaredType, scope: VolatileScope, depth: number
   }
   return once(scope, `body ${body.from}`, () =>
     members.some((m) =>
-      m.declarators.length === 0
-        ? hasVolatileStorage(declaredType(m.specifiers, []), scope, depth + 1)
-        : m.declarators.some((x) => hasVolatileStorage(declaredType(m.specifiers, x.derivations), scope, depth + 1)),
+      // a C++ member typedef or static member is no byte of the object
+      m.specifiers.typedef || m.specifiers.storage.includes('static')
+        ? false
+        : m.declarators.length === 0
+          ? hasVolatileStorage(declaredType(m.specifiers, []), scope, depth + 1)
+          : m.declarators.some((x) => hasVolatileStorage(declaredType(m.specifiers, x.derivations), scope, depth + 1)),
     ),
   );
 }
 
-/** `read()`, remembered under `key`, which reads as false while it is being read. */
+/** `read()`, remembered under `key`. A key met again while it is being read is a cycle no compiler
+ *  lays out (`typedef T U; typedef U T;`, which C11 and C++ accept), read as volatile: that leaves
+ *  the object out and keeps the earlier spelling. */
 function once(scope: VolatileScope, key: string, read: () => boolean): boolean {
   const known = scope.read.get(key);
   if (known !== undefined) {
     return known;
   }
-  scope.read.set(key, false);
+  scope.read.set(key, true);
   const v = read();
   scope.read.set(key, v);
   return v;
