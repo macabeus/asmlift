@@ -202,20 +202,96 @@ function hasVolatileStorage(t: DeclaredType, scope: VolatileScope, depth: number
     return false;
   }
   const members = memberDeclarations(scope.ctx, body);
-  if (members === undefined) {
+  const bases = baseClause(scope.ctx, body);
+  if (members === undefined || bases === undefined) {
     return true;
   }
-  return once(scope, `body ${body.from}`, () =>
-    members.some((m) =>
-      // a C++ member typedef or static member is no byte of the object
-      m.specifiers.typedef || m.specifiers.storage.includes('static')
-        ? false
-        : m.declarators.length === 0
-          ? hasVolatileStorage(declaredType(m.specifiers, []), scope, depth + 1)
-          : m.declarators.some((x) => hasVolatileStorage(declaredType(m.specifiers, x.derivations), scope, depth + 1)),
-    ),
+  // a C++ member typedef names a type for the members after it, so they are read through it, in a
+  // scope of their own. That scope also reads a body defined elsewhere through it, which can only
+  // leave more out.
+  const local = typedefTypes({ ...scope.ctx, declarations: members });
+  const inner: VolatileScope =
+    local.size === 0 ? scope : { ...scope, typedefs: new Map([...scope.typedefs, ...local]), read: new Map() };
+  return once(
+    scope,
+    `body ${body.from}`,
+    () =>
+      // a C++ base's members are bytes of the object too, and a base with no body here (one a
+      // namespace defines, which this does not read) is read as volatile
+      bases.some((b) => !definesBody(b, inner) || hasVolatileStorage(b, inner, depth + 1)) ||
+      members.some((m) =>
+        // a C++ member typedef or static member is no byte of the object
+        m.specifiers.typedef || m.specifiers.storage.includes('static')
+          ? false
+          : m.declarators.length === 0
+            ? hasVolatileStorage(declaredType(m.specifiers, []), inner, depth + 1)
+            : m.declarators.some((x) =>
+                hasVolatileStorage(declaredType(m.specifiers, x.derivations), inner, depth + 1),
+              ),
+      ),
   );
 }
+
+/** The C++ base classes ahead of `body`, each as the type its name spells, or undefined when a
+ *  clause holds anything else (a qualified name, a template argument list, `decltype`), which the
+ *  caller reads as volatile. Read backwards from the `{` to the clause's `:`; reaching the
+ *  tag keyword first means there is no clause. */
+function baseClause(ctx: ParsedContext, body: Range): DeclaredType[] | undefined {
+  if (ctx.language !== 'c++') {
+    return [];
+  }
+  const t = ctx.tokens;
+  let k = body.from - 2;
+  for (; k >= 0 && !t.is(k, ':'); k--) {
+    if (TAG_KEYWORDS.has(t.text(k))) {
+      return [];
+    }
+    if (t.kind(k) !== 'identifier' && !t.is(k, '::') && !t.is(k, ',')) {
+      // an attribute, a template argument list: a `:` between it and the tag keyword is a clause
+      // this does not read, and none means there is no clause
+      for (let j = k; j >= 0 && !t.is(j, ';') && !t.is(j, '}') && !t.is(j, '{') && !TAG_KEYWORDS.has(t.text(j)); j--) {
+        if (t.is(j, ':')) {
+          return undefined;
+        }
+      }
+      return [];
+    }
+  }
+  if (k < 0) {
+    return [];
+  }
+  const out: DeclaredType[] = [];
+  let last: string | undefined;
+  for (let j = k + 1; j < body.from; j++) {
+    if (t.is(j, ',') || j === body.from - 1) {
+      if (last === undefined) {
+        return undefined;
+      }
+      out.push({
+        qualifiers: [],
+        type: { kind: 'words', words: [last] },
+        unknownWords: [],
+        spelling: last,
+        derivations: [],
+      });
+      last = undefined;
+    } else if (t.is(j, '::')) {
+      return undefined;
+    } else if (t.kind(j) === 'identifier' && !BASE_WORDS.has(t.text(j))) {
+      last = t.text(j);
+    }
+  }
+  return out;
+}
+
+/** Whether the base `b` names a typedef or a body this context defines. */
+function definesBody(b: DeclaredType, scope: VolatileScope): boolean {
+  const name = b.spelling;
+  return scope.typedefs.has(name) || scope.table.named.get(name)?.body !== undefined || scope.bodies.has(name);
+}
+
+const TAG_KEYWORDS: ReadonlySet<string> = new Set(['struct', 'class', 'union', 'enum']);
+const BASE_WORDS: ReadonlySet<string> = new Set(['public', 'protected', 'private', 'virtual']);
 
 /** `read()`, remembered under `key`. A key met again while it is being read is a cycle no compiler
  *  lays out (`typedef T U; typedef U T;`, which C11 and C++ accept), read as volatile: that leaves

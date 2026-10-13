@@ -182,6 +182,28 @@ extern struct HoldsBuf gHoldsBuf;
     expect([...aggregateObjectsFromContext(cpp, 'c++')]).toEqual(['gStatic']);
   });
 
+  test('a C++ member typedef is read where a member names it, and a base class is read too', () => {
+    const typedefs = [
+      'struct MT { typedef volatile unsigned short VU; VU a; unsigned short b; }; extern MT gMT;',
+      'struct MB { typedef struct { volatile int x; } In; In i; }; extern MB gMB;',
+      'struct MA { typedef volatile unsigned char B[4]; B b; }; extern MA gMA;',
+      'typedef int VI; struct MS { typedef volatile int VI; VI a; }; extern MS gMS;',
+      'struct MP { typedef volatile int VI; VI *p; }; extern MP gMP;',
+    ].join('\n');
+    expect([...aggregateObjectsFromContext(typedefs, 'c++')]).toEqual(['gMP']);
+    const bases = [
+      'struct B0 { volatile unsigned short a; }; struct B1 { int n; };',
+      'struct D : public B0 { int c; }; extern D gD;',
+      'class D2 : B1, private D { public: int c; }; extern D2 gD2;',
+      'struct D3 : public B1 { int c; }; extern D3 gD3;',
+      'namespace ns { struct B { int b; }; } struct D4 : ns::B { int c; }; extern D4 gD4;',
+      'template <class T> struct TB { T t; }; struct D5 : TB<int> { int c; }; extern D5 gD5;',
+      'struct D6 : Unread { int c; }; extern D6 gD6;',
+    ].join('\n');
+    // a base this cannot read (qualified, a template, one with no body here) is read as volatile
+    expect([...aggregateObjectsFromContext(bases, 'c++')]).toEqual(['gD3']);
+  });
+
   test('a C++ class with a volatile member is left out', () => {
     expect([...aggregateObjectsFromContext('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
   });
