@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 104 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -61,7 +61,7 @@
 //                               relocation names, one relocated against a section, one in a delay
 //                               slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
-//   frontend/ppc.ts         12  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//   frontend/ppc.ts         14  `stwu` with update, a relocation on a stack-pointer adjust, a branch
 //                               testing a cr field a call destroyed (no compiler emits it), the
 //                               return address `mflr` copies out stored anywhere but the link
 //                               register's save word, the reaching-compare throw whose reason is
@@ -71,7 +71,9 @@
 //                               this function already wrote, and four ways a `bl` into a register
 //                               save or restore routine is not the bookkeeping it looks like (a
 //                               number no runtime routine has, the floating-point routines, no
-//                               single frame address in r11, r1's depth unknown there)
+//                               single frame address in r11, r1's depth unknown there), control
+//                               falling off the end, and an `mflr` or a return reading a link
+//                               register a `bl` overwrote
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
