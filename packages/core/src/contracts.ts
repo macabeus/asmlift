@@ -191,17 +191,23 @@ function qualifiedAccessChain(e: Expr): boolean {
 }
 
 /** The global an access's address is named by: its base through casts, address arithmetic and the
- *  element or member a dot member selects from, down to `gSym` or `&gSym`. Null when the base is
+ *  element or member a dot member selects from, down to `&gSym`, or to a `gSym` that spells its own
+ *  address — an array's name, which decays to it (`addresses`), or the struct a dot member selects
+ *  from (`dotted`). Any other bare `gSym` is the object's VALUE: `*(u16 *)gPtr` reads what the
+ *  pointer points at, not the pointer, so the access names no object. Null too when the base is
  *  anything else — another access, a local. */
-function accessedObject(base: Expr): string | null {
+function accessedObject(base: Expr, addresses: ReadonlySet<string>, dotted = false): string | null {
   switch (base.k) {
     case 'var':
+      return dotted || addresses.has(base.name) ? base.name : null;
     case 'addr':
       return base.name;
     case 'cast':
-      return accessedObject(base.e);
+      return accessedObject(base.e, addresses);
     case 'bin':
-      return base.op === '+' || base.op === '-' ? (accessedObject(base.l) ?? accessedObject(base.r)) : null;
+      return base.op === '+' || base.op === '-'
+        ? (accessedObject(base.l, addresses) ?? accessedObject(base.r, addresses))
+        : null;
     default:
       return null;
   }
@@ -214,6 +220,9 @@ interface TreeContext {
   declared: ReadonlySet<string>;
   written: ReadonlySet<string>;
   typeOf: (e: Expr) => IrType | undefined;
+  /** The names whose bare spelling is the object's address: the array-declared globals the
+   *  structurer subscripts by name (SFn.globals), and the array or struct statics it defines. */
+  addresses: ReadonlySet<string>;
 }
 
 /** every call under `e`, counted by target name; every qualified memory access, by the address it
@@ -234,7 +243,9 @@ function effectsInExpr(
 ): void {
   const bump = (k: string) => into.set(k, (into.get(k) ?? 0) + 1);
   const access = e.k === 'index' || e.k === 'field';
-  const object = access && !selected ? accessedObject(dotSelected(e)) : null;
+  const inner = access && !selected ? dotSelectedAccess(e) : null;
+  const object =
+    inner === null ? null : accessedObject(inner.base, ctx.addresses, inner.k === 'field' && fieldSpellsDot(inner));
   const ofDeclared = object !== null && !target && ctx.declared.has(object);
   const writesDeclared = object !== null && target && ctx.written.has(object);
   if (e.k === 'call') {
@@ -251,7 +262,9 @@ function effectsInExpr(
     if (object !== null) {
       bump(`${ofDeclared && castOffDeclaration(e, ctx.typeOf) ? STRIPPED : DECLARED}${object}`);
     }
-  } else if (!named && !target && e.k === 'var') {
+  } else if (!target && e.k === 'var' && !(named && (selected || ctx.addresses.has(e.name)))) {
+    // A bare name is a read of the object's value unless it spells the address of an access, which
+    // counts it: the struct a dot member selects from, or an array's decayed name.
     bump(`${DECLARED}${e.name}`);
   }
   const partOfThis = e.k === 'field' && fieldSpellsDot(e);
@@ -260,13 +273,15 @@ function effectsInExpr(
   );
 }
 
-/** A dot member's own base chain, past the element or member it selects from: the address of the
- *  one access the member spells. */
-function dotSelected(e: Extract<Expr, { k: 'index' } | { k: 'field' }>): Expr {
+type Access = Extract<Expr, { k: 'index' } | { k: 'field' }>;
+
+/** A dot member's innermost access, past the element or member it selects from: its base is the
+ *  address of the one access the member spells. */
+function dotSelectedAccess(e: Access): Access {
   if (e.k === 'field' && fieldSpellsDot(e) && (e.base.k === 'index' || e.base.k === 'field')) {
-    return dotSelected(e.base);
+    return dotSelectedAccess(e.base);
   }
-  return e.base;
+  return e;
 }
 
 /** The executions on the paths through a statement list, split by how each path LEAVES it: falling off
@@ -502,6 +517,12 @@ export function assertEffectsPreserved(fn: Fn, sfn: SFn): void {
     declared: new Set([...irDeclared.keys()].map((k) => k.slice(DECLARED.length))),
     written: declaredWritten,
     typeOf: (e) => exprCType(e, vt),
+    addresses: new Set([
+      ...(sfn.globals ?? []).map((g) => g.name),
+      ...[...(sfn.statics ?? []), ...(sfn.images ?? [])]
+        .filter((st) => st.type.kind === 'array' || st.type.kind === 'struct')
+        .map((st) => st.name),
+    ]),
   };
   const { total, paths } = countEffects(sfn.body, ctx, unreached);
   if (unreached.length) {

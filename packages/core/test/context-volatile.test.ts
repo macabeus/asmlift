@@ -116,6 +116,37 @@ describe('a context-declared volatile scalar: the object is the pointer, not wha
   const wrap = (name: string, body: string, sym: string): string =>
     `${name}:\n${body}\tbx\tlr\n.L3:\n\t.word\t${sym}\n`;
 
+  test('a read through the pointer value names no qualified object, so no cast drops its qualifier', () => {
+    // agbcc -O2 of `u16 vptrv(void){ return *gPV + *gPV; }` over `extern u16 * volatile gPV;`. The
+    // pointer is volatile, its pointee is not: `*(u16 *)gPV` reads the pointee, and the bare `gPV`
+    // under it is the qualified read, spelled through the declaration. This was refused as a read of
+    // `gPV` through a cast that drops its qualifier.
+    const VPTRV = wrap(
+      'vptrv',
+      '\tldr\tr0, .L3\n\tldr\tr1, [r0]\n\tldr\tr0, [r0]\n\tldrh\tr0, [r0]\n\tldrh\tr1, [r1]\n\tadd\tr0, r0, r1\n' +
+        '\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n',
+      'gPV',
+    );
+    expect(
+      decompile('vptrv', VPTRV, ARMV4T_AGBCC, { contextGlobals: ctxOf('extern u16 * volatile gPV;') }).source,
+    ).toContain('return (u16)(*(u16 *)gPV + *(u16 *)gPV);');
+    // …`gTask->b` over `extern struct T * volatile gTask;`, a member of the pointee
+    const VTASK = wrap('vtask', '\tldr\tr0, .L3\n\tldr\tr0, [r0]\n\tldrh\tr0, [r0, #0x2]\n', 'gTask');
+    const task = ctxOf('struct T { u16 a; u16 b; }; extern struct T * volatile gTask;');
+    expect(decompile('vtask', VTASK, ARMV4T_AGBCC, { contextGlobals: task }).source).toContain('((u16 *)gTask)[1]');
+    // …and a store through it: `*(u16 *)gOV = x; gOV = (u8 *)gOV + 2;` over `extern void * volatile gOV;`
+    const VPWR = wrap(
+      'vpwr',
+      '\tldr\tr2, .L3\n\tldr\tr1, [r2]\n\tstrh\tr0, [r1]\n\tldr\tr0, [r2]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r2]\n',
+      'gOV',
+    );
+    const pwr = decompile('vpwr', VPWR, ARMV4T_AGBCC, {
+      prototypes: { vpwr: { params: ['s32'], returnsVoid: true } },
+      contextGlobals: ctxOf('extern void * volatile gOV;'),
+    }).source;
+    expect(pwr).toContain('*(u16 *)gOV = a0;');
+  });
+
   test('two reads of one cell meeting in a commutative op are spelled in one expression, a difference stays sequenced', () => {
     // agbcc -O2 of `s32 vsc32(void){ return gR + gR; }` over `extern volatile s32 gR;`: the value is
     // the same whichever read runs first, so the order is the compiler's (ido 7.1 loads it the other
