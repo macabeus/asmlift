@@ -9503,6 +9503,20 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V gV; void volpollb(void);',
     proto: { volpollb: { returnsVoid: true } },
   },
+  // A FUNCTION-SCOPE TABLE OF ADDRESSES ONLY HANDED TO A CALLEE: nothing reads an element, so only
+  // the relocations in it say how wide its elements are, which matters where the compiler writes no
+  // directive that would (mwcc). Not on MIPS, which addresses a function-scope static
+  // section-relative.
+  {
+    sym: 'tabesc',
+    src:
+      'extern s32 ga, gb, gc;\nvoid take(const void *p);\n' +
+      'void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }',
+    features: ['static-local', 'pointer', 'call'],
+    toolchains: ['agbcc', 'mwcc_242_81'],
+    ctx: 'extern s32 ga, gb, gc; void take(const void *p); void tabesc(void);',
+    proto: { take: { params: ['const void *'], returnsVoid: true }, tabesc: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
