@@ -212,8 +212,9 @@ export interface TargetDescription {
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
-   *  frontend/ssa.ts (LiveInModel.uninitRegs). ABSENT ⇒ no register partition is claimed, which is
-   *  what MIPS and PPC take today.
+   *  frontend/ssa.ts (LiveInModel.uninitRegs). Thumb and PPC state it and measure the save half
+   *  from their prologues (Thumb `savedRegs`, PPC `prologueSavedRegs`). ABSENT ⇒ no register partition
+   *  is claimed, which is what both MIPS targets take today.
    *
    *  It must be DISJOINT from `argRegs`, and the frontend hands both to the builder so that is
    *  checked rather than trusted (`checkedLiveInModel`): a spelling that lands in both lists used
@@ -1271,7 +1272,9 @@ export const PPC_MWCC: TargetDescription = {
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
   // Every GPR but r1 (the stack pointer, never an SSA register here) and the eight argument
-  // registers. The frontend narrows it to the ones the prologue saved (`prologueSavedRegs`).
+  // registers. The frontend narrows it to the ones the prologue saved (`prologueSavedRegs`). r2 and
+  // r13, the small-data bases, never reach that rule: a read of either as a value refuses first
+  // (`SMALL_DATA_BASES` in frontend/ppc.ts).
   nonArgRegs: ['r0', 'r2', ...Array.from({ length: 21 }, (_, i) => `r${i + 11}`)],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
