@@ -1149,6 +1149,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ssa.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
+    ['return-address', 'copies out is used as a value', 'packages/core/src/frontend/ppc.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
@@ -1217,15 +1218,15 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/thumb.ts', 30],
     ['structure/structure.ts', 21],
     ['frontend/mips.ts', 16],
+    ['frontend/ppc.ts', 12],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/ppc.ts', 7],
     ['frontend/call-plan.ts', 6],
     ['frontend/ssa.ts', 2],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 99;
+  const RESIDUE_TOTAL = 104;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

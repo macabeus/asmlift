@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 99 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 104 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -61,16 +61,21 @@
 //                               relocation names, one relocated against a section, one in a delay
 //                               slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
+//   frontend/ppc.ts         12  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), the
+//                               return address `mflr` copies out stored anywhere but the link
+//                               register's save word, the reaching-compare throw whose reason is
+//                               interpolated (as Thumb's), the two-armed branch denylist, whose
+//                               template is interpolation end to end, the caller's value a register
+//                               restore routine puts back read as a value, and five ways a `bl` into
+//                               a register save or restore routine is not the bookkeeping it looks
+//                               like (a number no runtime routine has, no single frame address in
+//                               r11, r1's depth unknown there, a register saved after it was written,
+//                               a word restored that was not saved from that register)
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ppc.ts          7  `stwu` with update, a relocation on a stack-pointer adjust, a branch
-//                               testing a cr field a call destroyed (no compiler emits it), a return
-//                               address `mflr` copied out and the body read as a value, the same
-//                               address stored anywhere but the link register's save word, the
-//                               reaching-compare throw whose reason is interpolated (as Thumb's), and
-//                               the two-armed branch denylist, whose template is interpolation end to end
 //   frontend/call-plan.ts    6  a call to a function declared to return a struct it cannot lower (its
 //                               interpolated reason), one whose parameters nothing sizes, one whose
 //                               declaration the lifted source cannot print (a type it has no spelling
@@ -579,6 +584,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'clobbered-value',
     label: 'A value a call destroyed (caller-saved register read back)',
     pattern: /is read on a path where a call has destroyed it/,
+  },
+  {
+    // `frontend/ppc.ts` defines what `mflr` copies out as a return address rather than a value, and
+    // refuses when the body reads it. The row that reaches it, `synthetic:uninit_spill:mwcc_242_81`,
+    // reads an uninitialised local on its default path, and CodeWarrior gives that local r0, which
+    // still holds the return address the prologue copied out. The sibling refusal, the same address
+    // stored anywhere but the link register's save word, has no row and stays in the residue.
+    key: 'return-address',
+    label: 'The return address read as a value (an `mflr` copy used as data)',
+    pattern: /copies out is used as a value/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.
