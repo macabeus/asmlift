@@ -1121,6 +1121,15 @@ function indexedAccess(
   }
 }
 
+/** Why two access types on one byte refuse, as every refusal of it words it. THE RULE IS AGBCC'S
+ *  AND IS HELD ON EVERY TARGET: agbcc at -O2 serves a read of one type past a store of the other
+ *  (`indexedWidth` has the compiled cases), while IDO 7.1, KMC gcc and gcc 2.7.2 reload past every such
+ *  store, so on MIPS it is only more cautious than it has to be. The text names no compiler of the
+ *  input, since the audit is handed none. */
+const STALE_ACROSS_TYPES =
+  'and type-based alias analysis can let a read of one type pass a store of the other (agbcc at -O2 does, ' +
+  'and the audit refuses it on every target) — a cast spelling could read stale';
+
 /** The one width wider than a byte that runtime-indexed accesses take, or why there is not one.
  *
  *  A runtime index names no byte, so its access type must agree with every access it may reach,
@@ -1145,11 +1154,7 @@ function indexedWidth(accesses: readonly { readonly width: number }[]): {
   const widths = [...new Set(accesses.map((x) => x.width))].filter((w) => w !== 1);
   return {
     width: widths[0] ?? null,
-    refusal:
-      widths.length > 1
-        ? `accesses ${widths.join(' and ')} bytes wide, and agbcc at -O2 lets a read of one type pass a store ` +
-          'of the other (strict aliasing) — a cast spelling would read stale'
-        : null,
+    refusal: widths.length > 1 ? `accesses ${widths.join(' and ')} bytes wide, ${STALE_ACROSS_TYPES}` : null,
   };
 }
 
@@ -1859,8 +1864,7 @@ function keepAsOneObject({
     if (why !== null) {
       fail(
         `the byte at [sp,#${twoWidths.b}] of ${kept} is accessed ${twoWidths.had} and ${twoWidths.width} bytes ` +
-          'wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a cast ' +
-          `spelling would read stale, and ${why}`,
+          `wide, ${STALE_ACROSS_TYPES}, and ${why}`,
       );
     }
   }
@@ -1868,8 +1872,7 @@ function keepAsOneObject({
     if (index.width !== null && had !== index.width) {
       fail(
         `the byte at [sp,#${b}] of ${kept} is accessed ${had} bytes wide and by a runtime index ${index.width} ` +
-          'bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other (strict aliasing) — a ' +
-          'cast spelling would read stale',
+          `bytes wide, ${STALE_ACROSS_TYPES}`,
       );
     }
   }

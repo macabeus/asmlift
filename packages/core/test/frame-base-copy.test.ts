@@ -610,7 +610,7 @@ describe('the audit judges each frame object on its own bytes', () => {
         // the per-object model refuses the two widths, and kept as one object (nothing escapes) the
         // second audit refuses them by its own rule
         expect(() => lift(atTheIndexedRead('\tldrh\tr2, [r0]\n\tldr\tr0, [r0]\n\tadd\tr0, r0, r2\n'))).toThrow(
-          /a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide, and agbcc at -O2 lets a read of one type pass a store of the other/,
+          /a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide, and type-based alias analysis can let a read of one type pass a store of the other/,
         );
       });
 
