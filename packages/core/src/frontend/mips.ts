@@ -925,8 +925,8 @@ function liftOnce(
 
   // THE SLOT MODEL CLAIMS NO PARTITION OF ITS OWN, so a def-less slot read refuses (frontend/ssa.ts,
   // LiveInModel) unless `emitLoad` places it. A slot key is the RAW `sp@<off>`; what the offset
-  // names is read through the frame depth (`frameDepths`, below): a word at or past entry + 16 that
-  // this function never writes is incoming stack argument k (`@sarg<k>`, O32's `<pentry
+  // names is read through the frame depth (`frameDepths`, below): a word at or past entry + 16 is
+  // incoming stack argument k, read and written as `@sarg<k>` (`incomingStackKey`; O32's `<pentry
   // offset="16">` in `mips32be.cspec`), and `[0,16)` at entry is the caller-owned home of a0..a3,
   // which is in neither range. A function that takes a frame address gets a local area as well
   // (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory through an
@@ -994,19 +994,25 @@ function liftOnce(
   );
   const frameSize = pushes.length === 1 ? -parseImm(pushes[0].ops[2]) : undefined;
   const depthAt = frameDepths(blocks, entryReentered);
-  // …and every byte of the CALLER'S frame this function writes, entry-relative: a stack parameter
-  // it assigns to is a word its own stores reach, so a read of it is not the argument the caller
-  // passed (`emitLoad`). Every `sp` store, any width, wherever the walk measured its depth.
-  const incomingWritten = new Set<number>();
-  for (const [ins, depth] of depthAt ?? []) {
-    const mem = ins.ops[ins.ops.length - 1] ?? '';
-    const width = { sb: 1, sh: 2, sw: 4 }[ins.mnemonic];
-    if (width !== undefined && /\(/.test(mem) && isStackPtr(parseMem(mem).base)) {
-      for (let k = 0; k < width; k++) {
-        incomingWritten.add(parseMem(mem).off - depth + k);
-      }
-    }
-  }
+  // AN INCOMING STACK WORD HAS ONE NAME, `@sarg<k>`, for its loads AND its stores: O32 passes
+  // argument word k >= 4 at entry sp + 16 + 4(k-4), above the caller's 16-byte home of a0..a3, and
+  // a word slot there is keyed by that entry-relative position (`frameDepths`), never by the raw
+  // `sp@<off>` of the depth it was reached at. A function that assigns to its stack parameter (IDO
+  // stores it back in place: `if (a) e = b;` is `beqz a0; sw a1,40(sp)`) is then the same SSA
+  // variable as one that assigns to a register parameter: a read no store reaches is the caller's
+  // argument through the ordinary live-in path, and one a store reaches on some paths is the merge
+  // of the two. The store keeps no memory effect, which is sound because nothing else reads the
+  // word: the caller never reads its outgoing area back (`compilerBehaviors` on all three O32
+  // compilers, measured), a sub-word or FPU access to it turns the slot model off or refuses
+  // (`spSlotSafe`, the FP arm), and taking its address refuses (it is outside the local area).
+  // Undefined for every other word, and wherever the depth walk could not measure the frame.
+  const incomingStackKey = (ins: Instr, off: number): string | undefined => {
+    const depth = depthAt?.get(ins);
+    const entryOff = depth === undefined ? undefined : off - depth;
+    return entryOff !== undefined && entryOff >= STACK_ARGS_AT && entryOff % 4 === 0
+      ? stackArgKey(ARG_REGS.length + (entryOff - STACK_ARGS_AT) / 4)
+      : undefined;
+  };
 
   // THE FRAME'S SAVES. A word store of `ra`, or of a register O32 does not let a callee destroy,
   // made while the register still holds what the caller left in it, is a SAVE: the word holds the
@@ -1727,22 +1733,15 @@ function liftOnce(
         // readVar would FABRICATE a phantom entry parameter for the slot, silently emitting a function
         // of wrong arity that returns the wrong argument.
         //
-        // The two are told apart by where the word is, entry-relative (`frameDepths`): O32 passes
-        // argument word k >= 4 at entry sp + 4k, above the caller's 16-byte home of a0..a3, so a word
-        // at or past entry + 16 that this function never writes (`incomingWritten`) is that argument,
-        // `@sarg<k>` — a parameter through the ordinary live-in path, as on Thumb. Everything else
-        // keeps the decline: a word of this frame, of the home area, or at an unproven depth. A
-        // sub-word or floating-point incoming argument never reaches here (the `spSlotSafe` guard and
-        // the FPU's own load).
-        const depth = depthAt?.get(ins);
-        const entryOff = depth === undefined ? undefined : off - depth;
-        if (
-          entryOff !== undefined &&
-          entryOff >= STACK_ARGS_AT &&
-          entryOff % 4 === 0 &&
-          ![0, 1, 2, 3].some((k) => incomingWritten.has(entryOff + k))
-        ) {
-          write(d, readVar(stackArgKey(ARG_REGS.length + (entryOff - STACK_ARGS_AT) / 4), bi));
+        // The two are told apart by where the word is (`incomingStackKey`): a word at or past entry +
+        // 16 is that argument, `@sarg<k>`, a parameter through the ordinary live-in path, as on
+        // Thumb, merged with whatever this function stored there. Everything else keeps the
+        // decline: a word of this frame, of the home area, or at an unproven depth. A sub-word or
+        // floating-point incoming argument never reaches here (the `spSlotSafe` guard and the FP
+        // arm).
+        const incoming = incomingStackKey(ins, off);
+        if (incoming !== undefined) {
+          write(d, readVar(incoming, bi));
           return;
         }
         if (!ssa.hasReachingDef(stackSlot(off), bi)) {
@@ -1781,7 +1780,8 @@ function liftOnce(
         }
         refuseMixedSlot(ins, mem, off, 'value');
         valueSlots.add(off);
-        writeVar(stackSlot(off), bi, read(srcReg));
+        // an assignment to an incoming stack parameter is that parameter's SSA variable
+        writeVar(incomingStackKey(ins, off) ?? stackSlot(off), bi, read(srcReg));
         return;
       }
       ops.push(mkOp('store', { operands: [read(base), read(srcReg)], attrs: { off, width } }));

@@ -9416,6 +9416,17 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 's32 k1(s32 x); s32 in9(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i);',
     proto: { k1: { params: 1 } },
   },
+  // `inasgn` assigns its stack parameter on one path before a call: IDO stores `e` back in place
+  // (`beqz a0; sw a1,40(sp); lw a0,40(sp)`), so the read after the join is the caller's word on one
+  // path and the stored one on the other — one variable, `@sarg4`, for the load and the store.
+  {
+    sym: 'inasgn',
+    src: 'void g1(s32 x);\ns32 inasgn(s32 a, s32 b, s32 c, s32 d, s32 e){ if (a) e = b; g1(e); return e + b; }',
+    features: ['multi-arg', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void g1(s32 x); s32 inasgn(s32 a, s32 b, s32 c, s32 d, s32 e);',
+    proto: { g1: { params: ['s32'], returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

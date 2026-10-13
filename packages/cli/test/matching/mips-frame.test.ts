@@ -1,5 +1,5 @@
 // O32 frame objects and incoming stack arguments (frontend/mips.ts `measureO32Frame`, `emitLoad`),
-// pinned on gcc2.7.2 — the MIPS lane the synthetic tier does not cover. The same five shapes are
+// pinned on gcc2.7.2 — the MIPS lane the synthetic tier does not cover. The same six shapes are
 // synthetic rows on ido7.1 and gcc2.7.2kmc (`apps/benchmark/dataset/synthetic.ts`). Each lift
 // recompiles byte-exact with Mario Party 3's GCC 2.7.2 at its canonical flags.
 import { decompile } from '@asmlift/core/pipeline';
@@ -51,6 +51,13 @@ const CASES: Case[] = [
     c: 's32 k1(s32 x); s32 in9(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i){ if (a) return k1(i) + e; return b; }',
     prototypes: { k1: { params: 1 } },
     spelled: /k1\(a8\) \+ a4/,
+  },
+  {
+    name: 'a stack parameter assigned on one path before a call',
+    sym: 'inasgn',
+    c: 'void g1(s32 x); s32 inasgn(s32 a, s32 b, s32 c, s32 d, s32 e){ if (a) e = b; g1(e); return e + b; }',
+    prototypes: { g1: { params: ['s32'], returnsVoid: true } },
+    spelled: /if \(a0 != 0\) a4 = a1;/,
   },
 ];
 

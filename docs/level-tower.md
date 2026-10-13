@@ -1441,8 +1441,11 @@ instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the pro
 measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
 partition, so a def-less `sp@` read there still refuses; what reaches the model instead is an
 incoming stack word under its own key, `@sarg<k>`, which the frontend places by the frame depth
-(`frameDepths`) as Thumb keys its incoming words, so nothing incoming reaches a `sp@` key on MIPS
-either.
+(`frameDepths`) as Thumb keys its incoming words, for its stores as well as its loads, so nothing
+incoming reaches a `sp@` key on MIPS either where the depth is measured (and where it is not, a read
+no store reaches refuses). A store is an assignment to that parameter, as IDO makes one when it
+writes an assigned stack parameter back in place: a read that store does not reach is still the
+caller's word, and Braun's merge joins the two.
 
 The same split has a second instance on this very capability. The envelope's last clause was first
 written as plain "no frame address escapes", and the first inhabitant to reach it was a klonoa DMA

@@ -1,6 +1,6 @@
 // O32 INCOMING STACK ARGUMENTS (frontend/mips.ts `emitLoad`, `frameDepths`): argument word k >= 4
-// sits at entry sp + 4k, above the caller's 16-byte home of a0..a3, so a word `lw` this function
-// never writes, at or past entry + 16, reads `@sarg<k>` — a parameter, as on Thumb. Every other
+// sits at entry sp + 4k, above the caller's 16-byte home of a0..a3, so a word `lw` or `sw` at or
+// past entry + 16 is `@sarg<k>`: a parameter, as on Thumb, that a store assigns to. Every other
 // never-stored read keeps its refusal, and so does every shape whose depth is not one number.
 import { describe, expect, test } from 'vitest';
 
@@ -61,6 +61,22 @@ describe('an incoming stack word is a parameter', () => {
     expect(out).toContain('k1(a8) + a4');
   });
 
+  test('a stack parameter this function assigns to on one path is the incoming value on the other', () => {
+    // IDO stores an assigned stack parameter back in place (owns2: `if (a) e = b; g1(e);` is
+    // `beqz a0; sw a1,40(sp); lw a0,40(sp)`). Load and store are one variable, `@sarg4`, so the
+    // read merges the caller's word with the stored one.
+    expect(
+      src(['0:\tbeqz\ta0,c <f+0xc>', '4:\tnop', '8:\tsw\ta1,16(sp)', 'c:\tlw\tv0,16(sp)', '10:\tjr\tra', '14:\tnop']),
+    ).toBe('s32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4) {\n    if (a0 != 0) a4 = a1;\n    return a4;\n}\n');
+  });
+
+  test('a stack parameter stored at one depth is read back at another as the same word', () => {
+    // the entry-relative key, not the raw `sp@<off>`: 16(sp) at entry is 24(sp) under an 8-byte push
+    expect(
+      src(['0:\tsw\ta1,16(sp)', '4:\taddiu\tsp,sp,-8', '8:\tlw\tv0,24(sp)', 'c:\tjr\tra', '10:\taddiu\tsp,sp,8']),
+    ).toBe('s32 f(s32 a0, s32 a1) {\n    return a1;\n}\n');
+  });
+
   test('after the pop the block runs at the entry depth again', () => {
     expect(
       src(['0:\taddiu\tsp,sp,-8', '4:\tsw\ta0,8(sp)', '8:\taddiu\tsp,sp,8', 'c:\tjr\tra', '10:\tlw\tv0,16(sp)']),
@@ -77,12 +93,6 @@ describe('every other never-stored read keeps its refusal', () => {
 
   test('a word below the pushed size is an uninitialised local', () => {
     expect(lift(['0:\taddiu\tsp,sp,-24', '4:\tlw\tv0,8(sp)', '8:\tjr\tra', 'c:\taddiu\tsp,sp,24'])).toThrow(NEVER);
-  });
-
-  test('a stack parameter this function assigns to on one path is not the incoming value', () => {
-    expect(
-      lift(['0:\tbeqz\ta0,c <f+0xc>', '4:\tnop', '8:\tsw\ta1,16(sp)', 'c:\tlw\tv0,16(sp)', '10:\tjr\tra', '14:\tnop']),
-    ).toThrow(/is read on a path that never stores it/);
   });
 
   test('a second push leaves the depth unproven', () => {
