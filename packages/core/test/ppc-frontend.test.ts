@@ -334,6 +334,56 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         /the return address the 'mflr' at 0x4 copies out is used as a value/,
       );
     });
+    test('a call between the frame address and the routine destroys r11, and the routine refuses it', () => {
+      // The routine takes its frame address in r11 outside any op, so the builder is told it was
+      // used; a callee leaves whatever it likes in r11, and the save would store through that.
+      const asm = lines(
+        'stwu    r1,-32(r1)',
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'addi    r11,r1,32',
+        bl('foo'),
+        bl('_savegpr_30'),
+        'mr      r31,r3',
+        'addi    r11,r1,32',
+        'mr      r3,r31',
+        bl('_restgpr_30'),
+        ...EPI,
+      );
+      expect(() => decompile('cl', `0 <cl>:\n${asm}`, PPC_MWCC, { prototypes: { foo: { params: 0 } } })).toThrow(
+        /r11 is read on a path where a call has destroyed it/,
+      );
+    });
+    test('the routine overwrites the link register, so it must come after the return address is copied out', () => {
+      // `mflr` after the routine copies out the address after its `bl`.
+      const late = lines(
+        'stwu    r1,-32(r1)',
+        'addi    r11,r1,32',
+        bl('_savegpr_30'),
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'add     r3,r3,r4',
+        'addi    r11,r1,32',
+        bl('_restgpr_30'),
+        ...EPI,
+      );
+      expect(() => dis('lt', late)).toThrow(/the 'mflr' at 0xc reads the link register the 'bl' at 0x8 overwrote/);
+      // No `mflr` at all: the `blr` jumps through what the routine left there.
+      const none = lines(
+        'stwu    r1,-32(r1)',
+        'addi    r11,r1,32',
+        bl('_savegpr_30'),
+        'add     r3,r3,r4',
+        'addi    r11,r1,32',
+        bl('_restgpr_30'),
+        'addi    r1,r1,32',
+        'blr',
+      );
+      expect(() => dis('nm', none)).toThrow(/the 'blr' at 0x1c reads the link register the 'bl' at 0x14 overwrote/);
+      // An ordinary call before the `mflr` overwrote it the same way.
+      const call = lines('stwu    r1,-32(r1)', bl('foo'), 'mflr    r0', 'stw     r0,36(r1)', ...EPI);
+      expect(() => dis('oc', call)).toThrow(/the 'mflr' at 0x8 reads the link register the 'bl' at 0x4 overwrote/);
+    });
     test('the FPR routines are named and refused: no lift reaches them yet', () => {
       // mwcc 2.4.x -O4,s: `addi r11,r1,64; bl _savefpr_28` then `addi r11,r1,32; bl _savegpr_28`.
       // Every compiled caller declines on its float code first, so the 8-byte slots stay unmodelled.
@@ -495,7 +545,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       uninit('um'),
     );
     const routine =
-      '0:\taddi    r11,r1,0\n4:\tbl      4 <ur+0x4>\n\t\t\t4: R_PPC_REL24\t_savegpr_31\n8:\tadd     r3,r3,r31\nc:\tblr\n';
+      '0:\tmflr    r0\n4:\taddi    r11,r1,0\n8:\tbl      8 <ur+0x8>\n\t\t\t8: R_PPC_REL24\t_savegpr_31\n' +
+      'c:\tadd     r3,r3,r31\n10:\tmtlr    r0\n14:\tblr\n';
     expect(dis('ur', routine)).toBe(uninit('ur'));
     // Saved nowhere, or saved only after the function wrote it (a spill): no compiler homed a local
     // there, so the entry value stays what the caller handed over.

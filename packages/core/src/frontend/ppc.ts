@@ -538,6 +538,56 @@ function r1Displacements(blocks: PpcBlock[], succIdx: number[][]): Map<Instr, nu
   return at;
 }
 
+/** THE LINK REGISTER, per instruction that needs the return address in it: the `bl` that may have
+ *  overwritten it on some path from the entry, with no `mtlr` since. Absent where every path still
+ *  carries the return address, or one an `mtlr` put back.
+ *
+ *  Asked of two readers, about different writers:
+ *  - an `mflr`, after ANY `bl`. Its copy is taken as the return address (`return-address` in
+ *    `nonValues`), and after a `bl` it is the address that follows the `bl` instead.
+ *  - a return (`blr`, or a conditional one, which jumps through it), after a `bl` into a register
+ *    SAVE ROUTINE only. This frontend erases that call (`saveRoutine`) on the premise that it
+ *    overwrites only a link register already copied out, and this is what checks the premise. An
+ *    ordinary call lifts as a call, and claims nothing about the link register.
+ *  No compiler emits either violation; hand-written asm can. */
+function linkRegisterOverwrites(
+  blocks: PpcBlock[],
+  succIdx: number[][],
+  isRoutine: (ins: Instr) => boolean,
+): Map<Instr, Instr> {
+  const at = new Map<Instr, Instr>();
+  type Lr = { any: Instr | null; routine: Instr | null };
+  const into: Array<Lr | undefined> = blocks.map(() => undefined);
+  into[0] = { any: null, routine: null };
+  const work = [0];
+  while (work.length) {
+    const bi = work.pop()!;
+    let { any, routine } = into[bi]!;
+    for (const ins of [...blocks[bi].body, ...(blocks[bi].branch ? [blocks[bi].branch] : [])]) {
+      const by = ins.mnemonic === 'mflr' ? any : isReturn(ins) || isCondReturn(ins) ? routine : null;
+      if (by !== null) {
+        at.set(ins, by);
+      }
+      if (ins.mnemonic === 'bl') {
+        any = ins;
+        routine = isRoutine(ins) ? ins : routine;
+      } else if (ins.mnemonic === 'mtlr') {
+        any = routine = null;
+      }
+    }
+    for (const s of succIdx[bi]) {
+      // MAY: one path that overwrote it is enough; the `bl` named is the last one on the first such path.
+      const old = into[s];
+      const next = { any: old?.any ?? any, routine: old?.routine ?? routine };
+      if (old === undefined || next.any !== old.any || next.routine !== old.routine) {
+        into[s] = next;
+        work.push(s);
+      }
+    }
+  }
+  return at;
+}
+
 /** Lift disassembled PowerPC text → an L1 Fn with block-argument SSA. `asmData` (optional) supplies
  *  the data-section jump table for dense-switch (Regime-B) recovery; absent ⇒ a `bctr` dispatch
  *  loud-fails. */
@@ -637,6 +687,7 @@ export function lift(
   }
 
   const r1At = r1Displacements(blocks, succIdx);
+  const lrOverwrittenBy = linkRegisterOverwrites(blocks, succIdx, (ins) => Boolean(saveRoutineOf(target, ins)));
 
   const preds: number[][] = blocks.map(() => []);
   blocks.forEach((_, i) => {
@@ -725,6 +776,19 @@ export function lift(
     fail(
       `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
     );
+  /** An `mflr` or a return reached by a `bl` with no `mtlr` since (`linkRegisterOverwrites`): what
+   *  the link register holds there is the address after that `bl`, not this function's return
+   *  address. */
+  const refuseOverwrittenLink = (ins: Instr) => {
+    const by = lrOverwrittenBy.get(ins);
+    if (by !== undefined) {
+      fail(
+        `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reads the link register the ` +
+          `'bl' at 0x${by.addr.toString(16)} overwrote on some path, with no 'mtlr' since — the return address ` +
+          `is lost there`,
+      );
+    }
+  };
   /** DEFINITIONS THAT ARE NOT VALUES: the frame bookkeeping this frontend erases. Each kind is
    *  written into a register as an ordinary SSA definition, so SSA answers whether one reaches a use,
    *  and is keyed by that value, as the high halves are (frontend/high-half.ts). Its one legitimate
@@ -1057,6 +1121,9 @@ export function lift(
         );
       }
       consumedNonValues.add(base!);
+      // A call between the `addi` and here destroyed r11, and the routine would store through what
+      // the callee left there: the builder refuses that read once it knows it was used.
+      ssa.useOutsideOps(base!, bi);
       if (typeof frame.off !== 'number') {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': ${at} saves below the frame address formed at 0x${frame.addr.toString(16)}, where ` +
@@ -1368,6 +1435,7 @@ export function lift(
             `cannot lift '${name}': stwu with update on ${parseMem(s).base} (store-with-base-update) not modelled`,
           );
         case 'mflr': {
+          refuseOverwrittenLink(ins);
           const lr = mkValue(T.unk(32));
           nonValues.set(lr, { kind: 'return-address', addr: ins.addr });
           write(d, lr);
@@ -1879,6 +1947,9 @@ export function lift(
       const cond = mkCmp(ops, 'icmp_ne', dec, constVal(0));
       ops.push(mkOp('cond_br', { operands: [cond], successors: succIdx[bi].map((j) => succ(j)) }));
       return;
+    }
+    if (br && (isReturn(br) || isCondReturn(br))) {
+      refuseOverwrittenLink(br);
     }
     if (br && (isCond(br) || isCondReturn(br))) {
       const base = isCondReturn(br) ? condReturnBase(br)! : br.mnemonic;

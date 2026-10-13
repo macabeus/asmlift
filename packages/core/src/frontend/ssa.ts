@@ -104,6 +104,12 @@ export interface SsaBuilder {
    *  sense, answered without the entry parameter that one hands back. A callee-saved register stored
    *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
   holdsEntryValue(reg: string, b: number): boolean;
+  /** Record that the frontend CONSUMED `v`, which it read from a register in block `b`, without
+   *  placing it in any op: PowerPC's register save routine takes its frame address in r11 and is
+   *  erased, so the address appears in no operand. The refusal of a read a call destroyed
+   *  (`refuseStaleCallerSavedReads`) judges a read by its uses, and an op-less use is one too — left
+   *  unrecorded, a frame address a call destroyed would still be consumed, silently. */
+  useOutsideOps(v: Value, b: number): void;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up.
    *
@@ -420,6 +426,8 @@ export function makeSsaBuilder(
   const clobberedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const decidedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const staleCandidates: StaleRead[] = [];
+  /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
+  const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
   // proportional to what a block READS rather than to how many times it reads it. The value a key
   // holds only changes at a write, and the verdict only flips at a call, so a run of identical
@@ -880,7 +888,10 @@ export function makeSsaBuilder(
         continue;
       }
       const ops = irBlocks[c.block].ops;
-      if (ops.slice(c.fromOp).some((op) => op.operands.includes(c.value))) {
+      if (
+        ops.slice(c.fromOp).some((op) => op.operands.includes(c.value)) ||
+        usesOutsideOps.some((u) => u.value === c.value && u.block === c.block && u.atOp >= c.fromOp)
+      ) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${c.reg} is read on a path where a call has destroyed it, so what ` +
             `it holds is the callee's and not a value this function named — not modelled`,
@@ -907,6 +918,9 @@ export function makeSsaBuilder(
     holdsValue,
     entryValue,
     holdsEntryValue,
+    useOutsideOps: (v: Value, b: number) => {
+      usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
+    },
     noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see
