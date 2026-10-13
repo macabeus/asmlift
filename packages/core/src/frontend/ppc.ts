@@ -639,16 +639,16 @@ export function lift(
   const readReg = (r: string, at: number): Value => {
     const v = highHalves.guardRead(name, r, readVar(r, at));
     if (frameAddresses.has(v)) {
-      throw r1AsData();
+      r1AsData();
     }
     if (restoredRegs.has(v)) {
-      throw restoredRead(v);
+      restoredRead(v);
     }
     return v;
   };
-  const restoredRead = (v: Value) => {
+  const restoredRead = (v: Value): never => {
     const { reg, addr } = restoredRegs.get(v)!;
-    return new PpcUnsupportedError(
+    return fail(
       `cannot lift '${name}': ${reg} is read after the restore routine at 0x${addr.toString(16)} put the ` +
         `caller's ${reg} back — no C value names it`,
     );
@@ -656,8 +656,8 @@ export function lift(
   /** Reading r1 (the stack pointer) as a DATA operand means frame-pointer arithmetic or an
    *  address-taken local (`addi r3,r1,8` = `&local`) — not modellable without a stack abstraction,
    *  and fabricating a value for r1 silently miscompiles. */
-  const r1AsData = () =>
-    new PpcUnsupportedError(
+  const r1AsData = (): never =>
+    fail(
       `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
     );
   /** The FRAME ADDRESS `addi r11,r1,N` forms, per value standing for one: its offset from the entry
@@ -763,7 +763,7 @@ export function lift(
     // / mflr / mtlr / r1-relative spills / the save routines' frame address are handled before `read`.
     const read = (r: string): Value => {
       if (r === 'r1') {
-        throw r1AsData();
+        r1AsData();
       }
       return readReg(r, bi);
     };
@@ -1793,11 +1793,11 @@ export function lift(
     for (const op of b.ops) {
       const used = [...op.operands, ...op.successors.flatMap((s) => s.args)];
       if (used.some((v) => frameAddresses.has(v))) {
-        throw r1AsData();
+        r1AsData();
       }
       const restored = used.find((v) => restoredRegs.has(v));
       if (restored !== undefined) {
-        throw restoredRead(restored);
+        restoredRead(restored);
       }
       const lr = used.find((v) => returnAddresses.has(v));
       if (lr !== undefined) {
