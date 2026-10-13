@@ -49,13 +49,13 @@ import {
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
-  type ArgSlots,
   type SsaBuilder,
   abiSortEntryParams,
   makeSsaBuilder,
   mintArgSlotHoles,
-  stackArgIndex,
+  registerArgSlots,
   stackArgKey,
+  stackArgSlots,
   stackSlotKey,
 } from './ssa';
 import { type OutgoingArgs, type StackArgsBlock, type StackArgsEvent, analyzeOutgoingArgs } from './stackargs';
@@ -2453,17 +2453,7 @@ function liftOnce(
   // One word per argument, which is what this frontend assumes everywhere: an 8-byte argument,
   // which AAPCS may align into r1 or straddle across r3 and the stack, would break the index-slot
   // correspondence, and recovering one is its own capability.
-  const slotOf = (key: string): number | null => {
-    const i = target.argRegs.indexOf(key);
-    return i >= 0 ? i : stackArgIndex(key);
-  };
-  const argSlots: ArgSlots = {
-    slotOf,
-    holes: (readKeys) =>
-      Array.from({ length: Math.max(0, ...readKeys.map((k) => slotOf(k) ?? -1)) }, (_, k) =>
-        k < target.argRegs.length ? target.argRegs[k] : stackArgKey(k),
-      ),
-  };
+  const argSlots = stackArgSlots(registerArgSlots(target.argRegs), target.argRegs);
   mintArgSlotHoles(ssa, cfg.preds[0].length > 0, argSlots);
   ssa.finish();
 

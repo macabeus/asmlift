@@ -1697,6 +1697,28 @@ export const registerArgSlots = (argRegs: readonly string[]): ArgSlots => ({
   holes: (readKeys) => argRegs.slice(0, Math.max(0, ...readKeys.map((k) => argRegs.indexOf(k)))),
 });
 
+/** The slots of a convention that passes arguments past `argRegs` on the stack: `regs` for the
+ *  registers, then incoming stack word k as slot k ({@link stackArgKey}). Reading a stack word
+ *  proves every register slot and every lower stack word precede it, one word per argument.
+ *  `besideStackWords` is the convention's own refusal of a read it cannot place beside them (O32's
+ *  float arguments, which take integer slots this rule does not count), called with the highest
+ *  stack slot read. */
+export const stackArgSlots = (
+  regs: ArgSlots,
+  argRegs: readonly string[],
+  besideStackWords?: (readKeys: readonly string[], top: number) => void,
+): ArgSlots => ({
+  slotOf: (key) => stackArgIndex(key) ?? regs.slotOf(key),
+  holes: (readKeys) => {
+    const top = Math.max(-1, ...readKeys.map((k) => stackArgIndex(k) ?? -1));
+    if (top < 0) {
+      return regs.holes(readKeys);
+    }
+    besideStackWords?.(readKeys, top);
+    return Array.from({ length: top }, (_, k) => (k < argRegs.length ? argRegs[k] : stackArgKey(k)));
+  },
+});
+
 /** A rank past every argument slot, for a live-in that is not one. */
 const NOT_AN_ARGUMENT = Number.MAX_SAFE_INTEGER;
 

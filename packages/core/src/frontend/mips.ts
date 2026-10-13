@@ -44,7 +44,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgIndex, stackArgKey, stackSlotKey } from './ssa';
+import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgKey, stackArgSlots, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -2236,28 +2236,19 @@ function o32LocalArea(
   return area.from < area.to ? area : null;
 }
 
-/** The register slots, then an incoming stack word `@sarg<k>` as argument slot k: reading word k
- *  proves every register and every stack word below it is an argument. A floating-point register
- *  read beside a stack word refuses — where a float shadows the integer slots ahead of the stack
- *  words is not modelled here. */
+/** O32's slots: the shared register-then-stack-word rule (`stackArgSlots`), with a floating-point
+ *  register read beside a stack word refused — where a float shadows the integer slots ahead of
+ *  the stack words is not modelled here. */
 function o32ArgSlots(name: string, regs: ArgSlots, argRegs: readonly string[]): ArgSlots {
-  return {
-    slotOf: (key) => stackArgIndex(key) ?? regs.slotOf(key),
-    holes: (readKeys) => {
-      const top = Math.max(-1, ...readKeys.map((k) => stackArgIndex(k) ?? -1));
-      if (top < 0) {
-        return regs.holes(readKeys);
-      }
-      const float = readKeys.find(isFpKey);
-      if (float !== undefined) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': ${float} carries a floating-point argument beside the incoming stack argument ` +
-            `${top + 1} — which integer slots the float takes ahead of the stack words is not modelled`,
-        );
-      }
-      return Array.from({ length: top }, (_, k) => (k < argRegs.length ? argRegs[k] : stackArgKey(k)));
-    },
-  };
+  return stackArgSlots(regs, argRegs, (readKeys, top) => {
+    const float = readKeys.find(isFpKey);
+    if (float !== undefined) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${float} carries a floating-point argument beside the incoming stack argument ` +
+          `${top + 1} — which integer slots the float takes ahead of the stack words is not modelled`,
+      );
+    }
+  });
 }
 
 // Build the "branch taken" condition value for a conditional branch (emitting the icmp op).
