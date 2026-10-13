@@ -1451,15 +1451,14 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // The THIRD bullet above on CodeWarrior, outside the twelve: `x` is assigned on one arm only and
   // lives across five calls, so mwcc 2.4.2 homes it in r31, which its `_savegpr_27` prologue saved,
-  // and the path that skips the assignment reads what the caller left there. Before the PPC frontend
-  // took the prologue's save set as its live-in model, that read was a seventh PARAMETER for a
-  // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the
-  // row MATCHes with `s32 v0;` declared and never initialised. mwcc_242_81 only, by measurement:
-  // agbcc already lifts the shape as `s32 v0;` through Thumb's own live-in model (the rule that
-  // closed `loopfall`, below), ido7.1 declines on a `jal` with no callee symbol and both gcc 2.7.2 lanes on
-  // the sixth parameter's stack slot, so on those lanes the row would pin another capability or
-  // another blocker. The other two CodeWarrior builds are pinned by
-  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  // and the path that skips the assignment reads what the caller left there. Without the
+  // prologue's save set as the PPC frontend's live-in model, that read is a seventh PARAMETER for a
+  // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the row MATCHes with
+  // `s32 v0;` declared and never initialised. mwcc_242_81 only, by measurement: agbcc already lifts
+  // the shape as `s32 v0;` through Thumb's own live-in model (the rule that closed `loopfall`,
+  // below), and ido7.1 and both gcc 2.7.2 lanes decline on a `jal` with no callee symbol, so on those
+  // lanes the row would pin another capability or another blocker. The other two CodeWarrior builds
+  // are pinned by packages/cli/test/matching/ppc-save-routines.test.ts.
   {
     sym: 'uninit_saved',
     src: 'int k(int);\nint uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a); return k(k(k(k(b)+c)+d)+e) + x; }',
@@ -1472,8 +1471,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // homes its uninitialised local in a volatile register no argument travels in, with no save
   // (PPC_MWCC.scratchRegs). `uninit_r0` puts `x` in r0 (`mulli r0,r4,3; add r3,r0,r4`); in
   // `uninit_r12`, all eight argument registers are live, so `x` and `y` land in r11 and r12
-  // (`mullw r11,r4,r5; mullw r12,r7,r8` on one arm, `subf r4,r12,r11` after the join). Before
-  // the PPC live-in model took the target's scratch registers, each def-less read lifted as one more
+  // (`mullw r11,r4,r5; mullw r12,r7,r8` on one arm, `subf r4,r12,r11` after the join). Without the
+  // target's scratch registers in the PPC live-in model, each def-less read lifts as one more
   // PARAMETER — a third for a two-parameter source, and a ninth and tenth past the eight argument
   // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and both
   // MIPS frontends claim no register partition. mwcc_233_163n is pinned by

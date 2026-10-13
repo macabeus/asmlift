@@ -223,7 +223,7 @@ export interface TargetDescription {
   /** Of `nonArgRegs`, the ones this ABI does NOT require a callee to preserve — so the compiler may
    *  home a local in one with no prologue save at all, and the save half of the rule above does not
    *  apply to it. AAPCS's `ip` is the whole set on Thumb, and agbcc really does use it that way;
-   *  on PPC it is `r0`, where mwcc homes a leaf's uninitialised local (PPC_MWCC).
+   *  on PPC it is `r0`, `r11` and `r12`, where mwcc homes a leaf's uninitialised locals (PPC_MWCC).
    *
    *  UNDER-stating this list only makes the classification stricter: an unlisted register whose save
    *  the frontend cannot find falls back to being a parameter, which is what a target claiming no
@@ -1273,9 +1273,9 @@ export const PPC_MWCC: TargetDescription = {
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
   // Every GPR but r1 (the stack pointer, never an SSA register here) and the eight argument
-  // registers. The frontend narrows it to the ones the prologue saved (`prologueSavedRegs`). r2 and
-  // r13, the small-data bases, never reach that rule: a read of either as a value refuses first
-  // (`SMALL_DATA_BASES` in frontend/ppc.ts).
+  // registers. The frontend narrows it to `scratchRegs` and the ones the prologue saved
+  // (`prologueSavedRegs`). r2 and r13, the small-data bases, never reach that rule: a read of either
+  // as a value refuses first (`SMALL_DATA_BASES` in frontend/ppc.ts).
   nonArgRegs: ['r0', 'r2', ...Array.from({ length: 21 }, (_, i) => `r${i + 11}`)],
   // The volatile registers no argument travels in, which a callee may use with no save. MEASURED on
   // 2.4.2 at the synthetic tier's flags and on 2.3.3 at Pikmin's -O4,p (in C): a leaf homes an

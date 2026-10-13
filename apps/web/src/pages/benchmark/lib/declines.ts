@@ -68,7 +68,7 @@
 //                               interpolated (as Thumb's), the two-armed branch denylist, whose
 //                               template is interpolation end to end, the caller's value a restore
 //                               puts back read as a value, a `stmw` or save routine saving a register
-//                               this function already wrote, and four ways a `bl` into a register
+//                               this function already wrote or read, and four ways a `bl` into a register
 //                               save or restore routine is not the bookkeeping it looks like (a
 //                               number no runtime routine has, the floating-point routines, no
 //                               single frame address in r11, r1's depth unknown there), control

@@ -35,7 +35,7 @@ describe('PPC frontend robustness', () => {
   test('a body that runs off its end with no terminator declines, rather than inventing a return', () => {
     // A whole-object dump split on symbol lines ends a function early at a foreign label
     // (ac-decomp's famicom.o has five `.text` sections), and what follows the last instruction is
-    // unknown. Lifted as a return, `mr r31,r4; addi r3,r31,1` read as `return a1 + 1;`.
+    // unknown. Lifted as a return, `mr r31,r4; addi r3,r31,1` would read as `return a1 + 1;`.
     expect(() => dis('cut', '0:\tmr      r31,r4\n4:\taddi    r3,r31,1\n')).toThrow(
       /control falls off the end \(the block at 0x0 has no terminator and no successor; its last instruction is at 0x4\)/,
     );
@@ -295,7 +295,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '0:\taddi    r11,r1,8\n4:\tcmpwi   r4,0\n8:\tbeq-    10 <faj+0x10>\nc:\tmr      r11,r3\n' +
       '10:\tlwz     r3,0(r11)\n14:\tblr\n';
     expect(() => dis('faj', join)).toThrow(asData);
-    // Nothing takes it: only a save routine may, so a dead one refuses too, as the `addi` always did.
+    // Nothing takes it: only a save routine may, so a dead one refuses too.
     expect(() => dis('fadead', '0:\taddi    r11,r1,8\n4:\tli      r3,0\n8:\tblr\n')).toThrow(asData);
   });
   // mwcc 2.4.x's out-of-line register saves: `addi r11,r1,N; bl _savegpr_NN` stores rNN..r31 into
@@ -567,7 +567,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
     ).toBe('s32 uw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
     // Saved only after the function READ it: a value handed over, which the save preserves. Counting
-    // that save minted `uninit_r31` for the read before it.
+    // that save would mint `uninit_r31` for the read before it.
     expect(
       dis(
         'ur1',
@@ -579,7 +579,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
     // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and
     // in r11 and r12 when every argument register is live. Each is volatile and passes no argument,
-    // so no caller hands a value over there; before the scratch half, each read was one more parameter.
+    // so no caller hands a value over there.
     for (const r of ['r0', 'r11', 'r12']) {
       expect(dis('sc', `0:\tadd     r3,r3,${r}\n4:\tblr\n`)).toBe(
         `s32 sc(s32 a0) {\n    s32 uninit_${r};\n    return a0 + uninit_${r};\n}\n`,

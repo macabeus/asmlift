@@ -430,7 +430,7 @@ const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
  *  `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an uninitialised local
  *  only where the compiler could home a local there, which it may do only after saving it; without
  *  this, an uninitialised local in a callee-saved register lifts as an extra PARAMETER
- *  (`int x; if (s) x = k(a); return k(a) + x;` grew a third).
+ *  (`int x; if (s) x = k(a); return k(a) + x;` would take a third).
  *
  *  Read off the ENTRY block, the one every path starts with: `stmw rS,D(r1)` saves rS..r31, a GPR
  *  save routine rNN..r31, and `stw rN,D(r1)` rN. A register counts as saved only where NO earlier
@@ -986,7 +986,7 @@ export function lift(
     const saveInto = (ins: Instr, reg: string, off: number, mem: string) => {
       if (ssa.hasReachingDef(reg, bi)) {
         // A read leaves a definition too: the entry value, as a parameter, since `prologueSavedRegs`
-        // does not count a save after a read. Saying "wrote" there would name the wrong cause.
+        // does not count a save after a read.
         throw new PpcUnsupportedError(
           ssa.hasReachingDef(reg, bi, (v) => !paramReg.has(v))
             ? `cannot lift '${name}': ${site(ins)} saves ${reg} after this function wrote it, so '${mem}' holds a ` +
@@ -1089,16 +1089,16 @@ export function lift(
     // A `bl` into a register save or restore routine is frame bookkeeping, not a call: it writes no
     // register this function reads (only the link register, already copied out — which
     // `linkRegisterOverwrites` checks), so nothing is destroyed and r0 keeps the return address
-    // `mflr` put there. A SAVE records a save slot per
-    // word, at the routine's fixed offsets below the frame address in r11; a RESTORE must find the
-    // same register in every word it reloads. It refuses where:
+    // `mflr` put there. A SAVE records a save slot per word, at the routine's fixed offsets below the
+    // frame address in r11; a RESTORE must find the same register in every word it reloads. It
+    // refuses where:
     //   • r11 does not hold one frame address on every path into the call, or a call destroyed it on
     //     the way (`useOutsideOps`; and a frame address no routine takes refuses at the end of `lift`);
     //   • r1's displacement at the `addi` is not known, so no slot can be named;
     //   • the routine's number is outside r14..r31 (no such runtime routine);
     //   • it moves floating-point registers (named, not modelled);
-    //   • a register it saves was written first, or a word it restores was not saved from that
-    //     register — `saveInto` and `restoreFrom`, the rules every save and restore keeps.
+    //   • a register it saves was written or read first, or a word it restores was not saved from
+    //     that register — `saveInto` and `restoreFrom`, the rules every save and restore keeps.
     const saveRoutine = (ins: Instr, r: NonNullable<ReturnType<typeof saveRoutineOf>>) => {
       const at = `the 'bl' to '${r.sym}' at 0x${ins.addr.toString(16)}`;
       if (r.first < 14 || r.first > 31 || ins.reloc!.addend !== 0) {
@@ -1122,8 +1122,8 @@ export function lift(
         );
       }
       consumedNonValues.add(base!);
-      // A call between the `addi` and here destroyed r11, and the routine would store through what
-      // the callee left there: the builder refuses that read once it knows it was used.
+      // If a call between the `addi` and here destroyed r11, the routine would store through what the
+      // callee left there: the builder refuses that read once it knows it was used.
       ssa.useOutsideOps(base!, bi);
       if (typeof frame.off !== 'number') {
         throw new PpcUnsupportedError(
@@ -2018,9 +2018,7 @@ export function lift(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
-  // Checked on the finished function, after `finish` pruned the joins nothing reads, because a
-  // return address or a frame address reaches a use through a join's incoming arguments as well as
-  // directly.
+  // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
   assertNoNonValueEscaped(irBlocks);
   assertNonValuesConsumed();
 
