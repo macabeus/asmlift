@@ -28,6 +28,7 @@ import {
   renderedIntSignedness,
   writesNonPointerIntoPointer,
 } from '../l3/typing';
+import { spellableType } from '../proto';
 
 // C operator precedence (lower binds tighter). Used to emit MINIMAL parentheses. Shared: C++ has
 // the same precedence for these operators.
@@ -346,7 +347,11 @@ function printExpr(e: Expr, parentPrec: number, vt: PrintEnv, leaf?: LeafHook): 
       return `${e.fn}(${e.args
         .map((a, i) => {
           const to = declared?.[i];
-          return to !== undefined && argConversion(a, to, vt) ? `(${to})${rec(a, 2)}` : printConverted(a, vt, leaf);
+          // A parameter type this cannot spell is an object pointer (target.ts `declaredArgTypes`),
+          // reached through `void *`.
+          return to !== undefined && argConversion(a, to, vt)
+            ? `(${spellableType(to) ? to : 'void *'})${rec(a, 2)}`
+            : printConverted(a, vt, leaf);
         })
         .join(', ')})`;
     }

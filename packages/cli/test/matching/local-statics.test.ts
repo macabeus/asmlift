@@ -331,6 +331,22 @@ const ADDRESS_CASES: {
     spelled: /static const u32 tbl\[3\] = \{ \(u32\)&ga, \(u32\)&gb, \(u32\)&gc \};/,
   },
   {
+    // …and one a struct-pointer callee takes: the bytes say `u32 s[2]`, which mwcc will not pass as
+    // a `struct S *` implicitly ("illegal implicit conversion from 'unsigned int[2]'"), and the
+    // parameter type is not one the prelude can print, so the argument goes through `void *`.
+    sym: 'tabm',
+    context: 'struct S { u8 k; void (*p)(void); };\nvoid use2(struct S *);\nvoid f0(void);\n',
+    c: 'void tabm(void) { static struct S s = { 1, f0 }; use2(&s); }',
+    prototypes: {
+      use2: { params: ['struct S *'], returnsVoid: true },
+      f0: { params: [], returnsVoid: true },
+      tabm: { params: [], returnsVoid: true },
+    },
+    // agbcc (little-endian, C's own conversions) passes it bare; mwcc (big-endian, strict) casts
+    spelled:
+      /static u32 s\[2\] = \{ (?:1, \(u32\)&f0 \};\n\s*use2\(s\)|0x1000000, \(u32\)&f0 \};\n\s*use2\(\(void \*\)s\));/,
+  },
+  {
     sym: 'ptrdata',
     context: 'extern s32 g;\n',
     c: 's32 ptrdata(s32 i) { static s32 *p = &g; return p[i]; }',
