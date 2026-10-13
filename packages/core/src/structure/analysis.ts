@@ -2289,11 +2289,12 @@ function sameAddress(defOf: Map<Value, Op>, a: Value, b: Value): boolean {
  *  the same whichever read the compiler makes first, and its order is the compiler's to choose:
  *  `gR + gR` over `extern volatile u32 gR;` and `*gPV + *gPV` over `u16 *volatile gPV` read the
  *  object twice, in an order the source never stated, so naming the first read into a temp spells
- *  an order the source did not have (ido 7.1 loads `gR + gR` in the other order). `gR - gR` is not
- *  symmetric — the order decides which read is the minuend — and stays sequenced. */
+ *  an order the source did not have (ido 7.1 loads `gR + gR` in the other order). The meeting op
+ *  may also be a sum both reads enter with one sign, past a reassociation (`sameSignInOneSum`).
+ *  `gR - gR` is not symmetric — the order decides which read is the minuend — and stays sequenced.
+ *  `a` is the later read, `b` the earlier one placed past it. */
 function interchangeableReads(rules: MaterializeRules, a: Op, b: Op): boolean {
   const { defOf } = rules;
-  const { useSitesOf } = rules.uses;
   if (
     a === b ||
     opShape(a) !== opShape(b) ||
@@ -2302,6 +2303,13 @@ function interchangeableReads(rules: MaterializeRules, a: Op, b: Op): boolean {
   ) {
     return false;
   }
+  return mirroredChains(rules, a, b) || sameSignInOneSum(rules, b, a);
+}
+
+/** The two reads' sole-use chains are alike but for them and meet as the two operands of one
+ *  commutative op: `(gR << 1) * (gR << 1)`. */
+function mirroredChains(rules: MaterializeRules, a: Op, b: Op): boolean {
+  const { useSitesOf } = rules.uses;
   let ca = a;
   let cb = b;
   for (let depth = 0; depth < 8; depth++) {
@@ -2334,6 +2342,63 @@ function interchangeableReads(rules: MaterializeRules, a: Op, b: Op): boolean {
     }
     ca = na;
     cb = nb;
+  }
+  return false;
+}
+
+/** Each read's sole-use chain up through `add`/`sub` ops, as the ops it passes and the read's sign in
+ *  each: entering an `add`, or a `sub` as its minuend, keeps the sign; entering a `sub` as its
+ *  subtrahend flips it. The value of every op on the chain is then that sign times the read, plus
+ *  terms the read is not in. */
+function additiveChain(rules: MaterializeRules, read: Op): Map<Op, { sign: number; operand: number }> {
+  const { useSitesOf } = rules.uses;
+  const chain = new Map<Op, { sign: number; operand: number }>();
+  let v = read.results[0];
+  let sign = 1;
+  for (let depth = 0; depth < 8 && v !== undefined; depth++) {
+    const uses = useSitesOf.get(v);
+    if (uses?.length !== 1) {
+      break;
+    }
+    const n = uses[0].op;
+    const operand = n.operands.indexOf(v);
+    if (
+      (n.opcode !== 'add' && n.opcode !== 'sub') ||
+      n.operands.length !== 2 ||
+      n.results.length !== 1 ||
+      n.successors.length > 0 ||
+      n.operands.lastIndexOf(v) !== operand
+    ) {
+      break;
+    }
+    sign = n.opcode === 'sub' && operand === 1 ? -sign : sign;
+    chain.set(n, { sign, operand });
+    v = n.results[0];
+  }
+  return chain;
+}
+
+/** The two reads meet in one sum with the same sign: their sole-use chains run through `add`/`sub`
+ *  ops only, to an op one reaches through each operand, where each counts with the same sign. The
+ *  sum is then the same whichever read is made first, however the compiler reassociated it:
+ *  ido 7.1 compiles `(gR - x) + (gR - x)` as `((gR - x) + gR) - x`, where one read passes a `sub`
+ *  before the `add` they meet in and the other does not, so the chains are not mirrored. `gR - gR`
+ *  meets with opposite signs and stays sequenced. Wrapping arithmetic keeps the sum associative.
+ *  The value is then right in either order, but the match is not: the earlier read must also be
+ *  the one the expression spells first, entering the meeting op as its left operand, or a compiler
+ *  that reads operands left to right reverses the asm's two loads. mwcc 2.4.2 reads
+ *  `gMS.f + ((t + gMS.f) + t)`'s right-hand `gMS.f` first, and spelling both in one expression
+ *  there put the asm's second load first. */
+function sameSignInOneSum(rules: MaterializeRules, earlier: Op, later: Op): boolean {
+  const ofEarlier = additiveChain(rules, earlier);
+  if (ofEarlier.size === 0) {
+    return false;
+  }
+  for (const [n, inLater] of additiveChain(rules, later)) {
+    const inEarlier = ofEarlier.get(n);
+    if (inEarlier !== undefined) {
+      return inEarlier.operand === 0 && inLater.operand === 1 && inEarlier.sign === inLater.sign;
+    }
   }
   return false;
 }

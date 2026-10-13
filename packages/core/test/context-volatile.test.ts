@@ -164,6 +164,45 @@ describe('a context-declared volatile scalar: the object is the pointer, not wha
     expect(diff).toContain('v0 = gH;');
     expect(diff).toContain('return v0 - gH;');
   });
+
+  test('two reads of one cell entering one sum with one sign are spelled in one expression, past a reassociation', () => {
+    // The shape ido 7.1 compiles `(gR - x) + (gR - x)` to: `((gR - x) + gR) - x`. One read passes a
+    // `sub` before the `add` both meet in and the other does not, so the chains are not mirrored, but
+    // each enters the sum with a plus and the value does not depend on which is read first.
+    const VSHL = wrap(
+      'xshl',
+      '\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tldr\tr3, [r1]\n\tsub\tr2, r2, r0\n\tadd\tr2, r2, r3\n\tsub\tr0, r2, r0\n',
+      'gR',
+    );
+    const ctx = ctxOf('extern volatile s32 gR;');
+    const protos = { xshl: { params: 1 } };
+    expect(decompile('xshl', VSHL, ARMV4T_AGBCC, { contextGlobals: ctx, prototypes: protos }).source).toContain(
+      'return gR - a0 + gR - a0;',
+    );
+    // `(gR - x) - gR`: the reads enter with opposite signs, so the order decides the value
+    const VMIX = wrap(
+      'xmix',
+      '\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tldr\tr3, [r1]\n\tsub\tr2, r2, r0\n\tsub\tr0, r2, r3\n',
+      'gR',
+    );
+    const mix = decompile('xmix', VMIX, ARMV4T_AGBCC, {
+      contextGlobals: ctx,
+      prototypes: { xmix: { params: 1 } },
+    }).source;
+    expect(mix).toContain('v0 = gR;');
+    // the same sum with the later read as the meeting op's left operand: spelled in one expression,
+    // a compiler reading left to right would load it first, so the earlier read stays named
+    const VLATE = wrap(
+      'xlate',
+      '\tldr\tr1, .L3\n\tldr\tr2, [r1]\n\tldr\tr3, [r1]\n\tsub\tr2, r2, r0\n\tadd\tr2, r3, r2\n\tsub\tr0, r2, r0\n',
+      'gR',
+    );
+    const late = decompile('xlate', VLATE, ARMV4T_AGBCC, {
+      contextGlobals: ctx,
+      prototypes: { xlate: { params: 1 } },
+    }).source;
+    expect(late).toContain('v0 = gR;');
+  });
 });
 
 describe('an access of a context-declared volatile object through a pointer that is not its name', () => {
