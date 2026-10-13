@@ -37,6 +37,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
+import type { FrameRange } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -1716,6 +1717,28 @@ export function lift(
   return ssa.fn;
 }
 
+/** THE LOCAL AREA OF AN O32 FRAME, `[from, to)` in post-push `sp` offsets: where this compiler
+ *  keeps the locals and spill temps (`compilerBehaviors.o32LocalArea`), so where a captured frame
+ *  address may name a local and nothing else does. Below it is the outgoing area, which ends at
+ *  `outgoingEnd` — 0 in a function that makes no call, else the 16-byte home of a0..a3 and then
+ *  every stack word a call takes; above it, or below it on IDO, the registers the prologue saved at
+ *  `saves`. Null where the target states no layout, or the area is empty. */
+function o32LocalArea(
+  rule: TargetDescription['compilerBehaviors']['o32LocalArea'],
+  { frameSize, outgoingEnd, saves }: { frameSize: number; outgoingEnd: number; saves: readonly number[] },
+): FrameRange | null {
+  let area: FrameRange;
+  if (rule === 'above-outgoing-area') {
+    const from = Math.ceil(outgoingEnd / 8) * 8;
+    area = { from, to: Math.min(frameSize, ...saves.filter((o) => o >= from)) };
+  } else if (rule === 'above-saved-registers') {
+    area = { from: Math.max(outgoingEnd, ...saves.map((o) => o + 4)), to: frameSize };
+  } else {
+    return null;
+  }
+  return area.from < area.to ? area : null;
+}
+
 /** The register slots, then an incoming stack word `@sarg<k>` as argument slot k: reading word k
  *  proves every register and every stack word below it is an argument. A floating-point register
  *  read beside a stack word refuses — where a float shadows the integer slots ahead of the stack
@@ -1774,3 +1797,7 @@ function condValue(
 
 /** The MIPS-II / IDO frontend, registered for the `mips` target. */
 export const mipsFrontend: Frontend = { id: 'mips', inputFormat: 'objdump', lift };
+
+/** Internal surface for this module's own tests, and for nothing else (`frontend/frame-objects.ts`
+ *  says why it is not a plain export). */
+export const __testing = { o32LocalArea };

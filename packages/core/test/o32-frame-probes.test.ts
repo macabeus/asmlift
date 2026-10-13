@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { __testing } from '../src/frontend/mips';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
 interface Frame {
@@ -64,13 +65,9 @@ const LOCAL_BYTES: Record<string, number> = { leafarr: 16, callarr: 16, out5arr:
 // Where each probe's outgoing area ends: no call, a call taking no stack word, one stack word.
 const OUTGOING_END: Record<string, number> = { leafarr: 0, callarr: 16, out5arr: 20, spillarr: 16 };
 
-const area = (rule: 'above-outgoing-area' | 'above-saved-registers', f: Frame, outEnd: number) => {
-  if (rule === 'above-outgoing-area') {
-    const from = Math.ceil(outEnd / 8) * 8;
-    return { from, to: Math.min(f.size, ...f.saves.filter((s) => s >= from)) };
-  }
-  return { from: Math.max(outEnd, ...f.saves.map((s) => s + 4)), to: f.size };
-};
+// The MIPS frontend's own partition (`frontend/mips.ts` `o32LocalArea`), asked of each probe.
+const area = (rule: 'above-outgoing-area' | 'above-saved-registers', f: Frame, outgoingEnd: number) =>
+  __testing.o32LocalArea(rule, { frameSize: f.size, outgoingEnd, saves: f.saves })!;
 
 describe.each([
   ['ido71-o32frame.txt', MIPS_IDO],
@@ -93,6 +90,29 @@ describe.each([
     expect(fs.get('leafarr')!.local).toBe(0);
   });
 
+  // The area is the local's bytes and the padding and spills beside it, and nothing else: the
+  // outgoing words below and every save are outside it.
+  test('the partition the frontend draws on each probe', () => {
+    const got = Object.fromEntries(
+      Object.keys(LOCAL_BYTES).map((fn) => [fn, area(rule, fs.get(fn)!, OUTGOING_END[fn])]),
+    );
+    expect(got).toEqual(
+      rule === 'above-outgoing-area'
+        ? {
+            leafarr: { from: 0, to: 16 },
+            callarr: { from: 16, to: 32 },
+            out5arr: { from: 24, to: 40 },
+            spillarr: { from: 16, to: 32 },
+          }
+        : {
+            leafarr: { from: 0, to: 16 },
+            callarr: { from: 24, to: 40 },
+            out5arr: { from: 32, to: 48 },
+            spillarr: { from: 24, to: 40 },
+          },
+    );
+  });
+
   test('incoming argument word k >= 4 is read at the pushed size + 4k', () => {
     const f = fs.get('in9')!;
     const text = readFileSync(join(import.meta.dirname, 'corpus', fixture), 'utf8');
@@ -101,6 +121,13 @@ describe.each([
     expect(in9).toContain(`lw\ta0,${f.size + 32}(sp)`);
     expect(in9).toMatch(new RegExp(`lw\\t\\w+,${f.size + 16}\\(sp\\)`));
   });
+});
+
+test('no partition without a stated layout, or with nothing left between the outgoing area and the saves', () => {
+  expect(__testing.o32LocalArea(undefined, { frameSize: 40, outgoingEnd: 16, saves: [32] })).toBeNull();
+  // gcc2.7.2kmc `in9`: s0 and ra saved at 16 and 20, right above the home area — no local area
+  expect(__testing.o32LocalArea('above-outgoing-area', { frameSize: 24, outgoingEnd: 16, saves: [16, 20] })).toBeNull();
+  expect(__testing.o32LocalArea('above-saved-registers', { frameSize: 24, outgoingEnd: 16, saves: [20] })).toBeNull();
 });
 
 test('IDO: the local ends at the frame top, above `ra` and any spill', () => {
