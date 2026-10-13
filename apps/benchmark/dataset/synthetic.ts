@@ -1454,9 +1454,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // and the path that skips the assignment reads what the caller left there. Before the PPC frontend
   // took the prologue's save set as its live-in model, that read was a seventh PARAMETER for a
   // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the
-  // row MATCHes with `s32 v0;` declared and never initialised. mwcc_242_81 only: on the
-  // other lanes the local is a Thumb push register or a MIPS s-register, each its own frontend's
-  // live-in question. The other two CodeWarrior builds are pinned by
+  // row MATCHes with `s32 v0;` declared and never initialised. mwcc_242_81 only, by measurement:
+  // agbcc already lifts the shape as `s32 v0;` through Thumb's own live-in model (the rule that
+  // closed `loopfall`, below), ido7.1 declines on a `jal` with no callee symbol and both gcc 2.7.2 lanes on
+  // the sixth parameter's stack slot, so on those lanes the row would pin another capability or
+  // another blocker. The other two CodeWarrior builds are pinned by
   // packages/cli/test/matching/ppc-save-routines.test.ts.
   {
     sym: 'uninit_saved',
