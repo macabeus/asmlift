@@ -202,7 +202,8 @@ interface PpcBlock {
 interface PpcJT {
   scrutReg: string;
   caseAddrs: number[];
-  defaultAddr: number;
+  /** The default arm's address, or null for a `bgtlr` bound: out-of-range values return. */
+  defaultAddr: number | null;
   bctrAddr: number;
   /** The addresses of a loop-hoisted `lis`/`addi` table base, which only the pruned dispatch reads:
    *  `lift` drops them from their block, as the pruning drops an in-block base. */
@@ -334,7 +335,9 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       j--;
     }
     const bgt = instrs[j];
-    if (!bgt || bgt.mnemonic !== 'bgt' || bgt.target === undefined) {
+    // `bgt DEF`, or `bgtlr` when the default arm is the return itself: mwcc bounds a switch whose
+    // default falls straight out of a leaf that way.
+    if (!bgt || !((bgt.mnemonic === 'bgt' && bgt.target !== undefined) || bgt.mnemonic === 'bgtlr')) {
       continue;
     }
     // Each piece of the idiom is the LAST write of its register inside the block, so nothing between
@@ -419,7 +422,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     out.set(bgt.addr, {
       scrutReg,
       caseAddrs,
-      defaultAddr: bgt.target,
+      defaultAddr: bgt.target ?? null,
       bctrAddr: instrs[i].addr,
       hoistedBase: hoisted === null ? [] : [lis.addr, addi.addr],
     });
@@ -445,7 +448,9 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
     for (const a of jt.caseAddrs) {
       leaders.add(a);
     }
-    leaders.add(jt.defaultAddr);
+    if (jt.defaultAddr !== null) {
+      leaders.add(jt.defaultAddr);
+    }
   }
 
   const blocks: PpcBlock[] = [];
@@ -473,7 +478,15 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
     // leader, so all resolve; a target that is not a block boundary makes it malformed → loud-fail.
     const jt = br ? jts.get(br.addr) : undefined;
     if (jt) {
-      const succ = [...jt.caseAddrs, jt.defaultAddr].map((a) => idxOf.get(a));
+      const succ: Array<number | undefined> = jt.caseAddrs.map((a) => idxOf.get(a));
+      if (jt.defaultAddr !== null) {
+        succ.push(idxOf.get(jt.defaultAddr));
+      } else {
+        // A `bgtlr` bound: the default edge is a synthetic return, as for any conditional return.
+        succ.push(blocks.length);
+        blocks.push({ startAddr: -1 - blocks.length, body: [], branch: null, synthReturn: true });
+        succIdx.push([]);
+      }
       if (succ.some((x) => x === undefined)) {
         throw new PpcUnsupportedError(`cannot lift '${name}': jump-table target is not a block boundary`);
       }

@@ -317,3 +317,18 @@ test('…and refuses a hoisted base anything else could see or skip', () => {
   // two halves apart are not one hoisted pair
   expect(() => liftPpc(ppcHoisted([], [], 'r5', ['li      r6,0']))).toThrow(bctr);
 });
+
+test('a `bgtlr` bound sends the default to a return of what r3 holds', () => {
+  // mwcc bounds a leaf switch whose default falls straight out with a conditional return; the
+  // out-of-range value is returned unchanged here, as `return x;` after the switch compiles.
+  const { asm, at } = ppcSwitch([]);
+  const src = liftPpc({ asm: asm.replace(/bgt-\s+\S+ <f\+0x\w+>/, 'bgtlr-'), at });
+  expect(src).toContain('switch (a0)');
+  expect(src).toMatch(/default:\s*\n\s*return a0;/);
+  for (const k of [10, 20, 30, 40]) {
+    expect(src).toContain(`return ${k};`);
+  }
+  // the bound is still the `cmplwi` the conditional return reads
+  const cr1 = asm.replace(/bgt-\s+\S+ <f\+0x\w+>/, 'bgtlr-').replace('cmplwi  r3,3', 'cmplwi  cr1,r3,3');
+  expect(() => liftPpc({ asm: cr1, at })).toThrow(/unmodelled control transfer 'bctr'/);
+});
