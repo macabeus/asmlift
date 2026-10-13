@@ -1087,12 +1087,13 @@ export function lift(
       lastDef = v;
     };
     // A `bl` into a register save or restore routine is frame bookkeeping, not a call: it writes no
-    // register this function reads (only the link register, already saved), so nothing is
-    // destroyed and r0 keeps the return address `mflr` put there. A SAVE records a save slot per
+    // register this function reads (only the link register, already copied out — which
+    // `linkRegisterOverwrites` checks), so nothing is destroyed and r0 keeps the return address
+    // `mflr` put there. A SAVE records a save slot per
     // word, at the routine's fixed offsets below the frame address in r11; a RESTORE must find the
     // same register in every word it reloads. It refuses where:
-    //   • r11 does not hold one frame address on every path into the call (and a frame address no
-    //     routine takes refuses at the end of `lift`);
+    //   • r11 does not hold one frame address on every path into the call, or a call destroyed it on
+    //     the way (`useOutsideOps`; and a frame address no routine takes refuses at the end of `lift`);
     //   • r1's displacement at the `addi` is not known, so no slot can be named;
     //   • the routine's number is outside r14..r31 (no such runtime routine);
     //   • it moves floating-point registers (named, not modelled);
