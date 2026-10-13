@@ -61,6 +61,8 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
     );
     expect(unpaired.map((w) => `${w.id}  ${w.variations.join('/')}`)).toEqual([
       'pokeemerald:CreateBattleTowerMon:agbcc  unsigned/unreduce',
+      // a jump-table loop whose case stores index `p` by the counter, as its source does
+      'synthetic:sw_jtloop:mwcc_242_81  signed/unreduce',
     ]);
   });
 

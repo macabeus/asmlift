@@ -609,15 +609,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // NOT "loop unrolling", although `frontend/ppc.ts` says so. Its branch denylist has one throw
     // with two arms, and the non-`bctrl`/`blrl` arm prints "CTR-counted loop or indirect branch —
-    // mwcc -O4 loop unrolling is not yet supported" for ANY unmodelled `b*`. All three rows that
-    // reach it are a `bctr` the switch recovery did not claim — a jump-table dispatch — and one of
-    // them, `synthetic:sw_jtfall`, is a `switch` with no loop in it at all. A label taken from that
-    // arm sends a reader to build loop unrolling for three dispatch rows.
+    // mwcc -O4 loop unrolling is not yet supported" for ANY unmodelled `b*`, and that includes a
+    // `bctr` the jump-table recognizer did not claim: a dense `switch` with no loop in it at all
+    // whose dispatch the recognizer refuses prints exactly this (core
+    // test/jump-table-window.test.ts). A label taken from that arm sends a reader to build loop
+    // unrolling for a dispatch.
     //
-    // The label therefore names the disjunction the message carries, dispatch side first, because
-    // that is the side the corpus inhabits. The durable fix is to split the arm at the throw, which
-    // is decidable there from the mnemonic and which rewrites three published markers, so it owes a
-    // whole-tier bench of its own.
+    // The label therefore names the disjunction the message carries, dispatch side first. No row
+    // of the artifact reaches the class (`NO_ROWS` in apps/web/test/declines.test.ts). The durable
+    // fix is to split the arm at the throw, which is decidable there from the mnemonic.
     key: 'ctr-transfer',
     label: 'Branches through CTR (an unclaimed jump-table dispatch, or a CTR-counted loop)',
     // `frontend/ppc.ts` refuses a CTR loop at three sites, not one, and the other two are the ones
