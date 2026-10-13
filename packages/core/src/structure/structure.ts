@@ -3958,9 +3958,31 @@ export function structure(
   // casts, and the qualified cast agbcc compiles differently is put on a name that needed none.
   const printedType = (n: string): IrType | undefined => varType.get(n) ?? shapedGlobalTypes.get(n);
   const printedCType = (e0: Expr): IrType | undefined => exprCType(e0, printedType);
+  // A declared access reaches its object through the declaration only where its address is spelled
+  // from the object's own name. Through a local or a parameter — a pointer one of two addresses of
+  // the object joined into, or one a loop steps through it — the declaration qualifies nothing, and
+  // the qualifier goes on a cast.
+  const throughLocal = (access: Expr): boolean => {
+    let b: Expr | undefined = access.k === 'index' || access.k === 'field' ? access.base : undefined;
+    while (b !== undefined) {
+      if (b.k === 'var') {
+        return varType.has(b.name);
+      }
+      if (b.k === 'index' || b.k === 'field') {
+        b = b.base;
+      } else if (b.k === 'cast') {
+        b = b.e;
+      } else if (b.k === 'bin' && (b.op === '+' || b.op === '-')) {
+        b = b.l.k === 'const' ? b.r : b.l;
+      } else {
+        return false;
+      }
+    }
+    return false;
+  };
   const pinnedAccess = (op: Op, access: Expr): Expr => {
     const by = qualifiedBy(op);
-    if (by === null || (by === 'declaration' && !castOffDeclaration(access, printedCType))) {
+    if (by === null || (by === 'declaration' && !castOffDeclaration(access, printedCType) && !throughLocal(access))) {
       return access;
     }
     const q = qualifiedMemoryAccess(access, printedCType);

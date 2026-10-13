@@ -56,21 +56,7 @@ const stampable = (op: Op, behaviors: StampBehaviors): boolean =>
  *  is such a parameter, and the stamp is put before that pass, so it reads the base the structurer
  *  will. */
 function addressThroughJoins(fn: Fn): (v: Value) => Value {
-  const incoming = new Map<Value, Value[]>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const s of op.successors) {
-        if (s.block === fn.blocks[0]) {
-          continue;
-        }
-        s.block.params.forEach((param, i) => {
-          if (i < s.args.length) {
-            (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(s.args[i]);
-          }
-        });
-      }
-    }
-  }
+  const incoming = joinIncoming(fn);
   const numberOf = valueNumberOf(fn);
   const through = (v: Value, onWalk: Set<Value>): Value | null => {
     const ins = incoming.get(v);
@@ -91,6 +77,68 @@ function addressThroughJoins(fn: Fn): (v: Value) => Value {
   return (v) => through(v, new Set()) ?? v;
 }
 
+/** Every block parameter's incoming values, one per in-edge (the entry block's excepted). */
+function joinIncoming(fn: Fn): Map<Value, Value[]> {
+  const incoming = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        if (s.block === fn.blocks[0]) {
+          continue;
+        }
+        s.block.params.forEach((param, i) => {
+          if (i < s.args.length) {
+            (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(s.args[i]);
+          }
+        });
+      }
+    }
+  }
+  return incoming;
+}
+
+/** The ONE global a value's address lies in, read through joins as well as `globalBaseOf`'s address
+ *  arithmetic: a block parameter is in the object every in-edge's value is in, an edge that passes
+ *  the parameter itself moved by an offset (a strength-reduced loop pointer `v0 = v0 + 2`) aside.
+ *  So `c ? &gW.a : &gW.b`, and a pointer seeded with `&gVA` and stepped through it, are both
+ *  accesses of that object, which `addressThroughJoins` — one value on every edge — does not see.
+ *  Null where an edge reaches another object or none. */
+function objectThroughJoins(fn: Fn, defs: Map<Value, Op>): (v: Value) => string | null {
+  const incoming = joinIncoming(fn);
+  const SELF = Symbol('self');
+  type Reach = string | typeof SELF | null;
+  const reach = (v: Value, onWalk: Set<Value>): Reach => {
+    const d = defs.get(v);
+    if (d?.opcode === 'gaddr') {
+      return d.attrs.sym as string;
+    }
+    if (d?.opcode === 'add' && d.operands.length === 2) {
+      const a = reach(d.operands[0], onWalk);
+      const b = reach(d.operands[1], onWalk);
+      return a !== null && b !== null ? null : (a ?? b);
+    }
+    if (d?.opcode === 'sub' && d.operands.length === 2) {
+      return reach(d.operands[0], onWalk);
+    }
+    const ins = d === undefined ? incoming.get(v) : undefined;
+    if (ins === undefined) {
+      return null;
+    }
+    if (onWalk.has(v)) {
+      return SELF;
+    }
+    onWalk.add(v);
+    const each = ins.map((a) => reach(a, onWalk)).filter((r) => r !== SELF);
+    onWalk.delete(v);
+    const [first] = each;
+    return typeof first === 'string' && each.every((r) => r === first) ? first : null;
+  };
+  return (v) => {
+    const r = reach(v, new Set());
+    return typeof r === 'string' ? r : null;
+  };
+}
+
 /** Stamp every memory access of `fn` to an object `symbols` or `behaviors.contextGlobals` declares
  *  volatile — a read only where a compiler behaving as `behaviors` says could have made it of one —
  *  and clear the stamp from every other op. Returns the ops it stamped that were not stamped before. */
@@ -104,10 +152,11 @@ export function stampDeclaredVolatile(
   const reads = symbols !== undefined || (contextVolatiles !== undefined && contextVolatiles.size > 0);
   const defs = reads ? defOpMap(fn) : undefined;
   const addressOf = reads ? addressThroughJoins(fn) : undefined;
+  const objectOf = reads ? objectThroughJoins(fn, defs!) : undefined;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       const addr = defs && stampable(op, behaviors) ? addressOf!(op.operands[0]) : undefined;
-      const base = addr !== undefined ? globalBaseOf(defs!, addr) : null;
+      const base = addr !== undefined ? (globalBaseOf(defs!, addr) ?? objectOf!(addr)) : null;
       // A subscript reaches the object while naming no cell, so only a `load`/`store` asks by byte,
       // and an access that names no byte is placed only where every byte it could reach is qualified.
       const cell =

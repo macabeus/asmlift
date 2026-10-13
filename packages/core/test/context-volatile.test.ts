@@ -161,3 +161,22 @@ describe('a context-declared volatile scalar: the object is the pointer, not wha
     expect(diff).toContain('return v0 - gH;');
   });
 });
+
+describe('an access of a context-declared volatile object through a pointer that is not its name', () => {
+  test('a loop pointer seeded with the array and stepped through it reads through a qualified cast', () => {
+    // agbcc -O2 of `u32 varrsum(void){ u32 s = 0; int i; for (i = 0; i < 8; i++) s += gVA[i]; return s; }`
+    // over `extern volatile u16 gVA[8];`: the compiler strength-reduces `gVA[i]` to a pointer it
+    // steps by 2. That pointer is a local in the lift, which the declaration does not qualify, so a
+    // plain `*v1` let the read be hoisted or merged.
+    const VARRSUM =
+      'varrsum:\n\tmov\tr3, #0x0\n\tldr\tr2, .L8\n\tmov\tr1, #0x7\n.L6:\n\tldrh\tr0, [r2]\n\tadd\tr3, r0, r3\n' +
+      '\tadd\tr2, r2, #0x2\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbge\t.L6\n\tadd\tr0, r3, #0\n\tbx\tlr\n.L8:\n' +
+      '\t.word\tgVA\n';
+    const ctx = globalsFromContext('typedef unsigned short u16; extern volatile u16 gVA[8];', 'c');
+    const src = decompile('varrsum', VARRSUM, ARMV4T_AGBCC, { contextGlobals: ctx }).source;
+    expect(src).toMatch(/= \*\(volatile u16 \*\)v\d+;/);
+    expect(src).not.toMatch(/= \*v\d+;/);
+    // without the context nothing says the array is volatile, and the read stays plain
+    expect(decompile('varrsum', VARRSUM, ARMV4T_AGBCC, {}).source).not.toContain('volatile');
+  });
+});
