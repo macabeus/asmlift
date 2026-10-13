@@ -18,13 +18,15 @@
 // with no consuming branch (e.g. `return a>b` → `slt v0,a1,a0`) stays an icmp value. Unsigned
 // compares (`sltu`/`sltiu`) lower to `icmp_ult`; recover types their operands u32 so the backend
 // re-emits `sltu` (the operator is the same `<` — the signedness lives in the operand types).
-import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import type { Prototypes } from '../proto';
+import { type Prototypes, wordsOf } from '../proto';
+import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
 import { callDeclarations } from './call-plan';
+import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
   parseImm,
@@ -37,7 +39,7 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
-import type { FrameRange } from './frame-objects';
+import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
@@ -674,14 +676,40 @@ function toBlocks(
 }
 
 /** Lift disassembled MIPS text → an L1 Fn with block-argument SSA. `prototypes` declares each
- *  callee's arity (`frontend/call-plan.ts`). */
+ *  callee's arity (`frontend/call-plan.ts`).
+ *
+ *  AT MOST TWICE, as on Thumb (`frontend/thumb.ts` `lift`): where the frame-object audit answers
+ *  that a callee may write the local area without bound, or that nothing escapes and the per-object
+ *  model does not describe it, it asks for the area kept as one object, and the second lift's audit
+ *  judges it so and refuses rather than asking again. */
 export function lift(
   name: string,
   asm: string,
   target: TargetDescription,
   prototypes: Prototypes = {},
   asmData?: AsmData,
+  symbols?: SymbolMap,
 ): Fn {
+  const first = liftOnce(name, asm, target, prototypes, asmData, symbols, undefined);
+  if (!('oneObject' in first)) {
+    return first;
+  }
+  const again = liftOnce(name, asm, target, prototypes, asmData, symbols, first.oneObject);
+  if ('oneObject' in again) {
+    throw new Error(`internal: the frame-object audit of '${name}' asked for a second relift`);
+  }
+  return again;
+}
+
+function liftOnce(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  asmData: AsmData | undefined,
+  symbols: SymbolMap | undefined,
+  oneObject: FrameRange | undefined,
+): Fn | FrameObjectRelift {
   // Two input dialects reach this frontend: `objdump -d` text (IDO/KMC — no compiler-emitted asm),
   // and Splat-disassembled `.s` (pmret-style N64 projects). Splat is normalised to the SAME
   // DisasmInstr[] shape (frontend/splat.ts) so everything below is dialect-agnostic.
@@ -863,18 +891,6 @@ export function lift(
     (ins) => /^(cfc1|ctc1)$/i.test(ins.mnemonic) || ins.ops.some((o) => MIPS_FP_REG.test(o)),
   );
 
-  // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
-  // sp-relative access in the function is word-width. If a SUB-WORD sp access aliases a word slot
-  // (`sw a0,4(sp)` then `lbu v0,4(sp)`), routing the word store to an SSA slot while the sub-word
-  // reload stays on the memory path DROPS the store and reads uninitialised memory — a silent
-  // miscompile that ALSO masks the struct-overlap loud-fail (raise/structs.ts). So if ANY sub-word
-  // sp access exists, disable slot-modelling for the whole function: everything sp-relative falls
-  // back to the memory path, which loud-fails on a genuine overlap instead of miscompiling.
-  const spSlotSafe = !instrs.some(
-    (ins) =>
-      SUBWORD_MEM.has(ins.mnemonic) && ins.ops.length > 0 && isStackPtr(parseMem(ins.ops[ins.ops.length - 1]).base),
-  );
-
   // THE FRAME A CALL'S STACK ARGUMENTS ARE STAGED IN: the bytes one `addiu sp,sp,-N` pushed. Its
   // outgoing area is `[16, N)`; a word at or above N is this function's own incoming home area, which
   // IDO stores a0..a3 to, so it is never an argument of a call made here. Undefined where the
@@ -925,6 +941,62 @@ export function lift(
     }
   };
 
+  // THE LOCAL AREA, where a function takes a frame address (`measureO32Frame`): every `off(sp)`
+  // access inside it is MEMORY, read and written through an `laddr` the frame-object audit then
+  // proves, and every one outside it keeps the slot model below. Null where no frame address is
+  // taken, or the frame is one this cannot partition, and then every capture keeps the
+  // sp-as-data refusal.
+  const code = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]);
+  const frame = measureO32Frame({
+    code,
+    entry: [...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])],
+    depthAt,
+    frameSize,
+    rule: target.compilerBehaviors.o32LocalArea,
+    outgoingEnd: (callees) =>
+      callees.length === 0
+        ? 0
+        : Math.max(
+            ...callees.map((callee) => {
+              const declared = callee === undefined ? null : calls.declaredCall(callee);
+              const words = declared === null ? 0 : wordsOf(declared.widths) - ARG_REGS.length;
+              return STACK_ARGS_AT + 4 * Math.max(0, words);
+            }),
+          ),
+    savedByCallee,
+    splat,
+  });
+  /** Whether `off(sp)` at `ins` is an access inside the local area, refusing one that straddles its
+   *  edge: half memory and half slot is neither. */
+  const inLocalArea = (ins: Instr, off: number, width: number): boolean => {
+    if (frame === null || off >= frame.area.to || off + width <= frame.area.from) {
+      return false;
+    }
+    if (off < frame.area.from || off + width > frame.area.to) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': address-taken stack local — '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reaches across an edge of the ` +
+          `local area, sp+${frame.area.from} up to sp+${frame.area.to} — part memory, part slot`,
+      );
+    }
+    return true;
+  };
+
+  // SOUNDNESS GUARD. The word stack-slot model (emitLoad/emitStore) is safe ONLY when every
+  // sp-relative access it keys is word-width. If a SUB-WORD sp access aliases a word slot
+  // (`sw a0,4(sp)` then `lbu v0,4(sp)`), routing the word store to an SSA slot while the sub-word
+  // reload stays on the memory path DROPS the store and reads uninitialised memory — a silent
+  // miscompile that ALSO masks the struct-overlap loud-fail (raise/structs.ts). So if ANY sub-word
+  // sp access exists OUTSIDE the local area, disable slot-modelling for the whole function:
+  // everything sp-relative falls back to the memory path, which loud-fails on a genuine overlap
+  // instead of miscompiling. One inside it is memory like every access there (`inLocalArea`).
+  const spSlotSafe = !code.some((ins) => {
+    if (!SUBWORD_MEM.has(ins.mnemonic) || ins.ops.length === 0) {
+      return false;
+    }
+    const { base, off } = parseMem(ins.ops[ins.ops.length - 1]);
+    return isStackPtr(base) && !inLocalArea(ins, off, ins.mnemonic.includes('b') ? 1 : 2);
+  });
+
   // Hardware divide state (capabilities.hwDivide). MIPS `div`/`divu rs,rt` set the hi/lo pair
   // implicitly; a later `mflo`/`mfhi` reads the quotient/remainder. FUNCTION-scoped: GCC schedules
   // the `mflo` into a SEPARATE block after the trap-check branch (`bnez rt; break 7`), so a
@@ -933,6 +1005,10 @@ export function lift(
   // overwrites the same hi/lo pair, so it clears this (below) — whichever divide/multiply ran most
   // recently owns the next `mf*`, the true hardware semantics.
   let divState: { rs: Value; rt: Value; signed: boolean } | null = null;
+  // The frame offset each `laddr` this lift emitted names, and the deferred `sp + index` sums
+  // (`emitLaddr`, `materialize`) — function-scoped, since a register holding one crosses blocks.
+  const laddrAt = new Map<Value, number>();
+  const frameSums = new Map<Value, FrameSum>();
 
   const fillBlock = (b: MipsBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
@@ -969,6 +1045,10 @@ export function lift(
       // A register holding the high half of an address is NOT a value. The legitimate consumers
       // (`addiu %lo`, a `%lo` load/store base) reach the half through `foldLoHalf` instead.
       const v = readVar(r, bi);
+      const sum = frameSums.get(v);
+      if (sum !== undefined) {
+        return materialize(sum, 0);
+      }
       const restore = restores.get(v);
       if (restore) {
         throw new FrontendUnsupportedError(
@@ -978,6 +1058,41 @@ export function lift(
       }
       return highHalves.guardRead(name, r, v);
     };
+    // A FRAME ADDRESS AS DATA. `addiu rD,sp,k` and `move rD,sp` name frame offset k, and lower to
+    // an `laddr` the frame-object audit proves. `addu rD,sp,rX` — in either operand order — names
+    // `sp + rX`, a runtime index from the frame base, and that sum is DEFERRED: the access through
+    // it says which object it indexes, since `lw v0,24(v0)` after `addu v0,sp,t6` is `a[i]` on an
+    // array at sp+24 (IDO), not at sp+0. So the register holds a `FrameSum`, and each use builds
+    // `laddr(base + displacement) + index` there — an access at its displacement, any other use at
+    // 0. A capture or sum moved by a constant is the same capture at the sum. Below the local area
+    // there is no local, so an address there refuses (`emitLaddr`); above it the audit refuses.
+    const emitLaddr = (k: number): Value => {
+      const from = frame?.area.from ?? Infinity;
+      if (k < from) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': address-taken stack local — the frame address sp+${k} lies below the local area, which starts at sp+${from} — ` +
+            'an outgoing argument word or a saved register, whose address is not modelled',
+        );
+      }
+      const v = mkValue(T.unk(32));
+      ops.push(mkOp('laddr', { results: [v], attrs: { off: k } }));
+      laddrAt.set(v, k);
+      return v;
+    };
+    const materialize = (sum: FrameSum, displacement: number): Value => {
+      const v = mkValue(T.unk(32));
+      ops.push(mkOp('add', { operands: [emitLaddr(sum.base + displacement), sum.index], results: [v] }));
+      return v;
+    };
+    const deferSum = (base: number, index: Value): Value => {
+      const v = mkValue(T.unk(32));
+      frameSums.set(v, { base, index });
+      return v;
+    };
+    // What a register holds when it may be a frame address, unguarded — `read` then guards and
+    // materializes everything else.
+    const rawFrame = (r: string | undefined): Value | undefined =>
+      frame === null || r === undefined || isZero(r) || isStackPtr(r) || r === 'gp' ? undefined : readVar(r, bi);
     // `slt`-family results, so a following `beqz`/`bnez` can fold into one compare.
     //
     // Keyed by the SSA VALUE the compare produced, never by its register. Keying by register is the
@@ -1050,9 +1165,16 @@ export function lift(
       switch (ins.mnemonic) {
         case 'nop':
           break;
-        case 'move':
-          write(d, read(s));
-          break; // pseudo: addu/or rD,rS,zero
+        case 'move': {
+          // pseudo: addu/or rD,rS,zero
+          if (frame !== null && isStackPtr(s)) {
+            write(d, emitLaddr(0));
+            break;
+          }
+          const raw = rawFrame(s);
+          write(d, raw !== undefined && frameSums.has(raw) ? raw : read(s));
+          break;
+        }
         case 'li':
           write(d, constVal(imm(ins, s)));
           break; // pseudo: load immediate
@@ -1101,6 +1223,23 @@ export function lift(
           if (isStackPtr(d)) {
             break;
           }
+          if (frame !== null && ins.reloc === undefined) {
+            if (isStackPtr(s)) {
+              write(d, emitLaddr(imm(ins, t)));
+              break;
+            }
+            const raw = rawFrame(s)!;
+            const at = raw === undefined ? undefined : laddrAt.get(raw);
+            if (at !== undefined) {
+              write(d, emitLaddr(at + imm(ins, t)));
+              break;
+            }
+            const sum = raw === undefined ? undefined : frameSums.get(raw);
+            if (sum !== undefined) {
+              write(d, deferSum(sum.base + imm(ins, t), sum.index));
+              break;
+            }
+          }
           // `addiu rD, rHi, %lo(SYM)` completes a global's address begun by a `lui %hi(SYM)`:
           // rD = &SYM (+ a byte offset into it). Emits the shared `gaddr` op.
           if (ins.reloc?.type === 'R_MIPS_LO16') {
@@ -1119,9 +1258,21 @@ export function lift(
           emitBin('add', d, read(s), constVal(imm(ins, t)));
           break;
         case 'addu':
-        case 'add':
+        case 'add': {
+          if (frame !== null && t !== undefined && isStackPtr(s) !== isStackPtr(t) && !isZero(isStackPtr(s) ? t : s)) {
+            write(d, deferSum(0, read(isStackPtr(s) ? t : s)));
+            break;
+          }
+          const [rs, rt] = [rawFrame(s), rawFrame(t)];
+          const capturedAt = (v: Value | undefined) => (v === undefined ? undefined : laddrAt.get(v));
+          const [cs, ct] = [capturedAt(rs), capturedAt(rt)];
+          if ((cs === undefined) !== (ct === undefined)) {
+            write(d, deferSum((cs ?? ct)!, read(cs === undefined ? s : t)));
+            break;
+          }
           emitBin('add', d, read(s), read(t));
           break;
+        }
         case 'subu':
         case 'sub':
           emitBin('sub', d, read(s), read(t));
@@ -1419,6 +1570,25 @@ export function lift(
       const { off, base } = parseMem(mem);
       return foldLoHalf(ins, base, off);
     };
+    // The address an access in the local area, or through a frame sum, is made at — undefined for
+    // every other access. A register the prologue SAVES may not be stored there: the save area is
+    // outside it by construction, so a save inside it is a frame this does not describe.
+    const frameAccess = (ins: Instr, base: string, off: number, width: number, stored?: string) => {
+      if (isStackPtr(base)) {
+        if (!inLocalArea(ins, off, width)) {
+          return undefined;
+        }
+        if (stored !== undefined && savedByCallee(stored) && ssa.holdsEntryValue(stored, bi)) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': address-taken stack local — '${ins.mnemonic}' at 0x${ins.addr.toString(16)} saves the caller's ${stored} inside the local area, a frame this does not describe`,
+          );
+        }
+        return emitLaddr(off);
+      }
+      const raw = rawFrame(base);
+      const sum = raw === undefined ? undefined : frameSums.get(raw);
+      return sum === undefined ? undefined : materialize(sum, off);
+    };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
       const g = globalBase(ins, mem);
       if (g) {
@@ -1428,6 +1598,14 @@ export function lift(
         return;
       }
       const { off, base } = parseMem(mem);
+      // An access inside the local area, or through a frame sum, is MEMORY (`inLocalArea`).
+      const at = frameAccess(ins, base, off, width);
+      if (at !== undefined) {
+        const res = mkValue(T.unk(32));
+        ops.push(mkOp('load', { operands: [at], results: [res], attrs: { off: 0, width, signed } }));
+        write(d, res);
+        return;
+      }
       // A word reload from a stack slot is transparent to dataflow — the SAME value spilled — so
       // route it through the slot SSA variable, not a `load` through `sp` (which would make `sp` a
       // spurious pointer parameter). Compiler spills/reloads are always word-width; sub-word `sp`
@@ -1490,6 +1668,11 @@ export function lift(
         return;
       }
       const { off, base } = parseMem(mem);
+      const at = frameAccess(ins, base, off, width, srcReg);
+      if (at !== undefined) {
+        ops.push(mkOp('store', { operands: [at, read(srcReg)], attrs: { off: 0, width } }));
+        return;
+      }
       // A word spill to a stack slot (an argument home slot `sw a0,0(sp)`, or a local): record the
       // slot's value in SSA, do NOT emit a `store` through `sp`. A never-reloaded spill (the ABI
       // home-slot store) then has no uses and simply drops. See isStackPtr / spSlotSafe.
@@ -1513,7 +1696,7 @@ export function lift(
     // argument k ≥ 4 lives, and the guess that cannot see past a3.
     const lowerJal = (ins: Instr) => {
       const at = `0x${ins.addr.toString(16)}`;
-      const callee = splat ? ins.ops[0] : ins.reloc?.type === 'R_MIPS_26' ? ins.reloc.sym : undefined;
+      const callee = jalCallee(ins, splat);
       if (callee?.startsWith('.')) {
         throw new FrontendUnsupportedError(
           `${site(ins)} is relocated against the section '${callee}' — a callee known only by its offset ` +
@@ -1570,6 +1753,31 @@ export function lift(
           // A GUESS THAT FILLS a0..a3 CANNOT SAY WHERE THE LIST ENDS: a word of the outgoing area that
           // reaches the call is argument 5 onward, or a local the compiler put there.
           refuse: (argc) => {
+            // …and with a local area a guess says less still. A word staged for the call above the
+            // home area may be MEMORY there, which the slot test below cannot see; and a word
+            // staged below it reaches the call whether or not a3 is set, since an 8-aligned
+            // argument (`long long`, a struct holding one) skips a3 for the stack.
+            if (frame !== null) {
+              if (argc >= ARG_REGS.length) {
+                throw new FrontendUnsupportedError(
+                  `cannot lift '${name}': outgoing stack arguments not modelled — the undeclared call to '${callee}' ` +
+                    `at ${at} fills a0..a3 in a frame whose local area holds a captured address, so where its ` +
+                    'stack words end is not known',
+                );
+              }
+              const staged = [...valueSlots]
+                .filter(
+                  (off) => off >= STACK_ARGS_AT && off < frame.area.from && ssa.hasReachingDef(stackSlot(off), bi),
+                )
+                .sort((x, y) => x - y)[0];
+              if (staged !== undefined) {
+                throw new FrontendUnsupportedError(
+                  `cannot lift '${name}': outgoing stack arguments not modelled — the word stored to ${staged}(sp), ` +
+                    `below the local area, reaches the undeclared call to '${callee}' at ${at}, where a stack ` +
+                    'argument travels',
+                );
+              }
+            }
             if (argc < ARG_REGS.length) {
               return;
             }
@@ -1713,8 +1921,165 @@ export function lift(
     }
   }
 
+  if (frame !== null) {
+    refuseEscapedFrameSums(name, irBlocks, frameSums);
+    refuseConstantMovesBelow(name, irBlocks, frame.area);
+    // Prove every `laddr` names storage of this frame at a shape the machine states, or decline
+    // (`auditFrameObjects`); an accepted function then gets the device pin the audit answers.
+    const verdict = FRAME_OBJECT_AUDIT.run({
+      name,
+      irBlocks,
+      ownedLocals: frame.area,
+      declaredLocals: frame.area,
+      usedSlotOffsets: new Set([...valueSlots].filter((o) => o < frame.size)),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures: new Set(),
+      returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
+      symbols,
+      target,
+      oneObject,
+    });
+    if (verdict !== undefined && 'oneObject' in verdict) {
+      return verdict;
+    }
+    if (verdict !== undefined) {
+      pinDeviceAccesses(irBlocks, verdict, target, symbols);
+    }
+  }
+
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;
+}
+
+/** `sp + index`, deferred to its use (`materialize`): the frame offset it starts from and the index. */
+interface FrameSum {
+  readonly base: number;
+  readonly index: Value;
+}
+
+/** A frame sum is a VALUE no op defines — every use builds its own `laddr` and `add` — so one that
+ *  reached a phi, or anything else the fill did not materialize, refuses. */
+function refuseEscapedFrameSums(name: string, irBlocks: readonly Block[], sums: ReadonlyMap<Value, FrameSum>): void {
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      if ([...op.operands, ...op.successors.flatMap((x) => x.args)].some((v) => sums.has(v))) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': address-taken stack local — a frame address plus a runtime index reaches \`${op.opcode}\` across a join, ` +
+            'which object it indexes is not known there',
+        );
+      }
+    }
+  }
+}
+
+/** The audit folds a capture moved by a constant into the capture at the sum
+ *  (`foldMovedCaptures`), and below the local area that names an outgoing word or a save, not a
+ *  local — so a move the fill did not fold itself (`addu rD, rCapture, rK` with rK a constant)
+ *  refuses here when it lands there. */
+function refuseConstantMovesBelow(name: string, irBlocks: readonly Block[], area: FrameRange): void {
+  const defOf = new Map(irBlocks.flatMap((b) => b.ops.flatMap((op) => op.results.map((r) => [r, op] as const))));
+  for (const op of irBlocks.flatMap((b) => b.ops)) {
+    const [x, y] = op.operands.map((v) => defOf.get(v));
+    const capture = x?.opcode === 'laddr' ? x : y?.opcode === 'laddr' ? y : undefined;
+    const by = capture === x ? y : x;
+    if (op.opcode === 'add' && capture !== undefined && by?.opcode === 'const') {
+      const off = (capture.attrs.off as number) + (by.attrs.value as number);
+      if (off < area.from) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': address-taken stack local — the frame address sp+${off} lies below the local area, which starts at sp+${area.from} — ` +
+            'an outgoing argument word or a saved register, whose address is not modelled',
+        );
+      }
+    }
+  }
+}
+
+/** An instruction that takes a frame address as data: `addiu rD,sp,k`, `move rD,sp`, or `addu
+ *  rD,sp,rX` in either operand order. */
+function takesFrameAddress(ins: Instr): boolean {
+  const [d, s, t] = ins.ops;
+  if (d === undefined || isStackPtr(d)) {
+    return false;
+  }
+  if (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi' || ins.mnemonic === 'move') {
+    return isStackPtr(s ?? '');
+  }
+  return (
+    (ins.mnemonic === 'addu' || ins.mnemonic === 'add') && t !== undefined && isStackPtr(s ?? '') !== isStackPtr(t)
+  );
+}
+
+/** The local area of a function that takes a frame address (`o32LocalArea`), and the depth every
+ *  access it routes runs at — or null, which leaves every capture its sp-as-data refusal. Null
+ *  where nothing takes a frame address; where the depth walk is unproven or the frame is not one
+ *  push; where a capture runs at another depth; where the target states no layout or leaves no
+ *  area; and where an `sp` access at another depth lands on the area's bytes, which the routing by
+ *  raw offset would then misname.
+ *
+ *  The outgoing area ends past the widest call's stack words, read off each callee's declaration
+ *  (`outgoingEnd`); an undeclared callee counts as taking none, and its lowering refuses a guess
+ *  that fills a0..a3. The saves are the prologue's: a store of `ra` or a callee-saved register in
+ *  the entry block before anything writes it. */
+function measureO32Frame({
+  code,
+  entry,
+  depthAt,
+  frameSize,
+  rule,
+  outgoingEnd,
+  savedByCallee,
+  splat,
+}: {
+  code: readonly Instr[];
+  entry: readonly Instr[];
+  depthAt: ReadonlyMap<Instr, number> | null;
+  frameSize: number | undefined;
+  rule: TargetDescription['compilerBehaviors']['o32LocalArea'];
+  outgoingEnd: (callees: readonly (string | undefined)[]) => number;
+  savedByCallee: (r: string) => boolean;
+  splat: boolean;
+}): { area: FrameRange; size: number } | null {
+  const captures = code.filter(takesFrameAddress);
+  if (captures.length === 0 || depthAt === null || frameSize === undefined) {
+    return null;
+  }
+  if (captures.some((ins) => depthAt.get(ins) !== frameSize)) {
+    return null;
+  }
+  const written = new Set<string>();
+  const saves: number[] = [];
+  for (const ins of entry) {
+    const mem = ins.mnemonic === 'sw' ? parseMem(ins.ops[1] ?? '') : undefined;
+    if (mem !== undefined && isStackPtr(mem.base) && savedByCallee(ins.ops[0]) && !written.has(ins.ops[0])) {
+      saves.push(mem.off);
+    } else if (ins.mnemonic === 'jal') {
+      written.add('ra');
+    } else if (!SOURCE_FIRST.test(ins.mnemonic) && ins.ops[0] !== undefined) {
+      written.add(ins.ops[0]);
+    }
+  }
+  const callees = code.filter((ins) => ins.mnemonic === 'jal').map((ins) => jalCallee(ins, splat));
+  const area = o32LocalArea(rule, { frameSize, outgoingEnd: outgoingEnd(callees), saves });
+  if (area === null) {
+    return null;
+  }
+  for (const ins of code) {
+    const last = ins.ops[ins.ops.length - 1] ?? '';
+    const depth = depthAt.get(ins);
+    if (!/\(/.test(last) || !isStackPtr(parseMem(last).base) || depth === frameSize) {
+      continue;
+    }
+    const at = parseMem(last).off - depth! + frameSize;
+    if (at < area.to && at + 4 > area.from) {
+      return null;
+    }
+  }
+  return { area, size: frameSize };
+}
+
+/** A `jal`'s callee: the Splat operand, or the R_MIPS_26 record's symbol. */
+function jalCallee(ins: Instr, splat: boolean): string | undefined {
+  return splat ? ins.ops[0] : ins.reloc?.type === 'R_MIPS_26' ? ins.reloc.sym : undefined;
 }
 
 /** THE LOCAL AREA OF AN O32 FRAME, `[from, to)` in post-push `sp` offsets: where this compiler
