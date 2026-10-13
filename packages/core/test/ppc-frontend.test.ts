@@ -513,6 +513,26 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       ),
     ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
   });
+  test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
+    // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and
+    // in r11 and r12 when every argument register is live. Each is volatile and passes no argument,
+    // so no caller hands a value over there; before the scratch half, each read was one more parameter.
+    for (const r of ['r0', 'r11', 'r12']) {
+      expect(dis('sc', `0:\tadd     r3,r3,${r}\n4:\tblr\n`)).toBe(
+        `s32 sc(s32 a0) {\n    s32 uninit_${r};\n    return a0 + uninit_${r};\n}\n`,
+      );
+    }
+    // A target stating no scratch registers keeps the parameter, and one that lists a scratch
+    // register outside its non-argument registers is a target bug, refused before any lift.
+    const none = { ...PPC_MWCC, scratchRegs: undefined };
+    expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none).source).toBe(
+      's32 sn(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+    const bad = { ...PPC_MWCC, scratchRegs: ['r3'] };
+    expect(() => decompile('sb', '0 <sb>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', bad)).toThrow(
+      /scratch register r3 is not among the non-argument registers/,
+    );
+  });
   test('`lmw` checks every word it restores, not just the offset the `stmw` recorded', () => {
     // `stmw r30,8(r1)` saves r30,r31 into 8(r1),12(r1); `lmw r29,8(r1)` would restore r29,r30,r31
     // from 8(r1),12(r1),16(r1) — a different register range over the same slots.

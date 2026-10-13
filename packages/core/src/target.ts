@@ -222,7 +222,8 @@ export interface TargetDescription {
   nonArgRegs?: readonly string[];
   /** Of `nonArgRegs`, the ones this ABI does NOT require a callee to preserve — so the compiler may
    *  home a local in one with no prologue save at all, and the save half of the rule above does not
-   *  apply to it. AAPCS's `ip` is the whole set here, and agbcc really does use it that way.
+   *  apply to it. AAPCS's `ip` is the whole set on Thumb, and agbcc really does use it that way;
+   *  on PPC it is `r0`, where mwcc homes a leaf's uninitialised local (PPC_MWCC).
    *
    *  UNDER-stating this list only makes the classification stricter: an unlisted register whose save
    *  the frontend cannot find falls back to being a parameter, which is what a target claiming no
@@ -1276,6 +1277,12 @@ export const PPC_MWCC: TargetDescription = {
   // r13, the small-data bases, never reach that rule: a read of either as a value refuses first
   // (`SMALL_DATA_BASES` in frontend/ppc.ts).
   nonArgRegs: ['r0', 'r2', ...Array.from({ length: 21 }, (_, i) => `r${i + 11}`)],
+  // The volatile registers no argument travels in, which a callee may use with no save. MEASURED on
+  // 2.4.2 at the synthetic tier's flags and on 2.3.3 at Pikmin's -O4,p (in C): a leaf homes an
+  // uninitialised local in each of them, unsaved — `int x; if (s) x = a*3; return x + a;` is
+  // `mulli r0,r4,3; add r3,r0,r4`, and with all eight argument registers live two such locals land
+  // in r11 and r12. 2.4.7 at MP4's flags puts them in saved registers instead.
+  scratchRegs: ['r0', 'r11', 'r12'],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
   registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
   // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third

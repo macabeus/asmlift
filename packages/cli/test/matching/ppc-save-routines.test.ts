@@ -10,6 +10,10 @@
 // Pikmin's `-O4,p`: it saves with `stmw`/`lmw` there, and no Pikmin row carries the routine. It does
 // at `-O0,p`, a profile no mwcc_233_163n row compiles at, so that case pins the frontend on the
 // build's own routine names rather than any row, and the `stmw` case says why no Pikmin row moves.
+//
+// The same file pins the register LIVE-IN MODEL on those builds (`registerLiveIns`,
+// frontend/ssa.ts): an uninitialised local in a register the prologue saved, and one in a scratch
+// register a leaf uses unsaved.
 import { decompile } from '@asmlift/core/pipeline';
 import { targetFor } from '@asmlift/core/target';
 import { type MwccToolchainId, compilePpcTarget, scoreCPpc } from '@asmlift/toolchains';
@@ -69,6 +73,32 @@ const UNINIT_CASES: [MwccToolchainId, string, readonly string[], RegExp][] = [
   ['mwcc_233_163n', "Pikmin's -O4,p", PIKMIN_C, /\bstmw\s+r\d+,/],
 ];
 
+// AN UNINITIALISED LOCAL IN A SCRATCH REGISTER. A leaf saves nothing, so 2.3.3 at Pikmin's `-O4,p`
+// homes the local in a volatile register no argument travels in, unsaved: r0 when one is free, and
+// r11 and r12 when all eight argument registers are live (PPC_MWCC.scratchRegs). Each def-less read
+// is `s32 vN;`, not one more parameter. mwcc_242_81 is the synthetic rows `uninit_r0` and
+// `uninit_r12`; 2.4.7 at MP4's DOL flags puts both locals in saved registers, which the case above
+// covers.
+const SCRATCH = [
+  {
+    sym: 'uninit_r0',
+    c: 'int uninit_r0(int s,int a){ int x; if (s) x = a*3; return x + a; }',
+    home: /\bmulli\s+r0,r4,3\b/,
+    expect: 's32 uninit_r0(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 != 0) v0 = a1 * 3;\n    return v0 + a1;\n}\n',
+  },
+  {
+    sym: 'uninit_r12',
+    c:
+      'int uninit_r12(int s,int a,int b,int c,int d,int e,int f,int g){ int x,y; if (s) { x = a*b; y = d*e; }' +
+      ' return x - y + (a ^ b ^ c ^ d ^ e ^ f ^ g ^ s); }',
+    home: /\bsubf\s+r4,r12,r11\b/,
+    expect:
+      's32 uninit_r12(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7) {\n    s32 v0;\n    s32 v1;\n' +
+      '    if (a0 != 0) {\n        v0 = a1 * a2;\n        v1 = a4 * a5;\n    }\n' +
+      '    return v0 - v1 + (a0 ^ (a7 ^ (a6 ^ (a5 ^ (a4 ^ (a3 ^ (a1 ^ a2)))))));\n}\n',
+  },
+];
+
 const CASES: [MwccToolchainId, string, readonly string[]][] = [
   ['mwcc_247_107', 'Mario Party 4 DOL flags', MP4_DOL],
   ['mwcc_233_163n', '-O0,p (no row uses it)', PIKMIN_O0],
@@ -114,6 +144,23 @@ describe('the register save routine, lifted and recompiled on each build that em
         const r = decompile(UNINIT.sym, asm, targetFor(mwcc, flags).target, { prototypes: UNINIT.proto });
         expect(r.source).toBe(UNINIT.expect);
         const s = scoreCPpc(mwcc, r.source, UNINIT.sym, obj, flags);
+        expect(s.score, JSON.stringify(s)).toBe(0);
+        expect(s.match).toBe(true);
+      },
+      BUDGET,
+    );
+  }
+
+  for (const { sym, c, home, expect: want } of SCRATCH) {
+    test.runIf(ppcDockerGate('ppc-save-routines', 'mwcc_233_163n'))(
+      `mwcc_233_163n at Pikmin's -O4,p: an uninitialised local in a scratch register is no parameter (${sym})`,
+      () => {
+        const { obj, asm } = compilePpcTarget('mwcc_233_163n', c, sym, PIKMIN_C);
+        expect(asm).toMatch(home);
+        expect(asm).not.toMatch(/\bst(w|mw)\s/);
+        const r = decompile(sym, asm, targetFor('mwcc_233_163n', PIKMIN_C).target);
+        expect(r.source).toBe(want);
+        const s = scoreCPpc('mwcc_233_163n', r.source, sym, obj, PIKMIN_C);
         expect(s.score, JSON.stringify(s)).toBe(0);
         expect(s.match).toBe(true);
       },

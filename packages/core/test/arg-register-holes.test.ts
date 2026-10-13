@@ -47,12 +47,17 @@ test('MIPS: a loop at the entry still binds each argument to its own slot', () =
 
 // mwcc_242_81 at canonical flags, compiled: `int lp2(int *p, int n) { int i; int v; for (i = 0;
 // i < n; i++) { v = p[i]; if (v <= 0) break; } return v == 0 ? 7 : 9; }`. `v` is read uninitialised
-// when `n <= 0`, so r0 is a live-in no argument arrives in. It goes after the arguments: ranked
-// first, it would take `a0` and bind `p` to `a1` and `n` to `a2`.
+// when `n <= 0`, so r0 is a live-in no argument arrives in. On PPC_MWCC it is a scratch register,
+// so the read is the uninitialised local it is and the signature is the source's. On a target
+// claiming no scratch half it stays a parameter, and it goes after the arguments: ranked first, it
+// would take `a0` and bind `p` to `a1` and `n` to `a2`.
 test('a live-in no argument arrives in ranks after every argument', () => {
   const lp2 =
     '00000000 <lp2>:\n0:\tmtctr   r4\n4:\tcmpwi   r4,0\n8:\tble     20 <lp2+0x20>\nc:\tlwz     r0,0(r3)\n' +
     '10:\tcmpwi   r0,0\n14:\tble     20 <lp2+0x20>\n18:\taddi    r3,r3,4\n1c:\tbdnz    c <lp2+0xc>\n' +
     '20:\tcmpwi   r0,0\n24:\tli      r3,9\n28:\tbnelr\n2c:\tli      r3,7\n30:\tblr\n';
-  expect(decompile('lp2', lp2, PPC_MWCC).source).toContain('lp2(s32 *a0, s32 a1, s32 a2)');
+  expect(decompile('lp2', lp2, PPC_MWCC).source).toContain('lp2(s32 *a0, s32 a1) {');
+  expect(decompile('lp2', lp2, { ...PPC_MWCC, scratchRegs: undefined }).source).toContain(
+    'lp2(s32 *a0, s32 a1, s32 a2)',
+  );
 });
