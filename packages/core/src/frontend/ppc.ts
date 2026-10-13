@@ -1976,6 +1976,16 @@ export function lift(
         ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(succIdx[bi][0])] }));
         return;
       }
+      // A LAST block with no terminator runs off the end of the text: the input stops before the
+      // function does (a dump split at a foreign label, a hand-supplied fragment), and what
+      // follows is unknown. Lifting it as a return invents one. Thumb refuses the same way.
+      if (!br) {
+        const last = b.body[b.body.length - 1];
+        fail(
+          `cannot lift '${name}': control falls off the end (the block at 0x${b.startAddr.toString(16)} has no ` +
+            `terminator and no successor${last ? `; its last instruction is at 0x${last.addr.toString(16)}` : ''})`,
+        );
+      }
       ops.push(mkOp('ret', { operands: returnOperands(bi) }));
       return;
     }

@@ -32,6 +32,18 @@ describe('PPC frontend robustness', () => {
     }
   });
 
+  test('a body that runs off its end with no terminator declines, rather than inventing a return', () => {
+    // A whole-object dump split on symbol lines ends a function early at a foreign label
+    // (ac-decomp's famicom.o has five `.text` sections), and what follows the last instruction is
+    // unknown. Lifted as a return, `mr r31,r4; addi r3,r31,1` read as `return a1 + 1;`.
+    expect(() => dis('cut', '0:\tmr      r31,r4\n4:\taddi    r3,r31,1\n')).toThrow(
+      /control falls off the end \(the block at 0x0 has no terminator and no successor; its last instruction is at 0x4\)/,
+    );
+    // A last block reached by a branch, too: the loop exit at 0xc falls off.
+    const tail = '0:\tcmpwi   r3,0\n4:\tbeq-    c <tl+0xc>\n8:\tblr\nc:\tli      r3,1\n';
+    expect(() => dis('tl', tail)).toThrow(/control falls off the end \(the block at 0xc/);
+  });
+
   test('a compare does not cross a JOIN: two predecessors decline loud', () => {
     // `10 <join+0x10>` is reached from the `beq-` (cr0 = r3 vs r4) and by falling out of 0x8
     // (cr0 = r3 vs r5). The flags need not agree, so picking either states a condition the machine
