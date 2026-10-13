@@ -853,8 +853,10 @@ inside the project's headers drops that block.
 **What is NOT built.** Member reads of a returned struct: most of them decline in the Thumb slot
 model (`stack pointer used as data`) before the frame audit is asked, so building them in
 frame-objects.ts alone reaches few of the shapes. A struct returned straight into a global. MIPS,
-which returns every struct through a hidden pointer and refuses the call, because the pointer is an
-address in its frame (`addiu a0,sp,N`) and MIPS models no frame object. A symbol map states a
+which returns every struct through a hidden pointer and refuses the call: the pointer is an address
+in its frame (`addiu a0,sp,N`), and while MIPS now lifts such an address as a frame object through
+the same audit (`measureO32Frame` draws the O32 local area), its call lowering builds no memory
+return. A symbol map states a
 signless return of a word or less as nothing, since it is an enum as often as a struct; and a
 context return spelled by a typedef the reader never saw keeps its parameters.
 
@@ -1418,7 +1420,7 @@ spelling (`sp@…`). That is the "arch check inside a shared pass" this document
 layer down — it reads as data rather than as a branch on target, which is exactly why it slipped
 through. The answer depends on the _frame model_, and the frame model is per-ISA: Thumb bounds a
 slot to `off + 4 <= localArea` and keys incoming stack arguments separately, so nothing incoming can
-reach a `sp@` key there; MIPS applies no frame bound at all, and its `sp@` reaches O32's
+reach a `sp@` key there; MIPS then applied no frame bound at all, and its `sp@` reached O32's
 caller-owned argument home area. The shared rule silently rewrote a fifth argument as an
 uninitialised local on a function that had been declining.
 
@@ -1437,8 +1439,10 @@ as a second declarative member (`uninitRegs`, a LIST rather than a range, becaus
 the argument registers also holds the frontends' virtual keys) under the same generic rule. The dependency became an argument
 instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the prologue walk cannot
 measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
-partition and therefore refuses, and the shape of its eventual fix is now a pair of numbers rather
-than a rewrite.
+partition, so a def-less `sp@` read there still refuses; what reaches the model instead is an
+incoming stack word under its own key, `@sarg<k>`, which the frontend places by the frame depth
+(`frameDepths`) as Thumb keys its incoming words, so nothing incoming reaches a `sp@` key on MIPS
+either.
 
 The same split has a second instance on this very capability. The envelope's last clause was first
 written as plain "no frame address escapes", and the first inhabitant to reach it was a klonoa DMA

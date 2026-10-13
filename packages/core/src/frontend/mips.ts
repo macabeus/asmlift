@@ -923,17 +923,14 @@ function liftOnce(
     }
   });
 
-  // NO FRAME PARTITION IS CLAIMED, so every def-less slot read refuses (frontend/ssa.ts,
-  // LiveInModel). This frontend has no frame bound at all — `addiu sp,sp,±N` is transparent and
-  // every word sp-relative access becomes `sp@<rawOff>` — so its slot keys span O32's CALLER-owned
-  // register-parameter home area and the incoming stack arguments above it, where a def-less read
-  // is argument 5, not an uninitialised local.
-  //
-  // Claiming one needs the frame SIZE those offsets are measured against, which is not computed
-  // here, plus ensureParam for the register half. The ranges themselves are known: O32 reserves
-  // `[0,16)` as the caller-owned home area (in NEITHER range — caller-owned, but not an argument)
-  // with stack arguments from 16 up, which is what `mips32be.cspec`'s `<localrange>` and stack
-  // `<pentry offset="16">` encode.
+  // THE SLOT MODEL CLAIMS NO PARTITION OF ITS OWN, so a def-less slot read refuses (frontend/ssa.ts,
+  // LiveInModel) unless `emitLoad` places it. A slot key is the RAW `sp@<off>`; what the offset
+  // names is read through the frame depth (`frameDepths`, below): a word at or past entry + 16 that
+  // this function never writes is incoming stack argument k (`@sarg<k>`, O32's `<pentry
+  // offset="16">` in `mips32be.cspec`), and `[0,16)` at entry is the caller-owned home of a0..a3,
+  // which is in neither range. A function that takes a frame address gets a local area as well
+  // (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory through an
+  // `laddr` the shared frame-object audit proves, as on Thumb.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
   const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
     isFpKey(k) ? (fpType ?? T.f32()) : undefined,
