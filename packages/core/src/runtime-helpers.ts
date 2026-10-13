@@ -220,6 +220,44 @@ export const PPC_MWCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> =
   __shr2u: { op: 'shr_u', params: [64, 32], returns: 64 },
 };
 
+/** A compiler runtime's OUT-OF-LINE REGISTER SAVE AND RESTORE ROUTINES: a prologue that saves a run
+ *  of callee-saved registers by calling into the runtime instead of storing each one inline. A
+ *  compiler fact, like the table above, and it hangs off `TargetDescription` for the same reason:
+ *  which compiler emits the family, at which level, is measured per build, and a frontend that
+ *  hard-coded the names would recognise them on a target whose runtime has no such routine.
+ *
+ *  A call to one is FRAME BOOKKEEPING, not a call: it writes no register but the link register, and
+ *  the frame address in `frameReg` is the only thing it reads (frontend/ppc.ts `saveRoutine`). */
+export interface RegisterSaveRoutines {
+  /** the register a routine takes its frame address in. The save area is the words just BELOW it. */
+  frameReg: string;
+  /** every routine name, with three groups: `save` or `rest`, the register file (`gpr`/`fpr`), and
+   *  the first register the routine moves — it moves that one up to the file's last, 31. */
+  name: RegExp;
+}
+
+/** The routine a callee symbol names under `routines`, or null when it names none. */
+export function registerSaveRoutineOf(
+  routines: RegisterSaveRoutines | undefined,
+  sym: string,
+): { sym: string; restore: boolean; fpr: boolean; first: number } | null {
+  const m = routines?.name.exec(sym);
+  return m ? { sym: m[0], restore: m[1] === 'rest', fpr: m[2] === 'fpr', first: Number(m[3]) } : null;
+}
+
+/** CodeWarrior's `_savegpr_NN` / `_restgpr_NN` and `_savefpr_NN` / `_restfpr_NN`, called after
+ *  `addi r11,r1,N`. `_savegpr_NN` stores rNN..r31 into the 4*(32-NN) bytes just below r11, and
+ *  `_savefpr_NN` stores fNN..f31 into the 8*(32-NN) bytes below it.
+ *
+ *  COMPILED, per build: 2.4.2 and 2.4.7 emit the family at every level (`-O4,p`, `-O4,s`, `-O0,p`).
+ *  2.3.3 never does at Pikmin's `-O4,p`, where it saves with `stmw` and inline `stfd`, but does at
+ *  `-O0,p` and `-O4,s`; all three builds share `PPC_MWCC`, so the description carries it. The bench's
+ *  feature tagger reads this same pattern (apps/benchmark `features.ts`). */
+export const PPC_MWCC_SAVE_ROUTINES: RegisterSaveRoutines = {
+  frameReg: 'r11',
+  name: /^_(save|rest)(gpr|fpr)_(\d+)$/,
+};
+
 /** IDO 7.1's runtime for the 64-bit operations MIPS II has no instruction for, a family of its own
  *  (`__ll_*` for signed, `__ull_*` for unsigned): a scan for `__*di3` reports zero on it.
  *

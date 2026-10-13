@@ -544,7 +544,12 @@ describe('a hole takes its file from the reads around it', () => {
         '  10:\tcmpwi\tr0,0\n  14:\tble\t20 <lpf+0x20>\n  18:\taddi\tr3,r3,4\n  1c:\tbdnz\tc <lpf+0xc>\n' +
         '  20:\tcmpwi\tr0,0\n  24:\tbeqlr\n  28:\tfmuls\tf1,f1,f1\n  2c:\tblr\n',
     );
-    expect(lift('lpf', LPF, PPC_MWCC)).toContain('float lpf(s32 *a0, s32 a1, float a2, s32 a3)');
+    // r0 is PPC_MWCC's scratch register, an uninitialised local there; the ordering is a question
+    // only for a target that leaves it a parameter.
+    expect(lift('lpf', LPF, PPC_MWCC)).toContain('float lpf(s32 *a0, s32 a1, float a2) {');
+    expect(lift('lpf', LPF, { ...PPC_MWCC, scratchRegs: undefined, hiddenInputRegs: undefined })).toContain(
+      'float lpf(s32 *a0, s32 a1, float a2, s32 a3)',
+    );
   });
 });
 

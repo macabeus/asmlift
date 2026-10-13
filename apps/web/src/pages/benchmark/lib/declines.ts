@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 199 distinct decline messages (the texts reached by
+// `packages/core/src` throws 210 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 99 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -61,16 +61,23 @@
 //                               relocation names, one relocated against a section, one in a delay
 //                               slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
+//   frontend/ppc.ts         14  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//                               testing a cr field a call destroyed (no compiler emits it), the
+//                               return address `mflr` copies out stored anywhere but the link
+//                               register's save word, the reaching-compare throw whose reason is
+//                               interpolated (as Thumb's), the two-armed branch denylist, whose
+//                               template is interpolation end to end, the caller's value a restore
+//                               puts back read as a value, a `stmw` or save routine saving a register
+//                               this function already wrote or read, and four ways a `bl` into a register
+//                               save or restore routine is not the bookkeeping it looks like (a
+//                               number no runtime routine has, the floating-point routines, no
+//                               single frame address in r11, r1's depth unknown there), control
+//                               falling off the end, and an `mflr` or a return reading a link
+//                               register a `bl` overwrote
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/ppc.ts          7  `stwu` with update, a relocation on a stack-pointer adjust, a branch
-//                               testing a cr field a call destroyed (no compiler emits it), a return
-//                               address `mflr` copied out and the body read as a value, the same
-//                               address stored anywhere but the link register's save word, the
-//                               reaching-compare throw whose reason is interpolated (as Thumb's), and
-//                               the two-armed branch denylist, whose template is interpolation end to end
 //   frontend/call-plan.ts    6  a call to a function declared to return a struct it cannot lower (its
 //                               interpolated reason), one whose parameters nothing sizes, one whose
 //                               declaration the lifted source cannot print (a type it has no spelling
@@ -81,9 +88,10 @@
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
-//   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
-//                               and a struct one call hands back in the return register passed on
-//                               as the next guessed call's first argument
+//   frontend/ssa.ts          3  a register read round a cycle through the entry block with no join,
+//                               a struct one call hands back in the return register passed on as
+//                               the next guessed call's first argument, and a register a runtime
+//                               hands a hidden input in, read with no path's definition joining it
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
@@ -134,7 +142,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
-    // disjunction is 18 of the 18 rows, so a pattern requiring the word only Thumb writes claims
+    // disjunction is 8 of the 8 rows, so a pattern requiring the word only Thumb writes claims
     // 0 of them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -260,10 +268,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /MIPS calls not yet modelled/,
   },
   {
-    // Three sites spell this one gap: a surviving `gp` read (`mips.ts` `gp used as data`), a
-    // relocation operand the Splat reader cannot resolve (`splat.ts` `small-data / PIC data
-    // access`), and a memory base that is not a register (`ppc.ts` `SDA/global-relative`). The PPC
-    // one is narrower than its wording: since #221 an SDA access that CARRIES its relocation lifts,
+    // Four sites spell this one gap: a surviving `gp` read (`mips.ts` `gp used as data`), its PPC
+    // twin, r13 or r2 read as a value (`ppc.ts` `the small-data base) used as data`), a relocation
+    // operand the Splat reader cannot resolve (`splat.ts` `small-data / PIC data access`), and a
+    // memory base that is not a register (`ppc.ts` `SDA/global-relative`). That last PPC one is
+    // narrower than its wording: since #221 an SDA access that CARRIES its relocation lifts,
     // so what still reaches the throw is the `0(0)` placeholder with no relocation behind it — and
     // the two ppc.ts refusals for an SDA relocation whose operand or immediate is NOT that
     // placeholder are the same capability. Its one corpus inhabitant is `synthetic:tax_gprel`,
@@ -279,7 +288,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // `SDA/global-relative` sits about 81 characters past the function name, so a long C++ name
     // pushes it past the 200-character cap this file opens with.
     pattern:
-      /gp used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
+      /gp used as data|small-data base\) used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
   },
   {
     key: 'float',
@@ -319,7 +328,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // a function that refuses at an EARLIER guard — a constant-pool name, a `bctr`, an unpaired
     // relocation — is filed under that guard. `docs/floating-point.md` §1 measures both
     // populations with the command that recomputes them, and the share this class takes is gated
-    // in `declines.test.ts`: it claims the 55 rows whose own message names an FPU instruction.
+    // in `declines.test.ts`: it claims the 58 rows whose own message names an FPU instruction.
     //
     // The same file's ABI refusals are this class too (`frontend/fpu.ts`, PowerPC's float-plus-call
     // refusal, and `frontend/call-plan.ts`'s callee declared with a float): the single-precision
@@ -579,6 +588,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'clobbered-value',
     label: 'A value a call destroyed (caller-saved register read back)',
     pattern: /is read on a path where a call has destroyed it/,
+  },
+  {
+    // `frontend/ppc.ts` defines what `mflr` copies out as a return address rather than a value, and
+    // refuses when the body reads it. The row that reaches it, `synthetic:uninit_spill:mwcc_242_81`,
+    // reads an uninitialised local on its default path, and CodeWarrior gives that local r0, which
+    // still holds the return address the prologue copied out. The sibling refusal, the same address
+    // stored anywhere but the link register's save word, has no row and stays in the residue.
+    key: 'return-address',
+    label: 'The return address read as a value (an `mflr` copy used as data)',
+    pattern: /copies out is used as a value/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.

@@ -1107,6 +1107,21 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sink(int); void voidcall(int);',
     proto: { sink: { params: 1, returnsVoid: true }, voidcall: { returnsVoid: true } },
   },
+  // CodeWarrior's OUT-OF-LINE REGISTER SAVE beside real calls: five parameters live across the
+  // calls take r27..r31, which mwcc 2.4.2 saves with `addi r11,r1,N; bl _savegpr_27` and restores
+  // with `_restgpr_27` (the `savegpr-helper` tag). `dotprod` carries the same idiom, but its
+  // unrolled loop is a gap of its own, so this is the row on which the save itself can MATCH.
+  // mwcc_242_81 only: the routine is CodeWarrior's runtime, so on the other three lanes the row would
+  // be one more call chain. The other two CodeWarrior builds are pinned by
+  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  {
+    sym: 'savechain',
+    src: 'int k(int);\nint savechain(int a,int b,int c,int d,int e,int f){ return k(k(k(k(k(a)+b)+c)+d)+e)+f; }',
+    features: [],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'int k(int);',
+    proto: { k: { params: 1 } },
+  },
 
   // ── nested control flow ─────────────────────────────────────────────────────────────────
   {
@@ -1400,7 +1415,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // Attribution, so nothing here is credited to the wrong gap: of the twelve rows, five turn on
   // this capability — uninit_join:ido7.1, uninit_sw:ido7.1, uninit_sw:agbcc, and both slot halves
   // of uninit_spill (agbcc, ido7.1). Of the other seven, one declines for an unrelated reason —
-  // r1-as-data (uninit_spill:mwcc_242_81) — three recover without touching this gap
+  // uninit_spill:mwcc_242_81, whose default arm reads the uninitialised local out of r0, which
+  // still holds the return address `mflr` put there (`_savegpr_26` writes only the link register),
+  // so it declines as a function reading its own return address — three recover without touching this gap
   // (uninit_join:agbcc, uninit_join:mwcc_242_81 and uninit_sw:mwcc_242_81 MATCH; the last is the
   // register half, like uninit_sw:agbcc, reached through CodeWarrior's switch dispatch), and three
   // lift to nonmatches nothing here attributes (uninit_join, uninit_sw and uninit_spill on
@@ -1431,6 +1448,48 @@ export const SYNTHETIC: SynthSpec[] = [
       ' for(i=0;i<8;i++) s+=p[i]*v0+v1*v2+v3*v4+v5*v6+v7*v8+v9; return s; }',
     features: ['uninit-local', 'array'],
     toolchains: ALL,
+  },
+  // The THIRD bullet above on CodeWarrior, outside the twelve: `x` is assigned on one arm only and
+  // lives across five calls, so mwcc 2.4.2 homes it in r31, which its `_savegpr_27` prologue saved,
+  // and the path that skips the assignment reads what the caller left there. Without the
+  // prologue's save set as the PPC frontend's live-in model, that read is a seventh PARAMETER for a
+  // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the row MATCHes with
+  // `s32 v0;` declared and never initialised. mwcc_242_81 only, by measurement: agbcc already lifts
+  // the shape as `s32 v0;` through Thumb's own live-in model (the rule that closed `loopfall`,
+  // below), and ido7.1 and both gcc 2.7.2 lanes decline on a `jal` with no callee symbol, so on those
+  // lanes the row would pin another capability or another blocker. The other two CodeWarrior builds
+  // are pinned by packages/cli/test/matching/ppc-save-routines.test.ts.
+  {
+    sym: 'uninit_saved',
+    src: 'int k(int);\nint uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a); return k(k(k(k(b)+c)+d)+e) + x; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'int k(int);',
+    proto: { k: { params: 1 } },
+  },
+  // The SCRATCH half of the same rule on CodeWarrior: a LEAF needs no saved register, so mwcc 2.4.2
+  // homes its uninitialised local in a volatile register no argument travels in, with no save
+  // (PPC_MWCC.scratchRegs). `uninit_r0` puts `x` in r0 (`mulli r0,r4,3; add r3,r0,r4`); in
+  // `uninit_r12`, all eight argument registers are live, so `x` and `y` land in r11 and r12
+  // (`mullw r11,r4,r5; mullw r12,r7,r8` on one arm, `subf r4,r12,r11` after the join). Without the
+  // target's scratch registers in the PPC live-in model, each def-less read lifts as one more
+  // PARAMETER — a third for a two-parameter source, and a ninth and tenth past the eight argument
+  // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and both
+  // MIPS frontends claim no register partition. mwcc_233_163n is pinned by
+  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  {
+    sym: 'uninit_r0',
+    src: 'int uninit_r0(int s,int a){ int x; if (s) x = a*3; return x + a; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['mwcc_242_81'],
+  },
+  {
+    sym: 'uninit_r12',
+    src:
+      'int uninit_r12(int s,int a,int b,int c,int d,int e,int f,int g){ int x,y; if (s) { x = a*b; y = d*e; }' +
+      ' return x - y + (a ^ b ^ c ^ d ^ e ^ f ^ g ^ s); }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['mwcc_242_81'],
   },
 
   // SPILL-SLOT ORDER — the one property of a declaration list the allocator answers by a law, and
@@ -1491,12 +1550,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // agbcc only, by measurement: ido7.1 keeps all ten locals in s0–s5 (six `sw`, all prologue
   // saves — nothing spills) and its frontend declines both objects earlier anyway (`branch to
   // 0xbc is not a block boundary`, a MIPS-frontend blocker seven ido rows already carry);
-  // gcc2.7.2kmc compiles each to 50 instructions with zero `(sp)` accesses; mwcc_242_81 emits
-  // only `stwu r1,-32(r1)` and `stw r0,36(r1)`, and on that lane asmlift declines both at the PPC
-  // frontend's frame gate before any candidate is compiled (`stack pointer r1 used as data
-  // (address-taken local / frame arithmetic) — not supported`; each row smoked once widened to
-  // mwcc_242_81, 0.1–0.6 s, m2c declined too). On those lanes the rows would pin another
-  // family's blocker or nothing, so they are left off. The DIRECTION of the law differs by
+  // gcc2.7.2kmc compiles each to 50 instructions with zero `(sp)` accesses; mwcc_242_81 touches
+  // the frame only for the push, the link register and its `_savegpr_26`/`_restgpr_26` pair, so
+  // the locals stay in registers and there is no slot to order. On those lanes the rows would pin
+  // another family's blocker or nothing, so they are left off. The DIRECTION of the law differs by
   // compiler (a call-carrying probe of 14 locals, 24 on mwcc: ascending on agbcc and both
   // gcc 2.7.2 lanes, DESCENDING on ido7.1 and mwcc_242_81), which is why the capability is a per-target datum and
   // not a boolean — and why no non-agbcc value can be refereed today: the only shape that spills
@@ -1849,9 +1906,8 @@ export const SYNTHETIC: SynthSpec[] = [
   //     delay-slot ISA.
   //
   // `ifand_far` stays agbcc-only, and here the original reason does hold: the row IS the Thumb
-  // ±256-byte branch range, and no other target has one. mwcc additionally declines it outright on
-  // `stack pointer r1 used as data` (its `_savegpr_14` prologue does `addi r11,r1,80`), which has
-  // nothing to do with short circuits.
+  // ±256-byte branch range, and no other target has one. On mwcc its `_savegpr_14` prologue is
+  // frame bookkeeping, and the row lifts with nothing about short circuits left to measure.
   //
   // The arm's CONTENT is filler and its SIZE is the feature, so the near arm is a literal PREFIX
   // of the far one and all four share a signature. Two pointers, deliberately: a Thumb
@@ -3453,11 +3509,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // inhabitant (`spillorder`, in the uninit-local block, is), and its residual belongs to the
   // register half of value-home.
   // agbcc only, by measurement: ido7.1, gcc2.7.2kmc and gcc2.7.2 lift it, but the false alarm it
-  // pins is Thumb's outgoing-block licence, which no MIPS lift reaches, and on mwcc_242_81 asmlift
-  // declines it at the PPC frontend's frame gate before any candidate is compiled (`stack pointer
-  // r1 used as data (address-taken local / frame arithmetic) — not supported`; smoked once with the
-  // row widened to that lane, 0.7 s, m2c declined too), so those lanes would measure another
-  // capability. Its `value-home` tag is the judgement that
+  // pins is Thumb's outgoing-block licence, which no MIPS lift reaches, and mwcc_242_81 keeps the
+  // ten locals in the registers its `_savegpr_19` prologue saves, with no other frame word, so
+  // those lanes would measure another capability. Its `value-home` tag is the judgement that
   // the diff, once it lifts, is WHERE the ten locals live; it cannot carry `stack-addr`, whose
   // floor is a unary `&` the source does not contain.
   // m2c NONCOMPILES it on the identical `ctx` (``unksp8' undeclared (first use in this function)`):

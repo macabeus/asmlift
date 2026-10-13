@@ -104,6 +104,12 @@ export interface SsaBuilder {
    *  sense, answered without the entry parameter that one hands back. A callee-saved register stored
    *  to its save slot holds the caller's value, which is no parameter, so asking must not mint one. */
   holdsEntryValue(reg: string, b: number): boolean;
+  /** Record that the frontend CONSUMED `v`, which it read from a register in block `b`, without
+   *  placing it in any op: PowerPC's register save routine takes its frame address in r11 and is
+   *  erased, so the address appears in no operand. The refusal of a read a call destroyed
+   *  (`refuseStaleCallerSavedReads`) judges a read by its uses, and an op-less use is one too — left
+   *  unrecorded, a frame address a call destroyed would still be consumed, silently. */
+  useOutsideOps(v: Value, b: number): void;
   /** Record that block `b` makes a call HERE: the ABI's caller-saved registers stop being ones the
    *  caller set up.
    *
@@ -204,9 +210,17 @@ export interface LiveInModel {
    *  in registers it never saved. Passing the ABI list unfiltered cost the MP2K engine's
    *  `ChnVolSetAsm` its two-pointer signature and left it storing through `uninit_r4`, silently.
    *
-   *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it — Thumb reads
-   *  the leading push run (`savedRegs`); a frontend that cannot measure it passes nothing here and
+   *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it. Thumb reads
+   *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
+   *  nothing before it named (`prologueSavedRegs`), because mwcc interleaves its saves with the
+   *  body (`stw r31; mr r31,r3; stw r30`); "nothing named it first" is the condition Thumb's
+   *  leading run meets by construction. A frontend that cannot measure it passes nothing here and
    *  keeps the parameter it would have got anyway.
+   *
+   *  The one register class exempt from the save is the ABI's scratch set (`target.scratchRegs`):
+   *  a callee may use one with no save at all, so demanding one would refuse a local the compiler
+   *  homed there with no prologue (agbcc's `ip`, mwcc's `r0`). `registerLiveIns` composes both
+   *  halves for every frontend, so this list is never assembled by hand.
    *
    *  The frame's sole-writer obligation has no counterpart here and needs none: a register has no
    *  address, so nothing outside this function can name it and there is no escape to retract.
@@ -218,6 +232,11 @@ export interface LiveInModel {
    *
    *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
   uninitRegs?: readonly string[];
+  /** Of `uninitRegs`, the ones a runtime hands a hidden input in (`target.hiddenInputRegs`). The
+   *  entry value of one may reach the body only THROUGH A JOIN, beside some path's definition —
+   *  the shape of a local the compiler assigned on one arm. Used directly, it is the input, and
+   *  `finish` refuses rather than spell it `uninit_<reg>`. */
+  hiddenInputRegs?: readonly string[];
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
    *  both of its sides and refuses an offset in neither; this one declares both and refuses a key
@@ -255,6 +274,57 @@ function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
     );
   }
   return m;
+}
+
+/** A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the list
+ *  would go on reading as if it exempted something. Refused as a target bug, like the
+ *  argRegs/uninitRegs contradiction `checkedLiveInModel` refuses, rather than declined as a property
+ *  of the input. */
+export function assertScratchRegsPartitioned(target: {
+  id: string;
+  nonArgRegs?: readonly string[];
+  scratchRegs?: readonly string[];
+}): ReadonlySet<string> {
+  const scratchRegs = new Set(target.scratchRegs ?? []);
+  for (const r of scratchRegs) {
+    if (!(target.nonArgRegs ?? []).includes(r)) {
+      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
+    }
+  }
+  return scratchRegs;
+}
+
+/** THE REGISTER HALF OF THE LIVE-IN MODEL (`LiveInModel.uninitRegs` and `argRegs`), composed here
+ *  once for every frontend that claims it, so that no frontend can drop a half of the rule. A
+ *  register is an uninitialised local's home when the ABI passes no argument in it
+ *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
+ *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
+ *  of its own prologue. A target stating no `nonArgRegs` claims no partition and gets an empty
+ *  model, so every def-less read stays a parameter. */
+export function registerLiveIns(
+  target: {
+    id: string;
+    argRegs: readonly string[];
+    nonArgRegs?: readonly string[];
+    scratchRegs?: readonly string[];
+    hiddenInputRegs?: readonly string[];
+  },
+  savedRegs: ReadonlySet<string>,
+): Pick<LiveInModel, 'uninitRegs' | 'argRegs' | 'hiddenInputRegs'> {
+  const scratchRegs = assertScratchRegsPartitioned(target);
+  for (const r of target.hiddenInputRegs ?? []) {
+    if (!scratchRegs.has(r)) {
+      throw new Error(`target '${target.id}': hidden-input register ${r} is not among the scratch registers`);
+    }
+  }
+  if (target.nonArgRegs === undefined) {
+    return {};
+  }
+  return {
+    uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
+    argRegs: target.argRegs,
+    hiddenInputRegs: target.hiddenInputRegs,
+  };
 }
 
 /** A read whose register may be holding a callee's leftover — see `refuseStaleCallerSavedReads`. */
@@ -335,6 +405,9 @@ export function makeSsaBuilder(
   // arrives as a PHI — which is what happens when the entry block is itself a loop header — is
   // invisible to the escape check below. Braun's construction gives no other way to tell.
   const phiKey = new Map<Value, string>();
+  // The entry value of a register a runtime hands a hidden input in (`LiveInModel.hiddenInputRegs`),
+  // minted as an uninitialised local, for `finish` to check it reached nothing but joins.
+  const hiddenEntryValues = new Map<Value, string>();
   const paramReg = new Map<Value, string>();
   // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
   // `defs`: a parameter asserted because a calling convention proves it exists is not evidence that
@@ -368,6 +441,8 @@ export function makeSsaBuilder(
   const clobberedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const decidedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const staleCandidates: StaleRead[] = [];
+  /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
+  const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
   // proportional to what a block READS rather than to how many times it reads it. The value a key
   // holds only changes at a write, and the verdict only flips at a call, so a run of identical
@@ -591,6 +666,9 @@ export function makeSsaBuilder(
         const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key: reg } });
         irBlocks[b].ops.unshift(op); // ahead of everything in a block that nothing precedes
         defs[b].set(reg, op.results[0]);
+        if (off === null && model().hiddenInputRegs?.includes(reg)) {
+          hiddenEntryValues.set(op.results[0], reg);
+        }
         return op.results[0];
       }
       // an incoming argument register → function parameter.
@@ -828,7 +906,10 @@ export function makeSsaBuilder(
         continue;
       }
       const ops = irBlocks[c.block].ops;
-      if (ops.slice(c.fromOp).some((op) => op.operands.includes(c.value))) {
+      if (
+        ops.slice(c.fromOp).some((op) => op.operands.includes(c.value)) ||
+        usesOutsideOps.some((u) => u.value === c.value && u.block === c.block && u.atOp >= c.fromOp)
+      ) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${c.reg} is read on a path where a call has destroyed it, so what ` +
             `it holds is the callee's and not a value this function named — not modelled`,
@@ -855,6 +936,9 @@ export function makeSsaBuilder(
     holdsValue,
     entryValue,
     holdsEntryValue,
+    useOutsideOps: (v: Value, b: number) => {
+      usesOutsideOps.push({ value: v, block: b, atOp: irBlocks[b].ops.length });
+    },
     noteCall: (b: number, clobbers: readonly string[]) => {
       callsIn.add(b);
       // the callee clobbers the caller-saved registers, its own result register included — see
@@ -939,6 +1023,24 @@ export function makeSsaBuilder(
       refuseStaleCallerSavedReads();
       simplifyTrivialPhis(fn, dropPhiRecord);
       pruneDeadParams(fn, dropPhiRecord);
+      // A HIDDEN INPUT IS NO UNINITIALISED LOCAL (`LiveInModel.hiddenInputRegs`). After the
+      // trivial-phi pass, so a join every path of which arrives undefined counts as the direct use
+      // it now is. An edge arg is the one use allowed: the compiler's local, assigned on another
+      // path, meets its entry value there.
+      if (hiddenEntryValues.size > 0) {
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            const reg = op.operands.map((v) => hiddenEntryValues.get(v)).find((r) => r !== undefined);
+            if (reg !== undefined) {
+              throw new FrontendUnsupportedError(
+                `cannot lift '${name}': ${reg} is read before anything writes it, and no path's ` +
+                  `definition joins it — a hidden input this compiler's runtime passes there ` +
+                  `(a save routine's frame address, a member-function pointer), not an uninitialised local`,
+              );
+            }
+          }
+        }
+      }
       // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the
       // write, because `pruneDeadParams` above is the last thing that can retire an entry
       // parameter, and an observation about a value no longer in the signature is one the reader

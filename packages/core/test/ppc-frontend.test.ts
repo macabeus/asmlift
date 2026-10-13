@@ -32,6 +32,18 @@ describe('PPC frontend robustness', () => {
     }
   });
 
+  test('a body that runs off its end with no terminator declines, rather than inventing a return', () => {
+    // A whole-object dump split on symbol lines ends a function early at a foreign label
+    // (ac-decomp's famicom.o has five `.text` sections), and what follows the last instruction is
+    // unknown. Lifted as a return, `mr r31,r4; addi r3,r31,1` would read as `return a1 + 1;`.
+    expect(() => dis('cut', '0:\tmr      r31,r4\n4:\taddi    r3,r31,1\n')).toThrow(
+      /control falls off the end \(the block at 0x0 has no terminator and no successor; its last instruction is at 0x4\)/,
+    );
+    // A last block reached by a branch, too: the loop exit at 0xc falls off.
+    const tail = '0:\tcmpwi   r3,0\n4:\tbeq-    c <tl+0xc>\n8:\tblr\nc:\tli      r3,1\n';
+    expect(() => dis('tl', tail)).toThrow(/control falls off the end \(the block at 0xc/);
+  });
+
   test('a compare does not cross a JOIN: two predecessors decline loud', () => {
     // `10 <join+0x10>` is reached from the `beq-` (cr0 = r3 vs r4) and by falling out of 0x8
     // (cr0 = r3 vs r5). The flags need not agree, so picking either states a condition the machine
@@ -273,6 +285,207 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // `addi r3,r1,8` = `&local` — reading the stack pointer as data (silently `return a0 + 8;` otherwise).
     expect(() => dis('addrtaken', '0:\taddi    r3,r1,8\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
   });
+  test('the frame address `addi r11,r1,N` forms is no value: any use of it still refuses', () => {
+    // r11 is deferred for mwcc's register save routines, which take it there. Read directly, as a
+    // memory base, or through a join, it is the frame read as data.
+    const asData = /stack pointer r1 used as data/;
+    expect(() => dis('fa', '0:\taddi    r11,r1,8\n4:\tmr      r3,r11\n8:\tblr\n')).toThrow(asData);
+    expect(() => dis('fabase', '0:\taddi    r11,r1,8\n4:\tlwz     r3,0(r11)\n8:\tblr\n')).toThrow(asData);
+    const join =
+      '0:\taddi    r11,r1,8\n4:\tcmpwi   r4,0\n8:\tbeq-    10 <faj+0x10>\nc:\tmr      r11,r3\n' +
+      '10:\tlwz     r3,0(r11)\n14:\tblr\n';
+    expect(() => dis('faj', join)).toThrow(asData);
+    // Nothing takes it: only a save routine may, so a dead one refuses too.
+    expect(() => dis('fadead', '0:\taddi    r11,r1,8\n4:\tli      r3,0\n8:\tblr\n')).toThrow(asData);
+  });
+  // mwcc 2.4.x's out-of-line register saves: `addi r11,r1,N; bl _savegpr_NN` stores rNN..r31 into
+  // the words just below r11, and `_restgpr_NN` reloads them. The `addi` need not sit next to the `bl`.
+  describe('register save routines', () => {
+    // `@` in a line stands for its own address, which the call's relocation names.
+    const lines = (...ls: string[]) =>
+      ls.map((l, i) => `${(i * 4).toString(16)}:\t${l.replaceAll('@', (i * 4).toString(16))}\n`).join('');
+    const bl = (sym: string) => `bl      @ <x+0x@>\n\t\t\t@: R_PPC_REL24\t${sym}`;
+    const PRO = ['stwu    r1,-32(r1)', 'mflr    r0', 'stw     r0,36(r1)', 'addi    r11,r1,32', bl('_savegpr_30')];
+    const EPI = ['lwz     r0,36(r1)', 'mtlr    r0', 'addi    r1,r1,32', 'blr'];
+    const fn = (sym: string, ...body: string[]) => dis(sym, lines(...PRO, ...body, ...EPI));
+    test("the routine family is the target's data: a target that names none keeps the r1 refusal", () => {
+      // `registerSaveRoutines` absent: the `bl` is an ordinary call, and `addi r11,r1,N` is the stack
+      // pointer read as data where it stands.
+      const none = { ...PPC_MWCC, registerSaveRoutines: undefined };
+      const asm = lines(...PRO, 'add     r31,r3,r4', 'addi    r11,r1,32', 'mr      r3,r31', bl('_restgpr_30'), ...EPI);
+      expect(() => decompile('nr', `0 <nr>:\n${asm}`, none)).toThrow(/stack pointer r1 used as data/);
+    });
+    test('a save and its restore are frame bookkeeping, not calls', () => {
+      expect(fn('gs', 'add     r31,r3,r4', 'addi    r11,r1,32', 'mr      r3,r31', bl('_restgpr_30'))).toBe(
+        's32 gs(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+      );
+    });
+    test('a routine call with no relocation is no routine, and its frame address refuses', () => {
+      // A linked image, or objdump without `-r`: `bl <_savegpr_NN>` names its target only in the
+      // text, so it is lowered as an ordinary call that destroys r3..r12 and never reads r11. Lifted
+      // that way, the routine's "return value" would stand for the argument it preserves.
+      const bare = (sym: string) => `bl      200 <${sym}>`;
+      const asm = lines(
+        'stwu    r1,-32(r1)',
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'addi    r11,r1,32',
+        bare('_savegpr_30'),
+        'mr      r31,r3',
+        'mr      r3,r31',
+        'addi    r11,r1,32',
+        bare('_restgpr_30'),
+        ...EPI,
+      );
+      expect(() => dis('bare', asm)).toThrow(/stack pointer r1 used as data/);
+    });
+    test('the routine preserves r0: the return address `mflr` left there is still read as one', () => {
+      // synthetic uninit_spill: a path that reads r0 with nothing else written reads the return
+      // address. As a call the bytes would read as destroyed, or as the callee's.
+      expect(() => fn('ra', 'add     r3,r3,r0', 'addi    r11,r1,32', bl('_restgpr_30'))).toThrow(
+        /the return address the 'mflr' at 0x4 copies out is used as a value/,
+      );
+    });
+    test('a call between the frame address and the routine destroys r11, and the routine refuses it', () => {
+      // The routine takes its frame address in r11 outside any op, so the builder is told it was
+      // used; a callee leaves whatever it likes in r11, and the save would store through that.
+      const asm = lines(
+        'stwu    r1,-32(r1)',
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'addi    r11,r1,32',
+        bl('foo'),
+        bl('_savegpr_30'),
+        'mr      r31,r3',
+        'addi    r11,r1,32',
+        'mr      r3,r31',
+        bl('_restgpr_30'),
+        ...EPI,
+      );
+      expect(() => decompile('cl', `0 <cl>:\n${asm}`, PPC_MWCC, { prototypes: { foo: { params: 0 } } })).toThrow(
+        /r11 is read on a path where a call has destroyed it/,
+      );
+    });
+    test('the routine overwrites the link register, so it must come after the return address is copied out', () => {
+      // `mflr` after the routine copies out the address after its `bl`.
+      const late = lines(
+        'stwu    r1,-32(r1)',
+        'addi    r11,r1,32',
+        bl('_savegpr_30'),
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'add     r3,r3,r4',
+        'addi    r11,r1,32',
+        bl('_restgpr_30'),
+        ...EPI,
+      );
+      expect(() => dis('lt', late)).toThrow(/the 'mflr' at 0xc reads the link register the 'bl' at 0x8 overwrote/);
+      // No `mflr` at all: the `blr` jumps through what the routine left there.
+      const none = lines(
+        'stwu    r1,-32(r1)',
+        'addi    r11,r1,32',
+        bl('_savegpr_30'),
+        'add     r3,r3,r4',
+        'addi    r11,r1,32',
+        bl('_restgpr_30'),
+        'addi    r1,r1,32',
+        'blr',
+      );
+      expect(() => dis('nm', none)).toThrow(/the 'blr' at 0x1c reads the link register the 'bl' at 0x14 overwrote/);
+      // An ordinary call before the `mflr` overwrote it the same way.
+      const call = lines('stwu    r1,-32(r1)', bl('foo'), 'mflr    r0', 'stw     r0,36(r1)', ...EPI);
+      expect(() => dis('oc', call)).toThrow(/the 'mflr' at 0x8 reads the link register the 'bl' at 0x4 overwrote/);
+    });
+    test('the FPR routines are named and refused: no lift reaches them yet', () => {
+      // mwcc 2.4.x -O4,s: `addi r11,r1,64; bl _savefpr_28` then `addi r11,r1,32; bl _savegpr_28`.
+      // Every compiled caller declines on its float code first, so the 8-byte slots stay unmodelled.
+      const asm = lines(
+        'stwu    r1,-48(r1)',
+        'mflr    r0',
+        'stw     r0,52(r1)',
+        'addi    r11,r1,48',
+        bl('_savefpr_30'),
+        'addi    r11,r1,32',
+        bl('_savegpr_30'),
+        'add     r3,r3,r4',
+        'addi    r11,r1,48',
+        bl('_restfpr_30'),
+        'addi    r11,r1,32',
+        bl('_restgpr_30'),
+        'lwz     r0,52(r1)',
+        'mtlr    r0',
+        'addi    r1,r1,48',
+        'blr',
+      );
+      expect(() => dis('fg', asm)).toThrow(/'_savefpr_30' at 0x10 saves or restores floating-point registers/);
+    });
+    test('`stmw`, a single `stw` and the routine keep one save rule and one restore rule', () => {
+      // A restore puts the caller's register back, whichever instruction does it: reading it after
+      // is no C value (the hardware returns the caller's r31, not a0).
+      const after = /r31 is read after the restore at 0x8 put the caller's r31 back/;
+      expect(() =>
+        dis('stmA', lines('stmw    r31,28(r1)', 'mr      r31,r3', 'lmw     r31,28(r1)', 'mr      r3,r31', 'blr')),
+      ).toThrow(after);
+      expect(() =>
+        dis('stwA', lines('stw     r31,28(r1)', 'mr      r31,r3', 'lwz     r31,28(r1)', 'mr      r3,r31', 'blr')),
+      ).toThrow(after);
+      // A `stmw` of a register already written saves a value, which no compiler's prologue does (the
+      // hardware returns 5 here, not 7).
+      expect(() =>
+        dis(
+          'stm5',
+          lines('li      r31,5', 'stmw    r31,28(r1)', 'li      r31,7', 'lmw     r31,28(r1)', 'mr      r3,r31', 'blr'),
+        ),
+      ).toThrow(/the 'stmw' at 0x4 saves r31 after this function wrote it/);
+    });
+    test('each way the routine is not the bookkeeping it looks like refuses', () => {
+      // A restore over other words, or another register range, than the save filled.
+      expect(() => fn('skew', 'addi    r11,r1,36', bl('_restgpr_30'))).toThrow(
+        /reload of '-8\(r11\)' into r30, a slot r31 was saved/,
+      );
+      expect(() => fn('wide', 'addi    r11,r1,32', bl('_restgpr_29'))).toThrow(
+        /reload of '-12\(r11\)' into r29, a word nothing saved/,
+      );
+      // r11 is not a frame address, or is one on only one path.
+      expect(() => dis('nofa', lines('mr      r11,r3', bl('_savegpr_30'), 'blr'))).toThrow(
+        /one frame address \('addi r11,r1,N'\) in r11/,
+      );
+      const mixed = lines(
+        'addi    r11,r1,0',
+        'cmpwi   r4,0',
+        'beq-    10 <x+0x10>',
+        'mr      r11,r3',
+        bl('_savegpr_30'),
+        'blr',
+      );
+      expect(() => dis('mixfa', mixed)).toThrow(/one frame address \('addi r11,r1,N'\) in r11/);
+      // A register written before it is saved: the word holds a value.
+      expect(() => dis('late', lines('li      r31,0', 'addi    r11,r1,0', bl('_savegpr_30'), 'blr'))).toThrow(
+        /saves r31 after this function wrote it/,
+      );
+      // A register READ before it is saved: the save keeps a value the function was handed, and the
+      // refusal says read, not wrote. The read is no uninitialised local either — the prologue had
+      // not saved the register yet, so `prologueSavedRegs` does not count that save.
+      expect(() => dis('early', lines('add     r3,r3,r31', 'addi    r11,r1,0', bl('_savegpr_31'), 'blr'))).toThrow(
+        /saves r31 after this function read it/,
+      );
+      expect(() => dis('earlym', lines('add     r3,r3,r30', 'stmw    r30,8(r1)', 'lmw     r30,8(r1)', 'blr'))).toThrow(
+        /the 'stmw' at 0x4 saves r30 after this function read it/,
+      );
+      // A word the function also stores a value to.
+      expect(() => dis('both', lines('stw     r3,-8(r1)', 'addi    r11,r1,0', bl('_savegpr_30'), 'blr'))).toThrow(
+        /both saves a register in and stores a value to/,
+      );
+      // No runtime routine saves r5.
+      expect(() => dis('r5', lines('addi    r11,r1,0', bl('_savegpr_5'), 'blr'))).toThrow(
+        /names no register save routine/,
+      );
+      // A restored register holds the caller's value again.
+      expect(() => fn('after', 'addi    r11,r1,32', bl('_restgpr_30'), 'mr      r3,r31')).toThrow(
+        /r31 is read after the restore at 0x\w+ put the caller's r31 back/,
+      );
+    });
+  });
   test('REGISTER-INDEXED frame access (`lwzx rD,r1,rB`) fails loud — r1 in either operand', () => {
     // PPC is asmlift's only frontend with a register-indexed addressing mode, so this is the exact
     // structural analogue of the case that broke m2c's stack-frame model (`ldr rX, [sp, rY]`,
@@ -284,6 +497,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('lwzxframe', '0:\tlwzx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
     expect(() => dis('stwxframe', '0:\tstwx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
     expect(() => dis('lwzxindex', '0:\tlwzx    r3,r4,r1\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
+  });
+  test('a small-data base read as data refuses instead of becoming a parameter', () => {
+    // mwcc 2.4.7 indexes `playerOrderNew[j - 1]` with `lbzx r0,r3,r13` (MP4 `OrderPlayers`). r13 has
+    // no definition here, so the builder would read it as an invented argument: `s32 f(s32 a0, s32 a1)`.
+    expect(() => dis('sdaidx', '0:\tlbzx    r3,r3,r13\n4:\tblr\n')).toThrow(/r13 \(the small-data base\) used as data/);
+    expect(() => dis('sda2base', '0:\tlwz     r3,8(r2)\n4:\tblr\n')).toThrow(/r2 \(the small-data base\) used as data/);
   });
   // A word stored to the frame with a VALUE is a stack-slot variable, as on MIPS and Thumb: a
   // reload into any register reads it back, whichever register stored it.
@@ -324,6 +543,81 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('control: a save and restore of the SAME register stays transparent', () => {
     expect(dis('saverestore', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r4\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
       's32 saverestore(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+  });
+  test('a register the prologue saved and the body reads first is an uninitialised local, not a parameter', () => {
+    // mwcc homes `int x; if (s) x = k(a); return k(...) + x;` in a callee-saved register, and on the
+    // path that skips the assignment reads what the caller left there. Each save form names the
+    // register: a `stw`, a `stmw`, and the save routine.
+    const uninit = (sym: string) => `s32 ${sym}(s32 a0) {\n    s32 uninit_r31;\n    return a0 + uninit_r31;\n}\n`;
+    expect(dis('us', '0:\tstw     r31,12(r1)\n4:\tadd     r3,r3,r31\n8:\tlwz     r31,12(r1)\nc:\tblr\n')).toBe(
+      uninit('us'),
+    );
+    expect(dis('um', '0:\tstmw    r30,8(r1)\n4:\tadd     r3,r3,r31\n8:\tlmw     r30,8(r1)\nc:\tblr\n')).toBe(
+      uninit('um'),
+    );
+    const routine =
+      '0:\tmflr    r0\n4:\taddi    r11,r1,0\n8:\tbl      8 <ur+0x8>\n\t\t\t8: R_PPC_REL24\t_savegpr_31\n' +
+      'c:\tadd     r3,r3,r31\n10:\tmtlr    r0\n14:\tblr\n';
+    expect(dis('ur', routine)).toBe(uninit('ur'));
+    // Saved nowhere, or saved only after the function wrote it (a spill): no compiler homed a local
+    // there, so the entry value stays what the caller handed over.
+    expect(dis('un', '0:\tadd     r3,r3,r31\n4:\tblr\n')).toBe('s32 un(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    expect(
+      dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
+    ).toBe('s32 uw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    // Saved only after the function READ it: a value handed over, which the save preserves. Counting
+    // that save would mint `uninit_r31` for the read before it.
+    expect(
+      dis(
+        'ur1',
+        '0:\tstwu    r1,-16(r1)\n4:\tadd     r3,r3,r31\n8:\tstw     r31,12(r1)\nc:\tlwz     r31,12(r1)\n' +
+          '10:\taddi    r1,r1,16\n14:\tblr\n',
+      ),
+    ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+  });
+  test('a scratch register a leaf reads first is an uninitialised local, with no save (PPC_MWCC.scratchRegs)', () => {
+    // mwcc 2.4.2 and 2.3.3 home a leaf's `int x; if (s) x = a*3; return x + a;` in r0, unsaved, and
+    // in r11 and r12 when every argument register is live. Each is volatile and passes no argument,
+    // so no caller hands a value over there.
+    expect(dis('sc', '0:\tadd     r3,r3,r0\n4:\tblr\n')).toBe(
+      's32 sc(s32 a0) {\n    s32 uninit_r0;\n    return a0 + uninit_r0;\n}\n',
+    );
+    // r11 and r12 carry the runtime's hidden inputs (PPC_MWCC.hiddenInputRegs), so their entry
+    // value may reach the body only through a join, beside a path that assigned the local — the
+    // shape mwcc gives `uninit_r12`. Read directly, it is the input, and the lift refuses.
+    for (const r of ['r11', 'r12']) {
+      expect(
+        dis(
+          'sj',
+          `0:\tcmpwi   r3,0\n4:\tbeq     c <sj+0xc>\n8:\tmulli   ${r},r4,3\nc:\tadd     r3,${r},r4\n10:\tblr\n`,
+        ),
+      ).toBe('s32 sj(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 != 0) v0 = a1 * 3;\n    return v0 + a1;\n}\n');
+      expect(() => dis('sc', `0:\tadd     r3,r3,${r}\n4:\tblr\n`)).toThrow(
+        new RegExp(`${r} is read before anything writes it, and no path's definition joins it`),
+      );
+    }
+    // The runtime's own `_savegpr_31` stores through its frame address, r11; `__ptmf_scall` loads
+    // through r12 before overwriting it. Neither is an uninitialised local.
+    expect(() => dis('_savegpr_31', '0:\tstw     r31,-4(r11)\n4:\tblr\n')).toThrow(
+      /r11 is read before anything writes it/,
+    );
+    expect(() => dis('ps', '0:\tlwz     r0,0(r12)\n4:\tlwz     r12,8(r12)\n8:\tadd     r3,r0,r12\nc:\tblr\n')).toThrow(
+      /r12 is read before anything writes it/,
+    );
+    const hiddenOutside = { ...PPC_MWCC, hiddenInputRegs: ['r13'] };
+    expect(() => decompile('sh', '0 <sh>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', hiddenOutside)).toThrow(
+      /hidden-input register r13 is not among the scratch registers/,
+    );
+    // A target stating no scratch registers keeps the parameter, and one that lists a scratch
+    // register outside its non-argument registers is a target bug, refused before any lift.
+    const none = { ...PPC_MWCC, scratchRegs: undefined, hiddenInputRegs: undefined };
+    expect(decompile('sn', '0 <sn>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', none).source).toBe(
+      's32 sn(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n',
+    );
+    const bad = { ...PPC_MWCC, scratchRegs: ['r3'] };
+    expect(() => decompile('sb', '0 <sb>:\n0:\tadd     r3,r3,r0\n4:\tblr\n', bad)).toThrow(
+      /scratch register r3 is not among the non-argument registers/,
     );
   });
   test('`lmw` checks every word it restores, not just the offset the `stmw` recorded', () => {

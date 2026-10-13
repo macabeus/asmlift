@@ -70,6 +70,8 @@ import {
   IDO_RUNTIME_HELPERS,
   MIPS_GCC_RUNTIME_HELPERS,
   PPC_MWCC_RUNTIME_HELPERS,
+  PPC_MWCC_SAVE_ROUTINES,
+  type RegisterSaveRoutines,
   type RuntimeHelper,
 } from './runtime-helpers';
 import type { StaticLayout } from './structure/local-statics';
@@ -210,8 +212,9 @@ export interface TargetDescription {
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
-   *  frontend/ssa.ts (LiveInModel.uninitRegs). ABSENT ⇒ no register partition is claimed, which is
-   *  what MIPS and PPC take today.
+   *  frontend/ssa.ts (LiveInModel.uninitRegs). Thumb and PPC state it and measure the save half
+   *  from their prologues (Thumb `savedRegs`, PPC `prologueSavedRegs`). ABSENT ⇒ no register partition
+   *  is claimed, which is what both MIPS targets take today.
    *
    *  It must be DISJOINT from `argRegs`, and the frontend hands both to the builder so that is
    *  checked rather than trusted (`checkedLiveInModel`): a spelling that lands in both lists used
@@ -219,7 +222,8 @@ export interface TargetDescription {
   nonArgRegs?: readonly string[];
   /** Of `nonArgRegs`, the ones this ABI does NOT require a callee to preserve — so the compiler may
    *  home a local in one with no prologue save at all, and the save half of the rule above does not
-   *  apply to it. AAPCS's `ip` is the whole set here, and agbcc really does use it that way.
+   *  apply to it. AAPCS's `ip` is the whole set on Thumb, and agbcc really does use it that way;
+   *  on PPC it is `r0`, `r11` and `r12`, where mwcc homes a leaf's uninitialised locals (PPC_MWCC).
    *
    *  UNDER-stating this list only makes the classification stricter: an unlisted register whose save
    *  the frontend cannot find falls back to being a parameter, which is what a target claiming no
@@ -227,6 +231,22 @@ export interface TargetDescription {
    *  is classified with no evidence at all, which is the defect the save half exists to close. Every
    *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
+  /** Of `scratchRegs`, the ones this compiler's RUNTIME hands a hidden input in, outside the C
+   *  calling convention. mwcc's register save routines take their frame address in r11
+   *  (`addi r11,r1,N; bl _savegpr_NN`, and `_savegpr_31` is `stw r31,-4(r11); blr`), and
+   *  `__ptmf_scall` takes its member-function pointer in r12 (`lwz r0,0(r12)`). Hand-written asm
+   *  that reads one of these first is being handed a value, not reading an uninitialised local.
+   *
+   *  What separates the two is MEASURED on 2.4.2 and 2.3.3: the uninitialised local the compiler
+   *  homes in r11 or r12 is assigned on SOME path (`uninit_r12`: `if (s) { x = a*b; ... }`), so its
+   *  entry value reaches the body only through a join. A def-less read of one of these registers
+   *  that is USED DIRECTLY — the entry value with no path's definition beside it — refuses
+   *  (frontend/ssa.ts `LiveInModel.hiddenInputRegs`). r0 is not listed: the same compilers read a
+   *  never-assigned local straight out of r0 (`int x; return x + a;` is `add r3,r0,r3`), and the
+   *  runtime passes nothing there.
+   *
+   *  Every entry must appear in `scratchRegs`; the frontend refuses a target where one does not. */
+  hiddenInputRegs?: readonly string[];
   /** Registers a CALL destroys: after one, they hold whatever the callee left there, and no value
    *  this function computed. The frontends hand this to the SSA builder so a read of one past a
    *  call refuses instead of resolving to the pre-call definition (frontend/ssa.ts).
@@ -256,6 +276,10 @@ export interface TargetDescription {
    *  `__`-prefixed function by spelling — but it buys nothing on a target whose runtime has simply
    *  not been enumerated. */
   runtimeHelpers?: Readonly<Record<string, RuntimeHelper>>;
+  /** The runtime's OUT-OF-LINE REGISTER SAVE ROUTINES (runtime-helpers.ts `RegisterSaveRoutines`).
+   *  ABSENT ⇒ none is recognised: a `bl` to one is an ordinary call, and the frame address it would
+   *  have consumed is the stack pointer read as data, which refuses. */
+  registerSaveRoutines?: RegisterSaveRoutines;
   // HARDWARE / ISA facts — independent of the compiler.
   capabilities: {
     endianness: 'little' | 'big'; // consumed by structureOptionsFor (bitfield extract recognition is LSB-first)
@@ -1264,7 +1288,22 @@ export const PPC_MWCC: TargetDescription = {
   // and r12 are the linker's stub scratch, r13 is the small-data base and r14 upward are
   // callee-saved.
   callerSaved: ['r0', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'r10', 'r11', 'r12', 'lr'],
+  // Every GPR but r1 (the stack pointer, never an SSA register here) and the eight argument
+  // registers. The frontend narrows it to `scratchRegs` and the ones the prologue saved
+  // (`prologueSavedRegs`). r2 and r13, the small-data bases, never reach that rule: a read of either
+  // as a value refuses first (`SMALL_DATA_BASES` in frontend/ppc.ts).
+  nonArgRegs: ['r0', 'r2', ...Array.from({ length: 21 }, (_, i) => `r${i + 11}`)],
+  // The volatile registers no argument travels in, which a callee may use with no save. MEASURED on
+  // 2.4.2 at the synthetic tier's flags and on 2.3.3 at Pikmin's -O4,p (in C): a leaf homes an
+  // uninitialised local in each of them, unsaved — `int x; if (s) x = a*3; return x + a;` is
+  // `mulli r0,r4,3; add r3,r0,r4`, and with all eight argument registers live two such locals land
+  // in r11 and r12. 2.4.7 at MP4's flags puts them in saved registers instead.
+  scratchRegs: ['r0', 'r11', 'r12'],
+  // r11 is the save routines' frame address and r12 `__ptmf_scall`'s member-function pointer: a
+  // read of either that no path's definition joins refuses instead of minting `uninit_r11`.
+  hiddenInputRegs: ['r11', 'r12'],
   runtimeHelpers: PPC_MWCC_RUNTIME_HELPERS,
+  registerSaveRoutines: PPC_MWCC_SAVE_ROUTINES,
   // PPC EABI with `-fp hard`, measured at the synthetic tier's flags: `fadds f1,f1,f2; blr`, a third
   // float argument in f3, and the GPR/FPR order of mixed parameters absent from the object.
   fpu: { argRegs: ['f1', 'f2', 'f3', 'f4', 'f5', 'f6', 'f7', 'f8'], returnReg: 'f1', slots: 'separate' },

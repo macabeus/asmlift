@@ -37,10 +37,11 @@
 // conditional-CTR forms (`bdz`/`bdnzt`/…), an unrecovered `bctr`, and a `bdnz` with no reaching
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
-import { Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import type { Prototypes } from '../proto';
+import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { callDeclarations } from './call-plan';
@@ -62,7 +63,7 @@ import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
-import { makeSsaBuilder } from './ssa';
+import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -402,10 +403,80 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
   };
 }
 
+/** The PPC EABI's small-data base registers: r13 points into `.sdata`/`.sbss` and r2 into
+ *  `.sdata2`/`.sbss2`, both set once by the runtime's startup code and never by a compiled function.
+ *  A compiled access names its symbol in an `R_PPC_EMB_SDA21` relocation, which this frontend reads
+ *  instead of the base (`sdaAccess`). A base read as a VALUE — `lbzx r0,r3,r13`, which mwcc 2.4.7
+ *  emits for `playerOrderNew[j - 1]` (MP4 `OrderPlayers`), or `lwz r3,-0x7ff0(r13)` in a linked image —
+ *  has no C spelling here, and the SSA builder would otherwise read the def-less register as an
+ *  invented parameter. It refuses, as MIPS refuses `gp` used as data. */
+const SMALL_DATA_BASES: readonly string[] = ['r13', 'r2'];
+
 /** The link register's save word, as an offset from the entry r1: the second word of the caller's
  *  frame header, after the back chain. mwcc 2.3.3 spells it `4(r1)` before the push and 2.4.x
  *  `N+4(r1)` after it (`r1Displacements`). */
 const LR_SAVE_WORD = 4;
+
+/** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
+ *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
+ *  none — a linked image, or an objdump without `-r` — is an ordinary call to an unnamed target, and
+ *  the frame address its routine would have consumed then refuses at the end of `lift`. */
+const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
+  ins.mnemonic === 'bl' && ins.reloc?.type === 'R_PPC_REL24'
+    ? registerSaveRoutineOf(target.registerSaveRoutines, ins.reloc.sym)
+    : null;
+
+/** WHAT THE PROLOGUE SAVED — the save half of the register partition (frontend/ssa.ts,
+ *  `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an uninitialised local
+ *  only where the compiler could home a local there, which it may do only after saving it; without
+ *  this, an uninitialised local in a callee-saved register lifts as an extra PARAMETER
+ *  (`int x; if (s) x = k(a); return k(a) + x;` would take a third).
+ *
+ *  Read off the ENTRY block, the one every path starts with: `stmw rS,D(r1)` saves rS..r31, a GPR
+ *  save routine rNN..r31, and `stw rN,D(r1)` rN. A register counts as saved only where NO earlier
+ *  instruction names it, as an operand or as a memory base, read or written. That is what a save
+ *  is: the first thing the function does with the register. A write before the store makes the
+ *  `stw` a spill; a READ before it is asm handed a live value there, which the save then preserves
+ *  — the very case the save half exists to keep a parameter for, so it must not count.
+ *
+ *  NOT Thumb's rule (`savedRegs` in frontend/thumb.ts), which ends the measurement at the end of the
+ *  LEADING run of saves. mwcc interleaves its saves with the body's first instructions
+ *  (`stw r31,12(r1); mr r31,r3; stw r30,8(r1)`), and the save routine's `addi r11,r1,N` need not sit
+ *  next to its `bl`, so a leading run would drop saves the prologue really makes. The two rules
+ *  agree on what they let through: no instruction before a counted save touches the register. The
+ *  operand text can only over-name (a register spelt in a branch target names nothing), which
+ *  under-states the set — the direction that keeps a parameter. */
+function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
+  const saved = new Set<string>();
+  const named = new Set<string>();
+  const save = (first: number) => {
+    for (let k = first; k <= 31; k++) {
+      if (!named.has(`r${k}`)) {
+        saved.add(`r${k}`);
+      }
+    }
+  };
+  for (const ins of entry) {
+    const [d, s] = ins.ops;
+    const routine = saveRoutineOf(target, ins);
+    if (routine) {
+      if (!routine.restore && !routine.fpr) {
+        save(routine.first);
+      }
+    } else if (ins.mnemonic === 'stmw' && s !== undefined && parseMem(s).base === 'r1') {
+      save(Number(d.slice(1)));
+    } else if (ins.mnemonic === 'stw' && s !== undefined && parseMem(s).base === 'r1' && !named.has(d)) {
+      saved.add(d);
+    }
+    for (const op of ins.ops) {
+      const reg = op.includes('(') ? parseMem(op).base : op;
+      if (isReg(reg)) {
+        named.add(reg);
+      }
+    }
+  }
+  return saved;
+}
 
 /** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
  *  (0 before the frame push, -N after `stwu r1,-N(r1)`), or why it is not known there.
@@ -460,6 +531,56 @@ function r1Displacements(blocks: PpcBlock[], succIdx: number[][]): Map<Instr, nu
     }
     for (const s of succIdx[bi]) {
       if (meet(s, d)) {
+        work.push(s);
+      }
+    }
+  }
+  return at;
+}
+
+/** THE LINK REGISTER, per instruction that needs the return address in it: the `bl` that may have
+ *  overwritten it on some path from the entry, with no `mtlr` since. Absent where every path still
+ *  carries the return address, or one an `mtlr` put back.
+ *
+ *  Asked of two readers, about different writers:
+ *  - an `mflr`, after ANY `bl`. Its copy is taken as the return address (`return-address` in
+ *    `nonValues`), and after a `bl` it is the address that follows the `bl` instead.
+ *  - a return (`blr`, or a conditional one, which jumps through it), after a `bl` into a register
+ *    SAVE ROUTINE only. This frontend erases that call (`saveRoutine`) on the premise that it
+ *    overwrites only a link register already copied out, and this is what checks the premise. An
+ *    ordinary call lifts as a call, and claims nothing about the link register.
+ *  No compiler emits either violation; hand-written asm can. */
+function linkRegisterOverwrites(
+  blocks: PpcBlock[],
+  succIdx: number[][],
+  isRoutine: (ins: Instr) => boolean,
+): Map<Instr, Instr> {
+  const at = new Map<Instr, Instr>();
+  type Lr = { any: Instr | null; routine: Instr | null };
+  const into: Array<Lr | undefined> = blocks.map(() => undefined);
+  into[0] = { any: null, routine: null };
+  const work = [0];
+  while (work.length) {
+    const bi = work.pop()!;
+    let { any, routine } = into[bi]!;
+    for (const ins of [...blocks[bi].body, ...(blocks[bi].branch ? [blocks[bi].branch] : [])]) {
+      const by = ins.mnemonic === 'mflr' ? any : isReturn(ins) || isCondReturn(ins) ? routine : null;
+      if (by !== null) {
+        at.set(ins, by);
+      }
+      if (ins.mnemonic === 'bl') {
+        any = ins;
+        routine = isRoutine(ins) ? ins : routine;
+      } else if (ins.mnemonic === 'mtlr') {
+        any = routine = null;
+      }
+    }
+    for (const s of succIdx[bi]) {
+      // MAY: one path that overwrote it is enough; the `bl` named is the last one on the first such path.
+      const old = into[s];
+      const next = { any: old?.any ?? any, routine: old?.routine ?? routine };
+      if (old === undefined || next.any !== old.any || next.routine !== old.routine) {
+        into[s] = next;
         work.push(s);
       }
     }
@@ -554,6 +675,7 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  const savedRegs = prologueSavedRegs(blocks[0].body, target);
   // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
   // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
   // of it becomes the entry, and its live-ins are the function's parameters (frontend/ssa.ts
@@ -565,6 +687,7 @@ export function lift(
   }
 
   const r1At = r1Displacements(blocks, succIdx);
+  const lrOverwrittenBy = linkRegisterOverwrites(blocks, succIdx, (ins) => Boolean(saveRoutineOf(target, ins)));
 
   const preds: number[][] = blocks.map(() => []);
   blocks.forEach((_, i) => {
@@ -580,12 +703,22 @@ export function lift(
   // handed to one in f1 — would resolve to a value the callee overwrote or be dropped. Both scans
   // read the blocks the entry reaches: a `bl` on no path makes no call.
   const reached = blocks.flatMap((b) => b.body);
-  const callInsn = reached.find((ins) => ins.mnemonic === 'bl');
+  // A register save routine is no call: it moves only the registers it saves (`saveRoutine`).
+  const callInsn = reached.find((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
   const floatReturn = writesFloatReturn(reached, FP_ARITH_MNEMONICS, (t) => (isFpKey(t) ? t : null), fpu);
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
-    isFpKey(k) ? (fpType ?? T.f32()) : undefined,
+  // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
+  // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
+  // ABI lets a callee use unsaved, is an uninitialised local. `registerLiveIns` (frontend/ssa.ts)
+  // composes it, as it does for Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
+  // the treatment a target claiming no partition gets.
+  const ssa = makeSsaBuilder(
+    name,
+    blocks.length,
+    preds,
+    () => registerLiveIns(target, savedRegs),
+    (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   /** This frontend's refusal, for the shared code that refuses on its behalf. */
@@ -622,14 +755,118 @@ export function lift(
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
-  const readReg = (r: string, at: number): Value => highHalves.guardRead(name, r, readVar(r, at));
-  /** The return address `mflr rD` copies out of the link register, per value standing for one, with
-   *  the address of the `mflr`. Like a high half it is a definition and not a value: storing it to
-   *  the link register's save word is the LR save (`frameStore`), and moving it back with `mtlr` is
-   *  the return. Any other use is a function reading its own return address (MP4's
-   *  `asm { mflr retaddr }` does, to tag an allocation with its caller), which no C expression
-   *  spells, so that use refuses: a store at once, anything else once the function is built. */
-  const returnAddresses = new Map<Value, number>();
+  const readReg = (r: string, at: number): Value => {
+    if (SMALL_DATA_BASES.includes(r)) {
+      fail(
+        `cannot lift '${name}': ${r} (the small-data base) used as data — an access the relocation ` +
+          `does not name is not modelled`,
+      );
+    }
+    const v = highHalves.guardRead(name, r, readVar(r, at));
+    const nv = nonValues.get(v);
+    if (nv !== undefined && NON_VALUE_RULES[nv.kind].refuseAtRead) {
+      refuseNonValue(nv);
+    }
+    return v;
+  };
+  /** Reading r1 (the stack pointer) as a DATA operand means frame-pointer arithmetic or an
+   *  address-taken local (`addi r3,r1,8` = `&local`) — not modellable without a stack abstraction,
+   *  and fabricating a value for r1 silently miscompiles. */
+  const r1AsData = (): never =>
+    fail(
+      `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
+    );
+  /** An `mflr` or a return reached by a `bl` with no `mtlr` since (`linkRegisterOverwrites`): what
+   *  the link register holds there is the address after that `bl`, not this function's return
+   *  address. */
+  const refuseOverwrittenLink = (ins: Instr) => {
+    const by = lrOverwrittenBy.get(ins);
+    if (by !== undefined) {
+      fail(
+        `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reads the link register the ` +
+          `'bl' at 0x${by.addr.toString(16)} overwrote on some path, with no 'mtlr' since — the return address ` +
+          `is lost there`,
+      );
+    }
+  };
+  /** DEFINITIONS THAT ARE NOT VALUES: the frame bookkeeping this frontend erases. Each kind is
+   *  written into a register as an ordinary SSA definition, so SSA answers whether one reaches a use,
+   *  and is keyed by that value, as the high halves are (frontend/high-half.ts). Its one legitimate
+   *  consumer looks it up here; every other use refuses through `refuseNonValue`,
+   *  checked at a read (`readReg`) where the kind says so and, always, on the finished function
+   *  (`assertNoNonValueEscaped`), because a use can reach through a join's incoming arguments, which
+   *  no read sees. A new kind is one more member of the union, one rule and one refusal, and the
+   *  three checks cover it. The high halves keep their own module only because MIPS shares it.
+   *
+   *  - `frame-address`: what `addi r11,r1,N` forms — its offset from the entry r1 (or why that is not
+   *    known there) and the address of the `addi`. Its one consumer is a register save or restore
+   *    routine (`saveRoutineOf`), which takes it in the target's `registerSaveRoutines.frameReg`, so
+   *    that register is the only destination deferred; every other `addi rD,r1,N` refuses where it
+   *    stands. Any other use is the frame read as data, and refuses as the `addi` itself would. One
+   *    no routine took refuses too, even where nothing reads it (`assertNonValuesConsumed`): a `bl`
+   *    to the routine that carries no relocation (a linked image, or objdump without `-r`) is lowered
+   *    as an ordinary call, which never reads r11 and destroys the registers the routine preserves.
+   *  - `restored`: the caller's value a restore puts back in a callee-saved register
+   *    (`restoreFrom`). No C value names it, so it has no consumer.
+   *  - `return-address`: what `mflr rD` copies out of the link register, with the address of the
+   *    `mflr`. Storing it to the link register's save word is the LR save (`frameStore`), and moving
+   *    it back with `mtlr` is the return. Any other use is a function reading its own return address
+   *    (MP4's `asm { mflr retaddr }` does, to tag an allocation with its caller), which no C
+   *    expression spells: a store elsewhere refuses at once, anything else once the function is
+   *    built. A read alone does not refuse, so a copy (`mr`) still carries it to its save. */
+  type NonValue =
+    | { kind: 'frame-address'; off: number | string; addr: number }
+    | { kind: 'restored'; reg: string; addr: number }
+    | { kind: 'return-address'; addr: number };
+  const NON_VALUE_RULES: Record<NonValue['kind'], { refuseAtRead: boolean; mustBeConsumed: boolean }> = {
+    'frame-address': { refuseAtRead: true, mustBeConsumed: true },
+    restored: { refuseAtRead: true, mustBeConsumed: false },
+    'return-address': { refuseAtRead: false, mustBeConsumed: false },
+  };
+  const nonValues = new Map<Value, NonValue>();
+  /** The non-values their consumer took (only `frame-address` has one that must). */
+  const consumedNonValues = new Set<Value>();
+  /** The non-value of kind `k` that `v` stands for, or undefined. */
+  const nonValueOf = <K extends NonValue['kind']>(v: Value, k: K): Extract<NonValue, { kind: K }> | undefined => {
+    const nv = nonValues.get(v);
+    return nv?.kind === k ? (nv as Extract<NonValue, { kind: K }>) : undefined;
+  };
+  const refuseNonValue = (nv: NonValue): never => {
+    switch (nv.kind) {
+      case 'frame-address':
+        return r1AsData();
+      case 'restored':
+        return fail(
+          `cannot lift '${name}': ${nv.reg} is read after the restore at 0x${nv.addr.toString(16)} put the ` +
+            `caller's ${nv.reg} back — no C value names it`,
+        );
+      case 'return-address':
+        return fail(
+          `cannot lift '${name}': the return address the 'mflr' at 0x${nv.addr.toString(16)} ` +
+            `copies out is used as a value — a function reading its own return address has no C spelling`,
+        );
+    }
+  };
+  /** Checked on the finished function, after `finish` pruned the joins nothing reads. */
+  const assertNoNonValueEscaped = (fnBlocks: Block[]) => {
+    for (const b of fnBlocks) {
+      for (const op of b.ops) {
+        for (const v of [...op.operands, ...op.successors.flatMap((s) => s.args)]) {
+          const nv = nonValues.get(v);
+          if (nv !== undefined) {
+            refuseNonValue(nv);
+          }
+        }
+      }
+    }
+  };
+  const assertNonValuesConsumed = () => {
+    for (const [v, nv] of nonValues) {
+      if (NON_VALUE_RULES[nv.kind].mustBeConsumed && !consumedNonValues.has(v)) {
+        refuseNonValue(nv);
+      }
+    }
+  };
   const RET = target.returnReg;
   const ARG_REGS = target.argRegs;
 
@@ -638,9 +875,15 @@ export function lift(
   //
   // A SAVE holds an entry value that is no C value: a callee-saved register's, the link register's
   // word, or the back chain the frame push stores (the caller's r1). Nothing but the caller reads it
-  // back, so its restore — a load into the register it was saved from — is dropped, and a load into
-  // any other register refuses. Function-scoped, so a save in the prologue matches a restore in any
-  // epilogue.
+  // back. Its restore — a load into the register it was saved from — puts the caller's value back,
+  // which no C value names, so a read of the register after it refuses (`restored` in
+  // `nonValues`); a load into any other register refuses at once. Function-scoped, so a save in the
+  // prologue matches a restore in any epilogue.
+  //
+  // ONE SAVE AND ONE RESTORE, whichever instruction does it: `stmw`/`lmw`, a single `stw`/`lwz`
+  // and a register save routine all go through `saveInto` and `restoreFrom`. A single `stw` is the
+  // one save that may also be a spill: of a register this function already wrote, it stores a
+  // value. A `stmw` or a routine has no such reading, and saving a written register refuses.
   //
   // Every other word store is a VALUE — an argument's home, or a live value spilled — and it is the
   // shared stack-slot variable (`stackSlotKey`, frontend/ssa.ts) MIPS and Thumb use. A reload into
@@ -711,15 +954,11 @@ export function lift(
     // `lastDef` is the value most recently written to a register in this instruction — used to
     // wire a record-form op's implicit cr0 side effect (see the `rc` handling in `decode`).
     let lastDef: Value | null = null;
-    // Reading r1 (the stack pointer) as a DATA operand means frame-pointer arithmetic or an
-    // address-taken local (`addi r3,r1,8` = `&local`) — not modellable without a stack abstraction,
-    // and fabricating a value for r1 silently miscompiles. Fail LOUD. (Frame bookkeeping never
-    // reaches here: stwu / addi r1 / mflr / mtlr / r1-relative spills are handled before `read`.)
+    // r1 read as data fails LOUD (`r1AsData`). Frame bookkeeping never reaches here: stwu / addi r1
+    // / mflr / mtlr / r1-relative spills / the save routines' frame address are handled before `read`.
     const read = (r: string): Value => {
       if (r === 'r1') {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
-        );
+        r1AsData();
       }
       return readReg(r, bi);
     };
@@ -740,6 +979,45 @@ export function lift(
         );
       }
     };
+    /** The instruction a save or restore refusal names. */
+    const site = (ins: Instr) =>
+      `the '${ins.mnemonic}'${ins.mnemonic === 'bl' && ins.reloc ? ` to '${ins.reloc.sym}'` : ''} at 0x${ins.addr.toString(16)}`;
+    /** Save `reg`'s entry value into the save slot at entry offset `off`, named `mem` in `ins`. */
+    const saveInto = (ins: Instr, reg: string, off: number, mem: string) => {
+      if (ssa.hasReachingDef(reg, bi)) {
+        // A read leaves a definition too: the entry value, as a parameter, since `prologueSavedRegs`
+        // does not count a save after a read.
+        throw new PpcUnsupportedError(
+          ssa.hasReachingDef(reg, bi, (v) => !paramReg.has(v))
+            ? `cannot lift '${name}': ${site(ins)} saves ${reg} after this function wrote it, so '${mem}' holds a ` +
+                `value, not the caller's ${reg}`
+            : `cannot lift '${name}': ${site(ins)} saves ${reg} after this function read it — a value handed ` +
+                `over in a register no argument is passed in, which a compiled prologue saves before any use`,
+        );
+      }
+      refuseMixedSlot(ins, mem, off, 'save');
+      saveSlots.set(off, reg);
+    };
+    /** Restore `reg` from the save slot at `off`: it must be the slot `reg` was saved into, and `reg`
+     *  then holds the caller's value again. r1 is no SSA register: its reload is the back chain the
+     *  frame push stored, and `r1Displacements` tracks it instead. */
+    const restoreFrom = (ins: Instr, reg: string, off: number, mem: string) => {
+      const saved = saveSlots.get(off);
+      if (saved !== reg) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': reload of '${mem}' into ${reg}, ` +
+            (saved === undefined
+              ? `a word nothing saved it into (${site(ins)})`
+              : `a slot ${saved} was saved into — the word holds the caller's ${saved}, which no C value ` +
+                `names (${site(ins)})`),
+        );
+      }
+      if (reg !== 'r1') {
+        const caller = mkValue(T.unk(32));
+        nonValues.set(caller, { kind: 'restored', reg, addr: ins.addr });
+        writeVar(reg, bi, caller);
+      }
+    };
     // A word store/load based on r1: a SAVE or a VALUE slot (see `saveSlots` above). Returns false
     // for any other base, which is ordinary memory.
     const frameStore = (ins: Instr, srcReg: string, mem: string): boolean => {
@@ -752,8 +1030,9 @@ export function lift(
       // save word, 4 bytes above the entry r1. Anywhere else the word is a value — past the push,
       // 8 bytes up is the callee's parameter area, where it is a ninth argument — and a register
       // holding the return address on some paths and another value on others is not a save at all.
-      if (ssa.hasReachingDef(srcReg, bi, (v) => returnAddresses.has(v))) {
-        const mixed = ssa.hasReachingDef(srcReg, bi, (v) => !returnAddresses.has(v));
+      const isReturnAddress = (v: Value) => nonValueOf(v, 'return-address') !== undefined;
+      if (ssa.hasReachingDef(srcReg, bi, isReturnAddress)) {
+        const mixed = ssa.hasReachingDef(srcReg, bi, (v) => !isReturnAddress(v));
         if (mixed || off !== LR_SAVE_WORD) {
           throw new PpcUnsupportedError(
             `cannot lift '${name}': the store to '${mem}' at 0x${ins.addr.toString(16)} is not the link ` +
@@ -772,8 +1051,7 @@ export function lift(
       // Any other save stores what the register held at entry: nothing defined it on any path. An
       // argument register nothing defined holds the argument, which is a value.
       if (!isArg && !ssa.hasReachingDef(srcReg, bi)) {
-        refuseMixedSlot(ins, mem, off, 'save');
-        saveSlots.set(off, srcReg);
+        saveInto(ins, srcReg, off, mem);
         return true;
       }
       refuseMixedSlot(ins, mem, off, 'value');
@@ -790,15 +1068,9 @@ export function lift(
         return false;
       }
       const off = entryOffset(ins, mem);
-      const saved = saveSlots.get(off);
-      if (saved === dstReg) {
+      if (saveSlots.has(off)) {
+        restoreFrom(ins, dstReg, off, mem);
         return true;
-      }
-      if (saved !== undefined) {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': reload of '${mem}' into ${dstReg}, a slot ${saved} was saved into — the ` +
-            `word holds the caller's ${saved}, which no C value names`,
-        );
       }
       const slot = valueSlots.get(off);
       if (slot === undefined || !ssa.hasReachingDef(stackSlotKey(off), bi)) {
@@ -813,6 +1085,56 @@ export function lift(
     const write = (r: string, v: Value) => {
       writeVar(r, bi, v);
       lastDef = v;
+    };
+    // A `bl` into a register save or restore routine is frame bookkeeping, not a call: it writes no
+    // register this function reads (only the link register, already copied out — which
+    // `linkRegisterOverwrites` checks), so nothing is destroyed and r0 keeps the return address
+    // `mflr` put there. A SAVE records a save slot per word, at the routine's fixed offsets below the
+    // frame address in r11; a RESTORE must find the same register in every word it reloads. It
+    // refuses where:
+    //   • r11 does not hold one frame address on every path into the call, or a call destroyed it on
+    //     the way (`useOutsideOps`; and a frame address no routine takes refuses at the end of `lift`);
+    //   • r1's displacement at the `addi` is not known, so no slot can be named;
+    //   • the routine's number is outside r14..r31 (no such runtime routine);
+    //   • it moves floating-point registers (named, not modelled);
+    //   • a register it saves was written or read first, or a word it restores was not saved from
+    //     that register — `saveInto` and `restoreFrom`, the rules every save and restore keeps.
+    const saveRoutine = (ins: Instr, r: NonNullable<ReturnType<typeof saveRoutineOf>>) => {
+      const at = `the 'bl' to '${r.sym}' at 0x${ins.addr.toString(16)}`;
+      if (r.first < 14 || r.first > 31 || ins.reloc!.addend !== 0) {
+        throw new PpcUnsupportedError(`cannot lift '${name}': ${at} names no register save routine of the runtime`);
+      }
+      // The FPR half is named and refused. Every compiled function that calls it (doubles live
+      // across a call, a 24-float leaf; 2.4.2 and 2.4.7 at -O4,p, 2.3.3 at -O4,s) already declines
+      // on the unmodelled `stfd`/`lfd` or on a float live across a call, and no row calls it, so a
+      // model of its 8-byte slots would be a model no lift has checked.
+      if (r.fpr) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${at} saves or restores floating-point registers — not modelled`,
+        );
+      }
+      const fr = target.registerSaveRoutines!.frameReg;
+      const base = ssa.hasReachingDef(fr, bi, (v) => !nonValueOf(v, 'frame-address')) ? undefined : readVar(fr, bi);
+      const frame = base === undefined ? undefined : nonValueOf(base, 'frame-address');
+      if (frame === undefined) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${at} does not find one frame address ('addi ${fr},r1,N') in ${fr} on every path`,
+        );
+      }
+      consumedNonValues.add(base!);
+      // If a call between the `addi` and here destroyed r11, the routine would store through what the
+      // callee left there: the builder refuses that read once it knows it was used.
+      ssa.useOutsideOps(base!, bi);
+      if (typeof frame.off !== 'number') {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${at} saves below the frame address formed at 0x${frame.addr.toString(16)}, where ` +
+            `the stack pointer's offset from its entry value is not known: ${frame.off}`,
+        );
+      }
+      for (let k = r.first; k <= 31; k++) {
+        const disp = -4 * (32 - k);
+        (r.restore ? restoreFrom : saveInto)(ins, `r${k}`, frame.off + disp, `${disp}(${fr})`);
+      }
     };
     // Shared emitter kit (frontend/emit.ts) — the ISA-specific readers/guards stay above.
     const kit = mkEmitKit(ops, write);
@@ -1022,6 +1344,11 @@ export function lift(
         // and it has a reaching definition all the same.
         case 'bl': {
           relocTaken = ins.reloc?.type === 'R_PPC_REL24';
+          const routine = saveRoutineOf(target, ins);
+          if (routine) {
+            saveRoutine(ins, routine);
+            break;
+          }
           const sym = ins.reloc?.sym ?? 'func';
           calls.lower({
             callee: sym,
@@ -1081,7 +1408,8 @@ export function lift(
           break;
         }
         // Stack-frame + link-register bookkeeping. `stwu r1,-N(r1)` / `addi r1,r1,N` adjust the frame
-        // pointer; `mflr` copies the return address out (`returnAddresses`) and `mtlr` puts it back.
+        // pointer; `mflr` copies the return address out (a `return-address` in `nonValues`) and `mtlr`
+        // puts it back.
         // A word store or load on r1 is a save or a value slot (`frameStore`/`frameLoad`); `stmw`
         // records save slots.
         // The GENERAL form `stwu rS,D(rA)` (base ≠ r1) is a real store-with-BASE-UPDATE
@@ -1108,8 +1436,9 @@ export function lift(
             `cannot lift '${name}': stwu with update on ${parseMem(s).base} (store-with-base-update) not modelled`,
           );
         case 'mflr': {
+          refuseOverwrittenLink(ins);
           const lr = mkValue(T.unk(32));
-          returnAddresses.set(lr, ins.addr);
+          nonValues.set(lr, { kind: 'return-address', addr: ins.addr });
           write(d, lr);
           break;
         }
@@ -1124,9 +1453,10 @@ export function lift(
           break;
         case 'stmw':
           if (parseMem(s).base === 'r1') {
-            for (const slot of frameRange(d, entryOffset(ins, s))) {
-              refuseMixedSlot(ins, s, slot.off, 'save');
-              saveSlots.set(slot.off, slot.reg);
+            const off = entryOffset(ins, s);
+            const depth = off - parseMem(s).off;
+            for (const slot of frameRange(d, off)) {
+              saveInto(ins, slot.reg, slot.off, `${slot.off - depth}(r1)`);
             }
             break;
           }
@@ -1209,6 +1539,17 @@ export function lift(
                   `adjust — an address built in r1 is not a shape this frontend models`,
               );
             }
+            break;
+          }
+          if (mnem === 'addi' && d === target.registerSaveRoutines?.frameReg && s === 'r1' && !ins.reloc) {
+            const v = mkValue(T.unk(32));
+            const depth = r1At.get(ins);
+            nonValues.set(v, {
+              kind: 'frame-address',
+              off: typeof depth === 'number' ? depth + parseImm(t) : (depth ?? 'the instruction is unreachable'),
+              addr: ins.addr,
+            });
+            write(d, v);
             break;
           }
           // `addi rD,rHi,SYM@l` completes the address a `lis` began: rD = &SYM (+ the relocation's
@@ -1608,6 +1949,9 @@ export function lift(
       ops.push(mkOp('cond_br', { operands: [cond], successors: succIdx[bi].map((j) => succ(j)) }));
       return;
     }
+    if (br && (isReturn(br) || isCondReturn(br))) {
+      refuseOverwrittenLink(br);
+    }
     if (br && (isCond(br) || isCondReturn(br))) {
       const base = isCondReturn(br) ? condReturnBase(br)! : br.mnemonic;
       // The branch names its cr field as the first operand when not cr0.
@@ -1632,6 +1976,16 @@ export function lift(
       if (!br && succIdx[bi].length) {
         ops.push(mkOp('br', { attrs: { fallthrough: true }, successors: [succ(succIdx[bi][0])] }));
         return;
+      }
+      // A LAST block with no terminator runs off the end of the text: the input stops before the
+      // function does (a dump split at a foreign label, a hand-supplied fragment), and what
+      // follows is unknown. Lifting it as a return invents one. Thumb refuses the same way.
+      if (!br) {
+        const last = b.body[b.body.length - 1];
+        fail(
+          `cannot lift '${name}': control falls off the end (the block at 0x${b.startAddr.toString(16)} has no ` +
+            `terminator and no successor${last ? `; its last instruction is at 0x${last.addr.toString(16)}` : ''})`,
+        );
       }
       ops.push(mkOp('ret', { operands: returnOperands(bi) }));
       return;
@@ -1664,19 +2018,9 @@ export function lift(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
-  // Checked on the finished function, after `finish` pruned the joins nothing reads, because a
-  // return address reaches a use through a join's incoming arguments as well as directly.
-  for (const b of irBlocks) {
-    for (const op of b.ops) {
-      const lr = [...op.operands, ...op.successors.flatMap((s) => s.args)].find((v) => returnAddresses.has(v));
-      if (lr !== undefined) {
-        throw new PpcUnsupportedError(
-          `cannot lift '${name}': the return address the 'mflr' at 0x${returnAddresses.get(lr)!.toString(16)} ` +
-            `copies out is used as a value — a function reading its own return address has no C spelling`,
-        );
-      }
-    }
-  }
+  // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
+  assertNoNonValueEscaped(irBlocks);
+  assertNonValuesConsumed();
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();
