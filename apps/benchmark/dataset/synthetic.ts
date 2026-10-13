@@ -9481,6 +9481,28 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void g1(s32 x); s32 inasgn(s32 a, s32 b, s32 c, s32 d, s32 e);',
     proto: { g1: { params: ['s32'], returnsVoid: true } },
   },
+  // A VOLATILE STRUCT GLOBAL ONLY THE DECLARATION CONTEXT DESCRIBES, polled in a loop: no `symbols`,
+  // so the ctx is the only channel that says `gV` is a struct and that it is volatile. Read
+  // through a cast (`*(T *)&gV`, the aggregate spelling), the read must carry the qualifier, or every
+  // compiler here loads `gV.a` once and spins on the register; spelled bare (`gV == 0`) it does not
+  // compile against the struct. `volpollb` reads the member at byte 2, which takes a subscript on
+  // the cast rather than a dereference.
+  {
+    sym: 'volpoll',
+    src: 'struct V { u16 a; u16 b; };\nextern volatile struct V gV;\nvoid volpoll(void){ while (gV.a == 0) ; }',
+    features: ['global', 'struct', 'loop'],
+    toolchains: ALL,
+    ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V gV; void volpoll(void);',
+    proto: { volpoll: { returnsVoid: true } },
+  },
+  {
+    sym: 'volpollb',
+    src: 'struct V { u16 a; u16 b; };\nextern volatile struct V gV;\nvoid volpollb(void){ while (gV.b == 0) ; }',
+    features: ['global', 'struct', 'loop'],
+    toolchains: ALL,
+    ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V gV; void volpollb(void);',
+    proto: { volpollb: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
