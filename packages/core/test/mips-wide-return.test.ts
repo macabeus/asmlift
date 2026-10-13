@@ -29,7 +29,7 @@ const lift =
   () =>
     src(...args);
 
-const WIDE = /may hand back a 64-bit value in v0:v1/;
+const WIDE = /may hand back the halves of a 64-bit pair in v0:v1/;
 
 // `long long f(int a, int b, int c, int d, long long e) { return e; }` at gcc2.7.2kmc
 const RETURN_E = ['0:\tlw\tv0,16(sp)', '4:\tjr\tra', '8:\tlw\tv1,20(sp)'];

@@ -1996,8 +1996,9 @@ function liftOnce(
       // fits a word. Modelling the pair is the capability this stands in for.
       if (returnsWord && !ownReturnFitsAWord && v1MayHoldLowWord(blocks, preds, bi)) {
         throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the return at 0x${br.addr.toString(16)} may hand back a 64-bit value in v0:v1 ` +
-            '(v1 is written for it and nothing declares a word-wide return), and a 64-bit return is not modelled',
+          `cannot lift '${name}': the return at 0x${br.addr.toString(16)} may hand back the halves of a 64-bit pair ` +
+            'in v0:v1 (v1 is written for the caller, and nothing declares a return no wider than a word), and this ' +
+            'lowering returns one word',
         );
       }
       const retOps = floatReturn ? [read(fpu!.returnReg)] : returnsWord ? [readVar(RET, bi)] : [];
