@@ -8,6 +8,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
+import { measureO32Frame } from '../src/frontend/mips';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
@@ -400,5 +401,44 @@ describe('a frame word that is not a local refuses', () => {
       compilerBehaviors: { ...MIPS_GCC.compilerBehaviors, o32LocalArea: undefined },
     };
     expect(lift(ESCARR_GCC, [[8, 'R_MIPS_26', 'fill']], bare)).toThrow(/stack pointer used as data/);
+  });
+});
+
+describe('the outgoing extent is computed only where every call can be sized', () => {
+  // `int fp5(F5 fp, int x){ int a[2]; fill(a); return fp(1,2,3,4,x) + a[0]; }` at gcc2.7.2kmc
+  // stages x at sp+16 for the `jalr` and keeps `a` at sp+24. Read off the `jal` callees alone the
+  // area would start at sp+16, over the staged word; the call through a register refuses where
+  // the number is computed. (Its lowering refuses `jalr` too today; this holds when it no longer does.)
+  const ins = (addr: number, text: string) => {
+    const [mnemonic, rest = ''] = text.split('\t');
+    return { addr, mnemonic, ops: rest === '' ? [] : rest.split(',') };
+  };
+  const code = [
+    ins(0x0, 'addiu\tsp,sp,-40'),
+    ins(0x4, 'sw\tra,36(sp)'),
+    ins(0x8, 'addiu\ta0,sp,24'),
+    ins(0xc, 'jal\t0'),
+    ins(0x10, 'sw\ts0,16(sp)'),
+    ins(0x14, 'jalr\tt9'),
+  ];
+  const measure = (calls: typeof code) =>
+    measureO32Frame({
+      name: 'f',
+      code: calls,
+      entry: calls.slice(0, 2),
+      depthAt: new Map(calls.map((i, k) => [i, k === 0 ? 0 : 40])),
+      frameSize: 40,
+      rule: 'above-outgoing-area',
+      outgoingEnd: () => 16,
+      savedByCallee: (r) => r === 'ra' || /^s\d$/.test(r),
+      splat: false,
+    });
+
+  test('a `jalr` refuses', () => {
+    expect(() => measure(code)).toThrow(/the call 'jalr' at 0x14 has no declaration to size its stack words by/);
+  });
+
+  test('without it the area is drawn from the declared callees', () => {
+    expect(measure(code.slice(0, 5))?.area.from).toBe(16);
   });
 });

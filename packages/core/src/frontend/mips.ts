@@ -246,14 +246,17 @@ const SOURCE_FIRST = /^(s[bhwd]|sw[lr]|sc|s[wd]c1|b\w*|j|jr|mult|multu|div|divu|
  *  past as though r still held what came before, so the default is the answer that stops them. A
  *  call writes `ra`, whatever it names first (`jal f`, and `jalr rs` with the implicit `ra`). */
 const writtenReg = (ins: Instr): string | null => {
-  if (ins.mnemonic === 'jal' || ins.mnemonic === 'bal' || ins.mnemonic === 'bgezal' || ins.mnemonic === 'bltzal') {
-    return 'ra';
-  }
   if (ins.mnemonic === 'jalr') {
     return ins.ops.length > 1 ? ins.ops[0] : 'ra';
   }
+  if (isCallInstr(ins)) {
+    return 'ra';
+  }
   return SOURCE_FIRST.test(ins.mnemonic) || !isMipsReg(ins.ops[0]) ? null : ins.ops[0];
 };
+
+/** A call: every instruction that links into `ra` — `jal`, `jalr`, and the linking branches. */
+const isCallInstr = (ins: Instr) => /^(jal|jalr|bal|bgezall?|bltzall?)$/.test(ins.mnemonic);
 
 /** The register a register COPY reads — `move rD,rS`, or `addu`/`add`/`or` with `zero` beside it,
  *  which is how Splat and IDO spell the same move — or undefined for any other instruction. */
@@ -521,7 +524,6 @@ function checkDelaySlots(name: string, instrs: Instr[]): void {
  *  before it. The entry ends the backward walk, since what v1 held there is no value this
  *  function computed. */
 function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonly number[])[], bi: number): boolean {
-  const isCall = (ins: Instr) => /^(jal|jalr|bal|bgezal|bltzal)$/.test(ins.mnemonic);
   const readsV1 = (ins: Instr) => {
     const dest = writtenReg(ins) !== null && writtenReg(ins) === ins.ops[0];
     return ins.ops.some((o, k) => !(dest && k === 0) && (o === 'v1' || /\(v1\)$/.test(o)));
@@ -530,7 +532,7 @@ function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonl
   const runs = blocks.map((b) => {
     const seq = [...b.body, ...(b.branch ? [b.branch] : []), ...(b.delay ? [b.delay] : [])];
     for (let k = 0; k + 1 < seq.length; k++) {
-      if (isCall(seq[k])) {
+      if (isCallInstr(seq[k])) {
         [seq[k], seq[k + 1]] = [seq[k + 1], seq[k]];
         k++;
       }
@@ -550,7 +552,7 @@ function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonl
         if (readsV1(ins)) {
           readers.push(ins);
         }
-        if (isCall(ins) || writtenReg(ins) === 'v1') {
+        if (isCallInstr(ins) || writtenReg(ins) === 'v1') {
           return;
         }
         srcWritten ||= src !== undefined && writtenReg(ins) === src;
@@ -589,7 +591,7 @@ function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonl
   const back = (at: number, end: number): boolean => {
     for (let k = end - 1; k >= 0; k--) {
       const ins = runs[at][k];
-      if (isCall(ins)) {
+      if (isCallInstr(ins)) {
         return false;
       }
       if (writtenReg(ins) === 'v1') {
@@ -1037,6 +1039,7 @@ function liftOnce(
   // sp-as-data refusal.
   const code = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]);
   const frame = measureO32Frame({
+    name,
     code,
     entry: [...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])],
     depthAt,
@@ -2108,9 +2111,14 @@ function takesFrameAddress(ins: Instr): boolean {
  *
  *  The outgoing area ends past the widest call's stack words, read off each callee's declaration
  *  (`outgoingEnd`); an undeclared callee counts as taking none, and its lowering refuses a guess
- *  that fills a0..a3. The saves are the prologue's: a store of `ra` or a callee-saved register in
- *  the entry block before anything writes it. */
-function measureO32Frame({
+ *  that fills a0..a3. A CALL NO DECLARATION CAN SIZE — through a register (`jalr`) or a linking
+ *  branch — refuses here, where the number is computed, rather than relying on its own lowering
+ *  to refuse it: gcc stages `fp(1, 2, 3, 4, x)`'s fifth word at sp+16 and puts the local at sp+24,
+ *  so an extent read without that call would draw the area over the staged word. The saves are
+ *  the prologue's: a store of `ra` or a callee-saved register in the entry block before anything
+ *  writes it. */
+export function measureO32Frame({
+  name,
   code,
   entry,
   depthAt,
@@ -2120,6 +2128,7 @@ function measureO32Frame({
   savedByCallee,
   splat,
 }: {
+  name: string;
   code: readonly Instr[];
   entry: readonly Instr[];
   depthAt: ReadonlyMap<Instr, number> | null;
@@ -2135,6 +2144,14 @@ function measureO32Frame({
   }
   if (captures.some((ins) => depthAt.get(ins) !== frameSize)) {
     return null;
+  }
+  const unsized = code.find((ins) => isCallInstr(ins) && ins.mnemonic !== 'jal');
+  if (unsized !== undefined) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': outgoing stack arguments not modelled — the call '${unsized.mnemonic}' at ` +
+        `0x${unsized.addr.toString(16)} has no declaration to size its stack words by, in a frame whose local ` +
+        'area holds a captured address',
+    );
   }
   const written = new Set<string>();
   const saves: number[] = [];
