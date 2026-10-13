@@ -427,6 +427,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(() => dis('stwxframe', '0:\tstwx    r3,r1,r4\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
     expect(() => dis('lwzxindex', '0:\tlwzx    r3,r4,r1\n4:\tblr\n')).toThrow(/stack pointer r1 used as data/);
   });
+  test('a small-data base read as data refuses instead of becoming a parameter', () => {
+    // mwcc 2.4.7 indexes `playerOrderNew[j - 1]` with `lbzx r0,r3,r13` (MP4 `OrderPlayers`). r13 has
+    // no definition here, so the builder would read it as an invented argument: `s32 f(s32 a0, s32 a1)`.
+    expect(() => dis('sdaidx', '0:\tlbzx    r3,r3,r13\n4:\tblr\n')).toThrow(/r13 \(the small-data base\) used as data/);
+    expect(() => dis('sda2base', '0:\tlwz     r3,8(r2)\n4:\tblr\n')).toThrow(/r2 \(the small-data base\) used as data/);
+  });
   // A word stored to the frame with a VALUE is a stack-slot variable, as on MIPS and Thumb: a
   // reload into any register reads it back, whichever register stored it.
   test('a live value spilled to the frame is read back by its reload', () => {

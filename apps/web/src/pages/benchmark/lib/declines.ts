@@ -265,10 +265,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /MIPS calls not yet modelled/,
   },
   {
-    // Three sites spell this one gap: a surviving `gp` read (`mips.ts` `gp used as data`), a
-    // relocation operand the Splat reader cannot resolve (`splat.ts` `small-data / PIC data
-    // access`), and a memory base that is not a register (`ppc.ts` `SDA/global-relative`). The PPC
-    // one is narrower than its wording: since #221 an SDA access that CARRIES its relocation lifts,
+    // Four sites spell this one gap: a surviving `gp` read (`mips.ts` `gp used as data`), its PPC
+    // twin, r13 or r2 read as a value (`ppc.ts` `the small-data base) used as data`), a relocation
+    // operand the Splat reader cannot resolve (`splat.ts` `small-data / PIC data access`), and a
+    // memory base that is not a register (`ppc.ts` `SDA/global-relative`). That last PPC one is
+    // narrower than its wording: since #221 an SDA access that CARRIES its relocation lifts,
     // so what still reaches the throw is the `0(0)` placeholder with no relocation behind it — and
     // the two ppc.ts refusals for an SDA relocation whose operand or immediate is NOT that
     // placeholder are the same capability. Its one corpus inhabitant is `synthetic:tax_gprel`,
@@ -284,7 +285,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // `SDA/global-relative` sits about 81 characters past the function name, so a long C++ name
     // pushes it past the 200-character cap this file opens with.
     pattern:
-      /gp used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
+      /gp used as data|small-data base\) used as data|small-data \/ PIC data access|non-register memory base|SDA\/global-relative|carries a small-data relocation/,
   },
   {
     key: 'float',

@@ -403,6 +403,15 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
   };
 }
 
+/** The PPC EABI's small-data base registers: r13 points into `.sdata`/`.sbss` and r2 into
+ *  `.sdata2`/`.sbss2`, both set once by the runtime's startup code and never by a compiled function.
+ *  A compiled access names its symbol in an `R_PPC_EMB_SDA21` relocation, which this frontend reads
+ *  instead of the base (`sdaAccess`). A base read as a VALUE — `lbzx r0,r3,r13`, which mwcc 2.4.7
+ *  emits for `playerOrderNew[j - 1]` (MP4 `OrderPlayers`), or `lwz r3,-0x7ff0(r13)` in a linked image —
+ *  has no C spelling here, and the SSA builder would otherwise read the def-less register as an
+ *  invented parameter. It refuses, as MIPS refuses `gp` used as data. */
+const SMALL_DATA_BASES: readonly string[] = ['r13', 'r2'];
+
 /** The link register's save word, as an offset from the entry r1: the second word of the caller's
  *  frame header, after the back chain. mwcc 2.3.3 spells it `4(r1)` before the push and 2.4.x
  *  `N+4(r1)` after it (`r1Displacements`). */
@@ -687,6 +696,12 @@ export function lift(
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
   const readReg = (r: string, at: number): Value => {
+    if (SMALL_DATA_BASES.includes(r)) {
+      fail(
+        `cannot lift '${name}': ${r} (the small-data base) used as data — an access the relocation ` +
+          `does not name is not modelled`,
+      );
+    }
     const v = highHalves.guardRead(name, r, readVar(r, at));
     if (frameAddresses.has(v)) {
       r1AsData();
