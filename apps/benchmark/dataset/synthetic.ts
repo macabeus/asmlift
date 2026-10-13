@@ -3,8 +3,9 @@
 // the idioms that dominate real game code (arithmetic, bitwise, compare/logic, width casts, memory,
 // structs, arrays, loops, calls) rather than exotic constructs — the anti-overfitting goal.
 //
-// `toolchains` lists which toolchains to run each function on. MIPS-IDO is steered away from calls
-// (its PIC codegen makes external calls unfriendly to both decompilers).
+// `toolchains` lists which toolchains to run each function on. `CALL` leaves IDO out for history
+// only: ido7.1's canonical flags build `-non_shared`, whose `jal` carries an R_MIPS_26 record the
+// MIPS frontend lowers (`out9` matches there), so a call row may name ido7.1 explicitly.
 // C++ runs on mwcc_242_81 only (the `.cp` frontend). `ctx` is the m2c --context and `proto` feeds
 // asmlift the same info. For almost every row that is prototypes only — no struct layouts, so both
 // decompilers must RECOVER structure. THE EXCEPTION IS A ROW THAT CARRIES `symbols` (see below):
@@ -71,7 +72,7 @@ export interface SynthSpec {
 }
 
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
-const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // IDO PIC-unfriendly for calls
+const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // see the header for ido7.1
 
 // The map the `/no-ptr-elem` row below is fed: a struct global with a SIZED pointer member
 // (`u16 *pMap`), which is the exact predicate `fnHasSizedPtrFields` enumerates the variation on.
@@ -9360,6 +9361,60 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void volwalk(s32 a, s32 b);',
     proto: { volwalk: { params: ['s32', 's32'], returnsVoid: true } },
+  },
+  // ── O32 frame objects and incoming stack arguments (frontend/mips.ts) ──────────────────────
+  // An address-taken local and an incoming stack word on the two MIPS lanes the synthetic tier
+  // covers; gcc2.7.2 shares gcc2.7.2kmc's description and is pinned by
+  // `packages/cli/test/matching/mips-frame.test.ts`. Where the local sits is the compiler's
+  // (`compilerBehaviors.o32LocalArea`): right above the home of a0..a3 on gcc, at the frame top
+  // above `ra` on IDO. Both lanes take calls here: ido7.1's canonical `-non_shared` build emits a
+  // `jal` with an R_MIPS_26 record, which the MIPS frontend lowers like gcc's.
+  //
+  // `escarr` is the array handed to a callee and read back, kept as one object; `escaddu` reads it
+  // through `addu rD,sp,rX`, whose access displacement names the array (IDO `addu v0,sp,t6` /
+  // `lw v0,24(v0)`); `escstr` fills a struct before handing it over.
+  {
+    sym: 'escarr',
+    src: 'void fill(s32 *p);\ns32 escarr(void){ s32 a[4]; fill(a); return a[0] + a[3]; }',
+    features: ['stack-addr', 'array'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void fill(s32 *p); s32 escarr(void);',
+    proto: { fill: { params: ['s32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'escaddu',
+    src: 'void k(void *p);\ns32 escaddu(s32 i){ s32 a[8]; k(a); return *(s32 *)((u8 *)a + i); }',
+    features: ['stack-addr', 'array', 'pointer'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'void k(void *p); s32 escaddu(s32 i);',
+    proto: { k: { params: ['void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'escstr',
+    src: 'struct P { s32 x, y; };\nvoid gp(struct P *p);\ns32 escstr(s32 v){ struct P p; p.x = v; p.y = 2; gp(&p); return p.x; }',
+    features: ['stack-addr', 'struct'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 'struct P { s32 x, y; }; void gp(struct P *p); s32 escstr(s32 v);',
+    proto: { gp: { params: ['struct P *'], returnsVoid: true } },
+  },
+  // Incoming stack arguments: O32 passes argument word k >= 4 at entry sp + 4k, so `in9e` reads `e`
+  // and `i` at 16(sp) and 32(sp) in a frameless leaf, and `in9` reads them past its own frame, one
+  // of them in a block after the branch.
+  {
+    sym: 'in9e',
+    src: 's32 in9e(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i){ return e + i; }',
+    features: ['multi-arg'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+  },
+  {
+    sym: 'in9',
+    src:
+      's32 k1(s32 x);\n' +
+      's32 in9(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i){ if (a) return k1(i) + e; return b; }',
+    features: ['multi-arg', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    ctx: 's32 k1(s32 x); s32 in9(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i);',
+    proto: { k1: { params: 1 } },
   },
 ];
 
