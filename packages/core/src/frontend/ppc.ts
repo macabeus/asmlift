@@ -63,7 +63,7 @@ import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
-import { makeSsaBuilder } from './ssa';
+import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -658,17 +658,15 @@ export function lift(
   const fpType = fpPrecision(reached, (m) => FP_ARITH[m]?.width);
 
   // THE LIVE-IN MODEL is the register half only (this frontend claims no frame partition): a
-  // def-less read of a register the ABI passes no argument in AND the prologue saved is an
-  // uninitialised local, as on Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
+  // def-less read of a register the ABI passes no argument in, and that the prologue saved or the
+  // ABI lets a callee use unsaved, is an uninitialised local. `registerLiveIns` (frontend/ssa.ts)
+  // composes it, as it does for Thumb. The FPU's callee-saved half is not measured, so f14..f31 keep
   // the treatment a target claiming no partition gets.
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
-    () =>
-      target.nonArgRegs
-        ? { uninitRegs: target.nonArgRegs.filter((r) => savedRegs.has(r)), argRegs: target.argRegs }
-        : {},
+    () => registerLiveIns(target, savedRegs),
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;

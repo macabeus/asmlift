@@ -51,9 +51,11 @@ import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
 import {
   type SsaBuilder,
   abiSortEntryParams,
+  assertScratchRegsPartitioned,
   makeSsaBuilder,
   mintArgSlotHoles,
   registerArgSlots,
+  registerLiveIns,
   stackArgKey,
   stackArgSlots,
   stackSlotKey,
@@ -2716,19 +2718,6 @@ function buildCfg(
   return { labelIndex, preds };
 }
 
-// A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the
-// list would go on reading as if it exempted something. Refused as a target bug, like the
-// argRegs/uninitRegs contradiction, rather than declined as a property of the input.
-function assertScratchRegsPartitioned(target: TargetDescription): ReadonlySet<string> {
-  const scratchRegs = new Set(target.scratchRegs ?? []);
-  for (const r of scratchRegs) {
-    if (!(target.nonArgRegs ?? []).includes(r)) {
-      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
-    }
-  }
-  return scratchRegs;
-}
-
 /** A `bl` passes a pair in two argument words, a struct-return pointer in r0, and the words past r3
  *  in the outgoing block `analyzeOutgoingArgs` licensed; a call through rN passes r0..r(N-1). */
 const THUMB_CALL_LOWERING: CallLowering = {
@@ -4218,7 +4207,7 @@ function thumbFillOf(
 ): ThumbFill {
   const text = readThumbText(name, asm);
   const cfg = thumbCfg(name, text.blocks, text.tables);
-  const scratchRegs = assertScratchRegsPartitioned(target);
+  assertScratchRegsPartitioned(target); // first, for the refusal order; `registerLiveIns` asks again
   const calls = callDeclarations(name, target, prototypes, THUMB_CALL_LOWERING, (message) => {
     throw new FrontendUnsupportedError(message);
   });
@@ -4232,15 +4221,11 @@ function thumbFillOf(
   // describe — hand-written asm with a private convention, or a mid-function fragment — and it keeps
   // the treatment a target claiming no partition gets. The save is asked only of the registers the
   // ABI requires preserving: `target.scratchRegs` need none, so demanding one there would refuse a
-  // local the compiler was entitled to put in place with no prologue at all.
+  // local the compiler was entitled to put in place with no prologue at all. `registerLiveIns`
+  // (frontend/ssa.ts) composes it, as it does for PPC.
   const ssa = makeSsaBuilder(name, cfg.asmBlocks.length, cfg.preds, () => ({
     ...frame.partition,
-    ...(target.nonArgRegs
-      ? {
-          uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || frame.savedRegs.has(r)),
-          argRegs: target.argRegs,
-        }
-      : {}),
+    ...registerLiveIns(target, frame.savedRegs),
   }));
   const statics = makeLocalStatics();
   const operands = thumbOperands({

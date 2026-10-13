@@ -204,9 +204,17 @@ export interface LiveInModel {
    *  in registers it never saved. Passing the ABI list unfiltered cost the MP2K engine's
    *  `ChnVolSetAsm` its two-pointer signature and left it storing through `uninit_r4`, silently.
    *
-   *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it — Thumb reads
-   *  the leading push run (`savedRegs`); a frontend that cannot measure it passes nothing here and
+   *  The save is a MEASUREMENT, like the frame's, and belongs to whoever can make it. Thumb reads
+   *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
+   *  nothing before it named (`prologueSavedRegs`), because mwcc interleaves its saves with the
+   *  body (`stw r31; mr r31,r3; stw r30`); "nothing named it first" is the condition Thumb's
+   *  leading run meets by construction. A frontend that cannot measure it passes nothing here and
    *  keeps the parameter it would have got anyway.
+   *
+   *  The one register class exempt from the save is the ABI's scratch set (`target.scratchRegs`):
+   *  a callee may use one with no save at all, so demanding one would refuse a local the compiler
+   *  homed there with no prologue (agbcc's `ip`, mwcc's `r0`). `registerLiveIns` composes both
+   *  halves for every frontend, so this list is never assembled by hand.
    *
    *  The frame's sole-writer obligation has no counterpart here and needs none: a register has no
    *  address, so nothing outside this function can name it and there is no escape to retract.
@@ -255,6 +263,50 @@ function checkedLiveInModel(fnName: string, m: LiveInModel): LiveInModel {
     );
   }
   return m;
+}
+
+/** A `scratchRegs` entry outside `nonArgRegs` is inert, and inert is how a partition rots: the list
+ *  would go on reading as if it exempted something. Refused as a target bug, like the
+ *  argRegs/uninitRegs contradiction `checkedLiveInModel` refuses, rather than declined as a property
+ *  of the input. */
+export function assertScratchRegsPartitioned(target: {
+  id: string;
+  nonArgRegs?: readonly string[];
+  scratchRegs?: readonly string[];
+}): ReadonlySet<string> {
+  const scratchRegs = new Set(target.scratchRegs ?? []);
+  for (const r of scratchRegs) {
+    if (!(target.nonArgRegs ?? []).includes(r)) {
+      throw new Error(`target '${target.id}': scratch register ${r} is not among the non-argument registers`);
+    }
+  }
+  return scratchRegs;
+}
+
+/** THE REGISTER HALF OF THE LIVE-IN MODEL (`LiveInModel.uninitRegs` and `argRegs`), composed here
+ *  once for every frontend that claims it, so that no frontend can drop a half of the rule. A
+ *  register is an uninitialised local's home when the ABI passes no argument in it
+ *  (`target.nonArgRegs`) AND either the ABI lets a callee use it with no save (`target.scratchRegs`,
+ *  checked against `nonArgRegs`) or this function saved it — `savedRegs`, the frontend's measurement
+ *  of its own prologue. A target stating no `nonArgRegs` claims no partition and gets an empty
+ *  model, so every def-less read stays a parameter. */
+export function registerLiveIns(
+  target: {
+    id: string;
+    argRegs: readonly string[];
+    nonArgRegs?: readonly string[];
+    scratchRegs?: readonly string[];
+  },
+  savedRegs: ReadonlySet<string>,
+): Pick<LiveInModel, 'uninitRegs' | 'argRegs'> {
+  const scratchRegs = assertScratchRegsPartitioned(target);
+  if (target.nonArgRegs === undefined) {
+    return {};
+  }
+  return {
+    uninitRegs: target.nonArgRegs.filter((r) => scratchRegs.has(r) || savedRegs.has(r)),
+    argRegs: target.argRegs,
+  };
 }
 
 /** A read whose register may be holding a callee's leftover — see `refuseStaleCallerSavedReads`. */
