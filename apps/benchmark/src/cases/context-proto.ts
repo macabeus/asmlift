@@ -9,7 +9,12 @@ import {
   declaresAggregateReturn,
   declaresVoidReturn,
 } from '@asmlift/core/proto';
-import { aggregateObjectsFromContext, prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
+import {
+  type ContextGlobals,
+  globalsFromContext,
+  prototypesFromContext,
+  withContextPrototypes,
+} from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 
@@ -39,25 +44,25 @@ export function rowPrototypes(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-/** contexts' aggregate objects, keyed as `parsed` is */
-const aggregates = new Map<string, ReadonlySet<string>>();
+/** contexts' globals, keyed as `parsed` is */
+const globals = new Map<string, ContextGlobals>();
 
-/** The globals the row's vendored context declares as structs, unions or arrays
- *  (`aggregateObjectsFromContext`) — one set per context, shared by its rows. */
-export function rowAggregateGlobals(
+/** What the row's vendored context states about its globals — which are structs, unions or arrays,
+ *  and which are volatile (`globalsFromContext`) — one reading per context, shared by its rows. */
+export function rowContextGlobals(
   { ctxI, ctxFile }: { ctxI: string; ctxFile: string },
   language: 'c' | 'c++',
-): ReadonlySet<string> | undefined {
+): ContextGlobals | undefined {
   if (ctxI === '') {
     return undefined;
   }
   const key = `${language} ${ctxFile}`;
-  let found = aggregates.get(key);
+  let found = globals.get(key);
   if (found === undefined) {
-    found = aggregateObjectsFromContext(ctxI, language);
-    aggregates.set(key, found);
+    found = globalsFromContext(ctxI, language);
+    globals.set(key, found);
   }
-  return found.size > 0 ? found : undefined;
+  return found.aggregates.size > 0 || found.volatiles.size > 0 ? found : undefined;
 }
 
 /** The entries a lift can look up — the row's own symbol and every symbol `text` (the assembly, and

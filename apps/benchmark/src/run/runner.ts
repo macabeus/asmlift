@@ -220,7 +220,7 @@ export async function runCases(
       ctxRef: c.ctxRef,
       ctxProto: c.ctxProto,
       proto: c.proto,
-      aggregateGlobals: c.aggregateGlobals,
+      contextGlobals: c.contextGlobals,
       symbols: c.symbols,
       codegen: c.codegen,
       note: c.note,

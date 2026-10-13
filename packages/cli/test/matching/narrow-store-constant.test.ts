@@ -58,7 +58,7 @@ const SHARED_ACROSS_WIDTHS = new Set(['sh5:1', 'sh5:2']);
 const AGBCC_UNFOLDED = new Set(['ss16ffff', 'ss8m1', 'su16min', 'sh3:1', 'sh4:0', 'sh5:1', 'sh5:2']);
 
 const read = (sym: string, asm: string, target: TargetDescription) => {
-  const fn = liftStamped(sym, asm, target, {}, undefined, undefined);
+  const fn = liftStamped(sym, asm, target, {}, undefined, undefined, undefined);
   applyIdiomPatterns(fn, target);
   raiseRecovered(fn, target);
   const defs = defOpMap(fn);

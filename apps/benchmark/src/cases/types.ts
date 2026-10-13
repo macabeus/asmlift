@@ -4,6 +4,7 @@
 import type { RowTier } from '@asmlift/bench-schema';
 import type { CandidateCompiler } from '@asmlift/cli/compile-command';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { ContextGlobals } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { ResolvedTarget } from '@asmlift/core/target';
 
@@ -33,9 +34,9 @@ interface CaseFields {
   /** the project's vendored symbol map — threaded into asmlift only (m2c has its ctx) */
   symbols?: SymbolMap;
   proto?: Prototypes; // asmlift prototypes
-  /** real tier: the globals the vendored context declares as structs, unions or arrays (core
-   *  `aggregateObjectsFromContext`) — asmlift-only, as `proto` is */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** what the row's context states about its globals — its aggregates and its volatile objects
+   *  (core `globalsFromContext`) — asmlift-only, as `proto` is */
+  contextGlobals?: ContextGlobals;
   note?: string;
   toolchain: Toolchain;
   /** the flags the target and every candidate compile at, and the description asmlift decompiles

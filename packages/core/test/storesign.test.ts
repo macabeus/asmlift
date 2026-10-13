@@ -42,7 +42,7 @@ const obj = (...lines: string[]) =>
 /** Lift and raise through every pre-recovery pass, then read each const-offset store's
  *  stamp in program order. */
 const stamps = (asm: string, target: TargetDescription = MIPS_GCC) => {
-  const fn: Fn = liftStamped('f', asm, target, {}, undefined, undefined);
+  const fn: Fn = liftStamped('f', asm, target, {}, undefined, undefined, undefined);
   applyIdiomPatterns(fn, target);
   raiseRecovered(fn, target);
   return fn.blocks.flatMap((b) => b.ops.filter((o) => o.opcode === 'store').map((o) => o.attrs.signed));
@@ -87,7 +87,7 @@ test('refusals: a constant a wider use reads too, or whose value is stored at an
 });
 
 test('a store that already carries a signedness keeps it, and the pass reports only what it stamped', () => {
-  const fn = liftStamped('f', PAIR, MIPS_GCC, {}, undefined, undefined);
+  const fn = liftStamped('f', PAIR, MIPS_GCC, {}, undefined, undefined, undefined);
   const first = fn.blocks[0].ops.find((o) => o.opcode === 'store')!;
   first.attrs.signed = false;
   expect(seedNarrowStoreSigns(fn, MIPS_GCC)).toBe(1);
@@ -163,6 +163,7 @@ const globalFacts = (...lines: [string, string][]) => {
     MIPS_GCC,
     { f: { params: ['void *'], returnsVoid: true } },
     asmData,
+    undefined,
     undefined,
   );
   applyIdiomPatterns(fn, MIPS_GCC);

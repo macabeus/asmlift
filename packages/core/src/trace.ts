@@ -12,8 +12,9 @@ import { print } from './ir/print';
 import { verify } from './ir/verify';
 import type { LanguageBackend } from './l3/ast';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
-import { type OnGap, liftStamped, raiseRecovered, structureChecked, stubResult } from './pipeline';
+import { type OnGap, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked, stubResult } from './pipeline';
 import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
+import type { ContextGlobals } from './proto-context';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
@@ -92,7 +93,7 @@ export interface TraceOptions {
   prototypes?: Prototypes; // header facts (callee arities + void-ness), keyed by symbol
   asmData?: AsmData; // data-section side table (Regime-B jump tables), as in decompile()
   symbols?: SymbolMap; // address→symbol map (symbols.ts), as in decompile(); absent ⇒ inert
-  aggregateGlobals?: ReadonlySet<string>; // context-declared aggregates, as in decompile()
+  contextGlobals?: ContextGlobals; // the declaration context's globals, as in decompile()
   onGap?: OnGap; // "strict" (default) | "annotate", as in decompile()
   /** Source probe at pattern boundaries: the source asmlift would emit there, which the cli report
    *  scores. One call per boundary: pattern N's after-source is pattern N+1's before-source. Absent ⇒
@@ -196,7 +197,7 @@ function traceTower(
   const patternEvents: PatternEvent[] = [];
 
   // (1) lift → typed-SSA IR
-  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols);
+  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols, opts.contextGlobals);
   trace.push({ id: 'stage:lift', title: 'Lift (ISA frontend → typed-SSA IR)', irDump: irDump(fn), verified: true });
   // The array shapes the assembly evidences, off the LIFTED fn — same reading, same reason, as
   // pipeline.ts's runTower: the fold and the tower below destroy the order the licence reads.
@@ -222,7 +223,9 @@ function traceTower(
   // The names the map holds for addresses this machine code built by arithmetic off a named one
   // (raise/offsetnames.ts), off the same lifted fn and for the same reason as pipeline.ts's
   // runTower.
-  const named = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols, target.compilerBehaviors) : [];
+  const named = opts.symbols
+    ? OFFSET_NAME_PASS.run(fn, opts.symbols, stampBehaviorsFor(target, opts.contextGlobals))
+    : [];
   trace.push({
     id: 'stage:offsetnames',
     title: 'Name a walked-to address the symbol map knows',
@@ -322,7 +325,7 @@ function traceTower(
     spellSwitchFallthrough: (opts.backend ?? cBackend).spellsSwitchFallthrough,
     onGap: opts.onGap ?? 'strict',
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
-    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
+    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
     ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });

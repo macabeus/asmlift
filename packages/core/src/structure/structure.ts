@@ -93,6 +93,7 @@ import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, renderedIntSignedness } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
+import type { ContextGlobals } from '../proto-context';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
@@ -1816,10 +1817,11 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  they would read the map's `shape:'pointer'`. The operand-order rules do not read it: no element
    *  or field spelling folds from a name with no pointee. */
   pointerGlobals?: ReadonlySet<string>;
-  /** The globals the declaration context states are structs, unions or arrays
-   *  (proto-context.ts `aggregateObjectsFromContext`). Read with the map setting and without it: a
-   *  context declaration is what every candidate compiles against, whichever names it spells. */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** What the declaration context states about its globals (proto-context.ts `globalsFromContext`):
+   *  which are structs, unions or arrays, and which are volatile, read by the stamp this structuring
+   *  re-derives. Read with the map setting and without it: a context declaration is what every
+   *  candidate compiles against, whichever names it spells. */
+  contextGlobals?: ContextGlobals;
 }
 
 /** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
@@ -2307,7 +2309,7 @@ export function structure(
     inferredSymbols,
     orderLicensedGlobals,
     pointerGlobals,
-    aggregateGlobals,
+    contextGlobals,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
@@ -2677,7 +2679,7 @@ export function structure(
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
     for (const n of [...scalarGlobals]) {
       const shape = symbols?.get(n)?.shape;
-      if (shape === 'array' || shape === 'struct' || aggregateGlobals?.has(n) === true) {
+      if (shape === 'array' || shape === 'struct' || contextGlobals?.aggregates.has(n) === true) {
         scalarGlobals.delete(n);
       }
     }

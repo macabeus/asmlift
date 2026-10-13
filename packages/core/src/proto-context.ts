@@ -120,13 +120,6 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   return { aggregates, volatiles };
 }
 
-/** The context's aggregates with no volatile byte: what a reader that is handed no volatility may
- *  spell through a cast. */
-export function aggregateObjectsFromContext(src: string, language: Language): Set<string> {
-  const { aggregates, volatiles } = globalsFromContext(src, language);
-  return new Set([...aggregates].filter((n) => !volatiles.has(n)));
-}
-
 /** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare
  *  tag, as C++ spells one), attributed or not, at the top level and nested in another body. */
 function tagBodies(ctx: ParsedContext): Map<string, Range> {

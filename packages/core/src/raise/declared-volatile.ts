@@ -1,15 +1,18 @@
 // asmlift — the decider for ir/discipline.ts's `declared` placement: a memory access of an object
-// the project's symbol map declares volatile.
+// the project's symbol map, or its declaration context, declares volatile.
 //
-// The stamp is a function of the IR, the map the function is lifted and structured under, and the
-// compiler, and nothing else: an access whose base reaches a global the map qualifies, at the byte
-// the access names (`declaresVolatile`) — and, for a read, one the compiler could have made of a
-// `volatile` (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
+// The stamp is a function of the IR, the map the function is lifted and structured under, the
+// declaration context's globals and the compiler, and nothing else: an access whose base reaches a
+// global the map qualifies, at the byte the access names (`declaresVolatile`), or one the context
+// declares with a volatile byte and the map does not lay out (`ContextGlobals.volatiles`, which is
+// per object, not per byte) — and, for a read, one the compiler could have made of a `volatile`
+// (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
 // lift is made (pipeline.ts `liftStamped`), before the first pass that asks whether a read may be
 // deleted, folded or moved, and re-derived by every pass that changes which object an access names
 // and by structuring. Structuring the same function under another map — the `/raw-globals` setting
 // has none — re-runs it, and an op the new map does not qualify loses the stamp, so a structuring
-// never answers for a map it was not given. The base is read as the structurer will read it: a join
+// never answers for a map it was not given. The context is not the map: every candidate compiles
+// against it whichever names it spells, so it is read in both settings. The base is read as the structurer will read it: a join
 // whose every edge passes one address is that address (`addressThroughJoins`). A base that reaches
 // no name is a pointer parameter, a raw address or a genuine join: no declaration is in evidence,
 // and the access stays unplaced unless the lift pinned it (`device`).
@@ -21,12 +24,20 @@ import { globalBaseOf, globalCellOf } from '../ir/alias';
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { DECLARED_VOLATILE } from '../ir/discipline';
 import { MEM_BASE_OPS } from '../ir/opcodes';
+import type { ContextGlobals } from '../proto-context';
 import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
 import { valueNumberOf } from './gvn';
 
-/** The compiler fact the stamp reads. */
-export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'>;
+/** The compiler fact the stamp reads, and the declaration context's globals when there is one. */
+export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'> & {
+  readonly contextGlobals?: ContextGlobals;
+};
+
+/** Does the map lay out this object's volatility itself? A layout answers per member, which is
+ *  finer than the context's per-object fact; an entry with none (a name and a size off the symbol
+ *  table) leaves the context's answer standing. */
+const laysOut = (info: SymbolInfo | undefined): boolean => Array.isArray(info?.layout) && info.layout.length > 0;
 
 /** May this memory access be stamped: a store, or a read the compiler could have made of a
  *  `volatile`? */
@@ -76,17 +87,19 @@ function addressThroughJoins(fn: Fn): (v: Value) => Value {
   return (v) => through(v, new Set()) ?? v;
 }
 
-/** Stamp every memory access of `fn` to an object `symbols` declares volatile — a read only where a
- *  compiler behaving as `behaviors` says could have made it of one — and clear the stamp from every
- *  other op. Returns the ops it stamped that were not stamped before. */
+/** Stamp every memory access of `fn` to an object `symbols` or `behaviors.contextGlobals` declares
+ *  volatile — a read only where a compiler behaving as `behaviors` says could have made it of one —
+ *  and clear the stamp from every other op. Returns the ops it stamped that were not stamped before. */
 export function stampDeclaredVolatile(
   fn: Fn,
   symbols: ReadonlyMap<string, SymbolInfo> | undefined,
   behaviors: StampBehaviors,
 ): Op[] {
   const added: Op[] = [];
-  const defs = symbols ? defOpMap(fn) : undefined;
-  const addressOf = symbols ? addressThroughJoins(fn) : undefined;
+  const contextVolatiles = behaviors.contextGlobals?.volatiles;
+  const reads = symbols !== undefined || (contextVolatiles !== undefined && contextVolatiles.size > 0);
+  const defs = reads ? defOpMap(fn) : undefined;
+  const addressOf = reads ? addressThroughJoins(fn) : undefined;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       const addr = defs && stampable(op, behaviors) ? addressOf!(op.operands[0]) : undefined;
@@ -97,7 +110,11 @@ export function stampDeclaredVolatile(
         base !== null && (op.opcode === 'load' || op.opcode === 'store')
           ? globalCellOf(defs!, addr!, op.attrs.off as number)
           : null;
-      const declared = base !== null && declaresVolatile(symbols!.get(base), cell === null ? null : cell.byte);
+      const info = base !== null ? symbols?.get(base) : undefined;
+      const declared =
+        base !== null &&
+        (declaresVolatile(info, cell === null ? null : cell.byte) ||
+          (contextVolatiles?.has(base) === true && !laysOut(info)));
       // A fresh record either way: a rebuilder may hand two ops one `attrs` object.
       if (declared && op.attrs[DECLARED_VOLATILE] !== true) {
         op.attrs = { ...op.attrs, [DECLARED_VOLATILE]: true };

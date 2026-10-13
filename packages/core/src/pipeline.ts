@@ -26,7 +26,8 @@ import { mergeCommonTails } from './l3/tailmerge';
 import { dropUnspelledReturns } from './l3/tailret';
 import { DEFAULT_IDIOM_PATTERNS, RewritePattern, applyPattern, dce, patternApplies } from './pattern/engine';
 import { type FnProto, type Prototypes, declaresVoidReturn, ownReturnWidth, prototypesFromSymbols } from './proto';
-import { stampDeclaredVolatileUnder } from './raise/declared-volatile';
+import type { ContextGlobals } from './proto-context';
+import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
 import { foldEmptyLatches } from './raise/latch';
@@ -74,10 +75,11 @@ export interface DecompileOptions {
    *  declaration shapes (DWARF types-sidecar). Drives the Thumb numeric-pool promotion and the
    *  byte-sensitive global spellings. Absent ⇒ byte-identical to today. */
   symbols?: SymbolMap;
-  /** the globals the project's declaration context states are structs, unions or arrays
-   *  (proto-context.ts `aggregateObjectsFromContext`): none of them is spelled as a bare scalar
-   *  name. */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** what the project's declaration context states about its globals (proto-context.ts
+   *  `globalsFromContext`): no aggregate is spelled as a bare scalar name, and every access to a
+   *  volatile object the map does not lay out is stamped (raise/declared-volatile.ts), so the cast
+   *  an aggregate is read through carries the qualifier. */
+  contextGlobals?: ContextGlobals;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;
 }
@@ -160,7 +162,7 @@ function runTower(
   // CALLEES (a function still in assembly has none), which is what makes this transferable.
   const prototypes = prototypesFromSymbols(opts.symbols, opts.prototypes ?? {});
   // (1) lift: ISA frontend (resolved by target) → L1 with block-argument SSA
-  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols);
+  const fn = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols, opts.contextGlobals);
   // Every dump carries the write-order record (ir/print.ts `PrintOptions`): it decides the
   // edge-copy order and the raising folds mutate it, so two dumps compare whole program states.
   const raw = print(fn, { writeOrder: true });
@@ -183,7 +185,9 @@ function runTower(
   // `inferredSymbols`, and the ORDER licence only enables a cast spelling that is byte-correct
   // under any declaration. Measured: with this call moved ABOVE both readings, the three corpus
   // rows the pass fires on keep their fan size, their winner and their score exactly.
-  const walkedNames = opts.symbols ? OFFSET_NAME_PASS.run(fn, opts.symbols, target.compilerBehaviors) : [];
+  const walkedNames = opts.symbols
+    ? OFFSET_NAME_PASS.run(fn, opts.symbols, stampBehaviorsFor(target, opts.contextGlobals))
+    : [];
 
   // (2) idiom fold: apply serializable patterns on the IR (the AI-improvement surface),
   // gated generically by the Target's capabilities (not an `arch ==` branch).
@@ -206,7 +210,7 @@ function runTower(
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     onGap,
     ...(mapSymbols ? { symbols: mapSymbols } : {}),
-    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
+    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
     ...(inferredSymbols.size ? { inferredSymbols } : {}),
     ...(orderLicensed.size ? { orderLicensedGlobals: orderLicensed } : {}),
   });
@@ -228,10 +232,22 @@ function runTower(
   };
 }
 
+/** What the declared-volatile stamp reads besides the IR and the map: the compiler's fact and the
+ *  declaration context's globals. Every stamp a driver puts reads the same two. */
+export function stampBehaviorsFor(
+  target: TargetDescription,
+  contextGlobals: ContextGlobals | undefined,
+): StampBehaviors {
+  return {
+    volatileReadsExtendInRegister: target.compilerBehaviors.volatileReadsExtendInRegister,
+    ...(contextGlobals ? { contextGlobals } : {}),
+  };
+}
+
 /** Stage 1 — lift: the target's ISA frontend → L1, verified, with every read of an object
- *  `symbols` declares volatile stamped `declared` (raise/declared-volatile.ts) before any pass asks
- *  whether it may be deleted. Every entry path lifts through here, each lift under the map its
- *  structuring will be handed. */
+ *  `symbols` or `contextGlobals` declares volatile stamped `declared` (raise/declared-volatile.ts)
+ *  before any pass asks whether it may be deleted. Every entry path lifts through here, each lift
+ *  under the map its structuring will be handed. */
 export function liftStamped(
   name: string,
   asm: string,
@@ -239,11 +255,12 @@ export function liftStamped(
   prototypes: Prototypes,
   asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
+  contextGlobals: ContextGlobals | undefined,
 ): Fn {
   const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols);
   verify(fn);
   refuseNarrowReturnsOfWideDeclaration(fn, name, prototypes[name]);
-  stampDeclaredVolatileUnder(fn, symbols, target.compilerBehaviors);
+  stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));
   return fn;
 }
 

@@ -19,7 +19,12 @@ import { type AsmData, parseAsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { type OnGap, decompile } from '@asmlift/core/pipeline';
 import { type Prototypes, validatePrototypes } from '@asmlift/core/proto';
-import { aggregateObjectsFromContext, prototypesFromContext, withContextPrototypes } from '@asmlift/core/proto-context';
+import {
+  type ContextGlobals,
+  globalsFromContext,
+  prototypesFromContext,
+  withContextPrototypes,
+} from '@asmlift/core/proto-context';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
 import { joinVariations } from '@asmlift/core/variation-tokens';
@@ -708,7 +713,7 @@ export async function runCli(
   // --context: the declarations in the headers the candidate compiles against, under --proto and
   // the symbol map's signatures (`withContextPrototypes`).
   const contextFlag = flags.get('context') as string | undefined;
-  let aggregateGlobals: ReadonlySet<string> | undefined;
+  let contextGlobals: ContextGlobals | undefined;
   if (contextFlag !== undefined) {
     let text: string;
     try {
@@ -727,7 +732,7 @@ export async function runCli(
       symbols,
       unitTarget,
     );
-    aggregateGlobals = aggregateObjectsFromContext(text, unitTarget.dialect ?? 'c');
+    contextGlobals = globalsFromContext(text, unitTarget.dialect ?? 'c');
   }
 
   // Which callees' arity this run had to guess — computed AFTER `asIfUndecompiled` and the
@@ -819,7 +824,7 @@ export async function runCli(
         asmData,
         prototypes,
         symbols,
-        aggregateGlobals,
+        contextGlobals,
         onEnumerationError: (variations: readonly string[], error: string) => {
           const step = threwStep(variations);
           if (!enumerationErrors.has(step)) {
@@ -859,7 +864,7 @@ export async function runCli(
 
   const onGap: OnGap = flags.has('strict') ? 'strict' : 'annotate';
   try {
-    const result = decompile(name, asm, unitTarget, { backend, onGap, asmData, prototypes, symbols, aggregateGlobals });
+    const result = decompile(name, asm, unitTarget, { backend, onGap, asmData, prototypes, symbols, contextGlobals });
     // THE ASSUMPTIONS THE SOURCE RESTS ON, on the path that prints no declarations. Every other
     // spelling asmlift emits for a named global — `((T *)&gSym)[i]` — reproduces the target's
     // bytes under ANY declaration of that name, so the source alone is the whole answer. A bare

@@ -1,6 +1,6 @@
-// The globals a declaration context declares as structs, unions or arrays (src/proto-context.ts
-// `aggregateObjectsFromContext`), and the structurer reading them where it would read the map's
-// `shape` (structure.ts, the declaration-shape override of `scalarGlobals`). A global the map does
+// The globals a declaration context declares as structs, unions or arrays, and those with a volatile
+// byte (src/proto-context.ts `globalsFromContext`), and the structurer reading them where it would
+// read the map's `shape` (structure.ts, the declaration-shape override of `scalarGlobals`). A global the map does
 // not describe and the function reads only at offset 0 is otherwise spelled by its bare name, which
 // is a compile error over a struct and a read of the address over an array. The compiled proof is
 // packages/cli/test/matching/context-aggregate-global.test.ts.
@@ -8,10 +8,16 @@ import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
-import { aggregateObjectsFromContext, globalsFromContext } from '../src/proto-context';
+import { type ContextGlobals, globalsFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolMap } from '../src/symbols';
 import { ARMV4T_AGBCC, MIPS_GCC } from '../src/target';
+
+/** The context's aggregates with no volatile byte. */
+function plainAggregates(src: string, language: 'c' | 'c++'): Set<string> {
+  const { aggregates, volatiles } = globalsFromContext(src, language);
+  return new Set([...aggregates].filter((n) => !volatiles.has(n)));
+}
 
 describe('aggregate objects a declaration context declares', () => {
   const ctx = `
@@ -43,7 +49,7 @@ extern UNEXPANDED_MACRO gMacro;
 struct Info gFn(void);
 u8 gArrFn(void);
 `;
-  const found = aggregateObjectsFromContext(ctx, 'c');
+  const found = plainAggregates(ctx, 'c');
 
   test('a struct, a union, an array and a class through a typedef are aggregates', () => {
     expect([...found].sort()).toEqual(
@@ -58,13 +64,13 @@ u8 gArrFn(void);
   });
 
   test('a C++ class is an aggregate', () => {
-    expect([...aggregateObjectsFromContext('class Obj { int a; }; extern Obj gObj;', 'c++')]).toEqual(['gObj']);
+    expect([...plainAggregates('class Obj { int a; }; extern Obj gObj;', 'c++')]).toEqual(['gObj']);
   });
 });
 
-describe('an aggregate object with volatile storage is left out', () => {
+describe('an aggregate object with volatile storage is read as volatile', () => {
   // `*(T *)&g` drops the qualifier, so the compiler may merge the reads or hoist one out of a
-  // polling loop: left out, the object keeps the bare spelling, which the header refuses for a struct
+  // polling loop: such an object's accesses are stamped, so the cast carries the qualifier
   const ctx = `
 typedef unsigned char u8;
 typedef unsigned short u16;
@@ -104,9 +110,9 @@ extern PtrToV gPtrsToV2[4];
 extern const struct V gConst;
 extern struct Later gLater;
 `;
-  const found = aggregateObjectsFromContext(ctx, 'c');
+  const found = plainAggregates(ctx, 'c');
 
-  test('a volatile object, member, typedef, element or nested member is not an aggregate here', () => {
+  test('a volatile object, member, typedef, element or nested member is volatile', () => {
     for (const n of [
       'gV',
       'gVPost',
@@ -157,29 +163,27 @@ extern struct Gnu2 gGnu2;
 extern Plain gPlainT;
 extern struct HoldsBuf gHoldsBuf;
 `;
-    expect([...aggregateObjectsFromContext(typedefs, 'c')].sort()).toEqual(['gHoldsBuf', 'gPlainT']);
+    expect([...plainAggregates(typedefs, 'c')].sort()).toEqual(['gHoldsBuf', 'gPlainT']);
   });
 
   test('a chain of typedefs deeper than the nesting bound is no volatile', () => {
     // each member reaches `u8` through eighteen typedef names, and the bound counts bodies, not names
     const names = Array.from({ length: 18 }, (_, i) => `typedef T${i} T${i + 1};`).join('\n');
     const deep = `typedef unsigned char T0;\n${names}\nstruct D { T18 a; T18 b; }; extern struct D gDeep;`;
-    expect([...aggregateObjectsFromContext(deep, 'c')]).toEqual(['gDeep']);
+    expect([...plainAggregates(deep, 'c')]).toEqual(['gDeep']);
   });
 
   test('a typedef cycle is read as volatile, and a restated typedef keeps its body', () => {
     const cyc = 'typedef struct S { volatile int a; } T; typedef T U; typedef U T; extern T gCyc; extern U gCycU;';
-    expect([...aggregateObjectsFromContext(cyc, 'c')]).toEqual([]);
+    expect([...plainAggregates(cyc, 'c')]).toEqual([]);
     const self = 'typedef struct { volatile int a; } T; typedef T T; extern T gSelf;';
-    expect([...aggregateObjectsFromContext(self, 'c')]).toEqual([]);
-    expect([...aggregateObjectsFromContext('struct S { volatile int a; }; typedef S S; extern S gS;', 'c++')]).toEqual(
-      [],
-    );
+    expect([...plainAggregates(self, 'c')]).toEqual([]);
+    expect([...plainAggregates('struct S { volatile int a; }; typedef S S; extern S gS;', 'c++')]).toEqual([]);
   });
 
   test('a C++ member typedef or static member is no byte of the object', () => {
     const cpp = 'struct S { static volatile int s; typedef S Self; int a; }; extern S gStatic;';
-    expect([...aggregateObjectsFromContext(cpp, 'c++')]).toEqual(['gStatic']);
+    expect([...plainAggregates(cpp, 'c++')]).toEqual(['gStatic']);
   });
 
   test('a C++ member typedef is read where a member names it, and a base class is read too', () => {
@@ -190,7 +194,7 @@ extern struct HoldsBuf gHoldsBuf;
       'typedef int VI; struct MS { typedef volatile int VI; VI a; }; extern MS gMS;',
       'struct MP { typedef volatile int VI; VI *p; }; extern MP gMP;',
     ].join('\n');
-    expect([...aggregateObjectsFromContext(typedefs, 'c++')]).toEqual(['gMP']);
+    expect([...plainAggregates(typedefs, 'c++')]).toEqual(['gMP']);
     const bases = [
       'struct B0 { volatile unsigned short a; }; struct B1 { int n; };',
       'struct D : public B0 { int c; }; extern D gD;',
@@ -201,11 +205,11 @@ extern struct HoldsBuf gHoldsBuf;
       'struct D6 : Unread { int c; }; extern D6 gD6;',
     ].join('\n');
     // a base this cannot read (qualified, a template, one with no body here) is read as volatile
-    expect([...aggregateObjectsFromContext(bases, 'c++')]).toEqual(['gD3']);
+    expect([...plainAggregates(bases, 'c++')]).toEqual(['gD3']);
   });
 
-  test('a C++ class with a volatile member is left out', () => {
-    expect([...aggregateObjectsFromContext('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
+  test('a C++ class with a volatile member is volatile', () => {
+    expect([...plainAggregates('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
   });
 });
 
@@ -240,29 +244,25 @@ volatile int gFn(void);
   test('a volatile aggregate is still an aggregate', () => {
     expect([...aggregates].sort()).toEqual(['gAnon', 'gOpaque', 'gPlain', 'gUnread', 'gV', 'gV2', 'gVArr'].sort());
   });
-
-  test('the cast-only reader keeps no volatile aggregate', () => {
-    expect([...aggregateObjectsFromContext(ctx, 'c')].sort()).toEqual(['gPlain', 'gUnread']);
-  });
 });
 
 /** `ldrb` of a pool-addressed global at offset 0, and nothing else: the bare spelling's only reader */
 const READ = 'f:\n\tldr\tr0, .L1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgInfo\n';
 const STORE = 'f:\n\tldr\tr1, .L1\n\tstrb\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgInfo\n';
-const INFO = new Set(['gInfo']);
+const INFO: ContextGlobals = { aggregates: new Set(['gInfo']), volatiles: new Set() };
 
 describe('a context-declared aggregate the map does not describe', () => {
   test('an offset-0 read and store are spelled through the address, not the bare name', () => {
     expect(decompile('f', READ, ARMV4T_AGBCC).source).toContain('return gInfo;');
-    expect(decompile('f', READ, ARMV4T_AGBCC, { aggregateGlobals: INFO }).source).toContain('return *(u8 *)&gInfo;');
+    expect(decompile('f', READ, ARMV4T_AGBCC, { contextGlobals: INFO }).source).toContain('return *(u8 *)&gInfo;');
     expect(decompile('f', STORE, ARMV4T_AGBCC).source).toContain('gInfo = a0;');
-    expect(decompile('f', STORE, ARMV4T_AGBCC, { aggregateGlobals: INFO }).source).toContain('*(u8 *)&gInfo = a0;');
+    expect(decompile('f', STORE, ARMV4T_AGBCC, { contextGlobals: INFO }).source).toContain('*(u8 *)&gInfo = a0;');
   });
 
   test('every ranked candidate takes it, with the map and in the raw-globals setting', () => {
     // a map that knows another name, so the raw-globals setting is enumerated
     const map: SymbolMap = new Map([[0x3000000, [{ name: 'gOther', kind: 'data', shape: 'scalar', size: 1 }]]]);
-    const cands = enumerateCandidates('f', READ, ARMV4T_AGBCC, { symbols: map, aggregateGlobals: INFO });
+    const cands = enumerateCandidates('f', READ, ARMV4T_AGBCC, { symbols: map, contextGlobals: INFO });
     expect(cands.length).toBeGreaterThan(0);
     for (const c of cands) {
       expect(c.source, c.variations.join('/')).toContain('*(u8 *)&gInfo');
@@ -282,7 +282,7 @@ describe('a context-declared aggregate the map does not describe', () => {
       bigEndian: true,
     };
     expect(decompile('getg', asm, MIPS_GCC, { asmData }).source).toContain('return gInfo;');
-    expect(decompile('getg', asm, MIPS_GCC, { asmData, aggregateGlobals: INFO }).source).toContain(
+    expect(decompile('getg', asm, MIPS_GCC, { asmData, contextGlobals: INFO }).source).toContain(
       'return *(u8 *)&gInfo;',
     );
   });
