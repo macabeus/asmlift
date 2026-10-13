@@ -258,3 +258,62 @@ test('the PPC idiom is found by register, in whatever order the block holds it',
     bctr,
   );
 });
+
+/** mwcc 2.3.3's loop-hoisted table base: `lis r5 ; addi r5,r5` ahead of the dispatch, `before` the
+ *  pair and `after` it, `between` inside it. */
+const ppcHoisted = (before: string[], after: string[] = [], base = 'r5', between: string[] = []) =>
+  listing([
+    ...before,
+    `lis     ${base},0 #HA tbl`,
+    ...between,
+    `addi    ${base},${base},0 #LO tbl`,
+    ...after,
+    'cmplwi  r3,3',
+    'bgt-    @DEF',
+    'slwi    r0,r3,2',
+    `lwzx    r0,${base},r0`,
+    'mtctr   r0',
+    'bctr',
+    'C0:',
+    'li      r3,10',
+    'blr',
+    'C1:',
+    'li      r3,20',
+    'blr',
+    'C2:',
+    'li      r3,30',
+    'blr',
+    'C3:',
+    'li      r3,40',
+    'blr',
+    'DEF:',
+    'li      r3,0',
+    'blr',
+  ]);
+
+test('a PPC table base hoisted out of the dispatch block lifts when only the dispatch reads it', () => {
+  // the `@N` pool name mwcc gives the table never reaches the naming policy: the pair is dropped
+  const src = liftPpc(ppcHoisted([], ['li      r6,0']));
+  expect(src).toContain('switch (a0)');
+  for (const k of [10, 20, 30, 40]) {
+    expect(src).toContain(`return ${k};`);
+  }
+  // a callee-saved base
+  expect(liftPpc(ppcHoisted([], [], 'r31'))).toContain('switch (a0)');
+});
+
+test('…and refuses a hoisted base anything else could see or skip', () => {
+  const bctr = /unmodelled control transfer 'bctr'/;
+  // a second write of the base
+  expect(() => liftPpc(ppcHoisted([], ['li      r5,4']))).toThrow(bctr);
+  // another reader of the base: dropping the pair would change what it reads
+  expect(() => liftPpc(ppcHoisted([], ['stw     r5,0(r4)']))).toThrow(bctr);
+  // a path around the pair reaches the dispatch with the caller's r5
+  expect(() => liftPpc(ppcHoisted(['cmpwi   r4,0', 'beq-    @AROUND'], ['AROUND:']))).toThrow(bctr);
+  // a volatile base in a function that calls
+  expect(() => liftPpc(ppcHoisted([], ['bl      0 <f>']))).toThrow(bctr);
+  // a base in an argument/return register
+  expect(() => liftPpc(ppcHoisted([], [], 'r4'))).toThrow(bctr);
+  // two halves apart are not one hoisted pair
+  expect(() => liftPpc(ppcHoisted([], [], 'r5', ['li      r6,0']))).toThrow(bctr);
+});

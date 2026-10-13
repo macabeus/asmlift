@@ -204,6 +204,9 @@ interface PpcJT {
   caseAddrs: number[];
   defaultAddr: number;
   bctrAddr: number;
+  /** The addresses of a loop-hoisted `lis`/`addi` table base, which only the pruned dispatch reads:
+   *  `lift` drops them from their block, as the pruning drops an in-block base. */
+  hoistedBase: number[];
 }
 
 /** The `cr` field a compare writes or a conditional branch reads: its first operand when it names
@@ -259,6 +262,62 @@ function boundsCompare(instrs: Instr[], j: number, scrutReg: string): number | n
 const entersDispatch = (instrs: Instr[], boundsAddr: number, jumpAddr: number): boolean =>
   instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= jumpAddr);
 
+/** The index of a LOOP-HOISTED table base `lis rB,0 ; addi rB,rB,0` for the dispatch whose `lwzx` at
+ *  `li` reads rB and whose `bctr` is at `i`, or null. mwcc 2.3.3 forms it once at entry and
+ *  dispatches from the loop. The pair is dropped from its block once the table is recovered, so it
+ *  must be dead everywhere else; it is refused unless:
+ *  - the two are adjacent and are the function's only writes of rB (the `@ha`/`@l` evidence is
+ *    checked by the caller, as for an in-block base);
+ *  - nothing but the `addi` and that `lwzx` names rB, and rB is no register a call, a return or the
+ *    ABI reads implicitly (r0-r4, r13), nor a volatile one in a function that calls;
+ *  - every path from entry to the `lwzx` runs the `lis` first, walked over the instructions — and a
+ *    second indirect jump, whose targets the walk cannot follow, refuses. */
+function hoistedTableBase(instrs: Instr[], rB: string, li: number, i: number): number | null {
+  const n = /^r(\d+)$/.exec(rB) ? Number(rB.slice(1)) : -1;
+  const isCall = (x: Instr) => x.mnemonic === 'bl' || x.mnemonic === 'bctrl' || x.mnemonic === 'blrl';
+  if (n < 5 || n === 13 || (n <= 12 && instrs.some(isCall))) {
+    return null;
+  }
+  const writes = instrs.flatMap((x, k) => (!x.mnemonic.startsWith('b') && mayWriteGpr(x, rB) ? [k] : []));
+  const [p, q] = writes;
+  const mentions = (x: Instr) => x.ops.some((o) => new RegExp(`\\b${rB}\\b`).test(o));
+  if (
+    writes.length !== 2 ||
+    q !== p + 1 ||
+    instrs[p].mnemonic !== 'lis' ||
+    instrs[q].mnemonic !== 'addi' ||
+    instrs[q].ops[1] !== rB ||
+    instrs.some((x, k) => k !== p && k !== q && k !== li && mentions(x)) ||
+    instrs.some((x, k) => k !== i && x.mnemonic === 'bctr')
+  ) {
+    return null;
+  }
+  const at = new Map(instrs.map((x, k) => [x.addr, k]));
+  const succ = (k: number): number[] => {
+    const x = instrs[k];
+    const to = x.target === undefined ? [] : [at.get(x.target)].filter((t): t is number => t !== undefined);
+    if (isReturn(x) || x.mnemonic === 'bctr') {
+      return [];
+    }
+    if (isUncond(x)) {
+      return to;
+    }
+    return [...to, k + 1].filter((t) => t < instrs.length);
+  };
+  const seen = new Set<number>([p]);
+  for (const stack = p === 0 ? [] : [0]; stack.length;) {
+    const k = stack.pop()!;
+    if (k === li) {
+      return null;
+    }
+    if (!seen.has(k)) {
+      seen.add(k);
+      stack.push(...succ(k));
+    }
+  }
+  return p;
+}
+
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
 // deviation from the idiom, or a table that doesn't resolve to N in-function targets, declines
 // (→ the `bctr` loud-fail fires). Index IDENTITY guard: `slwi rIdx,rS,2` must be the bounds-checked
@@ -306,12 +365,18 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       continue;
     } // identity: rIdx = rS<<2
     const scrutReg = slwi.ops[1];
-    const ai = defIn(rB, li);
+    let ai = defIn(rB, li);
+    let lisI = ai < 0 ? -1 : defIn(instrs[ai].ops[1], ai);
+    // A base the block does not form is a LOOP-HOISTED one (mwcc 2.3.3 puts `lis rB ; addi rB,rB`
+    // at entry and dispatches from the loop): accepted only as `hoistedTableBase` states it.
+    const hoisted = ai < 0 ? hoistedTableBase(instrs, rB, li, i) : null;
+    if (hoisted !== null) {
+      [lisI, ai] = [hoisted, hoisted + 1];
+    }
     const addi = instrs[ai];
     if (addi?.mnemonic !== 'addi' || parseImm(addi.ops[2]) !== 0) {
       continue;
     } // rB = &table (lo) + 0
-    const lisI = defIn(addi.ops[1], ai);
     const lis = instrs[lisI];
     // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the same
     // evidence — both relocation types, one symbol, one addend — so a dispatch is never recovered
@@ -323,6 +388,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     const tableSym = lis?.reloc?.sym;
     if (
       lis?.mnemonic !== 'lis' ||
+      lis.ops[0] !== addi.ops[1] ||
       !tableSym ||
       lis.reloc?.type !== 'R_PPC_ADDR16_HA' ||
       addi.reloc?.type !== 'R_PPC_ADDR16_LO' ||
@@ -334,7 +400,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     // The block is pruned unread once the table is recovered, so it may hold the idiom and nothing
     // else, nothing may branch into it past the bounds check, and none of the idiom may rewrite the
     // scrutinee before the `slwi` scales it — the `switch_br` reads it at the bounds branch.
-    const idiom = new Set([lisI, si, ai, li, mi]);
+    const idiom = new Set(hoisted === null ? [lisI, si, ai, li, mi] : [si, li, mi]);
     if (
       instrs.slice(j + 1, i).some((_, o) => !idiom.has(j + 1 + o)) ||
       instrs.slice(j + 1, si).some((x) => mayWriteGpr(x, scrutReg)) ||
@@ -350,7 +416,13 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (!caseAddrs) {
       continue;
     }
-    out.set(bgt.addr, { scrutReg, caseAddrs, defaultAddr: bgt.target, bctrAddr: instrs[i].addr });
+    out.set(bgt.addr, {
+      scrutReg,
+      caseAddrs,
+      defaultAddr: bgt.target,
+      bctrAddr: instrs[i].addr,
+      hoistedBase: hoisted === null ? [] : [lis.addr, addi.addr],
+    });
   }
   return out;
 }
@@ -677,7 +749,8 @@ export function lift(
   // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
   // The jump-table idiom's own @tbl pair never reaches this guard: a recovered dispatch block
-  // is the bounds branch's replaced fall-through, pruned as unreachable before decode.
+  // is the bounds branch's replaced fall-through, pruned as unreachable before decode, and a
+  // loop-hoisted pair is dropped from its block with it.
   //
   // TWO refusals, because they are different problems and the reader acts on them differently. A
   // symbol the naming policy calls unspellable (frontend/reloc-symbol.ts) is a DEAD END: recovering
@@ -740,6 +813,11 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  // A loop-hoisted table base is the pruned dispatch's alone (`hoistedTableBase`), so it goes with it.
+  const hoistedBase = new Set([...jts.values()].flatMap((j) => j.hoistedBase));
+  for (const b of blocks) {
+    b.body = b.body.filter((x) => !hoistedBase.has(x.addr));
+  }
   const savedRegs = prologueSavedRegs(blocks[0].body, target);
   // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
   // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
