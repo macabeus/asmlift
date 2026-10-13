@@ -132,6 +132,41 @@ extern struct Later gLater;
     expect([...found].sort()).toEqual(['gConst', 'gLater', 'gPlain', 'gPtrOnly', 'gPtrsToV', 'gPtrsToV2'].sort());
   });
 
+  test('a typedef that defines a body, qualifies one, or bounds a volatile array is read through', () => {
+    const typedefs = `
+typedef unsigned char u8;
+typedef volatile u8 vu8;
+typedef unsigned short u16;
+typedef u16 Name;
+typedef struct { vu8 type; u8 mode; } Wipe;
+typedef struct Tagged { volatile u8 a; } TaggedT;
+typedef volatile struct { u8 a; } QualT;
+typedef vu8 VBuf[4];
+typedef u8 Buf[4];
+typedef struct { Name n; Buf b; } Plain;
+struct HoldsVBuf { VBuf m; u8 c; };
+struct HoldsBuf { Buf m; u8 c; };
+struct Gnu { __volatile__ u8 a; };
+struct Gnu2 { __volatile u8 a; };
+extern Wipe gWipe;
+extern TaggedT gTagged;
+extern QualT gQual;
+extern struct HoldsVBuf gHoldsVBuf;
+extern struct Gnu gGnu;
+extern struct Gnu2 gGnu2;
+extern Plain gPlainT;
+extern struct HoldsBuf gHoldsBuf;
+`;
+    expect([...aggregateObjectsFromContext(typedefs, 'c')].sort()).toEqual(['gHoldsBuf', 'gPlainT']);
+  });
+
+  test('a chain of typedefs deeper than the nesting bound is no volatile', () => {
+    // each member reaches `u8` through eighteen typedef names, and the bound counts bodies, not names
+    const names = Array.from({ length: 18 }, (_, i) => `typedef T${i} T${i + 1};`).join('\n');
+    const deep = `typedef unsigned char T0;\n${names}\nstruct D { T18 a; T18 b; }; extern struct D gDeep;`;
+    expect([...aggregateObjectsFromContext(deep, 'c')]).toEqual(['gDeep']);
+  });
+
   test('a C++ class with a volatile member is left out', () => {
     expect([...aggregateObjectsFromContext('class Reg { volatile int a; }; extern Reg gReg;', 'c++')]).toEqual([]);
   });

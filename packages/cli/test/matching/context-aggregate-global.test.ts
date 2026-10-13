@@ -58,12 +58,14 @@ describe('a context-declared volatile aggregate keeps the bare spelling — real
   const V =
     'struct V { u16 a; u16 b; }; extern volatile struct V gV;\n' +
     'struct V2 { volatile u16 a; u16 b; }; extern struct V2 gV2;\n' +
-    'typedef volatile struct V VV; extern VV gVV;\n';
+    'typedef volatile struct V VV; extern VV gVV;\n' +
+    'typedef struct { volatile u16 a; u16 b; } VW; extern VW gVW;\n';
   test.each([
     { sym: 'vloop', c: 'void vloop(void){ while (gV.a == 0) ; }', g: 'gV' },
     { sym: 'vmember', c: 'void vmember(void){ while (gV2.a == 0) ; }', g: 'gV2' },
     { sym: 'vtypedef', c: 'void vtypedef(void){ while (gVV.a == 0) ; }', g: 'gVV' },
     { sym: 'vtwice', c: 'int vtwice(void){ return gV.a + gV.a; }', g: 'gV' },
+    { sym: 'vbodytypedef', c: 'void vbodytypedef(void){ while (gVW.a == 0) ; }', g: 'gVW' },
   ])('$sym does not cast $g and does not compile against the header', ({ sym, c, g }) => {
     const asm = compileTargetAsm(V + c, FLAGS);
     const aggregateGlobals = aggregateObjectsFromContext(V, 'c');

@@ -84,7 +84,7 @@ export function prototypesFromContext(src: string, language: Language): Prototyp
 export function aggregateObjectsFromContext(src: string, language: Language): Set<string> {
   const ctx = parseDeclarations(src, language);
   const table = typeTable(ctx);
-  const bodies = tagBodies(ctx);
+  const scope: VolatileScope = { table, typedefs: typedefTypes(ctx), bodies: tagBodies(ctx), ctx, read: new Map() };
   const out = new Set<string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
@@ -92,12 +92,7 @@ export function aggregateObjectsFromContext(src: string, language: Language): Se
     }
     for (const x of d.declarators) {
       const t = declaredType(d.specifiers, x.derivations);
-      if (
-        x.name !== undefined &&
-        WORD.test(x.name) &&
-        isAggregate(t, table) &&
-        !hasVolatileStorage(t, table, bodies, ctx, 0)
-      ) {
+      if (x.name !== undefined && WORD.test(x.name) && isAggregate(t, table) && !hasVolatileStorage(t, scope, 0)) {
         out.add(x.name);
       }
     }
@@ -131,19 +126,44 @@ function tagBodies(ctx: ParsedContext): Map<string, Range> {
   return out;
 }
 
+/** Every typedef name the context declares, and the type it stands for as written: with the body a
+ *  typedef defines (`typedef struct { vu8 a; } S;`), its qualifiers (`typedef volatile struct {…} S;`)
+ *  and an array's bounds (`typedef vu8 Buf[4];`), none of which the type table keeps — it binds a
+ *  body's name to the name itself, and it reads no typedef of an array. */
+function typedefTypes(ctx: ParsedContext): Map<string, DeclaredType> {
+  const out = new Map<string, DeclaredType>();
+  for (const d of ctx.declarations) {
+    if (!d.specifiers.typedef) {
+      continue;
+    }
+    for (const x of d.declarators) {
+      if (x.name !== undefined && WORD.test(x.name)) {
+        out.set(x.name, declaredType(d.specifiers, x.derivations));
+      }
+    }
+  }
+  return out;
+}
+
+/** What `hasVolatileStorage` reads a type through, and what it has already read: each typedef name
+ *  and each body by its first token, so a type every member reaches through the same typedefs
+ *  (`mActor_name_t`, then `u16`) is walked once, and a long chain of them costs no nesting depth. */
+interface VolatileScope {
+  table: TypeTable;
+  typedefs: ReadonlyMap<string, DeclaredType>;
+  bodies: ReadonlyMap<string, Range>;
+  ctx: ParsedContext;
+  read: Map<string, boolean>;
+}
+
 /** Whether any byte of an object of type `t` is volatile: the type or an array's element is
  *  qualified, through the typedef names it is built on, or a struct or union in it has such a member.
  *  A pointer ends the walk at its own qualifiers, since what it points at is no byte of the object.
- *  A body that cannot be read, or a type nested past the bound, is read as volatile: leaving the
- *  object out only keeps the earlier spelling. A tag with no body here has no member to qualify. */
-function hasVolatileStorage(
-  t: DeclaredType,
-  table: TypeTable,
-  bodies: ReadonlyMap<string, Range>,
-  ctx: ParsedContext,
-  depth: number,
-): boolean {
-  if (depth > 16) {
+ *  A body that cannot be read, or bodies nested past the bound, is read as volatile: leaving the
+ *  object out only keeps the earlier spelling. A tag with no body here has no member to qualify.
+ *  A name met again while it is being read (a cycle, which no C type has) is read as not volatile. */
+function hasVolatileStorage(t: DeclaredType, scope: VolatileScope, depth: number): boolean {
+  if (depth > 32) {
     return true;
   }
   for (const x of t.derivations) {
@@ -154,7 +174,10 @@ function hasVolatileStorage(
       return false;
     }
   }
-  if (t.qualifiers.includes('volatile')) {
+  // GNU's alternate spellings, which the declaration parser keeps as words it does not know, or as
+  // the type's own name when a typedef name follows (`__volatile__ u8 a;`)
+  const words = t.type.kind === 'words' ? [...t.type.words, ...t.unknownWords] : t.unknownWords;
+  if (t.qualifiers.includes('volatile') || words.some((w) => w === '__volatile' || w === '__volatile__')) {
     return true;
   }
   let body: Range | undefined;
@@ -162,30 +185,42 @@ function hasVolatileStorage(
     if (t.type.keyword === 'enum') {
       return false;
     }
-    body = t.type.body ?? (t.type.tag !== undefined ? bodies.get(`${t.type.keyword} ${t.type.tag}`) : undefined);
+    body = t.type.body ?? (t.type.tag !== undefined ? scope.bodies.get(`${t.type.keyword} ${t.type.tag}`) : undefined);
   } else if (t.type.words.length === 1) {
     const name = t.type.words[0];
-    const next = table.typedefs.get(name);
+    const next = scope.typedefs.get(name);
     if (next !== undefined) {
       const resolves = next.type.kind === 'words' && next.type.words.length === 1 && next.type.words[0] === name;
-      return !resolves && hasVolatileStorage(next, table, bodies, ctx, depth + 1);
+      return !resolves && once(scope, `typedef ${name}`, () => hasVolatileStorage(next, scope, depth));
     }
-    body = table.named.get(name)?.body ?? bodies.get(name);
+    body = scope.table.named.get(name)?.body ?? scope.bodies.get(name);
   }
   if (body === undefined) {
     return false;
   }
-  const members = memberDeclarations(ctx, body);
+  const members = memberDeclarations(scope.ctx, body);
   if (members === undefined) {
     return true;
   }
-  return members.some((m) =>
-    m.declarators.length === 0
-      ? hasVolatileStorage(declaredType(m.specifiers, []), table, bodies, ctx, depth + 1)
-      : m.declarators.some((x) =>
-          hasVolatileStorage(declaredType(m.specifiers, x.derivations), table, bodies, ctx, depth + 1),
-        ),
+  return once(scope, `body ${body.from}`, () =>
+    members.some((m) =>
+      m.declarators.length === 0
+        ? hasVolatileStorage(declaredType(m.specifiers, []), scope, depth + 1)
+        : m.declarators.some((x) => hasVolatileStorage(declaredType(m.specifiers, x.derivations), scope, depth + 1)),
+    ),
   );
+}
+
+/** `read()`, remembered under `key`, which reads as false while it is being read. */
+function once(scope: VolatileScope, key: string, read: () => boolean): boolean {
+  const known = scope.read.get(key);
+  if (known !== undefined) {
+    return known;
+  }
+  scope.read.set(key, false);
+  const v = read();
+  scope.read.set(key, v);
+  return v;
 }
 
 /** Whether `t` is a struct, union, class or array type, through the typedef names it is built on. */
