@@ -2,12 +2,12 @@
 // Reference builds are content-cached (cache.ts); scoring uses the toolchain adapter default.
 import { onlySelects } from '@asmlift/bench-schema';
 import { renderDeclarations, selfDeclaredContext } from '@asmlift/core/declare';
-import { globalsFromContext } from '@asmlift/core/proto-context';
 import { canonicalFlagsOf } from '@asmlift/core/target';
 
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
 import { cachedBuildTarget } from '../cache';
 import { TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
+import { contextGlobalsNamed } from './context-proto';
 import type { Case } from './types';
 
 /** THE MAP, RENDERED FOR THE OTHER DECOMPILER — the synthetic tier's symmetry, made structural.
@@ -50,13 +50,8 @@ const withMapDeclarations = (ctx: string | undefined, symbols: NonNullable<Case[
  *  declares and no map describes measured a lift that had never been told the declaration every
  *  candidate is meant to compile against. Read from the ctx as m2c is handed it, map declarations
  *  included; a name the map describes answers from the map first (structure.ts, the stamp). */
-const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] => {
-  if (ctx === undefined || ctx === '') {
-    return undefined;
-  }
-  const found = globalsFromContext(ctx, language);
-  return found.aggregates.size > 0 || found.volatiles.size > 0 ? found : undefined;
-};
+const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] =>
+  ctx === undefined ? undefined : contextGlobalsNamed(`text ${ctx}`, ctx, language);
 
 export interface SyntheticFilter {
   only?: string; // substring match on the symbol

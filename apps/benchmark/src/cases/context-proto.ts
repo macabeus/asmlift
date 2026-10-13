@@ -44,25 +44,33 @@ export function rowPrototypes(
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
-/** contexts' globals, keyed as `parsed` is */
-const globals = new Map<string, ContextGlobals>();
+/** contexts' globals, keyed by the language and the context's name */
+const globals = new Map<string, ContextGlobals | undefined>();
 
-/** What the row's vendored context states about its globals — which are structs, unions or arrays,
- *  and which are volatile (`globalsFromContext`) — one reading per context, shared by its rows. */
+/** What a declaration context states about its globals — which are structs, unions or arrays, which
+ *  are volatile and which point at a volatile (`globalsFromContext`) — or undefined where it states
+ *  none of that. One reading per `name`, which stands for the text and is shared by every row that
+ *  reads it: the real tier names a vendored context by its file, the synthetic tier a row's ctx by
+ *  its text. */
+export function contextGlobalsNamed(name: string, text: string, language: 'c' | 'c++'): ContextGlobals | undefined {
+  if (text === '') {
+    return undefined;
+  }
+  const key = `${language} ${name}`;
+  if (!globals.has(key)) {
+    const found = globalsFromContext(text, language);
+    const states = found.aggregates.size > 0 || found.volatiles.size > 0 || found.pointeeVolatiles.size > 0;
+    globals.set(key, states ? found : undefined);
+  }
+  return globals.get(key);
+}
+
+/** What the row's vendored context states about its globals ({@link contextGlobalsNamed}). */
 export function rowContextGlobals(
   { ctxI, ctxFile }: { ctxI: string; ctxFile: string },
   language: 'c' | 'c++',
 ): ContextGlobals | undefined {
-  if (ctxI === '') {
-    return undefined;
-  }
-  const key = `${language} ${ctxFile}`;
-  let found = globals.get(key);
-  if (found === undefined) {
-    found = globalsFromContext(ctxI, language);
-    globals.set(key, found);
-  }
-  return found.aggregates.size > 0 || found.volatiles.size > 0 ? found : undefined;
+  return contextGlobalsNamed(`file ${ctxFile}`, ctxI, language);
 }
 
 /** The entries a lift can look up — the row's own symbol and every symbol `text` (the assembly, and
