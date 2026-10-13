@@ -41,7 +41,7 @@ import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgIndex, stackArgKey, stackSlotKey } from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -501,6 +501,61 @@ function checkDelaySlots(name: string, instrs: Instr[]): void {
   }
 }
 
+// Mnemonics whose FIRST operand is a source, never a destination: the stores, the branches that
+// compare it, and the moves and products that read it. Every other instruction naming `sp` first
+// writes it.
+const SOURCE_FIRST = /^(s[bhwd]|sw[lr]|sc|s[wd]c1|b\w*|jr|jalr|mult|multu|div|divu|mt\w+|ctc1|t\w+|cache|sync)$/;
+
+/** THE FRAME DEPTH AT EACH INSTRUCTION: how many bytes below the `sp` the function was entered
+ *  with it runs, so an `off(sp)` it makes names entry-relative byte `off - depth`. Exact or absent —
+ *  null wherever one number per instruction is not proven, and every reader then keeps its refusal.
+ *
+ *  Proven for the frame every compiler here builds: at most one `addiu sp,sp,-N`, in the entry
+ *  block (anywhere in it, IDO's leaves load before they push), and `addiu sp,sp,N` only in a block
+ *  that returns, after which the block runs at depth 0. The entry runs from depth 0 and every other
+ *  block from N, which holds because the entry runs once and every other block is reached through
+ *  it. Refused: any other write to `sp`, a second push, a push outside the entry or in an entry a
+ *  branch re-enters (the preheader's case), a pop of another size or in a block that does not
+ *  return. */
+function frameDepths(blocks: readonly MipsBlock[], entryReentered: boolean): ReadonlyMap<Instr, number> | null {
+  const depths = new Map<Instr, number>();
+  const adjust = (ins: Instr): number | null | undefined => {
+    if (!isStackPtr(ins.ops[0] ?? '') || SOURCE_FIRST.test(ins.mnemonic)) {
+      return undefined; // leaves sp alone
+    }
+    const by = parseImm(ins.ops[2] ?? '');
+    return (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi') && isStackPtr(ins.ops[1] ?? '') && Number.isFinite(by)
+      ? by
+      : null;
+  };
+  const pushes = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]).filter((i) => (adjust(i) ?? 0) < 0);
+  if (pushes.length > 1) {
+    return null;
+  }
+  const size = pushes.length === 1 ? -adjust(pushes[0])! : 0;
+  for (const [bi, b] of blocks.entries()) {
+    let depth = bi === 0 ? 0 : size;
+    for (const ins of [...b.body, ...(b.delay ? [b.delay] : [])]) {
+      depths.set(ins, depth);
+      const by = adjust(ins);
+      if (by === undefined) {
+        continue;
+      }
+      if (by === null) {
+        return null;
+      }
+      if (by < 0 && (bi !== 0 || entryReentered || depth !== 0)) {
+        return null;
+      }
+      if (by > 0 && (by !== depth || b.branch === null || !isReturn(b.branch))) {
+        return null;
+      }
+      depth -= by;
+    }
+  }
+  return depths;
+}
+
 // Split the instruction stream into basic blocks. Delay slots are consumed into their
 // branching block; leaders are the entry, every branch target, and each conditional branch's
 // fall-through. A branch-LIKELY's slot is not consumed — it becomes its own block (see
@@ -728,7 +783,8 @@ export function lift(
   // PREHEADER, as in frontend/ppc.ts: an entry that is a branch target gets an empty block ahead of
   // it, whose live-ins are the function's parameters. One word below the function, so it falls
   // through to it.
-  if (blocks.some((b) => succAddrs.get(b)!.includes(blocks[0].startAddr))) {
+  const entryReentered = blocks.some((b) => succAddrs.get(b)!.includes(blocks[0].startAddr));
+  if (entryReentered) {
     const ph: MipsBlock = {
       startAddr: blocks[0].startAddr - 4,
       body: [],
@@ -830,6 +886,20 @@ export function lift(
       parseImm(ins.ops[2] ?? '') < 0,
   );
   const frameSize = pushes.length === 1 ? -parseImm(pushes[0].ops[2]) : undefined;
+  const depthAt = frameDepths(blocks, entryReentered);
+  // …and every byte of the CALLER'S frame this function writes, entry-relative: a stack parameter
+  // it assigns to is a word its own stores reach, so a read of it is not the argument the caller
+  // passed (`emitLoad`). Every `sp` store, any width, wherever the walk measured its depth.
+  const incomingWritten = new Set<number>();
+  for (const [ins, depth] of depthAt ?? []) {
+    const mem = ins.ops[ins.ops.length - 1] ?? '';
+    const width = { sb: 1, sh: 2, sw: 4 }[ins.mnemonic];
+    if (width !== undefined && /\(/.test(mem) && isStackPtr(parseMem(mem).base)) {
+      for (let k = 0; k < width; k++) {
+        incomingWritten.add(parseMem(mem).off - depth + k);
+      }
+    }
+  }
 
   // THE FRAME'S SAVES. A word store of `ra`, or of a register O32 does not let a callee destroy,
   // made while the register still holds what the caller left in it, is a SAVE: the word holds the
@@ -1377,16 +1447,28 @@ export function lift(
         }
         // SOUNDNESS GUARD (mirrors PPC frameLoad): only route through the slot SSA var if that slot was
         // actually STORED (has a reaching def). A word `lw` from an sp offset that was NEVER spilled is an
-        // incoming STACK-PASSED argument (5th+ param, O32) or an uninitialised local — neither modelled.
-        // Without this, readVar would FABRICATE a phantom entry parameter for the slot, silently emitting a
-        // function of wrong arity that returns the wrong argument. Loud-fail instead of miscompiling.
+        // incoming STACK-PASSED argument (5th+ param, O32) or an uninitialised local. Without this,
+        // readVar would FABRICATE a phantom entry parameter for the slot, silently emitting a function
+        // of wrong arity that returns the wrong argument.
         //
-        // Those two cases are SEPARABLE, and the Thumb frontend now separates them (frontend/thumb.ts,
-        // incomingArgIndex): a slot at or above the callee's own frame cannot have been written by this
-        // function, so it is an incoming argument; below the frame top it is a local. Doing the same here
-        // needs O32's own frame rule — the 16-byte home area means a stack argument is NOT simply "above
-        // the frame", so the Thumb arithmetic does not carry over — plus ssa.ensureParam for the register
-        // half. Until then this stays one loud decline for both.
+        // The two are told apart by where the word is, entry-relative (`frameDepths`): O32 passes
+        // argument word k >= 4 at entry sp + 4k, above the caller's 16-byte home of a0..a3, so a word
+        // at or past entry + 16 that this function never writes (`incomingWritten`) is that argument,
+        // `@sarg<k>` — a parameter through the ordinary live-in path, as on Thumb. Everything else
+        // keeps the decline: a word of this frame, of the home area, or at an unproven depth. A
+        // sub-word or floating-point incoming argument never reaches here (the `spSlotSafe` guard and
+        // the FPU's own load).
+        const depth = depthAt?.get(ins);
+        const entryOff = depth === undefined ? undefined : off - depth;
+        if (
+          entryOff !== undefined &&
+          entryOff >= STACK_ARGS_AT &&
+          entryOff % 4 === 0 &&
+          ![0, 1, 2, 3].some((k) => incomingWritten.has(entryOff + k))
+        ) {
+          write(d, readVar(stackArgKey(ARG_REGS.length + (entryOff - STACK_ARGS_AT) / 4), bi));
+          return;
+        }
         if (!ssa.hasReachingDef(stackSlot(off), bi)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': load from stack slot sp@${off} that was never stored ` +
@@ -1612,7 +1694,7 @@ export function lift(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
-  const argSlots = fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType);
+  const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
@@ -1632,6 +1714,30 @@ export function lift(
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;
+}
+
+/** The register slots, then an incoming stack word `@sarg<k>` as argument slot k: reading word k
+ *  proves every register and every stack word below it is an argument. A floating-point register
+ *  read beside a stack word refuses — where a float shadows the integer slots ahead of the stack
+ *  words is not modelled here. */
+function o32ArgSlots(name: string, regs: ArgSlots, argRegs: readonly string[]): ArgSlots {
+  return {
+    slotOf: (key) => stackArgIndex(key) ?? regs.slotOf(key),
+    holes: (readKeys) => {
+      const top = Math.max(-1, ...readKeys.map((k) => stackArgIndex(k) ?? -1));
+      if (top < 0) {
+        return regs.holes(readKeys);
+      }
+      const float = readKeys.find(isFpKey);
+      if (float !== undefined) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': ${float} carries a floating-point argument beside the incoming stack argument ` +
+            `${top + 1} — which integer slots the float takes ahead of the stack words is not modelled`,
+        );
+      }
+      return Array.from({ length: top }, (_, k) => (k < argRegs.length ? argRegs[k] : stackArgKey(k)));
+    },
+  };
 }
 
 // Build the "branch taken" condition value for a conditional branch (emitting the icmp op).

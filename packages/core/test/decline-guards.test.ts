@@ -242,7 +242,9 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // store outright. One sub-word sp access disables slot modelling for the entire function.
   expect(mips('   0:\tsw\ta0,4(sp)\n   4:\tlbu\tv0,4(sp)\n')).toThrow(/stack pointer used as data/);
   expect(mips('   0:\taddu\tv0,sp,a0\n')).toThrow(/stack pointer used as data/); // &local
-  expect(mips('   0:\tlw\tv0,16(sp)\n')).toThrow(/never stored/); // a slot no store defined
+  // a slot no store defined, in the caller's home of a0..a3 (16(sp) up is an incoming stack
+  // argument, frontend/mips.ts `emitLoad`)
+  expect(mips('   0:\tlw\tv0,4(sp)\n')).toThrow(/never stored/);
   // …and the case that guard MISSES, found while porting the model to Thumb: `hasReachingDef` asks
   // whether a store reaches on SOME path, so a slot stored on one arm of a diamond and reloaded at
   // the join passes it. readVar then recurses into the unstored predecessor and mints an entry
