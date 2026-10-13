@@ -61,10 +61,10 @@ export function rankOptionsFor(
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
   // Optional but with NO default, so `Function.length` counts it and is 8 — which is how `bench
-  // sweep --base` tells this signature from the one before it. That one took, in the same eighth place and behind a
-  // default (length 7), the bare set of context aggregates; a driver that passed one tree's
-  // argument to the other would lift a side without the context its own rows read, and a moved
-  // `src` would read as a decompiler change (run/sweep-driver.ts `contextArgument`).
+  // sweep --base` tells this signature from the one before it, whose eighth place held the bare set
+  // of context aggregates behind a default (length 7). A driver that passed one tree's argument to
+  // the other would lift a side without the context its own rows read, and a moved `src` would
+  // read as a decompiler change (run/sweep-driver.ts `contextArgument`).
   contextGlobals?: ContextGlobals,
 ): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a

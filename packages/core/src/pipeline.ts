@@ -77,8 +77,8 @@ export interface DecompileOptions {
   symbols?: SymbolMap;
   /** what the project's declaration context states about its globals (proto-context.ts
    *  `globalsFromContext`): no aggregate is spelled as a bare scalar name, and every access to a
-   *  volatile object the map does not lay out is stamped (raise/declared-volatile.ts), so the cast
-   *  an aggregate is read through carries the qualifier. */
+   *  volatile object the map does not lay out, or through a pointer to one, is stamped
+   *  (raise/declared-volatile.ts), so the cast it is read through carries the qualifier. */
   contextGlobals?: ContextGlobals;
   /** gap policy — see `OnGap`. Default "strict". */
   onGap?: OnGap;

@@ -4,22 +4,24 @@
 // The stamp is a function of the IR, the map the function is lifted and structured under, the
 // declaration context's globals and the compiler, and nothing else: an access whose base reaches a
 // global the map qualifies, at the byte the access names (`declaresVolatile`), or one the context
-// declares with a volatile byte and the map does not lay out (`ContextGlobals.volatiles`, which is
-// per object, not per byte), or one through the value of a pointer the context declares to point at
-// a volatile (`ContextGlobals.pointeeVolatiles`) — and, for a read, one the compiler could have made of a `volatile`
-// (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
+// declares with a volatile byte and the map does not lay out (`ContextGlobals.volatiles`, per
+// object, not per byte), or one through the value of a pointer the context declares to point at a
+// volatile (`ContextGlobals.pointeeVolatiles`) — and, for a read, one the compiler could have made
+// of a `volatile` (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
 // lift is made (pipeline.ts `liftStamped`), before the first pass that asks whether a read may be
 // deleted, folded or moved, and re-derived by every pass that changes which object an access names
 // and by structuring. Structuring the same function under another map — the `/raw-globals` setting
 // has none — re-runs it, and an op the new map does not qualify loses the stamp, so a structuring
 // never answers for a map it was not given. The context is not the map: every candidate compiles
-// against it whichever names it spells, so it is read in both settings. The base is read as the structurer will read it: a join
-// whose every edge passes one address is that address (`addressThroughJoins`), and one every edge of
-// which reaches one object — two of its addresses, or a pointer a loop steps through it — is an
-// access of that object, as one every edge of which moves a pointer global's value is an access of
-// its pointee (`reachThroughJoins`, one reader for both). A base that reaches no name is a pointer parameter,
-// a raw address or a join of two objects: no declaration is in evidence, and the access stays
-// unplaced unless the lift pinned it (`device`).
+// against it whichever names it spells, so it is read in both settings.
+//
+// The base is read as the structurer will read it: a join whose every edge passes one address is
+// that address (`addressThroughJoins`), and one every edge of which reaches one object — two of its
+// addresses, or a pointer a loop steps through it — is an access of that object, as one every edge
+// of which moves a pointer global's value is an access of its pointee (`reachThroughJoins`, one
+// reader for both). A base that reaches no name is a pointer parameter, a raw address or a join of
+// two objects: no declaration is in evidence, and the access stays unplaced unless the lift pinned
+// it (`device`).
 //
 // A read structuring stamps that the earlier stamps left plain was plain to every raising pass, and a
 // short-circuit fold may have lifted it out of the arm it ran in. structure.ts declines on such a
@@ -35,9 +37,8 @@ import { valueNumberOf } from './gvn';
 
 /** The compiler fact the stamp reads, and the declaration context's globals when there is one.
  *  The context is a REQUIRED key, `undefined` when there is none: the stamp clears every stamp it
- *  does not re-derive, so a re-stamp that left it out — the compiler behaviors alone, which an
- *  optional key accepted — silently unplaced every read the context made volatile. Build one with
- *  pipeline.ts `stampBehaviorsFor`. */
+ *  does not re-derive, so a re-stamp handed the compiler behaviors alone would unplace every read
+ *  the context made volatile. Build one with pipeline.ts `stampBehaviorsFor`. */
 export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'> & {
   readonly contextGlobals: ContextGlobals | undefined;
 };
@@ -109,13 +110,14 @@ type Reach = { readonly kind: 'object' | 'pointee'; readonly sym: string };
  *  arithmetic and joins alike: a `gaddr` is its object; a word read from a global's own first byte
  *  is that global's value, so an address moved from it reaches the global's pointee (asked only of a
  *  global in `pointers`, the ones the context declares to point at a volatile: any other word read
- *  is an index, not a base); an `add` with one reaching operand and a `sub` from
- *  one reach what it does; and a block parameter reaches what every in-edge's value reaches, an edge that passes the parameter itself moved by an offset (a
- *  strength-reduced loop pointer `v0 = v0 + 2`) aside. So `c ? &gW.a : &gW.b` and a pointer seeded
- *  with `&gVA` and stepped through it are accesses of that object, and `c ? gP + 1 : gP + 2` and a
- *  pointer seeded with `gP` and stepped are accesses of gP's pointee. ONE reader answers both, so a
- *  shape the object path reads the pointee path reads too. Null where an edge reaches another
- *  global, the other kind, or none. `addressThroughJoins` — one value on every edge — is narrower. */
+ *  is an index, not a base); an `add` with one reaching operand and a `sub` from one reach what it
+ *  does; and a block parameter reaches what every in-edge's value reaches, an edge that passes the
+ *  parameter itself moved by an offset (a strength-reduced loop pointer `v0 = v0 + 2`) aside. So
+ *  `c ? &gW.a : &gW.b` and a pointer seeded with `&gVA` and stepped through it are accesses of that
+ *  object, and `c ? gP + 1 : gP + 2` and a pointer seeded with `gP` and stepped are accesses of gP's
+ *  pointee. ONE reader answers both, so a shape the object path reads the pointee path reads too.
+ *  Null where an edge reaches another global, the other kind, or none. `addressThroughJoins` — one
+ *  value on every edge — is narrower. */
 function reachThroughJoins(
   fn: Fn,
   defs: Map<Value, Op>,

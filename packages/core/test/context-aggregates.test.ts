@@ -1,9 +1,9 @@
 // The globals a declaration context declares as structs, unions or arrays, and those with a volatile
 // byte (src/proto-context.ts `globalsFromContext`), and the structurer reading them where it would
-// read the map's `shape` (structure.ts, the declaration-shape override of `scalarGlobals`). A global the map does
-// not describe and the function reads only at offset 0 is otherwise spelled by its bare name, which
-// is a compile error over a struct and a read of the address over an array. The compiled proof is
-// packages/cli/test/matching/context-aggregate-global.test.ts.
+// read the map's `shape` (structure.ts, the declaration-shape override of `scalarGlobals`). A
+// global the map does not describe and the function reads only at offset 0 is otherwise spelled by
+// its bare name, which is a compile error over a struct and a read of the address over an array.
+// The compiled proof is packages/cli/test/matching/context-aggregate-global.test.ts.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -64,8 +64,8 @@ u8 gArrFn(void);
   });
 
   test('an array through a typedef is an aggregate, volatile or not', () => {
-    // The type table reads no typedef of an array; left out, `gTB`'s offset-0 read was spelled
-    // `gTB`, its address, and `gTC`'s poll compared the address with 0.
+    // The type table reads no typedef of an array; unless it is followed as written, `gTB`'s
+    // offset-0 read is spelled `gTB`, its address, and `gTC`'s poll compares the address with 0.
     const td =
       'typedef unsigned short u16;\ntypedef u16 Arr4[4];\ntypedef volatile u16 VArr4[4];\n' +
       'typedef Arr4 Arr4b;\nextern Arr4 gTB;\nextern VArr4 gTC;\nextern Arr4b gTD;\nextern Arr4 *gTP;\n';

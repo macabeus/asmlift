@@ -44,12 +44,11 @@ const withMapDeclarations = (ctx: string | undefined, symbols: NonNullable<Case[
   return `${selfDeclaredContext(renderDeclarations(refs))}\n${ctx ?? ''}`;
 };
 
-/** WHAT THE ROW'S CONTEXT STATES ABOUT ITS GLOBALS, read as the real tier reads a project's
- *  (`context-proto.ts` `rowContextGlobals`): which are structs, unions or arrays, and which are
- *  volatile. Without it a synthetic row's `ctx` reached m2c alone, so a row whose global the ctx
- *  declares and no map describes measured a lift that had never been told the declaration every
- *  candidate is meant to compile against. Read from the ctx as m2c is handed it, map declarations
- *  included; a name the map describes answers from the map first (structure.ts, the stamp). */
+/** WHAT THE ROW'S CONTEXT STATES ABOUT ITS GLOBALS, read by the real tier's reader
+ *  (`context-proto.ts` `contextGlobalsNamed`): which are structs, unions or arrays, which are
+ *  volatile and which point at a volatile. Every candidate compiles against the ctx, so the lift is
+ *  told it too. Read from the ctx as m2c is handed it, map declarations included; a name the map
+ *  describes answers from the map first (structure.ts, the stamp). */
 const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] =>
   ctx === undefined ? undefined : contextGlobalsNamed(`text ${ctx}`, ctx, language);
 

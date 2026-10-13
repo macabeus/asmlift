@@ -306,8 +306,8 @@ export const LEGACY_RANK_OPTIONS_ARITY = 7;
 
 /** The eighth argument a tree's own `rankOptionsFor` takes, off that tree's own case: the meaning of
  *  the position changed with the count, so each side is handed the field its own rows carry. Passed
- *  across, the base side of `bench sweep --base` lifted without the context aggregates its rows
- *  always read — `kleod:BootScreenHandler:agbcc` moved src on an unchanged tree. */
+ *  across, the base side of `bench sweep --base` lifts without the context aggregates its rows
+ *  read. */
 export function contextArgument(arity: number, c: { contextGlobals?: unknown; aggregateGlobals?: unknown }): unknown {
   return arity === LEGACY_RANK_OPTIONS_ARITY ? c.aggregateGlobals : c.contextGlobals;
 }

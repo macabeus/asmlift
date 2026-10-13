@@ -70,16 +70,16 @@ export function prototypesFromContext(src: string, language: Language): Prototyp
 }
 
 /** What a preprocessed declaration context states about the globals it declares, beyond their
- *  prototypes. Both sets are read together and travel together: the aggregate spelling `*(T *)&g`
- *  is a cast, which drops the declaration's qualifiers, so a reader handed the aggregates without
- *  the volatile objects would print a plain read of a volatile one. */
+ *  prototypes. The sets travel together: the aggregate spelling `*(T *)&g` is a cast, which drops
+ *  the declaration's qualifiers, so a reader handed the aggregates without the volatile objects
+ *  would print a plain read of a volatile one. */
 export interface ContextGlobals {
   /** The objects declared as a struct, a union or an array. Such an object has no value a bare name
    *  reads: `v = gInfo;` over `extern struct Info gInfo;` is a compile error, and over
    *  `extern u8 gBuf[];` it reads the address. A project whose symbol map does not describe a
    *  global (one its linker script places has no DWARF) states it here, so the structurer reads
    *  this set where it would read the map's `shape`. A type this cannot resolve — an unexpanded
-   *  macro, a typedef of an array — is left out, which keeps the usage-inferred spelling. */
+   *  macro — is left out, which keeps the usage-inferred spelling. */
   aggregates: ReadonlySet<string>;
   /** The objects any byte of which is volatile (`hasVolatileStorage`): the object, an array's
    *  element, a typedef in its chain, or a member of a struct or union in it, nested or anonymous.
@@ -344,8 +344,8 @@ function once(scope: VolatileScope, key: string, read: () => boolean): boolean {
 
 /** Whether `t` is a struct, union, class or array type, through the typedef names it is built on.
  *  A typedef the type table does not read — one of an array, `typedef u16 Arr4[4];` — is followed
- *  as written (`typedefTypes`): left out, `extern Arr4 gTB;` read as a scalar, and its offset-0
- *  read was spelled `gTB`, the array's address. */
+ *  as written (`typedefTypes`), or `extern Arr4 gTB;` reads as a scalar whose offset-0 read is
+ *  spelled `gTB`, the array's address. */
 function isAggregate(t: DeclaredType, table: TypeTable, written: ReadonlyMap<string, DeclaredType>): boolean {
   let cur = t;
   for (let hops = 0; hops < 16; hops++) {

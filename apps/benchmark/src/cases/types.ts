@@ -34,8 +34,8 @@ interface CaseFields {
   /** the project's vendored symbol map — threaded into asmlift only (m2c has its ctx) */
   symbols?: SymbolMap;
   proto?: Prototypes; // asmlift prototypes
-  /** what the row's context states about its globals — its aggregates and its volatile objects
-   *  (core `globalsFromContext`) — asmlift-only, as `proto` is */
+  /** what the row's context states about its globals — its aggregates, its volatile objects and
+   *  its pointers to volatile (core `globalsFromContext`) — asmlift-only, as `proto` is */
   contextGlobals?: ContextGlobals;
   note?: string;
   toolchain: Toolchain;

@@ -2387,8 +2387,8 @@ function additiveChain(rules: MaterializeRules, read: Op): Map<Op, { sign: numbe
  *  The value is then right in either order, but the match is not: the earlier read must also be
  *  the one the expression spells first, entering the meeting op as its left operand, or a compiler
  *  that reads operands left to right reverses the asm's two loads. mwcc 2.4.2 reads
- *  `gMS.f + ((t + gMS.f) + t)`'s right-hand `gMS.f` first, and spelling both in one expression
- *  there put the asm's second load first. */
+ *  `gMS.f + ((t + gMS.f) + t)`'s right-hand `gMS.f` first, so spelling both in one expression
+ *  there puts the asm's second load first. */
 function sameSignInOneSum(rules: MaterializeRules, earlier: Op, later: Op): boolean {
   const ofEarlier = additiveChain(rules, earlier);
   if (ofEarlier.size === 0) {

@@ -91,7 +91,7 @@ describe('a context-declared volatile aggregate the map does not describe', () =
   test('an array subscripted through its own name keeps it: the declaration already qualifies the element', () => {
     // agbcc -O2 of `void vidxp(int i){ while (gVA[i] == 0); }` over `extern volatile u16 gVA[8];`.
     // The printer spells the subscript through the name, and the qualifier the stamp would put on a
-    // cast there is a spelling agbcc compiles differently (the ranked best went MATCH -> 2).
+    // cast there is a spelling agbcc compiles differently.
     const VIDXP =
       'vidxp:\n\tldr\tr1, .L7\n\tlsl\tr0, r0, #0x1\n\tadd\tr1, r0, r1\n.L3:\n\tldrh\tr0, [r1]\n\tcmp\tr0, #0\n' +
       '\tbeq\t.L3\n\tbx\tlr\n.L7:\n\t.word\tgVA\n';
@@ -123,8 +123,8 @@ describe('a context-declared volatile scalar: the object is the pointer, not wha
   test('a read through the pointer value names no qualified object, so no cast drops its qualifier', () => {
     // agbcc -O2 of `u16 vptrv(void){ return *gPV + *gPV; }` over `extern u16 * volatile gPV;`. The
     // pointer is volatile, its pointee is not: `*(u16 *)gPV` reads the pointee, and the bare `gPV`
-    // under it is the qualified read, spelled through the declaration. This was refused as a read of
-    // `gPV` through a cast that drops its qualifier.
+    // under it is the qualified read, spelled through the declaration, not a read of `gPV` through
+    // a cast that drops its qualifier.
     const VPTRV = wrap(
       'vptrv',
       '\tldr\tr0, .L3\n\tldr\tr1, [r0]\n\tldr\tr0, [r0]\n\tldrh\tr0, [r0]\n\tldrh\tr1, [r1]\n\tadd\tr0, r0, r1\n' +
@@ -210,7 +210,7 @@ describe('an access of a context-declared volatile object through a pointer that
     // agbcc -O2 of `u32 varrsum(void){ u32 s = 0; int i; for (i = 0; i < 8; i++) s += gVA[i]; return s; }`
     // over `extern volatile u16 gVA[8];`: the compiler strength-reduces `gVA[i]` to a pointer it
     // steps by 2. That pointer is a local in the lift, which the declaration does not qualify, so a
-    // plain `*v1` let the read be hoisted or merged.
+    // plain `*v1` lets the read be hoisted or merged.
     const VARRSUM =
       'varrsum:\n\tmov\tr3, #0x0\n\tldr\tr2, .L8\n\tmov\tr1, #0x7\n.L6:\n\tldrh\tr0, [r2]\n\tadd\tr3, r0, r3\n' +
       '\tadd\tr2, r2, #0x2\n\tsub\tr1, r1, #0x1\n\tcmp\tr1, #0\n\tbge\t.L6\n\tadd\tr0, r3, #0\n\tbx\tlr\n.L8:\n' +
