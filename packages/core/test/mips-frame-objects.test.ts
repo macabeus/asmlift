@@ -131,6 +131,29 @@ describe('a captured local lifts as one object in the local area', () => {
     expect(gcc).toMatch(/return p0\[a0\];/);
   });
 
+  test('…and the frame base by every spelling of `move rD,sp`: Splat `addu`, IDO `or`', () => {
+    // Splat writes `addu $a3, $sp, $zero` where objdump writes `move a3,sp` (snowboardkids2
+    // func_80036AF8_376F8); IDO's own move is `or rD,rS,zero`.
+    const leaf = (base: string) => [
+      '0:\taddiu\tsp,sp,-16',
+      '4:\tli\tv0,1',
+      '8:\tsw\tv0,0(sp)',
+      'c:\tsw\tzero,4(sp)',
+      '10:\tsw\tzero,8(sp)',
+      '14:\tsw\tzero,12(sp)',
+      `18:\t${base}`,
+      '1c:\tsll\ta0,a0,0x2',
+      '20:\taddu\ta0,a1,a0',
+      '24:\tlw\tv0,0(a0)',
+      '28:\tjr\tra',
+      '2c:\taddiu\tsp,sp,16',
+    ];
+    const move = src(leaf('move\ta1,sp'));
+    expect(move).toContain('u8 sp0[16];');
+    expect(src(leaf('addu\ta1,sp,zero'))).toBe(move);
+    expect(src(leaf('or\ta1,sp,zero'))).toBe(move);
+  });
+
   test('an access before the push is placed by its depth, not its raw offset', () => {
     // `lw t6,16(sp)` before `addiu sp,sp,-24` is the fifth argument (entry + 16), not the word at
     // post-push sp+16 inside the local area; the store at 0(sp) after the push is the local.

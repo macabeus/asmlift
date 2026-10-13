@@ -255,6 +255,19 @@ const writtenReg = (ins: Instr): string | null => {
   return SOURCE_FIRST.test(ins.mnemonic) || !isMipsReg(ins.ops[0]) ? null : ins.ops[0];
 };
 
+/** The register a register COPY reads — `move rD,rS`, or `addu`/`add`/`or` with `zero` beside it,
+ *  which is how Splat and IDO spell the same move — or undefined for any other instruction. */
+const copiedReg = (ins: Instr): string | undefined => {
+  const [, s, t] = ins.ops;
+  if (ins.mnemonic === 'move') {
+    return s;
+  }
+  if (!/^(addu|add|or)$/.test(ins.mnemonic) || s === undefined || t === undefined) {
+    return undefined;
+  }
+  return isZero(t) ? s : isZero(s) ? t : undefined;
+};
+
 // A recovered dense-switch jump table (Regime B), keyed
 // by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. Two idioms are
 // handled: IDO gp-relative (`lw base,0(gp)` GOT16; `addu rV,rV,gp`
@@ -556,15 +569,8 @@ function v1MayHoldLowWord(blocks: readonly MipsBlock[], preds: readonly (readonl
   const lowWord = (at: number, k: number): boolean => {
     const ins = runs[at][k];
     const [, x, y] = ins.ops;
-    // A register copy (`move v1,X`, `addu`/`or` with zero): its source, unless that is zero.
-    const copied =
-      ins.mnemonic === 'move'
-        ? x
-        : /^(addu|or)$/.test(ins.mnemonic) && (isZero(x ?? '') || isZero(y ?? ''))
-          ? isZero(x ?? '')
-            ? y
-            : x
-          : undefined;
+    // A register copy's source, unless that is zero (a constant).
+    const copied = copiedReg(ins);
     const src = copied === undefined || isZero(copied) ? undefined : copied;
     const { readers, srcWritten } = after(at, k, src);
     // The carry compares the sum against what was added: `sltu t,v1,X` for `addu v1,X,Y` (either
@@ -1359,6 +1365,11 @@ function liftOnce(
           break;
         case 'addu':
         case 'add': {
+          // `addu rD,sp,zero` is Splat's spelling of objdump's `move rD,sp`: the frame base.
+          if (frame !== null && isStackPtr(copiedReg(ins) ?? '')) {
+            write(d, emitLaddr(0));
+            break;
+          }
           if (frame !== null && t !== undefined && isStackPtr(s) !== isStackPtr(t) && !isZero(isStackPtr(s) ? t : s)) {
             write(d, deferSum(0, read(isStackPtr(s) ? t : s)));
             break;
@@ -1430,6 +1441,10 @@ function liftOnce(
           emitBin('and', d, read(s), constVal(imm(ins, t)));
           break;
         case 'or':
+          if (frame !== null && isStackPtr(copiedReg(ins) ?? '')) {
+            write(d, emitLaddr(0)); // `or rD,sp,zero`, IDO's spelling of the same move
+            break;
+          }
           isZero(t) ? write(d, read(s)) : emitBin('or', d, read(s), read(t));
           break;
         case 'ori':
@@ -2112,6 +2127,9 @@ function takesFrameAddress(ins: Instr): boolean {
   }
   if (ins.mnemonic === 'addiu' || ins.mnemonic === 'addi' || ins.mnemonic === 'move') {
     return isStackPtr(s ?? '');
+  }
+  if (ins.mnemonic === 'or') {
+    return isStackPtr(copiedReg(ins) ?? '');
   }
   return (
     (ins.mnemonic === 'addu' || ins.mnemonic === 'add') && t !== undefined && isStackPtr(s ?? '') !== isStackPtr(t)
