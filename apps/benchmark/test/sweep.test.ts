@@ -39,7 +39,15 @@ import {
   sweepRefusal,
   unmeasuredCounts,
 } from '../src/run/sweep';
-import { RANK_OPTIONS_ARITY, fanDigests, mapModesFor, optsDigest, stable } from '../src/run/sweep-driver';
+import {
+  LEGACY_RANK_OPTIONS_ARITY,
+  RANK_OPTIONS_ARITY,
+  contextArgument,
+  fanDigests,
+  mapModesFor,
+  optsDigest,
+  stable,
+} from '../src/run/sweep-driver';
 
 const rec = (over: Partial<SweepRecord> & Pick<SweepRecord, 'id' | 'mapMode'>): SweepRecord => ({
   src: 'aaaaaaaaaaaa',
@@ -310,6 +318,18 @@ describe('the record carries its INPUT, not only its output', () => {
     // parameter without moving the constant and every base, an identical checkout included, is
     // refused.
     expect(rankOptionsFor.length).toBe(RANK_OPTIONS_ARITY);
+  });
+
+  it('hands each tree the eighth argument its own cases carry, so a base side keeps its context', () => {
+    // The eighth position meant the bare set of context aggregates (`aggregateGlobals`, length 7)
+    // before it meant `ContextGlobals` (`contextGlobals`, length 8). Handed this tree's field, a
+    // base tree lifted every row without the aggregates it always read, and its moved `src` read
+    // as a decompiler change. An old driver handed this tree refuses on the count instead.
+    const aggregates = new Set(['gInfo']);
+    const contextGlobals = { aggregates, volatiles: new Set<string>() };
+    expect(contextArgument(LEGACY_RANK_OPTIONS_ARITY, { aggregateGlobals: aggregates })).toBe(aggregates);
+    expect(contextArgument(RANK_OPTIONS_ARITY, { contextGlobals, aggregateGlobals: aggregates })).toBe(contextGlobals);
+    expect(LEGACY_RANK_OPTIONS_ARITY).not.toBe(RANK_OPTIONS_ARITY);
   });
 
   it('digests the option object without depending on key order, and ignores the compiler closure', () => {

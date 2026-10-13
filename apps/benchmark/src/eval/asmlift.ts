@@ -60,9 +60,12 @@ export function rankOptionsFor(
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
-  // A default, so `Function.length` stays the 7 `bench sweep --base` checks a tree by: an older
-  // tree's builder ignores the trailing argument, and lifts as that tree always did.
-  contextGlobals: ContextGlobals | undefined = undefined,
+  // Optional but with NO default, so `Function.length` counts it and is 8 — which is how `bench
+  // sweep --base` tells this signature from the one before it. That one took, in the same eighth place and behind a
+  // default (length 7), the bare set of context aggregates; a driver that passed one tree's
+  // argument to the other would lift a side without the context its own rows read, and a moved
+  // `src` would read as a decompiler change (run/sweep-driver.ts `contextArgument`).
+  contextGlobals?: ContextGlobals,
 ): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover, reading the section that defines `sym` — a CodeWarrior object
