@@ -2248,7 +2248,7 @@ function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access
   // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
   // qualified read spelled as a bare statement because nothing uses it is an access too.
   if (once && !isCall && (x.opcode === 'load' || x.opcode === 'aload') && counted(x)) {
-    return true;
+    return !interchangeableReads(rules, x, op);
   }
   if (!isCall) {
     return false;
@@ -2257,6 +2257,83 @@ function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access
     return !x.results.length || !rules.uses.useSitesOf.has(x.results[0])
       ? false // dead load: never emitted at all
       : materialize.has(x) || !sameStatement(rules.render, access, x);
+  }
+  return false;
+}
+
+const COMMUTATIVE_OPS: ReadonlySet<string> = new Set(['add', 'mul', 'and', 'or', 'xor']);
+
+/** One op's identity apart from its operands: opcode, result count and attributes, keys sorted. */
+const opShape = (op: Op): string =>
+  `${op.opcode}/${op.results.length}/${JSON.stringify(Object.entries(op.attrs).sort(([a], [b]) => a.localeCompare(b)))}`;
+
+/** Do two values name the same address: one value, or two `gaddr`s of one symbol? */
+function sameAddress(defOf: Map<Value, Op>, a: Value, b: Value): boolean {
+  if (a === b) {
+    return true;
+  }
+  const da = defOf.get(a);
+  const db = defOf.get(b);
+  return (
+    da !== undefined &&
+    db !== undefined &&
+    da.opcode === 'gaddr' &&
+    db.opcode === 'gaddr' &&
+    opShape(da) === opShape(db)
+  );
+}
+
+/** Are two qualified reads of ONE cell interchangeable in the one expression they feed: the same
+ *  access of the same address, each the sole use of its value up a chain of ops alike but for it,
+ *  the two chains meeting as the two operands of one commutative op? Then the expression's value is
+ *  the same whichever read the compiler makes first, and its order is the compiler's to choose:
+ *  `gR + gR` over `extern volatile u32 gR;` and `*gPV + *gPV` over `u16 *volatile gPV` read the
+ *  object twice, in an order the source never stated, so naming the first read into a temp spells
+ *  an order the source did not have (ido 7.1 loads `gR + gR` in the other order). `gR - gR` is not
+ *  symmetric — the order decides which read is the minuend — and stays sequenced. */
+function interchangeableReads(rules: MaterializeRules, a: Op, b: Op): boolean {
+  const { defOf } = rules;
+  const { useSitesOf } = rules.uses;
+  if (
+    a === b ||
+    opShape(a) !== opShape(b) ||
+    a.operands.length !== b.operands.length ||
+    !a.operands.every((v, i) => sameAddress(defOf, v, b.operands[i]))
+  ) {
+    return false;
+  }
+  let ca = a;
+  let cb = b;
+  for (let depth = 0; depth < 8; depth++) {
+    const va = ca.results[0];
+    const vb = cb.results[0];
+    const ua = va === undefined ? undefined : useSitesOf.get(va);
+    const ub = vb === undefined ? undefined : useSitesOf.get(vb);
+    if (ua?.length !== 1 || ub?.length !== 1) {
+      return false;
+    }
+    const na = ua[0].op;
+    const nb = ub[0].op;
+    if (na === nb) {
+      return (
+        COMMUTATIVE_OPS.has(na.opcode) &&
+        na.successors.length === 0 &&
+        na.operands.length === 2 &&
+        ((na.operands[0] === va && na.operands[1] === vb) || (na.operands[0] === vb && na.operands[1] === va))
+      );
+    }
+    if (
+      opShape(na) !== opShape(nb) ||
+      na.successors.length > 0 ||
+      nb.successors.length > 0 ||
+      (MEM_BASE_OPS.has(na.opcode) && counted(na)) ||
+      na.operands.length !== nb.operands.length ||
+      !na.operands.every((v, i) => (v === va ? nb.operands[i] === vb : v === nb.operands[i] && v !== vb))
+    ) {
+      return false;
+    }
+    ca = na;
+    cb = nb;
   }
   return false;
 }

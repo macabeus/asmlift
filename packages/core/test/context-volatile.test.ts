@@ -110,3 +110,23 @@ describe('a context-declared volatile aggregate the map does not describe', () =
     }
   });
 });
+
+describe('a context-declared volatile scalar: the object is the pointer, not what it points at', () => {
+  const ctxOf = (decl: string) => globalsFromContext(`typedef unsigned short u16; typedef int s32; ${decl}`, 'c');
+  const wrap = (name: string, body: string, sym: string): string =>
+    `${name}:\n${body}\tbx\tlr\n.L3:\n\t.word\t${sym}\n`;
+
+  test('two reads of one cell meeting in a commutative op are spelled in one expression, a difference stays sequenced', () => {
+    // agbcc -O2 of `s32 vsc32(void){ return gR + gR; }` over `extern volatile s32 gR;`: the value is
+    // the same whichever read runs first, so the order is the compiler's (ido 7.1 loads it the other
+    // way round from a named first read). `gH - gH` is not symmetric: the first read is the minuend.
+    const VSC32 = wrap('vsc32', '\tldr\tr1, .L3\n\tldr\tr0, [r1]\n\tldr\tr1, [r1]\n\tadd\tr0, r0, r1\n', 'gR');
+    expect(
+      decompile('vsc32', VSC32, ARMV4T_AGBCC, { contextGlobals: ctxOf('extern volatile s32 gR;') }).source,
+    ).toContain('return gR + gR;');
+    const VSC16 = wrap('vsc16', '\tldr\tr1, .L3\n\tldrh\tr0, [r1]\n\tldrh\tr1, [r1]\n\tsub\tr0, r0, r1\n', 'gH');
+    const diff = decompile('vsc16', VSC16, ARMV4T_AGBCC, { contextGlobals: ctxOf('extern volatile u16 gH;') }).source;
+    expect(diff).toContain('v0 = gH;');
+    expect(diff).toContain('return v0 - gH;');
+  });
+});
