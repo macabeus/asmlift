@@ -15,6 +15,10 @@
 //     s32 bssuse(s32 i) { static u8 a[64]; static u8 b[64]; a[i] = 1; b[i] = 2; return a[0] + b[1]; }
 //   corpus/mwcc-bss-zero-statics.{txt,asm}  the same with `-sdata 0 -sdata2 0`, over
 //     s32 bsszero(s32 i) { static s32 c; static s32 a = 0; if (i) return c; return a; }
+//   corpus/mwcc-escaped-table.{txt,asm}  the side table and disassembly of mwcc_242_81 at its
+//                                  canonical flags over
+//     extern s32 ga, gb, gc; void take(const void *p);
+//     void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }
 //
 // agbcc-local-statics.s:
 //   int fa(int i) { static const u8 tide[] = {1,2,3}; return tide[i]; }
@@ -618,6 +622,20 @@ test('an address in an element narrower than a pointer declines, and an image of
   );
   expect(() => decompile('f', image, ARMV4T_AGBCC)).toThrow(
     "reads the compiler's anonymous constant ('.LC0') which no top-level block-copy call (memcpy) takes as its source",
+  );
+});
+
+test('mwcc: a table only handed to a callee takes a pointer-wide element from its relocations', () => {
+  // mwcc_242_81 of `void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }`:
+  // nothing reads an element and mwcc writes no directive, so only the three ADDR32 words say the
+  // width; read as bytes, each address would sit in an element a quarter its size
+  const asm = corpus('mwcc-escaped-table.asm');
+  const prototypes = {
+    take: { params: ['const void *'], returnsVoid: true },
+    tabesc: { params: [], returnsVoid: true },
+  };
+  expect(decompile('tabesc', asm, PPC_MWCC, { asmData: dump('mwcc-escaped-table.txt'), prototypes }).source).toContain(
+    '    static const u32 tbl[3] = { (u32)&ga, (u32)&gb, (u32)&gc };\n',
   );
 });
 

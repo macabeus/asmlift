@@ -15,6 +15,7 @@
 // which any score checks either.
 import { renderDeclarations } from '@asmlift/core/declare';
 import { decompile } from '@asmlift/core/pipeline';
+import type { Prototypes } from '@asmlift/core/proto';
 import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
@@ -291,7 +292,14 @@ const CASES: {
  *  either side of the array, and a pointer scalar in .data. Neither the bytes nor the score sees an
  *  address — both name it only through a relocation — so each compiler's own record of the
  *  relocations inside the data is compared too. `context` declares what the project's headers would. */
-const ADDRESS_CASES: { sym: string; c: string; context: string; spelled: RegExp; mwccDeclines?: RegExp }[] = [
+const ADDRESS_CASES: {
+  sym: string;
+  c: string;
+  context: string;
+  spelled: RegExp;
+  mwccDeclines?: RegExp;
+  prototypes?: Prototypes;
+}[] = [
   {
     sym: 'fptab',
     context: 'u8 h1(u8);\nu8 h2(u8);\nu8 h3(u8);\n',
@@ -312,6 +320,15 @@ const ADDRESS_CASES: { sym: string; c: string; context: string; spelled: RegExp;
     c: 's32 addend(s32 i) { static s32 *const tbl[3] = { &garr[2], &garr[-1], garr }; return *tbl[i]; }',
     spelled:
       /static const u32 tbl\[3\] = \{ \(u32\)\(\(u8 \*\)&garr \+ 8\), \(u32\)\(\(u8 \*\)&garr - 4\), \(u32\)&garr \};/,
+  },
+  {
+    // a table read by nothing but the callee its address is handed to: no access says how wide its
+    // elements are, and mwcc writes no directive that does, so the relocations do
+    sym: 'tabesc',
+    context: 'extern s32 ga, gb, gc;\nvoid take(const void *p);\n',
+    c: 'void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }',
+    prototypes: { take: { params: ['const void *'], returnsVoid: true }, tabesc: { params: [], returnsVoid: true } },
+    spelled: /static const u32 tbl\[3\] = \{ \(u32\)&ga, \(u32\)&gb, \(u32\)&gc \};/,
   },
   {
     sym: 'ptrdata',
@@ -359,10 +376,10 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
     }
   });
 
-  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled }) => {
+  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled, prototypes }) => {
     const asm = compileTargetAsm(context + c, FLAGS);
     const target = assembleTarget(asm);
-    const r = decompile(sym, asm, ARMV4T_AGBCC);
+    const r = decompile(sym, asm, ARMV4T_AGBCC, { prototypes });
     expect(r.source).toMatch(spelled);
     const cand = compileCandAgbcc(context + r.source, FLAGS);
     expect(dataSections(cand)).toEqual(dataSections(target));
@@ -440,14 +457,14 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
 
     test.runIf(have).each(ADDRESS_CASES)(
       'an initializer holding addresses: $sym',
-      ({ sym, c, context, spelled, mwccDeclines }) => {
+      ({ sym, c, context, spelled, mwccDeclines, prototypes }) => {
         const { obj, asm } = compilePpcTarget(mwcc, context + c, sym, FLAGS);
         const asmData = extractPpcAsmData(obj, sym);
         if (mwccDeclines) {
-          expect(() => decompile(sym, asm, target, { asmData })).toThrow(mwccDeclines);
+          expect(() => decompile(sym, asm, target, { asmData, prototypes })).toThrow(mwccDeclines);
           return;
         }
-        const r = decompile(sym, asm, target, { asmData });
+        const r = decompile(sym, asm, target, { asmData, prototypes });
         expect(r.source).toMatch(spelled);
         const cand = compileCandPpc(mwcc, context + r.source, FLAGS);
         expect(dataSections(cand)).toEqual(dataSections(obj));

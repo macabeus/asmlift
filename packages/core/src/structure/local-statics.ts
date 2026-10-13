@@ -226,8 +226,11 @@ function elements(obj: LocalObject, width: number, signed: boolean): number[] {
 }
 
 /** The width of `obj`'s element: the one its definition's directives write, else the one every
- *  access agrees on; with no access either, the whole object where it is aligned below the
- *  compiler's aggregate floor, as only a scalar is, and a byte where it is not. */
+ *  access agrees on; with no access either, a pointer's where the target relocates a word of it (an
+ *  address table only handed to a callee, on a compiler that writes no directives: mwcc), else the
+ *  whole object where it is aligned below the compiler's aggregate floor, as only a scalar is, and
+ *  a byte where it is not. A relocation the pointer width does not seat is still refused, by the
+ *  caller's check of every relocation's offset. */
 function elementWidth(
   obj: LocalObject,
   accesses: readonly Access[],
@@ -240,9 +243,15 @@ function elementWidth(
   if (widths.length > 1) {
     return { refused: `whose accesses disagree on its element width (${widths.sort().join(' and ')} bytes)` };
   }
+  if (widths.length === 1) {
+    return widths[0];
+  }
+  if ((obj.relocs?.length ?? 0) > 0 && obj.size % LOCAL_OBJECT_ADDRESS_BYTES === 0) {
+    return LOCAL_OBJECT_ADDRESS_BYTES;
+  }
   const shown = obj.directives?.align ?? obj.placement?.align;
   const scalarOnly = shown !== undefined && shown < layout.aggregateAlign;
-  return widths[0] ?? (scalarOnly && [1, 2, 4].includes(obj.size) ? obj.size : 1);
+  return scalarOnly && [1, 2, 4].includes(obj.size) ? obj.size : 1;
 }
 
 /** The shape and definition of every static `fn` defines, or the refusal: the static's linker name
