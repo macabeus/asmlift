@@ -1449,6 +1449,23 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['uninit-local', 'array'],
     toolchains: ALL,
   },
+  // The THIRD bullet above on CodeWarrior, outside the twelve: `x` is assigned on one arm only and
+  // lives across five calls, so mwcc 2.4.2 homes it in r31, which its `_savegpr_27` prologue saved,
+  // and the path that skips the assignment reads what the caller left there. Before the PPC frontend
+  // took the prologue's save set as its live-in model, that read was a seventh PARAMETER for a
+  // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the
+  // row MATCHes with `s32 v0;` declared and never initialised. mwcc_242_81 only: on the
+  // other lanes the local is a Thumb push register or a MIPS s-register, each its own frontend's
+  // live-in question. The other two CodeWarrior builds are pinned by
+  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  {
+    sym: 'uninit_saved',
+    src: 'int k(int);\nint uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a); return k(k(k(k(b)+c)+d)+e) + x; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'int k(int);',
+    proto: { k: { params: 1 } },
+  },
 
   // SPILL-SLOT ORDER — the one property of a declaration list the allocator answers by a law, and
   // the one asmlift now places by reading the target's own frame order (l3/slotorder.ts). When
