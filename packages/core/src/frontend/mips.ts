@@ -233,46 +233,27 @@ interface MipsBlock {
   delayAnnulled: boolean;
 }
 
-// Mnemonics whose destination is `ops[0]` (a plain register write) — the subset the jump-table
-// backward trace chases (index/base/address/load). Stores, branches, `jr`, `nop`, `div`/`mult`
-// (hi/lo writers) are absent, so `destReg` returns null for them and the trace never mis-attributes.
-const WRITES_D = new Set([
-  'lui',
-  'lw',
-  'lh',
-  'lhu',
-  'lb',
-  'lbu',
-  'sll',
-  'srl',
-  'sra',
-  'sllv',
-  'srlv',
-  'srav',
-  'addu',
-  'add',
-  'addiu',
-  'addi',
-  'subu',
-  'sub',
-  'or',
-  'ori',
-  'and',
-  'andi',
-  'xor',
-  'xori',
-  'nor',
-  'move',
-  'li',
-  'slt',
-  'sltu',
-  'slti',
-  'sltiu',
-  'mflo',
-  'mfhi',
-  'mul',
-]);
-const destReg = (ins: Instr): string | null => (WRITES_D.has(ins.mnemonic) ? ins.ops[0] : null);
+// Mnemonics whose FIRST operand is a source, never a destination: the stores, the branches that
+// compare it, and the moves and products that read it.
+const SOURCE_FIRST = /^(s[bhwd]|sw[lr]|sc|s[wd]c1|b\w*|j|jr|mult|multu|div|divu|mt\w+|ctc1|t\w+|cache|sync)$/;
+
+/** THE INTEGER REGISTER AN INSTRUCTION WRITES, or null — the one classifier every reader here asks
+ *  (the jump-table trace, the `gp` skip, the frame-depth walk, the save scan, the 64-bit return
+ *  check), so no two of them can disagree on a mnemonic.
+ *
+ *  A DENY-LIST: every instruction writes its first operand unless it is one of `SOURCE_FIRST`'s.
+ *  Every reader asks "is this the write of r?", and an unknown write answered no would be stepped
+ *  past as though r still held what came before, so the default is the answer that stops them. A
+ *  call writes `ra`, whatever it names first (`jal f`, and `jalr rs` with the implicit `ra`). */
+const writtenReg = (ins: Instr): string | null => {
+  if (ins.mnemonic === 'jal' || ins.mnemonic === 'bal' || ins.mnemonic === 'bgezal' || ins.mnemonic === 'bltzal') {
+    return 'ra';
+  }
+  if (ins.mnemonic === 'jalr') {
+    return ins.ops.length > 1 ? ins.ops[0] : 'ra';
+  }
+  return SOURCE_FIRST.test(ins.mnemonic) || !isMipsReg(ins.ops[0]) ? null : ins.ops[0];
+};
 
 // A recovered dense-switch jump table (Regime B), keyed
 // by the BOUNDS branch (`beqz tmp, DEF`) whose block emits the `switch_br`. Two idioms are
@@ -295,7 +276,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
       if (isXfer(instrs[j])) {
         return -1;
       }
-      if (destReg(instrs[j]) === reg) {
+      if (writtenReg(instrs[j]) === reg) {
         return j;
       }
     }
@@ -504,10 +485,6 @@ function checkDelaySlots(name: string, instrs: Instr[]): void {
   }
 }
 
-// Mnemonics whose FIRST operand is a source, never a destination: the stores, the branches that
-// compare it, and the moves and products that read it. Every other instruction naming `sp` first
-// writes it.
-const SOURCE_FIRST = /^(s[bhwd]|sw[lr]|sc|s[wd]c1|b\w*|jr|jalr|mult|multu|div|divu|mt\w+|ctc1|t\w+|cache|sync)$/;
 
 /** THE FRAME DEPTH AT EACH INSTRUCTION: how many bytes below the `sp` the function was entered
  *  with it runs, so an `off(sp)` it makes names entry-relative byte `off - depth`. Exact or absent —
@@ -523,7 +500,7 @@ const SOURCE_FIRST = /^(s[bhwd]|sw[lr]|sc|s[wd]c1|b\w*|jr|jalr|mult|multu|div|di
 function frameDepths(blocks: readonly MipsBlock[], entryReentered: boolean): ReadonlyMap<Instr, number> | null {
   const depths = new Map<Instr, number>();
   const adjust = (ins: Instr): number | null | undefined => {
-    if (!isStackPtr(ins.ops[0] ?? '') || SOURCE_FIRST.test(ins.mnemonic)) {
+    if (!isStackPtr(writtenReg(ins) ?? '')) {
       return undefined; // leaves sp alone
     }
     const by = parseImm(ins.ops[2] ?? '');
@@ -1159,7 +1136,7 @@ function liftOnce(
       // reading `t9` for the `addu` would fabricate a phantom leading parameter (like the sp/r1 guards).
       // Its only real use, the GOT table-base `lw ...,0(gp)` in a jump-table dispatch, is subsumed by the
       // recovered `switch_br` (that block is elided). So a write to `gp` is transparent: skip it.
-      if (destReg(ins) === 'gp') {
+      if (writtenReg(ins) === 'gp') {
         return;
       }
       switch (ins.mnemonic) {
@@ -2052,10 +2029,8 @@ function measureO32Frame({
     const mem = ins.mnemonic === 'sw' ? parseMem(ins.ops[1] ?? '') : undefined;
     if (mem !== undefined && isStackPtr(mem.base) && savedByCallee(ins.ops[0]) && !written.has(ins.ops[0])) {
       saves.push(mem.off);
-    } else if (ins.mnemonic === 'jal') {
-      written.add('ra');
-    } else if (!SOURCE_FIRST.test(ins.mnemonic) && ins.ops[0] !== undefined) {
-      written.add(ins.ops[0]);
+    } else if (writtenReg(ins) !== null) {
+      written.add(writtenReg(ins)!);
     }
   }
   const callees = code.filter((ins) => ins.mnemonic === 'jal').map((ins) => jalCallee(ins, splat));
