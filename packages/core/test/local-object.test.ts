@@ -266,6 +266,23 @@ test('mwcc: the symbol table gives the section and size, the section contents th
   expect(bytes(readObjectLocalObject(ad, 'zz$23', 'zdata'))).toEqual([0, 0, 0, 0]);
 });
 
+test('mwcc: `.comment` is read past its version byte, which 2.3.3 writes as 0x08 and 2.4.x as 0x0a', () => {
+  const ad = dump('mwcc-local-statics.txt');
+  const withComment = (edit: (c: Uint8Array) => void) => {
+    const c = Uint8Array.from(ad.sections.get('.comment')!);
+    edit(c);
+    return { ...ad, sections: new Map([...ad.sections, ['.comment', c]]) };
+  };
+  expect(ad.sections.get('.comment')![11]).toBe(0x0a);
+  const at233 = withComment((c) => (c[11] = 0x08));
+  expect(readObjectLocalObject(at233, 'kt$18', 'rtab')).toEqual(readObjectLocalObject(ad, 'kt$18', 'rtab'));
+  // the eleven letters still decide whose records these are
+  const other = withComment((c) => (c[0] = 0x63));
+  expect(readObjectLocalObject(other, 'kt$18', 'rtab')).toMatchObject({
+    refused: expect.stringContaining('`.comment` section does not record'),
+  });
+});
+
 test('mwcc: a bss static laid out ahead of a later-declared one had `= 0`', () => {
   // .sbss holds a$4 +0, c$6 +4, b$5 +8: the zero scalars first in declaration order, then the one
   // with no initializer. c, the last of the rising run, lands there declared either way

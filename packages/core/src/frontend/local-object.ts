@@ -487,12 +487,14 @@ const ABSOLUTE_WORD: ReadonlySet<string> = new Set(['R_PPC_ADDR32']);
 /** Sections whose relocations describe the program for a debugger, not for the machine. */
 const isDebugSection = (s: string): boolean => /^\.(debug|line)/.test(s);
 
-/** mwcc's `.comment` section: `CodeWarrior\n`, a header to 0x2c, then one 8-byte record per
- *  symbol-table entry, the null one first, whose first word is the alignment mwcc gave that symbol
- *  (compiled: `s64` records 8 and lands at 8 after an `s32`, `aligned(32)` records 32, a scalar
- *  `u8` 1). No section header or symbol value says the same: a section's alignment is its widest
- *  object's, and an object at offset 0 of one is aligned to anything. */
-const MW_COMMENT_MAGIC = 'CodeWarrior\n';
+/** mwcc's `.comment` section: `CodeWarrior`, a version byte (0x0a from 2.4.2 and 2.4.7, 0x08 from
+ *  2.3.3), a header to 0x2c, then one 8-byte record per symbol-table entry, the null one first,
+ *  whose first word is the alignment mwcc gave that symbol (compiled on all three builds: `s64`
+ *  records 8 and lands at 8 after an `s32`, `aligned(32)` records 32, a scalar `u8` 1). No section
+ *  header or symbol value says the same: a section's alignment is its widest object's, and an
+ *  object at offset 0 of one is aligned to anything. The magic is the eleven letters alone, so the
+ *  version byte never decides whether the records are read. */
+const MW_COMMENT_MAGIC = 'CodeWarrior';
 const MW_COMMENT_RECORDS = 0x2c;
 
 /** The alignment mwcc's `.comment` records for the symbol at `index`, or null when the section is

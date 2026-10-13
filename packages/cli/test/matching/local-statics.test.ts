@@ -19,6 +19,7 @@ import { enumerateCandidates } from '@asmlift/core/rank';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { ARMV4T_AGBCC, PPC_MWCC, TOOLCHAIN_TARGETS, targetFor } from '@asmlift/core/target';
 import {
+  type MwccToolchainId,
   assembleTarget,
   compileCandAgbcc,
   compileCandPpc,
@@ -105,6 +106,11 @@ const CASES: {
   c: string;
   spelled: RegExp;
   mwccSpelled?: RegExp;
+  /** mwcc 2.3.3's spelling, where its layout of zero-initialized statics differs from 2.4.x's: the
+   *  candidate still defines the target's bytes, in the target's places */
+  mwcc233Spelled?: RegExp;
+  /** what mwcc 2.3.3's lift declines with, where it addresses the static through its section */
+  mwcc233Declines?: RegExp;
   agbccScore?: number;
   layoutOnly?: true;
   context?: string;
@@ -137,6 +143,7 @@ const CASES: {
     c: 's32 zeroed(void) { static s32 q = 0; q++; return q; }',
     spelled: /static u32 q = 0;\n {4}s32 v0;\n {4}v0 = q;/,
     mwccSpelled: /static u32 q;\n {4}s32 v0;\n {4}v0 = q;/,
+    mwcc233Spelled: /static u32 q;\n {4}q = q \+ 1;/,
   },
   {
     // agbcc word-aligns a string-literal initializer, and the literal is what says so; mwcc's
@@ -162,6 +169,7 @@ const CASES: {
     c: 'u32 zeromix(void) { static u32 a = 0; static u32 b; static u32 c = 0; return a + b + c; }',
     spelled: /static u32 a = 0;\n {4}static u32 b;\n {4}static u32 c = 0;/,
     mwccSpelled: /static u32 a = 0;\n {4}static u32 b;\n {4}static u32 c;/,
+    mwcc233Spelled: /static u32 a = 0;\n {4}static u32 b = 0;\n {4}static u32 c;/,
     layoutOnly: true,
   },
   {
@@ -170,6 +178,8 @@ const CASES: {
     sym: 'bssuse',
     c: 's32 bssuse(s32 i) { static u8 a[64]; static u8 b[64]; a[i] = 1; b[i] = 2; return a[0] + b[1]; }',
     spelled: /static u8 a\[64\];\n {4}static u8 b\[64\];/,
+    // 2.3.3 addresses both through the section's own label (`...bss.0`), which names no object
+    mwcc233Declines: /section-relative label/,
   },
   {
     sym: 'words',
@@ -257,6 +267,8 @@ const CASES: {
     spelled: /static u8 a1;\n {4}static u8 a2;\n {4}static u8 b1\[2\];/,
     mwccSpelled:
       /static u16 b1;\n {4}static u8 a3 __attribute__\(\(aligned\(4\)\)\);\n {4}static u8 l\[16\] __attribute__\(\(aligned\(8\)\)\);/,
+    mwcc233Spelled:
+      /static u8 a1 = 0;\n {4}static u8 a2 = 0;\n {4}static u16 b1 = 0;\n {4}static u8 a3 __attribute__\(\(aligned\(4\)\)\);\n {4}static u8 l\[16\] __attribute__\(\(aligned\(8\)\)\);/,
   },
   {
     // strings agbcc writes with `\b` and `\f`, in objects with no `.size`: the whole run is the object
@@ -285,8 +297,8 @@ const ADDRESS_CASES: { sym: string; c: string; context: string; spelled: RegExp;
     context: 'u8 h1(u8);\nu8 h2(u8);\nu8 h3(u8);\n',
     c: 's32 fptab(s32 i, u8 x) { static u8 (*const tbl[3])(u8) = { h1, h2, h3 }; return tbl[i](x); }',
     spelled: /static const u32 tbl\[3\] = \{ \(u32\)&h1, \(u32\)&h2, \(u32\)&h3 \};/,
-    // mwcc calls through it with `bctrl`, which its frontend does not model
-    mwccDeclines: /unmodelled control transfer 'bctrl'/,
+    // mwcc calls through it with `bctrl` (2.3.3: `blrl`), which its frontend does not model
+    mwccDeclines: /unmodelled control transfer '(bctrl|blrl)'/,
   },
   {
     sym: 'dptab',
@@ -397,42 +409,64 @@ describe('function-scope statics — real agbcc: the candidate defines the targe
 
 const HAVE_MWCC = ppcDockerGate('local-statics', 'mwcc_242_81');
 
+// The same statics on every CodeWarrior build, at 2.4.2's canonical flags (the two others have none
+// of their own). 2.3.3 writes `.comment`'s version byte as 0x08 where 2.4.2 and 2.4.7 write 0x0a,
+// and its alignment records mean the same: the s64 and aligned(32) cases below place by them.
+describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainId[])(
+  'function-scope statics — real %s: the candidate defines the target’s bytes',
+  (mwcc) => {
+    const have = ppcDockerGate('local-statics', mwcc);
+    const FLAGS = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
+    const target = TOOLCHAIN_TARGETS[mwcc].description;
+    test.runIf(have).each(CASES)('$sym', (k) => {
+      const { sym, c, spelled, mwccSpelled = spelled, layoutOnly, context = '' } = k;
+      const at233 = mwcc === 'mwcc_233_163n';
+      const { obj, asm } = compilePpcTarget(mwcc, c, sym, FLAGS);
+      const asmData = extractPpcAsmData(obj, sym);
+      if (at233 && k.mwcc233Declines) {
+        expect(() => decompile(sym, asm, target, { asmData })).toThrow(k.mwcc233Declines);
+        return;
+      }
+      const r = decompile(sym, asm, target, { asmData });
+      expect(r.source).toMatch((at233 ? k.mwcc233Spelled : undefined) ?? mwccSpelled);
+      const cand = compileCandPpc(mwcc, context + r.source, FLAGS);
+      expect(dataSections(cand)).toEqual(dataSections(obj));
+      expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
+      if (!layoutOnly) {
+        const s = scoreCPpc(mwcc, context + r.source, sym, obj, FLAGS);
+        expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+      }
+    });
+
+    test.runIf(have).each(ADDRESS_CASES)(
+      'an initializer holding addresses: $sym',
+      ({ sym, c, context, spelled, mwccDeclines }) => {
+        const { obj, asm } = compilePpcTarget(mwcc, context + c, sym, FLAGS);
+        const asmData = extractPpcAsmData(obj, sym);
+        if (mwccDeclines) {
+          expect(() => decompile(sym, asm, target, { asmData })).toThrow(mwccDeclines);
+          return;
+        }
+        const r = decompile(sym, asm, target, { asmData });
+        expect(r.source).toMatch(spelled);
+        const cand = compileCandPpc(mwcc, context + r.source, FLAGS);
+        expect(dataSections(cand)).toEqual(dataSections(obj));
+        expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
+        const inData = (o: string) =>
+          extractPpcAsmData(o, sym)
+            .relocs.filter((x) => DATA_SECTIONS.has(x.section))
+            .sort((a, b) => a.section.localeCompare(b.section) || a.offset - b.offset);
+        expect(asmData.relocs.some((x) => DATA_SECTIONS.has(x.section))).toBe(true);
+        expect(inData(cand)).toEqual(inData(obj));
+        const s = scoreCPpc(mwcc, context + r.source, sym, obj, FLAGS);
+        expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
+      },
+    );
+  },
+);
+
 describe.runIf(HAVE_MWCC)('function-scope statics — real mwcc: the candidate defines the target’s bytes', () => {
   const FLAGS = TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags;
-  test.each(CASES)('$sym', ({ sym, c, spelled, mwccSpelled = spelled, layoutOnly, context = '' }) => {
-    const { obj, asm } = compilePpcTarget('mwcc_242_81', c, sym, FLAGS);
-    const r = decompile(sym, asm, PPC_MWCC, { asmData: extractPpcAsmData(obj, sym) });
-    expect(r.source).toMatch(mwccSpelled);
-    const cand = compileCandPpc('mwcc_242_81', context + r.source, FLAGS);
-    expect(dataSections(cand)).toEqual(dataSections(obj));
-    expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
-    if (!layoutOnly) {
-      const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
-      expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
-    }
-  });
-
-  test.each(ADDRESS_CASES)('an initializer holding addresses: $sym', ({ sym, c, context, spelled, mwccDeclines }) => {
-    const { obj, asm } = compilePpcTarget('mwcc_242_81', context + c, sym, FLAGS);
-    const asmData = extractPpcAsmData(obj, sym);
-    if (mwccDeclines) {
-      expect(() => decompile(sym, asm, PPC_MWCC, { asmData })).toThrow(mwccDeclines);
-      return;
-    }
-    const r = decompile(sym, asm, PPC_MWCC, { asmData });
-    expect(r.source).toMatch(spelled);
-    const cand = compileCandPpc('mwcc_242_81', context + r.source, FLAGS);
-    expect(dataSections(cand)).toEqual(dataSections(obj));
-    expect(staticPlaces(cand)).toEqual(staticPlaces(obj));
-    const inData = (o: string) =>
-      extractPpcAsmData(o, sym)
-        .relocs.filter((x) => DATA_SECTIONS.has(x.section))
-        .sort((a, b) => a.section.localeCompare(b.section) || a.offset - b.offset);
-    expect(asmData.relocs.some((x) => DATA_SECTIONS.has(x.section))).toBe(true);
-    expect(inData(cand)).toEqual(inData(obj));
-    const s = scoreCPpc('mwcc_242_81', context + r.source, sym, obj, FLAGS);
-    expect(s.match, `objdiff ${s.score}\n${r.source}`).toBe(true);
-  });
 
   test('a table member the body also calls with no prototype is declared ahead of the static', () => {
     // mwcc has no implicit declaration to fall back on inside an initializer either: "undefined
