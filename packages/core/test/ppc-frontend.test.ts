@@ -334,8 +334,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         /the return address the 'mflr' at 0x4 copies out is used as a value/,
       );
     });
-    test('an FPR save and a GPR save below it, each from its own `addi r11`', () => {
+    test('the FPR routines are named and refused: no lift reaches them yet', () => {
       // mwcc 2.4.x -O4,s: `addi r11,r1,64; bl _savefpr_28` then `addi r11,r1,32; bl _savegpr_28`.
+      // Every compiled caller declines on its float code first, so the 8-byte slots stay unmodelled.
       const asm = lines(
         'stwu    r1,-48(r1)',
         'mflr    r0',
@@ -354,7 +355,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         'addi    r1,r1,48',
         'blr',
       );
-      expect(dis('fg', asm)).toBe('s32 fg(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+      expect(() => dis('fg', asm)).toThrow(/'_savefpr_30' at 0x10 saves or restores floating-point registers/);
     });
     test('each way the routine is not the bookkeeping it looks like refuses', () => {
       // A restore over other words, or another register range, than the save filled.

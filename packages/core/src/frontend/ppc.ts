@@ -878,6 +878,15 @@ export function lift(
       if (r.first < 14 || r.first > 31 || ins.reloc!.addend !== 0) {
         throw new PpcUnsupportedError(`cannot lift '${name}': ${at} names no register save routine of the runtime`);
       }
+      // The FPR half is named and refused. Every compiled function that calls it (doubles live
+      // across a call, a 24-float leaf; 2.4.2 and 2.4.7 at -O4,p, 2.3.3 at -O4,s) already declines
+      // on the unmodelled `stfd`/`lfd` or on a float live across a call, and no row calls it, so a
+      // model of its 8-byte slots would be a model no lift has checked.
+      if (r.fpr) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': ${at} saves or restores floating-point registers — not modelled`,
+        );
+      }
       const fr = target.registerSaveRoutines!.frameReg;
       const base = ssa.hasReachingDef(fr, bi, (v) => !frameAddresses.has(v)) ? undefined : readVar(fr, bi);
       const frame = base === undefined ? undefined : frameAddresses.get(base);
@@ -893,12 +902,11 @@ export function lift(
             `the stack pointer's offset from its entry value is not known: ${frame.off}`,
         );
       }
-      const width = r.fpr ? 8 : 4;
       for (let k = r.first; k <= 31; k++) {
-        const reg = `${r.fpr ? 'f' : 'r'}${k}`;
-        const disp = -width * (32 - k);
+        const reg = `r${k}`;
+        const disp = -4 * (32 - k);
         const mem = `${disp}(${fr})`;
-        const words = r.fpr ? [frame.off + disp, frame.off + disp + 4] : [frame.off + disp];
+        const words = [frame.off + disp];
         if (!r.restore) {
           if (ssa.hasReachingDef(reg, bi)) {
             throw new PpcUnsupportedError(
