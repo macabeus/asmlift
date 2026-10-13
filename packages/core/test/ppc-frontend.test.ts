@@ -401,6 +401,15 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       expect(() => dis('late', lines('li      r31,0', 'addi    r11,r1,0', bl('_savegpr_30'), 'blr'))).toThrow(
         /saves r31 after this function wrote it/,
       );
+      // A register READ before it is saved: the save keeps a value the function was handed, and the
+      // refusal says read, not wrote. The read is no uninitialised local either — the prologue had
+      // not saved the register yet, so `prologueSavedRegs` does not count that save.
+      expect(() => dis('early', lines('add     r3,r3,r31', 'addi    r11,r1,0', bl('_savegpr_31'), 'blr'))).toThrow(
+        /saves r31 after this function read it/,
+      );
+      expect(() => dis('earlym', lines('add     r3,r3,r30', 'stmw    r30,8(r1)', 'lmw     r30,8(r1)', 'blr'))).toThrow(
+        /the 'stmw' at 0x4 saves r30 after this function read it/,
+      );
       // A word the function also stores a value to.
       expect(() => dis('both', lines('stw     r3,-8(r1)', 'addi    r11,r1,0', bl('_savegpr_30'), 'blr'))).toThrow(
         /both saves a register in and stores a value to/,
@@ -494,6 +503,15 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     expect(
       dis('uw', '0:\tadd     r3,r3,r31\n4:\tmr      r31,r3\n8:\tstw     r31,12(r1)\nc:\tlwz     r3,12(r1)\n10:\tblr\n'),
     ).toBe('s32 uw(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
+    // Saved only after the function READ it: a value handed over, which the save preserves. Counting
+    // that save minted `uninit_r31` for the read before it.
+    expect(
+      dis(
+        'ur1',
+        '0:\tstwu    r1,-16(r1)\n4:\tadd     r3,r3,r31\n8:\tstw     r31,12(r1)\nc:\tlwz     r31,12(r1)\n' +
+          '10:\taddi    r1,r1,16\n14:\tblr\n',
+      ),
+    ).toBe('s32 ur1(s32 a0, s32 a1) {\n    return a0 + a1;\n}\n');
   });
   test('`lmw` checks every word it restores, not just the offset the `stmw` recorded', () => {
     // `stmw r30,8(r1)` saves r30,r31 into 8(r1),12(r1); `lmw r29,8(r1)` would restore r29,r30,r31

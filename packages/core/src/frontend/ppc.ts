@@ -427,22 +427,31 @@ const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
     : null;
 
 /** WHAT THE PROLOGUE SAVED — the save half of the register partition (frontend/ssa.ts,
- *  `LiveInModel.uninitRegs`), measured as Thumb's `prologueSavedRegs` measures its own. A register the
- *  ABI passes no argument in is an uninitialised local only where the compiler could home a local
- *  there, which it may do only after saving it; without this, an uninitialised local in a callee-saved
- *  register lifts as an extra PARAMETER (`int x; if (s) x = k(a); return k(a) + x;` grew a third).
+ *  `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an uninitialised local
+ *  only where the compiler could home a local there, which it may do only after saving it; without
+ *  this, an uninitialised local in a callee-saved register lifts as an extra PARAMETER
+ *  (`int x; if (s) x = k(a); return k(a) + x;` grew a third).
  *
  *  Read off the ENTRY block, the one every path starts with: `stmw rS,D(r1)` saves rS..r31, a GPR
- *  save routine rNN..r31, and `stw rN,D(r1)` rN. A register the block wrote before the store is not
- *  saved by it (`stw` of a written register is a spill). "Written" is read off the operand text: every
- *  instruction but a store counts its first operand as written, which can only under-state the set —
- *  the direction that keeps a parameter. */
+ *  save routine rNN..r31, and `stw rN,D(r1)` rN. A register counts as saved only where NO earlier
+ *  instruction names it, as an operand or as a memory base, read or written. That is what a save
+ *  is: the first thing the function does with the register. A write before the store makes the
+ *  `stw` a spill; a READ before it is asm handed a live value there, which the save then preserves
+ *  — the very case the save half exists to keep a parameter for, so it must not count.
+ *
+ *  NOT Thumb's rule (`savedRegs` in frontend/thumb.ts), which ends the measurement at the end of the
+ *  LEADING run of saves. mwcc interleaves its saves with the body's first instructions
+ *  (`stw r31,12(r1); mr r31,r3; stw r30,8(r1)`), and the save routine's `addi r11,r1,N` need not sit
+ *  next to its `bl`, so a leading run would drop saves the prologue really makes. The two rules
+ *  agree on what they let through: no instruction before a counted save touches the register. The
+ *  operand text can only over-name (a register spelt in a branch target names nothing), which
+ *  under-states the set — the direction that keeps a parameter. */
 function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
   const saved = new Set<string>();
-  const written = new Set<string>();
+  const named = new Set<string>();
   const save = (first: number) => {
     for (let k = first; k <= 31; k++) {
-      if (!written.has(`r${k}`)) {
+      if (!named.has(`r${k}`)) {
         saved.add(`r${k}`);
       }
     }
@@ -456,12 +465,14 @@ function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): 
       }
     } else if (ins.mnemonic === 'stmw' && s !== undefined && parseMem(s).base === 'r1') {
       save(Number(d.slice(1)));
-    } else if (ins.mnemonic === 'stw' && s !== undefined && parseMem(s).base === 'r1') {
-      if (!written.has(d)) {
-        saved.add(d);
+    } else if (ins.mnemonic === 'stw' && s !== undefined && parseMem(s).base === 'r1' && !named.has(d)) {
+      saved.add(d);
+    }
+    for (const op of ins.ops) {
+      const reg = op.includes('(') ? parseMem(op).base : op;
+      if (isReg(reg)) {
+        named.add(reg);
       }
-    } else if (!ins.mnemonic.startsWith('st') && d !== undefined) {
-      written.add(d);
     }
   }
   return saved;
@@ -866,9 +877,14 @@ export function lift(
     /** Save `reg`'s entry value into the save slot at entry offset `off`, named `mem` in `ins`. */
     const saveInto = (ins: Instr, reg: string, off: number, mem: string) => {
       if (ssa.hasReachingDef(reg, bi)) {
+        // A read leaves a definition too: the entry value, as a parameter, since `prologueSavedRegs`
+        // does not count a save after a read. Saying "wrote" there would name the wrong cause.
         throw new PpcUnsupportedError(
-          `cannot lift '${name}': ${site(ins)} saves ${reg} after this function wrote it, so '${mem}' holds a ` +
-            `value, not the caller's ${reg}`,
+          ssa.hasReachingDef(reg, bi, (v) => !paramReg.has(v))
+            ? `cannot lift '${name}': ${site(ins)} saves ${reg} after this function wrote it, so '${mem}' holds a ` +
+                `value, not the caller's ${reg}`
+            : `cannot lift '${name}': ${site(ins)} saves ${reg} after this function read it — a value handed ` +
+                `over in a register no argument is passed in, which a compiled prologue saves before any use`,
         );
       }
       refuseMixedSlot(ins, mem, off, 'save');
