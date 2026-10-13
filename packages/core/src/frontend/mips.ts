@@ -284,6 +284,49 @@ interface MipsJT {
   jrAddr: number;
 }
 
+/** Whether any branch lands in a dispatch block — after its bounds branch at `boundsAddr`, up to the
+ *  last word at `lastAddr`. Such a path skips the bounds check, and the block it enters is the one a
+ *  recovered table prunes. The same rule as frontend/ppc.ts. */
+const entersDispatch = (instrs: Instr[], boundsAddr: number, lastAddr: number): boolean =>
+  instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= lastAddr);
+
+/** A MIPS jump table's bounds guard for the dispatch whose `jr` is at `i`: `sltiu tmp,scrutReg,N`
+ *  then `beqz tmp,DEF`, where the beqz is the nearest transfer before the `jr`. Between the two,
+ *  inside the beqz's block, nothing may write `tmp` or the scrutinee or transfer control (IDO
+ *  schedules `move s0,a1` there). `at` is the beqz's index. */
+function mipsBounds(
+  instrs: Instr[],
+  i: number,
+  scrutReg: string,
+): { at: number; addr: number; n: number; def: number } | null {
+  let k = i - 1;
+  while (k >= 0 && !isControlTransfer(instrs[k])) {
+    k--;
+  }
+  const beqz = instrs[k];
+  if (!beqz || beqz.mnemonic !== 'beqz' || beqz.target === undefined) {
+    return null;
+  }
+  const tmp = beqz.ops[0];
+  for (let j = k - 1; j >= 0 && !isControlTransfer(instrs[j]); j--) {
+    const c = instrs[j];
+    if (c.mnemonic === 'sltiu' && c.ops[0] === tmp && c.ops[1] === scrutReg) {
+      // A delay slot belongs to the transfer before it, not to the beqz's block.
+      if (j > 0 && isControlTransfer(instrs[j - 1])) {
+        return null;
+      }
+      // `sltiu tmp, scrut, N` bounds `scrut < N`: the immediate IS the case count (PPC's `cmplwi`
+      // states the max index).
+      const n = parseImm(c.ops[2]);
+      return n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target };
+    }
+    if (writtenReg(c) === tmp || writtenReg(c) === scrutReg) {
+      return null;
+    }
+  }
+  return null;
+}
+
 function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT> {
   // Nearest def of `reg` strictly before index `p`, not crossing a control transfer (so the trace
   // stays inside the dispatch's extended block). Returns the instruction index, or -1.
@@ -326,10 +369,12 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     let rV = jr.ops[0];
     // Optional IDO `+gp`: `addu rV, rL, gp` before the load — the loaded value is the other operand.
     let ldIdx = defBefore(rV, i);
+    let gpIdx = -1;
     if (ldIdx >= 0 && instrs[ldIdx].mnemonic === 'addu') {
       const [a, b] = [instrs[ldIdx].ops[1], instrs[ldIdx].ops[2]];
       if (a === 'gp' || b === 'gp') {
         rV = a === 'gp' ? b : a;
+        gpIdx = ldIdx;
         ldIdx = defBefore(rV, ldIdx);
       }
     }
@@ -347,7 +392,9 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     const [oa, ob] = [instrs[aIdx].ops[1], instrs[aIdx].ops[2]];
     // One operand is the shifted index (`sll rIdx, scrut, 2` — identity guard), the other the table base.
     let scrutReg: string | null = null,
-      table: { sym: string; addend: number } | null = null;
+      table: { sym: string; addend: number } | null = null,
+      sllIdx = -1,
+      baseIdx = -1;
     for (const [idxCand, baseCand] of [
       [oa, ob],
       [ob, oa],
@@ -367,31 +414,31 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
       }
       scrutReg = sll.ops[1];
       table = tb;
+      [sllIdx, baseIdx] = [si, bi2];
       break;
     }
     if (!scrutReg || !table) {
       continue;
     }
-    // Bounds: `sltiu tmp, scrutReg, N ; beqz tmp, DEF` — the guard whose delay-slot-consuming branch
-    // block will emit the switch_br. Scan back for the sltiu on the scrutinee.
-    let bounds: { addr: number; n: number; def: number } | null = null;
-    for (let j = aIdx; j >= 0; j--) {
-      const c = instrs[j];
-      if (c.mnemonic === 'sltiu' && c.ops[1] === scrutReg) {
-        const tmp = c.ops[0];
-        // the beqz reading tmp (the block terminator); it may follow the sltiu directly.
-        for (let k = j + 1; k < instrs.length && k <= j + 3; k++) {
-          if (instrs[k].mnemonic === 'beqz' && instrs[k].ops[0] === tmp && instrs[k].target !== undefined) {
-            // `sltiu tmp, scrut, N` bounds `scrut < N` — the immediate IS the case count (unlike PPC's
-            // `cmplwi rS, N-1` which uses the max index). So N = the immediate, not immediate+1.
-            bounds = { addr: instrs[k].addr, n: parseImm(c.ops[2]), def: instrs[k].target! };
-            break;
-          }
-        }
-        break;
-      }
+    // Bounds: `sltiu tmp, scrutReg, N ; beqz tmp, DEF`, the beqz the nearest transfer before the
+    // dispatch. Its block emits the `switch_br`, reading the scrutinee where the beqz reads `tmp`.
+    const bounds = mipsBounds(instrs, i, scrutReg);
+    if (!bounds) {
+      continue;
     }
-    if (!bounds || bounds.n < 2) {
+    // THE DISPATCH BLOCK — after the bounds branch's delay slot, through the `jr` and its own slot —
+    // is pruned unread once the table is recovered, so it may hold the idiom and nothing else:
+    // anything more would be dropped. Nothing may branch into it past the bounds check, the `jr`'s
+    // slot must be empty, and nothing from the bounds slot on may rewrite the scrutinee before the
+    // `sll` scales it (IDO's in-place `sll` IN the slot is that `sll`).
+    const k = bounds.at;
+    const idiom = new Set([ldIdx, aIdx, gpIdx, sllIdx, baseIdx]);
+    if (
+      instrs[i + 1]?.mnemonic !== 'nop' ||
+      entersDispatch(instrs, instrs[k].addr, instrs[i + 1].addr) ||
+      instrs.slice(k + 2, i).some((_, o) => !idiom.has(k + 2 + o)) ||
+      instrs.slice(k + 1, sllIdx).some((x) => writtenReg(x) === scrutReg)
+    ) {
       continue;
     }
     const caseAddrs = readJumpTable(ad, table.sym, table.addend, bounds.n);

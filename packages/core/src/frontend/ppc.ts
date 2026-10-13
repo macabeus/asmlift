@@ -253,6 +253,12 @@ function boundsCompare(instrs: Instr[], j: number, scrutReg: string): number | n
   return null;
 }
 
+/** Whether any branch lands in a dispatch block — after its bounds branch at `boundsAddr`, up to its
+ *  indirect jump at `jumpAddr`. Such a path skips the bounds check, and the block it enters is the
+ *  one a recovered table prunes. Shared shape with frontend/mips.ts. */
+const entersDispatch = (instrs: Instr[], boundsAddr: number, jumpAddr: number): boolean =>
+  instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= jumpAddr);
+
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
 // deviation from the exact idiom, or a table that doesn't resolve to N in-function targets, declines
 // (→ the `bctr` loud-fail fires). Index IDENTITY guard: `slwi rIdx,rS,2` must be the bounds-checked
@@ -308,27 +314,24 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     ) {
       continue;
     }
-    // Bounds: the nearest preceding `cmplwi scrutReg,N-1 ; bgt DEF` guard (a different transfer
-    // before it ⇒ decline). mwcc schedules into the pair — the default's `li r6,0`, the LR save
-    // `stw r0,20(r1)` — so the `cmplwi` is found by `boundsCompare`.
-    let bounds: { addr: number; n: number; def: number } | null = null;
-    for (let j = i - 6; j >= 1; j--) {
-      const bgt = instrs[j];
-      if (bgt.mnemonic === 'bgt' && bgt.target !== undefined) {
-        const n = boundsCompare(instrs, j, scrutReg);
-        if (n !== null) {
-          bounds = { addr: bgt.addr, n, def: bgt.target };
-        }
-        break;
-      }
-      if (isXfer(bgt)) {
-        break;
-      }
+    // The idiom must not read the scrutinee after one of its own instructions wrote it: the
+    // `switch_br` reads it at the bounds branch, and the `slwi` would scale a different value.
+    if (lis.ops[0] === scrutReg || (instrs.indexOf(addi) < instrs.indexOf(slwi) && addi.ops[0] === scrutReg)) {
+      continue;
     }
+    // Bounds: `cmplwi scrutReg,N-1 ; bgt DEF` directly before the dispatch. The dispatch block is
+    // pruned unread once the table is recovered, so it may hold nothing but the idiom, and nothing
+    // may branch into it past the bounds check.
+    const bgt = instrs[i - 6];
+    if (!bgt || bgt.mnemonic !== 'bgt' || bgt.target === undefined || entersDispatch(instrs, bgt.addr, instrs[i].addr)) {
+      continue;
+    }
+    const n = boundsCompare(instrs, i - 6, scrutReg);
+    const bounds = n === null ? null : { addr: bgt.addr, n, def: bgt.target };
     if (!bounds || bounds.n < 2) {
       continue;
     }
-    const caseAddrs = readJumpTable(ad, tableSym, 0, bounds.n);
+    const caseAddrs = readJumpTable(ad, tableSym, lis.reloc.addend, bounds.n);
     if (!caseAddrs) {
       continue;
     }
