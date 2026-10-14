@@ -1823,7 +1823,9 @@ function decode(
     for (const b of aliasOf.size ? blocks : []) {
       for (const ins of b.instrs) {
         const k = ins.ops.length - 1;
-        if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic]) && k >= 0) {
+        // A marked relay is a branch here too (classifyXfer): it is lowered to `b` only later, so
+        // asking the mnemonic alone left `bl .L28 @ far jump` naming the dropped alias of `.L27`.
+        if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic] || ins.farJump) && k >= 0) {
           ins.ops[k] = aliasOf.get(ins.ops[k]) ?? ins.ops[k];
         }
       }

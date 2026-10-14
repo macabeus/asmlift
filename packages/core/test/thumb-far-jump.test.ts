@@ -72,6 +72,18 @@ describe('a marked relay is lowered to the branch it stands for', () => {
     expect(lift(asm)).toBe('void f(s32 a0) {\n    if (a0 <= 5) h(a0);\n    return;\n}\n');
   });
 
+  // agbcc puts two labels on one instruction when a helper label lands on an existing one, and the
+  // first is dropped as an alias of the second. The relay is still a `bl` when that happens, and
+  // naming the dropped alias it declined as leaving the function (libc s_erf.s `erf`:
+  // `bl .L28 @ far jump` with `.L28:` stacked on `.L27:`).
+  test('a relay to a stacked label follows the alias like the branch it stands for', () => {
+    const tail = '.LCB0:\n\tbl\th\n.L3:\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n';
+    const relay = `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L3\t@ far jump\n${tail}`;
+    const near = `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tb\t.L3\n${tail}`;
+    expect(lift(relay)).toBe(lift(near));
+    expect(lift(relay)).toBe('void f(s32 a0) {\n    if (a0 <= 5) h(a0);\n    return;\n}\n');
+  });
+
   // `jump`: `bl <target>\t@ far jump`, followed by a pool behind `.align 2, 0`. The relay seals
   // the fill and stays 4 bytes in the layout, so the pool word is found on its 4-byte boundary.
   test('the unconditional relay seals the pool after it and keeps its four bytes', () => {
