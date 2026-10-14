@@ -21,11 +21,12 @@ import { verify } from '../src/ir/verify';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const emit = (ir: string, on = true): string => {
+// `on` undefined ⇒ the option is not passed at all, so the test reads structure()'s own default.
+const emit = (ir: string, on?: boolean): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { unsignedCompareSpelling: on }));
+  return cBackend.emit(structure(fn, on === undefined ? {} : { unsignedCompareSpelling: on }));
 };
 
 // A u32 counter merged through a name an s32 value claims first: the loop param's compare
@@ -164,7 +165,12 @@ test('signed-use evidence blocks the flip', () => {
   expect(src).not.toMatch(/u32 v\d+;/);
 });
 
-test('off by default: the default spelling keeps the uncast signed rendering', () => {
+test('on by default: with no option set, an unsigned compare is spelled unsigned', () => {
+  expect(emit(LOOPBOUND)).toMatch(/\(u32\)/);
+  expect(emit(RECON)).toMatch(/u32 v\d+;/);
+});
+
+test('switched off, the spelling keeps the uncast signed rendering', () => {
   expect(emit(LOOPBOUND, false)).not.toContain('(u32)');
   expect(emit(RECON, false)).not.toMatch(/u32 v\d+;/);
 });

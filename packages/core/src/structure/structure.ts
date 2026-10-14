@@ -1758,10 +1758,13 @@ export interface StructureOptions extends ArithCompilerFacts {
   readsStayWhereWritten?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
-  // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
-  // the compiler (it emits the unsigned branch from signed compares only then), so which spelling
-  // the source used is genuinely ambiguous at emission — rank.ts enumerates the ON spelling as
-  // the `/uns-cmp` variation and the differ referees.
+  // needs signed. ON by default, because it is the only spelling that is value-faithful without a
+  // proof: an unsigned compare spelled over two signed-rendering operands compiles to a SIGNED
+  // compare, which differs from the machine's wherever an operand's top bit is set. The OFF spelling
+  // is still a real source: a signed spelling that byte-matched was PROVED non-negative by the
+  // compiler (it emits the unsigned branch from signed compares only then), and emission's provable
+  // set is smaller than the compiler's. So rank.ts enumerates it as the `/signed-cmp` variation and
+  // publishes it only on a byte-exact score (`Candidate.matchOnly`).
   unsignedCompareSpelling?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
@@ -2302,7 +2305,7 @@ export function structure(
     contractsFloatProducts = false,
     keepsPointerSumAddend = false,
     staticLayout,
-    unsignedCompareSpelling = false,
+    unsignedCompareSpelling = true,
     coalesceMergeNames = false,
     freshParamMerge = false,
     followEarlyReturns = false,
