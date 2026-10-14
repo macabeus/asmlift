@@ -50,7 +50,8 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
 
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
-      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams" or "byValueParams")',
+      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ' +
+        '"byValueParams" or "byValueLayouts")',
     ]);
   });
 
@@ -165,5 +166,42 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
     expect(problems).toHaveLength(2);
     expect(problems[0]).toContain('a:');
     expect(problems[1]).toContain('b:');
+  });
+});
+
+// `struct A { u16 a, b, c, d; s8 e, f; }; void take2(struct A a);` — the members that size the struct
+const A = {
+  kind: 'struct' as const,
+  members: [
+    ...['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u16' })),
+    { name: 'e', type: 's8' },
+    { name: 'f', type: 's8' },
+  ],
+};
+
+describe('a by-value parameter layout', () => {
+  test('is accepted for a parameter the list passes by value', () => {
+    expect(validatePrototypes({ take2: { params: ['struct A'], byValueLayouts: { 0: A } } })).toEqual([]);
+    expect(validatePrototypes({ t: { params: ['s32', 'A_t'], byValueParams: [1], byValueLayouts: { 1: A } } })).toEqual(
+      [],
+    );
+  });
+
+  test('keyed by any other parameter, or malformed, is refused', () => {
+    expect(validatePrototypes({ t: { params: ['s32'], byValueLayouts: { 0: A } } })).toEqual([
+      't: "byValueLayouts" key "0" is not a parameter the typed "params" pass by value',
+    ]);
+    expect(validatePrototypes({ t: { params: ['struct A'], byValueLayouts: { 1: A } } })).toEqual([
+      't: "byValueLayouts" key "1" is not a parameter the typed "params" pass by value',
+    ]);
+    expect(validatePrototypes({ t: { params: 1, byValueLayouts: { 0: A } } })).toEqual([
+      't: "byValueLayouts" key "0" is not a parameter the typed "params" pass by value',
+    ]);
+    expect(validatePrototypes({ t: { params: ['struct A'], byValueLayouts: [A] } })).toEqual([
+      't: "byValueLayouts" must map a parameter index to its layout',
+    ]);
+    expect(validatePrototypes({ t: { params: ['struct A'], byValueLayouts: { 0: { kind: 'class' } } } })).toEqual([
+      't: "byValueLayouts" 0: "kind" must be "struct" or "union"',
+    ]);
   });
 });

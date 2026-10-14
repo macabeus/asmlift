@@ -902,8 +902,13 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
   // __attribute__((mode(DI)))` takes a register pair. Its parameters are not read, in any
   // declaration of it; its return is.
   const unreadParams = new Set<string>();
-  const returnOnly = ({ params: _unread, wordParams: _words, byValueParams: _copies, ...rest }: FnProto): FnProto =>
-    rest;
+  const returnOnly = ({
+    params: _unread,
+    wordParams: _words,
+    byValueParams: _copies,
+    byValueLayouts: _layouts,
+    ...rest
+  }: FnProto): FnProto => rest;
   for (const d of ctx.declarations) {
     const s = d.specifiers;
     if (
@@ -1037,6 +1042,16 @@ function readSignature(
   }
   if (copies.length > 0) {
     proto.byValueParams = copies;
+    // …and the members of each one the context defines, which size it (`FnProto.byValueLayouts`)
+    const layouts = Object.fromEntries(
+      copies.flatMap((k) => {
+        const l = layoutOf(resolve(types[k], typedefs, tokens));
+        return l === undefined ? [] : [[k, l] as const];
+      }),
+    );
+    if (Object.keys(layouts).length > 0) {
+      proto.byValueLayouts = layouts;
+    }
   }
   return proto;
 }

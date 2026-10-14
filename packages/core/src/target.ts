@@ -888,6 +888,15 @@ export interface TargetDescription {
     // a one-word one included (compiled: `struct {u32 x;} mkw(s32)` is called `addiu a0,sp,28 / jal
     // mkw / lw v0,28(sp)`), and states nothing: the MIPS frontend lowers no call to read it.
     aggregateReturn?: 'apcs' | 'svr4';
+    // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
+    // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
+    // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
+    // BLKmode argument across r3 and the stack, FUNCTION_ARG_ADVANCE rounds its size to a word, and
+    // no FUNCTION_ARG_PASS_BY_REFERENCE is defined); compiled, `struct A {u16 a,b,c,d; s8 e,f;}`
+    // is `ldr r0..r2` off the frame copy ahead of `bl take2`. ABSENT ⇒ the target passes one some
+    // other way or states nothing: mwcc passes the address of a copy, and O32 places one in words
+    // only after copying it into the argument home area, which the MIPS frontend does not read.
+    byValueAggregateArgWords?: boolean;
     // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
     // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
     // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
@@ -1066,6 +1075,7 @@ export const ARMV4T_AGBCC: TargetDescription = {
     aggregateBoundary: 4,
     largestAlignment: 4,
     aggregateReturn: 'apcs',
+    byValueAggregateArgWords: true,
     enumBytes: 4,
     bitfieldPacking: 'contiguous',
     roundTripsDoubleLiterals: true,

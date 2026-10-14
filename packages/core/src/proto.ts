@@ -49,6 +49,13 @@ export interface FnProto {
    *  nothing else sizes, is UNSIZED — a name nothing here resolved, not a struct by inference — and
    *  every reader abstains on it. */
   byValueParams?: readonly number[];
+  /** The members of each struct or union a typed `params` list passes BY VALUE, keyed by the
+   *  parameter's index: what sizes it, and so how many argument words it takes on a target that
+   *  passes one in words (`compilerBehaviors.byValueAggregateArgWords`, read by `aggregate.ts`
+   *  `byValueCallArgs`). A context states it from the struct's definition, as it states
+   *  `returnLayout`. A by-value parameter with no layout here is unsized, and the call is lifted at
+   *  the argument-register guess. */
+  byValueLayouts?: Readonly<Record<number, AggregateLayout>>;
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
    *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
@@ -597,15 +604,25 @@ export function spellableProto(
   p: FnProto | undefined,
   target: Pick<TargetDescription, 'doubleArgWords'>,
   returned?: IrType,
+  byValue?: ReadonlySet<number>,
 ): { readonly params: readonly ParamType[]; readonly returns: ParamType } | undefined {
   // A struct returned through memory prints as the headers spell the struct the lift typed its call
   // as (`returned`), which the declarations block defines beside this prototype (declare.ts). With
   // no such call it is a return this cannot print.
-  const returns = returned?.kind === 'struct' ? (returned.declared ?? `struct ${returned.name}`) : p?.returns;
+  // A callee passed a struct by value prints whenever its declaration is complete, `returnsVoid`
+  // standing for `void`: the struct is defined only beside it, and the local the lift passes is of
+  // that type, so without it the candidate cannot declare its own local.
+  const passesStruct = byValue !== undefined && byValue.size > 0;
+  const returns =
+    returned?.kind === 'struct'
+      ? (returned.declared ?? `struct ${returned.name}`)
+      : (p?.returns ?? (passesStruct && p?.returnsVoid === true ? 'void' : undefined));
   if (
     p === undefined ||
     returns === undefined ||
-    (returned === undefined && (!spellableType(returns) || declaredWidth(returns) === undefined))
+    (returned === undefined &&
+      !(passesStruct && returns.trim() === 'void') &&
+      (!spellableType(returns) || declaredWidth(returns) === undefined))
   ) {
     return undefined;
   }
@@ -613,7 +630,19 @@ export function spellableProto(
     return { params: [], returns };
   }
   // A parameter prints where the frontend lays it out (`declaredCallArgs`): a type this spells, or a
-  // `double` the target gives general words, which as a C keyword needs no typedef.
+  // `double` the target gives general words, which as a C keyword needs no typedef — or a struct
+  // the lift passed by value (`byValue`, by parameter index), which the declarations block defines
+  // beside this prototype from its `byValueLayouts`, as it defines a returned one.
+  if (Array.isArray(p.params) && byValue !== undefined && passesStruct) {
+    const params = p.params;
+    const rest = params.map((t, i) => (byValue.has(i) ? 'u32' : t));
+    const laid = declaredCallArgs({ ...p, params: rest }, target);
+    return laid !== undefined &&
+      [...byValue].every((i) => p.byValueLayouts !== undefined && Object.hasOwn(p.byValueLayouts, i)) &&
+      rest.every((t, i) => laid.doubles.has(i) || spellableType(t))
+      ? { params, returns }
+      : undefined;
+  }
   const laid = declaredCallArgs(p, target);
   return Array.isArray(p.params) &&
     laid !== undefined &&
@@ -670,20 +699,23 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'returns' &&
         key !== 'returnLayout' &&
         key !== 'wordParams' &&
-        key !== 'byValueParams'
+        key !== 'byValueParams' &&
+        key !== 'byValueLayouts'
       ) {
         problems.push(
-          `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams" or "byValueParams")`,
+          `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
+            '"byValueParams" or "byValueLayouts")',
         );
       }
     }
-    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams } = proto as {
+    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts } = proto as {
       params?: unknown;
       returnsVoid?: unknown;
       returns?: unknown;
       returnLayout?: unknown;
       wordParams?: unknown;
       byValueParams?: unknown;
+      byValueLayouts?: unknown;
     };
     for (const [key, list] of [
       ['wordParams', wordParams],
@@ -707,6 +739,34 @@ export function validatePrototypes(value: unknown): string[] {
       wordParams.some((k) => byValueParams.includes(k))
     ) {
       problems.push(`${sym}: "wordParams" and "byValueParams" both list one parameter`);
+    }
+    // A layout keyed by a parameter the list does not pass by value would size a word as a struct.
+    if (byValueLayouts !== undefined) {
+      if (typeof byValueLayouts !== 'object' || byValueLayouts === null || Array.isArray(byValueLayouts)) {
+        problems.push(`${sym}: "byValueLayouts" must map a parameter index to its layout`);
+      } else {
+        for (const [key, layout] of Object.entries(byValueLayouts)) {
+          const k = Number(key);
+          if (
+            !Array.isArray(params) ||
+            !params.every((t) => typeof t === 'string') ||
+            !/^\d+$/.test(key) ||
+            k >= params.length ||
+            paramClassOf(
+              {
+                wordParams: Array.isArray(wordParams) ? wordParams : [],
+                byValueParams: Array.isArray(byValueParams) ? byValueParams : [],
+              },
+              params,
+              k,
+            ) !== 'by-value'
+          ) {
+            problems.push(`${sym}: "byValueLayouts" key "${key}" is not a parameter the typed "params" pass by value`);
+            continue;
+          }
+          problems.push(...layoutProblems(`${sym}: "byValueLayouts" ${key}`, layout));
+        }
+      }
     }
     if (returnLayout !== undefined) {
       problems.push(...layoutProblems(`${sym}: "returnLayout"`, returnLayout));
