@@ -158,18 +158,28 @@ describe('what is not provably a relay declines loud', () => {
   // `b` twins of these two are `thumb-frontend.test.ts`'s. It is not part of the relay's lr proof:
   // nothing but the entry `push` names lr, so the relay's lr never reaches r3 or r0. Pinned here
   // because lowering the relay must not let either one through as a return.
-  test('a relay in a function with a `bx` that is not a just-popped return declines', () => {
+  test("a relay in a function with a `bx` that is not a return through the caller's lr declines", () => {
     declines(
       `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n` +
         '.L2:\n\tmov\tr0, #7\n\tbx\tr3\n',
-      /indirect\/computed jump 'bx r3' is not a return through a just-popped saved lr/,
+      /indirect\/computed jump 'bx r3' is not a return through the caller's lr/,
+    );
+  });
+
+  // The relay's lowering leans on this: with every return reading the caller's lr, the lr the relay
+  // wrote is not what any return jumps to. `pop {r0}` here reads the saved r4, so the lowered
+  // function would have returned to wherever r4 pointed; on main it declined on the bare `bl`.
+  test("a relay in a function whose `pop` reads the saved r4's word, not lr's, declines", () => {
+    declines(
+      `${H}\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n.L2:\n\tmov\tr0, #7\n\tpop\t{r0}\n\tbx\tr0\n`,
+      /indirect\/computed jump 'bx r0' is not a return through the caller's lr/,
     );
   });
 
   test('a `bx` through a register the `pop` did not load last declines', () => {
     declines(
       `${H}\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n.L2:\n\tpop\t{r0, r4}\n\tbx\tr0\n`,
-      /indirect\/computed jump 'bx r0' is not a return through a just-popped saved lr/,
+      /indirect\/computed jump 'bx r0' is not a return through the caller's lr/,
     );
   });
 

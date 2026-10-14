@@ -257,9 +257,10 @@ function classifyXfer(ins: Instr): XferKind | null {
     return 'cond';
   }
   // `bx rN`: agbcc's return is `bx lr` or `pop {…, rN}; bx rN` (rN holds the restored LR) — a return.
-  // This sees one instruction, so it cannot tell that `rN` was just popped; `readThumbText` asks
-  // that of every `bx rN` of the selected function (`bxReturnsThroughPop`) and declines any other
-  // as the indirect jump it is. (agbcc emits jump tables via `mov pc`, NOT `bx`.)
+  // This sees one instruction, so it cannot tell what rN holds; once the CFG exists, every return
+  // of the selected function is asked whether it reads the caller's lr from the frame word the
+  // prologue saved it in (`refuseReturnsNotThroughCallersLr`), and any other declines as the
+  // indirect jump it is. (agbcc emits jump tables via `mov pc`, NOT `bx`.)
   if (mn === 'bx') {
     return 'return';
   }
@@ -2474,6 +2475,9 @@ function liftOnce(
     fillThumbBlock(fill, ab, bi);
     ssa.markFilled(bi);
   });
+  // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
+  // refusal order: the proof reads only the text and the CFG, and changes nothing.
+  refuseReturnsNotThroughCallersLr(name, cfg);
 
   pairs.refuseWordReturns();
   // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
@@ -2529,33 +2533,219 @@ interface ThumbText {
   readonly poolNamesSymbols: boolean;
 }
 
-/** Whether the `bx rN` at `instrs[i]` returns through the lr the prologue saved: the
- *  instruction before it in its block is a `pop` whose highest register is rN, the slot the entry
- *  `push` put lr in, with at most the release of pretend-argument space between them (agbcc's
- *  variadic epilogue: `pop {r3}; add sp, sp, #0x10; bx r3`). `bx lr` is a return by itself.
+// One spelling per register for the return proof below, which tracks registers by identity:
+// `r14` and `lr` are one register, and so are `ip` and `r12`.
+const REG_ALIAS: Readonly<Record<string, string>> = {
+  sp: 'r13',
+  lr: 'r14',
+  pc: 'r15',
+  sb: 'r9',
+  sl: 'r10',
+  fp: 'r11',
+  ip: 'r12',
+};
+const canonReg = (r: string): string | null => {
+  const t = r.replace(/!$/, '');
+  return /^r(\d|1[0-5])$/.test(t) ? t : (REG_ALIAS[t] ?? null);
+};
+const regIndex = (r: string): number => Number(r.slice(1));
+// Registers `ins` may write, besides sp and besides a `pop`'s list (the proof reads both itself).
+// OVER-approximate: naming a register here that the instruction does not write costs a decline,
+// and missing one costs a wrong return. 'all' for a call, and for anything this cannot read.
+const NO_REG_WRITE: ReadonlySet<string> = new Set([
+  'str',
+  'strb',
+  'strh',
+  'push',
+  'cmp',
+  'cmn',
+  'tst',
+  'nop',
+  'b',
+  'bx',
+]);
+function regWritesOf(ins: Instr): readonly string[] | 'all' {
+  const mn = ins.mnemonic;
+  if (NO_REG_WRITE.has(mn) || COND_OPCODE[mn]) {
+    return [];
+  }
+  if (mn === 'bl' || mn === 'blx' || mn === 'swi') {
+    return 'all';
+  }
+  if (/^(ldm|stm)/.test(mn)) {
+    const base = canonReg(ins.ops[0] ?? '');
+    const list = /^ldm/.test(mn) ? regListOf(ins.ops.slice(1)) : [];
+    if (base === null || list === null) {
+      return 'all';
+    }
+    const listed = list.map(canonReg);
+    return listed.some((r) => r === null) ? 'all' : [base, ...(listed as string[])];
+  }
+  const dest = canonReg(ins.ops[0] ?? '');
+  return dest === null ? 'all' : [dest];
+}
+
+/** What the return proof knows at one point of the function: the frame depth `makeFrameWalk`
+ *  measures, which word of the frame holds the caller's lr (`slot`, as the depth at which it sits:
+ *  the word at entry sp − slot), and which registers hold it. */
+interface LrState {
+  readonly depth: number | null;
+  readonly slot: number | null;
+  readonly regs: ReadonlySet<string>;
+}
+
+/** EVERY RETURN OF THIS FUNCTION RETURNS THROUGH THE CALLER'S lr, or the lift declines.
  *
- *  STRUCTURAL, by design. Which word of the frame the `pop` reads is the frame walk's question; this
- *  holds for the return shapes agbcc emits — every `bx` in the benchmark's 548 Thumb target listings
- *  and in the kleod and sa3 builds is one — and declines anything else. Without it `classifyXfer`
- *  reads every `bx rN` as a return, and `mov r0, #7; bx r3` lifts to `return 7;` although it jumps
- *  wherever r3 points, and `pop {r0, r4}; bx r0` lifts to a return although it jumps to the saved
- *  r4. */
-function bxReturnsThroughPop(instrs: readonly Instr[], i: number): boolean {
-  const reg = instrs[i].ops[0];
-  if (reg === 'lr' || reg === 'r14') {
-    return true;
+ *  `classifyXfer` reads `bx rN`, `pop {…, pc}` and `mov pc, lr` as returns from the instruction
+ *  alone, and each is one only when the word it transfers to is the lr this function was called
+ *  with: in lr itself, in the frame word the prologue's `push` saved it to, or in a register a
+ *  `pop` loaded from that word. Which word a `pop` reads is a question about the FRAME, not about
+ *  register names — a `pop` fills its list in register-number order from the lowest address up —
+ *  so this walks the frame (`makeFrameWalk`) over the CFG and tracks where the caller's lr is:
+ *    • a `push` that saves a register holding it records the word it went to;
+ *    • a `pop` whose k-th register (by number) reads that word puts it in that register, and every
+ *      other register it fills loses it;
+ *    • the word stops holding it when sp rises past it (a `pop` or `add sp` releases it), a
+ *      `str` through sp overwrites it, or the depth stops being one number;
+ *    • a register stops holding it when anything writes the register (a call writes them all);
+ *      a `mov` copies it.
+ *  Paths meet by agreement: a depth or a word the predecessors disagree on is unknown, and a
+ *  register holds lr only if it does on every path in.
+ *
+ *  So `push {r4, lr}; pop {r0}; bx r0` (the saved r4), `push {lr}; sub sp, #8; pop {r1}; bx r1` (a
+ *  local), `pop {r4, r1}` after `push {r4, lr}` (r1 is filled first, from r4's word) and
+ *  `mov r0, #7; bx r3` all decline, where agbcc's `pop {r4}; pop {r0}; bx r0` and its variadic
+ *  `push {r0-r3}; push {lr}; … pop {r3}; add sp, sp, #0x10; bx r3` are returns. It is also what the
+ *  far-jump relay's lowering needs and does not itself prove (`lowerFarJumpRelays`): with every
+ *  return reading the CALLER's lr, the lr a relay writes cannot be what a return jumps to.
+ *
+ *  NOT ASKED, AND SAID SO: `bx lr` and `mov pc, lr` stay returns by the register's name, as they
+ *  were before this proof existed, whether or not a call has since overwritten lr. A compiler
+ *  saves lr before it calls, so no compiled function reaches that case; this frontend's own test
+ *  fixtures write leaf-style `bl h; bx lr` throughout, and declining them is a separate change
+ *  with nothing in the corpus to buy. The far-jump relay does not lean on it either: its lowering
+ *  declines any function in which an instruction other than the entry `push` names lr.
+ *
+ *  Blocks no path from the entry reaches are not asked: they never run. */
+function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
+  const { asmBlocks, preds, entryReachable } = cfg;
+  const succs: number[][] = asmBlocks.map(() => []);
+  preds.forEach((ps, b) => ps.forEach((p) => succs[p].push(b)));
+  const LR = 'r14';
+  const join = (a: LrState, b: LrState): LrState => {
+    const depth = a.depth !== null && a.depth === b.depth ? a.depth : null;
+    return {
+      depth,
+      slot: depth !== null && a.slot !== null && a.slot === b.slot ? a.slot : null,
+      regs: new Set([...a.regs].filter((r) => b.regs.has(r))),
+    };
+  };
+  const same = (a: LrState, b: LrState) =>
+    a.depth === b.depth && a.slot === b.slot && a.regs.size === b.regs.size && [...a.regs].every((r) => b.regs.has(r));
+  const refuse = (ins: Instr): never => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' is not a return ` +
+        `through the caller's lr — on some path what it jumps to is not lr, nor the frame word the prologue ` +
+        `saved lr in — jump tables / computed gotos / register tail calls not supported`,
+    );
+  };
+  // A pop/ldm list in the order the machine fills it: by register number, lowest address first.
+  const byNumber = (list: readonly string[]): string[] | null => {
+    const regs = list.map(canonReg);
+    return regs.some((r) => r === null) ? null : (regs as string[]).sort((x, y) => regIndex(x) - regIndex(y));
+  };
+
+  // Run one block from its in-state, asking each return as it is reached; the out-state.
+  const run = (b: number, inState: LrState): LrState => {
+    const walk = makeFrameWalk({ argRegs: [], start: inState.depth });
+    let slot = inState.slot;
+    const regs = new Set(inState.regs);
+    for (const ins of asmBlocks[b].instrs) {
+      const mn = ins.mnemonic;
+      const depth = walk.depthNow();
+      const xfer = classifyXfer(ins);
+      const isPop =
+        mn === 'pop' || ((mn === 'ldmia' || mn === 'ldmfd') && isSpReg((ins.ops[0] ?? '').replace(/!$/, '')));
+      if (isPop) {
+        const list = byNumber(regListOf(mn === 'pop' ? ins.ops : ins.ops.slice(1)) ?? []);
+        if (list === null || list.length === 0) {
+          if (xfer === 'return') {
+            refuse(ins);
+          }
+          regs.clear();
+        } else {
+          list.forEach((r, k) => {
+            if (depth !== null && slot !== null && depth - 4 * k === slot) {
+              regs.add(r);
+            } else {
+              regs.delete(r);
+            }
+          });
+          if (xfer === 'return' && !regs.has('r15')) {
+            refuse(ins); // `pop {…, pc}` that does not load pc from the saved lr's word
+          }
+        }
+      } else if (xfer === 'return') {
+        // `bx rN`: the register itself must hold the caller's lr. `bx lr` and `mov pc, lr` are
+        // returns by name, as they always were (see the doc comment).
+        const via = canonReg(mn === 'bx' ? (ins.ops[0] ?? '') : (ins.ops[1] ?? ''));
+        if (via !== LR && (via === null || !regs.has(via))) {
+          refuse(ins);
+        }
+      } else if (mn === 'push') {
+        const list = byNumber(regListOf(ins.ops) ?? []);
+        const k = list?.findIndex((r) => regs.has(r)) ?? -1;
+        if (list !== null && k >= 0 && depth !== null) {
+          slot = depth + 4 * list.length - 4 * k;
+        }
+      } else if (/^str[bh]?$/.test(mn)) {
+        const { base, off, regOff } = parseAddr(ins.ops[1] ?? '');
+        if (isSpReg(base) && slot !== null) {
+          const width = mn === 'strb' ? 1 : mn === 'strh' ? 2 : 4;
+          const at = depth === null || regOff !== undefined ? null : depth - off; // the word's depth
+          if (at === null || (at - width < slot && at > slot - 4)) {
+            slot = null;
+          }
+        }
+      } else if (!isSpReg(ins.ops[0])) {
+        const writes = regWritesOf(ins);
+        if (writes === 'all') {
+          regs.clear();
+        } else {
+          const src = /^movs?$/.test(mn) ? canonReg(ins.ops[1] ?? '') : null;
+          const copies = src !== null && regs.has(src);
+          writes.forEach((r) => regs.delete(r));
+          if (copies) {
+            regs.add(writes[0]);
+          }
+        }
+      }
+      walk.step(ins);
+      const after = walk.depthNow();
+      if (slot !== null && (after === null || slot > after)) {
+        slot = null; // released, or the frame is no longer one number
+      }
+    }
+    return { depth: walk.depthNow(), slot, regs };
+  };
+
+  const inStates = new Map<number, LrState>([[0, { depth: 0, slot: null, regs: new Set([LR]) }]]);
+  const work = [0];
+  while (work.length > 0) {
+    const b = work.pop()!;
+    const out = run(b, inStates.get(b)!);
+    for (const s of succs[b]) {
+      if (!entryReachable.has(s)) {
+        continue;
+      }
+      const prev = inStates.get(s);
+      const next = prev === undefined ? out : join(prev, out);
+      if (prev === undefined || !same(prev, next)) {
+        inStates.set(s, next);
+        work.push(s);
+      }
+    }
   }
-  let j = i - 1;
-  while (
-    j >= 0 &&
-    instrs[j].mnemonic === 'add' &&
-    instrs[j].ops[0] === 'sp' &&
-    instrs[j].ops[instrs[j].ops.length - 1].startsWith('#')
-  ) {
-    j--;
-  }
-  const popped = j >= 0 && instrs[j].mnemonic === 'pop' ? regListOf(instrs[j].ops) : null;
-  return popped !== null && popped[popped.length - 1] === reg;
 }
 
 /** Lower every far-jump relay the target marks (`bl .Lx @far jump`, agbcc's; see
@@ -2577,9 +2767,10 @@ function bxReturnsThroughPop(instrs: readonly Instr[], i: number): boolean {
  *    • no other instruction of the function names lr at all — no `bx lr`, no `mov pc, lr`, no
  *      `mov rX, lr`, no second `push`. So the lr the relay writes never reaches a register, and no
  *      code can return to it: `b` dropping that write is unobservable.
- *  Whether a `bx rN` is a return or an indirect jump is NOT this proof's question: the relay's lr
- *  cannot reach rN, and the misreading of a non-return `bx rN` is the same with or without a relay.
- *  `readThumbText` asks it of every function (`bxReturnsThroughPop`).
+ *  That every RETURN jumps through the caller's lr — not through a word the relay's lr could have
+ *  reached, nor through a saved callee register — is the other half of the argument, and it is
+ *  asked of every Thumb function once the CFG exists (`refuseReturnsNotThroughCallersLr`), where
+ *  the frame walk says which word each `pop` reads.
  *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
  *  function that pushes lr too) has the same shape and no mark, and still declines below.
  *
@@ -2729,7 +2920,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
   // itself (recursion), or a sibling a shared-tail slice extends through.
   for (const ab of asmBlocks) {
-    for (const [i, ins] of ab.instrs.entries()) {
+    for (const ins of ab.instrs) {
       // Asked of the SELECTED function's blocks, not of the file as it is parsed: an upper-case
       // register in some other function's body is not this one's problem.
       const upper = upperCaseRegIn(ins.ops);
@@ -2737,14 +2928,6 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': register '${upper}' in '${ins.mnemonic} ${ins.ops.join(', ')}' is spelled in ` +
             `upper case — this frontend identifies registers by spelling and models the lower-case forms only`,
-        );
-      }
-      // A `bx rN` that `classifyXfer` reads as a return without seeing what rN holds: only the
-      // pop-restored lr makes it one. Any other is a jump through a register.
-      if (ins.mnemonic === 'bx' && !bxReturnsThroughPop(ab.instrs, i)) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' is not a return ` +
-            `through a just-popped saved lr — jump tables / computed gotos / register tail calls not supported`,
         );
       }
       if (classifyXfer(ins) === 'indirect') {

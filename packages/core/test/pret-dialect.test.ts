@@ -249,9 +249,15 @@ describe('audit regressions: pool symbols, register ranges, layout, crashes', ()
 
   // A fused register-range in a pop/ldmia must be expanded — an unexpanded `{r4-pc}` silently
   // DELETED the return; `{r1-r3}` fabricated a 3-arg signature.
-  test('pop {r4-pc} is a return (not silently skipped, deleting it)', () => {
+  // `{r4-pc}` is r4..r15, twelve words, and the push saved two: pc does not read the word lr went
+  // to, so it is not a return either — and it declines rather than lifting the `return 0x63` past
+  // it. A range that does reach lr's word is the return.
+  test('pop {r4-pc} is a transfer, not silently skipped, deleting it', () => {
     const asm = '	thumb_func_start rr\nrr:\n	push {r4, lr}\n	movs r0, #0x3\n	pop {r4-pc}\n	movs r0, #0x63\n	bx lr\n';
-    expect(d('rr', asm).source).toBe('s32 rr(void) {\n    return 3;\n}\n');
+    expect(() => d('rr', asm)).toThrow(/'pop \{r4-pc\}' is not a return through the caller's lr/);
+    const ranged =
+      '	thumb_func_start rr\nrr:\n	push {r4, r5, lr}\n	movs r0, #0x3\n	pop {r4-r5, pc}\n	movs r0, #0x63\n	bx lr\n';
+    expect(d('rr', ranged).source).toBe('s32 rr(void) {\n    return 3;\n}\n');
   });
   test('ldmia {r1-r3} expands to three loads, not one phantom register', () => {
     const asm = '	thumb_func_start lm\nlm:\n	ldmia r0!, {r1-r3}\n	adds r1, r1, r2\n	adds r1, r1, r3\n	mov r0, r1\n	bx lr\n';

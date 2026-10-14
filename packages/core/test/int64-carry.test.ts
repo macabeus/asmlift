@@ -121,7 +121,7 @@ describe('the return width', () => {
     expect(framed([...pair, ...viaHigh])).toMatch(/^s64 f\(/);
     const viaSlot = ['\tadd\tsp, #-8', ...pair, '\tstr\tr1, [sp, #4]', '\tadd\tr4, r0, #0', '\tbl\tg'];
     expect(framed([...viaSlot, '\tldr\tr1, [sp, #4]', '\tadd\tr0, r4, #0', '\tadd\tsp, #8'])).toMatch(/^s64 f\(/);
-    const stored = [...pair, '\tldr\tr4, .Lg', '\tstr\tr1, [r4]'];
+    const stored = ['\tpush\t{r4, r5, lr}', ...pair, '\tldr\tr4, .Lg', '\tstr\tr1, [r4]'];
     expect(decompile('f', leaf(stored, ['\tpop\t{r4, r5, pc}', '.Lg:', '\t.word\tgv']), ARMV4T_AGBCC).source).toMatch(
       /^s64 f\(/,
     );

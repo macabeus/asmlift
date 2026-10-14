@@ -86,12 +86,14 @@ describe('a PC write is a control transfer under either spelling', () => {
   });
 });
 
-// THE SAME QUESTION FOR `bx`. `classifyXfer` sees one instruction and reads every `bx rN` as a
-// return, which is only true when rN holds the lr the prologue saved. Both shapes below lifted
-// silently — `mov r0, #7; bx r3` to `return 7;` although it jumps wherever r3 points, and
-// `pop {r0, r4}; bx r0` to a return although r0 holds the saved r4 — so a `bx rN` is a return only
-// through a just-popped saved lr, and declines otherwise.
-describe('a `bx rN` is a return only through a just-popped saved lr', () => {
+// THE SAME QUESTION FOR `bx`. `classifyXfer` sees one instruction and reads every `bx rN` (and
+// `pop {…, pc}`) as a return, which is only true when what it jumps to is the lr this function was
+// called with. `mov r0, #7; bx r3` lifted to `return 7;` although it jumps wherever r3 points. A
+// first fix asked for "a `pop` whose highest register is rN" — a register NAME standing in for a
+// frame WORD — and still let through `pop {r0}` reading the saved r4, a `pop` reading a local, and
+// `pop {r4, r1}`, which fills r1 first (a list is filled by register number) from r4's word. So the
+// frame is walked: a return must read the word the prologue's `push` saved lr in, on every path.
+describe("a return is a return only through the caller's lr, read from the frame word it was saved in", () => {
   test.each([
     ['a register nothing popped', '\tpush\t{lr}\n\tmov\tr0, #7\n\tbx\tr3\n', 'bx r3'],
     [
@@ -100,26 +102,64 @@ describe('a `bx rN` is a return only through a just-popped saved lr', () => {
       'bx r3',
     ],
     [
-      'a register the `pop` did not load last',
+      'a register the `pop` filled from the saved r4',
       '\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tb\t.L2\n.LCB0:\n\tbl\th\n.L2:\n\tpop\t{r0, r4}\n\tbx\tr0\n',
       'bx r0',
     ],
-    ['a pop in another block', '\tpush\t{lr}\n\tpop\t{r1}\n.L1:\n\tbx\tr1\n', 'bx r1'],
-  ])('`bx` through %s declines', (_, body, bx) => {
-    expect(() => dc('f', body)).toThrow(new RegExp(`indirect/computed jump '${bx}' is not a return`));
+    [
+      "a one-register `pop` of r4's word",
+      '\tpush\t{r4, lr}\n\tmov\tr4, r0\n\tmov\tr0, #5\n\tpop\t{r0}\n\tbx\tr0\n',
+      'bx r0',
+    ],
+    [
+      'a `pop` of a local, with the release after it',
+      '\tpush\t{lr}\n\tsub\tsp, #8\n\tmov\tr0, #5\n\tpop\t{r1}\n\tadd\tsp, #8\n\tbx\tr1\n',
+      'bx r1',
+    ],
+    [
+      'a list written out of order (`pop {r4, r1}` fills r1 first)',
+      '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, r1}\n\tbx\tr1\n',
+      'bx r1',
+    ],
+    [
+      'a pop on only one of the paths in',
+      '\tpush\t{lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tpop\t{r1}\n.L1:\n\tbx\tr1\n',
+      'bx r1',
+    ],
+    ['a `pop {pc}` of a local', '\tpush\t{lr}\n\tsub\tsp, #8\n\tmov\tr0, #5\n\tpop\t{pc}\n', 'pop {pc}'],
+  ])('a return through %s declines', (_, body, bx) => {
+    expect(() => dc('f', body)).toThrow(
+      new RegExp(`indirect/computed jump '${bx}' is not a return through the caller's lr`),
+    );
   });
 
   test.each([
     ['`bx lr`', '\tmov\tr0, #5\n\tbx\tlr\n'],
+    ['`mov pc, lr`', '\tmov\tr0, #5\n\tmov\tpc, lr\n'],
     ['`pop {rN}; bx rN`', '\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r1}\n\tbx\tr1\n'],
-    ['`pop {r4, rN}; bx rN`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, r1}\n\tbx\tr1\n'],
+    ["agbcc's `pop {r4}; pop {r1}; bx r1`", '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n'],
+    ['`pop {r4, r5}; bx r5`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, r5}\n\tbx\tr5\n'],
+    ['`pop {r4, pc}`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, pc}\n'],
+    ['a pop in the block that falls into the `bx`', '\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r1}\n.L1:\n\tbx\tr1\n'],
+    [
+      'a local area released before the `pop`',
+      '\tpush\t{lr}\n\tsub\tsp, #8\n\tmov\tr0, #5\n\tadd\tsp, #8\n\tpop\t{r1}\n\tbx\tr1\n',
+    ],
   ])('%s is the return', (_, body) => {
     expect(dc('f', body).source).toContain('return 5;');
   });
 
+  // A store over the saved word: the frame refuses it first (the word is above the local area), and
+  // the return proof would refuse the `bx` after it too; either way it is not a return.
+  test('a return through the saved word, overwritten, declines', () => {
+    expect(() => dc('f', '\tpush\t{lr}\n\tmov\tr1, #0\n\tstr\tr1, [sp]\n\tpop\t{r0}\n\tbx\tr0\n')).toThrow(
+      /cannot lift/,
+    );
+  });
+
   // agbcc's variadic epilogue releases the pretend-argument area between the pop and the `bx`
-  // (sa3 hariisen_proj.s: `pop {r3}; add sp, sp, #0x10; bx r3`). Asked of the `bx` alone, so the
-  // frame walk's own verdict on the variadic frame is whatever it was.
+  // (sa3 hariisen_proj.s: `pop {r3}; add sp, sp, #0x10; bx r3`). r3 was filled from lr's word,
+  // which sits below the four argument words the first `push` stored.
   test('a release of sp between the `pop` and the `bx` keeps it a return', () => {
     const body = '\tpush\t{r0, r1, r2, r3}\n\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r3}\n\tadd\tsp, sp, #0x10\n\tbx\tr3\n';
     expect(() => dc('f', body)).not.toThrow(/indirect\/computed jump/);
