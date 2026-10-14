@@ -35,6 +35,20 @@ export interface FnProto {
    *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
+  /** The parameters, by index into a typed `params`, whose spelling `declaredWidth` cannot size and
+   *  which still travel in one register: an enum, or an array or function type a typedef name
+   *  stands for, which the parameter adjusts to a pointer. A context states it, reading the types
+   *  behind the names (`prototypesFromContext`). Every reader sizes such a parameter at one word
+   *  (`paramClassOf`): the call lowering's widths (`declaredCallArgs`) and a frontend's frame
+   *  partition alike. */
+  wordParams?: readonly number[];
+  /** The parameters, by index into a typed `params`, that are a struct, union or class passed BY
+   *  VALUE: mwcc passes the address of a copy it builds in the caller's own frame, which no source
+   *  declares (`frontend/ppc.ts` `measurePpcFrame`). A context states it, reading the tag behind the
+   *  name (`prototypesFromContext`). A spelling neither this nor `wordParams` lists, and that
+   *  nothing else sizes, is UNSIZED — a name nothing here resolved, not a struct by inference — and
+   *  every reader abstains on it. */
+  byValueParams?: readonly number[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
    *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
@@ -153,11 +167,13 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *
  *  THREE WAYS TO SAY NOTHING, AND THEY ARE ONE ANSWER. `params` omitted; `params` malformed (a
  *  bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits); and a list holding a
- *  spelling `declaredWidth` cannot read — a project typedef (`bool8`, `Direction`, `TaskFunc`), a
- *  by-value struct, a floating type. The first two are not a reading of the list at all. The third
- *  is a list read to the end that cannot be CONVERTED: a parameter of unknown width occupies one
- *  argument register or two, the choice moves every later argument's home, and nothing a
- *  declaration holds settles it.
+ *  spelling neither `declaredWidth` reads nor the declaration sizes — a project typedef
+ *  (`bool8`, `Direction`, `TaskFunc`) that `wordParams` does not list, a by-value struct, a
+ *  floating type. The first two are not a reading of the list at all. The third is a list read to
+ *  the end that cannot be CONVERTED: a parameter of unknown width occupies one argument register
+ *  or two, and the choice moves every later argument's home. Where the declaration does settle it
+ *  — a typedef'd enum, an array or a function type the context resolved to one word, which
+ *  `wordParams` lists (`paramClassOf`) — the parameter is 32 bits and the list converts.
  *
  *  SO IT ABSTAINS, AND ABSTAINING IS NEITHER A REFUSAL NOR A GUESS. The caller falls back to its
  *  own contiguous-arg-register scan — exactly what it does for a callee the project never declared
@@ -200,7 +216,7 @@ export function declaredCallArgs(
   const widths: number[] = [];
   const doubles = new Set<number>();
   for (const [i, t] of p.params.entries()) {
-    const w = declaredWidth(t);
+    const w = declaredWidth(t) ?? (paramClassOf(p, p.params, i) === 'word' ? 32 : undefined);
     if (w !== undefined) {
       widths.push(w);
     } else if (target.doubleArgWords !== undefined && isDoubleSpelling(t)) {
@@ -211,6 +227,36 @@ export function declaredCallArgs(
     }
   }
   return { widths, doubles };
+}
+
+/** WHAT ONE DECLARED PARAMETER IS, as far as where a caller places it goes — the one reading every
+ *  reader of a declaration takes, so the call lowering (`declaredCallArgs`) and a frontend's frame
+ *  partition (`frontend/call-plan.ts` `declaredParams`) cannot give one declaration two answers: a
+ *  value of one word (`declaredWidth` sizes it at 32 bits or less, or `wordParams` lists it), one
+ *  wider than a word, a floating type (`isFloatingSpelling`), a struct or union passed by value
+ *  (`byValueParams` lists it, or the spelling says so with its keyword: `struct B`), or UNSIZED — a
+ *  spelling nothing here resolved, which states none of those and is not read as any of them. A
+ *  count states words. */
+export type ParamClass = 'word' | 'wide' | 'float' | 'by-value' | 'unsized';
+
+/** A struct, union or class named by its keyword and tag, with no declarator: passed by value. */
+const BY_VALUE_SPELLING = /^\s*(?:struct|union|class)\s+\w+\s*$/;
+
+/** The class of parameter `k` of the typed list `params` that declaration `p` states (`ParamClass`). */
+export function paramClassOf(p: FnProto, params: readonly ParamType[], k: number): ParamClass {
+  const spelling = params[k];
+  const w = declaredWidth(spelling);
+  return w !== undefined
+    ? w > 32
+      ? 'wide'
+      : 'word'
+    : isFloatingSpelling(spelling)
+      ? 'float'
+      : p.wordParams?.includes(k)
+        ? 'word'
+        : p.byValueParams?.includes(k) || BY_VALUE_SPELLING.test(spelling.replace(/\b(?:const|volatile)\b/g, ' '))
+          ? 'by-value'
+          : 'unsized';
 }
 
 /** Whether a declared type is `double`, qualifiers aside. */
@@ -618,16 +664,50 @@ export function validatePrototypes(value: unknown): string[] {
       continue;
     }
     for (const key of Object.keys(proto)) {
-      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns' && key !== 'returnLayout') {
-        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns" or "returnLayout")`);
+      if (
+        key !== 'params' &&
+        key !== 'returnsVoid' &&
+        key !== 'returns' &&
+        key !== 'returnLayout' &&
+        key !== 'wordParams' &&
+        key !== 'byValueParams'
+      ) {
+        problems.push(
+          `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams" or "byValueParams")`,
+        );
       }
     }
-    const { params, returnsVoid, returns, returnLayout } = proto as {
+    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams } = proto as {
       params?: unknown;
       returnsVoid?: unknown;
       returns?: unknown;
       returnLayout?: unknown;
+      wordParams?: unknown;
+      byValueParams?: unknown;
     };
+    for (const [key, list] of [
+      ['wordParams', wordParams],
+      ['byValueParams', byValueParams],
+    ] as const) {
+      if (
+        list !== undefined &&
+        !(
+          Array.isArray(params) &&
+          Array.isArray(list) &&
+          list.every((k) => Number.isInteger(k) && k >= 0 && k < params.length)
+        )
+      ) {
+        problems.push(`${sym}: "${key}" must list indices into a typed "params" list`);
+      }
+    }
+    // Two answers to one question — whether the parameter travels in a register or as a copy.
+    if (
+      Array.isArray(wordParams) &&
+      Array.isArray(byValueParams) &&
+      wordParams.some((k) => byValueParams.includes(k))
+    ) {
+      problems.push(`${sym}: "wordParams" and "byValueParams" both list one parameter`);
+    }
     if (returnLayout !== undefined) {
       problems.push(...layoutProblems(`${sym}: "returnLayout"`, returnLayout));
       // A layout beside a return that says `void` or spells a scalar is two answers to one question

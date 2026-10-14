@@ -17,6 +17,7 @@ import { type Value, mkOp, mkValue } from '../ir/core';
 import { type IrType, T, typeToString } from '../ir/types';
 import {
   type FnProto,
+  type ParamClass,
   type Prototypes,
   STANDARD_SIGNATURES,
   declaredCallArgs,
@@ -25,6 +26,7 @@ import {
   declaresParams,
   declaresVoidReturn,
   isFloatingSpelling,
+  paramClassOf,
   spellableProto,
   wordsOf,
 } from '../proto';
@@ -70,6 +72,16 @@ export interface DeclaredCall {
   readonly returned?: StructReturn | 'register';
 }
 
+/** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes (`paramClassOf`,
+ *  proto.ts, which `declaredCall`'s widths read too). */
+export type { ParamClass };
+
+/** One declared parameter: its class, and the spelling it was read from (empty for a count). */
+export interface DeclaredParam {
+  readonly kind: ParamClass;
+  readonly spelling: string;
+}
+
 /** What one call is, decided from its callee's declaration before any instruction is read. */
 export interface CallPlan {
   /** each argument's width, a hidden pointer first; null when nothing sizes them, so `lower`
@@ -103,6 +115,9 @@ export interface CallDeclarations {
   /** the callee's declared argument widths, for a frontend that places them before it lowers the
    *  call; null where no declaration sizes them */
   declaredCall(callee: string): DeclaredCall | null;
+  /** what each parameter the callee's declaration spells is (`ParamClass`), read through the tiers
+   *  `declaredCall` reads; null where no declaration states the parameters */
+  declaredParams(callee: string): readonly DeclaredParam[] | null;
   /** `lower`'s first half, the call decided from the declaration alone: a value its tests compare
    *  whole, where `lower` leaves IR */
   plan(callee: string): CallPlan;
@@ -283,9 +298,11 @@ export function callDeclarations(
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
   // spell, `long long` included, and `undefined` for a project typedef, a by-value struct or a
   // floating type. `declaredCallArgs` sizes a `double` from the target
-  // (`TargetDescription.doubleArgWords`); one other such spelling and it states no layout at all,
-  // because the question here is not how wide that parameter is but whether it occupies one
-  // argument register or two, and the choice moves every later argument's home. So the declaration licenses no outgoing block and this returns `null`:
+  // (`TargetDescription.doubleArgWords`) and a typedef the declaration lists in `wordParams` (an
+  // enum, an array or a function type: `proto.ts` `paramClassOf`) at one word; one other such
+  // spelling and it states no layout at all, because the question here is not how wide that
+  // parameter is but whether it occupies one argument register or two, and the choice moves every
+  // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
   // the call is lifted at the arg-register guess, exactly as a callee the project never declared
   // is, and the guess retracts the registers a call destroyed where a stated width would assert
   // them.
@@ -299,6 +316,24 @@ export function callDeclarations(
   // A frontend that places the widths before it lowers the call runs this over every call, so a
   // refusal thrown here reaches the caller ahead of every other slot-model refusal, which is right
   // because it is the most specific thing that was seen.
+  const known = (t: Prototypes, callee: string) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+  /** the declaration a callee is read at: the project's, then the runtime table's, then the C
+   *  standard's (the tier order `declaredCall` gives the reasons for) */
+  const declarationOf = (callee: string): FnProto | undefined => {
+    const own = known(prototypes, callee);
+    return declaresParams(own) ? own : (known(helperProtos, callee) ?? known(STANDARD_SIGNATURES, callee));
+  };
+  const declaredParams = (callee: string): readonly DeclaredParam[] | null => {
+    const params = declarationOf(callee)?.params;
+    if (typeof params === 'number') {
+      return Array.from({ length: params }, () => ({ kind: 'word', spelling: '' }));
+    }
+    if (!Array.isArray(params)) {
+      return null;
+    }
+    const declared = declarationOf(callee)!;
+    return params.map((spelling, k) => ({ kind: paramClassOf(declared, params, k), spelling }));
+  };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
@@ -312,11 +347,9 @@ export function callDeclarations(
     //
     // `Object.hasOwn` on all three tables: a callee named `toString` or `valueOf` would otherwise
     // read a `Function` off `Object.prototype` as its prototype entry.
-    const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
-    const own = known(prototypes);
+    const own = known(prototypes, callee);
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
-    const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const declared = declaredCallArgs(proto, target);
+    const declared = declaredCallArgs(declarationOf(callee), target);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -675,6 +708,7 @@ export function callDeclarations(
     callClobbers,
     returnsWithoutHiddenPointer: (callee) => returnsWithoutHiddenPointer(callee, prototypes, target),
     declaredCall,
+    declaredParams,
     plan,
     lower,
   };

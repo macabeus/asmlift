@@ -50,7 +50,24 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
 
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
-      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns" or "returnLayout")',
+      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams" or "byValueParams")',
+    ]);
+  });
+
+  test('word parameters that index no typed parameter list', () => {
+    const bad = ['f: "wordParams" must list indices into a typed "params" list'];
+    expect(validatePrototypes({ f: { params: 2, wordParams: [0] } })).toEqual(bad);
+    expect(validatePrototypes({ f: { params: ['GXTexFmt'], wordParams: [1] } })).toEqual(bad);
+    expect(validatePrototypes({ f: { params: ['GXTexFmt'], wordParams: [0] } })).toEqual([]);
+    expect(validatePrototypes({ f: { params: 1, byValueParams: [0] } })).toEqual([
+      'f: "byValueParams" must list indices into a typed "params" list',
+    ]);
+    expect(validatePrototypes({ f: { params: ['B_t'], byValueParams: [0] } })).toEqual([]);
+  });
+
+  test('one parameter listed both as a word and as a by-value copy', () => {
+    expect(validatePrototypes({ f: { params: ['T'], wordParams: [0], byValueParams: [0] } })).toEqual([
+      'f: "wordParams" and "byValueParams" both list one parameter',
     ]);
   });
 

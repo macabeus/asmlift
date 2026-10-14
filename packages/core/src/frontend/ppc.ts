@@ -23,7 +23,9 @@
 //    prototype (falling back to argument-register liveness). The frame bookkeeping — `stwu r1`,
 //    the link-register save, callee-saved saves — is transparent to dataflow, so a value in a
 //    callee-saved register survives the call; a word stored to the frame with a value is a
-//    stack-slot variable (`frameStore`).
+//    stack-slot variable (`frameStore`). Inside the local area of a function that takes a frame
+//    address (`measurePpcFrame`), every access is memory through a frame object the shared audit
+//    proves instead.
 //  • RECORD FORM (`.` = the Rc bit, e.g. `andi.`/`add.`) also sets cr0 from a signed compare of
 //    the result against 0; that implicit compare is wired so a following `beq`/`bne` fuses.
 //
@@ -42,11 +44,12 @@ import { spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
-import { type Prototypes, declaredWidth, declaresVoidReturn } from '../proto';
+import { type FnProto, type Prototypes, declaredWidth, declaresVoidReturn, isFloatingSpelling } from '../proto';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
-import { callDeclarations } from './call-plan';
+import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
+import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
   parseImm,
@@ -59,6 +62,14 @@ import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
+import {
+  FRAME_OBJECT_AUDIT,
+  type FrameObjectRelift,
+  type FrameRange,
+  areaAboveOutgoing,
+  landsOnArea,
+  liftWithRelift,
+} from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
@@ -72,7 +83,14 @@ import {
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
+import {
+  type ArgSlots,
+  abiSortEntryParams,
+  incomingStackArgKey,
+  mintArgSlotHoles,
+  stackArgSlots,
+  stackSlotKey,
+} from './ssa';
 import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
@@ -498,8 +516,9 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
       return;
     }
     // conditional branch to a label: [taken, fall]. Both must land on block boundaries; otherwise the
-    // branch leaves the function (a tail branch) or targets unrecovered flow — fail LOUD and catchably
+    // branch falls off the function's end or targets unrecovered flow — fail LOUD and catchably
     // rather than silently dropping an edge (which surfaces as an opaque `verify` successor-count error).
+    // A branch out of the function, relocated or not, has already refused as a tail call (`liftPrelude`).
     const taken = idxOf.get(br.target!);
     const fall = idxOf.get(br.addr + 4);
     if (taken === undefined || fall === undefined) {
@@ -545,6 +564,9 @@ const SMALL_DATA_BASES: readonly string[] = ['r13', 'r2'];
  *  frame header, after the back chain. mwcc 2.3.3 spells it `4(r1)` before the push and 2.4.x
  *  `N+4(r1)` after it (`r1Displacements`). */
 const LR_SAVE_WORD = 4;
+/** The caller's parameter area, as an offset from the entry r1: past the back chain and the link
+ *  register's save word, the words a call takes past its eight argument registers. */
+const PARAM_AREA_AT = 8;
 
 /** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
  *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
@@ -555,11 +577,21 @@ const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
     ? registerSaveRoutineOf(target.registerSaveRoutines, ins.reloc.sym)
     : null;
 
-/** WHAT THE PROLOGUE SAVED — the save half of the register partition (frontend/ssa.ts,
- *  `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an uninitialised local
- *  only where the compiler could home a local there, which it may do only after saving it; without
- *  this, an uninitialised local in a callee-saved register lifts as an extra PARAMETER
- *  (`int x; if (s) x = k(a); return k(a) + x;` would take a third).
+/** A general register a callee must preserve: one the EABI neither passes an argument in, nor lets
+ *  a callee destroy, nor reserves (r1, and the small-data bases). `prologueSavedRegs` counts the
+ *  first store of ANY register in `regs`; only these are saves of the caller's value in `offsets`. */
+const isCalleeSaved = (target: TargetDescription, r: string): boolean =>
+  isReg(r) &&
+  r !== 'r1' &&
+  !SMALL_DATA_BASES.includes(r) &&
+  !target.argRegs.includes(r) &&
+  !target.callerSaved.includes(r);
+
+/** WHAT THE PROLOGUE SAVED, AND WHERE. `regs` is the save half of the register partition
+ *  (frontend/ssa.ts, `LiveInModel.uninitRegs`). A register the ABI passes no argument in is an
+ *  uninitialised local only where the compiler could home a local there, which it may do only after
+ *  saving it; without this, an uninitialised local in a callee-saved register lifts as an extra
+ *  PARAMETER (`int x; if (s) x = k(a); return k(a) + x;` would take a third).
  *
  *  Read off the ENTRY block, the one every path starts with: `stmw rS,D(r1)` saves rS..r31, a GPR
  *  save routine rNN..r31, and `stw rN,D(r1)` rN. A register counts as saved only where NO earlier
@@ -574,28 +606,60 @@ const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
  *  next to its `bl`, so a leading run would drop saves the prologue really makes. The two rules
  *  agree on what they let through: no instruction before a counted save touches the register. The
  *  operand text can only over-name (a register spelt in a branch target names nothing), which
- *  under-states the set — the direction that keeps a parameter. */
-function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
-  const saved = new Set<string>();
+ *  under-states the set — the direction that keeps a parameter.
+ *
+ *  `offsets` are where the saves of the caller's values lie, as entry-r1 offsets, which bound the
+ *  local area from above (`measurePpcFrame`): each `stw` of a callee-saved register (`isCalleeSaved`)
+ *  the same first-naming rule counts, each such word of a `stmw`, each word a save routine stores
+ *  below its frame address (`addi r11,r1,N`), and each floating-point save (`stfd`, or the FPR
+ *  routine), which this frontend refuses elsewhere but which still bounds where a local may lie.
+ *  Null where a save's offset cannot be named: r1's depth at it, or the routine's frame address, is
+ *  unknown. */
+function prologueSavedRegs(
+  entry: readonly Instr[],
+  target: TargetDescription,
+  r1At: ReadonlyMap<Instr, number | string>,
+): { regs: ReadonlySet<string>; offsets: number[] | null } {
+  const regs = new Set<string>();
   const named = new Set<string>();
-  const save = (first: number) => {
-    for (let k = first; k <= 31; k++) {
-      if (!named.has(`r${k}`)) {
-        saved.add(`r${k}`);
-      }
+  const offsets: number[] = [];
+  let unnamed = false;
+  const word = (off: number | null) => {
+    if (off === null) {
+      unnamed = true;
+    } else {
+      offsets.push(off);
     }
   };
+  let frameAddress: number | null = null;
   for (const ins of entry) {
     const [d, s] = ins.ops;
+    const depth = r1At.get(ins);
     const routine = saveRoutineOf(target, ins);
-    if (routine) {
-      if (!routine.restore && !routine.fpr) {
-        save(routine.first);
+    if (ins.mnemonic === 'addi' && d === target.registerSaveRoutines?.frameReg && s === 'r1') {
+      frameAddress = typeof depth === 'number' ? depth + parseImm(ins.ops[2]) : null;
+    } else if (routine) {
+      if (!routine.restore) {
+        const bytes = routine.fpr ? 8 : 4;
+        for (let k = routine.first; k <= 31; k++) {
+          if (!routine.fpr && !named.has(`r${k}`)) {
+            regs.add(`r${k}`);
+          }
+          word(frameAddress === null ? null : frameAddress - bytes * (32 - k));
+        }
       }
-    } else if (ins.mnemonic === 'stmw' && s !== undefined && parseMem(s).base === 'r1') {
-      save(Number(d.slice(1)));
-    } else if (ins.mnemonic === 'stw' && s !== undefined && parseMem(s).base === 'r1' && !named.has(d)) {
-      saved.add(d);
+    } else if (/^(stw|stmw|stfd)$/.test(ins.mnemonic) && s?.includes('(') && parseMem(s).base === 'r1') {
+      const first = ins.mnemonic === 'stmw' ? Number(d.slice(1)) : 0;
+      const n = ins.mnemonic === 'stmw' ? 32 - first : 1;
+      for (let k = 0; k < n; k++) {
+        const reg = ins.mnemonic === 'stmw' ? `r${first + k}` : d;
+        if (ins.mnemonic !== 'stfd' && !named.has(reg)) {
+          regs.add(reg);
+        }
+        if (ins.mnemonic === 'stfd' || (isCalleeSaved(target, reg) && !named.has(reg))) {
+          word(typeof depth === 'number' ? parseMem(s).off + depth + 4 * k : null);
+        }
+      }
     }
     for (const op of ins.ops) {
       const reg = op.includes('(') ? parseMem(op).base : op;
@@ -604,7 +668,7 @@ function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): 
       }
     }
   }
-  return saved;
+  return { regs, offsets: unnamed ? null : offsets };
 }
 
 /** Where r1 stands, relative to its value at entry, just BEFORE an instruction runs: a byte count
@@ -717,9 +781,270 @@ function linkRegisterOverwrites(
   return at;
 }
 
+/** The sub-word load and store mnemonics this frontend lifts. */
+const SUBWORD_MEM: ReadonlySet<string> = new Set(['lbz', 'lha', 'lhz', 'stb', 'sth']);
+
+/** An instruction that takes a frame address as data: `addi rD,r1,k`. The register save routines'
+ *  `addi r11,r1,N` is frame bookkeeping (`frame-address` in `nonValues`), not a capture. */
+const takesFrameAddress = (ins: Instr, frameReg: string | undefined): boolean =>
+  ins.mnemonic === 'addi' && ins.ops[1] === 'r1' && ins.ops[0] !== 'r1' && ins.ops[0] !== frameReg && !ins.reloc;
+
+/** THE LOCAL AREA of a function that takes a frame address, reaches its frame below a word, or
+ *  keeps a dead local there, and the size of the one frame it pushes — or null, which leaves every
+ *  such access the refusal it had without one. Null where none of the three happens; where the
+ *  function does not push exactly one frame, with `stwu r1,-N(r1)` at entry depth; where a capture
+ *  runs at another depth; where the target states no layout, a save's offset cannot be named, or
+ *  no area is left; and where an r1 access at another depth lands on the area's bytes
+ *  (`landsOnArea`), which the routing by post-push offset would then misname.
+ *
+ *  The area starts where the caller's parameter area does (`PARAM_AREA_AT`), past the back chain
+ *  and the link-register save word, and runs to the lowest save (`compilerBehaviors.linkageLocalArea`,
+ *  `areaAboveOutgoing`). The measured rule puts it past the widest call's stack words too; no call
+ *  this frontend lowers takes any, so a call whose declaration may take some refuses here, where the
+ *  area is drawn: one declared with more parameter words than argument registers, with a 64-bit parameter (the EABI
+ *  aligns a pair to an odd register, so a packed word count does not say where the stack words
+ *  start), or with more floating parameters than f1..f8. So does a declared parameter that is a
+ *  struct or union passed by value (`ParamClass` `by-value`), which mwcc passes as the address of a
+ *  copy in this area (`tb(1, b)` copies `b` to r1+8 and passes `addi r4,r1,8` at -O4,p) — a copy no
+ *  source declares, whose address the lift would pass where the callee takes the struct — and one
+ *  nothing sizes (`unsized`), which may be that, a pair or a stack word.
+ *
+ *  A CALL NOTHING DECLARES IS NOT PROVEN CLEAR OF THE AREA HERE, and neither does its lowering's
+ *  guess prove it: the guess refuses a call whose guessed arity reaches seven argument registers
+ *  (`lift`, the guess's `refuse`), but it counts only the registers this function sets, none it
+ *  passes straight through, so `g9(a, …, h, 77)` with r3..r10 untouched passes it and the word at
+ *  r1+8 is g9's ninth argument, inside the area. What refuses that call is the shared audit
+ *  (frame-objects.ts `storedNeverRead`): the store to r1+8 reaches the call unread, below every
+ *  area word a load after a call proves a local's (`compilerBehaviors.localsAboveOutgoingArea`).
+ *  That audit is the backstop this partition rests on for an undeclared callee; a change to the
+ *  guess or to the audit's survivor rule moves it.
+ *
+ *  A word stored to the frame that no word load reads back, in a function that makes no call, is a
+ *  DEAD LOCAL: no callee can take it as a stack argument. A tail branch, which would hand this
+ *  frame's caller's parameter area to another function, refuses before this runs (`liftPrelude`).
+ *  It lifts as a store to a frame object, and what reaches the C is then the shared lift's, as for
+ *  the same store on Thumb and MIPS: a fixed-offset scalar becomes a local, which the dead-store
+ *  pass drops (`l3/dce.ts`) unless its value is a read it keeps (`sp8 = *a0`), so `int v; v = x;`
+ *  at -O0,p lifts to an empty body and a `volatile` local's stores are lost with it — no code can
+ *  observe that word — and only a store at a runtime index stays one, into the frame array. A dead
+ *  local alone draws the area only where one lies inside it. */
+function measurePpcFrame({
+  name,
+  blocks,
+  saves,
+  r1At,
+  target,
+  calls,
+  fail,
+}: {
+  name: string;
+  blocks: readonly PpcBlock[];
+  /** the prologue's save words, as entry-r1 offsets (`prologueSavedRegs`) */
+  saves: readonly number[] | null;
+  r1At: ReadonlyMap<Instr, number | string>;
+  target: TargetDescription;
+  calls: CallDeclarations;
+  fail: FrontendRefusal;
+}): { area: FrameRange; size: number } | null {
+  const code = blocks.flatMap((b) => [...b.body, ...(b.branch ? [b.branch] : [])]);
+  const bls = blocks.flatMap((b) => b.body).filter((ins) => ins.mnemonic === 'bl' && !saveRoutineOf(target, ins));
+  const frameReg = target.registerSaveRoutines?.frameReg;
+  const r1Mem = (ins: Instr) => {
+    const last = ins.ops[ins.ops.length - 1] ?? '';
+    return last.includes('(') && parseMem(last).base === 'r1' && ins.mnemonic !== 'stwu' ? parseMem(last) : undefined;
+  };
+  const captures = code.filter((ins) => takesFrameAddress(ins, frameReg));
+  const subword = code.filter((ins) => SUBWORD_MEM.has(ins.mnemonic) && r1Mem(ins) !== undefined);
+  const entryOff = (ins: Instr) => {
+    const at = r1At.get(ins);
+    return typeof at === 'number' ? r1Mem(ins)!.off + at : undefined;
+  };
+  const loadedWords = new Set(
+    code.flatMap((ins) => {
+      const at = r1Mem(ins) && /^(lwz|lmw)$/.test(ins.mnemonic) ? entryOff(ins) : undefined;
+      return at === undefined
+        ? []
+        : ins.mnemonic === 'lmw'
+          ? [...Array(32 - Number(ins.ops[0].slice(1))).keys()].map((k) => at + 4 * k)
+          : [at];
+    }),
+  );
+  const deadStores =
+    bls.length > 0
+      ? []
+      : code.filter(
+          (ins) => ins.mnemonic === 'stw' && r1Mem(ins) !== undefined && !loadedWords.has(entryOff(ins) ?? NaN),
+        );
+  if (captures.length === 0 && subword.length === 0 && deadStores.length === 0) {
+    return null;
+  }
+  const pushes = code.filter((ins) => ins.mnemonic === 'stwu' && ins.ops[0] === 'r1');
+  if (pushes.length !== 1 || r1At.get(pushes[0]) !== 0 || parseMem(pushes[0].ops[1]).base !== 'r1') {
+    return null;
+  }
+  const size = -parseMem(pushes[0].ops[1]).off;
+  if (!(size > 0) || captures.some((ins) => r1At.get(ins) !== -size) || saves === null) {
+    return null;
+  }
+  const area = target.compilerBehaviors.linkageLocalArea
+    ? areaAboveOutgoing({ frameSize: size, outgoingEnd: PARAM_AREA_AT, saves: saves.map((o) => o + size), align: 4 })
+    : null;
+  if (area === null) {
+    return null;
+  }
+  for (const ins of code) {
+    const off = r1Mem(ins) === undefined || r1At.get(ins) === -size ? undefined : entryOff(ins);
+    if (off !== undefined && landsOnArea(area, off + size, 4)) {
+      return null;
+    }
+  }
+  // Drawn for dead stores alone, the area must hold one: a save the prologue made is no local.
+  const inArea = (ins: Instr) => {
+    const at = (entryOff(ins) ?? NaN) + size;
+    return at >= area.from && at < area.to;
+  };
+  if (captures.length === 0 && subword.length === 0 && !deadStores.some(inArea)) {
+    return null;
+  }
+  const fprArgs = target.fpu?.argRegs.length ?? 0;
+  for (const ins of bls) {
+    const callee = ins.reloc?.sym ?? '';
+    const params = calls.declaredParams(callee);
+    if (params === null) {
+      continue;
+    }
+    const at = `'${callee}', called at 0x${ins.addr.toString(16)},`;
+    const copied = params.findIndex((p) => p.kind === 'by-value');
+    if (copied >= 0) {
+      fail(
+        `cannot lift '${name}': address-taken stack local — ${at} takes its parameter ${copied + 1} as ` +
+          `'${params[copied].spelling}', which no word holds: a struct or union passed by value, which this compiler ` +
+          "passes as the address of a copy in the caller's local area — not modelled",
+      );
+    }
+    const count = (kind: ParamClass) => params.filter((p) => p.kind === kind).length;
+    const unsized = params.findIndex((p) => p.kind === 'unsized');
+    const why =
+      count('wide') > 0
+        ? 'a 64-bit parameter, which the EABI places in an aligned register pair or on the stack'
+        : count('word') > target.argRegs.length
+          ? `${count('word')} parameter words and the argument registers carry ${target.argRegs.length}`
+          : count('float') > fprArgs
+            ? `${count('float')} floating parameters and the floating-point argument registers carry ${fprArgs}`
+            : unsized >= 0
+              ? `its parameter ${unsized + 1} as '${params[unsized].spelling}', which nothing here sizes: a word, a ` +
+                'pair, a stack word or a by-value copy in the local area'
+              : undefined;
+    if (why !== undefined) {
+      fail(
+        `cannot lift '${name}': outgoing stack arguments not modelled — ${at} is declared with ${why}, and this ` +
+          "compiler's local area starts past the stack words a call takes",
+      );
+    }
+  }
+  return { area, size };
+}
+
+/** What a call's lowering on this frontend carries out (`CallLowering`): no pair, no stack word, no
+ *  struct returned through memory. */
+const PPC_CALL_LOWERING = {
+  pairs: false,
+  memoryReturn: false,
+  stackArgs: false,
+  voidReturn: false,
+  argRegisterBoundsArity: false,
+} as const;
+
+/** This frontend's refusal, for the shared code that refuses on its behalf. */
+const ppcRefusal: FrontendRefusal = (message) => {
+  throw new PpcUnsupportedError(message);
+};
+
+/** WHAT `lift` READS OFF THE TEXT BEFORE IT DECODES AN INSTRUCTION: the control transfers it
+ *  refuses, the blocks (with the preheader), r1's depth at each instruction, the prologue's saves,
+ *  the callees' declarations, and the local area those draw (`measurePpcFrame`). `lift` and
+ *  `__testing.frameOf` both run it, so the area a test pins is the one the lift draws. */
+function liftPrelude(
+  name: string,
+  instrs: Instr[],
+  target: TargetDescription,
+  prototypes: Prototypes,
+  jts: Map<number, PpcJT>,
+) {
+  const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
+  // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
+  // would silently miscompile the control flow). CTR-counted loops and indirect branches land here.
+  for (const ins of instrs) {
+    if (ins.mnemonic.startsWith('b') && !isModeledBranch(ins)) {
+      if (ins.mnemonic === 'bctr' && recoveredBctr.has(ins.addr)) {
+        continue;
+      } // recovered switch dispatch
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': unmodelled control transfer '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+          (ins.mnemonic === 'blrl' || ins.mnemonic === 'bctrl'
+            ? `(an indirect call — a virtual dispatch or a call through a pointer — is not yet supported)`
+            : `(CTR-counted loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)`),
+      );
+    }
+  }
+  // A BRANCH OUT OF THE FUNCTION is a tail call: the callee takes over this frame's caller's
+  // parameter area as its own, so a word stored there may be its stack argument, and the call
+  // itself would be dropped. objdump prints one either at an address outside the function or,
+  // relocated, at its own address, which would read as a loop. A conditional branch out
+  // (`beq- g`, `R_PPC_REL14`) and a `bdnz` out are tail calls too.
+  const tail = instrs.find(
+    (i) =>
+      (isUncond(i) || isCond(i) || isCtrLoop(i)) &&
+      (i.reloc !== undefined || (i.target !== undefined && !instrs.some((j) => j.addr === i.target))),
+  );
+  if (tail !== undefined) {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': the '${tail.mnemonic}' at 0x${tail.addr.toString(16)} leaves the function` +
+        (tail.reloc ? ` for '${tail.reloc.sym}'` : '') +
+        ' — a tail call is not modelled',
+    );
+  }
+  const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  refuseReachableDispatch(name, blocks, recoveredBctr, ppcRefusal);
+  const entryBody = blocks[0].body;
+  // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
+  // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
+  // of it becomes the entry, and its live-ins are the function's parameters (frontend/ssa.ts
+  // `ArgSlots`). It starts where the function does, which is what its label says.
+  if (succIdx.some((ss) => ss.includes(0))) {
+    blocks.unshift({ startAddr: blocks[0].startAddr, body: [], branch: null });
+    succIdx.forEach((ss, i) => (succIdx[i] = ss.map((j) => j + 1)));
+    succIdx.unshift([1]);
+  }
+  const r1At = r1Displacements(blocks, succIdx);
+  const saves = prologueSavedRegs(entryBody, target, r1At);
+  const calls = callDeclarations(name, target, prototypes, PPC_CALL_LOWERING, ppcRefusal);
+  // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
+  // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1
+  // access inside it, any width, is MEMORY through an `laddr` the shared frame-object audit then
+  // proves, as on Thumb and MIPS, and every word access outside it keeps the slot model. Null where
+  // neither happens, or the frame is one this cannot partition, and then every capture keeps its
+  // r1-as-data refusal and every sub-word access its own.
+  const frame = measurePpcFrame({
+    name,
+    blocks,
+    saves: saves.offsets,
+    r1At,
+    target,
+    calls,
+    fail: ppcRefusal,
+  });
+  return { blocks, succIdx, r1At, savedRegs: saves.regs, calls, frame };
+}
+
 /** Lift disassembled PowerPC text → an L1 Fn with block-argument SSA. `asmData` (optional) supplies
  *  the data-section jump table for dense-switch (Regime-B) recovery; absent ⇒ a `bctr` dispatch
- *  loud-fails. */
+ *  loud-fails.
+ *
+ *  AT MOST TWICE, as on Thumb and MIPS (`frontend/frame-objects.ts` `liftWithRelift`): where the
+ *  frame-object audit answers that a callee may write the local area without bound, or that nothing
+ *  escapes and the per-object model does not describe it, it asks for the area kept as one object,
+ *  and the second lift's audit judges it so and refuses rather than asking again. */
 export function lift(
   name: string,
   asm: string,
@@ -727,6 +1052,17 @@ export function lift(
   prototypes: Prototypes = {},
   asmData?: AsmData,
 ): Fn {
+  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, oneObject));
+}
+
+function liftOnce(
+  name: string,
+  asm: string,
+  target: TargetDescription,
+  prototypes: Prototypes,
+  asmData: AsmData | undefined,
+  oneObject: FrameRange | undefined,
+): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
   const instrs = parseDisasm(sliceSymbol(asm, name)); // ONE function only — an absent symbol declines loud
   if (instrs.length === 0) {
@@ -736,7 +1072,6 @@ export function lift(
   // recovered dispatch's `bctr` is subsumed into a `switch_br` (emitted from its bounds block), so
   // it is exempted from the loud-fail below; an UNrecovered `bctr` still fails loud.
   const jts = asmData ? recoverPpcJumpTables(instrs, asmData) : new Map<number, PpcJT>();
-  const recoveredBctr = new Set([...jts.values()].map((j) => j.bctrAddr));
   // A data reloc on an instruction whose decode did not TAKE it means objdump printed a LINK-TIME
   // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
@@ -789,37 +1124,8 @@ export function lift(
         `is a link-time placeholder, not the value`,
     );
   };
-  // TRUSTWORTHINESS: fail loud on an unmodelled control transfer rather than dropping it (which
-  // would silently miscompile the control flow). CTR-counted loops and indirect branches land here.
-  for (const ins of instrs) {
-    if (ins.mnemonic.startsWith('b') && !isModeledBranch(ins)) {
-      if (ins.mnemonic === 'bctr' && recoveredBctr.has(ins.addr)) {
-        continue;
-      } // recovered switch dispatch
-      throw new PpcUnsupportedError(
-        `cannot lift '${name}': unmodelled control transfer '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-          (ins.mnemonic === 'blrl' || ins.mnemonic === 'bctrl'
-            ? `(an indirect call — a virtual dispatch or a call through a pointer — is not yet supported)`
-            : `(CTR-counted loop or indirect branch — mwcc -O4 loop unrolling is not yet supported)`),
-      );
-    }
-  }
-  const { blocks, succIdx } = toBlocks(instrs, name, jts);
-  refuseReachableDispatch(name, blocks, recoveredBctr, (m) => {
-    throw new PpcUnsupportedError(m);
-  });
-  const savedRegs = prologueSavedRegs(blocks[0].body, target);
-  // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
-  // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
-  // of it becomes the entry, and its live-ins are the function's parameters (frontend/ssa.ts
-  // `ArgSlots`). It starts where the function does, which is what its label says.
-  if (succIdx.some((ss) => ss.includes(0))) {
-    blocks.unshift({ startAddr: blocks[0].startAddr, body: [], branch: null });
-    succIdx.forEach((ss, i) => (succIdx[i] = ss.map((j) => j + 1)));
-    succIdx.unshift([1]);
-  }
-
-  const r1At = r1Displacements(blocks, succIdx);
+  const fail = ppcRefusal;
+  const { blocks, succIdx, r1At, savedRegs, calls, frame } = liftPrelude(name, instrs, target, prototypes, jts);
   const lrOverwrittenBy = linkRegisterOverwrites(blocks, succIdx, (ins) => Boolean(saveRoutineOf(target, ins)));
 
   const preds: number[][] = blocks.map(() => []);
@@ -854,17 +1160,34 @@ export function lift(
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
-  /** This frontend's refusal, for the shared code that refuses on its behalf. */
-  const fail: FrontendRefusal = (message) => {
-    throw new PpcUnsupportedError(message);
+
+  /** Where an r1 access of `width` bytes at `ins` lies in the local area: its post-push offset, or
+   *  undefined for one outside it. An access across the area's edge refuses: half memory and half
+   *  slot is neither. `measurePpcFrame` refuses a frame where an access at another depth lands in
+   *  the area, so one inside it runs at the frame's own depth. */
+  const inLocalArea = (ins: Instr, mem: string, width: number): number | undefined => {
+    const depth = r1At.get(ins);
+    if (frame === null || parseMem(mem).base !== 'r1' || typeof depth !== 'number') {
+      return undefined;
+    }
+    const at = parseMem(mem).off + depth + frame.size;
+    if (at >= frame.area.to || at + width <= frame.area.from) {
+      return undefined;
+    }
+    if (at < frame.area.from || at + width > frame.area.to) {
+      fail(
+        `cannot lift '${name}': address-taken stack local — '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reaches ` +
+          `across an edge of the local area, r1+${frame.area.from} up to r1+${frame.area.to} — part memory, part slot`,
+      );
+    }
+    return at;
   };
-  const calls = callDeclarations(
-    name,
-    target,
-    prototypes,
-    { pairs: false, memoryReturn: false, stackArgs: false, voidReturn: false, argRegisterBoundsArity: false },
-    fail,
-  );
+  // The frame offset each `laddr` this lift emitted names — function-scoped, since a register
+  // holding one crosses blocks — and every capture moved into another (`addi rD,rCapture,k`
+  // re-minted as the `laddr` of the sum), handed to the audit so a base only the move read is
+  // dropped rather than judged as a capture (`foldMovedCaptures`).
+  const laddrAt = new Map<Value, number>();
+  const movedCaptures = new Set<Value>();
 
   /** The HIGH half of a relocated address, per value standing for one. The invariant, and every
    *  way a placeholder could leak past it, lives in frontend/high-half.ts — shared with
@@ -1038,6 +1361,17 @@ export function lift(
   // A slot is one kind for the whole function: a word both saved and stored with a value has no
   // single reading, and refuses.
   const saveSlots = new Map<number, string>();
+  // AN INCOMING STACK WORD HAS ONE NAME, `@sarg<k>`, for its loads and its stores: the EABI passes
+  // integer argument word k >= 8 at entry r1 + 8 + 4(k - 8), in the caller's parameter area past
+  // its back chain and link-register save word (`corpus/probe-mwcc-frame.c`, `in9`/`in10`). A read
+  // no store reaches is the caller's argument through the ordinary live-in path, and a store makes
+  // the parameter an assigned one, as Thumb and MIPS name it. Words only: a sub-word incoming
+  // argument (`lha 10(r1)` for a `short`) refuses as a sub-word frame access, a float past f8 is
+  // loaded with the unmodelled `lfs`/`lfd`, and a function reading one beside a float argument or
+  // declared with a 64-bit or floating parameter refuses (`ppcArgSlots`). Undefined for every
+  // other word.
+  const incomingStackKey = (entryOff: number): string | undefined =>
+    incomingStackArgKey(entryOff, PARAM_AREA_AT, ARG_REGS.length);
   const valueSlots = new Map<number, { addr: number; mem: string; read: boolean }>();
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
@@ -1317,7 +1651,7 @@ export function lift(
     // A word store/load based on r1: a SAVE or a VALUE slot (see `saveSlots` above). Returns false
     // for any other base, which is ordinary memory.
     const frameStore = (ins: Instr, srcReg: string, mem: string): boolean => {
-      if (parseMem(mem).base !== 'r1') {
+      if (parseMem(mem).base !== 'r1' || inLocalArea(ins, mem, 4) !== undefined) {
         return false;
       }
       const off = entryOffset(ins, mem);
@@ -1353,6 +1687,14 @@ export function lift(
       refuseMixedSlot(ins, mem, off, 'value');
       // An argument moved to its home is not an argument set up for the next call.
       const v = (isArg ? ssa.entryValue(srcReg, bi) : undefined) ?? readReg(srcReg, bi);
+      // An assignment to an incoming stack parameter is that parameter's SSA variable, and no call
+      // made here takes the word: it is the caller's (a tail branch, whose callee would read the
+      // same words as its own stack arguments, refuses in `liftPrelude`).
+      const incoming = incomingStackKey(off);
+      if (incoming !== undefined) {
+        writeVar(incoming, bi, v);
+        return true;
+      }
       writeVar(stackSlotKey(off), bi, v);
       if (!valueSlots.has(off)) {
         valueSlots.set(off, { addr: ins.addr, mem, read: false });
@@ -1360,12 +1702,17 @@ export function lift(
       return true;
     };
     const frameLoad = (ins: Instr, dstReg: string, mem: string): boolean => {
-      if (parseMem(mem).base !== 'r1') {
+      if (parseMem(mem).base !== 'r1' || inLocalArea(ins, mem, 4) !== undefined) {
         return false;
       }
       const off = entryOffset(ins, mem);
       if (saveSlots.has(off)) {
         restoreFrom(ins, dstReg, off, mem);
+        return true;
+      }
+      const incoming = incomingStackKey(off);
+      if (incoming !== undefined) {
+        write(dstReg, readVar(incoming, bi));
         return true;
       }
       const slot = valueSlots.get(off);
@@ -1495,6 +1842,15 @@ export function lift(
       ops.push(mkOp('gaddr', { results: [g], attrs: { sym } }));
       return g;
     };
+    // A FRAME ADDRESS AS DATA: post-push offset k of the local area, lowered to the `laddr` the
+    // frame-object audit proves (`FRAME_OBJECT_AUDIT`, frontend/frame-objects.ts `frameObjects`),
+    // which also judges where it lies against the area: below it or above it refuses.
+    const emitLaddr = (k: number): Value => {
+      const v = mkValue(T.unk(32));
+      ops.push(mkOp('laddr', { results: [v], attrs: { off: k } }));
+      laddrAt.set(v, k);
+      return v;
+    };
     // `lwz rD,0(0)` under an `R_PPC_EMB_SDA21` relocation is a SMALL-DATA access. Both printed
     // fields are link-time placeholders: the linker substitutes r13/r2 for the base register and a
     // section-relative displacement for the offset, so the address is exactly `&SYM` plus the
@@ -1516,10 +1872,14 @@ export function lift(
     // The base value + byte offset of a displacement memory operand: a small-data global, or an
     // ordinary register base. Read BEFORE a store's source register, because read order decides
     // block-parameter layout.
-    const memOperand = (ins: Instr, mem: string): { base: Value; off: number } => {
+    const memOperand = (ins: Instr, mem: string, width: number): { base: Value; off: number } => {
       const sda = sdaAccess(ins, mem);
       if (sda) {
         return sda;
+      }
+      const local = inLocalArea(ins, mem, width);
+      if (local !== undefined) {
+        return { base: emitLaddr(local), off: 0 };
       }
       assertOrdinaryMem(mem);
       const { off, base } = parseMem(mem);
@@ -1573,11 +1933,23 @@ export function lift(
       return v;
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
-      const { base, off } = memOperand(ins, mem);
+      const { base, off } = memOperand(ins, mem, width);
       emit('load', d, [base], { off, width, signed });
     };
     const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
-      const { base, off } = memOperand(ins, mem);
+      const { base, off } = memOperand(ins, mem, width);
+      // A register the prologue saves is saved above the local area by construction, so its
+      // entry value stored inside it is a frame this does not describe.
+      if (
+        inLocalArea(ins, mem, width) !== undefined &&
+        isCalleeSaved(target, srcReg) &&
+        !ssa.hasReachingDef(srcReg, bi)
+      ) {
+        fail(
+          `cannot lift '${name}': address-taken stack local — '${ins.mnemonic}' at 0x${ins.addr.toString(16)} stores ` +
+            `the caller's ${srcReg} inside the local area, a frame this does not describe`,
+        );
+      }
       ops.push(mkOp('store', { operands: [base, read(srcReg)], attrs: { off, width } }));
     };
     // Register+register INDEXED addressing (`lwzx rD,rA,rB` = *(rA+rB), `stwx rS,rA,rB` = *(rA+rB)=rS).
@@ -1687,15 +2059,25 @@ export function lift(
                 if (argc < ARG_REGS.length - 1) {
                   return;
                 }
+                // The same question decides where the local area starts: past the widest call's
+                // stack words, so a guess that cannot say whether this call takes any cannot draw it.
+                if (frame !== null) {
+                  fail(
+                    `cannot lift '${name}': outgoing stack arguments not modelled — nothing declares '${sym}', called at ` +
+                      `0x${ins.addr.toString(16)} with ${argc} argument registers filled, so whether it takes stack words ` +
+                      `is unknown, and this compiler's local area starts past them`,
+                  );
+                }
                 const depth = r1At.get(ins);
                 const reaching = (off: number) => valueSlots.has(off) && ssa.hasReachingDef(stackSlotKey(off), bi);
-                const inParamArea = (off: number) => typeof depth !== 'number' || (off >= depth + 8 && off < 0);
+                const inParamArea = (off: number) =>
+                  typeof depth !== 'number' || (off >= depth + PARAM_AREA_AT && off < 0);
                 const word = [...valueSlots.keys()].find((off) => inParamArea(off) && reaching(off));
                 const passed =
                   argc === ARG_REGS.length || typeof depth !== 'number'
                     ? word
-                    : reaching(depth + 8) && reaching(depth + 12)
-                      ? depth + 8
+                    : reaching(depth + PARAM_AREA_AT) && reaching(depth + PARAM_AREA_AT + 4)
+                      ? depth + PARAM_AREA_AT
                       : undefined;
                 if (passed !== undefined) {
                   const slot = valueSlots.get(passed)!;
@@ -1763,6 +2145,12 @@ export function lift(
           break;
         case 'stmw':
           if (parseMem(s).base === 'r1') {
+            if (inLocalArea(ins, s, 4 * (32 - Number(d.slice(1)))) !== undefined) {
+              fail(
+                `cannot lift '${name}': address-taken stack local — the 'stmw' at 0x${ins.addr.toString(16)} saves ` +
+                  `into the local area, a frame this does not describe`,
+              );
+            }
             const off = entryOffset(ins, s);
             const depth = off - parseMem(s).off;
             for (const slot of frameRange(d, off)) {
@@ -1777,7 +2165,14 @@ export function lift(
         case 'lmw':
           if (parseMem(s).base === 'r1') {
             for (const slot of frameRange(d, parseMem(s).off)) {
-              frameLoad(ins, slot.reg, `${slot.off}(r1)`);
+              const word = `${slot.off}(r1)`;
+              if (inLocalArea(ins, word, 4) !== undefined) {
+                fail(
+                  `cannot lift '${name}': address-taken stack local — the 'lmw' at 0x${ins.addr.toString(16)} ` +
+                    `reloads ${slot.reg} out of '${word}', inside the local area, a frame this does not describe`,
+                );
+              }
+              frameLoad(ins, slot.reg, word);
             }
             break;
           }
@@ -1855,6 +2250,30 @@ export function lift(
               );
             }
             break;
+          }
+          // A capture, `addi rD,r1,k`, is the `laddr` of the local area's offset k, where the frame
+          // has one (`measurePpcFrame`); without one it reaches `read`'s r1-as-data refusal. A capture
+          // moved by a constant is the capture at the sum.
+          if (frame !== null && takesFrameAddress(ins, target.registerSaveRoutines?.frameReg)) {
+            write(d, emitLaddr(parseImm(t) + (r1At.get(ins) as number) + frame.size));
+            break;
+          }
+          if (
+            frame !== null &&
+            mnem === 'addi' &&
+            !ins.reloc &&
+            isReg(s) &&
+            s !== 'r0' &&
+            s !== 'r1' &&
+            !SMALL_DATA_BASES.includes(s)
+          ) {
+            const raw = readVar(s, bi);
+            const at = laddrAt.get(raw);
+            if (at !== undefined) {
+              movedCaptures.add(raw);
+              write(d, emitLaddr(at + parseImm(t)));
+              break;
+            }
           }
           if (mnem === 'addi' && d === target.registerSaveRoutines?.frameReg && s === 'r1' && !ins.reloc) {
             const v = mkValue(T.unk(32));
@@ -2339,7 +2758,7 @@ export function lift(
       );
     }
   }
-  const argSlots = fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType);
+  const argSlots = ppcArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS, prototypes[name]);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
@@ -2347,6 +2766,33 @@ export function lift(
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
   assertNoNonValueEscaped(irBlocks);
   assertNonValuesConsumed();
+
+  if (frame !== null) {
+    // Prove every `laddr` names storage of this frame at a shape the machine states, or decline
+    // (`auditFrameObjects`); an accepted function then gets the device pin the audit answers. The
+    // slot model's words are named from the pushed r1, as the audit names every offset.
+    const verdict = FRAME_OBJECT_AUDIT.run({
+      name,
+      irBlocks,
+      ownedLocals: frame.area,
+      declaredLocals: frame.area,
+      usedSlotOffsets: new Set(
+        [...valueSlots.keys()].map((o) => o + frame.size).filter((o) => o >= 0 && o < frame.size),
+      ),
+      capturedObjectIsTheWholeFrame: false,
+      movedCaptures,
+      returnsWithoutHiddenPointer: calls.returnsWithoutHiddenPointer,
+      symbols: undefined,
+      target,
+      oneObject,
+    });
+    if (verdict !== undefined && 'oneObject' in verdict) {
+      return verdict;
+    }
+    if (verdict !== undefined) {
+      pinDeviceAccesses(irBlocks, verdict, target, undefined);
+    }
+  }
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();
@@ -2359,5 +2805,37 @@ function mkCmp(ops: Op[], opc: Opcode, l: Value, r: Value): Value {
   return v;
 }
 
+/** The EABI's slots: the shared register-then-stack-word rule (`stackArgSlots`), refusing a stack
+ *  word read beside a floating-point argument — the FPRs are a separate file, so where a float
+ *  parameter falls among the integer ones is not in the object — or in a function whose own
+ *  declaration has a 64-bit or floating parameter, which takes words the integer count does not. */
+function ppcArgSlots(name: string, regs: ArgSlots, argRegs: readonly string[], own: FnProto | undefined): ArgSlots {
+  return stackArgSlots(regs, argRegs, (readKeys, top) => {
+    const float = readKeys.find(isFpKey);
+    const declared = Array.isArray(own?.params)
+      ? own.params.find((p) => isFloatingSpelling(p) || (declaredWidth(p) ?? 0) > 32)
+      : undefined;
+    if (float !== undefined || declared !== undefined) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': incoming stack argument ${top + 1} is read beside ` +
+          (float !== undefined ? `the floating-point argument in ${float}` : `a parameter declared '${declared}'`) +
+          ` — which words that argument takes ahead of the stack words is not modelled`,
+      );
+    }
+  });
+}
+
 /** The PowerPC / CodeWarrior frontend, registered for the `ppc` target. */
 export const ppcFrontend: Frontend = { id: 'ppc', inputFormat: 'objdump', lift };
+
+/** Internal surface for this module's own tests, and for nothing else (`frontend/frame-objects.ts`
+ *  says why it is not a plain export). */
+export const __testing = {
+  PARAM_AREA_AT,
+  /** the local area `lift` draws for one function of objdump text (`liftPrelude`), or its refusal */
+  frameOf: (name: string, asm: string, target: TargetDescription, prototypes: Prototypes = {}, asmData?: AsmData) => {
+    const instrs = parseDisasm(sliceSymbol(asm, name));
+    const jts = asmData ? recoverPpcJumpTables(instrs, asmData) : new Map<number, PpcJT>();
+    return liftPrelude(name, instrs, target, prototypes, jts).frame;
+  },
+};

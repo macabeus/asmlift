@@ -223,6 +223,60 @@ describe('prototypes from a declaration context', () => {
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  test('a parameter nothing sizes is listed where it still travels in one register', () => {
+    // an enum, and an array or a function behind a typedef name, which the parameter adjusts to a
+    // pointer; a struct or union is passed by value, and a name never seen states nothing
+    const p = prototypesFromContext(
+      `typedef float f32; typedef enum { GX_TF_I4 } GXTexFmt; typedef f32 Mtx[3][4];
+       typedef struct __va_list_struct { char a; } __va_list[1]; typedef void Fn(int);
+       typedef struct { unsigned char r, g, b, a; } GXColor; typedef struct B { int x; } B_t;
+       void f(GXTexFmt, Mtx, __va_list, Fn, enum E, GXColor, B_t, struct B, Unknown_t, int);`,
+      'c',
+    );
+    expect(p.f?.params).toEqual([
+      'GXTexFmt',
+      'Mtx',
+      '__va_list',
+      'Fn',
+      'enum E',
+      'GXColor',
+      'B_t',
+      'struct B',
+      'Unknown_t',
+      'int',
+    ]);
+    expect(p.f?.wordParams).toEqual([0, 1, 2, 3, 4]);
+    // …and a struct or union passed by value is stated as the positive fact it is, so a name never
+    // seen (`Unknown_t`) is in neither list: unsized, not a struct by inference
+    expect(p.f?.byValueParams).toEqual([5, 6, 7]);
+    // every reader takes the same answer: the call lowering sizes the listed words too
+    const g = prototypesFromContext('typedef enum { A, B } Fmt; typedef float Mtx[3][4]; int g(Fmt, Mtx, int);', 'c');
+    expect(declaredCallArgs(g.g, PPC_MWCC)?.widths).toEqual([32, 32, 32]);
+  });
+
+  test('an enum holding a value an int cannot is no word: it may take two', () => {
+    const p = prototypesFromContext('enum Big { B0 = 0x100000000LL }; void f(enum Big, int);', 'c');
+    expect(p.f?.wordParams).toBeUndefined();
+    expect(p.f?.byValueParams).toBeUndefined();
+    expect(declaredCallArgs(p.f, PPC_MWCC)).toBeUndefined();
+  });
+
+  test('in C++ an enum tag names its type bare, and that name is one word as the struct name is a copy', () => {
+    const src = 'enum Fmt { FA, FB }; struct V { int x, y; }; extern "C" void hk(Fmt e, V v, int x);';
+    const p = prototypesFromContext(src, 'c++');
+    expect(p.hk?.params).toEqual(['Fmt', 'V', 'int']);
+    expect(p.hk?.wordParams).toEqual([0]);
+    expect(p.hk?.byValueParams).toEqual([1]);
+    // an enum C++ cannot fit in an int stays unsized under its bare name too
+    const big = prototypesFromContext('enum Big { B0 = 0x100000000LL }; extern "C" void f(Big, int);', 'c++');
+    expect(big.f?.wordParams).toBeUndefined();
+    expect(declaredCallArgs(big.f, PPC_MWCC)).toBeUndefined();
+    // in C the bare tag names nothing: only `enum Fmt` or a typedef does
+    expect(
+      prototypesFromContext('enum Fmt { FA }; typedef int Fmt2; void g(enum Fmt, Fmt2);', 'c').g?.wordParams,
+    ).toEqual([0]);
+  });
+
   test('a word C++ alone reserves names a parameter or a member in C', () => {
     const src = `typedef unsigned char u8; typedef unsigned short u16;
        void named(int class, int operator, int friend, int y);
@@ -758,14 +812,17 @@ describe('a context register return under a mapped signature', () => {
   const merged = withContextPrototypes(undefined, ctx, 'f', symbols, ARMV4T_AGBCC);
 
   test('a pointer return is kept over the parameters the map sizes', () => {
-    expect(declaredCallArgs(ctx.conv!, ARMV4T_AGBCC)).toBeUndefined();
+    // the source question is asked of the spellings, which leave the enum unsized; the context's
+    // own reading of it (`wordParams`) sizes it for a lowering, and does not outrank the map
+    expect(declaredCallArgs({ params: ctx.conv!.params }, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredCallArgs(ctx.conv!, ARMV4T_AGBCC)?.widths).toEqual([32, 32, 32, 8]);
     expect(merged.conv).toEqual({ params: ['void *', 's32', 's32', 'u8'], returns: 'u8 *' });
     expect(merged.count).toEqual({ params: ['s32'], returns: 'int' });
   });
 
   test('a return the map contradicts is not kept', () => {
     // a width the definition disagrees with, and a value the definition calls void
-    expect(ctx.nar).toEqual({ params: ['enum Mode'], returns: 'int' });
+    expect(ctx.nar).toEqual({ params: ['enum Mode'], returns: 'int', wordParams: [0] });
     expect(merged.nar).toBeUndefined();
     expect(merged.gone).toBeUndefined();
   });

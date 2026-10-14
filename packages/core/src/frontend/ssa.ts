@@ -1789,11 +1789,18 @@ export const slotKeyOffset = (key: string): number | null =>
   key.startsWith(SLOT_PREFIX) ? Number(key.slice(SLOT_PREFIX.length)) : null;
 
 /** The virtual key of incoming stack argument `index` (its ABI argument rank, the registers
- *  counted), which the Thumb and MIPS frontends read an incoming stack word through. Reading it goes
+ *  counted), which the Thumb, MIPS and PPC frontends read an incoming stack word through. Reading it goes
  *  through the ordinary Braun live-in path, which turns a read with no reaching def into a function
  *  parameter — so it needs NO new representation, opcode or pass. The `@` cannot appear in a real
  *  register token, so the key cannot collide with one. */
 export const stackArgKey = (index: number): string => `@sarg${index}`;
+/** The {@link stackArgKey} of the incoming word at `entryOff` bytes above the caller's stack pointer,
+ *  on an ABI whose caller's parameter area starts `paramAreaAt` bytes above it and whose first
+ *  `regArgs` argument words travel in registers: word k past them is at `paramAreaAt + 4k`
+ *  (O32: 16, past the a0..a3 home; the PPC EABI: 8, past the back chain and the LR save word).
+ *  Undefined below the area and for an offset off the word grid. */
+export const incomingStackArgKey = (entryOff: number, paramAreaAt: number, regArgs: number): string | undefined =>
+  entryOff >= paramAreaAt && entryOff % 4 === 0 ? stackArgKey(regArgs + (entryOff - paramAreaAt) / 4) : undefined;
 /** The argument rank a {@link stackArgKey} names, or null for any other key. Defined beside its mint
  *  site on purpose: the format string and its parser once drifted 650 lines apart. */
 export const stackArgIndex = (key: string): number | null => {

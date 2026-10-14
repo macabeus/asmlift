@@ -523,8 +523,10 @@ export interface TargetDescription {
     // every call, with every local and spill above it, and the caller never reads a word of it
     // back after a call — the callee may assign to its stack parameters, so the caller re-stages
     // an argument before every call. A compiler can stage in its frame
-    // (`stagesOutgoingArgsInFrame`) and still break this: mwcc may put a local in the words its
-    // outgoing parameters use (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY ARGUMENT REGISTER").
+    // (`stagesOutgoingArgsInFrame`) and still break this. mwcc does not, though it puts a local in
+    // the words a call COULD take as stack arguments where no call takes any — which is why a
+    // guess that cannot say whether one does refuses (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY
+    // ARGUMENT REGISTER") — and not where one does: the area starts past them.
     //
     // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
     // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
@@ -540,8 +542,12 @@ export interface TargetDescription {
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
     // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
     // re-staging and the callee's write. Set on the three MIPS toolchains off their own probe
-    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. NOT set
-    // on mwcc, for the reason above.
+    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. Set on
+    // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
+    // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`
+    // stores its ninth argument again before its second call. The frame-object audit is the only
+    // reader there too, and on mwcc it is LOAD-BEARING: it is what refuses an undeclared call whose
+    // ninth argument the arity guess cannot see (frontend/ppc.ts `measurePpcFrame`).
     localsAboveOutgoingArea?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
@@ -604,6 +610,30 @@ export interface TargetDescription {
     //
     // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
     o32LocalArea?: 'above-outgoing-area' | 'above-saved-registers';
+    // WHERE A FUNCTION THAT PUSHES ONE FRAME KEEPS ITS LOCALS, on a target whose frame starts with a
+    // fixed LINKAGE area — the back chain and the callee's link-register save word, which the ABI
+    // fixes and the frontend states (`frontend/ppc.ts` `PARAM_AREA_AT`, where the caller's parameter
+    // area starts). Above it the OUTGOING area holds the stack words of the widest call (none in a
+    // function whose calls take none), and the locals and spill temps share what is left below the
+    // lowest saved register:
+    //   [linkage + 4 * (stack words of the widest call), lowest saved register)
+    // in post-push offsets — O32's `above-outgoing-area` rule (`o32LocalArea`) past a linkage area
+    // instead of the a0..a3 home, without the 8-byte rounding (`areaAboveOutgoing`). The PPC
+    // frontend hands it to the frame-object audit as `ownedLocals`/`declaredLocals`; a call it
+    // lowers takes no stack word, so it refuses one whose declaration may and draws the area from
+    // the linkage's end. No object start inside it is fixed: the compiler chooses where in the area
+    // each local goes.
+    //
+    // MEASURED on mwcc 2.3.3, 2.4.2 (at -O4,p and at Mario Party 4's -O0,p) and 2.4.7 off
+    // `corpus/probe-mwcc-frame.c` (`scripts/regen-mwcc-frame-probes.ts`, read by
+    // `mwcc-frame-probes.test.ts`): every local and every home or spill lies in the area, a leaf
+    // with a local still pushes a frame whose area starts at 8, one or two stack words of a call push
+    // the locals past them, and the widest call sizes the area for every call. The first local's
+    // offset inside it differs per build and per function (8, 12 or 16 on 2.3.3; a homed parameter
+    // takes 8 at -O0,p), which is why this is an area and not a start.
+    //
+    // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
+    linkageLocalArea?: 'above-outgoing-area';
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
     // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
@@ -1357,6 +1387,12 @@ export const PPC_MWCC: TargetDescription = {
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
     // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through that pass.
     narrowParamWitness: 'prologue-extension',
+    // MEASURED on all three builds: the note at the field.
+    linkageLocalArea: 'above-outgoing-area',
+    // MEASURED off the same probes, on all three builds and at -O0,p (`twice9`, and every outgoing
+    // word below the area unread): Mario Party 4's -O0,p homes a parameter in the area and reloads
+    // it after a call, which proves the word a local's (`ee`, `synthetic:homecall:mwcc_242_81`).
+    localsAboveOutgoingArea: true,
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at
