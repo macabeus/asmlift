@@ -1034,17 +1034,17 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
   //
   // THE TWO STACK PAIRS ARE ONE THROW PER FRONTEND, and `stack-frames` says why it loses both: an
-  // sp-as-data refusal is keyed on the throw, and its `why` is what names a capability. Five of
-  // the six `address-taken-local` markers are the kleod census rows — `byvalregs` on ido7.1 and
-  // gcc2.7.2kmc by `mips.ts`'s spelling, and `byvalregs`, `sret4two` and `uninitfirst` on agbcc by
-  // `thumb.ts`'s fallback `why`, the disjunction the class comment names. The
+  // sp-as-data refusal is keyed on the throw, and its `why` is what names a capability. Three of
+  // the four `address-taken-local` markers are the kleod census rows — `byvalregs` on ido7.1 and
+  // gcc2.7.2kmc by `mips.ts`'s spelling, and `uninitfirst` on agbcc by `thumb.ts`'s fallback
+  // `why`, the disjunction the class comment names. The
   // `outgoing-stack-args` one is `spilldead:agbcc`, whose `why` comes from `frontend/stackargs.ts`
   // ("it may be that call's outgoing stack argument"). The census found that store a dead spill,
   // so the row is filed where its message's own hedge points — the refusal is what is attributed,
   // and a reader of this pair should know the hedge is there.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
-    ['address-taken-local > stack-frames', 6],
+    ['address-taken-local > stack-frames', 4],
     ['outgoing-stack-args > stack-frames', 1],
   ];
 
@@ -1259,12 +1259,12 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/ppc.ts', 15],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/call-plan.ts', 4],
+    ['frontend/call-plan.ts', 5],
     ['frontend/ssa.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 106;
+  const RESIDUE_TOTAL = 107;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

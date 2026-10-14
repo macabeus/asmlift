@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 226 distinct decline messages (the texts reached by
+// `packages/core/src` throws 227 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -82,10 +82,11 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/call-plan.ts    4  a call returning a struct through a hidden pointer whose parameters
+//   frontend/call-plan.ts    5  a call returning a struct through a hidden pointer whose parameters
 //                               nothing sizes, one whose declaration the lifted source cannot print (a
 //                               type it has no spelling for, or a bare parameter count that states
-//                               none), and one declared to return both a struct and a 64-bit value
+//                               none), one declared to return both a struct and a 64-bit value, and a
+//                               struct passed by value that runs past the argument registers
 //                               (its two refusals of the struct return itself are `struct-return`'s,
 //                               and its two 64-bit refusals are NOT here either — both carry
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
@@ -145,7 +146,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 7 of the 12 rows, so a pattern requiring the decided spelling claims 5 of
+    // disjunction is 5 of the 9 rows, so a pattern requiring the decided spelling claims 4 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
@@ -590,8 +591,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     // ITS FIRST INHABITANTS ARE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc: a four-byte
     // struct the O32 target states no return rule for. The same rows on agbcc are not here — agbcc
-    // returns it through memory, the call lowers, and what refuses is the frame temp it lands in
-    // (`address-taken-local`). The call-plan refusals that only HAVE a struct return in them — its
+    // returns it through memory, the call lowers, and the frame temp it lands in is read through
+    // its members. The call-plan refusals that only HAVE a struct return in them — its
     // parameters unsized, its declaration unprintable, a struct and a 64-bit value at once — stay
     // in the residue: what each names to build is the declaration, not the return.
     key: 'struct-return',
