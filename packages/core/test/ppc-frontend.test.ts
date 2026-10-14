@@ -675,8 +675,13 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('a value stored to the frame and never read back refuses', () => {
     // The class phrase leads, because the benchmark publishes a reason cut at 200 characters and a
     // long C++ name alone can push a later phrase past the cut (apps/web declines.ts).
-    expect(() => dis('livespill', '0:\taddi    r0,r3,1\n4:\tstw     r0,8(r1)\n8:\tblr\n')).toThrow(
-      /^cannot lift 'livespill': local stack frames not supported — '8\(r1\)' is stored at 0x4 and never read back/,
+    // With a call after it: in a function that makes none it is a dead local (ppc-frame-objects.test.ts).
+    const asm =
+      pro(16) +
+      'c:\taddi    r0,r3,1\n10:\tstw     r0,8(r1)\n14:\tbl      14 <livespill+0x14>\n\t\t\t14: R_PPC_REL24\te0\n' +
+      epi(0x18, 16);
+    expect(() => dis('livespill', asm)).toThrow(
+      /^cannot lift 'livespill': local stack frames not supported — '8\(r1\)' is stored at 0x10 and never read back/,
     );
   });
   // mwcc 2.3.3 -O4, `int s9(int a) { return g9(1, 2, 3, 4, 5, 6, 7, 8, a); }`: `stw r3,8(r1)` is the
@@ -831,13 +836,13 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       '10:\taddi    r1,r1,16\n14:\tmtlr    r0\n18:\tblr\n';
     expect(() => dis('twowords', asm)).toThrow(/reload of a stack local \('4\(r1\)'\)/);
   });
-  test('a local nobody saved, and an argument the caller passed on the stack, still refuse', () => {
+  test('a local nobody saved refuses, and an argument the caller passed on the stack is a parameter', () => {
     expect(() =>
       dis('unsaved', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,8(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
     ).toThrow(/reload of a stack local \('8\(r1\)'\)/);
-    expect(() =>
-      dis('stkarg', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,24(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n'),
-    ).toThrow(/reload of a stack local \('24\(r1\)'\)/);
+    expect(dis('stkarg', '0:\tstwu    r1,-16(r1)\n4:\tlwz     r3,24(r1)\n8:\taddi    r1,r1,16\nc:\tblr\n')).toContain(
+      'return a8;',
+    );
   });
   test('an argument stored before the push is read back after it from the same word', () => {
     const asm =

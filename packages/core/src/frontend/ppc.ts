@@ -44,7 +44,7 @@ import { spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
-import { type Prototypes, declaredWidth, declaresVoidReturn, wordsOf } from '../proto';
+import { type Prototypes, declaredWidth, declaresVoidReturn, wordsOf, type FnProto, isFloatingSpelling } from '../proto';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
@@ -76,7 +76,7 @@ import {
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
-import { abiSortEntryParams, mintArgSlotHoles, stackSlotKey } from './ssa';
+import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgKey, stackArgSlots, stackSlotKey } from './ssa';
 import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
@@ -549,6 +549,9 @@ const SMALL_DATA_BASES: readonly string[] = ['r13', 'r2'];
  *  frame header, after the back chain. mwcc 2.3.3 spells it `4(r1)` before the push and 2.4.x
  *  `N+4(r1)` after it (`r1Displacements`). */
 const LR_SAVE_WORD = 4;
+/** The caller's parameter area, as an offset from the entry r1: past the back chain and the link
+ *  register's save word, the words a call takes past its eight argument registers. */
+const PARAM_AREA_AT = 8;
 
 /** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
  *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
@@ -1282,6 +1285,19 @@ function liftOnce(
   // A slot is one kind for the whole function: a word both saved and stored with a value has no
   // single reading, and refuses.
   const saveSlots = new Map<number, string>();
+  // AN INCOMING STACK WORD HAS ONE NAME, `@sarg<k>`, for its loads and its stores: the EABI passes
+  // integer argument word k >= 8 at entry r1 + 8 + 4(k - 8), in the caller's parameter area past
+  // its back chain and link-register save word (`corpus/probe-mwcc-frame.c`, `in9`/`in10`). A read
+  // no store reaches is the caller's argument through the ordinary live-in path, and a store makes
+  // the parameter an assigned one, as Thumb and MIPS name it. Words only: a sub-word incoming
+  // argument (`lha 10(r1)` for a `short`) refuses as a sub-word frame access, a float past f8 is
+  // loaded with the unmodelled `lfs`/`lfd`, and a function reading one beside a float argument or
+  // declared with a 64-bit or floating parameter refuses (`ppcArgSlots`). Undefined for every
+  // other word.
+  const incomingStackKey = (entryOff: number): string | undefined =>
+    entryOff >= PARAM_AREA_AT && entryOff % 4 === 0
+      ? stackArgKey(ARG_REGS.length + (entryOff - PARAM_AREA_AT) / 4)
+      : undefined;
   const valueSlots = new Map<number, { addr: number; mem: string; read: boolean }>();
   const refuseMixedSlot = (ins: Instr, mem: string, off: number, kind: 'save' | 'value') => {
     if (kind === 'save' ? valueSlots.has(off) : saveSlots.has(off)) {
@@ -1597,6 +1613,14 @@ function liftOnce(
       refuseMixedSlot(ins, mem, off, 'value');
       // An argument moved to its home is not an argument set up for the next call.
       const v = (isArg ? ssa.entryValue(srcReg, bi) : undefined) ?? readReg(srcReg, bi);
+      // An assignment to an incoming stack parameter is that parameter's SSA variable, and no call
+      // made here takes the word: it is the caller's — unless the function leaves by a tail branch,
+      // whose callee reads the same words as its own stack arguments.
+      const incoming = tailBranch === undefined ? incomingStackKey(off) : undefined;
+      if (incoming !== undefined) {
+        writeVar(incoming, bi, v);
+        return true;
+      }
       writeVar(stackSlotKey(off), bi, v);
       if (!valueSlots.has(off)) {
         valueSlots.set(off, { addr: ins.addr, mem, read: false });
@@ -1610,6 +1634,11 @@ function liftOnce(
       const off = entryOffset(ins, mem);
       if (saveSlots.has(off)) {
         restoreFrom(ins, dstReg, off, mem);
+        return true;
+      }
+      const incoming = incomingStackKey(off);
+      if (incoming !== undefined) {
+        write(dstReg, readVar(incoming, bi));
         return true;
       }
       const slot = valueSlots.get(off);
@@ -2669,7 +2698,7 @@ function liftOnce(
       );
     }
   }
-  const argSlots = fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType);
+  const argSlots = ppcArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS, prototypes[name]);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
@@ -2714,6 +2743,26 @@ function mkCmp(ops: Op[], opc: Opcode, l: Value, r: Value): Value {
   const v = mkValue(T.unk(32));
   ops.push(mkOp(opc, { operands: [l, r], results: [v] }));
   return v;
+}
+
+/** The EABI's slots: the shared register-then-stack-word rule (`stackArgSlots`), refusing a stack
+ *  word read beside a floating-point argument — the FPRs are a separate file, so where a float
+ *  parameter falls among the integer ones is not in the object — or in a function whose own
+ *  declaration has a 64-bit or floating parameter, which takes words the integer count does not. */
+function ppcArgSlots(name: string, regs: ArgSlots, argRegs: readonly string[], own: FnProto | undefined): ArgSlots {
+  return stackArgSlots(regs, argRegs, (readKeys, top) => {
+    const float = readKeys.find(isFpKey);
+    const declared = Array.isArray(own?.params)
+      ? own.params.find((p) => isFloatingSpelling(p) || (declaredWidth(p) ?? 0) > 32)
+      : undefined;
+    if (float !== undefined || declared !== undefined) {
+      throw new PpcUnsupportedError(
+        `cannot lift '${name}': incoming stack argument ${top + 1} is read beside ` +
+          (float !== undefined ? `the floating-point argument in ${float}` : `a parameter declared '${declared}'`) +
+          ` — which words that argument takes ahead of the stack words is not modelled`,
+      );
+    }
+  });
 }
 
 /** THE LOCAL AREA OF A FRAME BEHIND A LINKAGE AREA, `[from, to)` in post-push `r1` offsets: where

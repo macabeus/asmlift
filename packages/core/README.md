@@ -131,9 +131,9 @@ PowerPC, `frontend/flags-edge.ts`), and a MIPS likely branch's nullified delay s
 never wrong code): **local stack frames** beyond what the models prove (Thumb, MIPS and PPC lift an
 address-taken local the frame-object audit can bound — a scalar, or an untyped buffer that fills
 the frame — and decline the rest, MIPS inside the O32 local area and PPC inside mwcc's local area
-that its compiler's measured layout draws; MIPS also models word `sp` slots and reads an incoming
-stack word as a parameter, and PPC elides callee-saved save slots, so a spill/reload pair is
-modelled on those two — anything the narrow models cannot honour declines),
+that its compiler's measured layout draws; MIPS and PPC also read an incoming stack word as a
+parameter, MIPS models word `sp` slots and PPC elides callee-saved save slots, so a spill/reload
+pair is modelled on those two — anything the narrow models cannot honour declines),
 **condition flags at a join** (a compare two or more edges bring to one branch, or one the caller
 set), computed tail calls, PIC and `gp`-relative access outside PowerPC's
 small-data relocation — MIPS refuses `R_MIPS_GOT16`/`R_MIPS_CALL16`/`R_MIPS_GPREL16` alike —

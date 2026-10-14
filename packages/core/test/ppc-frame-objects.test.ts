@@ -311,3 +311,34 @@ describe('a word stored and never read back', () => {
     );
   });
 });
+
+describe('an incoming stack argument is a parameter', () => {
+  test('a leaf reads its ninth argument at entry r1 + 8 and its tenth at + 12', () => {
+    expect(lift('in10', ['lwz     r3,8(r1)', 'lwz     r0,12(r1)', 'subf    r3,r0,r3', 'blr'])).toBe(
+      's32 in10(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8, s32 a9) {\n' +
+        '    return a8 - a9;\n}\n',
+    );
+  });
+
+  test('read past a pushed frame, at its entry offset', () => {
+    const src = lift('in9', ['stwu    r1,-16(r1)', 'lwz     r3,24(r1)', 'addi    r1,r1,16', 'blr']);
+    expect(src).toContain('return a8;');
+  });
+
+  test('an assignment to it is the same variable', () => {
+    const src = lift('own9', ['lwz     r0,8(r1)', 'add     r0,r0,r3', 'stw     r0,8(r1)', 'lwz     r3,8(r1)', 'blr']);
+    expect(src).toContain('a8 + a0');
+  });
+
+  test('a sub-word incoming argument, one beside a float, and one beside a declared 64-bit parameter refuse', () => {
+    expect(() => lift('h', ['lha     r3,10(r1)', 'blr'])).toThrow(/sub-word stack-frame access \('10\(r1\)'\)/);
+    expect(() => lift('h', ['lwz     r3,8(r1)', 'fadds   f1,f1,f1', 'blr'])).toThrow(
+      /incoming stack argument 9 is read beside the floating-point argument in f1/,
+    );
+    expect(() =>
+      lift('h', ['lwz     r3,8(r1)', 'blr'], {
+        h: { params: ['s32', 's32', 's32', 's32', 's32', 's32', 's32', 's64'] },
+      }),
+    ).toThrow(/beside a parameter declared 's64'/);
+  });
+});
