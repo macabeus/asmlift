@@ -71,6 +71,11 @@ interface Instr {
    *  Messages must use this: a decline naming `ldrsh` for a file containing `ldsh` sends the
    *  reader looking for an instruction that is not there. */
   asWritten?: string;
+  /** set only on a `bl <label>` whose line carried agbcc's `@far jump` / `@ far jump` comment —
+   *  the relay agbcc spells a branch past Thumb's ±2 KB reach with (see `FAR_JUMP_COMMENT`). The
+   *  comment is the ONLY text that separates it from a call: everything else on the line is
+   *  dropped at tokenizing, and a call thunk is the same `bl` to a label of this function. */
+  farJump?: true;
 }
 interface AsmBlock {
   label: string;
@@ -217,6 +222,14 @@ function padHalfword(v: number): Instr | null {
   const e = PAD_ENCODINGS.find((p) => p.hw === v);
   return e ? { mnemonic: e.mnemonic, ops: [...e.ops] } : null;
 }
+
+// agbcc's far-jump relay comment, as the compiler writes it. agbcc's gcc/thumb.md emits a branch
+// past the ±2 KB reach of Thumb `b` as `bl <label>` with this comment from three patterns: `jump`
+// (`bl %l0\t@ far jump`, thumb.md:837), and the relays of `*cond_branch` (`.LCB`, :930) and
+// `*cond_branch_reversed` (`.LCBR`, :957), both `bl %l0\t@far jump`. Matched against the comment
+// text from its `@` to the end of the line, and only as the WHOLE comment: a longer comment that
+// mentions a far jump is not the compiler's mark.
+const FAR_JUMP_COMMENT = /^@\s*far jump\s*$/;
 
 type XferKind = 'return' | 'uncond' | 'cond' | 'indirect';
 
@@ -1030,10 +1043,19 @@ function decode(
   //     `.Letext0`) that no code line names. A label starts a block, and a block split at a
   //     lexical-scope marker restructures the loop around it: kept, it lifts the pair's `gcd` loop as
   //     an `if` around a `do` instead of a `while`.
+  //
+  // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line was agbcc's
+  // far-jump relay (`FAR_JUMP_COMMENT`). Kept as a set of line texts' positions, not as text, so
+  // nothing downstream can read any other comment.
   const codeLines: string[] = [];
+  const farJumpLines = new Set<number>();
   for (const rawLine of withoutDebugSections(asm).split('\n')) {
-    const line = rawLine.split('@')[0].trim();
+    const at = rawLine.indexOf('@');
+    const line = (at === -1 ? rawLine : rawLine.slice(0, at)).trim();
     if (line) {
+      if (at !== -1 && FAR_JUMP_COMMENT.test(rawLine.slice(at))) {
+        farJumpLines.add(codeLines.length);
+      }
       codeLines.push(line);
     }
   }
@@ -1045,7 +1067,8 @@ function decode(
     }
   }
   const isDebugMarker = (label: string) => /^\.L(?:FB|FE|M|BB|BE|etext)\d+$/.test(label) && !namedByCode.has(label);
-  for (let rest of codeLines) {
+  for (const [lineNo, line] of codeLines.entries()) {
+    let rest = line;
     // A label may share the line with what follows it (pret pools: `_08x: .4byte 0x…`) — peel it.
     const lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/);
     if (lm && isDebugMarker(lm[1]) && lm[2] === '') {
@@ -1242,6 +1265,7 @@ function decode(
         mnemonic: canon,
         ops,
         ...(canon === m[1] ? {} : { asWritten: m[1] }),
+        ...(canon === 'bl' && ops.length === 1 && farJumpLines.has(lineNo) ? { farJump: true as const } : {}),
       },
     });
   }
@@ -5359,6 +5383,7 @@ export const thumbFrontend: Frontend = { id: 'thumb', inputFormat: 'gnu-as', lif
  *  package's public API, where no consumer should be able to depend on them. The name says what it
  *  is; nothing in `src` reads it. */
 export const __testing = {
+  decode,
   PAD_ENCODINGS,
   isPadInstr,
   factKey,
