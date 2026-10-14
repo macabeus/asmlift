@@ -187,9 +187,10 @@ test('chained latches fold to a fixpoint, and every removal keeps dominance soun
   expect(print(fn)).toContain('cond_br %4, ^bb1(%3), ^bb2(%3)');
 });
 
-test('two edges into one block after a fold: loop recovery still declines, it does not emit', () => {
+test('two edges into one block after a fold: each edge keeps its own update copy', () => {
   // ^bb2's predecessor ^bb1 already branches to the target ^bb1, so folding leaves a terminator with
-  // both edges continuing the loop — a block with no exit, which loop recovery refuses either way.
+  // both edges continuing the loop, each carrying its own argument. The loop has no exit — a
+  // `while (1)` (`loop-forever.test.ts`) — and the fold must leave the two updates apart.
   const fn = parse(`fn dup {
 ^bb0(%0: s32):
   br ^bb1(%0)
@@ -207,7 +208,10 @@ test('two edges into one block after a fold: loop recovery still declines, it do
   expect(foldEmptyLatches(fn)).toBe(1);
   verify(fn); // the args are still dominating defs — the fold cannot break SSA
   expect(print(fn)).toContain('cond_br %6, ^bb1(%3), ^bb1(%5)');
-  expect(() => structure(fn, { returnsVoid: true, littleEndian: true })).toThrow(/unrecovered back-edge/);
+  expect(cBackend.emit(structure(fn, { returnsVoid: true, littleEndian: true }))).toBe(
+    'void dup(s32 a0) {\n    s32 v0;\n    v0 = a0;\n    while (1) {\n        if (v0 + 1 >= a0) {\n' +
+      '            v0 = v0 + 2;\n        } else {\n            v0 = v0 + 1;\n        }\n    }\n}\n',
+  );
 });
 
 test('dominators: a latch is dominated by its header, a preheader is not', () => {

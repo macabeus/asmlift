@@ -726,3 +726,66 @@ test('a value both loops carry, read after the inner loop at either version, kee
     expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
   }
 });
+
+// A LOOP NO EDGE LEAVES — the main loop of a program that never returns. It is `while (1)` with no
+// `break` and nothing after it, on every toolchain. Post-dominance treats its header as an end of
+// paths, as it does a `ret`: otherwise no block before it reaches EXIT, every block post-dominates
+// every other, and an `if` ahead of the loop joins at an arbitrary block and copies the loop into
+// its arm. The trace oracle caps steps, so a seed that enters the loop is not judged: a fixture whose
+// every path enters it is judged on shape alone.
+
+/** `while (1) { x = f(x); }` */
+const NO_EXIT = `fn noexit {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = call %1 {target="f"}
+  br ^bb1(%2)
+}`;
+/** `if (a0 < 0) g(a0); x = a0; while (1) { x = f(x); }` — AgbMain's shape: setup under an `if`. */
+const IF_THEN_NO_EXIT = `fn ifnoexit {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_slt %0, %1
+  cond_br %2, ^bb1(), ^bb2()
+^bb1():
+  %3: s32 = call %0 {target="g"}
+  br ^bb2()
+^bb2():
+  br ^bb3(%0)
+^bb3(%4: s32):
+  %5: s32 = call %4 {target="f"}
+  br ^bb3(%5)
+}`;
+/** `if (a0 < 0) { x = a0; while (1) x = f(x); } return h(a0);` — the loop is one arm's end. */
+const ARM_NO_EXIT = `fn armnoexit {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: u32 = icmp_slt %0, %1
+  cond_br %2, ^bb1(%0), ^bb2()
+^bb1(%3: s32):
+  %4: s32 = call %3 {target="f"}
+  br ^bb1(%4)
+^bb2():
+  %5: s32 = call %0 {target="h"}
+  ret %5
+}`;
+
+test('a loop no edge leaves is a `while (1)` with nothing after it', () => {
+  const src = judged(NO_EXIT).src;
+  expect(src).toBe('s32 noexit(s32 a0) {\n    s32 v0;\n    v0 = a0;\n    while (1) {\n        v0 = f(v0);\n    }\n}\n');
+});
+
+test('an `if` ahead of a loop no edge leaves joins at the loop, which is written once', () => {
+  const src = judged(IF_THEN_NO_EXIT).src;
+  expect(src.split('while (1)').length - 1).toBe(1);
+  expect(src).toContain('if (a0 < 0) g(a0);\n');
+});
+
+test('a loop no edge leaves ends the arm that enters it', () => {
+  const r = judged(ARM_NO_EXIT);
+  expect(r.src.split('while (1)').length - 1).toBe(1);
+  expect(r.agreement.disagree).toBe(0);
+  expect(r.agreement.judged).toBeGreaterThan(0);
+  expect(r.shipped.disagree).toBe(0);
+});

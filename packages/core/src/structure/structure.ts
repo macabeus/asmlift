@@ -1114,12 +1114,13 @@ interface LoopArm {
 }
 
 // A loop with no test of its own, `while (1)`: its latches are conditional continues, and it leaves
-// by a `break` to `exit` or an early `return`.
+// by a `break` to `exit` or an early `return`. `exit` is null for a loop no edge leaves at all — the
+// main loop that never returns — which has no break, no arm, and nothing after it.
 interface ForeverLoopInfo {
   header: Block;
   latches: Block[];
   forwardPreds: Block[];
-  exit: Block;
+  exit: Block | null;
   body: Set<Block>;
   arms: LoopArm[];
   breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`
@@ -2414,8 +2415,18 @@ export function structure(
   }
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);
-  const ipdom = postDominators(fn);
   const dom = dominators(fn);
+  // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
+  const forest = analyzeLoops(fn, dom);
+  // A loop no edge leaves reaches no `ret`, so post-dominance would hand every block before it every
+  // block as a post-dominator, and an `if` ahead of it an arbitrary join. Its header ENDS paths as a
+  // `ret` does: the region holding the loop ends there (`emitForever`).
+  const ipdom = postDominators(
+    fn,
+    undefined,
+    undefined,
+    new Set([...forest.byHeader.values()].filter((nl) => nl.exitEdges.length === 0).map((nl) => nl.header)),
+  );
 
   /** The byte step `raise/const.ts` recorded on the literal that feeds this access's address, or
    *  `undefined` where the address was not reached by advancing a register. Read at the two
@@ -2712,9 +2723,6 @@ export function structure(
       }
     : undefined;
 
-  // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
-  const forest = analyzeLoops(fn, dom);
-
   // GUARDED self-loop headers (a block that is its own successor, entered through a guard-shaped
   // cond_br) — recovered by the guard-fusion + emitWhile un-rotation path below (the gcc "guard +
   // do-while" → `while` shape; countdown/shifts). UNGUARDED self-loops register as single-block
@@ -2919,6 +2927,20 @@ export function structure(
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const foreverShape = (nl: NaturalLoop): ForeverLoopInfo | null => {
+    // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
+    // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
+    // region holding the loop ends at the loop either way (`emitForever`).
+    if (nl.exitEdges.length === 0) {
+      return {
+        header: nl.header,
+        latches: nl.latches,
+        forwardPreds: nl.forwardPreds,
+        exit: null,
+        body: nl.body,
+        arms: [],
+        breaks: new Set(),
+      };
+    }
     const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
     const rank = (x: Block) => fn.blocks.indexOf(x) + (fn.blocks.indexOf(x) > last ? 0 : fn.blocks.length);
     const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort((x, y) => rank(x) - rank(y));
@@ -5167,7 +5189,7 @@ export function structure(
   // to `header` is a conditional continue; its other edge, when it leaves the loop, is an early exit
   // (a `break` to `exit`, or an early `return` through a trampoline). Null outside any loop body —
   // the early-exit branch in structureBlock is inert there.
-  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; arms: LoopArm[]; breaks: ReadonlySet<Block> };
+  type LoopFrame = { header: Block; exit: Block | null; body: Set<Block>; arms: LoopArm[]; breaks: ReadonlySet<Block> };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
@@ -5208,12 +5230,16 @@ export function structure(
   // that render: an exit parameter that takes its argument's own name renders no copy, yet the exit
   // still reads that name, and a latch update that wrote it hands the exit the updated value.
   const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
+    const exit = frame.exit;
+    if (exit === null) {
+      return { refusal: 'leaves a loop that has no exit' }; // DEFENSIVE: no edge leaves such a loop
+    }
     // A `while (1)` has no copies of its own after the loop, so a break carries its own, computed
     // where it leaves; what is left is the exit region's re-derivations. An inner loop's value the
     // region reads under its name (`emitForever`) is no re-derivation.
     const fl = foreverLoops.get(frame.header);
     if (fl !== undefined) {
-      const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
+      const exitRegion = new Set([exit, ...reachFrom(exit)].filter((x) => !frame.body.has(x)));
       const { sub } = latchInnerSub(fl.header, fl.body, [...fl.breaks], exitRegion);
       return loopEscapeHazard(frame.body, sub, writes, exitRegion)
         ? { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' }
@@ -5222,11 +5248,11 @@ export function structure(
     if (!whileLoops.has(frame.header)) {
       return { refusal: 'leaves a do-while' };
     }
-    const headerCopies = argAssigns(frame.header, frame.exit);
+    const headerCopies = argAssigns(frame.header, exit);
     let bare = false;
     if (headerCopies.length !== 0) {
-      const headerArgs = successorTo(frame.header, frame.exit)!.args;
-      const breakArgs = successorTo(from, frame.exit)!.args;
+      const headerArgs = successorTo(frame.header, exit)!.args;
+      const breakArgs = successorTo(from, exit)!.args;
       const reads = new Set<string>();
       for (const s of headerCopies) {
         stmtExprs(s).forEach((e) => exprVars(e, reads));
@@ -5239,7 +5265,7 @@ export function structure(
         return { refusal: 'would run the copies the loop header hands its exit' };
       }
     }
-    const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
+    const exitRegion = new Set([exit, ...reachFrom(exit)].filter((x) => !frame.body.has(x)));
     if (loopEscapeHazard(frame.body, new Map(), writes, exitRegion)) {
       return { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' };
     }
@@ -6047,7 +6073,7 @@ export function structure(
         } // continue is `taken` → leave when NOT it
         const exitArm =
           rule && 'bare' in rule
-            ? [...(rule.bare ? [] : argAssigns(b, loopCtx.exit, sub)), { k: 'break' } as Stmt] // break to the loop exit
+            ? [...(rule.bare ? [] : argAssigns(b, exitB, sub)), { k: 'break' } as Stmt] // break to the loop exit
             : withSub(sub, () => [...argAssigns(b, exitB, sub), ...structureRegion(exitB, stop)]); // early return
         out.push(mkIf(leaveCond, exitArm, []));
         return out;
@@ -6094,7 +6120,7 @@ export function structure(
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
-      if (continueRefused || (!isArm(frame.exit) && !isRet(frame.exit))) {
+      if (continueRefused || frame.exit === null || (!isArm(frame.exit) && !isRet(frame.exit))) {
         throw new StructureError(
           `cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${rule.refusal}`,
         );
@@ -6488,10 +6514,11 @@ export function structure(
     );
     dwActive.delete(fl.header);
     const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body };
-    if (!breaksOut(body)) {
+    const exit = fl.exit;
+    if (exit === null || !breaksOut(body)) {
       return [loop];
     }
-    const region = exitRegion(fl.exit, fl.body, stop);
+    const region = exitRegion(exit, fl.body, stop);
     const { sub: innerSub, unreadable } = latchInnerSub(fl.header, fl.body, [...fl.breaks], region);
     if (unreadable.size > 0 && rootsOf(region).some((r) => rendersThrough(r, innerSub, unreadable))) {
       throw new StructureError(
@@ -6501,7 +6528,7 @@ export function structure(
     }
     return [
       loop,
-      ...(innerSub.size > 0 ? withSub(innerSub, () => structureRegion(fl.exit, stop)) : structureRegion(fl.exit, stop)),
+      ...(innerSub.size > 0 ? withSub(innerSub, () => structureRegion(exit, stop)) : structureRegion(exit, stop)),
     ];
   };
 
@@ -7444,11 +7471,17 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
   }
 }
 
-// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it. Over the
+// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do the
+// blocks of `ends` besides their own successors. Over the
 // subgraph `keep` induces when given, every member of which must still reach a `ret` inside it — or,
 // with `onward`, over only the edges it names between members of `keep`: a block it names no edge
 // from ends its paths, post-dominated by nothing but itself.
-function postDominators(fn: Fn, keep?: ReadonlySet<Block>, onward?: (b: Block) => Block[]): Map<Block, Block | null> {
+function postDominators(
+  fn: Fn,
+  keep?: ReadonlySet<Block>,
+  onward?: (b: Block) => Block[],
+  ends?: ReadonlySet<Block>,
+): Map<Block, Block | null> {
   const blocks = keep ? fn.blocks.filter((b) => keep.has(b)) : fn.blocks;
   const nodes: (Block | null)[] = [null, ...blocks];
   const succ = (b: Block): (Block | null)[] => {
@@ -7456,7 +7489,11 @@ function postDominators(fn: Fn, keep?: ReadonlySet<Block>, onward?: (b: Block) =
       return onward(b);
     }
     const term = b.ops[b.ops.length - 1];
-    return term.opcode === 'ret' ? [null] : successorsOf(b).filter((s) => keep === undefined || keep.has(s));
+    if (term.opcode === 'ret') {
+      return [null];
+    }
+    const onwards = successorsOf(b).filter((s) => keep === undefined || keep.has(s));
+    return ends?.has(b) === true ? [...onwards, null] : onwards;
   };
   const pdom = new Map<Block | null, Set<Block | null>>();
   pdom.set(null, new Set([null]));
