@@ -139,21 +139,50 @@ function reachThroughJoins(
     return out;
   };
   /** The globals whose own address every edge of `v` passes, unmoved; null where one passes anything else. */
+  // A value's answer is the same from every walk that never cut a cycle below it, so those are
+  // remembered: without that, a chain of diamonds whose arms both step one pointer is walked once
+  // per path, 2^n times, on every stamp. An answer that cut a cycle depends on the walk and is not.
+  let cuts = 0;
+  const addressMemo = new Map<Value, string[] | null>();
+  const reachMemo = new Map<Value, Step>();
   const addresses = (v: Value, onWalk: Set<Value>): string[] | null => {
     const d = defs.get(v);
     if (d?.opcode === 'gaddr') {
       return [d.attrs.sym as string];
     }
     const ins = d === undefined ? incoming.get(v) : undefined;
-    if (ins === undefined || onWalk.has(v)) {
+    if (ins === undefined) {
       return null;
     }
+    if (onWalk.has(v)) {
+      cuts++;
+      return null;
+    }
+    if (addressMemo.has(v)) {
+      return addressMemo.get(v)!;
+    }
+    const before = cuts;
     onWalk.add(v);
     const each = ins.filter((a) => a !== v).map((a) => addresses(a, onWalk));
     onWalk.delete(v);
-    return each.length > 0 && each.every((a) => a !== null) ? [...new Set(each.flat())] : null;
+    const out = each.length > 0 && each.every((a) => a !== null) ? [...new Set(each.flat())] : null;
+    if (cuts === before) {
+      addressMemo.set(v, out);
+    }
+    return out;
   };
   const reach = (v: Value, onWalk: Set<Value>): Step => {
+    if (reachMemo.has(v)) {
+      return reachMemo.get(v)!;
+    }
+    const before = cuts;
+    const out = reachOnce(v, onWalk);
+    if (cuts === before) {
+      reachMemo.set(v, out);
+    }
+    return out;
+  };
+  const reachOnce = (v: Value, onWalk: Set<Value>): Step => {
     const d = defs.get(v);
     if (d?.opcode === 'gaddr') {
       return [{ kind: 'object', sym: d.attrs.sym as string }];
@@ -190,6 +219,7 @@ function reachThroughJoins(
       return null;
     }
     if (onWalk.has(v)) {
+      cuts++;
       return SELF;
     }
     onWalk.add(v);

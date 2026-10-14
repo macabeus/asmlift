@@ -311,6 +311,27 @@ describe('an access through a context-declared pointer to volatile, reached thro
     );
   });
 
+  test(
+    'a chain of diamonds stepping the pointer is read once per value, not once per path',
+    { timeout: 30_000 },
+    () => {
+      // agbcc -O2 shape of `void bd(int a){ volatile u16 *p = gP; if (a & 1) p += 1; else p += 2; a >>= 1;
+      // …×40… while (*p == 0) ; }`: 2^40 paths through the joins, so an unremembered walk never ends
+      const N = 40;
+      let asm = 'bd:\n\tadd\tr2, r0, #0\n\tldr\tr0, .LP\n\tldr\tr1, [r0]\n\tb\t.LS\n.LP:\n\t.word\tgP\n.LS:\n';
+      for (let i = 0; i < N; i++) {
+        asm +=
+          `\tmov\tr0, #0x1\n\tand\tr0, r0, r2\n\tcmp\tr0, #0\n\tbeq\t.LE${i}\n\tadd\tr1, r1, #0x2\n\tb\t.LJ${i}\n` +
+          `.LE${i}:\n\tadd\tr1, r1, #0x4\n.LJ${i}:\n\tasr\tr2, r2, #0x1\n`;
+      }
+      asm += '.LW:\n\tldrh\tr0, [r1]\n\tcmp\tr0, #0\n\tbeq\t.LW\n\tbx\tlr\n';
+      const protos = { bd: { params: 1, returnsVoid: true } };
+      expect(decompile('bd', asm, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: ctx }).source).toMatch(
+        /while \(\*\(volatile u16 \*\)v\d+ == 0\)/,
+      );
+    },
+  );
+
   test('a loop pointer seeded with the pointer and stepped reads through a qualified cast', () => {
     // agbcc -O2 of `void pvloop(int n){ u16 s = 0; volatile u16 *p = gP; while (n-- != 0) s += *p++; gS = s; }`
     const PVLOOP =
