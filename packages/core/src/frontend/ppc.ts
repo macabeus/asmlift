@@ -38,8 +38,10 @@
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
+import { demangle } from '../mangle';
 import { type Prototypes, declaredWidth, declaresVoidReturn } from '../proto';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
@@ -1104,6 +1106,7 @@ export function lift(
   // the bare return would mint a parameter the ABI never passed — `f(s32 a0)`, which contradicts a
   // declared `void f(void)` (the candidate does not compile) and a C++ `__Fv` mangling.
   const bareReturns: Array<{ op: Op; bi: number }> = [];
+  const wordReturns: number[] = [];
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -1113,15 +1116,95 @@ export function lift(
     }
     if (op.operands.length > 0) {
       wordReturn = true;
+      wordReturns.push(bi);
     } else {
       bareReturns.push({ op, bi });
     }
+  };
+  /** Whether every word return hands back a value computed ONLY to be returned: on every path into
+   *  it, r3's last write is an op with no effect and no memory read (`spelledWhenDead` answers no)
+   *  whose value nothing but a return reads, directly or through the joins that carry it there.
+   *
+   *  The evidence is the compiler's, the claim `spelledWhenDead` already rests on: an optimizing
+   *  compiler deletes a pure computation nobody reads, so one that survives with a return as its
+   *  only reader was written for that return, and the function returns a word. `int f(int a) {
+   *  switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ; blr` on every case and a bare
+   *  `blr` out of range. A temporary is read again (`lwz r3,gB ; addi r0,r3,1`), and a
+   *  call's result and a load are excluded — a void function's call leaves its callee's result in
+   *  r3, and a discarded `volatile` read is a load nobody reads — so `void f(void) { if (gA & 2)
+   *  return; gB++; }` still answers no.
+   *
+   *  What it cannot tell apart is an `int f(void)` with a path that falls off its end: that path
+   *  returns whatever the caller left in r3 too, and is lifted as returning it — the bytes' own
+   *  behaviour, at the cost of a parameter the source did not name. A CodeWarrior C++ symbol says
+   *  so where there is one (`__Fv`), and a declaration always decides first. */
+  const r3WrittenToReturn = (): boolean => {
+    if (wordReturns.length === 0) {
+      return false;
+    }
+    const defOp = new Map<Value, Op>();
+    const incoming = new Map<Value, Value[]>();
+    const uses = new Map<Value, Array<Op | Value | undefined>>();
+    const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
+      const l = m.get(k);
+      if (l) {
+        l.push(v);
+      } else {
+        m.set(k, [v]);
+      }
+    };
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        op.results.forEach((r) => defOp.set(r, op));
+        op.operands.forEach((v) => push(uses, v, op));
+        for (const s of op.successors) {
+          s.args.forEach((v, i) => {
+            const p = s.block.params[i] as Value | undefined;
+            push(uses, v, p);
+            if (p !== undefined) {
+              push(incoming, p, v);
+            }
+          });
+        }
+      }
+    }
+    // A join is followed to what it merges, and every value on the way may have only returns, or
+    // joins that are themselves read only by returns, as readers. A cycle adds nothing the first
+    // visit did not judge.
+    const returnOnly = (v: Value, seen: Set<Value>): boolean => {
+      if (seen.has(v)) {
+        return true;
+      }
+      seen.add(v);
+      return (uses.get(v) ?? []).every(
+        (u) => u !== undefined && ('opcode' in u ? u.opcode === 'ret' : returnOnly(u, seen)),
+      );
+    };
+    const computed = (v: Value, seen: Set<Value>): boolean => {
+      if (seen.has(v)) {
+        return true;
+      }
+      seen.add(v);
+      if (!returnOnly(v, new Set())) {
+        return false;
+      }
+      const op = defOp.get(v);
+      if (op !== undefined) {
+        return !spelledWhenDead(op);
+      }
+      // an entry parameter (the caller's value) merges nothing
+      const ins = incoming.get(v);
+      return ins !== undefined && ins.every((a) => computed(a, seen));
+    };
+    return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, (v) => computed(v, new Set())));
   };
   /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
    *  decides when there is one: a non-void return and at least one integer-class parameter (the
    *  first such takes r3) or a nonzero register count. Without one, only the body can show it: r3
    *  is already an entry parameter, or a higher argument register is live in, which puts an
-   *  argument in r3 by position (the obligation `mintArgSlotHoles` discharges). */
+   *  argument in r3 by position (the obligation `mintArgSlotHoles` discharges), or every word
+   *  return hands back a value computed only to be returned (`r3WrittenToReturn`) — then the
+   *  function returns a word, and a bare return of it hands back what the caller left in r3. */
   const r3IsAnArgument = (): boolean => {
     const own = prototypes[name];
     if (declaresVoidReturn(own)) {
@@ -1134,7 +1217,13 @@ export function lift(
       return own.params.some((t) => declaredWidth(t) !== undefined);
     }
     const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
-    return ARG_REGS.some((r) => live.has(r));
+    if (ARG_REGS.some((r) => live.has(r))) {
+      return true;
+    }
+    // A CodeWarrior C++ symbol is a declaration of its own parameters: `ksNesInit13__Fv` is a free
+    // function of none, which no body evidence overrides.
+    const mangled = demangle(name);
+    return !(mangled !== null && mangled.cls === undefined && mangled.params.length === 0) && r3WrittenToReturn();
   };
   const returnUntouchedArg = () => {
     if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {

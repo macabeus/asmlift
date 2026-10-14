@@ -10,6 +10,8 @@
 //   conditional return (`bgtlr-`), so the default edge is the return.
 // - `reta`: the same bound, the default returning the first argument, which arrived in r3 and that
 //   edge never touches — it must still return it, not fall off the end.
+// - `retg`: the same with a global scrutinee and no declaration, so r3 is the only argument and the
+//   body never reads it; the cases' `li r3,N ; blr` show the function returns a word.
 // - `loop`: a switch inside a loop. mwcc 2.3.3 alone hoists the table base out of the loop
 //   (`lis r5 ; addi r5,r5` at entry); 2.4.2 and 2.4.7 form it in the dispatch. KMC and gcc 2.7.2
 //   hoist it into the preheader (`lui ; addiu`). Each shape asserts where its compiler put the base,
@@ -66,6 +68,13 @@ const RETA = {
   sym: 'reta',
   head: '',
   c: 'int reta(int a,unsigned x,int *p){ switch(x){case 0:p[0]=1;return 3;case 1:p[1]=5;return 4;case 2:p[2]=6;return 7;case 3:p[3]=7;return 1;case 4:p[4]=3;return 9;case 5:p[5]=2;return 2;case 6:p[6]=9;return 0;case 7:p[7]=4;return 8;} return a; }',
+};
+/** RETA with the scrutinee a global and no declaration: r3 is the only argument and the body never
+ *  reads it, so only the cases' `li r3,N ; blr` show the function takes it. */
+const RETG = {
+  sym: 'retg',
+  head: 'extern unsigned gS;\n',
+  c: 'int retg(int a){ switch(gS){case 0:return 3;case 1:return 4;case 2:return 7;case 3:return 1;case 4:return 9;case 5:return 2;case 6:return 0;case 7:return 8;} return a; }',
 };
 const DO = { sym: 'dloop', head: '', c: `void dloop(int n,int *p){ do { switch(*p){${ARMS}} p++; } while(--n); }` };
 const ARMS2 = ARMS.replace(/=(\d);/g, (_, k: string) => `=${20 + Number(k)};`).replace(/\*p/g, '*q');
@@ -125,6 +134,17 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
       BUDGET,
     );
     test.runIf(gated)('a bgtlr bound', () => expect(run(FALL).asm).toMatch(/\tbgtlr/), BUDGET);
+    test.runIf(gated)(
+      'with no declaration, a default returning the only argument, which the body never reads',
+      () => {
+        const { obj, asm } = compilePpcTarget(id, RETG.head + RETG.c, RETG.sym, PPC_FLAGS);
+        const source = decompile(RETG.sym, asm, PPC_MWCC, { asmData: extractAsmData(obj, PPC_MWCC, RETG.sym) }).source;
+        expect(source).toMatch(/^s32 retg\(s32 a0\)/m);
+        expect(source).toMatch(/default:\s*\n\s*return a0;/);
+        expect(scoreObjects(obj, compileCandPpc(id, RETG.head + source, PPC_FLAGS), RETG.sym).score, source).toBe(0);
+      },
+      BUDGET,
+    );
     test.runIf(gated)(
       'a bgtlr default returning an argument it never touches',
       () => {

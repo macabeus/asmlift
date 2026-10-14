@@ -447,6 +447,37 @@ test('a return nothing wrote r3 for mints no parameter the caller never passed',
   expect(decompile('f', listing(lines).asm, PPC_MWCC, withArg).source).toContain('return a0;');
 });
 
+test('…but with no declaration, a word computed only to be returned shows the function takes r3', () => {
+  // `int f(int a) { if (gS == 0) return a; return 5; }`: the scrutinee is a global, so r3 is the only
+  // argument and nothing reads it. The `li r3,5` has the return as its only reader, and a compiler
+  // deletes a pure value nobody reads, so it was written to be returned: the bare return hands back a.
+  const shape = (ret: string[]) =>
+    listing(['lis     r12,0 #HA gS', 'addi    r12,r12,0 #LO gS', 'lwz     r0,0(r12)', 'cmpwi   r0,0', 'beqlr-', ...ret])
+      .asm;
+  const src = decompile('f', shape(['li      r3,5', 'blr']), PPC_MWCC).source;
+  expect(src).toMatch(/^s32 f\(s32 a0\)/m);
+  expect(src).toContain('return a0;');
+  expect(src).toContain('return 5;');
+  // through a join the value reaches the return by
+  const joined = shape(['cmpwi   r0,1', 'li      r3,5', 'beq-    @J', 'li      r3,9', 'J:', 'blr']);
+  expect(decompile('f', joined, PPC_MWCC).source).toContain('return a0;');
+  // NOT a value something else reads too (a temporary), a load (a discarded `volatile` read is one
+  // nobody reads either), or a call's result (a void function's call leaves one in r3)
+  for (const ret of [
+    ['li      r3,5', 'stw     r3,0(r12)', 'blr'],
+    ['lwz     r3,4(r12)', 'blr'],
+    ['bl      0 <f>', 'blr'],
+  ]) {
+    expect(decompile('f', shape(ret), PPC_MWCC).source).not.toContain('a0');
+  }
+  // and not where the C++ symbol declares no parameters (`__Fv`)
+  const fv = shape(['li      r3,5', 'blr']).replace('<f>:', '<g__Fv>:');
+  expect(decompile('g__Fv', fv, PPC_MWCC).source).not.toContain('a0');
+  // …which a member function's (`this` in r3) does not
+  const member = shape(['li      r3,5', 'blr']).replace('<f>:', '<g__3FooFv>:');
+  expect(decompile('g__3FooFv', member, PPC_MWCC).source).toContain('return a0;');
+});
+
 /** KMC's / gcc 2.7.2's loop with the table base hoisted into the preheader: `lui t6 ; addiu t6,t6`
  *  before the loop, the dispatch adding t6 inside it. `pre` runs before the pair, `mid` inside it,
  *  `post` after it; `arm` is case 3's body. */
