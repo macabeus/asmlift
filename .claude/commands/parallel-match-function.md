@@ -286,8 +286,10 @@ hand-roll a poll: `docs/bench-cost.md` records what happens when waiter shells m
    first. Handle each one to the standard above **before reading the next** — a pass that reads six
    messages and then acts on four has no way to know which two it dropped.
 2. **Advance the merge queue** (Phase 3).
-3. **Fill a lane**, if the open-PR rule allows one. A fix lane for a held PR (Phase 3) goes first.
-   Otherwise choose from the pending list on two counts: least
+3. **Fill a lane**, if the open-PR rule allows one. **Fix lanes for open PRs always go first**:
+   while any fix lane is waiting — for a held PR (Phase 3), or for a PR whose branch went back to a
+   lane — every lane that frees goes to it, oldest waiting fix first, and no pending target opens.
+   Only when no fix is waiting, choose from the pending list on two counts: least
    expected file-surface overlap with what the running rounds have claimed, and least likely to
    want the bench at the same moment. If every pending target collides badly, **hold** — write the
    target's row in `LANES.md` with `state: held` and the reason. A held target is still pending; it
@@ -343,8 +345,14 @@ A silent wrong the PR leaves exactly as `main` has it — the same emitted C on 
 merging changes no answer. The slot merges, and the finding is recorded as a known gap in the
 closing report, not opened as a lane.
 
-**The fix is a lane of its own, opened in the same pass, before any pending target.** It is a
-`match-round` run like any other, branched from `origin/main` and never from the held PR:
+**The fix is a lane of its own, and it takes the first lane available, ahead of every pending
+target.** When the running-round cap has room, open it in the same pass. When it is full, do not
+stop a running round to make room. Write the fix lane into `LANES.md` as waiting, with its args
+saved to `<board>/args/`. Open it in the pass where the next round returns, before that pass looks
+at the pending list. When the held PR has several defects in different subsystems, each gets its
+own fix lane. They queue in the order the slot listed them and take the next free lanes one after
+another; none of them waits for the others to merge. Each fix lane is a `match-round` run like any
+other, branched from `origin/main` and never from the held PR:
 
 - its `target` is a function that shows the defect without the held PR — the slot usually names one
   (a function `main` already gets wrong); measured outside the harness when it is not a row, which
