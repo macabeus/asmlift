@@ -261,6 +261,22 @@ describe('prototypes from a declaration context', () => {
     expect(declaredCallArgs(p.f, PPC_MWCC)).toBeUndefined();
   });
 
+  test('in C++ an enum tag names its type bare, and that name is one word as the struct name is a copy', () => {
+    const src = 'enum Fmt { FA, FB }; struct V { int x, y; }; extern "C" void hk(Fmt e, V v, int x);';
+    const p = prototypesFromContext(src, 'c++');
+    expect(p.hk?.params).toEqual(['Fmt', 'V', 'int']);
+    expect(p.hk?.wordParams).toEqual([0]);
+    expect(p.hk?.byValueParams).toEqual([1]);
+    // an enum C++ cannot fit in an int stays unsized under its bare name too
+    const big = prototypesFromContext('enum Big { B0 = 0x100000000LL }; extern "C" void f(Big, int);', 'c++');
+    expect(big.f?.wordParams).toBeUndefined();
+    expect(declaredCallArgs(big.f, PPC_MWCC)).toBeUndefined();
+    // in C the bare tag names nothing: only `enum Fmt` or a typedef does
+    expect(
+      prototypesFromContext('enum Fmt { FA }; typedef int Fmt2; void g(enum Fmt, Fmt2);', 'c').g?.wordParams,
+    ).toEqual([0]);
+  });
+
   test('a word C++ alone reserves names a parameter or a member in C', () => {
     const src = `typedef unsigned char u8; typedef unsigned short u16;
        void named(int class, int operator, int friend, int y);

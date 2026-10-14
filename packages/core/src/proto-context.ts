@@ -468,6 +468,14 @@ function readTag(
   if ((attributed || wide) && name !== undefined) {
     table.unsizedEnums.add(`enum ${name}`);
   }
+  // In C++ an enum's tag names its type with no keyword, as a typedef bound to its body does in C
+  // (`readTypedefs`), so the bare `Fmt` of `enum Fmt { … }` is that enum, sized as it is.
+  if (ctx.language === 'c++' && name !== undefined) {
+    table.enums.add(name);
+    if (attributed || wide) {
+      table.unsizedEnums.add(name);
+    }
+  }
   return attributed || wide;
 }
 
