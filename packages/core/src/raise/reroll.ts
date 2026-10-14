@@ -28,11 +28,13 @@
 //     ops are a function of the values it hands round);
 //   • E's condition and arguments into X are T's, with B replaced by E's arguments A into H, compared
 //     as canonical expression trees (`canon`) over the values both see;
+//   • T holds no effect and no read outside what was compared: it now runs whole on the first
+//     iteration as well, where E's own copies of anything else would still run;
 //   • E runs no effect after the first op its test reads, so the test reads the same memory moved to
 //     the head of T as it did at the end of E.
 // Every check that fails leaves the function as it was.
 import { Block, Fn, Op, Value, dominators, mkValue, predecessors, successorsOf } from '../ir/core';
-import { effectful } from '../ir/discipline';
+import { effectful, spelledWhenDead } from '../ir/discipline';
 import { simplifyTrivialPhis } from '../ir/simplify';
 import { analyzeLoops } from '../structure/loops';
 
@@ -122,13 +124,25 @@ function rerollOne(fn: Fn): boolean {
     if (!sameTest || tArgs.length !== eArgs.length || tArgs.some((a, k) => a !== eArgs[k])) {
       continue;
     }
-    // neither test runs an effect (E's copy would stay and run it twice), and E runs none after the
-    // first op its test reads
-    const slice = sliceIn(defs, E, eTerm.operands[0]);
-    const tSlice = sliceIn(defs, T, tTerm.operands[0]);
-    if ([...slice, ...tSlice].some(effectful)) {
+    // What the comparison above covers: in each block, the ops its condition and its args into X are
+    // computed from. Only E's copies of those are deleted below.
+    const slice = sliceOf(defs, E, [eTerm.operands[0], ...eTerm.successors[eOut].args]);
+    const tSlice = sliceOf(defs, T, [tTerm.operands[0], ...tTerm.successors[tOut].args]);
+    // After the rotation T runs WHOLE on the first iteration too, where before E ran in its place.
+    // So T may hold nothing but what was compared, and nothing E would also have run: no effect at
+    // all (E keeps its own peeled copy, and the first iteration would run it twice — agbcc peels
+    // `gCnt++` with the test), and no read outside the compared slices (a read the asm kept is
+    // evidence of `volatile`, and one more would run). Its back-edge args must be H's, not T's own:
+    // H hands them to T after the rotation.
+    if (
+      T.ops.some((op) => op !== tTerm && (effectful(op) || (spelledWhenDead(op) && !tSlice.has(op)))) ||
+      [...slice].some(effectful) ||
+      B.some((v) => defBlock.get(v) === T)
+    ) {
       continue;
     }
+    // E runs no effect after the first op its compared slice reads, so that slice reads the same
+    // memory moved to the head of T as it did at the end of E
     const firstRead = E.ops.findIndex((op) => slice.has(op));
     if (firstRead >= 0 && E.ops.slice(firstRead, -1).some((op) => !slice.has(op) && effectful(op))) {
       continue;
@@ -155,14 +169,14 @@ function rerollOne(fn: Fn): boolean {
     eTerm.operands = [];
     eTerm.successors = [{ block: T, args: [...A] }];
     eTerm.attrs = {};
-    // the test E no longer reads
+    // the test E no longer reads — only its compared slice: any other op of E is E's own code
     for (let changed = true; changed;) {
       changed = false;
       const used = new Set(
         fn.blocks.flatMap((b) => b.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((s) => s.args)])),
       );
       E.ops = E.ops.filter((op) => {
-        const dead = op.successors.length === 0 && !effectful(op) && op.results.every((r) => !used.has(r));
+        const dead = slice.has(op) && op.results.every((r) => !used.has(r));
         changed ||= dead;
         return !dead;
       });
@@ -177,8 +191,8 @@ function rerollOne(fn: Fn): boolean {
   return false;
 }
 
-/** The ops in `blk` the value `root` is computed from. */
-function sliceIn(defs: ReadonlyMap<Value, Op>, blk: Block, root: Value): Set<Op> {
+/** The ops in `blk` the values `roots` are computed from. */
+function sliceOf(defs: ReadonlyMap<Value, Op>, blk: Block, roots: readonly Value[]): Set<Op> {
   const out = new Set<Op>();
   const walk = (v: Value) => {
     const d = defs.get(v);
@@ -187,7 +201,7 @@ function sliceIn(defs: ReadonlyMap<Value, Op>, blk: Block, root: Value): Set<Op>
       d.operands.forEach(walk);
     }
   };
-  walk(root);
+  roots.forEach(walk);
   return out;
 }
 

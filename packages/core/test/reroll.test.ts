@@ -101,3 +101,28 @@ test('a test that calls is left alone — the entry’s call would run as well',
   ).replace('%11: s32 = load %10 {off=0, signed=false, width=1}', '%11: s32 = call %8 {target="t"}');
   expect(rerolled(calls).n).toBe(0);
 });
+
+// agbcc -O2 of `for (i = 0; i < 16; i++) { gCnt++; if (gTab[i] == 7) { gHit = 1; break; } } gOut = 0;`
+// peels `gCnt++` into the entry WITH the first test, and the latch repeats it. The tests compare,
+// but rotated, the latch would run its `gCnt++` on the first iteration while the entry kept its own:
+// one increment more than the asm.
+const PEELED_EFFECT = PEELED.replace(
+  '^bb0(%0: u8*, %1: s32):\n',
+  '^bb0(%0: u8*, %1: s32):\n  %30: s32* = gaddr {sym="gCnt"}\n  %31: s32 = load %30 {off=0, signed=true, width=4}\n' +
+    '  %32: s32 = const {value=1}\n  %33: s32 = add %31, %32\n  store %30, %33 {off=0, width=4}\n',
+).replace(
+  '^bb2():\n',
+  '^bb2():\n  %34: s32 = load %30 {off=0, signed=true, width=4}\n  %35: s32 = add %34, %32\n  store %30, %35 {off=0, width=4}\n',
+);
+
+test('a latch that runs an effect besides its test is left alone — the entry’s peeled copy stays', () => {
+  expect(rerolled(PEELED_EFFECT).n).toBe(0);
+});
+
+test('a latch that reads memory outside its test is left alone — the first iteration would read it once more', () => {
+  const reads = PEELED.replace(
+    '^bb2():\n',
+    '^bb2():\n  %30: s32* = gaddr {sym="gReg"}\n  %31: s32 = load %30 {off=0, signed=false, width=1}\n',
+  );
+  expect(rerolled(reads).n).toBe(0);
+});
