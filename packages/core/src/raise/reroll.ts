@@ -35,8 +35,8 @@
 // Every check that fails leaves the function as it was.
 import { Block, Fn, Op, Value, dominators, mkValue, predecessors, successorsOf } from '../ir/core';
 import { effectful, spelledWhenDead } from '../ir/discipline';
+import { analyzeLoops } from '../ir/loops';
 import { simplifyTrivialPhis } from '../ir/simplify';
-import { analyzeLoops } from '../structure/loops';
 
 /** Commutative opcodes, whose operands `canon` sorts. */
 const COMMUTES = new Set(['add', 'mul', 'and', 'or', 'xor', 'icmp_eq', 'icmp_ne']);

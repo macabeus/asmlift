@@ -1,4 +1,4 @@
-// Unit tests for the natural-loop discovery module (src/structure/loops.ts) — the CFG analysis the
+// Unit tests for the natural-loop discovery module (src/ir/loops.ts) — the CFG analysis the
 // structurer consumes for loop recovery. Pure over
 // the CFG: no emitter, no type recovery, no toolchain. Pins the structural facts the classifier
 // depends on (back-edge headers, natural-loop bodies, single vs multi latch, exit edges, self-loop
@@ -6,8 +6,8 @@
 import { expect, test } from 'vitest';
 
 import { type Block, dominators } from '../src/ir/core';
+import { analyzeLoops } from '../src/ir/loops';
 import { parse } from '../src/ir/parse';
-import { analyzeLoops } from '../src/structure/loops';
 
 function forestOf(ir: string) {
   const fn = parse(ir);

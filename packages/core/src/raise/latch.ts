@@ -3,7 +3,7 @@
 // A loop whose back-edge carries a register copy — `add r3, r0, #0` then `b .L6` — lifts to a block
 // holding nothing but that branch, because SSA construction turns the copy into an EDGE ARGUMENT.
 // The loop is unchanged; its latch has just become a separate empty block between the exit test and
-// the header. Loop DISCOVERY still finds the loop — `structure/loops.ts` reads the same back-edge —
+// the header. Loop DISCOVERY still finds the loop — `ir/loops.ts` reads the same back-edge —
 // but the do-while emitter requires the latch to end in a `cond_br`, an empty one ends in `br`, and
 // the test is at the bottom so the `while` form is unavailable too. The back-edge survives to the
 // `onStack` refusal and the whole function declines with "unrecovered back-edge".
@@ -26,8 +26,8 @@
 // unrelated branch as a loop guard — which is the `target-dominates` entry's own note below.
 import { Block, Fn, dominators, foldWriteOrder, predecessors, successorsOf } from '../ir/core';
 import { effectful } from '../ir/discipline';
+import { analyzeLoops } from '../ir/loops';
 import { type Gate, firstRejection } from '../l3/gates';
-import { analyzeLoops } from '../structure/loops';
 
 /** What the gates below judge: one candidate block and the block its `br` goes to. */
 interface LatchCandidate {

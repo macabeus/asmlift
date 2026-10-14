@@ -38,9 +38,9 @@
 // numerator, the spelling that wins.
 import type { Block, Op, Value } from '../ir/core';
 import { effectful } from '../ir/discipline';
+import type { NaturalLoop } from '../ir/loops';
 import { opSig } from '../ir/opcodes';
 import type { UseSite } from './analysis';
-import type { NaturalLoop } from './loops';
 
 export interface RedundantTestDeps {
   defs: Map<Value, Op>;

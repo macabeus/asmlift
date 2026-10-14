@@ -1,4 +1,8 @@
-// asmlift — natural-loop discovery: the pure CFG analysis the structurer consumes.
+// asmlift — natural-loop discovery: the pure CFG analysis the structurer consumes, and the raise
+// passes that rewrite a loop's edges before it (`raise/latch.ts`, `raise/reroll.ts`).
+//
+// A substrate fact like dominance, so it lives here and not under `structure/`: that keeps the
+// dependency between the levels one way — structure imports raise, never the reverse.
 //
 // Produces a DEFINITE header set computed structurally from back-edges — a block is a loop header
 // iff it is a real back-edge target (`h ∈ dom(t)` for an edge `t→h`), never inferred from `cond_br`
@@ -8,7 +12,7 @@
 //
 // Dominance itself is a substrate fact and lives in `ir/core.ts`; `analyzeLoops` takes the map as
 // a parameter, so a caller passes `dominators(fn)` from there.
-import { Block, Fn, predecessors, successorsOf } from '../ir/core';
+import { Block, Fn, predecessors, successorsOf } from './core';
 
 /** One natural loop, keyed by its header. */
 export interface NaturalLoop {

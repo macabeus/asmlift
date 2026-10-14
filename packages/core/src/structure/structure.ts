@@ -59,6 +59,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
+import { type NaturalLoop, analyzeLoops } from '../ir/loops';
 import { CAST_WIDTHS, opSig } from '../ir/opcodes';
 import {
   type IrType,
@@ -143,7 +144,6 @@ import {
   updateWriteSet,
 } from './hazards';
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
-import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArithCompilerFacts, declaresBytePointer, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
