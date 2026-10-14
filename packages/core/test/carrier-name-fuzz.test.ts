@@ -111,11 +111,10 @@ function spellings(
 // exactly the vacuity `generator-shape.test.ts` refuses one level up. A change to what the emitter
 // spells moves these populations by a few seeds at a time, which a floor does not record.
 //
-// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. It judges 2,753 at depth 1 where
-// `namecoalesce-fuzz` judges 2,755, and the two files lose different seeds. Both rose by a dozen or
-// so when a `while`'s header exit copies learned to run ahead of the loop for a break with a value of
-// its own, and by one more when an `if` in a tested loop learned to join inside the body; the
-// breakdown below was measured before both, at 2,740 and 2,745.
+// THESE NUMBERS ARE THIS FILE'S, not a shared quantity. It judges 2,741 at depth 1 where
+// `namecoalesce-fuzz` judges 2,746 — five FEWER — and the two files lose different seeds. Both rose
+// by one when an `if` in a tested loop learned to join inside the body; the breakdown below was
+// measured before that, at 2,740 and 2,745.
 // `ADMIT_NOTHING` declines on 7 judged seeds the shipped spelling structures (291, 1089, 1489, 1724,
 // 3923, each `unrecovered back-edge into block #k`, and 1504 and 2921, whose fresh exit param makes
 // a header→exit copy a `break` would run), and `spellings` needs both, so those seven leave here and
@@ -128,7 +127,7 @@ function spellings(
 // ADMIT_NOTHING})`, `structure(fn, {})` and `structure(fn, {coalesceMergeNames: true})` throws, and
 // whether `traceOf`/`irTraceOf` cap. Verified deterministic forward and in reversed seed order at
 // every depth, and `bad` is the identical seed list both ways.
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2753, 2: 1557, 3: 655 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2741, 2: 1557, 3: 655 };
 
 describe.each([
   ['acyclic', 0],

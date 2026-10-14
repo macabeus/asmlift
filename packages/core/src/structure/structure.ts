@@ -3153,15 +3153,6 @@ export function structure(
       paramBlock.set(pv, blk);
     }
   }
-  /** Is `v` computed before a loop with body `body` is entered — a constant, or defined outside it? */
-  const definedBeforeLoop = (body: ReadonlySet<Block>, v: Value): boolean => {
-    const d = defs.get(v);
-    if (d !== undefined) {
-      return d.opcode === 'const' || !body.has(opBlock.get(d)!);
-    }
-    const pb = paramBlock.get(v);
-    return pb !== undefined && !body.has(pb);
-  };
   // AND THE NAME MUST BE EXACTLY AS WIDE AS `p`. Every edge into `B` copies its argument into
   // `name`, which is a C assignment through `name`'s declaration, and the name's type is fixed by
   // its FIRST claimant — so a width mismatch loses a truncation in one direction or the other:
@@ -3658,25 +3649,6 @@ export function structure(
     // exclusion seeded with enclosing-loop names → never coalesce onto them
     seedLoopParams(l.header, l.forwardPreds, l.backArgs, enclosingNames(l));
   }
-  // A `while` whose exit slot `i` the header hands a value computed before the loop, and a `break`
-  // that no early-`return` arm owns hands another: `r = 1; while (…) { if (…) { r = i; break; } }`.
-  // Its header copy can only render AHEAD of the loop (`breakRule`), where a name the loop computes
-  // would be overwritten before the loop reads it.
-  const valuedBreakLoop = (b: Block, i: number): WhileLoopInfo | undefined => {
-    for (const wl of whileLoops.values()) {
-      const headerArg = wl.exit === b ? successorTo(wl.header, b)?.args[i] : undefined;
-      if (
-        headerArg !== undefined &&
-        definedBeforeLoop(wl.body, headerArg) &&
-        [...wl.breaks].some(
-          (from) => !wl.arms.some((a) => a.from === from && a.to === b) && successorTo(from, b)?.args[i] !== headerArg,
-        )
-      ) {
-        return wl;
-      }
-    }
-    return undefined;
-  };
   let changed = true;
   while (changed) {
     changed = false;
@@ -3704,17 +3676,11 @@ export function structure(
          *  went unnamed", since the rejections above it `continue` without recording. Over-marking
          *  costs one downstream merge an extra fresh home, a spelling the differ referees. */
         let refusedParamCarrier = false;
-        const valued = valuedBreakLoop(b, i);
         for (const c of [
           ...incoming.filter((c) => varName.has(c.v)),
           ...incoming.filter((c) => backArgName.has(c.v)),
         ]) {
           const nm = varName.get(c.v) ?? backArgName.get(c.v)!;
-          // The header's copy into this slot runs ahead of the loop (`breakRule`), so the slot must
-          // not share a name the loop itself computes.
-          if (valued !== undefined && !definedBeforeLoop(valued.body, c.v)) {
-            continue;
-          }
           if (carriesPreUpdate(c.v, c.pr, b) || !canTakeName(p, b, nm, allSame, varName.has(c.v))) {
             continue;
           }
@@ -5343,8 +5309,6 @@ export function structure(
   // over every argument the header hands the exit, at the value level, and not only over the copies
   // that render: an exit parameter that takes its argument's own name renders no copy, yet the exit
   // still reads that name, and a latch update that wrote it hands the exit the updated value.
-  /** The `while` headers a break promised to render the exit copies of ahead of the loop. */
-  const hoistedExitCopies = new Set<Block>();
   const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
     const exit = frame.exit;
     if (exit === null) {
@@ -5377,19 +5341,7 @@ export function structure(
         breakArgs.every((v, k) => v === headerArgs[k]) &&
         ![...reads].some((n) => writes.has(n)) &&
         !headerArgs.some((a) => readsClobbered(a, new Map(), writes));
-      // A BREAK WITH A VALUE OF ITS OWN. The header's copies may run ahead of the loop instead of
-      // after it when every value they hand the exit is computed before the loop: they then hold on
-      // the header's way out, and a break overwrites them with its own on the way past. Whether the
-      // loop leaves those names alone is a question about the body, which is not structured yet, so
-      // this PROMISES the hoist and `emitTestAtTopWhile` keeps the promise or declines loud. An edge
-      // an early-`return` arm owns keeps that spelling instead.
-      if (
-        !bare &&
-        !frame.arms.some((a) => a.from === from && a.to === exit) &&
-        headerArgs.every((a) => definedBeforeLoop(frame.body, a))
-      ) {
-        hoistedExitCopies.add(frame.header);
-      } else if (!bare) {
+      if (!bare) {
         return { refusal: 'would run the copies the loop header hands its exit' };
       }
     }
@@ -6595,26 +6547,12 @@ export function structure(
     // Mirror the br/cond_br cases: argAssigns then structureRegion. Structure the body under this
     // loop's frame so an in-body conditional exit (break / early return) is recognised instead of
     // tripping the header-re-entry `onStack` guard.
-    hoistedExitCopies.delete(wl.header);
     const body = withLoop({ header: wl.header, exit: wl.exit, body: wl.body, arms: wl.arms, breaks: wl.breaks }, () => [
       ...argAssigns(wl.header, wl.bodyEntry),
       ...structureRegion(wl.bodyEntry, wl.header),
     ]);
-    const exitCopies = argAssigns(wl.header, wl.exit); // phi args carried on the header→exit edge, if any
-    if (hoistedExitCopies.has(wl.header)) {
-      // A break carried a value of its own (`breakRule`), so the header's copies run AHEAD of the
-      // loop. Sound only where the loop leaves them standing: it never reads their names, writes
-      // them only on its way out by a `break`, and writes no name their values read.
-      const refusal = hoistRefusal(cond, body, exitCopies);
-      if (refusal !== null) {
-        throw new StructureError(
-          `cannot structure '${fn.name}': a loop's exit copies cannot run ahead of it: ${refusal}`,
-        );
-      }
-      return [...exitCopies, { k: 'while', cond, body }, ...structureRegion(wl.exit, stop)];
-    }
     const out: Stmt[] = [{ k: 'while', cond, body }];
-    out.push(...exitCopies);
+    out.push(...argAssigns(wl.header, wl.exit)); // phi args carried on the header→exit edge, if any
     out.push(...structureRegion(wl.exit, stop));
     return out;
   };
@@ -7619,60 +7557,6 @@ function sequentialize(
 }
 // Read-set / rewrite walkers over the FULL Expr union — a walker that misses a node kind (e.g.
 // call/index/field reads) sequentializes a copy keyed by an array index in the wrong order.
-/** Every name `e` reads or writes: a variable, an address taken, a post-increment. */
-function namesIn(e: Expr, acc: Set<string> = new Set()): Set<string> {
-  const n = mentionedName(e);
-  if (n !== undefined) {
-    acc.add(n);
-  }
-  for (const c of exprChildren(e)) {
-    namesIn(c, acc);
-  }
-  return acc;
-}
-/** Why the copies `copies` cannot run ahead of the loop `while (cond) { body }`, or null when they
- *  can: the loop must never mention a name they write except to assign it on its way out — in a
- *  statement list of the loop's own that ends in `break` — and must write no name their values
- *  read. A name the loop writes nowhere else still holds what the copy wrote when the test fails. */
-export function hoistRefusal(cond: Expr, body: Stmt[], copies: Stmt[]): string | null {
-  const dests = new Set<string>();
-  const reads = new Set<string>();
-  for (const c of copies) {
-    if (c.k !== 'assign') {
-      return 'a copy is not a plain assignment';
-    }
-    dests.add(c.name);
-    namesIn(c.value, reads);
-  }
-  if ([...namesIn(cond)].some((n) => dests.has(n))) {
-    return 'the loop test reads a name the copies write';
-  }
-  const walk = (ss: Stmt[], ownLevel: boolean): string | null => {
-    const leaves = ownLevel && ss.length > 0 && ss[ss.length - 1].k === 'break';
-    for (const st of ss) {
-      for (const e of stmtExprs(st)) {
-        if ([...namesIn(e)].some((n) => dests.has(n))) {
-          return 'the loop reads a name the copies write';
-        }
-        if ([...walkExprs([{ k: 'exprstmt', value: e }])].some((x) => x.k === 'postincr' && reads.has(x.name))) {
-          return 'the loop writes a name the copies read';
-        }
-      }
-      if (st.k === 'assign' && reads.has(st.name)) {
-        return 'the loop writes a name the copies read';
-      }
-      if (st.k === 'assign' && dests.has(st.name) && !leaves) {
-        return 'the loop writes a name the copies write, other than on its way out';
-      }
-      const inner = walk(stmtChildren(st), ownLevel && !isLoop(st) && st.k !== 'switch');
-      if (inner !== null) {
-        return inner;
-      }
-    }
-    return null;
-  };
-  return walk(body, true);
-}
 function exprVars(e: Expr, acc: Set<string> = new Set()): Set<string> {
   if (e.k === 'var') {
     acc.add(e.name);
