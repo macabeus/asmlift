@@ -382,6 +382,33 @@ test('a return nothing wrote r3 for still returns r3, when another return hands 
   expect(decompile('f', bare.asm, PPC_MWCC).source).toMatch(/^void f\(/m);
 });
 
+test('a return nothing wrote r3 for mints no parameter the caller never passed', () => {
+  // `void f(void) { int *p = &gB; if (gA & 2) return; *p = *p + 1; }`: mwcc's temporary `lwz r3`
+  // makes the other path return a word, but no argument register is live in, so r3 is no argument.
+  const lines = [
+    'lis     r4,0 #HA gB',
+    'lis     r5,0 #HA gA',
+    'addi    r4,r4,0 #LO gB',
+    'addi    r5,r5,0 #LO gA',
+    'lwz     r0,0(r5)',
+    'rlwinm. r0,r0,0,30,30',
+    'bnelr-',
+    'lwz     r3,0(r4)',
+    'addi    r0,r3,1',
+    'stw     r0,0(r4)',
+    'blr',
+  ];
+  const noArg = decompile('f', listing(lines).asm, PPC_MWCC).source;
+  expect(noArg).toMatch(/^\w+ f\(void\)/m);
+  expect(noArg).not.toContain('a0');
+  // the declared `void f(void)` decides it too
+  const declared = { prototypes: { f: { params: [], returnsVoid: true } } };
+  expect(decompile('f', listing(lines).asm, PPC_MWCC, declared).source).toMatch(/^void f\(void\)/m);
+  // a declared first parameter makes r3 an argument, read or not
+  const withArg = { prototypes: { f: { params: ['s32'], returns: 's32' } } };
+  expect(decompile('f', listing(lines).asm, PPC_MWCC, withArg).source).toContain('return a0;');
+});
+
 /** KMC's / gcc 2.7.2's loop with the table base hoisted into the preheader: `lui t6 ; addiu t6,t6`
  *  before the loop, the dispatch adding t6 inside it. `pre` runs before the pair, `mid` inside it,
  *  `post` after it,

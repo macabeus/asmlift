@@ -40,7 +40,7 @@
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import type { Prototypes } from '../proto';
+import { type Prototypes, declaredWidth, declaresVoidReturn } from '../proto';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
@@ -1087,6 +1087,12 @@ export function lift(
   // (`returnUntouchedArg`) when another return hands back a word. Only where r3 still holds the
   // entry value on every path into it: a path a call destroyed r3 on returns nothing a C expression
   // names, and stays bare.
+  //
+  // AND ONLY WHERE r3 IS AN ARGUMENT AT ALL (`r3IsAnArgument`). "r3 still holds what the caller
+  // left" says nothing about whether the caller left anything: `void f(void) { if (gA & 2) return;
+  // gB++; }` uses r3 as a temporary on the other path, so that path "returns a word", and filling
+  // the bare return would mint a parameter the ABI never passed — `f(s32 a0)`, which contradicts a
+  // declared `void f(void)` (the candidate does not compile) and a C++ `__Fv` mangling.
   const bareReturns: Array<{ op: Op; bi: number }> = [];
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
@@ -1101,8 +1107,27 @@ export function lift(
       bareReturns.push({ op, bi });
     }
   };
+  /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
+   *  decides when there is one: a non-void return and at least one integer-class parameter (the
+   *  first such takes r3) or a nonzero register count. Without one, only the body can show it: r3
+   *  is already an entry parameter, or a higher argument register is live in, which puts an
+   *  argument in r3 by position (the obligation `mintArgSlotHoles` discharges). */
+  const r3IsAnArgument = (): boolean => {
+    const own = prototypes[name];
+    if (declaresVoidReturn(own)) {
+      return false;
+    }
+    if (typeof own?.params === 'number') {
+      return own.params > 0;
+    }
+    if (Array.isArray(own?.params)) {
+      return own.params.some((t) => declaredWidth(t) !== undefined);
+    }
+    const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
+    return ARG_REGS.some((r) => live.has(r));
+  };
   const returnUntouchedArg = () => {
-    if (!wordReturn) {
+    if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {
       return;
     }
     for (const { op, bi } of bareReturns) {
