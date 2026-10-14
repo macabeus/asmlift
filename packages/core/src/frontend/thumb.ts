@@ -3377,7 +3377,16 @@ function measureThumbFrame({
   // are `handedOutRegs`, the rule the two licences above read too.
   const captureOffsetOf = new Map<Instr, number>();
   const escapedOffsetOf = new Map<Instr, number>();
+  let frameBaseIsReturnStorage = false;
   heldFrameWalk(asmBlocks, entryReachable, mayWriteReg, (ins, held) => {
+    if (
+      ins.mnemonic === 'bl' &&
+      held.get(target.argRegs[0]) === 0 &&
+      calleeRegister(ins, target) === null &&
+      typeof calls.declaredCall(ins.ops[0] ?? '?')?.returned === 'object'
+    ) {
+      frameBaseIsReturnStorage = true;
+    }
     const handed = handedOutRegs(ins);
     const offs = [...held].filter(([r, off]) => handed.includes(r) && off >= 0).map(([, off]) => off);
     if (offs.length > 0) {
@@ -3389,12 +3398,34 @@ function measureThumbFrame({
     }
     return false;
   });
-  // …and the offsets themselves, nonzero only — the frame base has its own licence,
-  // `capturedObjectIsTheWholeFrame`. A word whose address is taken is not an outgoing argument —
+  // …and the offsets themselves. A word whose address is taken is not an outgoing argument —
   // C gives an argument no address — so the outgoing-argument analysis below does not see these
   // offsets either: a store there reaching a call unread is the object being filled for the
   // callee that is handed it.
-  const constantCaptureOffsets: ReadonlySet<number> = new Set([...captureOffsetOf.values()].filter((o) => o > 0));
+  //
+  // THE FRAME BASE, ONLY AS A DECLARED CALL'S RETURN STORAGE AND ONLY WHERE NO CALL TAKES A STACK
+  // WORD. A bare `mov rD, sp` is also the base of a by-value argument's block copy into the
+  // outgoing area, and [sp,#0] is then a call's fifth argument word (the producer table above
+  // `capturedObjectIsTheWholeFrame`, which keeps its own licence for a one-word frame). Where every
+  // call is to a callee whose declaration places all of its arguments in registers there is no
+  // outgoing area, and where the base is handed as the hidden pointer of a callee declared to
+  // return a struct through memory it is that struct's storage: two struct-return temps,
+  // `mov r0, sp / bl mk` and `add r0, sp, #4 / bl mk`. A call nothing declares, a call through a
+  // register, or a declaration nothing sizes may take a stack word, and keeps offset 0 out.
+  const noCallTakesAStackWord = [...entryReachable].every((b) =>
+    asmBlocks[b].instrs.every((ins) => {
+      if (ins.mnemonic !== 'bl' && ins.mnemonic !== 'blx') {
+        return true;
+      }
+      const declared = calleeRegister(ins, target) === null ? calls.declaredCall(ins.ops[0] ?? '?') : null;
+      return declared !== null && outgoingBlock(declared.widths, target) === null;
+    }),
+  );
+  const constantCaptureOffsets: ReadonlySet<number> = new Set(
+    [...captureOffsetOf.values()].filter(
+      (o) => o > 0 || (o === 0 && frameBaseIsReturnStorage && noCallTakesAStackWord),
+    ),
+  );
 
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
   // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
