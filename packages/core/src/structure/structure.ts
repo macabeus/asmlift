@@ -1113,6 +1113,16 @@ interface LoopArm {
   owned: Set<Block>;
 }
 
+// A `break` whose arm RUNS CODE first: `if (t[i] == 7) { gHit = 1; break; }`. The arm's blocks sit
+// outside the natural loop (they never reach the latch), so it is a second exit target; it is one
+// exit with code on the way when the arm is a region entered only by this edge, holding no `ret`,
+// every way out of which lands on the loop's exit (`codeBreakArm`).
+interface BreakArm {
+  from: Block;
+  to: Block;
+  region: Set<Block>;
+}
+
 // A loop with no test of its own, `while (1)`: its latches are conditional continues, and it leaves
 // by a `break` to `exit` or an early `return`. `exit` is null for a loop no edge leaves at all — the
 // main loop that never returns — which has no break, no arm, and nothing after it.
@@ -1123,7 +1133,8 @@ interface ForeverLoopInfo {
   exit: Block | null;
   body: Set<Block>;
   arms: LoopArm[];
-  breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`
+  breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`, or whose edge enters a `breakArms` arm
+  breakArms: BreakArm[];
 }
 
 // A test-at-top multi-block `while`. The header is a pure test whose cond_br enters `bodyEntry`
@@ -2218,6 +2229,41 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
 //
 // Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
 // of the update — or null when this is not an early-`return` arm.
+/** The arm `from -> to` breaks to `exit` after running code: `to` is entered by that edge alone, and
+ *  the region it heads holds no `ret`, re-enters no `body` block, admits no edge from outside itself,
+ *  and leaves only for `exit`. Returns that region, or null. Each region block is then written once,
+ *  inside the loop, ahead of the `break`. */
+function codeBreakArm(
+  preds: ReadonlyMap<Block, Block[]>,
+  from: Block,
+  to: Block,
+  body: ReadonlySet<Block>,
+  exit: Block,
+): Set<Block> | null {
+  if (to === exit || body.has(to)) {
+    return null;
+  }
+  const region = new Set<Block>();
+  let leaves = false;
+  for (const stack = [to]; stack.length > 0;) {
+    const x = stack.pop()!;
+    if (x === exit) {
+      leaves = true;
+      continue;
+    }
+    if (region.has(x)) {
+      continue;
+    }
+    const t = x.ops[x.ops.length - 1];
+    if (body.has(x) || (t.opcode !== 'br' && t.opcode !== 'cond_br')) {
+      return null; // re-enters the loop, returns, or dispatches
+    }
+    region.add(x);
+    stack.push(...successorsOf(x));
+  }
+  const entered = (x: Block) => (preds.get(x) ?? []).every((p) => region.has(p) || (x === to && p === from));
+  return leaves && [...region].every(entered) ? region : null;
+}
 function earlyReturnArm(
   { dom, reachFrom }: EarlyReturnArmDeps,
   from: Block,
@@ -2850,7 +2896,25 @@ export function structure(
       exit: Block,
       kind: 'while' | 'dowhile',
       bodyEntry: Block | null = null;
-    if (!nl.selfLoop && hTerm.opcode === 'cond_br' && hInBody.length === 1 && hOut.length === 1 && headerPure) {
+    // The header's way out is not the loop's exit when it enters an arm that runs code and then
+    // joins another exit edge (`codeBreakArm`) whose tail has an effect: that arm is a `break`, and
+    // the loop a `while (1)`. Where the tail only returns, the `while` reading copies it into the
+    // other edge as an early `return`, and keeps that spelling.
+    const runsEffect = (x: Block) => [x, ...reachFrom(x)].some((y) => !nl.body.has(y) && y.ops.some(effectful));
+    const hOutIsBreakArm =
+      hOut.length === 1 &&
+      nl.exitEdges.some(
+        (e) =>
+          e.to !== hOut[0].block && runsEffect(e.to) && codeBreakArm(preds, h, hOut[0].block, nl.body, e.to) !== null,
+      );
+    if (
+      !nl.selfLoop &&
+      hTerm.opcode === 'cond_br' &&
+      hInBody.length === 1 &&
+      hOut.length === 1 &&
+      headerPure &&
+      !hOutIsBreakArm
+    ) {
       kind = 'while';
       exitFrom = h;
       exit = hOut[0].block;
@@ -2939,6 +3003,7 @@ export function structure(
         body: nl.body,
         arms: [],
         breaks: new Set(),
+        breakArms: [],
       };
     }
     const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
@@ -2947,6 +3012,7 @@ export function structure(
     for (const exit of targets) {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
+      const breakArms: BreakArm[] = [];
       const fits = nl.exitEdges.every((e) => {
         if (e.to === exit) {
           breaks.add(e.from);
@@ -2955,6 +3021,12 @@ export function structure(
         const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
+        }
+        const region = owned === null ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
+        if (region !== null) {
+          breaks.add(e.from);
+          breakArms.push({ from: e.from, to: e.to, region });
+          return !innerBodyHas(nl, e.from);
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
@@ -2969,6 +3041,7 @@ export function structure(
           body: nl.body,
           arms,
           breaks,
+          breakArms,
         };
       }
     }
@@ -5223,7 +5296,14 @@ export function structure(
   // to `header` is a conditional continue; its other edge, when it leaves the loop, is an early exit
   // (a `break` to `exit`, or an early `return` through a trampoline). Null outside any loop body —
   // the early-exit branch in structureBlock is inert there.
-  type LoopFrame = { header: Block; exit: Block | null; body: Set<Block>; arms: LoopArm[]; breaks: ReadonlySet<Block> };
+  type LoopFrame = {
+    header: Block;
+    exit: Block | null;
+    body: Set<Block>;
+    arms: LoopArm[];
+    breaks: ReadonlySet<Block>;
+    breakArms?: readonly BreakArm[];
+  };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
@@ -6150,7 +6230,10 @@ export function structure(
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
     if (loopCtx && loopCtx.breaks.has(b)) {
       const frame = loopCtx;
-      const breakIsTaken = takenB === frame.exit;
+      // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
+      // the `break`, and its last block's copies into the exit are the break's.
+      const arm = frame.breakArms?.find((a) => a.from === b && (a.to === takenB || a.to === fallB));
+      const breakIsTaken = takenB === (arm?.to ?? frame.exit);
       const stayB = breakIsTaken ? fallB : takenB;
       const continueRefused = stayB === frame.header && !continueFallsToBottom(frame, stop);
       const rule = continueRefused
@@ -6164,7 +6247,17 @@ export function structure(
           leaveCond = negateCond(leaveCond);
         }
         const [breakEdge, stayEdge] = breakIsTaken ? term.successors : [term.successors[1], term.successors[0]];
-        out.push(mkIf(leaveCond, [...(rule.bare ? [] : argAssignsFor(b, breakEdge)), { k: 'break' }], []));
+        out.push(
+          mkIf(
+            leaveCond,
+            [
+              ...(rule.bare ? [] : argAssignsFor(b, breakEdge)),
+              ...(arm !== undefined ? structureRegion(arm.to, frame.exit) : []),
+              { k: 'break' },
+            ],
+            [],
+          ),
+        );
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
@@ -6215,7 +6308,9 @@ export function structure(
     // (`foreverJoin`): a branch whose one arm continues is post-dominated, in the CFG, by wherever
     // the other arm leaves the loop from.
     const inForever = loopCtx === null ? undefined : foreverLoops.get(loopCtx.header);
-    const bodyJoin = inForever === undefined ? undefined : foreverJoin(inForever, b);
+    // A break arm's own blocks join as any code outside the loop does: they are not the body's.
+    const inArm = loopCtx?.breakArms?.some((a) => a.region.has(b)) === true;
+    const bodyJoin = inForever === undefined || inArm ? undefined : foreverJoin(inForever, b);
     const merge = bodyJoin !== undefined ? (bodyJoin ?? stop) : clampToLoop ? stop : (ipd ?? stop);
     // Per-successor records, NOT successorTo(b, block): a cond_br whose two edges reach the SAME
     // block with different args would otherwise give both arms the first edge's copies.
@@ -6571,9 +6666,15 @@ export function structure(
   // neither reading is the value, decline LOUD, as the do-while latch does.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
-    const body = withLoop({ header: fl.header, exit: fl.exit, body: fl.body, arms: fl.arms, breaks: fl.breaks }, () =>
-      structureBlock(fl.header, fl.header),
-    );
+    const frame = {
+      header: fl.header,
+      exit: fl.exit,
+      body: fl.body,
+      arms: fl.arms,
+      breaks: fl.breaks,
+      breakArms: fl.breakArms,
+    };
+    const body = withLoop(frame, () => structureBlock(fl.header, fl.header));
     dwActive.delete(fl.header);
     const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body };
     const exit = fl.exit;

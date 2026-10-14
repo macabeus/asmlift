@@ -810,3 +810,80 @@ test('a bottom-tested loop with a mid-body `break` is `while (1)`', () => {
   expect(r.agreement).toEqual({ judged: SEEDS.length, disagree: 0 });
   expect(r.shipped).toEqual({ judged: SEEDS.length, disagree: 0 });
 });
+
+// ── A `break` WHOSE ARM RUNS CODE (structure.ts `codeBreakArm`) ─────────────────────────────────
+//
+// `for (i = 0; i < n; i++) { if (t(i) == 7) { hit(i); break; } } out();` — the arm's block never
+// reaches the latch, so it sits outside the natural loop and is a second exit target. It is one exit
+// with code on the way: entered by its edge alone, it leaves only for the loop's exit. The loop is a
+// `while (1)` and the arm renders inside the `if`, ahead of its `break`.
+
+/** The header computes before it tests (a call), so no `while` form is offered. */
+const CODE_ARM = `fn codearm {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = call %2 {target="t"}
+  %4: s32 = const {value=7}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb2(), ^bb3()
+^bb2():
+  %6: s32 = call %2 {target="hit"}
+  br ^bb4()
+^bb3():
+  %7: s32 = const {value=1}
+  %8: s32 = add %2, %7
+  %9: u32 = icmp_slt %8, %0
+  cond_br %9, ^bb1(%8), ^bb4()
+^bb4():
+  %10: s32 = call {target="out"}
+  ret %10
+}`;
+/** The header is a pure test of a value the previous iteration loaded (ido7.1 and mwcc_242_81's
+ *  `synthetic:break_code`), which the `while` classifier would take with the arm as its exit. */
+const CODE_ARM_PURE_HEADER = `fn codearmpure {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  %2: s32 = call %1 {target="t"}
+  br ^bb1(%1, %2)
+^bb1(%3: s32, %4: s32):
+  %5: s32 = const {value=7}
+  %6: u32 = icmp_eq %4, %5
+  cond_br %6, ^bb2(), ^bb3()
+^bb2():
+  %7: s32 = call %3 {target="hit"}
+  br ^bb4()
+^bb3():
+  %8: s32 = const {value=1}
+  %9: s32 = add %3, %8
+  %10: u32 = icmp_slt %9, %0
+  cond_br %10, ^bb5(), ^bb4()
+^bb5():
+  %11: s32 = call %9 {target="t"}
+  br ^bb1(%9, %11)
+^bb4():
+  %12: s32 = call {target="out"}
+  ret %12
+}`;
+
+test('a `break` whose arm runs code renders the arm ahead of the `break`', () => {
+  for (const ir of [CODE_ARM, CODE_ARM_PURE_HEADER]) {
+    const { src, agreement, shipped } = judged(ir);
+    expect(src).toContain('while (1) {');
+    expect(src).toMatch(/\{\n {12}hit\(v\d\);\n {12}break;\n {8}\}/);
+    expect(src.match(/hit\(/g)).toHaveLength(1);
+    expect(agreement).toEqual({ judged: 300, disagree: 0 });
+    expect(shipped).toEqual({ judged: 300, disagree: 0 });
+  }
+});
+
+test('an arm another path also enters is not a `break` arm, and the loop declines', () => {
+  // ^bb0 enters the arm too (agbcc's peeled first test in `synthetic:break_code`, kleod
+  // `TextBoxInit`'s out-of-loop merge): rendering it inside the loop would drop that path's copy.
+  const shared = CODE_ARM.replace(
+    '  %1: s32 = const {value=0}\n  br ^bb1(%1)',
+    '  %1: s32 = const {value=0}\n  %20: u32 = icmp_slt %0, %1\n  cond_br %20, ^bb2(), ^bb1(%1)',
+  ).replace('%6: s32 = call %2 {target="hit"}', '%6: s32 = call {target="hit"}');
+  expect(() => emit(shared)).toThrow(/unrecovered back-edge/);
+});
