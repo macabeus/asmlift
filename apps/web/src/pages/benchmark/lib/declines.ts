@@ -625,21 +625,21 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /copies out is used as a value/,
   },
   {
-    // ONE CAPABILITY, THREE MESSAGES, AND NONE OF THEM SAYS IT. agbcc spells a branch past Thumb's
-    // ±2 KB reach as `bl .Lx @far jump` (thumb.md `*cond_branch` and `jump`); the `@` comment that
-    // says so is dropped before decoding, so `frontend/thumb.ts` reads the `bl` as a call and
-    // refuses wherever that reading breaks first: the `bl` names a label of this function, an
-    // `.align` behind the relay decodes differently under base 0 and base 2, or — once an earlier
-    // pool fixed the parity — the block before the pool runs into it. The kleod census pinned all
-    // three to the relay by ablation (lowering it to `b` lifts and MATCHes), and the rows
-    // `farjump_cond`, `farjump_pool` and `farjump_sealed` are one each.
+    // ONE CAPABILITY, AND IT LANDED. agbcc spells a branch past Thumb's ±2 KB reach as
+    // `bl .Lx @far jump` (thumb.md `jump`, `*cond_branch`, `*cond_branch_reversed`). The tokenizer
+    // in `frontend/thumb.ts` used to drop the comment that says so, read the `bl` as a call, and
+    // refuse wherever that reading broke first: the `bl` names a label of this function, an `.align`
+    // behind the relay decodes differently under base 0 and base 2, or (once an earlier pool fixed
+    // the parity) the block before the pool runs into it. It now keeps the mark and lowers the relay
+    // to `b`. The rows that pinned it, `farjump_cond`, `farjump_pool` and `farjump_sealed`, MATCH.
     //
-    // ALL THREE ARE KEYED ON THEIR OWN WORDS, and those words are wider than the relay: the `bl`
-    // refusal names its other reading itself (a locally-defined call thunk), and hand-written asm
-    // whose alignment fill really is undetermined, or whose code really does run into data,
-    // reaches the two layout throws. No row does — every one the corpus has is the relay — so the
-    // label names the cause they have today. The durable fix is in core: read the `@far jump`
-    // comment as the branch it is, and these throws go back to meaning only what they say.
+    // UNINHABITED, AND EVERY REFUSAL IS INTACT. The three old throws still fire on what they say:
+    // an UNMARKED `bl` to a label of this function (a call thunk, or a relay whose comment a
+    // splitter dropped), alignment fill the input really leaves open, and code that really runs
+    // into data. The lowering adds its own refusals, for a marked relay whose lr is not provably
+    // dead (no `push` of lr in the entry block, a branch or jump table back to the entry, or another
+    // instruction naming lr) or whose target is not a code label of this function. No row reaches
+    // any of them, so the class is in `NO_ROWS`; it stays because the refusals are still core's.
     key: 'far-jump',
     label: 'Thumb far-jump relays (`bl .Lx @far jump` read as a call)',
     pattern:

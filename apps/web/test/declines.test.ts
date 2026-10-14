@@ -946,6 +946,11 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // describe — a second push, a depth r1 does not hold, a reload nothing stored — and no benchmark
   // row reaches any of them.
   //
+  // `far-jump` joins when its capability lands: `frontend/thumb.ts` lowers agbcc's marked relay to
+  // the branch it stands for, and its three rows MATCH. What it keys on still throws, on a `bl` to
+  // a local label with no mark, on fill or data the input really leaves open, and on a relay whose
+  // lr is not provably dead, and no row reaches any of them.
+  //
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
@@ -954,6 +959,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'branch-likely',
     'cross-block-flags',
     'ctr-transfer',
+    'far-jump',
     'no-prototype-args',
     'pool-word-shape',
     'stack-frames',
