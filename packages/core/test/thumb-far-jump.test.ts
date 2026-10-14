@@ -75,8 +75,7 @@ describe('a marked relay is lowered to the branch it stands for', () => {
   });
 
   // kleod's `WorldMapScreenHandler` is stored as a callback from ANOTHER function's pool. A word
-  // naming the entry is a pointer, not a way back into it, and the whole file's words are visible
-  // to the decoder: keyed on them, seven of kleod's relays declined for a word they never read.
+  // naming the entry is a pointer, not a way back into it, though the decoder sees the whole file's.
   test('a pointer to the function from another function’s pool is not a branch back to its entry', () => {
     const asm =
       '\t.code\t16\n\t.globl\tg\n\t.thumb_func\ng:\n\tldr\tr0, .Lg\n\tbx\tlr\n\t.align\t2, 0\n.Lg:\n\t.word\tf\n' +
@@ -86,8 +85,8 @@ describe('a marked relay is lowered to the branch it stands for', () => {
 
   // agbcc puts two labels on one instruction when a helper label lands on an existing one, and the
   // first is dropped as an alias of the second. The relay is still a `bl` when that happens, and
-  // naming the dropped alias it declined as leaving the function (libc s_erf.s `erf`:
-  // `bl .L28 @ far jump` with `.L28:` stacked on `.L27:`).
+  // must follow the alias as a `b` does (libc s_erf.s `erf`: `bl .L28 @ far jump` with `.L28:`
+  // stacked on `.L27:`).
   test('a relay to a stacked label follows the alias like the branch it stands for', () => {
     const tail = '.LCB0:\n\tbl\th\n.L3:\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n';
     const relay = `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L3\t@ far jump\n${tail}`;
@@ -117,7 +116,7 @@ describe('what is not provably a relay declines loud', () => {
 
   // pokeemerald m4a_1.s: `push {r0, lr}` … `bl call_r3` … `call_r3: bx r3`. The function saves lr
   // like a relay's does, so only the missing mark keeps this a decline.
-  test('the call-thunk shape, unmarked, still declines', () => {
+  test('the call-thunk shape, unmarked, declines', () => {
     const thunk =
       `${H}\tpush\t{r0, lr}\n\tcmp\tr0, #0\n\tbeq\t.L1\n\tldr\tr3, [r0]\n\tbl\t.L2\n.L1:\n\tpop\t{r0}\n\tpop\t{r0}\n\tbx\tr0\n` +
       '.L2:\n\tbx\tr3\n';
@@ -154,10 +153,8 @@ describe('what is not provably a relay declines loud', () => {
     );
   });
 
-  // A `bx` that is not a return declines in a relay's function as it does in any other — the near
-  // `b` twins of these two are `thumb-frontend.test.ts`'s. It is not part of the relay's lr proof:
-  // nothing but the entry `push` names lr, so the relay's lr never reaches r3 or r0. Pinned here
-  // because lowering the relay must not let either one through as a return.
+  // A return that is not one declines in a relay's function as in any other (the near-`b` twins
+  // are `thumb-frontend.test.ts`'s). Pinned here because lowering the relay must not let one through.
   test("a relay in a function with a `bx` that is not a return through the caller's lr declines", () => {
     declines(
       `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n` +
@@ -167,8 +164,7 @@ describe('what is not provably a relay declines loud', () => {
   });
 
   // The relay's lowering leans on this: with every return reading the caller's lr, the lr the relay
-  // wrote is not what any return jumps to. `pop {r0}` here reads the saved r4, so the lowered
-  // function would have returned to wherever r4 pointed; on main it declined on the bare `bl`.
+  // wrote is not what any return jumps to. `pop {r0}` here reads the saved r4.
   test("a relay in a function whose `pop` reads the saved r4's word, not lr's, declines", () => {
     declines(
       `${H}\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n.L2:\n\tmov\tr0, #7\n\tpop\t{r0}\n\tbx\tr0\n`,
@@ -176,7 +172,7 @@ describe('what is not provably a relay declines loud', () => {
     );
   });
 
-  test('a `bx` through a register the `pop` did not load last declines', () => {
+  test("a `bx` through the register `pop {r0, r4}` filled from the saved r4's word declines", () => {
     declines(
       `${H}\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n.L2:\n\tpop\t{r0, r4}\n\tbx\tr0\n`,
       /indirect\/computed jump 'bx r0' is not a return through the caller's lr/,
@@ -184,7 +180,7 @@ describe('what is not provably a relay declines loud', () => {
   });
 
   // Only a target that declares the mark lowers it (`compilerBehaviors.farJumpRelay`). Without the
-  // declaration the marked `bl` is the bare `bl` to a local label it always was, and declines so.
+  // declaration the marked `bl` is a bare `bl` to a local label, and declines as one.
   test('a target that does not declare the mark keeps the bare-`bl` decline', () => {
     const unmarked = {
       ...ARMV4T_AGBCC,

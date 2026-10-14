@@ -628,21 +628,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /copies out is used as a value/,
   },
   {
-    // ONE CAPABILITY, AND IT LANDED. agbcc spells a branch past Thumb's ±2 KB reach as
-    // `bl .Lx @far jump` (thumb.md `jump`, `*cond_branch`, `*cond_branch_reversed`). The tokenizer
-    // in `frontend/thumb.ts` used to drop the comment that says so, read the `bl` as a call, and
-    // refuse wherever that reading broke first. It now keeps the mark and lowers the relay to `b`,
-    // and the rows that pinned it, `farjump_cond`, `farjump_pool` and `farjump_sealed`, MATCH.
+    // agbcc spells a branch past Thumb's ±2 KB reach as `bl .Lx @far jump` (thumb.md `jump`,
+    // `*cond_branch`, `*cond_branch_reversed`), and `frontend/thumb.ts` lowers it to `b`.
     //
-    // SO THE CLASS IS THE LOWERING'S OWN REFUSALS, AND NOTHING ELSE: a marked relay whose lr is not
+    // THE CLASS IS THE LOWERING'S OWN REFUSALS, AND NOTHING ELSE: a marked relay whose lr is not
     // provably dead (no `push` of lr in the entry block, a branch or jump table back to the entry,
-    // or another instruction naming lr) or whose target is not a code label of this function. The
-    // three throws a relay used to reach — an UNMARKED `bl` to a label of this function (a call
-    // thunk like m4a's `bl call_r3`, or a relay whose comment a splitter dropped), alignment fill
-    // the input really leaves open, and code that really runs into data — now mean only what they
-    // say, and are in the residue: a marked relay never reaches them, so counting them here would
-    // book a thunk or a layout gap as a far jump. No row reaches any of the two, so the class is in
-    // `NO_ROWS`; it stays because the refusals are still core's.
+    // or another instruction naming lr) or whose target is not a code label of this function. An
+    // UNMARKED `bl` to a label of this function (a call thunk like m4a's `bl call_r3`, or a relay
+    // whose comment a splitter dropped), alignment fill the input leaves open, and code that runs
+    // into data are in the residue: a marked relay never reaches them, so counting them here would
+    // book a thunk or a layout gap as a far jump. No row reaches either refusal, so the class is in
+    // `NO_ROWS`.
     key: 'far-jump',
     label: 'Thumb far-jump relays whose lr is not provably dead, or that leave the function',
     pattern: /would drop the lr write a|does not target a code label of this function/,

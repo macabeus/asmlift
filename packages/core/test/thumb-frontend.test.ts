@@ -88,11 +88,9 @@ describe('a PC write is a control transfer under either spelling', () => {
 
 // THE SAME QUESTION FOR `bx`. `classifyXfer` sees one instruction and reads every `bx rN` (and
 // `pop {…, pc}`) as a return, which is only true when what it jumps to is the lr this function was
-// called with. `mov r0, #7; bx r3` lifted to `return 7;` although it jumps wherever r3 points. A
-// first fix asked for "a `pop` whose highest register is rN" — a register NAME standing in for a
-// frame WORD — and still let through `pop {r0}` reading the saved r4, a `pop` reading a local, and
-// `pop {r4, r1}`, which fills r1 first (a list is filled by register number) from r4's word. So the
-// frame is walked: a return must read the word the prologue's `push` saved lr in, on every path.
+// called with. Which word a `pop` reads is a FRAME question, not a register-name one — a list is
+// filled by register number, lowest address first — so a return must read the word the prologue's
+// `push` saved lr in, on every path; `mov r0, #7; bx r3` jumps wherever r3 points.
 describe("a return is a return only through the caller's lr, read from the frame word it was saved in", () => {
   test.each([
     ['a register nothing popped', '\tpush\t{lr}\n\tmov\tr0, #7\n\tbx\tr3\n', 'bx r3'],

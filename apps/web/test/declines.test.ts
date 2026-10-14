@@ -946,10 +946,9 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // describe — a second push, a depth r1 does not hold, a reload nothing stored — and no benchmark
   // row reaches any of them.
   //
-  // `far-jump` joins when its capability lands: `frontend/thumb.ts` lowers agbcc's marked relay to
-  // the branch it stands for, and its three rows MATCH. What it keys on is the lowering's own
-  // refusals — a relay whose lr is not provably dead, or whose target is not a code label of this
-  // function — and no row reaches either.
+  // `far-jump` keys on the far-jump lowering's own refusals in `frontend/thumb.ts` — a relay whose
+  // lr is not provably dead, or whose target is not a code label of this function — and no row
+  // reaches either.
   //
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts

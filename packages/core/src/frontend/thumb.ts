@@ -1045,8 +1045,8 @@ function decode(
   //     an `if` around a `do` instead of a `while`.
   //
   // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line carried the
-  // target's far-jump mark (`farJumpMark`, from `compilerBehaviors.farJumpRelay`). Kept as a set of line texts' positions, not as text, so
-  // nothing downstream can read any other comment.
+  // target's far-jump mark (`farJumpMark`, from `compilerBehaviors.farJumpRelay`). Kept as a set of
+  // line positions, not as text, so nothing downstream can read any other comment.
   const codeLines: string[] = [];
   const farJumpLines = new Set<number>();
   for (const rawLine of withoutDebugSections(asm).split('\n')) {
@@ -1819,8 +1819,8 @@ function decode(
     for (const b of aliasOf.size ? blocks : []) {
       for (const ins of b.instrs) {
         const k = ins.ops.length - 1;
-        // A marked relay is a branch here too (classifyXfer): it is lowered to `b` only later, so
-        // asking the mnemonic alone left `bl .L28 @ far jump` naming the dropped alias of `.L27`.
+        // A marked relay is a branch here too (classifyXfer), though still spelt `bl` until
+        // `lowerFarJumpRelays`: a relay to a dropped alias must name the label it stands for.
         if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic] || ins.farJump) && k >= 0) {
           ins.ops[k] = aliasOf.get(ins.ops[k]) ?? ins.ops[k];
         }
@@ -2619,12 +2619,10 @@ interface LrState {
  *  far-jump relay's lowering needs and does not itself prove (`lowerFarJumpRelays`): with every
  *  return reading the CALLER's lr, the lr a relay writes cannot be what a return jumps to.
  *
- *  NOT ASKED, AND SAID SO: `bx lr` and `mov pc, lr` stay returns by the register's name, as they
- *  were before this proof existed, whether or not a call has since overwritten lr. A compiler
- *  saves lr before it calls, so no compiled function reaches that case; this frontend's own test
- *  fixtures write leaf-style `bl h; bx lr` throughout, and declining them is a separate change
- *  with nothing in the corpus to buy. The far-jump relay does not lean on it either: its lowering
- *  declines any function in which an instruction other than the entry `push` names lr.
+ *  NOT ASKED: `bx lr` and `mov pc, lr` are returns by the register's name, whether or not a call
+ *  has since overwritten lr. A compiler saves lr before it calls, so no compiled function reaches
+ *  that case. The far-jump relay does not lean on it: its lowering declines any function in which
+ *  an instruction other than the entry `push` names lr.
  *
  *  Blocks no path from the entry reaches are not asked: they never run. */
 function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
@@ -2687,7 +2685,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
         }
       } else if (xfer === 'return') {
         // `bx rN`: the register itself must hold the caller's lr. `bx lr` and `mov pc, lr` are
-        // returns by name, as they always were (see the doc comment).
+        // returns by name (see the doc comment).
         const via = canonReg(mn === 'bx' ? (ins.ops[0] ?? '') : (ins.ops[1] ?? ''));
         if (via !== LR && (via === null || !regs.has(via))) {
           refuse(ins);
@@ -2761,9 +2759,8 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
  *    • the entry block saves lr with a `push`, and no branch of this function names the entry
  *      label, so that push runs once, before any relay, and saves the CALLER's lr. A recovered
  *      jump table is the other way back to the entry, and `readThumbText` asks that once the
- *      tables exist (`relayed`). A `.word` naming the entry is NOT one by itself: `dataWords` is
- *      the whole file's, and a state machine storing its own address as a callback (kleod's
- *      `WorldMapScreenHandler`, from another function's pool) is a pointer, not a branch;
+ *      tables exist (`relayed`). A `.word` naming the entry is not one: `dataWords` is the whole
+ *      file's, and a function stored as a callback in another function's pool is a pointer;
  *    • no other instruction of the function names lr at all — no `bx lr`, no `mov pc, lr`, no
  *      `mov rX, lr`, no second `push`. So the lr the relay writes never reaches a register, and no
  *      code can return to it: `b` dropping that write is unobservable.
@@ -2772,7 +2769,7 @@ function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
  *  asked of every Thumb function once the CFG exists (`refuseReturnsNotThroughCallersLr`), where
  *  the frame walk says which word each `pop` reads.
  *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
- *  function that pushes lr too) has the same shape and no mark, and still declines below.
+ *  function that pushes lr too) has the same shape and no mark, and declines below.
  *
  *  The relay must also target a code label of THIS function that is not a declared function start:
  *  agbcc only relays within a function, and a marked `bl` anywhere else is not its relay. */
@@ -2819,7 +2816,7 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
 }
 
 /** `farJumpMark` is the target's `compilerBehaviors.farJumpRelay` comment; absent, no `bl` is a
- *  relay, and one to a label of this function declines below as it always did. */
+ *  relay, and one to a label of this function declines below. */
 function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm, farJumpMark);
