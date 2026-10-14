@@ -349,6 +349,14 @@ describe('what the local area refuses', () => {
     expect(() => decompile('f', reloc, PPC_MWCC, { prototypes: PROTOS })).toThrow(
       /the 'b' at 0x4 leaves the function for 'other' — a tail call is not modelled/,
     );
+    // a conditional tail branch (`R_PPC_REL14`) is one too, even as the function's only other exit
+    const cond = `0 <f>:\n0:\tcmpwi   r3,0\n4:\tbeq-    4 <f+0x4>\n\t\t\t4: R_PPC_REL14\tother\n8:\tli      r3,1\nc:\tblr\n`;
+    expect(() => __testing.frameOf('f', cond, PPC_MWCC, PROTOS)).toThrow(
+      /the 'beq' at 0x4 leaves the function for 'other'/,
+    );
+    expect(() => decompile('f', cond, PPC_MWCC, { prototypes: PROTOS })).toThrow(
+      /the 'beq' at 0x4 leaves the function for 'other' — a tail call is not modelled/,
+    );
   });
 
   test('an undeclared call filling seven argument registers may take stack words under the area', () => {

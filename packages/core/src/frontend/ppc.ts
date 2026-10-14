@@ -516,8 +516,9 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
       return;
     }
     // conditional branch to a label: [taken, fall]. Both must land on block boundaries; otherwise the
-    // branch leaves the function (a tail branch) or targets unrecovered flow — fail LOUD and catchably
+    // branch falls off the function's end or targets unrecovered flow — fail LOUD and catchably
     // rather than silently dropping an edge (which surfaces as an opaque `verify` successor-count error).
+    // A branch out of the function, relocated or not, has already refused as a tail call (`liftPrelude`).
     const taken = idxOf.get(br.target!);
     const fall = idxOf.get(br.addr + 4);
     if (taken === undefined || fall === undefined) {
@@ -990,14 +991,17 @@ function liftPrelude(
   // A BRANCH OUT OF THE FUNCTION is a tail call: the callee takes over this frame's caller's
   // parameter area as its own, so a word stored there may be its stack argument, and the call
   // itself would be dropped. objdump prints one either at an address outside the function or,
-  // relocated (`R_PPC_REL24`), at its own address, which would read as a loop.
+  // relocated, at its own address, which would read as a loop. A conditional branch is one too
+  // (`beq- g`, `R_PPC_REL14`: ac-decomp's ks_nes_core.o carries 46 functions with one), and so
+  // is a `bdnz` out, so every branch with a target is checked, not the `b` alone.
   const tail = instrs.find(
     (i) =>
-      isUncond(i) && (i.reloc !== undefined || (i.target !== undefined && !instrs.some((j) => j.addr === i.target))),
+      (isUncond(i) || isCond(i) || isCtrLoop(i)) &&
+      (i.reloc !== undefined || (i.target !== undefined && !instrs.some((j) => j.addr === i.target))),
   );
   if (tail !== undefined) {
     throw new PpcUnsupportedError(
-      `cannot lift '${name}': the 'b' at 0x${tail.addr.toString(16)} leaves the function` +
+      `cannot lift '${name}': the '${tail.mnemonic}' at 0x${tail.addr.toString(16)} leaves the function` +
         (tail.reloc ? ` for '${tail.reloc.sym}'` : '') +
         ' — a tail call is not modelled',
     );
