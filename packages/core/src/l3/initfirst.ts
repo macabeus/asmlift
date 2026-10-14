@@ -234,16 +234,20 @@ export function initFirstGuards(sfn: SFn): SFn | null {
       // a COMMON-hoisted variable holds its const on both paths, so the condition's matching
       // const operand reads through it unconditionally — no tail gate needed.
       // A BARE const only, where the guard re-spelling below uses the cast-tolerant `sameValue`:
-      // this site does not run `meaningPreserved`, so it may not swap in a name whose declared
-      // type could re-render the compare's signedness — which is exactly what peeling a `(u32)`
-      // would put on the table. A row that needs the unsigned-compare spelling hoisted here brings the
-      // gate with it.
+      // peeling a `(u32)` here would put a re-rendered signedness on the table with no cast left to
+      // say which. The name's DECLARED type can re-render it too — `if (a1 > 0)` read through a
+      // `u32 v` that holds the 0 is `a1 != 0` — so the swap asks `meaningPreserved` as the guard
+      // re-spelling does.
       for (const hv of hoisted) {
         if (cond.k === 'bin' && NEGATE_REL[cond.op]) {
           if (cond.l.k === 'const' && cond.l.value === hv.value) {
-            cond = { ...cond, l: { k: 'var', name: hv.name } };
+            if (meaningPreserved(cond.l, cond.r, 'l', hv.name, env)) {
+              cond = { ...cond, l: { k: 'var', name: hv.name } };
+            }
           } else if (cond.r.k === 'const' && cond.r.value === hv.value) {
-            cond = { ...cond, r: { k: 'var', name: hv.name } };
+            if (meaningPreserved(cond.l, cond.r, 'r', hv.name, env)) {
+              cond = { ...cond, r: { k: 'var', name: hv.name } };
+            }
           }
         }
       }

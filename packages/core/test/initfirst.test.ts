@@ -192,6 +192,29 @@ test('refused: the swap would flip the compare signedness (u32 variable into a s
   expect(r).toBeNull();
 });
 
+test('a common-hoisted u32 variable does not re-spell a signed compare it would make unsigned', () => {
+  // gcc 2.7.2 `blez a1` over `s = 0` in both arms: `if (0 >= a0)` read through a u32 `v0` holding
+  // the 0 is `v0 >= a0`, which compares unsigned and is true only at a0 == 0. The hoist still
+  // happens; the cond keeps its const.
+  const r = initFirstGuards(
+    fnWith(
+      [{ name: 'v0', type: u32t }],
+      [
+        {
+          k: 'if',
+          cond: bin('>=', c(0), v('a0')),
+          then: [assign('v0', c(0))],
+          else: [assign('v0', c(0)), dowhile(bin('!=', v('a0'), c(0)), [])],
+        },
+      ],
+    ),
+  );
+  expect(r).not.toBeNull();
+  expect(r!.body[0]).toEqual(assign('v0', c(0)));
+  const g = r!.body[1] as Extract<Stmt, { k: 'if' }>;
+  expect(g.cond).toEqual(bin('<', c(0), v('a0')));
+});
+
 test('refused inside a loop: the skip-path write would re-execute where an enclosing scope watches', () => {
   // do { if (0 < a0) { v0 = 0; … } } while (v0 != 5) — re-spelled, a guard-false iteration
   // writes v0 = 0 and the outer condition observes it: the original terminates, that C spins.
