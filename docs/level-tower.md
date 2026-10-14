@@ -860,16 +860,19 @@ inside the project's headers drops that block.
 | frame audit | a write, an index or any other use of the return temp but a read inside it                                            | only a read of a returned struct is modelled                         |
 | frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
 
-**Member reads of a returned struct.** The audit rebases a capture's access inside the temp onto
-the temp (`declaredStructs`) and accepts reads of it; structure spells an access that names one
+**Member reads of a returned struct.** A declared struct's range (`declaredStructs`: a return temp,
+or a struct passed by value) is an object boundary. The audit rebases onto its base both a
+capture's access inside it and an `laddr` strictly inside it that is only accessed — a
+`str r1, [sp,#4]` into a by-value struct is a member store, not a second object — and accepts reads
+of a return temp; structure spells an access that names one
 declared member exactly as that member (`sp0.a`), and an L1 pass, `raise/aggmembers.ts` in
 `PRE_RECOVERY_PASSES` after `structs`, splits a whole-word read of the temp — agbcc's only
 sp-relative load — into the member reads its uses take.
 
 **What is NOT built.** A member read of a returned struct at any word but the temp's first: the
-Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`), and routing it to the
-temp needs the audit to rebase an `laddr` inside a declared struct as it rebases a capture. A
-struct returned straight into a global. MIPS,
+Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`); the audit would rebase it
+onto the temp, but the frontend does not route a word there to an `laddr` as it does inside a
+by-value block. A struct returned straight into a global. MIPS,
 which returns every struct through a hidden pointer and refuses the call: the pointer is an address
 in its frame (`addiu a0,sp,N`), and while MIPS now lifts such an address as a frame object through
 the same audit (`measureO32Frame` draws the O32 local area), its call lowering builds no memory

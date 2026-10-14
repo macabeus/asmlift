@@ -95,6 +95,47 @@ const WIDE =
   '\tldr\tr1, [r0, #0x4]\n\tldr\tr0, [r0]\n\tldr\tr2, [sp]\n\tldr\tr3, [sp, #0x4]\n\tbl\ttaked\n' +
   '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
   '\t.word\t-0x10000\n\t.word\t0xffff\n\t.word\tgX\n';
+// `struct F { u16 a, b; u32 c; s8 e, f; }; void fw0(u16 a, u32 w) { struct F x; x.a = a; x.b = 1;
+//  x.c = w; x.e = 3; x.f = 4; takeF(x); }` — the word member is stored straight to [sp,#4]
+const FW0 =
+  'fw0:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n' +
+  '\tmov\tr0, #0x1\n\tstrh\tr0, [r2, #0x2]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr1, sp\n' +
+  '\tmov\tr0, #0x3\n\tstrb\tr0, [r1, #0x8]\n\tmov\tr0, #0x4\n\tstrb\tr0, [r1, #0x9]\n' +
+  '\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n\tldr\tr2, [sp, #0x8]\n\tbl\ttakeF\n' +
+  '\tadd\tsp, sp, #0xc\n\tpop\t{r0}\n\tbx\tr0\n';
+// `… takeF(x); gW = x.c; }` — and read back off [sp,#4] after the call
+const AFTER =
+  'after:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n' +
+  '\tmov\tr0, #0x1\n\tstrh\tr0, [r2, #0x2]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr1, sp\n' +
+  '\tmov\tr0, #0x3\n\tstrb\tr0, [r1, #0x8]\n\tmov\tr0, #0x4\n\tstrb\tr0, [r1, #0x9]\n' +
+  '\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n\tldr\tr2, [sp, #0x8]\n\tbl\ttakeF\n' +
+  '\tldr\tr1, .L4\n\tldr\tr0, [sp, #0x4]\n\tstr\tr0, [r1]\n\tadd\tsp, sp, #0xc\n\tpop\t{r0}\n' +
+  '\tbx\tr0\n.L5:\n\t.align\t2, 0\n.L4:\n\t.word\tgW\n';
+// `… gp(&x.c); takeF(x); }` — the member's address is handed over
+const INTERIOR =
+  'interior:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr2, sp\n\tstrh\tr0, [r2]\n' +
+  '\tmov\tr0, #0x1\n\tstrh\tr0, [r2, #0x2]\n\tstr\tr1, [sp, #0x4]\n\tmov\tr1, sp\n' +
+  '\tmov\tr0, #0x3\n\tstrb\tr0, [r1, #0x8]\n\tmov\tr0, #0x4\n\tstrb\tr0, [r1, #0x9]\n' +
+  '\tadd\tr0, sp, #0x4\n\tbl\tgp\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n' +
+  '\tldr\tr2, [sp, #0x8]\n\tbl\ttakeF\n\tadd\tsp, sp, #0xc\n\tpop\t{r0}\n\tbx\tr0\n';
+// `struct E { u16 a; s8 c, d; u16 b; s8 e, f; }; void tm(u16 a, u16 b, u32 p, u32 q) { struct E x;
+//  x.a = a; x.c = 1; x.d = 2; x.b = b; x.e = 3; x.f = 4; takeE(p, x, q); }` — an 8-byte struct built
+//  by word read-modify-write at [sp] and [sp,#4]
+const TM =
+  'tm:\n\tpush\t{r4, r5, r6, lr}\n\tmov\tr6, r8\n\tpush\t{r6}\n\tadd\tsp, sp, #-0x8\n' +
+  '\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n' +
+  '\tldr\tr6, .L4\n\tadd\tr4, r6, #0\n\tldr\tr5, [sp]\n\tand\tr4, r4, r5\n\torr\tr4, r4, r0\n' +
+  '\tstr\tr4, [sp]\n\tldr\tr5, .L4+0x4\n\tadd\tr0, r5, #0\n\tand\tr0, r0, r4\n' +
+  '\tmov\tr4, #0x80\n\tlsl\tr4, r4, #0x9\n\torr\tr0, r0, r4\n\tstr\tr0, [sp]\n' +
+  '\tldr\tr4, .L4+0x8\n\tmov\tr8, r4\n\tand\tr0, r0, r4\n\tmov\tr4, #0x80\n' +
+  '\tlsl\tr4, r4, #0x12\n\torr\tr0, r0, r4\n\tstr\tr0, [sp]\n\tldr\tr0, [sp, #0x4]\n' +
+  '\tand\tr6, r6, r0\n\torr\tr6, r6, r1\n\tstr\tr6, [sp, #0x4]\n\tand\tr5, r5, r6\n' +
+  '\tmov\tr0, #0xc0\n\tlsl\tr0, r0, #0xa\n\torr\tr5, r5, r0\n\tstr\tr5, [sp, #0x4]\n' +
+  '\tmov\tr4, r8\n\tand\tr5, r5, r4\n\tmov\tr0, #0x80\n\tlsl\tr0, r0, #0x13\n' +
+  '\torr\tr5, r5, r0\n\tstr\tr5, [sp, #0x4]\n\tadd\tr0, r2, #0\n\tldr\tr1, [sp]\n' +
+  '\tldr\tr2, [sp, #0x4]\n\tbl\ttakeE\n\tadd\tsp, sp, #0x8\n\tpop\t{r3}\n\tmov\tr8, r3\n' +
+  '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L5:\n\t.align\t2, 0\n.L4:\n' +
+  '\t.word\t-0x10000\n\t.word\t-0xff0001\n\t.word\t0xffffff\n';
 
 const A = {
   kind: 'struct' as const,
@@ -209,6 +250,56 @@ describe('a struct passed by value in argument registers', () => {
     expect(() => decompile('esc', ESC, ARMV4T_AGBCC, { prototypes: { take2, use } })).toThrow(
       /the object at \[sp,#0\) is passed by value as struct A, and its address is also used another way/,
     );
+  });
+
+  describe('a word of the struct accessed straight at [sp,#k] is its member, not an object of its own', () => {
+    const F = {
+      kind: 'struct' as const,
+      members: [
+        { name: 'a', type: 'u16' },
+        { name: 'b', type: 'u16' },
+        { name: 'c', type: 'u32' },
+        { name: 'e', type: 's8' },
+        { name: 'f', type: 's8' },
+      ],
+    };
+    const takeF = { params: ['struct F'], byValueLayouts: { 0: F }, returnsVoid: true };
+
+    test('stored before the call', () => {
+      const { source } = decompile('fw0', FW0, ARMV4T_AGBCC, { prototypes: { takeF } });
+      expect(source).toContain('    sp0.b = 1;\n    sp0.c = a1;\n    sp0.e = 3;\n');
+      expect(source).toContain('    takeF(sp0);\n');
+    });
+
+    test('read back after it', () => {
+      const { source } = decompile('after', AFTER, ARMV4T_AGBCC, { prototypes: { takeF } });
+      expect(source).toContain('    takeF(sp0);\n    gW = ((s32 *)&sp0)[1];\n');
+    });
+
+    test('a struct built by word read-modify-write', () => {
+      const E = {
+        kind: 'struct' as const,
+        members: [
+          { name: 'a', type: 'u16' },
+          { name: 'c', type: 's8' },
+          { name: 'd', type: 's8' },
+          { name: 'b', type: 'u16' },
+          { name: 'e', type: 's8' },
+          { name: 'f', type: 's8' },
+        ],
+      };
+      const takeE = { params: ['u32', 'struct E', 'u32'], byValueLayouts: { 1: E }, returnsVoid: true };
+      const { source } = decompile('tm', TM, ARMV4T_AGBCC, { prototypes: { takeE } });
+      expect(source).toContain('    v1 = ((s32 *)&sp0)[1];\n');
+      expect(source).toContain('    takeE(a2, sp0, a3);\n');
+    });
+
+    test('whose address is handed over declines', () => {
+      const gp = { params: ['u32 *'], returnsVoid: true };
+      expect(() => decompile('interior', INTERIOR, ARMV4T_AGBCC, { prototypes: { takeF, gp } })).toThrow(
+        /address-taken stack local/,
+      );
+    });
   });
 
   test('without a layout the call is lifted as before, at the guessed arity', () => {

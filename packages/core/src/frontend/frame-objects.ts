@@ -711,6 +711,30 @@ function splitAddressingCopies(
     if (at.length === 0 || accesses.length !== at.length) {
       continue;
     }
+    // AN ADDRESS STRICTLY INSIDE A DECLARED STRUCT, ONLY ACCESSED, IS A MEMBER ACCESS OF THAT
+    // STRUCT. A word store into a struct passed by value goes straight to `[sp,#k]` — `x.c = w` is
+    // `str r1, [sp, #0x4]` over `struct F {u16 a,b; u32 c; s8 e,f;}` at [sp,#0) — and the frontend
+    // mints that access its own `laddr` at k. The declaration says those bytes are the struct's,
+    // so the address is re-rooted on the struct's base with the displacement on the access, and
+    // the audit judges one object rather than two that overlap. Any use that is not an access —
+    // `&x.c` handed on — is an interior pointer, which is not this shape and is left to refuse.
+    const off = capture.attrs.off as number;
+    const holders = structs.filter((r) => r.from < off && off < r.to);
+    const holder = holders[0];
+    const inHolder = (u: { op: Op }): boolean =>
+      off + (u.op.attrs.off as number) >= holder!.from &&
+      off + (u.op.attrs.off as number) + (u.op.attrs.width as number) <= holder!.to;
+    if (
+      holder !== undefined &&
+      holders.every((r) => r.from === holder.from && r.to === holder.to) &&
+      accesses.every(inHolder)
+    ) {
+      for (const u of accesses) {
+        u.op.attrs = { ...u.op.attrs, off: off - holder.from + (u.op.attrs.off as number) };
+      }
+      capture.attrs = { ...capture.attrs, off: holder.from };
+      continue;
+    }
     if (!subWord) {
       splitRefusal.set(capture.results[0], 'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form');
       continue;
