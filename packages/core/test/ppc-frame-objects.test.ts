@@ -3,7 +3,7 @@
 // reads back with no call to take it, gets a local area (`compilerBehaviors.linkageLocalArea`);
 // every r1 access inside it is memory through an `laddr`, and the shared frame-object audit
 // (frontend/frame-objects.ts) proves the objects or refuses. An incoming stack word is a parameter
-// (`@sarg<k>`). The shapes are mwcc's own (`corpus/probe-mwcc-frame.c` and the review's probes), and
+// (`@sarg<k>`). The shapes are mwcc's own (`corpus/probe-mwcc-frame.c` and compiles like it), and
 // the refusals are the ways a frame word that is not a local — an outgoing argument, a save, an
 // incoming argument, a by-value copy — would otherwise be declared one.
 import { readFileSync } from 'node:fs';

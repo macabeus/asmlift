@@ -72,11 +72,8 @@ export interface DeclaredCall {
   readonly returned?: StructReturn | 'register';
 }
 
-/** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes: the one reading the
- *  declaration's every reader takes (`paramClassOf`, proto.ts), so `declaredCall`'s widths and this
- *  class cannot disagree. A frontend asks it where a width alone is not enough: a by-value
- *  aggregate travels as the address of a copy the caller builds in its own frame on mwcc, which a
- *  float or an enum never does, and an unsized spelling may be any of them. */
+/** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes (`paramClassOf`,
+ *  proto.ts, which `declaredCall`'s widths read too). */
 export type { ParamClass };
 
 /** One declared parameter: its class, and the spelling it was read from (empty for a count). */

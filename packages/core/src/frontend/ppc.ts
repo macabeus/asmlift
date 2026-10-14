@@ -800,9 +800,8 @@ const takesFrameAddress = (ins: Instr, frameReg: string | undefined): boolean =>
  *  The area starts where the caller's parameter area does (`PARAM_AREA_AT`), past the back chain
  *  and the link-register save word, and runs to the lowest save (`compilerBehaviors.linkageLocalArea`,
  *  `areaAboveOutgoing`). The measured rule puts it past the widest call's stack words too; no call
- *  this frontend lowers takes any, so a call whose declaration may refuses here, where the area is
- *  drawn, rather than leaving the partition sound only through the lowering's own refusal: one
- *  declared with more parameter words than argument registers, with a 64-bit parameter (the EABI
+ *  this frontend lowers takes any, so a call whose declaration may take some refuses here, where the
+ *  area is drawn: one declared with more parameter words than argument registers, with a 64-bit parameter (the EABI
  *  aligns a pair to an odd register, so a packed word count does not say where the stack words
  *  start), or with more floating parameters than f1..f8. So does a declared parameter that is a
  *  struct or union passed by value (`ParamClass` `by-value`), which mwcc passes as the address of a
@@ -991,9 +990,8 @@ function liftPrelude(
   // A BRANCH OUT OF THE FUNCTION is a tail call: the callee takes over this frame's caller's
   // parameter area as its own, so a word stored there may be its stack argument, and the call
   // itself would be dropped. objdump prints one either at an address outside the function or,
-  // relocated, at its own address, which would read as a loop. A conditional branch is one too
-  // (`beq- g`, `R_PPC_REL14`: ac-decomp's ks_nes_core.o carries 46 functions with one), and so
-  // is a `bdnz` out, so every branch with a target is checked, not the `b` alone.
+  // relocated, at its own address, which would read as a loop. A conditional branch out
+  // (`beq- g`, `R_PPC_REL14`) and a `bdnz` out are tail calls too.
   const tail = instrs.find(
     (i) =>
       (isUncond(i) || isCond(i) || isCtrLoop(i)) &&
@@ -1126,7 +1124,6 @@ function liftOnce(
         `is a link-time placeholder, not the value`,
     );
   };
-  /** This frontend's refusal, for the shared code that refuses on its behalf. */
   const fail = ppcRefusal;
   const { blocks, succIdx, r1At, savedRegs, calls, frame } = liftPrelude(name, instrs, target, prototypes, jts);
   const lrOverwrittenBy = linkRegisterOverwrites(blocks, succIdx, (ins) => Boolean(saveRoutineOf(target, ins)));

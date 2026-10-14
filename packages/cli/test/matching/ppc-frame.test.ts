@@ -141,8 +141,8 @@ describe('frame objects and incoming stack arguments, lifted and recompiled on e
   }
 });
 
-// TWO SHAPES THAT DO NOT MATCH, pinned on the builds the synthetic tier does not run, beside
-// `synthetic:{homecall,tbval}:mwcc_242_81`. Mario Party 4's -O0,p homes a parameter at r1+8, below
+// TWO SHAPES THAT DO NOT MATCH, beside `synthetic:{homecall,tbval}:mwcc_242_81`: `homecall` on
+// mwcc_247_107, `tbval` on both builds the synthetic tier does not run. Mario Party 4's -O0,p homes a parameter at r1+8, below
 // the array its callee is handed, and reloads it after the call: the reload proves the word a
 // local's (`compilerBehaviors.localsAboveOutgoingArea`), so the function lifts — to the home as a
 // word of the frame object, which is right and does not recompile to the same frame. A struct a
@@ -193,8 +193,7 @@ describe('a homed parameter beside a captured local lifts, and a typedef-spelled
 // AN ENUM PARAMETER, read through the context as the bench's real rows read it, beside
 // `synthetic:enumarg:mwcc_242_81`: the context says the enum travels in one word
 // (`FnProto.wordParams`), and the call lowering reads that one fact too, so the seven-argument
-// call is lowered at its declared arity instead of refusing as one nothing declares. It lifts as
-// its `s32` twin does, to the same frame and the same score.
+// call is lowered at its declared arity instead of refusing as one nothing declares.
 describe('an enum parameter a context sizes is one word to the call lowering too', () => {
   const ctx =
     'typedef int s32; typedef enum { A, B } Fmt; void use(s32 *p);\n' +

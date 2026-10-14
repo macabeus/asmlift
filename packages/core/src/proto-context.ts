@@ -1146,8 +1146,7 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  (`wordParams`, `byValueParams`) set aside: which source states the declaration better is not
  *  which one a lowering can place. The map sizes an enum or an array typedef by its byte count and
  *  spells it, which the context's reading of the name only classifies; so an entry that sizes such
- *  a parameter through that reading still yields to a map that spells it, as it did before the
- *  reading existed. Whichever entry wins is the one every reader of it takes. */
+ *  a parameter through that reading still yields to a map that spells it. Whichever entry wins is the one every reader of it takes. */
 function contextPrototypesUnder(
   context: Prototypes,
   symbols: SymbolMap | undefined,

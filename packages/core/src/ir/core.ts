@@ -163,9 +163,9 @@ export type LocalObjects = ReadonlyMap<string, LocalObject>;
  *  `deadHome` — THE STORE DOES NOT REACH THE IR. Every slot-modelling frontend spells a word
  *  sp-relative store as a write to the SSA key `sp@k` instead of a `store` op (`stackSlotKey`), so
  *  a slot nothing reloads has no reader, no op and no value: it simply is not there by L1. MIPS and
- *  Thumb lift such a store. PowerPC refuses it in a function that makes a call, because an unread
- *  store may be that call's outgoing stack argument, and in one that makes none lifts it as a store
- *  to a frame object in mwcc's local area, not to a slot (frontend/ppc.ts `measurePpcFrame`), so a
+ *  Thumb lift such a store. PowerPC refuses it, because an unread slot store may be a call's
+ *  outgoing stack argument; in a function that makes no call, mwcc's local area takes such a store
+ *  as a store to a frame object instead of a slot (frontend/ppc.ts `measurePpcFrame`). Either way a
  *  PowerPC lift never reports a dead home. A
  *  parameter stored to two slots, one of them reloaded, still counts — the dead store happened —
  *  and the reader's own gates decide what a parameter with that much traffic may become.
