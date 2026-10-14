@@ -12,7 +12,7 @@ import { print } from '../src/ir/print';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
-import { LATCH_GATES, foldEmptyLatches } from '../src/raise/latch';
+import { EXIT_TRAMPOLINE_GATES, LATCH_GATES, foldEmptyLatches, foldExitTrampolines } from '../src/raise/latch';
 import { structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -160,6 +160,37 @@ test('a latch whose sole op is a cond_br is refused — folding it would drop it
   expect(ops.filter((o) => o.opcode === 'cond_br').length).toBe(1); // the latch's own went with it
   const reached = new Set(ops.flatMap((o) => o.successors.map((sx) => sx.block)));
   expect(reached.has(secondArm)).toBe(false); // …and its second arm lost its only in-edge
+});
+
+test('an exit block whose sole op is a cond_br is never folded', () => {
+  // ^bb3 leaves the loop beside the header's own exit to ^bb4, so the trampoline fold judges it — and
+  // its sole op is a `cond_br`, whose second arm (^bb5) a fold would drop with it.
+  const IR = `fn x {
+^bb0(%0: s32):
+  br ^bb1(%0)
+^bb1(%1: s32):
+  %2: s32 = const {value=1}
+  %3: s32 = add %1, %2
+  %4: u32 = icmp_slt %3, %0
+  cond_br %4, ^bb2(), ^bb4(%3)
+^bb2():
+  %5: s32 = call %3 {target="f"}
+  %6: u32 = icmp_slt %5, %0
+  cond_br %6, ^bb1(%3), ^bb3()
+^bb3():
+  cond_br %6, ^bb4(%5), ^bb5()
+^bb4(%7: s32):
+  %8: s32 = call %7 {target="g"}
+  ret %8
+^bb5():
+  ret %5
+}
+`;
+  expect(foldExitTrampolines(parse(IR))).toBe(0);
+  const ablated = parse(IR);
+  expect(foldExitTrampolines(ablated, without(EXIT_TRAMPOLINE_GATES, 'trampoline-does-work'))).toBe(1);
+  const reached = new Set(ablated.blocks.flatMap((b) => b.ops.flatMap((o) => o.successors.map((sx) => sx.block))));
+  expect([...reached].some((b) => b.ops[0]?.opcode === 'ret' && b.params.length === 0)).toBe(false); // ^bb5 orphaned
 });
 
 test('chained latches fold to a fixpoint, and every removal keeps dominance sound', () => {

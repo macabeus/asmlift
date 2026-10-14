@@ -46,7 +46,7 @@ import {
   ORDER_SHAPE_GATES,
   SHAPE_GATES,
 } from '../src/raise/globalshape';
-import { LATCH_GATES } from '../src/raise/latch';
+import { EXIT_TRAMPOLINE_GATES, LATCH_GATES } from '../src/raise/latch';
 import { MEMBER_ARRAY_GATES } from '../src/raise/memberarrays';
 import { NARROW_LOCAL_GATES } from '../src/raise/narrowlocal';
 import { OFFSET_NAME_GATES } from '../src/raise/offsetnames';
@@ -87,6 +87,7 @@ const TABLES: Record<string, readonly Gate<never>[]> = {
   PREUPDATE_SINK_GATES: PREUPDATE_SINK_GATES as readonly Gate<never>[],
   PREUPDATE_COND_GATES: PREUPDATE_COND_GATES as readonly Gate<never>[],
   LATCH_GATES: LATCH_GATES as readonly Gate<never>[],
+  EXIT_TRAMPOLINE_GATES: EXIT_TRAMPOLINE_GATES as readonly Gate<never>[],
   FALL_IN_GATES: FALL_IN_GATES as readonly Gate<never>[],
   SELECT_GATES: SELECT_GATES as readonly Gate<never>[],
   ARM_REREAD_GATES: ARM_REREAD_GATES as readonly Gate<never>[],

@@ -11,9 +11,11 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import type { Expr, Stmt } from '../src/l3/ast';
 import { decompile, readabilityRewrites } from '../src/pipeline';
+import { foldExitTrampolines } from '../src/raise/latch';
 import { recoverTypes } from '../src/raise/recover';
-import { structure } from '../src/structure/structure';
+import { hoistRefusal, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC } from '../src/target';
 import { irAgreement } from './helpers';
 
@@ -365,9 +367,10 @@ test('an edge to an exit whose tail agbcc keeps single is spelled `break`', () =
   expect(src.match(/return /g)).toHaveLength(1);
 });
 
-/** The exit takes a param: `-1` from the header, `j` from the break. The header's copy runs after
- *  the loop, so a `break` would reach it and overwrite `j`. The exit is a live merge, not a `ret`
- *  block, so nothing else can spell the edge. */
+/** The exit takes a param: `-1` from the header, `j` from the break. Rendered after the loop, the
+ *  header's copy would overwrite `j` on the break's way past, so it renders AHEAD of the loop: `-1`
+ *  is computed before the loop, which never reads the exit's name and writes it only on its way out.
+ *  The exit therefore takes a name of its own rather than the loop variable's. */
 const HEADER_EXIT_COPIES = `fn exitcopies {
 ^bb0(%0: s32, %1: s32):
   %2: s32 = const {value=0}
@@ -393,8 +396,150 @@ const HEADER_EXIT_COPIES = `fn exitcopies {
   ret %11
 }`;
 
-test('a `break` the header-exit copies would overwrite declines', () => {
-  expect(() => emit(HEADER_EXIT_COPIES)).toThrow(/would run the copies the loop header hands its exit/);
+test('a `break` with a value of its own moves the header-exit copies ahead of the loop', () => {
+  const { src, agreement, shipped } = judged(HEADER_EXIT_COPIES);
+  expect(src).toBe(
+    's32 exitcopies(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    v0 = 0;\n    v1 = -1;\n' +
+      '    while (v0 < a0) {\n        if (f(a1 + v0) != 0) {\n            v1 = v0;\n            break;\n        }\n' +
+      '        v0 = v0 + 1;\n    }\n    g(v1);\n    return v1;\n}\n',
+  );
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+/** The same loop, with the header handing the exit the loop variable itself: a value computed IN the
+ *  loop, which holds nothing ahead of it. Its copy has nowhere to go but after the loop, where the
+ *  break would run it, and the exit is a live merge rather than a `ret` block. */
+const HEADER_EXIT_COPIES_IN_LOOP = HEADER_EXIT_COPIES.replace(
+  'cond_br %4, ^bb2(), ^bb4(%20)',
+  '%21: s32 = add %3, %20\n  cond_br %4, ^bb2(), ^bb4(%21)',
+).replace('fn exitcopies', 'fn exitloopval');
+
+test('a `break` with a value of its own declines when the header hands the exit a loop value', () => {
+  expect(() => emit(HEADER_EXIT_COPIES_IN_LOOP)).toThrow(/would run the copies the loop header hands its exit/);
+});
+
+test('exit copies run ahead of a loop only where the loop leaves their names standing', () => {
+  const v = (name: string): Expr => ({ k: 'var', name });
+  const copies: Stmt[] = [{ k: 'assign', name: 'r', value: v('a0') }];
+  const cond: Expr = { k: 'bin', op: '<', l: v('i'), r: v('n') };
+  const leave = (value: Expr): Stmt => ({
+    k: 'if',
+    cond: v('c'),
+    then: [{ k: 'assign', name: 'r', value }, { k: 'break' }],
+    else: [],
+  });
+  expect(hoistRefusal(cond, [leave(v('i'))], copies)).toBeNull();
+  expect(hoistRefusal({ ...cond, r: v('r') }, [leave(v('i'))], copies)).toMatch(/test reads/);
+  expect(hoistRefusal(cond, [{ k: 'exprstmt', value: { k: 'call', fn: 'f', args: [v('r')] } }], copies)).toMatch(
+    /loop reads/,
+  );
+  expect(hoistRefusal(cond, [{ k: 'assign', name: 'r', value: v('i') }], copies)).toMatch(/other than on its way out/);
+  expect(hoistRefusal(cond, [{ k: 'assign', name: 'a0', value: v('i') }], copies)).toMatch(
+    /writes a name the copies read/,
+  );
+  // a `break` inside an inner loop leaves THAT loop, so the write there is not on this one's way out
+  const inner: Stmt = { k: 'while', cond: v('c'), body: [{ k: 'assign', name: 'r', value: v('i') }, { k: 'break' }] };
+  expect(hoistRefusal(cond, [inner], copies)).toMatch(/other than on its way out/);
+});
+
+// ── EMPTY EXIT TRAMPOLINES (raise/latch.ts `foldExitTrampolines`) ──────────────────────────────
+
+const folded = (ir: string) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  const n = foldExitTrampolines(fn);
+  verify(fn);
+  const sfn = structure(fn);
+  return {
+    n,
+    src: cBackend.emit(sfn),
+    agreement: irAgreement(ir, sfn, SEEDS),
+    shipped: irAgreement(ir, readabilityRewrites(sfn), SEEDS),
+  };
+};
+
+/** agbcc -O2 of `synthetic:break_value`, `r = 1; for (i = 1; i < 9; i++) { if (t[i] == 28) { r = i;
+ *  break; } } return u[r];`, without the first test agbcc peels: the break's `r = i` is an edge
+ *  argument on a block that holds nothing but its `br` to the code after the loop, which the header's
+ *  test also reaches. */
+const BREAK_TRAMPOLINE = `fn brktramp {
+^bb0(%0: s32):
+  %1: s32 = const {value=1}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = const {value=1}
+  %4: s32 = add %2, %3
+  %5: s32 = const {value=8}
+  %6: u32 = icmp_slt %5, %4
+  cond_br %6, ^bb4(%1), ^bb2()
+^bb2():
+  %7: s32 = call %4 {target="t"}
+  %8: s32 = const {value=28}
+  %9: u32 = icmp_eq %7, %8
+  cond_br %9, ^bb3(), ^bb1(%4)
+^bb3():
+  br ^bb4(%4)
+^bb4(%10: s32):
+  %11: s32 = call %10 {target="u"}
+  ret %11
+}`;
+/** kleod `sub_0801E664`'s side of the same thing: the trampoline sits on the LATCH's way out, and the
+ *  mid-body break reaches the code after the loop directly. */
+const LATCH_TRAMPOLINE = `fn latchtramp {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1)
+^bb1(%2: s32):
+  %3: s32 = call %2 {target="t"}
+  %4: s32 = const {value=28}
+  %5: u32 = icmp_eq %3, %4
+  cond_br %5, ^bb4(%2), ^bb2()
+^bb2():
+  %6: s32 = const {value=1}
+  %7: s32 = add %2, %6
+  %8: u32 = icmp_slt %7, %0
+  cond_br %8, ^bb1(%7), ^bb3()
+^bb3():
+  %9: s32 = const {value=-1}
+  br ^bb4(%9)
+^bb4(%10: s32):
+  %11: s32 = call %10 {target="u"}
+  ret %11
+}`;
+
+test('an empty block on a break edge folds into the edge, and the break carries its copy', () => {
+  const r = folded(BREAK_TRAMPOLINE);
+  expect(r.n).toBe(1);
+  expect(r.src).toContain('break;');
+  expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+test('an empty block on the latch’s exit edge folds the same way', () => {
+  const r = folded(
+    LATCH_TRAMPOLINE.replace('%9: s32 = const {value=-1}\n  ', '').replace('br ^bb4(%9)', 'br ^bb4(%7)'),
+  );
+  expect(r.n).toBe(1);
+  expect(r.agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(r.shipped).toEqual({ judged: 300, disagree: 0 });
+});
+
+test('an empty exit block whose target only returns keeps its early-`return` spelling', () => {
+  const pureRet = BREAK_TRAMPOLINE.replace('%11: s32 = call %10 {target="u"}\n  ret %11', 'ret %10');
+  expect(folded(pureRet).n).toBe(0);
+});
+
+test('an empty exit block is folded only beside another exit to the same target', () => {
+  // the header leaves for ^bb5 instead, so ^bb3 is the break's own way to ^bb4
+  const lone = BREAK_TRAMPOLINE.replace('cond_br %6, ^bb4(%1), ^bb2()', 'cond_br %6, ^bb5(), ^bb2()').replace(
+    '  ret %11\n}',
+    '  ret %11\n^bb5():\n  ret %1\n}',
+  );
+  const fn = parse(lone);
+  verify(fn);
+  expect(foldExitTrampolines(fn)).toBe(0);
 });
 
 /** A loop rotated so its header computes `i + 1` and hands it to the exit, and a mid-body `break`

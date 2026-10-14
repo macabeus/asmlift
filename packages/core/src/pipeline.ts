@@ -30,7 +30,7 @@ import type { ContextGlobals } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
-import { foldEmptyLatches } from './raise/latch';
+import { foldEmptyLatches, foldExitTrampolines } from './raise/latch';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
@@ -383,7 +383,7 @@ export function raiseRecovered(
     verify(fn);
     hooks.afterRetsink?.();
   }
-  if (foldEmptyLatches(fn)) {
+  if (foldEmptyLatches(fn) + foldExitTrampolines(fn) > 0) {
     verify(fn);
     hooks.afterLatchFold?.();
   }

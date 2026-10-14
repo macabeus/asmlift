@@ -24,8 +24,10 @@
 // `if` (declining loud on the hazards). The guard therefore survives the fold either way; what the
 // gate preserves is the SHAPE — a forward trampoline is not a latch, and folding one re-casts an
 // unrelated branch as a loop guard — which is the `target-dominates` entry's own note below.
-import { Fn, dominators, foldWriteOrder } from '../ir/core';
+import { Block, Fn, dominators, foldWriteOrder, predecessors, successorsOf } from '../ir/core';
+import { effectful } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
+import { analyzeLoops } from '../structure/loops';
 
 /** What the gates below judge: one candidate block and the block its `br` goes to. */
 interface LatchCandidate {
@@ -80,9 +82,9 @@ export const LATCH_GATES: readonly Gate<LatchCandidate>[] = [
  *  SUCCESSOR changes, so an edge that was not a back-edge becomes one. (Dominator sets themselves
  *  only ever shrink — removing a block removes it from every set it was in.)
  *
- *  A predecessor that already branches to the target ends up with two edges into one block. That is
- *  a block whose every edge continues the loop, so it has no exit and loop recovery declines — the
- *  same loud decline it gave before the fold.
+ *  A predecessor that already branches to the target ends up with two edges into one block, each
+ *  carrying its own arguments. Where that predecessor has no other edge the loop has no exit, and
+ *  loop recovery spells it `while (1)` with each edge's own update copy.
  */
 export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] = LATCH_GATES): number {
   let folded = 0;
@@ -121,6 +123,145 @@ export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] 
       }
     }
     fn.blocks = fn.blocks.filter((b) => b !== latch);
+    folded++;
+  }
+}
+
+// ── EMPTY EXIT TRAMPOLINES ──────────────────────────────────────────────────────────────────────
+//
+// The same empty block on a loop's way OUT. `for (…) { if (t[i] == k) { r = i; break; } }` keeps
+// `r` in a register the break copies into (`add r2, r1, #0`), and the copy becomes an edge argument
+// of a block that holds nothing but its `br` to the code after the loop — beside a second exit edge
+// (the loop's own test failing) that reaches that code directly. The loop then has two exit targets
+// and none of them is a `return`, so every loop form refuses it, and the back-edge declines loud at
+// `onStack`. Which exit edge carries the block is the compiler's choice: agbcc puts it on the break
+// (`synthetic:break_value`) or on the latch's own exit with the break going direct (kleod
+// `sub_0801E664`).
+//
+// Splicing it out re-points each edge into it at its target with its own arguments, and the loop
+// exits to one block: a `break` that carries its copies, which the structurer already spells. The
+// arguments move soundly for the reason the latch's do: the block has no params and one op, so
+// every value its `br` passes dominates it, and therefore the end of each of its predecessors.
+
+/** One candidate trampoline: the block, where its `br` goes, and the loops it may leave. */
+interface ExitTrampoline {
+  block: Block;
+  target: Block;
+  /** the predecessors of `block` */
+  preds: readonly Block[];
+  /** does some loop hold every predecessor of `block` but not `block` itself, and leave by another
+   *  edge for `target` as well? */
+  sharedExit: boolean;
+  /** does every path from `target` reach a `ret` without an effect on the way? */
+  pureReturn: boolean;
+}
+
+export const EXIT_TRAMPOLINE_GATES: readonly Gate<ExitTrampoline>[] = [
+  {
+    id: 'trampoline-has-params',
+    why: 'a param is a join: the br args may read it, and they would not exist at a predecessor',
+    // the fold then hands a predecessor a value it does not dominate, which `verify` refuses loud
+    sound: false,
+    rejects: (c) => c.block.params.length > 0,
+  },
+  {
+    id: 'trampoline-does-work',
+    why: 'the sole terminator must be an unconditional `br`: folding a `cond_br` block discards its second successor',
+    sound: true,
+    guardedBy: 'latch.test.ts: an exit block whose sole op is a cond_br is never folded',
+    rejects: (c) => c.block.ops[0]?.opcode !== 'br',
+  },
+  {
+    id: 'trampoline-self-branch',
+    why: 'a block branching to itself is an infinite loop rather than a trampoline',
+    sound: false,
+    rejects: (c) => c.target === c.block,
+  },
+  {
+    // The SCOPE of the fold, not its soundness: an exit edge's empty block is harmless to the
+    // structurer wherever it is the loop's one way out, and folding it there would only re-spell
+    // functions that already lift.
+    id: 'trampoline-not-a-second-exit',
+    why: 'only a loop that also leaves for the same target by another edge has two exit targets because of it',
+    sound: false,
+    rejects: (c) => !c.sharedExit,
+  },
+  {
+    // A target that only returns already lifts: the structurer takes the edge through the
+    // trampoline as an early `return` and copies the pure tail into it. Kept that way, so the fold
+    // re-spells no function that lifted before it.
+    id: 'trampoline-returns-already',
+    why: 'an exit that only returns is an early `return` arm, which the structurer spells without the fold',
+    sound: false,
+    rejects: (c) => c.pureReturn,
+  },
+];
+
+/** Every path from `b` ends in a `ret` and runs no effect on the way. */
+function returnsPurely(b: Block): boolean {
+  const seen = new Set<Block>();
+  for (const stack = [b]; stack.length > 0;) {
+    const x = stack.pop()!;
+    if (seen.has(x)) {
+      continue; // a join two paths share, or a cycle — either way judged on its first visit
+    }
+    seen.add(x);
+    if (x.ops.some(effectful)) {
+      return false;
+    }
+    const t = x.ops[x.ops.length - 1];
+    if (t?.opcode === 'ret') {
+      continue;
+    }
+    if (t?.opcode !== 'br' && t?.opcode !== 'cond_br') {
+      return false;
+    }
+    stack.push(...successorsOf(x));
+  }
+  return true;
+}
+
+/** Splice out every empty EXIT TRAMPOLINE the gates above admit; returns how many were removed.
+ *  Iterated, as the latch fold is: one splice can make another block's exit edges shared. */
+export function foldExitTrampolines(fn: Fn, gates: readonly Gate<ExitTrampoline>[] = EXIT_TRAMPOLINE_GATES): number {
+  let folded = 0;
+  for (;;) {
+    const preds = predecessors(fn);
+    const loops = [...analyzeLoops(fn, dominators(fn)).byHeader.values()];
+    const found = fn.blocks.find((b) => {
+      const target = b.ops[0]?.successors[0]?.block;
+      if (target === undefined) {
+        return false;
+      }
+      const into = preds.get(b) ?? [];
+      const sharedExit =
+        into.length > 0 &&
+        loops.some(
+          (nl) => !nl.body.has(b) && into.every((p) => nl.body.has(p)) && nl.exitEdges.some((e) => e.to === target),
+        );
+      return (
+        firstRejection(gates, { block: b, target, preds: into, sharedExit, pureReturn: returnsPurely(target) }) === null
+      );
+    });
+    if (!found) {
+      return folded;
+    }
+    const onward = found.ops[0].successors[0];
+    for (const b of fn.blocks) {
+      let repointed = false;
+      for (const op of b.ops) {
+        op.successors.forEach((s, i) => {
+          if (s.block === found) {
+            op.successors[i] = { block: onward.block, args: [...onward.args] };
+            repointed = true;
+          }
+        });
+      }
+      if (repointed) {
+        foldWriteOrder(fn.writeOrder, found, b);
+      }
+    }
+    fn.blocks = fn.blocks.filter((b) => b !== found);
     folded++;
   }
 }
