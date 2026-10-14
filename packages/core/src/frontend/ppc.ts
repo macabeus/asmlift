@@ -59,6 +59,7 @@ import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
+import { type HoistedDispatch, type TableKey, agreedTable, entersDispatch, makeTableBases } from './jump-table';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
@@ -205,9 +206,10 @@ interface PpcJT {
   /** The default arm's address, or null for a `bgtlr` bound: out-of-range values return. */
   defaultAddr: number | null;
   bctrAddr: number;
-  /** The addresses of a loop-hoisted `lis`/`addi` table base, which only the pruned dispatch reads:
-   *  `lift` drops them from their block, as the pruning drops an in-block base. */
-  hoistedBase: number[];
+  /** The base register and table of a dispatch whose block does not form its base (mwcc 2.3.3
+   *  hoists the `lis`/`addi` pair out of a loop): `lift` proves the base reaches it
+   *  (frontend/jump-table.ts). Null when the pruned block forms the base itself. */
+  hoisted: HoistedDispatch | null;
 }
 
 /** The `cr` field a compare writes or a conditional branch reads: its first operand when it names
@@ -257,67 +259,18 @@ function boundsCompare(instrs: Instr[], j: number, scrutReg: string): number | n
   return null;
 }
 
-/** Whether any branch lands in a dispatch block — after its bounds branch at `boundsAddr`, up to its
- *  indirect jump at `jumpAddr`. Such a path skips the bounds check, and the block it enters is the
- *  one a recovered table prunes. Shared shape with frontend/mips.ts. */
-const entersDispatch = (instrs: Instr[], boundsAddr: number, jumpAddr: number): boolean =>
-  instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= jumpAddr);
-
-/** The index of a LOOP-HOISTED table base `lis rB,0 ; addi rB,rB,0` for the dispatch whose `lwzx` at
- *  `li` reads rB and whose `bctr` is at `i`, or null. mwcc 2.3.3 forms it once at entry and
- *  dispatches from the loop. The pair is dropped from its block once the table is recovered, so it
- *  must be dead everywhere else; it is refused unless:
- *  - the two are adjacent and are the function's only writes of rB (the `@ha`/`@l` evidence is
- *    checked by the caller, as for an in-block base);
- *  - nothing but the `addi` and that `lwzx` names rB, and rB is no register a call, a return or the
- *    ABI reads implicitly (r0-r4, r13), nor a volatile one in a function that calls;
- *  - every path from entry to the `lwzx` runs the `lis` first, walked over the instructions — and a
- *    second indirect jump, whose targets the walk cannot follow, refuses. */
-function hoistedTableBase(instrs: Instr[], rB: string, li: number, i: number): number | null {
-  const n = /^r(\d+)$/.exec(rB) ? Number(rB.slice(1)) : -1;
-  const isCall = (x: Instr) => x.mnemonic === 'bl' || x.mnemonic === 'bctrl' || x.mnemonic === 'blrl';
-  if (n < 5 || n === 13 || (n <= 12 && instrs.some(isCall))) {
-    return null;
-  }
-  const writes = instrs.flatMap((x, k) => (!x.mnemonic.startsWith('b') && mayWriteGpr(x, rB) ? [k] : []));
-  const [p, q] = writes;
-  const mentions = (x: Instr) => x.ops.some((o) => new RegExp(`\\b${rB}\\b`).test(o));
-  if (
-    writes.length !== 2 ||
-    q !== p + 1 ||
-    instrs[p].mnemonic !== 'lis' ||
-    instrs[q].mnemonic !== 'addi' ||
-    instrs[q].ops[1] !== rB ||
-    instrs.some((x, k) => k !== p && k !== q && k !== li && mentions(x)) ||
-    instrs.some((x, k) => k !== i && x.mnemonic === 'bctr')
-  ) {
-    return null;
-  }
-  const at = new Map(instrs.map((x, k) => [x.addr, k]));
-  const succ = (k: number): number[] => {
-    const x = instrs[k];
-    const to = x.target === undefined ? [] : [at.get(x.target)].filter((t): t is number => t !== undefined);
-    if (isReturn(x) || x.mnemonic === 'bctr') {
-      return [];
-    }
-    if (isUncond(x)) {
-      return to;
-    }
-    return [...to, k + 1].filter((t) => t < instrs.length);
-  };
-  const seen = new Set<number>([p]);
-  for (const stack = p === 0 ? [] : [0]; stack.length;) {
-    const k = stack.pop()!;
-    if (k === li) {
-      return null;
-    }
-    if (!seen.has(k)) {
-      seen.add(k);
-      stack.push(...succ(k));
-    }
-  }
-  return p;
-}
+/** The table a base formed OUTSIDE the dispatch block addresses, as far as the instructions say:
+ *  every `addi rB,rX,SYM@l` in the function must name one table, or the guess is left undecided.
+ *  mwcc 2.3.3 forms the base once at entry and dispatches from a loop. Only a guess — `lift` pairs
+ *  the halves and proves the base reaches the dispatch (frontend/jump-table.ts). */
+const hoistedTable = (instrs: Instr[], rB: string): TableKey | null =>
+  agreedTable(
+    instrs.flatMap((x) =>
+      x.mnemonic === 'addi' && x.ops[0] === rB && x.reloc?.type === 'R_PPC_ADDR16_LO' && parseImm(x.ops[2]) === 0
+        ? [{ sym: x.reloc.sym, addend: x.reloc.addend }]
+        : [],
+    ),
+  );
 
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
 // deviation from the idiom, or a table that doesn't resolve to N in-function targets, declines
@@ -368,36 +321,35 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       continue;
     } // identity: rIdx = rS<<2
     const scrutReg = slwi.ops[1];
-    let ai = defIn(rB, li);
-    let lisI = ai < 0 ? -1 : defIn(instrs[ai].ops[1], ai);
-    // A base the block does not form is a LOOP-HOISTED one (mwcc 2.3.3 puts `lis rB ; addi rB,rB`
-    // at entry and dispatches from the loop): accepted only as `hoistedTableBase` states it.
-    const hoisted = ai < 0 ? hoistedTableBase(instrs, rB, li, i) : null;
-    if (hoisted !== null) {
-      [lisI, ai] = [hoisted, hoisted + 1];
+    const ai = defIn(rB, li);
+    const lisI = ai < 0 ? -1 : defIn(instrs[ai].ops[1], ai);
+    // A base the block does not form is a HOISTED one (mwcc 2.3.3 puts `lis rB ; addi rB,rB` at entry
+    // and dispatches from a loop). Which pair it is stays a guess here; `lift` proves it.
+    const hoisted = ai < 0 ? hoistedTable(instrs, rB) : null;
+    let table: TableKey | null = hoisted;
+    if (ai >= 0) {
+      const [lis, addi] = [instrs[lisI], instrs[ai]];
+      // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the
+      // same evidence — both relocation types, one symbol, one addend — so a dispatch is never
+      // recovered from two instructions that never addressed the table together. It stays a
+      // separate pairing: it runs before the blocks exist, and it wants the table's NAME, for
+      // `readJumpTable`, not its address. It skips the naming policy deliberately — a table base is
+      // read here as data, never written into the candidate as an identifier — so the `@N` and
+      // `.`-prefixed symbols the address fold must refuse (292 of the corpus's `ADDR16` relocations)
+      // are harmless here.
+      table =
+        addi.mnemonic === 'addi' &&
+        parseImm(addi.ops[2]) === 0 &&
+        lis?.mnemonic === 'lis' &&
+        lis.ops[0] === addi.ops[1] &&
+        lis.reloc?.type === 'R_PPC_ADDR16_HA' &&
+        addi.reloc?.type === 'R_PPC_ADDR16_LO' &&
+        addi.reloc.sym === lis.reloc.sym &&
+        addi.reloc.addend === lis.reloc.addend
+          ? { sym: lis.reloc.sym, addend: lis.reloc.addend }
+          : null;
     }
-    const addi = instrs[ai];
-    if (addi?.mnemonic !== 'addi' || parseImm(addi.ops[2]) !== 0) {
-      continue;
-    } // rB = &table (lo) + 0
-    const lis = instrs[lisI];
-    // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the same
-    // evidence — both relocation types, one symbol, one addend — so a dispatch is never recovered
-    // from two instructions that never addressed the table together. It stays a separate pairing:
-    // it runs before the blocks exist, and it wants the table's NAME, for `readJumpTable`, not its
-    // address. It skips the naming policy deliberately — a table base is read here as data, never
-    // written into the candidate as an identifier — so the `@N` and `.`-prefixed symbols the
-    // address fold must refuse (292 of the corpus's `ADDR16` relocations) are harmless here.
-    const tableSym = lis?.reloc?.sym;
-    if (
-      lis?.mnemonic !== 'lis' ||
-      lis.ops[0] !== addi.ops[1] ||
-      !tableSym ||
-      lis.reloc?.type !== 'R_PPC_ADDR16_HA' ||
-      addi.reloc?.type !== 'R_PPC_ADDR16_LO' ||
-      addi.reloc.sym !== tableSym ||
-      addi.reloc.addend !== lis.reloc.addend
-    ) {
+    if (table === null) {
       continue;
     }
     // The block is pruned unread once the table is recovered, so it may hold the idiom and nothing
@@ -415,7 +367,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (n === null || n < 2) {
       continue;
     }
-    const caseAddrs = readJumpTable(ad, tableSym, lis.reloc.addend, n);
+    const caseAddrs = readJumpTable(ad, table.sym, table.addend, n);
     if (!caseAddrs) {
       continue;
     }
@@ -424,7 +376,7 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
       caseAddrs,
       defaultAddr: bgt.target ?? null,
       bctrAddr: instrs[i].addr,
-      hoistedBase: hoisted === null ? [] : [lis.addr, addi.addr],
+      hoisted: hoisted === null ? null : { reg: rB, table: hoisted },
     });
   }
   return out;
@@ -471,6 +423,13 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
   const idxOf = new Map(blocks.map((b, i) => [b.startAddr, i]));
   const fallAddr = (b: PpcBlock) => (b.branch ?? b.body[b.body.length - 1]).addr + 4;
   const succIdx: number[][] = blocks.map(() => []);
+  /** A conditional return's taken edge: a block of its own that returns, appended past the real ones.
+   *  Its index. */
+  const synthReturn = (): number => {
+    blocks.push({ startAddr: -1 - blocks.length, body: [], branch: null, synthReturn: true });
+    succIdx.push([]);
+    return blocks.length - 1;
+  };
   blocks.forEach((b, i) => {
     const br = b.branch;
     // Recovered switch: the bounds block dispatches to its case blocks + default (the `cmplwi`/`bgt`
@@ -483,9 +442,7 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
         succ.push(idxOf.get(jt.defaultAddr));
       } else {
         // A `bgtlr` bound: the default edge is a synthetic return, as for any conditional return.
-        succ.push(blocks.length);
-        blocks.push({ startAddr: -1 - blocks.length, body: [], branch: null, synthReturn: true });
-        succIdx.push([]);
+        succ.push(synthReturn());
       }
       if (succ.some((x) => x === undefined)) {
         throw new PpcUnsupportedError(`cannot lift '${name}': jump-table target is not a block boundary`);
@@ -510,10 +467,7 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
       return;
     }
     if (isCondReturn(br)) {
-      const synth: PpcBlock = { startAddr: -1 - blocks.length, body: [], branch: null, synthReturn: true };
-      const si = blocks.length;
-      blocks.push(synth);
-      succIdx.push([]);
+      const si = synthReturn();
       const fall = idxOf.get(br.addr + 4); // fall = instruction after the cond-return (no delay slot)
       succIdx[i] = fall !== undefined ? [si, fall] : [si];
       return;
@@ -763,7 +717,7 @@ export function lift(
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
   // The jump-table idiom's own @tbl pair never reaches this guard: a recovered dispatch block
   // is the bounds branch's replaced fall-through, pruned as unreachable before decode, and a
-  // loop-hoisted pair is dropped from its block with it.
+  // hoisted pair is decoded into a table base (`tableBases`).
   //
   // TWO refusals, because they are different problems and the reader acts on them differently. A
   // symbol the naming policy calls unspellable (frontend/reloc-symbol.ts) is a DEAD END: recovering
@@ -826,11 +780,6 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
-  // A loop-hoisted table base is the pruned dispatch's alone (`hoistedTableBase`), so it goes with it.
-  const hoistedBase = new Set([...jts.values()].flatMap((j) => j.hoistedBase));
-  for (const b of blocks) {
-    b.body = b.body.filter((x) => !hoistedBase.has(x.addr));
-  }
   const savedRegs = prologueSavedRegs(blocks[0].body, target);
   // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
   // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
@@ -908,6 +857,18 @@ export function lift(
     lo: '@l',
     fail,
   });
+  /** The jump-table bases a recovered dispatch reads from outside its own block — the `@l` that
+   *  completes one defines no value but the base (frontend/jump-table.ts). */
+  const tableBases = makeTableBases(
+    [...jts.values()].flatMap((j) => (j.hoisted ? [j.hoisted] : [])),
+    fail,
+  );
+  /** What this frontend defines registers with that is no argument: a pending `@ha` half and a
+   *  table base. */
+  const placeholders = {
+    has: (v: Value) => highHalves.has(v) || tableBases.has(v),
+    guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
+  };
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
@@ -918,7 +879,7 @@ export function lift(
           `does not name is not modelled`,
       );
     }
-    const v = highHalves.guardRead(name, r, readVar(r, at));
+    const v = placeholders.guardRead(name, r, readVar(r, at));
     const nv = nonValues.get(v);
     if (nv !== undefined && NON_VALUE_RULES[nv.kind].refuseAtRead) {
       refuseNonValue(nv);
@@ -1092,9 +1053,15 @@ export function lift(
       : `the return block '${name}' synthesizes`;
 
   // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and then
-  // r3 is scratch like any other integer register.
+  // r3 is scratch like any other integer register. A table base left in r3 is no return value, as a
+  // pending half is none (`placeholders`); reading one would refuse, and a merge of one with a value
+  // still does.
   const returnOperands = (bi: number): Value[] =>
-    floatReturn ? [readReg(fpu!.returnReg, bi)] : ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
+    floatReturn
+      ? [readReg(fpu!.returnReg, bi)]
+      : ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v))
+        ? [readReg(RET, bi)]
+        : [];
 
   const fillBlock = (b: PpcBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
@@ -1418,6 +1385,20 @@ export function lift(
       const hi = highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
       return emitGaddr(hi.sym);
     };
+    /** `addi rD,rHi,SYM@l` completing the base of a jump table a dispatch reads from outside its
+     *  block: the pair is proven as `foldLoHalf` proves it, and rD holds the table base. */
+    const foldTableBase = (ins: Instr, rHi: string): Value | null => {
+      const lo = ins.reloc!;
+      const key = { sym: lo.sym, addend: lo.addend };
+      if (!tableBases.wants(key)) {
+        return null;
+      }
+      relocTaken = true;
+      highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
+      const v = mkValue(T.unk(32));
+      tableBases.record(v, key, ins.addr);
+      return v;
+    };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
       const { base, off } = memOperand(ins, mem);
       emit('load', d, [base], { off, width, signed });
@@ -1512,8 +1493,8 @@ export function lift(
             bi,
             read,
             write,
-            // a pending `@ha` half is not an argument
-            highHalves,
+            // a pending `@ha` half and a table base are no argument
+            placeholders,
             guess: {
               // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
               at: ins.addr,
@@ -1665,9 +1646,14 @@ export function lift(
                   `is '${s}', not the expected 0 placeholder`,
               );
             }
+            // A jump table's own name is read as data and never written down, so the naming policy
+            // does not ask it; RELA pairs a half only with a low half of the same symbol and addend,
+            // and that one makes a table base (`foldTableBase`).
+            const table = tableBases.wants({ sym: ins.reloc.sym, addend: ins.reloc.addend });
+            relocTaken = true;
             const hi = mkValue(T.unk(32));
             highHalves.record(hi, {
-              sym: spellableSym(ins),
+              sym: table ? ins.reloc.sym : spellableSym(ins),
               addend: ins.reloc.addend,
               addr: ins.addr,
               mnemonic: ins.mnemonic,
@@ -1715,6 +1701,11 @@ export function lift(
           // level": no row in this benchmark reaches them. Each refuses at its own guard, and a
           // high half none of them consumed is caught by `readReg` or by the dangling-`@ha` check.
           if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
+            const base = parseImm(t) === 0 ? foldTableBase(ins, s) : null;
+            if (base !== null) {
+              write(d, base);
+              break;
+            }
             const g = foldLoHalf(ins, s, t);
             if (ins.reloc.addend === 0) {
               write(d, g);
@@ -2051,6 +2042,9 @@ export function lift(
     // dispatch (`lis…lwzx;mtctr;bctr`) are subsumed.
     const jt = br ? jts.get(br.addr) : undefined;
     if (jt) {
+      if (jt.hoisted) {
+        tableBases.demand(jt.hoisted, bi, jt.bctrAddr);
+      }
       pushSwitchBr(
         ops,
         readReg(jt.scrutReg, bi),
@@ -2158,6 +2152,7 @@ export function lift(
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
+  tableBases.prove(name, ssa);
   // A value stored to the frame that nothing reloads is either a home the body never reads or an
   // OUTGOING stack argument (`stw r4,8(r1)` before a nine-argument `bl` passes the ninth in the
   // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same
@@ -2174,6 +2169,7 @@ export function lift(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
+  tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
   assertNoNonValueEscaped(irBlocks);
   assertNonValuesConsumed();

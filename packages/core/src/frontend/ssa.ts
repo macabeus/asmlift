@@ -94,6 +94,12 @@ export interface SsaBuilder {
    *  value this function named reaches it here on some path. A path that brings the destroyed bytes
    *  and one that brings a value still answer yes, and the read that follows refuses at `finish`. */
   holdsValue(reg: string, b: number, accept?: (v: Value) => boolean): boolean;
+  /** The MUST question beside {@link hasReachingDef}'s MAY one: whether EVERY path into the end of
+   *  block `b` brings a definition of `reg` that `accept` takes, with no call destroying it since
+   *  (`noteCall`). A path from the entry that defines nothing answers no — the register holds the
+   *  caller's value there. Asked once every block is filled: before that, a back edge from a block
+   *  not yet filled carries definitions this walk cannot see, so it refuses to answer. */
+  everyReachingDef(reg: string, b: number, accept: (v: Value) => boolean): boolean;
   /** The entry parameter `reg` still holds at this point of block `b`, taken WITHOUT a read. A read
    *  leaves a definition behind, and `hasReachingDef` counts it as argument setup, so a frontend that
    *  only moves the argument somewhere (a frame store) would raise the guessed arity of every later
@@ -818,6 +824,28 @@ export function makeSsaBuilder(
     reaches(reg, b, accept, true);
   const holdsValue = (reg: string, b: number, accept: (v: Value) => boolean = () => true): boolean =>
     reaches(reg, b, accept, false);
+  const everyReachingDef = (reg: string, b: number, accept: (v: Value) => boolean): boolean => {
+    if (!filled.every(Boolean)) {
+      throw new Error('everyReachingDef: asked before every block is filled');
+    }
+    // A block met again on a cycle adds no path the first visit did not already judge.
+    const seen = new Set<number>();
+    const walk = (at: number): boolean => {
+      if (clobberedLocal[at].has(reg)) {
+        return false;
+      }
+      const own = defs[at].get(reg);
+      if (own !== undefined) {
+        return accept(own);
+      }
+      if (seen.has(at)) {
+        return true;
+      }
+      seen.add(at);
+      return preds[at].length > 0 && preds[at].every(walk);
+    };
+    return walk(b);
+  };
 
   const holdsEntryValue = (reg: string, b: number): boolean => {
     // A predecessor is known only once filled, and `b` itself only up to here — so a path that comes
@@ -934,6 +962,7 @@ export function makeSsaBuilder(
     ensureParam,
     hasReachingDef,
     holdsValue,
+    everyReachingDef,
     entryValue,
     holdsEntryValue,
     useOutsideOps: (v: Value, b: number) => {

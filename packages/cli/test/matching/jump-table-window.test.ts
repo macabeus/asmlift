@@ -12,6 +12,12 @@
 //   (`lis r5 ; addi r5,r5` at entry); 2.4.2 and 2.4.7 form it in the dispatch. KMC and gcc 2.7.2
 //   hoist it into the preheader (`lui ; addiu`). Each shape asserts where its compiler put the base,
 //   so a compiler that stopped hoisting would fail here rather than pass without exercising it.
+// - `two`, `dcall`, `dpost`: two loop switches in one function, a call inside the loop, a call after
+//   it. A hoisted base sits wherever the allocator put it — a callee-saved register across the call
+//   (2.3.3's `lis r5 ; addi r31,r5,0`), a temporary in a function that calls after it is dead, an
+//   argument register once its argument is (2.3.3's second base in r4) — and the lift asks only
+//   that it reach the dispatch on every path (frontend/jump-table.ts). The two tables' arms store
+//   different values, so a dispatch read through the other table's base would not recompile.
 //
 // mwcc 2.3.3 and 2.4.7 have no canonical flag set of their own; every build compiles at mwcc
 // 2.4.2's, the set the shapes were measured at.
@@ -54,6 +60,22 @@ const LOOP = {
   c: `void loop(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){${ARMS.replace(/\*p/g, 'p[i]')}} } }`,
 };
 const DO = { sym: 'dloop', head: '', c: `void dloop(int n,int *p){ do { switch(*p){${ARMS}} p++; } while(--n); }` };
+const ARMS2 = ARMS.replace(/=(\d);/g, (_, k: string) => `=${20 + Number(k)};`).replace(/\*p/g, '*q');
+const TWO = {
+  sym: 'two',
+  head: '',
+  c: `void two(int n,int *p,int *q){ int k=n; do { switch(*p){${ARMS}} p++; } while(--k); do { switch(*q){${ARMS2}} q++; } while(--n); }`,
+};
+const DCALL = {
+  sym: 'dcall',
+  head: 'void g(int);\n',
+  c: `void dcall(int n,int *p){ do { switch(*p){${ARMS}} g(n); p++; } while(--n); }`,
+};
+const DPOST = {
+  sym: 'dpost',
+  head: 'void g(int);\n',
+  c: `void dpost(int n,int *p){ int k=n; do { switch(*p){${ARMS}} p++; } while(--k); g(n); }`,
+};
 
 /** The instructions between the bounds branch and the indirect jump: the dispatch block. */
 const dispatchBlock = (asm: string, bound: RegExp, jump: RegExp): string => {
@@ -93,6 +115,19 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
       BUDGET,
     );
     test.runIf(gated)('a bgtlr bound', () => expect(run(FALL)).toMatch(/\tbgtlr/), BUDGET);
+    for (const [what, s] of [
+      ['two loop switches', TWO],
+      ['a call in the loop', DCALL],
+    ] as const) {
+      test.runIf(gated)(
+        `${what}, the table bases hoisted by 2.3.3 alone`,
+        () => {
+          const block = dispatchBlock(run(s), /\tbgt/, /\tbctr/);
+          expect(/\tlis\s/.test(block), block).toBe(id !== 'mwcc_233_163n');
+        },
+        BUDGET,
+      );
+    }
     test.runIf(gated)(
       'a switch in a loop, its table base hoisted by 2.3.3 alone',
       () => {
@@ -104,22 +139,22 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
   },
 );
 
-describe('a MIPS jump table based in the loop preheader recompiles byte-exact', () => {
+describe.each([DO, TWO, DPOST])('a MIPS jump table based in the loop preheader recompiles byte-exact: $sym', (s) => {
   const hoisted = (asm: string) => expect(dispatchBlock(asm, /\tbeqz\t/, /\tjr\tv0/)).not.toMatch(/\tlui\t/);
-  const VOID = prototypesFromContext(DO.c.slice(0, DO.c.indexOf('{')) + ';', 'c');
+  const prototypes = prototypesFromContext(s.head + s.c.slice(0, s.c.indexOf('{')) + ';', 'c');
 
   test.runIf(kmcGate('jump-table-window-kmc'))(
     'gcc2.7.2kmc',
     () => {
       const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;
-      const { obj, asm } = compileMipsGccTarget(DO.c, DO.sym, flags);
+      const { obj, asm } = compileMipsGccTarget(s.head + s.c, s.sym, flags);
       hoisted(asm);
-      const source = decompile(DO.sym, asm, MIPS_GCC, {
-        asmData: extractAsmData(obj, MIPS_GCC, DO.sym),
-        prototypes: VOID,
+      const source = decompile(s.sym, asm, MIPS_GCC, {
+        asmData: extractAsmData(obj, MIPS_GCC, s.sym),
+        prototypes,
       }).source;
       expect(source).toContain('switch (');
-      expect(scoreCMipsGcc(source, DO.sym, obj, flags).score, source).toBe(0);
+      expect(scoreCMipsGcc(s.head + source, s.sym, obj, flags).score, source).toBe(0);
     },
     60_000,
   );
@@ -128,14 +163,16 @@ describe('a MIPS jump table based in the loop preheader recompiles byte-exact', 
     'gcc2.7.2',
     () => {
       const flags = TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags;
-      const { obj, asm } = compileMipsGcc272Target(DO.c, DO.sym, flags);
+      const { obj, asm } = compileMipsGcc272Target(s.head + s.c, s.sym, flags);
       hoisted(asm);
-      const source = decompile(DO.sym, asm, MIPS_GCC, {
-        asmData: extractAsmData(obj, MIPS_GCC, DO.sym),
-        prototypes: VOID,
+      const source = decompile(s.sym, asm, MIPS_GCC, {
+        asmData: extractAsmData(obj, MIPS_GCC, s.sym),
+        prototypes,
       }).source;
       expect(source).toContain('switch (');
-      expect(scoreObjects(obj, compileMipsGcc272Target(source, DO.sym, flags).obj, DO.sym).score, source).toBe(0);
+      expect(scoreObjects(obj, compileMipsGcc272Target(s.head + source, s.sym, flags).obj, s.sym).score, source).toBe(
+        0,
+      );
     },
     60_000,
   );

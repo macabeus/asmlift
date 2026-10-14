@@ -42,6 +42,7 @@ import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } fro
 import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange, liftWithRelift } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
+import { type HoistedDispatch, type TableKey, agreedTable, entersDispatch, makeTableBases } from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
 import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgKey, stackArgSlots, stackSlotKey } from './ssa';
@@ -282,16 +283,11 @@ interface MipsJT {
   caseAddrs: number[];
   defaultAddr: number;
   jrAddr: number;
-  /** The addresses of a loop-hoisted `lui`/`addiu` table base, which only the pruned dispatch reads:
-   *  `lift` drops them from their block, as the pruning drops an in-block base. */
-  hoistedBase: number[];
+  /** The base register and table of a dispatch whose block does not form its base (KMC and gcc
+   *  2.7.2 hoist the `lui`/`addiu` pair into a loop's preheader): `lift` proves the base reaches it
+   *  (frontend/jump-table.ts). Null when the pruned block forms the base itself. */
+  hoisted: HoistedDispatch | null;
 }
-
-/** Whether any branch lands in a dispatch block — after its bounds branch at `boundsAddr`, up to the
- *  last word at `lastAddr`. Such a path skips the bounds check, and the block it enters is the one a
- *  recovered table prunes. The same rule as frontend/ppc.ts. */
-const entersDispatch = (instrs: Instr[], boundsAddr: number, lastAddr: number): boolean =>
-  instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= lastAddr);
 
 /** A MIPS jump table's bounds guard for the dispatch whose `jr` is at `i`: `sltiu tmp,scrutReg,N`
  *  then `beqz tmp,DEF`, where the beqz is the nearest transfer before the `jr`. Between the two,
@@ -363,70 +359,31 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     return { sym: r.sym, addend: r.addend };
   };
 
-  /** A LOOP-HOISTED table base `lui rB,%hi ; addiu rB,rB,%lo` for the dispatch whose `addu` at `ai`
-   *  reads rB and whose `jr` is at `i`: the table it addresses and the `lui`'s index, or null. The
-   *  pair is dropped from its block once the table is recovered, so it must be dead everywhere
-   *  else; it is refused unless:
-   *  - the two are adjacent, neither is a delay slot, they are the function's only writes of rB, and
-   *    their HI16/LO16 relocations name one symbol in a data section;
-   *  - nothing but the `addiu` and that `addu` names rB, rB is a temporary or saved register, and
-   *    a temporary only in a function that makes no call;
-   *  - every path from entry to the `addu` runs the `lui` first, walked over the instructions with
-   *    their delay slots — and a second indirect jump, whose targets the walk cannot follow, refuses.
-   *  The table's offset is the pair's own `%hi`/`%lo` halves, as REL relocations carry it. */
-  const hoistedBase = (rB: string, ai: number, i: number): { sym: string; addend: number; at: number } | null => {
-    if (!/^(t\d|s[0-8])$/.test(rB) || (rB.startsWith('t') && instrs.some(isCallInstr))) {
-      return null;
-    }
-    const writes = instrs.flatMap((x, k) => (writtenReg(x) === rB ? [k] : []));
-    const [p, q] = writes;
-    const esc = rB.replace(/[$]/g, '\\$');
-    const mentions = (x: Instr) => x.ops.some((o) => new RegExp(`(^|[^\\w$])${esc}\\b`).test(o));
-    if (
-      writes.length !== 2 ||
-      q !== p + 1 ||
-      instrs[p].mnemonic !== 'lui' ||
-      instrs[q].mnemonic !== 'addiu' ||
-      instrs[q].ops[1] !== rB ||
-      (p > 0 && isControlTransfer(instrs[p - 1])) ||
-      instrs.some((x, k) => k !== p && k !== q && k !== ai && mentions(x)) ||
-      instrs.some((x, k) => k !== i && x.mnemonic === 'jr' && x.ops[0] !== 'ra')
-    ) {
-      return null;
-    }
-    const hi = tableBaseOf(instrs[p]);
-    const lo = textRelocAt(ad, instrs[q].addr);
-    if (!hi || lo?.type !== 'R_MIPS_LO16' || lo.sym !== hi.sym) {
-      return null;
-    }
-    // Every path reaches the `addu` through the `lui`? A transfer's successor is its delay slot, and
-    // the slot's are the transfer's: its target, and the word after the slot unless it is a jump.
-    const at = new Map(instrs.map((x, k) => [x.addr, k]));
-    const after = (t: number): number[] => {
-      const x = instrs[t];
-      const to = x.target === undefined ? [] : [at.get(x.target)].filter((n): n is number => n !== undefined);
-      if (x.mnemonic === 'jr' || x.mnemonic === 'j' || x.mnemonic === 'b') {
-        return x.mnemonic === 'jr' ? [] : to;
-      }
-      return isCallInstr(x) ? [t + 2] : [...to, t + 2];
-    };
-    const succ = (k: number): number[] =>
-      (k > 0 && isControlTransfer(instrs[k - 1]) ? after(k - 1) : [k + 1]).filter((n) => n < instrs.length);
-    const seen = new Set<number>([p]);
-    for (const stack = p === 0 ? [] : [0]; stack.length;) {
-      const k = stack.pop()!;
-      if (k === ai) {
-        return null;
-      }
-      if (!seen.has(k)) {
-        seen.add(k);
-        stack.push(...succ(k));
-      }
-    }
-    const half = (o: string) => parseImm(o) & 0xffff;
-    const addend = hi.addend + ((half(instrs[p].ops[1]) << 16) + ((half(instrs[q].ops[2]) << 16) >> 16));
-    return { sym: hi.sym, addend, at: p };
-  };
+  /** The table a base formed OUTSIDE the dispatch block addresses, as far as the instructions say:
+   *  every `addiu rB,rH,%lo` in the function, with the `lui rH,%hi` nearest before it, must name
+   *  one table, or the guess is left undecided. KMC and gcc 2.7.2 form the base in a loop's
+   *  preheader. Only a guess — `lift` pairs the halves and proves the base reaches the dispatch
+   *  (frontend/jump-table.ts). The table's offset is the pair's own `%hi`/`%lo` halves, as REL
+   *  relocations carry it. */
+  const hoistedTable = (rB: string): TableKey | null =>
+    agreedTable(
+      instrs.flatMap((x, q) => {
+        const lo = x.mnemonic === 'addiu' && x.ops[0] === rB ? textRelocAt(ad, x.addr) : null;
+        if (lo?.type !== 'R_MIPS_LO16') {
+          return [];
+        }
+        let p = q - 1;
+        while (p >= 0 && writtenReg(instrs[p]) !== x.ops[1]) {
+          p--;
+        }
+        const hi = p >= 0 && instrs[p].mnemonic === 'lui' ? tableBaseOf(instrs[p]) : null;
+        if (!hi || hi.sym !== lo.sym) {
+          return [{ sym: '', addend: NaN }];
+        }
+        const half = (o: string) => parseImm(o) & 0xffff;
+        return [{ sym: hi.sym, addend: hi.addend + ((half(instrs[p].ops[1]) << 16) + ((half(x.ops[2]) << 16) >> 16)) }];
+      }),
+    );
 
   const out = new Map<number, MipsJT>();
   for (let i = 0; i < instrs.length; i++) {
@@ -463,31 +420,31 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
       table: { sym: string; addend: number } | null = null,
       sllIdx = -1,
       baseIdx = -1,
-      hoistedAt: number[] = [];
+      hoisted: HoistedDispatch | null = null;
     for (const [idxCand, baseCand] of [
       [oa, ob],
       [ob, oa],
     ] as const) {
       const si = defBefore(idxCand, aIdx);
       const bi2 = defBefore(baseCand, aIdx);
-      // A base the dispatch's block does not form is a LOOP-HOISTED one (KMC and gcc 2.7.2 put
-      // `lui rB ; addiu rB,rB` in the loop's preheader): accepted only as `hoistedBase` states it.
-      const hoisted = bi2 < 0 && si >= 0 ? hoistedBase(baseCand, aIdx, i) : null;
-      if (si < 0 || (bi2 < 0 && !hoisted)) {
+      // A base the dispatch's block does not form is a HOISTED one (KMC and gcc 2.7.2 put `lui rB ;
+      // addiu rB,rB` in the loop's preheader). Which pair it is stays a guess here; `lift` proves it.
+      const out = bi2 < 0 && si >= 0 ? hoistedTable(baseCand) : null;
+      if (si < 0 || (bi2 < 0 && !out)) {
         continue;
       }
       const sll = instrs[si];
       if (sll.mnemonic !== 'sll' || (sll.ops[2] !== '0x2' && sll.ops[2] !== '2')) {
         continue;
       } // index*4
-      const tb = hoisted ?? tableBaseOf(instrs[bi2]);
+      const tb = out ?? tableBaseOf(instrs[bi2]);
       if (!tb) {
         continue;
       }
       scrutReg = sll.ops[1];
       table = tb;
       [sllIdx, baseIdx] = [si, bi2];
-      hoistedAt = hoisted ? [instrs[hoisted.at].addr, instrs[hoisted.at + 1].addr] : [];
+      hoisted = out ? { reg: baseCand, table: out } : null;
       break;
     }
     if (!scrutReg || !table) {
@@ -518,7 +475,13 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     if (!caseAddrs) {
       continue;
     }
-    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, jrAddr: jr.addr, hoistedBase: hoistedAt });
+    out.set(bounds.addr, {
+      scrutReg,
+      caseAddrs,
+      defaultAddr: bounds.def,
+      jrAddr: jr.addr,
+      hoisted,
+    });
   }
   return out;
 }
@@ -1015,11 +978,6 @@ function liftOnce(
   }
   checkDelaySlots(name, instrs);
   const { blocks, succAddrs } = toBlocks(instrs, jts, likelyAddrs);
-  // A loop-hoisted table base is the pruned dispatch's alone (`hoistedBase`), so it goes with it.
-  const hoistedBase = new Set([...jts.values()].flatMap((j) => j.hoistedBase));
-  for (const b of blocks) {
-    b.body = b.body.filter((x) => !hoistedBase.has(x.addr));
-  }
   // PREHEADER, as in frontend/ppc.ts: an entry that is a branch target gets an empty block ahead of
   // it, whose live-ins are the function's parameters. One word below the function, so it falls
   // through to it.
@@ -1088,6 +1046,18 @@ function liftOnce(
     throw new FrontendUnsupportedError(message);
   };
   const highHalves = makeHighHalves({ hi: '%hi', hiArticle: 'a', lo: '%lo', fail });
+  /** The jump-table bases a recovered dispatch reads from outside its own block — the `%lo` that
+   *  completes one defines no value but the base (frontend/jump-table.ts). */
+  const tableBases = makeTableBases(
+    [...jts.values()].flatMap((j) => (j.hoisted ? [j.hoisted] : [])),
+    fail,
+  );
+  /** What this frontend defines registers with that is no argument: a pending `%hi` half and a
+   *  table base. */
+  const placeholders = {
+    has: (v: Value) => highHalves.has(v) || tableBases.has(v),
+    guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
+  };
   // O32 passes the words past a0..a3 on the stack and returns a word in v0. This lowering builds no
   // register pair and receives no struct through a hidden pointer, so the plan refuses both. A call
   // through an argument register bounds no arity here: a leading float leaves a0 free.
@@ -1285,7 +1255,7 @@ function liftOnce(
             `caller's ${restore.reg} into it — no C value names it`,
         );
       }
-      return highHalves.guardRead(name, r, v);
+      return placeholders.guardRead(name, r, v);
     };
     // A FRAME ADDRESS AS DATA. `addiu rD,sp,k` and `move rD,sp` name frame offset k, and lower to
     // an `laddr` the frame-object audit proves. `addu rD,sp,rX` — in either operand order — names
@@ -1467,7 +1437,17 @@ function liftOnce(
           // `addiu rD, rHi, %lo(SYM)` completes a global's address begun by a `lui %hi(SYM)`:
           // rD = &SYM (+ a byte offset into it). Emits the shared `gaddr` op.
           if (ins.reloc?.type === 'R_MIPS_LO16') {
-            const { base: g, off } = foldLoHalf(ins, s, imm(ins, t));
+            const at = pairLoHalf(ins, s, imm(ins, t));
+            // The base of a jump table a dispatch reads from outside its block is no value but the
+            // table base (frontend/jump-table.ts), which only that dispatch may take.
+            const table = { sym: ins.reloc.sym, addend: at };
+            if (tableBases.wants(table)) {
+              const base = mkValue(T.unk(32));
+              tableBases.record(base, table, ins.addr);
+              write(d, base);
+              break;
+            }
+            const { base: g, off } = addressAt(ins, at);
             // `&SYM` (offset 0), or `&SYM + N` for a byte offset into the global. The `add` tree is
             // folded byte-correctly by memAccess when this address is a load/store base; if it
             // instead ESCAPES as a value, `assertDerefsTyped` declines it (the byte offset would
@@ -1780,12 +1760,11 @@ function liftOnce(
     // instructions folds while a register reused between the halves does not, and a half that
     // arrives only through a merge or a loop header comes back as the block parameter standing for
     // the join, which is not a half and refuses.
-    const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } => {
-      relocTaken = true;
+    const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } =>
+      addressAt(ins, pairLoHalf(ins, rHi, loImm));
+    /** `&SYM + off`, for the `%lo` at `ins` that completed it. */
+    const addressAt = (ins: Instr, off: number): { base: Value; off: number } => {
       const lo = ins.reloc!;
-      const hi = highHalves.pair(site(ins), rHi, readVar(rHi, bi), lo.sym);
-      // The addend is split across the two instruction immediates because MIPS is REL.
-      const off = hi.addend + loImm;
       if (off < 0) {
         throw new FrontendUnsupportedError(
           `${site(ins)} completes '${lo.sym}' at ` +
@@ -1793,6 +1772,13 @@ function liftOnce(
         );
       }
       return { base: emitGaddr(lo.sym), off };
+    };
+    /** The byte offset into its symbol of the address the `%lo` at `ins` completes, the pair proven. */
+    const pairLoHalf = (ins: Instr, rHi: string, loImm: number): number => {
+      relocTaken = true;
+      const hi = highHalves.pair(site(ins), rHi, readVar(rHi, bi), ins.reloc!.sym);
+      // The addend is split across the two instruction immediates because MIPS is REL.
+      return hi.addend + loImm;
     };
     // A displacement memory operand whose base is a `%hi` half: the global's address plus the
     // access offset. A non-`%lo` instruction returns null (the caller falls through to the ordinary
@@ -1973,8 +1959,8 @@ function liftOnce(
           }
           return readVar(stackSlot(off), bi);
         },
-        // a pending `%hi` half is not an argument
-        highHalves,
+        // a pending `%hi` half and a table base are no argument
+        placeholders,
         guess: {
           // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
           at: ins.addr,
@@ -2074,6 +2060,9 @@ function liftOnce(
       if (b.delay) {
         decode(b.delay);
       }
+      if (jt.hoisted) {
+        tableBases.demand(jt.hoisted, bi, jt.jrAddr);
+      }
       pushSwitchBr(ops, scrut, [...jt.caseAddrs, jt.defaultAddr].map(succ));
       return;
     }
@@ -2118,7 +2107,7 @@ function liftOnce(
       }
       // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and
       // then `v0` is scratch like any other integer register.
-      const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !highHalves.has(v));
+      const returnsWord = !floatReturn && ssa.holdsValue(RET, bi, (v) => !placeholders.has(v));
       // A 64-BIT INTEGER RETURN COMES BACK IN v0:v1, the high word in v0, and this lowering returns
       // one word: returning v0 alone hands back the high word with the low one dropped, a function
       // that compiles and returns the wrong value (`long long f(int a, int b, int c, int d,
@@ -2145,10 +2134,12 @@ function liftOnce(
     ssa.markFilled(bi);
   });
   highHalves.assertAllConsumed(name);
+  tableBases.prove(name, ssa);
   const argSlots = o32ArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
+  tableBases.assertNoneEscaped(name, irBlocks);
   for (const blk of irBlocks) {
     const used = [
       ...blk.params,

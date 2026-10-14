@@ -294,31 +294,35 @@ const ppcHoisted = (before: string[], after: string[] = [], base = 'r5', between
     'blr',
   ]);
 
-test('a PPC table base hoisted out of the dispatch block lifts when only the dispatch reads it', () => {
-  // the `@N` pool name mwcc gives the table never reaches the naming policy: the pair is dropped
+test('a PPC table base formed outside the dispatch block lifts when it reaches the dispatch on every path', () => {
+  // the `@N` pool name mwcc gives the table never reaches the naming policy: the pair is the base
   const src = liftPpc(ppcHoisted([], ['li      r6,0']));
   expect(src).toContain('switch (a0)');
   for (const k of [10, 20, 30, 40]) {
     expect(src).toContain(`return ${k};`);
   }
-  // a callee-saved base
-  expect(liftPpc(ppcHoisted([], [], 'r31'))).toContain('switch (a0)');
+  // in whatever register the allocator chose — a callee-saved one, or an argument register whose
+  // argument is dead (mwcc 2.3.3 puts a second loop's base in r4) — and with its halves apart
+  for (const shape of [
+    ppcHoisted([], [], 'r31'),
+    ppcHoisted([], [], 'r4'),
+    ppcHoisted([], [], 'r5', ['li      r6,0']),
+  ]) {
+    expect(liftPpc(shape)).toContain('switch (a0)');
+  }
 });
 
-test('…and refuses a hoisted base anything else could see or skip', () => {
-  const bctr = /unmodelled control transfer 'bctr'/;
-  // a second write of the base
-  expect(() => liftPpc(ppcHoisted([], ['li      r5,4']))).toThrow(bctr);
-  // another reader of the base: dropping the pair would change what it reads
-  expect(() => liftPpc(ppcHoisted([], ['stw     r5,0(r4)']))).toThrow(bctr);
+test('…and refuses a base some path does not bring, or anything else reads', () => {
+  const proof =
+    /reads the base of jump table 'tbl'\+0 from r5, and r5 does not hold that table's address on every path/;
+  // a rewrite of the base after the pair
+  expect(() => liftPpc(ppcHoisted([], ['li      r5,4']))).toThrow(proof);
   // a path around the pair reaches the dispatch with the caller's r5
-  expect(() => liftPpc(ppcHoisted(['cmpwi   r4,0', 'beq-    @AROUND'], ['AROUND:']))).toThrow(bctr);
-  // a volatile base in a function that calls
-  expect(() => liftPpc(ppcHoisted([], ['bl      0 <f>']))).toThrow(bctr);
-  // a base in an argument/return register
-  expect(() => liftPpc(ppcHoisted([], [], 'r4'))).toThrow(bctr);
-  // two halves apart are not one hoisted pair
-  expect(() => liftPpc(ppcHoisted([], [], 'r5', ['li      r6,0']))).toThrow(bctr);
+  expect(() => liftPpc(ppcHoisted(['cmpwi   r4,0', 'beq-    @AROUND'], ['AROUND:']))).toThrow(proof);
+  // another reader: the base is no value
+  expect(() => liftPpc(ppcHoisted([], ['stw     r5,0(r4)']))).toThrow(
+    /'tbl'\+0's base, formed at 0x4, is read from r5 as a value/,
+  );
 });
 
 test('a `bgtlr` bound sends the default to a return of what r3 holds', () => {
@@ -350,6 +354,7 @@ const mipsLoop = (o: { pre?: string[]; mid?: string[]; post?: string[]; arm?: st
       'LUI:',
       `lui\t${b},0x0`,
       ...(o.mid ?? []),
+      'LO:',
       `addiu\t${b},${b},0`,
       ...(o.post ?? []),
       'addu\ta0,v0,a1',
@@ -391,39 +396,27 @@ const liftMipsLoop = ({ asm, at }: ReturnType<typeof listing>) =>
     asmData: mipsTable(
       at.get('LUI')!,
       ['C0', 'C1', 'C2', 'C3'].map((k) => at.get(k)!),
-      at.get('LUI')! + 4,
+      at.get('LO')!,
     ),
   }).source;
 
-test('a MIPS table base hoisted into the loop preheader lifts when only the dispatch reads it', () => {
-  for (const shape of [{}, { base: 's1' }]) {
+test('a MIPS table base hoisted into the loop preheader lifts when it reaches the dispatch on every path', () => {
+  // a temporary or a saved register, the halves apart
+  for (const shape of [{}, { base: 's1' }, { mid: ['nop'] }]) {
     const src = liftMipsLoop(mipsLoop(shape));
     expect(src).toContain('switch (');
     expect(src).toMatch(/case 2:\s*\n\s*\*\w+ = 0;/);
   }
 });
 
-test('…and refuses a hoisted MIPS base anything else could see or skip', () => {
-  const jr = /indirect jump 'jr v0'/;
+test('…and refuses a base some path does not bring, or anything else reads', () => {
+  const proof = /reads the base of jump table 'jt'\+0 from t6, and t6 does not hold that table's address on every path/;
   // a path around the pair reaches the dispatch with whatever t6 held
-  expect(() => liftMipsLoop(mipsLoop({ pre: ['bnez\ta3,@LOOP', 'nop'] }))).toThrow(jr);
-  // another reader of the base: dropping the pair would change what it reads
-  expect(() => liftMipsLoop(mipsLoop({ arm: ['sw\tt6,4(a1)'] }))).toThrow(jr);
-  // a second write of the base
-  expect(() => liftMipsLoop(mipsLoop({ arm: ['li\tt6,4'] }))).toThrow(jr);
-  // a temporary base in a function that calls
-  expect(() => liftMipsLoop(mipsLoop({ arm: ['jal\t0 <f>', 'nop'] }))).toThrow(jr);
-  // the pair split by another instruction
-  const split = mipsLoop({ mid: ['nop'] });
-  expect(() =>
-    decompile('f', split.asm, MIPS_GCC, {
-      asmData: mipsTable(
-        split.at.get('LUI')!,
-        ['C0', 'C1', 'C2', 'C3'].map((k) => split.at.get(k)!),
-        split.at.get('LUI')! + 8,
-      ),
-    }),
-  ).toThrow(jr);
-  // a base in an argument register
-  expect(() => liftMipsLoop(mipsLoop({ base: 'a2' }))).toThrow(jr);
+  expect(() => liftMipsLoop(mipsLoop({ pre: ['bnez\ta3,@LOOP', 'nop'] }))).toThrow(proof);
+  // a rewrite of the base on one path round the loop
+  expect(() => liftMipsLoop(mipsLoop({ arm: ['li\tt6,4'] }))).toThrow(proof);
+  // (a call that destroys a temporary base is the SSA's `noteCall`: test/ssa-every-reaching-def.test.ts)
+  // another reader: the base is no value. Read in the loop, it is read through the join the loop
+  // header makes, which is then what reaches the dispatch.
+  expect(() => liftMipsLoop(mipsLoop({ arm: ['sw\tt6,4(a1)'] }))).toThrow(proof);
 });
