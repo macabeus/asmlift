@@ -939,6 +939,13 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // that clobbers CTR, and a dispatch the recognizer refuses, and no benchmark row reaches any of
   // them.
   //
+  // `stack-frames` joins on the population reading: its last inhabitants were mwcc rows refusing a
+  // capture, a sub-word r1 access or an unread frame word, which frontend/ppc.ts now lifts as frame
+  // objects inside mwcc's local area (`measurePpcFrame`) or as incoming stack arguments, or refuses
+  // under a later guard. The refusals keyed on its text still fire on frames the models do not
+  // describe — a second push, a depth r1 does not hold, a reload nothing stored — and no benchmark
+  // row reaches any of them.
+  //
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
@@ -949,6 +956,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'ctr-transfer',
     'no-prototype-args',
     'pool-word-shape',
+    'stack-frames',
     'store-class',
     'structs',
     'tu-scoped-name',
