@@ -310,10 +310,12 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     const fn = (sym: string, ...body: string[]) => dis(sym, lines(...PRO, ...body, ...EPI));
     test("the routine family is the target's data: a target that names none keeps the r1 refusal", () => {
       // `registerSaveRoutines` absent: the `bl` is an ordinary call, and `addi r11,r1,N` is the stack
-      // pointer read as data where it stands.
+      // pointer read as data where it stands — a capture of the frame top, which no local starts at.
       const none = { ...PPC_MWCC, registerSaveRoutines: undefined };
       const asm = lines(...PRO, 'add     r31,r3,r4', 'addi    r11,r1,32', 'mr      r3,r31', bl('_restgpr_30'), ...EPI);
-      expect(() => decompile('nr', `0 <nr>:\n${asm}`, none)).toThrow(/stack pointer r1 used as data/);
+      expect(() => decompile('nr', `0 <nr>:\n${asm}`, none)).toThrow(/cannot lift 'nr'/);
+      const noLayout = { ...none, compilerBehaviors: { ...none.compilerBehaviors, linkageLocalArea: undefined } };
+      expect(() => decompile('nr', `0 <nr>:\n${asm}`, noLayout)).toThrow(/stack pointer r1 used as data/);
     });
     test('a save and its restore are frame bookkeeping, not calls', () => {
       expect(fn('gs', 'add     r31,r3,r4', 'addi    r11,r1,32', 'mr      r3,r31', bl('_restgpr_30'))).toBe(

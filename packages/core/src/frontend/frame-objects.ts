@@ -9,11 +9,14 @@
  *  every ISA — the level-tower split for this frame model: the frontend supplies the PARTITION,
  *  the shared pass applies the rule. Messages name the frame base `sp`.
  *
- *  Two frontends call it: Thumb, and MIPS, which lowers `addiu rD,sp,k` and `addu rD,sp,rX` to an
- *  `laddr` and hands over the O32 local area as both ranges (`frontend/mips.ts` `measureO32Frame`).
+ *  Three frontends call it: Thumb; MIPS, which lowers `addiu rD,sp,k` and `addu rD,sp,rX` to an
+ *  `laddr` and hands over the O32 local area as both ranges (`frontend/mips.ts` `measureO32Frame`);
+ *  and PPC, which lowers `addi rD,r1,k` and every r1 access inside mwcc's local area the same way
+ *  (`frontend/ppc.ts` `measurePpcFrame`).
  *  The worked examples below are agbcc's, because agbcc is the compiler every rule was first
- *  measured against; IDO and gcc 2.7.2 reload past every store of another type (strict aliasing
- *  does not reorder there), so the cast and union refusals below are only more cautious on MIPS. */
+ *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
+ *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
+ *  MIPS and PPC. */
 import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
