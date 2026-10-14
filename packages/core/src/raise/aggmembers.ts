@@ -232,8 +232,9 @@ export function readDeclaredMembers(fn: Fn, littleEndian: boolean): number {
           narrowed < top
         ) {
           plan.push({ byte: byteOf(shift, narrowed), width: narrowed, sites: shUses.map(narrowSite) });
-        } else if (top === 1 || top === 2) {
-          // the shift's fill is the top member's own extension
+        } else if (word === 4 && (top === 1 || top === 2)) {
+          // the shift's fill is the top member's own extension — of a whole word, whose bits above the
+          // member are the shift's alone, not a narrower load's extension
           plan.push({ byte: byteOf(shift, top), width: top, sites: [extractSite(u.op, top)] });
         } else {
           ok = false;
