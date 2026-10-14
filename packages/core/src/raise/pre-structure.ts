@@ -18,8 +18,13 @@ export interface PreStructureFold {
   run: (fn: Fn) => number;
 }
 
-/** In the order they ran in when they shared one stage; `synthetic:break_value:agbcc` takes both of
- *  the last two. */
+/** THE ORDER CARRIES LOAD, and each fold runs ONCE: there is no fixpoint across folds, so a fold
+ *  that exposes another's shape must run before it. The re-roll needs the latch's way out and the
+ *  entry's to reach ONE block, and on `synthetic:break_value:agbcc` they reach it only after the
+ *  trampoline fold has spliced out the empty block the break leaves through — run first, the re-roll
+ *  declines and the loop with it ('unrecovered back-edge'). `reroll.test.ts` pins it by lifting that
+ *  row's pre-fold IR through this record. The latch fold comes first for the same reason in kind:
+ *  the other two read the back edge it leaves. */
 export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
   {
     id: 'latchfold',

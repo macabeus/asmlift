@@ -11,6 +11,7 @@ import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
 import { type Gate, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
+import { PRE_STRUCTURE_FOLDS } from '../src/raise/pre-structure';
 import { recoverTypes } from '../src/raise/recover';
 import { type PeeledTest, REROLL_GATES, rerollPeeledTests } from '../src/raise/reroll';
 import { structure } from '../src/structure/structure';
@@ -203,4 +204,59 @@ test('the rotation keeps the write-order record saying who wrote each key it re-
   expect(fn.writeOrder.lastWrite.get(E)?.has(p)).toBe(false);
   expect(fn.writeOrder.lastWrite.get(H)?.has(q)).toBe(true); // H computes what the back edge carries
   expect(fn.writeOrder.lastWrite.get(T)?.has(p) ?? false).toBe(false);
+});
+
+/** `synthetic:break_value:agbcc` as it reaches the folds: the break leaves through ^bb3, an empty
+ *  block carrying i to the shared exit, so the latch's out-edge and the entry's do not land on one
+ *  block until the trampoline fold splices ^bb3 out. */
+const BREAK_VALUE_PRE_TRAMPOLINE = `fn break_value {
+^bb0():
+  %0: s32 = const {value=1}
+  %1: s32 = const {value=1}
+  %2: u8* = gaddr {sym="gTab"}
+  %3: s32 = load %2 {off=1, signed=false, width=1}
+  %4: s32* = gaddr {sym="gOut"}
+  %5: s32 = gaddr {sym="gVal"}
+  %6: s32 = const {value=28}
+  %7: u32 = icmp_eq %3, %6
+  cond_br %7, ^bb4(%0), ^bb1(%1)
+^bb1(%8: s32):
+  %9: s32 = const {value=1}
+  %10: u32 = add %8, %9
+  %11: u32 = const {value=8}
+  %12: u32 = icmp_ugt %10, %11
+  cond_br %12, ^bb4(%0), ^bb2()
+^bb2():
+  %13: u8* = add %10, %2
+  %14: s32 = load %13 {off=0, signed=false, width=1}
+  %15: s32 = const {value=28}
+  %16: u32 = icmp_ne %14, %15
+  cond_br %16, ^bb1(%10), ^bb3()
+^bb3():
+  br ^bb4(%10) {fallthrough=true}
+^bb4(%17: s32):
+  %18: u8* = add %17, %5
+  %19: s32 = load %18 {off=0, signed=false, width=1}
+  store %4, %19 {off=0, width=4}
+  ret
+}`;
+
+test('the re-roll reads the shape the trampoline fold leaves, so the trampoline runs first', () => {
+  // Each fold runs once, in the record's order, with no fixpoint across folds: run before the
+  // trampoline, the re-roll sees the latch leave for ^bb3 and the entry for ^bb4, and declines.
+  const alone = rerolled(BREAK_VALUE_PRE_TRAMPOLINE);
+  expect(alone.n).toBe(0);
+  const ids = PRE_STRUCTURE_FOLDS.map((f) => f.id);
+  expect(ids.indexOf('trampoline')).toBeLessThan(ids.indexOf('reroll'));
+  const fn = parse(BREAK_VALUE_PRE_TRAMPOLINE);
+  verify(fn);
+  recoverTypes(fn);
+  const ran = PRE_STRUCTURE_FOLDS.map((f) => {
+    const n = f.run(fn);
+    verify(fn);
+    return [f.id, n] as const;
+  });
+  expect(Object.fromEntries(ran)).toMatchObject({ trampoline: 1, reroll: 1 });
+  const src = cBackend.emit(structure(fn, { returnsVoid: true, littleEndian: true }));
+  expect(src.match(/gTab/g)).toHaveLength(1); // the test is written once, in the loop
 });
