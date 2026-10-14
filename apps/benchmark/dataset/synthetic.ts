@@ -9702,7 +9702,26 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['struct', 'struct-copy'],
     toolchains: ['mwcc_242_81'],
     ctx: 'typedef struct { s32 x, y; } B_t; s32 tbT(s32 k, B_t b); s32 tbval(B_t *p);',
-    proto: { tbT: { params: ['s32', 'B_t'] } },
+    proto: { tbT: { params: ['s32', 'B_t'], byValueParams: [1] } },
+  },
+  // `enumarg` hands an enum, spelled through a typedef as GXTexFmt is, to a seven-parameter callee
+  // beside a captured array. The declaration states the enum one word (`wordParams`, as a context
+  // reads it), and the call lowering and the local area read that one fact: the call is lowered at
+  // its declared arity rather than refused as one nothing declares.
+  {
+    sym: 'enumarg',
+    src:
+      'typedef enum { A, B } Fmt;\nvoid use(s32 *p);\ns32 h8(Fmt f, s32 a, s32 b, s32 c, s32 d, s32 e, s32 g);\n' +
+      's32 enumarg(s32 k){ s32 buf[2]; use(buf); return h8(A, k, buf[0], buf[1], 4, 5, 6); }',
+    features: ['stack-addr', 'array', 'multi-arg'],
+    toolchains: ['mwcc_242_81'],
+    ctx:
+      'typedef enum { A, B } Fmt; void use(s32 *p); s32 h8(Fmt f, s32 a, s32 b, s32 c, s32 d, s32 e, s32 g); ' +
+      's32 enumarg(s32 k);',
+    proto: {
+      use: { params: ['s32 *'], returnsVoid: true },
+      h8: { params: ['Fmt', 's32', 's32', 's32', 's32', 's32', 's32'], wordParams: [0] },
+    },
   },
 ];
 

@@ -894,7 +894,8 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
   // __attribute__((mode(DI)))` takes a register pair. Its parameters are not read, in any
   // declaration of it; its return is.
   const unreadParams = new Set<string>();
-  const returnOnly = ({ params: _unread, wordParams: _words, ...rest }: FnProto): FnProto => rest;
+  const returnOnly = ({ params: _unread, wordParams: _words, byValueParams: _copies, ...rest }: FnProto): FnProto =>
+    rest;
   for (const d of ctx.declarations) {
     const s = d.specifiers;
     if (
@@ -924,7 +925,7 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
         ctx,
         table.typedefs,
         (t) => layoutOf(t, 0),
-        (t) => passesInOneWord(t, table, written),
+        (t) => passingOf(t, table, written),
       );
       const proto = unreadParams.has(x.name) ? returnOnly(read) : read;
       const prior = found.get(x.name);
@@ -960,7 +961,7 @@ function readSignature(
   { tokens, language }: ParsedContext,
   typedefs: ReadonlyMap<string, DeclaredType>,
   layoutOf: (t: DeclaredType) => AggregateLayout | undefined,
-  oneWord: (t: DeclaredType) => boolean,
+  passing: (t: DeclaredType) => Passing,
 ): FnProto {
   const proto: FnProto = {};
   const resolved = resolve(ret, typedefs, tokens);
@@ -1010,48 +1011,68 @@ function readSignature(
   }
   // Each parameter's type, its name taken off: an array or a function nearest the name is a
   // pointer, and the typedef names it is built on resolve as a return's do. A spelling that sizes to
-  // nothing and is no floating type is either a struct or union passed BY VALUE — which mwcc passes
-  // as the address of a copy in the caller's frame — or a type that still travels in one register:
-  // an enum, or an array or function type behind a typedef name, which the parameter adjusts to a
-  // pointer (`GXTexFmt`, `Mtx`, `__va_list`). The second kind is listed (`FnProto.wordParams`).
+  // nothing and is no floating type is read through those names for what it positively is: a type
+  // that still travels in one register — an enum, or an array or function type behind a typedef
+  // name, which the parameter adjusts to a pointer (`GXTexFmt`, `Mtx`, `__va_list`) — listed in
+  // `FnProto.wordParams`; or a struct, union or class passed BY VALUE, which mwcc passes as the
+  // address of a copy in the caller's frame — listed in `FnProto.byValueParams`. A name the context
+  // never resolves is in neither, and every reader leaves it unsized.
   const types = params.map((p) => asParameter(declaredType(p.specifiers, p.declarator.derivations)));
-  proto.params = types.map((t) => spellType(resolve(t, typedefs, tokens), tokens));
-  const words = proto.params.flatMap((spelled, k) =>
-    declaredWidth(spelled) === undefined && !isFloatingSpelling(spelled) && oneWord(types[k]) ? [k] : [],
-  );
+  const spelled = types.map((t) => spellType(resolve(t, typedefs, tokens), tokens));
+  proto.params = spelled;
+  const unsized = (k: number) => declaredWidth(spelled[k]) === undefined && !isFloatingSpelling(spelled[k]);
+  const listed = (as: Passing) => types.flatMap((t, k) => (unsized(k) && passing(t) === as ? [k] : []));
+  const words = listed('word');
+  const copies = listed('by-value');
   if (words.length > 0) {
     proto.wordParams = words;
+  }
+  if (copies.length > 0) {
+    proto.byValueParams = copies;
   }
   return proto;
 }
 
-/** Whether a parameter of type `t` travels in one register, read through the typedef names it is
- *  built on: an enum; a pointer; an array or a function, which a parameter adjusts to a pointer. A
- *  struct or union passes by value, and a name this never saw states nothing. */
-function passesInOneWord(t: DeclaredType, table: TypeTable, written: ReadonlyMap<string, DeclaredType>): boolean {
+/** How a parameter of type `t` is passed, read through the typedef names it is built on: in ONE
+ *  WORD — an enum the target sizes; a pointer; an array or a function, which a parameter adjusts to
+ *  a pointer — or BY VALUE, a struct, union or class (a tag, or a name bound to a body). Undefined
+ *  where nothing here says: a name this never saw, or an enum the target does not size
+ *  (`unsizedEnums`: `packed`, or a value an int cannot hold), which may take two words. */
+type Passing = 'word' | 'by-value' | undefined;
+
+function passingOf(t: DeclaredType, table: TypeTable, written: ReadonlyMap<string, DeclaredType>): Passing {
   let cur = t;
   for (let hops = 0; hops < 16; hops++) {
     const [first] = cur.derivations;
     if (first !== undefined) {
-      return first.kind === 'array' || first.kind === 'function' || first.kind === 'reference' || isPointer(first);
+      return first.kind === 'array' || first.kind === 'function' || first.kind === 'reference' || isPointer(first)
+        ? 'word'
+        : undefined;
     }
     if (cur.type.kind === 'tag') {
-      return cur.type.keyword === 'enum';
+      const { keyword, tag } = cur.type;
+      if (keyword !== 'enum') {
+        return 'by-value';
+      }
+      return tag !== undefined && table.unsizedEnums.has(`enum ${tag}`) ? undefined : 'word';
     }
     const name = nameOf(cur);
-    if (name === undefined || table.named.has(name)) {
-      return false;
+    if (name === undefined) {
+      return undefined;
+    }
+    if (table.named.has(name)) {
+      return 'by-value';
     }
     if (table.enums.has(name)) {
-      return true;
+      return table.unsizedEnums.has(name) ? undefined : 'word';
     }
     const next = table.typedefs.get(name) ?? written.get(name);
     if (next === undefined || nameOf(next) === name) {
-      return false;
+      return undefined;
     }
     cur = next;
   }
-  return false;
+  return undefined;
 }
 
 /** The prototypes a lift of `own` reads when a context is in hand: `stated` — a caller's own
@@ -1110,8 +1131,15 @@ const same = (a: FnProto | null, b: FnProto): boolean => a !== null && JSON.stri
  *  declines this shape, and a context entry dropped whole leaves every non-void call to that name
  *  undeclared — and a frame address handed to an undeclared callee may be its hidden struct-return
  *  pointer (`returnsWithoutHiddenPointer`). pokeemerald's `u8 *ConvertIntToDecimalStringN(u8 *,
- *  s32, enum StringConvertMode, u8)` is the case: its enum parameter has no width here, so the
- *  entry yields its parameters and keeps its `u8 *`. */
+ *  s32, enum StringConvertMode, u8)` is the case: its enum parameter has no width its SPELLING
+ *  states, so the entry yields its parameters and keeps its `u8 *`.
+ *
+ *  THE QUESTION HERE IS ASKED OF THE SPELLINGS, the context's own reading of the names behind them
+ *  (`wordParams`, `byValueParams`) set aside: which source states the declaration better is not
+ *  which one a lowering can place. The map sizes an enum or an array typedef by its byte count and
+ *  spells it, which the context's reading of the name only classifies; so an entry that sizes such
+ *  a parameter through that reading still yields to a map that spells it, as it did before the
+ *  reading existed. Whichever entry wins is the one every reader of it takes. */
 function contextPrototypesUnder(
   context: Prototypes,
   symbols: SymbolMap | undefined,
@@ -1132,7 +1160,7 @@ function contextPrototypesUnder(
   return Object.fromEntries(
     Object.entries(context).flatMap(([name, p]): [string, FnProto][] => {
       const map = mapped.get(name);
-      if (declaredCallArgs(p, target) !== undefined || map === undefined) {
+      if (declaredCallArgs({ params: p.params }, target) !== undefined || map === undefined) {
         return [[name, p]];
       }
       const kept = contextReturnUnder(p, map.signed.params, map.returned);

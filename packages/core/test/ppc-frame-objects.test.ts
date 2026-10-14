@@ -279,11 +279,15 @@ describe('what the local area refuses', () => {
   test('…and one a header spells through a typedef, as GXColor and Vec are', () => {
     // the copy built from `*p` (r5) at r1+8, its address in r4: `tbT(1, *p)` with `B_t` a struct
     const copy = ['lwz     r0,0(r5)', 'stw     r0,8(r1)', 'lwz     r0,4(r5)', 'stw     r0,12(r1)'];
-    expect(() =>
-      lift('f', frame([...copy, 'li      r3,1', 'addi    r4,r1,8', 'bl tbT', ...tail]), {
-        tbT: { returns: 's32', params: ['s32', 'B_t'] },
-      }),
-    ).toThrow(/takes its parameter 2 as 'B_t', which no word holds/);
+    const body = frame([...copy, 'li      r3,1', 'addi    r4,r1,8', 'bl tbT', ...tail]);
+    expect(() => lift('f', body, { tbT: { returns: 's32', params: ['s32', 'B_t'], byValueParams: [1] } })).toThrow(
+      /takes its parameter 2 as 'B_t', which no word holds: a struct or union passed by value/,
+    );
+    // …where a table spells the name and states nothing about it, the name is unsized, not a struct:
+    // the area still cannot be drawn, and the refusal says why without claiming a by-value copy
+    expect(() => lift('f', body, { tbT: { returns: 's32', params: ['s32', 'B_t'] } })).toThrow(
+      /'tbT', called at 0x\w+, is declared with its parameter 2 as 'B_t', which nothing here sizes/,
+    );
   });
 
   test('an enum, or an array behind a typedef, is no by-value copy where the context says so', () => {
@@ -292,10 +296,37 @@ describe('what the local area refuses', () => {
     const call = ['addi    r3,r1,8', 'li      r4,1', 'bl tx', 'lwz     r3,8(r1)', ...tail];
     const declared = { tx: { params: ['Mtx', 'GXTexFmt'], wordParams: [0, 1], returnsVoid: true } };
     expect(lift('f', frame(call), declared)).toContain('tx(sp8, 1)');
-    // …and the same spellings a table states without the fact may name a struct passed by value
+    // …and the same spellings a table states without the fact are unsized: not words, and not a
+    // struct either — a name nothing resolved
     expect(() => lift('f', frame(call), { tx: { params: ['Mtx', 'GXTexFmt'], returnsVoid: true } })).toThrow(
-      /takes its parameter 1 as 'Mtx', which no word holds/,
+      /is declared with its parameter 1 as 'Mtx', which nothing here sizes: a word, a pair, a stack word or a by-value copy/,
     );
+  });
+
+  test('a call the declaration sizes through wordParams is lowered at that arity, not guessed', () => {
+    // `enum8`'s shape: `h8(A, k, buf[0], buf[1], 4, 5, 6)` with an enum first parameter. The area check
+    // and the call lowering read one declaration: the call takes seven words, and no guess refuses it
+    const regs = ['li      r3,0', 'mr      r4,r31', 'lwz     r5,8(r1)', 'lwz     r6,12(r1)'];
+    const rest = ['li      r7,4', 'li      r8,5', 'li      r9,6', 'bl h8'];
+    const body = [
+      'stwu    r1,-32(r1)',
+      'mflr    r0',
+      'stw     r0,36(r1)',
+      'stw     r31,28(r1)',
+      'mr      r31,r3',
+      'addi    r3,r1,8',
+      'bl fill',
+      ...regs,
+      ...rest,
+      'lwz     r0,36(r1)',
+      'lwz     r31,28(r1)',
+      'mtlr    r0',
+      'addi    r1,r1,32',
+      'blr',
+    ];
+    const h8 = { params: ['Fmt', 's32', 's32', 's32', 's32', 's32', 's32'], returns: 's32' };
+    expect(lift('f', body, { ...PROTOS, h8: { ...h8, wordParams: [0] } })).toContain('h8(0, a0, ');
+    expect(() => lift('f', body, { ...PROTOS, h8 })).toThrow(/parameter 1 as 'Fmt', which nothing here sizes/);
   });
 
   test('a floating parameter is no by-value copy, and keeps its own refusal', () => {

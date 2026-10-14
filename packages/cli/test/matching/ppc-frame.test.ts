@@ -8,6 +8,7 @@
 // that build's rows use, lifted, recompiled with the same build and scored.
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
+import { prototypesFromContext } from '@asmlift/core/proto-context';
 import { targetFor } from '@asmlift/core/target';
 import { type MwccToolchainId, compilePpcTarget, scoreCPpc } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -179,8 +180,38 @@ describe('a homed parameter beside a captured local lifts, and a typedef-spelled
         const { asm } = compilePpcTarget(mwcc, tbval, 'tbval', flags);
         expect(asm).toMatch(/\baddi\s+r\d+,r1,\d+\b/);
         expect(() =>
-          decompile('tbval', asm, targetFor(mwcc, flags).target, { prototypes: { tbT: { params: ['s32', 'B_t'] } } }),
+          decompile('tbval', asm, targetFor(mwcc, flags).target, {
+            prototypes: { tbT: { params: ['s32', 'B_t'], byValueParams: [1] } },
+          }),
         ).toThrow(/takes its parameter 2 as 'B_t', which no word holds: a struct or union passed by value/);
+      },
+      BUDGET,
+    );
+  }
+});
+
+// AN ENUM PARAMETER, read through the context as the bench's real rows read it, beside
+// `synthetic:enumarg:mwcc_242_81`: the context says the enum travels in one word
+// (`FnProto.wordParams`), and the call lowering reads that one fact too, so the seven-argument
+// call is lowered at its declared arity instead of refusing as one nothing declares. It lifts as
+// its `s32` twin does, to the same frame and the same score.
+describe('an enum parameter a context sizes is one word to the call lowering too', () => {
+  const ctx =
+    'typedef int s32; typedef enum { A, B } Fmt; void use(s32 *p);\n' +
+    's32 h8(Fmt f, s32 a, s32 b, s32 c, s32 d, s32 e, s32 g);\n';
+  const enumarg = 's32 enumarg(s32 k){ s32 buf[2]; use(buf); return h8(A, k, buf[0], buf[1], 4, 5, 6); }';
+  for (const [mwcc, flags] of BEYOND) {
+    test.runIf(ppcDockerGate('ppc-frame', mwcc))(
+      `${mwcc}: enumarg`,
+      () => {
+        const { obj, asm } = compilePpcTarget(mwcc, ctx + enumarg, 'enumarg', flags);
+        expect(asm).toMatch(/\baddi\s+r3,r1,(8|12)\b/);
+        const r = decompile('enumarg', asm, targetFor(mwcc, flags).target, {
+          prototypes: prototypesFromContext(ctx, 'c'),
+        });
+        expect(r.source).toMatch(/return h8\(0, /);
+        const s = scoreCPpc(mwcc, ctx + r.source, 'enumarg', obj, flags);
+        expect(s.score, JSON.stringify(s)).toBeGreaterThanOrEqual(0);
       },
       BUDGET,
     );

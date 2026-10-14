@@ -17,15 +17,16 @@ import { type Value, mkOp, mkValue } from '../ir/core';
 import { type IrType, T, typeToString } from '../ir/types';
 import {
   type FnProto,
+  type ParamClass,
   type Prototypes,
   STANDARD_SIGNATURES,
   declaredCallArgs,
   declaredReturnWidth,
-  declaredWidth,
   declaresAggregateReturn,
   declaresParams,
   declaresVoidReturn,
   isFloatingSpelling,
+  paramClassOf,
   spellableProto,
   wordsOf,
 } from '../proto';
@@ -71,15 +72,12 @@ export interface DeclaredCall {
   readonly returned?: StructReturn | 'register';
 }
 
-/** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes: a value of one word
- *  (`declaredWidth` sizes it at 32 bits or less, or the declaration lists it in `wordParams`: an
- *  enum, an array or a function type behind a typedef name), one wider than a word, a floating type
- *  (`isFloatingSpelling`), or a spelling none of those reads — a struct or union passed BY VALUE
- *  (`B_t`, `GXColor`), or a name nothing here saw. `declaredCall` answers null for all but the
- *  sized words. A count (`{ params: 3 }`) states words. A frontend asks it where that null is not
- *  enough: a by-value aggregate travels as the address of a copy the caller builds in its own
- *  frame on mwcc, which a float or an enum never does. */
-export type ParamClass = 'word' | 'wide' | 'float' | 'unsized';
+/** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes: the one reading the
+ *  declaration's every reader takes (`paramClassOf`, proto.ts), so `declaredCall`'s widths and this
+ *  class cannot disagree. A frontend asks it where a width alone is not enough: a by-value
+ *  aggregate travels as the address of a copy the caller builds in its own frame on mwcc, which a
+ *  float or an enum never does, and an unsized spelling may be any of them. */
+export type { ParamClass };
 
 /** One declared parameter: its class, and the spelling it was read from (empty for a count). */
 export interface DeclaredParam {
@@ -334,21 +332,8 @@ export function callDeclarations(
     if (!Array.isArray(params)) {
       return null;
     }
-    const words = new Set(declarationOf(callee)?.wordParams ?? []);
-    return params.map((spelling, k) => {
-      const w = declaredWidth(spelling);
-      const kind =
-        w !== undefined
-          ? w > 32
-            ? 'wide'
-            : 'word'
-          : isFloatingSpelling(spelling)
-            ? 'float'
-            : words.has(k)
-              ? 'word'
-              : 'unsized';
-      return { kind, spelling };
-    });
+    const declared = declarationOf(callee)!;
+    return params.map((spelling, k) => ({ kind: paramClassOf(declared, params, k), spelling }));
   };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,

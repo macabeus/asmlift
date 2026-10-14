@@ -246,6 +246,19 @@ describe('prototypes from a declaration context', () => {
       'int',
     ]);
     expect(p.f?.wordParams).toEqual([0, 1, 2, 3, 4]);
+    // …and a struct or union passed by value is stated as the positive fact it is, so a name never
+    // seen (`Unknown_t`) is in neither list: unsized, not a struct by inference
+    expect(p.f?.byValueParams).toEqual([5, 6, 7]);
+    // every reader takes the same answer: the call lowering sizes the listed words too
+    const g = prototypesFromContext('typedef enum { A, B } Fmt; typedef float Mtx[3][4]; int g(Fmt, Mtx, int);', 'c');
+    expect(declaredCallArgs(g.g, PPC_MWCC)?.widths).toEqual([32, 32, 32]);
+  });
+
+  test('an enum holding a value an int cannot is no word: it may take two', () => {
+    const p = prototypesFromContext('enum Big { B0 = 0x100000000LL }; void f(enum Big, int);', 'c');
+    expect(p.f?.wordParams).toBeUndefined();
+    expect(p.f?.byValueParams).toBeUndefined();
+    expect(declaredCallArgs(p.f, PPC_MWCC)).toBeUndefined();
   });
 
   test('a word C++ alone reserves names a parameter or a member in C', () => {
@@ -783,7 +796,10 @@ describe('a context register return under a mapped signature', () => {
   const merged = withContextPrototypes(undefined, ctx, 'f', symbols, ARMV4T_AGBCC);
 
   test('a pointer return is kept over the parameters the map sizes', () => {
-    expect(declaredCallArgs(ctx.conv!, ARMV4T_AGBCC)).toBeUndefined();
+    // the source question is asked of the spellings, which leave the enum unsized; the context's
+    // own reading of it (`wordParams`) sizes it for a lowering, and does not outrank the map
+    expect(declaredCallArgs({ params: ctx.conv!.params }, ARMV4T_AGBCC)).toBeUndefined();
+    expect(declaredCallArgs(ctx.conv!, ARMV4T_AGBCC)?.widths).toEqual([32, 32, 32, 8]);
     expect(merged.conv).toEqual({ params: ['void *', 's32', 's32', 'u8'], returns: 'u8 *' });
     expect(merged.count).toEqual({ params: ['s32'], returns: 'int' });
   });

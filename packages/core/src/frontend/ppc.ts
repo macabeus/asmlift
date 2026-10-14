@@ -803,11 +803,11 @@ const takesFrameAddress = (ins: Instr, frameReg: string | undefined): boolean =>
  *  drawn, rather than leaving the partition sound only through the lowering's own refusal: one
  *  declared with more parameter words than argument registers, with a 64-bit parameter (the EABI
  *  aligns a pair to an odd register, so a packed word count does not say where the stack words
- *  start), or with more floating parameters than f1..f8. So does a parameter whose spelling the
- *  declaration machinery reads as neither (`ParamClass` `unsized`): a struct or union passed by
- *  value, which mwcc passes as the address of a copy in this area (`tb(1, b)` copies `b` to r1+8 and
- *  passes `addi r4,r1,8` at -O4,p) — a copy no source declares, whose address the lift would pass
- *  where the callee takes the struct.
+ *  start), or with more floating parameters than f1..f8. So does a declared parameter that is a
+ *  struct or union passed by value (`ParamClass` `by-value`), which mwcc passes as the address of a
+ *  copy in this area (`tb(1, b)` copies `b` to r1+8 and passes `addi r4,r1,8` at -O4,p) — a copy no
+ *  source declares, whose address the lift would pass where the callee takes the struct — and one
+ *  nothing sizes (`unsized`), which may be that, a pair or a stack word.
  *
  *  A CALL NOTHING DECLARES IS NOT PROVEN CLEAR OF THE AREA HERE, and neither does its lowering's
  *  guess prove it: the guess refuses a call whose guessed arity reaches seven argument registers
@@ -914,15 +914,16 @@ function measurePpcFrame({
       continue;
     }
     const at = `'${callee}', called at 0x${ins.addr.toString(16)},`;
-    const unsized = params.findIndex((p) => p.kind === 'unsized');
-    if (unsized >= 0) {
+    const copied = params.findIndex((p) => p.kind === 'by-value');
+    if (copied >= 0) {
       fail(
-        `cannot lift '${name}': address-taken stack local — ${at} takes its parameter ${unsized + 1} as ` +
-          `'${params[unsized].spelling}', which no word holds: a struct or union passed by value, which this compiler ` +
+        `cannot lift '${name}': address-taken stack local — ${at} takes its parameter ${copied + 1} as ` +
+          `'${params[copied].spelling}', which no word holds: a struct or union passed by value, which this compiler ` +
           "passes as the address of a copy in the caller's local area — not modelled",
       );
     }
     const count = (kind: ParamClass) => params.filter((p) => p.kind === kind).length;
+    const unsized = params.findIndex((p) => p.kind === 'unsized');
     const why =
       count('wide') > 0
         ? 'a 64-bit parameter, which the EABI places in an aligned register pair or on the stack'
@@ -930,7 +931,10 @@ function measurePpcFrame({
           ? `${count('word')} parameter words and the argument registers carry ${target.argRegs.length}`
           : count('float') > fprArgs
             ? `${count('float')} floating parameters and the floating-point argument registers carry ${fprArgs}`
-            : undefined;
+            : unsized >= 0
+              ? `its parameter ${unsized + 1} as '${params[unsized].spelling}', which nothing here sizes: a word, a ` +
+                'pair, a stack word or a by-value copy in the local area'
+              : undefined;
     if (why !== undefined) {
       fail(
         `cannot lift '${name}': outgoing stack arguments not modelled — ${at} is declared with ${why}, and this ` +
