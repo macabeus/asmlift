@@ -1,7 +1,7 @@
 // DENSE SWITCHES WHOSE JUMP TABLE THE COMPILER SCHEDULES AROUND, compiled and recompiled on the
 // toolchains the synthetic tier does not cover (mwcc 2.3.3, mwcc 2.4.7, gcc 2.7.2) and on mwcc 2.4.2
 // beside them: reference C → target → lift (frontend/ppc.ts `recoverPpcJumpTables`, frontend/mips.ts
-// `recoverMipsJumpTables`) → candidate → scored. Each shape declined at the indirect jump before.
+// `recoverMipsJumpTables`) → candidate → scored.
 //
 // - `sched`: every arm calls, so the function saves LR, and all three mwcc builds schedule that
 //   store between the bound and its branch (`cmplwi r3,7 ; stw r0,20(r1) ; bgt-`; 2.3.3 saves before

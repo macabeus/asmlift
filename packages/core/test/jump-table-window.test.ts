@@ -1,7 +1,9 @@
 // The Regime-B jump-table recognizers (frontend/ppc.ts `recoverPpcJumpTables`, frontend/mips.ts
-// `recoverMipsJumpTables`) against the shapes compilers schedule around the dispatch. Each fixture is
-// hand-written objdump text in the compiled shape, and each refusal is a one-instruction edit of an
-// accepted fixture, so what declines is the edit and nothing else.
+// `recoverMipsJumpTables`) against the shapes compilers schedule around the dispatch, the table
+// bases they hoist out of it (frontend/jump-table.ts), and the PowerPC `bgtlr` default's return of
+// an untouched r3. Each fixture is hand-written objdump text in the compiled shape. Most refusals
+// are a small edit of an accepted fixture, so what declines is the edit; the bounds-window, the
+// reachable-dispatch and the r3 cases build their own listings.
 import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -447,8 +449,7 @@ test('a return nothing wrote r3 for mints no parameter the caller never passed',
 
 /** KMC's / gcc 2.7.2's loop with the table base hoisted into the preheader: `lui t6 ; addiu t6,t6`
  *  before the loop, the dispatch adding t6 inside it. `pre` runs before the pair, `mid` inside it,
- *  `post` after it,
- *  `arm` is case 3's body. */
+ *  `post` after it; `arm` is case 3's body. */
 const mipsLoop = (o: { pre?: string[]; mid?: string[]; post?: string[]; arm?: string[]; base?: string } = {}) => {
   const b = o.base ?? 't6';
   return listing(

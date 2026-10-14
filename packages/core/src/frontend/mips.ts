@@ -493,8 +493,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     ] as const) {
       const si = defBefore(idxCand, aIdx);
       const bi2 = defBefore(baseCand, aIdx);
-      // A base the dispatch's block does not form is a HOISTED one (KMC and gcc 2.7.2 put `lui rB ;
-      // addiu rB,rB` in the loop's preheader). Which pair it is stays a guess here; `lift` proves it.
+      // A base the dispatch's block does not form is a HOISTED one (`hoistedTable`).
       const out = bi2 < 0 && si >= 0 ? hoistedTable(baseCand) : null;
       if (si < 0 || (bi2 < 0 && !out)) {
         continue;

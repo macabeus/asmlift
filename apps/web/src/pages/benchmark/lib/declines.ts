@@ -117,11 +117,11 @@
 // `raise:` — 265 / 60 / 13 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
 // fourth value a decline could carry. One control-transfer capability is in that residue and is
 // worth naming on its own: `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls" (its MIPS sibling has a row, and `indirect-jump` below). So are two kinds of the naming family: `reloc-symbol.ts`
-// `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not
-// a C identifier" and "names the function's predefined name" have none (a Thumb pool word naming
-// the predefined name is the exception: `pool-word-shape` takes it). They have no rows, so they
-// wait for one.
+// gotos / register tail calls" (its MIPS sibling has a row, and the class `indirect-jump`). So are
+// two kinds of the naming family: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six
+// have a class here, while "names 'X', which is not a C identifier" and "names the function's
+// predefined name" have none (a Thumb pool word naming the predefined name is the exception:
+// `pool-word-shape` takes it). They have no rows, so they wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {

@@ -201,12 +201,14 @@ interface PpcBlock {
 }
 
 // A recovered dense-switch jump table (Regime B), keyed
-// by the BOUNDS branch (`bgt DEF`) whose block emits the `switch_br`. `caseAddrs[k]` is the `.text`
+// by the BOUNDS branch (`bgt DEF`, or `bgtlr`) whose block emits the `switch_br`. `caseAddrs[k]` is the `.text`
 // address of case `k` (dense 0..N-1); `bctrAddr` is the elided dispatch's indirect jump. The mwcc
 // idiom:
 //   cmplwi rS,N-1 ; bgt DEF                                        (bounds)
 //   lis rT,0 [ADDR16_HA @tbl] ; slwi rIdx,rS,2 ; addi rB,rT,0 [ADDR16_LO @tbl]
 //   ; lwzx rV,rB,rIdx ; mtctr rV ; bctr                           (dispatch — table in .data)
+// mwcc schedules other words into the bounds pair (`boundsCompare`), orders the dispatch's freely,
+// and 2.3.3 forms the table base outside the dispatch (`hoistedTable`).
 interface PpcJT {
   scrutReg: string;
   /** The bounds compare's address: nothing may enter after it, up to the `bctr`. */
@@ -336,8 +338,6 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     const scrutReg = slwi.ops[1];
     const ai = defIn(rB, li);
     const lisI = ai < 0 ? -1 : defIn(instrs[ai].ops[1], ai);
-    // A base the block does not form is a HOISTED one (mwcc 2.3.3 puts `lis rB ; addi rB,rB` at entry
-    // and dispatches from a loop). Which pair it is stays a guess here; `lift` proves it.
     const hoisted = ai < 0 ? hoistedTable(instrs, rB) : null;
     let table: TableKey | null = hoisted;
     if (ai >= 0) {
@@ -1732,7 +1732,7 @@ export function lift(
             }
             // A jump table's own name is read as data and never written down, so the naming policy
             // does not ask it; RELA pairs a half only with a low half of the same symbol and addend,
-            // and that one makes a table base (`foldTableBase`).
+            // and that one, with no immediate of its own, makes a table base (`foldTableBase`).
             const table = tableBases.wants({ sym: ins.reloc.sym, addend: ins.reloc.addend });
             relocTaken = true;
             const hi = mkValue(T.unk(32));
