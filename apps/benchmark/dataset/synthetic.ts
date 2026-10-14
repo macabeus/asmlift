@@ -9489,13 +9489,17 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void volwalk(s32 a, s32 b);',
     proto: { volwalk: { params: ['s32', 's32'], returnsVoid: true } },
   },
-  // ── O32 frame objects and incoming stack arguments (frontend/mips.ts) ──────────────────────
+  // ── O32 and mwcc frame objects and incoming stack arguments (frontend/mips.ts, ppc.ts) ─────
   // An address-taken local and an incoming stack word on the two MIPS lanes the synthetic tier
   // covers; gcc2.7.2 shares gcc2.7.2kmc's description and is pinned by
   // `packages/cli/test/matching/mips-frame.test.ts`. Where the local sits is the compiler's
   // (`compilerBehaviors.o32LocalArea`): right above the home of a0..a3 on gcc, at the frame top
   // above `ra` on IDO. Both lanes take calls here: ido7.1's canonical `-non_shared` build emits a
   // `jal` with an R_MIPS_26 record, which the MIPS frontend lowers like gcc's.
+  //
+  // `escarr`, `in9e` and `in9` run on mwcc_242_81 too, where the local area is past the back chain
+  // and the link-register save word and under the saves (`compilerBehaviors.linkageLocalArea`), and
+  // argument word k >= 8 arrives at entry r1 + 8 + 4(k - 8); the mwcc-only rows follow the list.
   //
   // `escarr` is the array handed to a callee and read back, kept as one object; `escaddu` reads it
   // through `addu rD,sp,rX`, whose access displacement names the array (IDO `addu v0,sp,t6` /
@@ -9504,7 +9508,7 @@ export const SYNTHETIC: SynthSpec[] = [
     sym: 'escarr',
     src: 'void fill(s32 *p);\ns32 escarr(void){ s32 a[4]; fill(a); return a[0] + a[3]; }',
     features: ['stack-addr', 'array'],
-    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 'void fill(s32 *p); s32 escarr(void);',
     proto: { fill: { params: ['s32 *'], returnsVoid: true } },
   },
@@ -9531,7 +9535,7 @@ export const SYNTHETIC: SynthSpec[] = [
     sym: 'in9e',
     src: 's32 in9e(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i){ return e + i; }',
     features: ['multi-arg'],
-    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
   },
   {
     sym: 'in9',
@@ -9539,7 +9543,7 @@ export const SYNTHETIC: SynthSpec[] = [
       's32 k1(s32 x);\n' +
       's32 in9(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i){ if (a) return k1(i) + e; return b; }',
     features: ['multi-arg', 'branch'],
-    toolchains: ['ido7.1', 'gcc2.7.2kmc'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'],
     ctx: 's32 k1(s32 x); s32 in9(s32 a, s32 b, s32 c, s32 d, s32 e, s32 f, s32 g, s32 h, s32 i);',
     proto: { k1: { params: 1 } },
   },
@@ -9630,6 +9634,51 @@ export const SYNTHETIC: SynthSpec[] = [
       f0: { returnsVoid: true },
       tabstr: { returnsVoid: true },
     },
+  },
+  // mwcc_242_81 only. The other two CodeWarrior builds are pinned by
+  // packages/cli/test/matching/ppc-frame.test.ts. `framelist` is marioparty4's CharRandomize shape at
+  // its -O0,p: an array indexed through `addi r3,r1,8; stwx`, re-made at each use, under three saved
+  // registers. `subslot` is a halfword array, every access to it below a word. `u64loc` hands a
+  // 64-bit local to a callee and reads both of its words back, as SLSerialNoCheck does. `deadloc` is
+  // fn_1_3994's: a local written in a loop and never read, in a function that makes no call, which
+  // -O0,p keeps and the lift keeps as a store.
+  {
+    sym: 'framelist',
+    src:
+      's32 r8(void);\nvoid framelist(s16 *pro, s16 *out){ s32 i, j, n; s32 list[8]; for (i = 0; i < 4; i++) { n = 0; ' +
+      'for (j = 0; j < 8; j++) { if (pro[j]) continue; list[n++] = j; } out[i] = list[r8() % n]; } }',
+    features: ['array', 'variable-index', 'continue'],
+    toolchains: ['mwcc_242_81'],
+    cflags: ['-proc', 'gekko', '-O0,p', '-enum', 'int', '-inline', 'auto', '-fp', 'hard', '-Cpp_exceptions', 'off'],
+    ctx: 's32 r8(void); void framelist(s16 *pro, s16 *out);',
+    proto: { r8: { params: [] }, framelist: { params: ['s16 *', 's16 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'subslot',
+    src: 'void k(void *p);\ns32 subslot(s32 x){ s16 h[2]; h[0] = x; h[1] = x + 1; k(h); return h[1]; }',
+    features: ['stack-addr', 'array'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'void k(void *p); s32 subslot(s32 x);',
+    proto: { k: { params: ['void *'], returnsVoid: true } },
+  },
+  {
+    sym: 'u64loc',
+    src:
+      's32 gsn(s32 s, u64 *v);\ns32 u64loc(s32 s, u64 *want){ u64 v; if (gsn(s, &v) < 0) return 1; ' +
+      'if (v != *want) return 0; return 1; }',
+    features: ['stack-addr', 'branch'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 's32 gsn(s32 s, u64 *v); s32 u64loc(s32 s, u64 *want);',
+    proto: { gsn: { params: ['s32', 'u64 *'] } },
+  },
+  {
+    sym: 'deadloc',
+    src: 'void deadloc(s32 **p){ s32 *v; s32 **q = p; while (q) { v = *(s32 **)q; q = (s32 **)q[2]; } }',
+    features: ['pointer'],
+    toolchains: ['mwcc_242_81'],
+    cflags: ['-proc', 'gekko', '-O0,p', '-enum', 'int', '-inline', 'auto', '-fp', 'hard', '-Cpp_exceptions', 'off'],
+    ctx: 'void deadloc(s32 **p);',
+    proto: { deadloc: { params: ['s32 **'], returnsVoid: true } },
   },
 ];
 
