@@ -49,6 +49,7 @@ import {
   Op,
   Successor,
   Value,
+  byValueOperands,
   callArgs,
   calleeName,
   calleeValue,
@@ -4414,24 +4415,22 @@ export function structure(
       const through = calleeValue(d);
       // a struct passed by value is the object its operand addresses — a frame object stamped as
       // that struct, or a global — spelled bare (frontend/call-plan.ts `foldByValueArgs`)
-      const byValue = ((d.attrs.byValue as number[] | undefined) ?? [])
-        .filter((_, i) => i % 2 === 0)
-        .map((at) => {
-          const o = defs.get(d.operands[at]);
-          const t = d.operands[at].type;
-          const type = t.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
-          const object =
-            type !== undefined &&
-            (o?.opcode === 'laddr'
-              ? o.attrs.aggregate === true
-              : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type));
-          if (!object) {
-            throw new Error(
-              `internal: a by-value argument of '${d.attrs.target}' is not the address of an object of the struct it passes`,
-            );
-          }
-          return { at, type };
-        });
+      const byValue = byValueOperands(d).map(({ at, param }) => {
+        const o = defs.get(d.operands[at]);
+        const t = d.operands[at].type;
+        const type = t.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
+        const object =
+          type !== undefined &&
+          (o?.opcode === 'laddr'
+            ? o.attrs.aggregate === true
+            : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type));
+        if (!object) {
+          throw new Error(
+            `internal: a by-value argument of '${d.attrs.target}' is not the address of an object of the struct it passes`,
+          );
+        }
+        return { at, param, type };
+      });
       const args = callArgs(d).map((v, i): Expr => {
         const x = e(v);
         return byValue.some((b) => b.at === i) && x.k === 'addr' ? { k: 'var', name: x.name } : x;
@@ -7065,9 +7064,9 @@ export function structure(
           }
         }
         // a struct passed by value is read whole at the call: the word loads the asm made of it
-        const passed = ((op.attrs.byValue as number[] | undefined) ?? []).filter(
-          (at, i) => i % 2 === 0 && roots.has(op.operands[at]),
-        );
+        const passed = byValueOperands(op)
+          .map((b) => b.at)
+          .filter((at) => roots.has(op.operands[at]));
         passed.forEach((at) => {
           const t = op.operands[at].type;
           loads += t.kind === 'ptr' && t.to.kind === 'struct' ? Math.ceil((t.to.size ?? 4) / 4) : 1;

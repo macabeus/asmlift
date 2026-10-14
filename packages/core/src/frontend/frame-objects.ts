@@ -17,7 +17,7 @@
  *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
-import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
+import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
@@ -464,15 +464,14 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
       if (op.attrs.sret === true && from !== undefined && t?.kind === 'struct' && t.size !== undefined) {
         out.push({ from, to: from + t.size });
       }
-      const byValue = (op.attrs.byValue as number[] | undefined) ?? [];
-      byValue.forEach((at, i) => {
-        const v = i % 2 === 0 ? op.operands[at] : undefined;
-        const off = v === undefined ? undefined : laddrOff.get(v);
+      for (const { at } of byValueOperands(op)) {
+        const v = op.operands[at];
+        const off = laddrOff.get(v);
         const t = v?.type.kind === 'ptr' ? v.type.to : undefined;
         if (off !== undefined && t?.kind === 'struct' && t.size !== undefined) {
           out.push({ from: off, to: off + t.size });
         }
-      });
+      }
     }
   }
   return out;
@@ -1115,8 +1114,7 @@ function classifyFrameUses({
           accesses.get(off)!.push({ width: op.attrs.width as number, signed: false, isLoad: false });
           continue;
         }
-        const byValue = op.opcode === 'call' ? (op.attrs.byValue as number[] | undefined) : undefined;
-        if (byValue?.some((at, i) => i % 2 === 0 && at === idx)) {
+        if (byValueOperands(op).some((b) => b.at === idx)) {
           // the fold types the operand a pointer to the struct passed (call-plan.ts `foldByValueArgs`)
           const type = v.type.kind === 'ptr' ? v.type.to : undefined;
           if (type?.kind !== 'struct' || type.size === undefined) {

@@ -129,7 +129,7 @@ export function collectSymbolRefs(
       for (const b of e.byValue ?? []) {
         if (b.type.kind === 'struct') {
           const params = passedTo.get(e.fn) ?? passedTo.set(e.fn, new Map()).get(e.fn)!;
-          params.set(b.at - (e.sret === undefined ? 0 : 1), b.type);
+          params.set(b.param, b.type);
           const arg = e.args[b.at];
           if (arg?.k === 'var' && symbols.has(arg.name)) {
             // by its tag, which declares even ahead of the definition and of a typedef of it

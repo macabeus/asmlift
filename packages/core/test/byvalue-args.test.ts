@@ -172,6 +172,12 @@ describe('a struct passed by value in argument registers', () => {
     };
     const { source } = decompile('sretby', SRETBY, ARMV4T_AGBCC, { prototypes: { mkr } });
     expect(source).toContain('    sp12 = mkr(sp0);\n    gOut = sp12.x;\n');
+    // the struct is operand 1 and declared parameter 0: the call carries the parameter, which is
+    // the key the declaration's `byValueLayouts` defines it by
+    const [c] = enumerateCandidates('sretby', SRETBY, ARMV4T_AGBCC, { prototypes: { mkr } });
+    const decls = renderDeclarations(c.symbolRefs ?? []);
+    expect(decls).toContain('struct A { u16 a; u16 b; u16 c; u16 d; s8 e; s8 f; };');
+    expect(decls).toContain('struct R mkr(struct A);');
   });
 
   test('words loaded off a pointer, or off two places, decline', () => {

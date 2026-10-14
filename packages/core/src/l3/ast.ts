@@ -65,7 +65,8 @@ export type Expr =
   // `dest = fn(rest)`, so such a call stands alone.
   //
   // `byValue` names the arguments that are a struct passed BY VALUE — a local or a global spelled
-  // bare, `take(s)` — by their place in `args`, with the struct the declaration passes
+  // bare, `take(s)` — by their place in `args` and the declared parameter each is, with the struct
+  // the declaration passes
   // (frontend/call-plan.ts `foldByValueArgs`); the declarations block defines each beside the
   // callee's prototype.
   //
@@ -79,7 +80,7 @@ export type Expr =
       args: Expr[];
       wide64?: true;
       sret?: IrType;
-      byValue?: readonly { readonly at: number; readonly type: IrType }[];
+      byValue?: readonly { readonly at: number; readonly param: number; readonly type: IrType }[];
     }
   // The ADDRESS of a named global, `&gSym` (agbcc pool `.word gSym`, frontend `gaddr` op). A
   // DEREF of it collapses to the bare global: memAccess/arrayAccess spell `*(&gSym)` as `gSym`

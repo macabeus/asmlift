@@ -825,7 +825,7 @@ function structReturnOf(
  *  The operand's value is typed a pointer to the struct, and a global's `gaddr` is a fresh one that
  *  names the struct too (`passedAs`), so value numbering never merges it with a plain address of
  *  the symbol. The call then names which operands it passes by value (`byValue`, pairs of operand
- *  and the declaration's word). */
+ *  and declared parameter, read by ir/core.ts `byValueOperands`). */
 export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<CallDeclarations, 'declaredCall'>): void {
   const defs = new Map<Value, { op: Op; blk: Block }>();
   for (const blk of irBlocks) {
@@ -842,11 +842,12 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
       const callee = calleeName(call);
       const declared = callee === undefined ? undefined : calls.declaredCall(callee)?.byValue;
       const pairs = Array.from({ length: words.length / 2 }, (_, i) => {
-        const type = declared?.find((b) => b.word === words[2 * i])?.type;
+        const arg = declared?.find((b) => b.word === words[2 * i]);
+        const type = arg?.type;
         if (type?.kind !== 'struct' || type.size === undefined) {
           throw new Error(`internal: a by-value operand of a call to '${callee}' has no declared struct`);
         }
-        return { first: words[2 * i], n: words[2 * i + 1], type };
+        return { first: words[2 * i], n: words[2 * i + 1], type, param: arg!.param };
       });
       // highest first, so folding one leaves the operand places of those below it as they were
       for (const { first, n, type } of [...pairs].sort((x, y) => y.first - x.first)) {
@@ -947,9 +948,9 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
       const { byValueWords: _, ...attrs } = call.attrs;
       call.attrs = {
         ...attrs,
-        byValue: sorted.flatMap(({ first }) => [
+        byValue: sorted.flatMap(({ first, param }) => [
           first - pairs.filter((q) => q.first < first).reduce((m, q) => m + q.n - 1, 0),
-          first,
+          param,
         ]),
       };
     }
