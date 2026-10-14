@@ -251,11 +251,13 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('sp4 = mk4(a1);');
   });
 
-  // no call takes a stack word, so [sp,#0] is the first temp's, not an outgoing argument
+  // no call takes a stack word, so [sp,#0] is the first temp's, not an outgoing argument; each
+  // member is read where the source used it, the word load being agbcc's CSE of those reads
   test('a temp at the frame base of a wider frame is an object', () => {
-    expect(() => decompile('sret4two', SRET4TWO, ARMV4T_AGBCC, { prototypes: { mk: mkab } })).toThrow(
-      /the object at \[sp,#0\) is where `mk` returns struct S4/,
-    );
+    const { source } = decompile('sret4two', SRET4TWO, ARMV4T_AGBCC, { prototypes: { mk: mkab } });
+    expect(source).toContain('    struct S4 sp0;\n    struct S4 sp4;\n    sp0 = mk(a0, 0, 16);');
+    expect(source).toMatch(/if \(sp0\.a != v0\) \{\n {8}gOut = sp0\.a;\n {8}gOut2 = sp0\.b;\n {4}\}/);
+    expect(source).toMatch(/if \(sp4\.a != v0\) \{\n {8}gOut = sp4\.a;\n {8}gOut2 = sp4\.b;\n {4}\}/);
   });
 
   test('a frame base staged as a fifth argument is not an object', () => {
@@ -268,9 +270,61 @@ describe('a callee declared to return a struct through memory', () => {
     );
   });
 
-  test('a read of the returned struct declines', () => {
-    expect(() => decompile('q1', Q1, ARMV4T_AGBCC, { prototypes: { mk4 } })).toThrow(
-      /the object at \[sp,#0\) is where `mk4` returns struct S4, and this function also reads or writes it/,
+  test('a read of the returned struct reads its member', () => {
+    expect(decompile('q1', Q1, ARMV4T_AGBCC, { prototypes: { mk4 } }).source).toContain(
+      '    sp0 = mk4(a0);\n    return sp0.a;',
+    );
+  });
+
+  // `mov r0, sp / bl mk4` then one use of the word read back: the low byte, the top byte, a middle
+  // byte, two bytes that are no one member, the word whole
+  test('each use of the word names the member whose bits it keeps, or the word stays one read', () => {
+    const q = (use: string) =>
+      decompile(
+        'q',
+        Q1.replace('q1:', 'q:').replace('\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n', use),
+        ARMV4T_AGBCC,
+        {
+          prototypes: { mk4 },
+        },
+      ).source;
+    expect(q('\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n')).toContain('return sp0.a;');
+    expect(q('\tlsr\tr0, r0, #0x18\n')).toContain('return sp0.d;');
+    expect(q('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x18\n')).toContain('return sp0.b;');
+    expect(q('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n')).toContain('return (u16)*(s32 *)&sp0;');
+    expect(q('')).toContain('return *(s32 *)&sp0;');
+  });
+
+  // the word read before a second call fills the same temp, its member used in a later block: read
+  // where the word was, since the call between rewrites it; with no call between, read at the use
+  test('a member is read at its use only where nothing rewrites the struct in between', () => {
+    const twice =
+      'q:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr5, r1, #0\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n' +
+      '\tbl\tmk4\n\tldr\tr4, [sp]\n\tmov\tr0, sp\n\tmov\tr1, #0x1\n\tbl\tmk4\n\tmov\tr0, #0x0\n\tcmp\tr5, #0x0\n' +
+      '\tbeq\t.L2\n\tlsl\tr0, r4, #0x18\n\tlsr\tr0, r0, #0x18\n.L2:\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n' +
+      '\tbx\tr1\n';
+    expect(decompile('q', twice, ARMV4T_AGBCC, { prototypes: { mk4 } }).source).toContain(
+      '    v0 = sp0.a;\n    sp0 = mk4(1);\n    if (a1 == 0) v0 = 0;',
+    );
+    const once = twice.replace('\tmov\tr0, sp\n\tmov\tr1, #0x1\n\tbl\tmk4\n', '');
+    expect(decompile('q', once, ARMV4T_AGBCC, { prototypes: { mk4 } }).source).toContain(
+      '    if (a1 != 0) {\n        v0 = sp0.a;\n',
+    );
+  });
+
+  test('a write into the returned struct declines', () => {
+    const w = Q1.replace('\tldr\tr0, [sp]\n', '\tmov\tr1, #0x5\n\tmov\tr0, sp\n\tstrb\tr1, [r0]\n\tldr\tr0, [sp]\n');
+    expect(() => decompile('q1', w, ARMV4T_AGBCC, { prototypes: { mk4 } })).toThrow(
+      /the object at \[sp,#0\) is where `mk4` returns struct S4, and this function also writes it/,
+    );
+  });
+
+  test('a read past the returned struct declines', () => {
+    const past =
+      'q:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk4\n\tmov\tr1, sp\n' +
+      '\tldr\tr0, [r1, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('q', past, ARMV4T_AGBCC, { prototypes: { mk4 } })).toThrow(
+      /returns struct S4, and this function reads \[sp,#4\) of width 4, past the struct/,
     );
   });
 

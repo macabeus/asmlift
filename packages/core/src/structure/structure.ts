@@ -4019,6 +4019,25 @@ export function structure(
       ? cell
       : ({ k: 'index', base: cell, idx: { k: 'const', value: index }, width, signed, subscript: true } as const);
   };
+  // A FRAME OBJECT DECLARED AS A STRUCT (a call's return storage, `laddrType`) is read and written
+  // through the member an access names exactly — its offset, its width, and the type the cast it
+  // replaces would spell (`spellsAccessType`, a load's alone: a store truncates to the member's
+  // bytes whatever their type); any other access keeps the cast. Unqualified only: a qualified
+  // access keeps the cast its qualifier goes on.
+  const frameStructMember = (op: Op, off: number, width: number, signed: boolean | null): Expr | null => {
+    const d = defs.get(op.operands[0]);
+    const t = d?.results[0].type;
+    if (d?.opcode !== 'laddr' || d.attrs.aggregate !== true || t?.kind !== 'ptr' || t.to.kind !== 'struct') {
+      return null;
+    }
+    const f = t.to.fields.find((m) => m.off === off);
+    if (f === undefined || f.type.kind !== 'int' || f.type.width !== width * 8 || qualifiedBy(op) !== null) {
+      return null;
+    }
+    return signed === null || spellsAccessType(f.type.signed, width, signed)
+      ? { k: 'field', base: { k: 'var', name: laddrName.get(d)! }, name: f.name, dot: true }
+      : null;
+  };
   // …and with no qualifier: `pinnedAccess` would put one on through a cast, the very spelling, and
   // the audit refuses the union where its accesses would need one (`unionRefusal`)
   const unqualifiedView = (op: Op, viewed: Expr): Expr => {
@@ -4432,6 +4451,15 @@ export function structure(
       );
       if (viewed !== null) {
         return unqualifiedView(d, viewed);
+      }
+      const member = frameStructMember(
+        d,
+        d.attrs.off as number,
+        d.attrs.width as number,
+        (d.attrs.signed as boolean) ?? false,
+      );
+      if (member !== null) {
+        return member;
       }
       const access = memAccess(
         d.operands[0],
@@ -5024,6 +5052,11 @@ export function structure(
         if (viewed !== null) {
           const lval = unqualifiedView(op, viewed);
           out.push({ k: 'store', lval, value: intoPtrCell(lval, expr(op.operands[1])) });
+          continue;
+        }
+        const member = frameStructMember(op, off, width, null);
+        if (member !== null) {
+          out.push({ k: 'store', lval: member, value: intoPtrCell(member, expr(op.operands[1])) });
           continue;
         }
         const baseExpr = expr(op.operands[0]);

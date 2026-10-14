@@ -983,8 +983,9 @@ function classifyFrameUses({
   // access at [+k] through a capture is a member of the one object rather than a second object
   const members: { at: number; width: number }[] = [];
   // …and without it, the first such access, which the per-object model refuses once the model is
-  // chosen (`chooseFrameModel`)
-  let memberRefusal: string | undefined;
+  // chosen (`chooseFrameModel`) — save one of a call's return storage, whose members are the
+  // struct's declared ones (`objectShapes`)
+  const memberRefusals: [number, string][] = [];
   // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
   // touches, whether it reads them, and whether its address is this frame's on every path — what
   // `storedNeverRead` asks of a frame that makes a call
@@ -1002,9 +1003,11 @@ function classifyFrameUses({
       return;
     }
     if ((op.attrs.off as number) !== 0) {
-      memberRefusal ??=
+      memberRefusals.push([
+        off,
         `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
-        (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled');
+          (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled'),
+      ]);
     }
   };
   for (const blk of irBlocks) {
@@ -1122,7 +1125,7 @@ function classifyFrameUses({
     useCount,
     indexed,
     members,
-    memberRefusal,
+    memberRefusal: memberRefusals.find(([off]) => !returnTemps.has(off))?.[1],
     fixed,
   };
 }
@@ -1289,9 +1292,11 @@ function readWindow(
     target: TargetDescription;
   },
 ): ReadWindow {
-  // a callee handed only its own return storage writes the struct it returns and nothing else
+  // a callee handed only its own return storage writes the struct it returns and nothing else —
+  // and this function's own reads of it hand the address to nobody
   const temps = uses.returnTemps.get(off);
-  if (temps !== undefined && uses.useCount.get(off) === temps.length) {
+  const reads = uses.accesses.get(off)?.filter((a) => a.isLoad).length ?? 0;
+  if (temps !== undefined && uses.useCount.get(off) === temps.length + reads) {
     return { lo: 0, hi: returnedSize(temps[0]), why: 'that returns its struct into it' };
   }
   const control = target.capabilities.readSourceControl;
@@ -2129,29 +2134,32 @@ function objectShapes({
     const byIndex = uses.indexed.get(off) ?? [];
     const temps = uses.returnTemps.get(off);
     if (temps !== undefined) {
-      // The callee writes the whole struct and this function names it once, as the call's
-      // destination. A read of a member, or any other use of the address, is not modelled —
-      // and most such reads never arrive here: the Thumb slot model refuses a word of the temp
-      // read at a constant offset first ("stack pointer used as data"), a copy of the whole
-      // struct into a global (`gS8 = mk8(x)`, which agbcc stages through the temp) included. So
-      // modelling member reads starts with the slot model handing this audit a read return temp.
+      // The callee writes the whole struct and this function names it as the call's destination,
+      // and READS it: each load is of bytes inside the struct, which the struct's declaration
+      // types (raise/aggmembers.ts reads a word's members, structure.ts spells a member access).
+      // A write, an index, or any other use of the address is not modelled.
       const callee = temps[0].attrs.target as string;
       const type = temps[0].results[0].type;
       const spelling = type.kind === 'struct' ? (type.declared ?? `struct ${type.name}`) : typeToString(type);
+      const at = `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}`;
       if (temps.some((t) => !typeEquals(t.results[0].type, type))) {
         fail(`the object at [sp,#${off}) is the struct-return storage of calls declared to return different types`);
       }
-      if (acc.length > 0 || byIndex.length > 0) {
+      if (acc.some((a) => !a.isLoad) || byIndex.length > 0) {
         fail(
-          `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}, and this function also reads or ` +
-            'writes it — a member of a returned struct is not modelled',
+          `${at}, and this function also ${byIndex.length > 0 ? 'indexes' : 'writes'} it — only a read of a ` +
+            'returned struct is modelled',
         );
       }
-      if (uses.useCount.get(off) !== temps.length) {
-        fail(
-          `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}, and its address is also used ` +
-            'another way — only the call it is returned by is modelled',
-        );
+      if (uses.useCount.get(off) !== temps.length + acc.length) {
+        fail(`${at}, and its address is also used another way — only the call it is returned by is modelled`);
+      }
+      const size = returnedSize(temps[0]);
+      const past = uses.fixed.find(
+        (f) => uses.accessOps.get(f.op)?.off === off && (f.at < off || f.at + f.width > off + size),
+      );
+      if (past !== undefined) {
+        fail(`${at}, and this function reads [sp,#${past.at}) of width ${past.width}, past the struct`);
       }
       extent.set(off, { width: 1, count: returnedSize(temps[0]) });
       aggregateAt.set(off, type);
@@ -2511,8 +2519,9 @@ function stampObjects(
 ): void {
   for (const [off, ops] of objects) {
     const { width, count } = extent.get(off)!;
-    const signed = uses.accesses.get(off)!.some((a) => a.signed);
     const aggregate = aggregateAt.get(off);
+    // a declared struct's storage is bytes, whatever signedness its members are read at
+    const signed = aggregate === undefined && uses.accesses.get(off)!.some((a) => a.signed);
     for (const op of ops) {
       const qualified = uses.published.has(off) || uses.filledFrom.has(off);
       op.attrs = {

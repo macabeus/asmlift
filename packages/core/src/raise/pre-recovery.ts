@@ -15,6 +15,7 @@ import { simplifyTrivialPhis } from '../ir/simplify';
 import { dce } from '../pattern/engine';
 import type { FnProto } from '../proto';
 import type { TargetDescription } from '../target';
+import { readDeclaredMembers } from './aggmembers';
 import { recognizeArrays } from './arrays';
 import { recognizeConsts } from './const';
 import { recognizeDivPow2 } from './divpow2';
@@ -242,6 +243,13 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
     id: 'structs',
     run: (fn, _self, _opts, target) => recognizeStructs(fn, target.compilerBehaviors.aggregateBoundary),
     dce: false,
+  },
+  // AFTER `structs`, which synthesizes layouts for bases it can type and never for a frame object
+  // the audit already typed as a declared struct — the only base this reads.
+  {
+    id: 'aggmembers',
+    run: (fn, _self, _opts, target) => readDeclaredMembers(fn, target.capabilities.endianness === 'little'),
+    dce: true,
   },
   { id: 'shortcircuit', run: recognizeShortCircuit, dce: true },
   // The control-flow sibling, value form FIRST.
