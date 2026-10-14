@@ -77,16 +77,17 @@ function spellings(
 // because depth 3 judges 655: another 250 seeds over the cap would leave both arms green over
 // nothing.
 //
-// DIFFERENT FROM `carrier-name-fuzz`'s AT DEPTH 1 (2,754 here, 2,752 there), and the files lose
+// DIFFERENT FROM `carrier-name-fuzz`'s AT DEPTH 1 (2,755 here, 2,753 there), and the files lose
 // different seeds. Both rose when a `while`'s header exit copies learned to run ahead of the loop for
-// a break with a value of its own (2,745 and 2,740 before); the seed lists below were measured at
-// those earlier counts, when the gap was five. Its reference table `ADMIT_NOTHING` declines on 7 judged seeds the shipped
+// a break with a value of its own, and when an `if` in a tested loop learned to join inside the body
+// (2,745 and 2,740 before); the seed lists below were measured at those earlier counts, when the gap
+// was five. Its reference table `ADMIT_NOTHING` declines on 7 judged seeds the shipped
 // spelling structures (291, 1089, 1489, 1504, 1724, 2921, 3923) and its `spellings` needs both, so
 // it judges seven fewer. This file's second `structure()` call declines on 2 the shipped spelling
 // structures (3601, 3947), so it judges two fewer. Measured per depth, `coalesceMergeNames` declines
 // on the shipped set and those: 975 against 973 at depth 1, 224/224 at depth 2, 523 against
 // 521 at depth 3 (1443 and 2832, which the step cap already drops from both files).
-const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2754, 2: 1557, 3: 655 };
+const JUDGED: Readonly<Record<0 | 1 | 2 | 3, number>> = { 0: 4000, 1: 2755, 2: 1557, 3: 655 };
 
 // All three arms sweep `SEEDS`, the nested one included even though its functions are the largest
 // the generator makes: it costs a couple of seconds, and a per-arm size would be a knob claiming an

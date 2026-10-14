@@ -6294,10 +6294,9 @@ export function structure(
     // `stop` stands in for the real join, so it has to BE the real join: one side must already end
     // this region — an admitted arm (its `return` terminates that path) or `stop` itself. Two sides
     // meeting somewhere further down instead would each re-emit everything from there to the bottom,
-    // doubling per nesting level; those keep the CFG join and the old loud decline. Lifting that
-    // needs a post-dominator computed over the body alone with the arms DELETED — treating them as
-    // exits does not work, since post-dominance cannot express "where the paths that did not
-    // return meet".
+    // doubling per nesting level; those take the post-dominator computed over the body alone with
+    // the back edges and the arms DELETED (`loopBodyJoin`, below) — treating the arms as exits does
+    // not work, since post-dominance cannot express "where the paths that did not return meet".
     const clampToLoop =
       loopCtx !== null &&
       ipd !== null &&
@@ -6311,7 +6310,35 @@ export function structure(
     // A break arm's own blocks join as any code outside the loop does: they are not the body's.
     const inArm = loopCtx?.breakArms?.some((a) => a.region.has(b)) === true;
     const bodyJoin = inForever === undefined || inArm ? undefined : foreverJoin(inForever, b);
-    const merge = bodyJoin !== undefined ? (bodyJoin ?? stop) : clampToLoop ? stop : (ipd ?? stop);
+    // THE SAME QUESTION IN A TESTED LOOP. A branch whose one way leads out of the body by a `break` —
+    // the `else break;` of an if/else-if chain — has the loop's exit as its CFG join, and its in-body
+    // arm walked from there through the latch back into the header (`onStack`). Its join is where its
+    // paths that stay in the body meet: the post-dominator over the body with the back edges and the
+    // exits deleted (`loopBodyJoin`). Asked only where the CFG join leaves the body, no clamp applies
+    // and an arm stays in the body — every input that reached that state declined before — and where
+    // every way out of the body from here is a `break`, the loop's own exit edge or an early-`return`
+    // arm the loop owns (`leavesByOwnedEdges`): a `ret` target nothing owns is copied wherever it is
+    // reached, and joining inside the body would write its tail into the arm as well.
+    const tested =
+      loopCtx !== null &&
+      inForever === undefined &&
+      !inArm &&
+      ipd !== null &&
+      !loopCtx.body.has(ipd) &&
+      !clampToLoop &&
+      loopCtx.body.has(b) &&
+      term.successors.some((sc) => loopCtx!.body.has(sc.block) && sc.block !== loopCtx!.header) &&
+      leavesByOwnedEdges(loopCtx, b)
+        ? loopBodyJoin(loopCtx, b)
+        : undefined;
+    const merge =
+      bodyJoin !== undefined
+        ? (bodyJoin ?? stop)
+        : tested !== undefined
+          ? (tested ?? stop)
+          : clampToLoop
+            ? stop
+            : (ipd ?? stop);
     // Per-successor records, NOT successorTo(b, block): a cond_br whose two edges reach the SAME
     // block with different args would otherwise give both arms the first edge's copies.
     const thenS = [...argAssignsFor(b, term.successors[0]), ...structureRegion(takenB, merge)];
@@ -6599,6 +6626,39 @@ export function structure(
   // and so is a latch two body paths reach: the foot of `for (…) { if (c) {…} }`, where deleting it
   // moves the `if`'s join into one arm, which then copies the latch and adds a `continue` the
   // source never wrote. A break block two paths share stays an end, each path its own `break`.
+  const leavesByOwnedEdges = (frame: LoopFrame, b: Block): boolean => {
+    const exitFrom = whileLoops.get(frame.header)?.header ?? doWhileLoops.get(frame.header)?.latch;
+    const seen = new Set<Block>();
+    for (const stack = [b]; stack.length > 0;) {
+      const x = stack.pop()!;
+      if (x === frame.header || seen.has(x)) {
+        continue;
+      }
+      seen.add(x);
+      for (const sx of successorsOf(x)) {
+        if (frame.body.has(sx)) {
+          stack.push(sx);
+        } else if (
+          !frame.arms.some((a) => a.from === x && a.to === sx) &&
+          !(sx === frame.exit && (frame.breaks.has(x) || x === exitFrom))
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  const testedJoins = new Map<Block, Map<Block, Block | null>>();
+  const loopBodyJoin = (frame: LoopFrame, b: Block): Block | null => {
+    let ipdom = testedJoins.get(frame.header);
+    if (ipdom === undefined) {
+      ipdom = postDominators(fn, frame.body, (n) =>
+        [...new Set(successorsOf(n))].filter((x) => frame.body.has(x) && x !== frame.header),
+      );
+      testedJoins.set(frame.header, ipdom);
+    }
+    return ipdom.get(b) ?? null;
+  };
   const foreverJoins = new Map<Block, Map<Block, Block | null>>();
   const foreverJoin = (fl: ForeverLoopInfo, b: Block): Block | null => {
     let ipdom = foreverJoins.get(fl.header);

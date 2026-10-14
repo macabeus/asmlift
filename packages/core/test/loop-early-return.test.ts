@@ -224,10 +224,11 @@ test('a conditional-latch arm stores the value the IR read, not the updated one'
   );
 });
 
-// REFUSAL — two in-body sides that meet somewhere OTHER than the loop bottom. `stop` is not their
-// join, and using it anyway makes each side re-emit everything from the meeting point down: with the
+// Two in-body sides that meet somewhere OTHER than the loop bottom. `stop` is not their join, and
+// using it anyway makes each side re-emit everything from the meeting point down: with the clamp's
 // guard dropped this emits `*a0 = 200` twice, correct but doubled, and doubled again per nesting
-// level. ^bb6 is where they meet; ^bb5 is the arm that pushes the CFG join out of the loop.
+// level. ^bb6 is where they meet; ^bb5 is the arm that pushes the CFG join out of the loop. The join
+// over the body with that arm deleted (`loopBodyJoin`) is ^bb6, written once.
 const INNER_JOIN = `fn innerjoin {
 ^bb0(%0: s32*):
   %1: s32 = const {value=0}
@@ -264,9 +265,14 @@ const INNER_JOIN = `fn innerjoin {
 }
 `;
 
-test('two in-body sides meeting below the loop bottom keep the CFG join — and decline', () => {
+test('two in-body sides meeting below the loop bottom join where they meet, written once', () => {
   expect(() => emit(SCAN_RETURN_HIT)).not.toThrow();
-  expect(() => emit(INNER_JOIN)).toThrow(StructureError);
+  const src = emit(INNER_JOIN);
+  expect(src.match(/\*a0 = 200;/g)).toHaveLength(1);
+  expect(src).toContain(
+    '        if (gF == 0) {\n            if (gG != 0) {\n                v1 = 7;\n                return v1;\n' +
+      '            }\n        } else {\n            *a0 = 100;\n        }\n        *a0 = 200;\n',
+  );
 });
 
 // REFUSAL — the arm lands straight on the POST-LOOP join. `^bb5` dominates itself and `^bb2`

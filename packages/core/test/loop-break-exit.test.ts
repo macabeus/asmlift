@@ -735,9 +735,9 @@ test('a refused `break` to an exit that ends in a return copies the tail instead
 
 /** agbcc -O2 of `int f(int *p, int n, int m, int k) { int t = 0; while (*p != k) { if (p[1] == m) {
  *  if (p[2] == 0) break; t += 3; } p++; if (--n < 0) break; } G = t; if (n > 5) t = 1; return t; }`.
- *  The `if (p[1] == m)` joins at `.L4`, the loop's exit, and both of its arms reach the latch's
- *  `if (--n < 0) break;`. Spelled with the latch's implicit continue, `G = t; …; return t;` would
- *  render after that `if` inside the body and the loop would run at most once. */
+ *  The `if (p[1] == m)` has `.L4`, the loop's exit, as its CFG join, since its inner `break` leaves
+ *  for it. Joined there, `G = t; …; return t;` would render inside the body; joined where its paths
+ *  that stay in the body meet (`loopBodyJoin`), the function is its own source. */
 const IF_JOINING_AT_THE_EXIT = `f:
 	push	{r4, r5, r6, lr}
 	add	r4, r0, #0
@@ -774,9 +774,11 @@ const IF_JOINING_AT_THE_EXIT = `f:
 	.word	G
 `;
 
-test('a latch break under an `if` that joins at the loop exit declines', () => {
-  expect(() => decompile('f', IF_JOINING_AT_THE_EXIT, ARMV4T_AGBCC, { prototypes: { f: { params: 4 } } })).toThrow(
-    /a break out of block #\d+ would continue the loop from a region that ends past the loop bottom/,
+test('a latch break under an `if` whose CFG join is the loop exit joins inside the body', () => {
+  expect(decompile('f', IF_JOINING_AT_THE_EXIT, ARMV4T_AGBCC, { prototypes: { f: { params: 4 } } }).source).toContain(
+    '    while (*v0 != a3) {\n        if (v0[1] == a2) {\n            if (v0[2] == 0) break;\n' +
+      '            v1 = v1 + 3;\n        }\n        v0 = v0 + 1;\n        v2 = v2 - 1;\n        if (v2 < 0) break;\n' +
+      '    }\n    G = v1;\n    if (v2 > 5) v1 = 1;\n    return v1;\n',
   );
 });
 
@@ -886,4 +888,52 @@ test('an arm another path also enters is not a `break` arm, and the loop decline
     '  %1: s32 = const {value=0}\n  %20: u32 = icmp_slt %0, %1\n  cond_br %20, ^bb2(), ^bb1(%1)',
   ).replace('%6: s32 = call %2 {target="hit"}', '%6: s32 = call {target="hit"}');
   expect(() => emit(shared)).toThrow(/unrecovered back-edge/);
+});
+
+// ── AN `else break;` INSIDE A TESTED LOOP (structure.ts `loopBodyJoin`) ─────────────────────────
+//
+// `for (i = 0; i < 3; i++) { if (a(v)) v = x(v); else if (b(v)) v = y(v); else break; z(v); } out();`
+// — `synthetic:loop_elsebreak`'s shape. The first `if`'s paths meet at `z(v)` inside the body, but one
+// of them can leave by the `break`, so its CFG post-dominator is the loop's exit. Joined there, its
+// in-body arm walked through the latch back into the header and declined. Its join is the body's.
+const ELSE_BREAK = `fn elsebreak {
+^bb0(%0: s32):
+  %1: s32 = const {value=0}
+  br ^bb1(%1, %0)
+^bb1(%2: s32, %3: s32):
+  %4: s32 = const {value=3}
+  %5: u32 = icmp_slt %2, %4
+  cond_br %5, ^bb2(), ^bb7()
+^bb2():
+  %6: s32 = call %3 {target="a"}
+  %7: s32 = const {value=0}
+  %8: u32 = icmp_eq %6, %7
+  cond_br %8, ^bb4(), ^bb3()
+^bb3():
+  %9: s32 = call %3 {target="x"}
+  br ^bb6(%9)
+^bb4():
+  %10: s32 = call %3 {target="b"}
+  %11: u32 = icmp_eq %10, %7
+  cond_br %11, ^bb7(), ^bb5()
+^bb5():
+  %12: s32 = call %3 {target="y"}
+  br ^bb6(%12)
+^bb6(%13: s32):
+  %14: s32 = call %13 {target="z"}
+  %15: s32 = const {value=1}
+  %16: s32 = add %2, %15
+  br ^bb1(%16, %13)
+^bb7():
+  %17: s32 = call {target="out"}
+  ret %17
+}`;
+
+test('an `else break;` in a tested loop joins its `if` inside the body', () => {
+  const { src, agreement, shipped } = judged(ELSE_BREAK);
+  expect(src).toContain('            if (b(v2) == v0) break;\n            v3 = y(v2);\n        }\n        z(v3);\n');
+  expect(src.match(/z\(/g)).toHaveLength(1);
+  expect(src.match(/out\(/g)).toHaveLength(1);
+  expect(agreement).toEqual({ judged: 300, disagree: 0 });
+  expect(shipped).toEqual({ judged: 300, disagree: 0 });
 });
