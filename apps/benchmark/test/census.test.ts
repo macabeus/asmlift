@@ -63,6 +63,8 @@ describe("the properties of the winners' variations rank.ts argues from", () => 
       'pokeemerald:CreateBattleTowerMon:agbcc  unsigned/unreduce',
       // a jump-table loop whose case stores index `p` by the counter, as its source does
       'synthetic:sw_jtloop:mwcc_242_81  signed/unreduce',
+      // the same loop with a call after the switch
+      'synthetic:sw_jtloopcall:mwcc_242_81  signed/unreduce',
     ]);
   });
 

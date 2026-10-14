@@ -1137,6 +1137,8 @@ describe('a class may not outlive the message it classifies', () => {
       'packages/core/src/structure/structure.ts',
     ],
     ['switch-shapes', 'takes a value from the switch edge', 'packages/core/src/structure/structure.ts'],
+    ['switch-shapes', 'reads the base of jump table', 'packages/core/src/frontend/jump-table.ts'],
+    ['switch-shapes', "'s base, formed at", 'packages/core/src/frontend/jump-table.ts'],
     ['structs', 'cannot recover struct', 'packages/core/src/raise/structs.ts'],
     ['structs', 'naturally aligned', 'packages/core/src/raise/structs.ts'],
     ['structs', 'overlapping fields', 'packages/core/src/raise/structs.ts'],
@@ -1160,6 +1162,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'clobbers CTR', 'packages/core/src/frontend/ppc.ts'],
+    ['indirect-jump', "indirect jump 'jr ", 'packages/core/src/frontend/mips.ts'],
     ['block-boundary', 'not a block boundary', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'unmodelled control transfer', 'packages/core/src/frontend/mips.ts'],
     ['branch-form', 'not a modelled branch form', 'packages/core/src/frontend/mips.ts'],
@@ -1223,7 +1226,7 @@ describe('the classifier is measured against the messages core can throw, not on
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 30],
     ['structure/structure.ts', 21],
-    ['frontend/mips.ts', 16],
+    ['frontend/mips.ts', 15],
     ['frontend/ppc.ts', 14],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
@@ -1232,7 +1235,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 107;
+  const RESIDUE_TOTAL = 106;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

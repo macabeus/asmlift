@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -54,8 +54,8 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        16  a relocation with an addend, an address below the symbol, an indirect
-//                               `jr`, a non-numeric immediate, the caller's value a restore writes
+//   frontend/mips.ts        15  a relocation with an addend, an address below the symbol, a
+//                               non-numeric immediate, the caller's value a restore writes
 //                               read as a value (at the read, or through a merge), five refusals
 //                               about a disassembly the reader cannot account for, a `jal` no
 //                               relocation names, one relocated against a section, one in a delay
@@ -115,10 +115,9 @@
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
 // `raise:` — 265 / 60 / 13 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
-// fourth value a decline could carry. Two control-transfer capabilities are in that residue and
-// are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
-// calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls". So are two kinds of the naming family: `reloc-symbol.ts`
+// fourth value a decline could carry. One control-transfer capability is in that residue and is
+// worth naming on its own: `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
+// gotos / register tail calls" (its MIPS sibling has a row, and `indirect-jump` below). So are two kinds of the naming family: `reloc-symbol.ts`
 // `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not
 // a C identifier" and "names the function's predefined name" have none (a Thumb pool word naming
 // the predefined name is the exception: `pool-word-shape` takes it). They have no rows, so they
@@ -629,6 +628,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // clobbers CTR. Keyed on the single spelling the artifact carried, both would arrive as
     // unclassified the first time a row reached them.
     pattern: /CTR-counted loop|without a reaching 'mtctr'|clobbers CTR/,
+  },
+  {
+    // `frontend/mips.ts`'s refusal of a `jr` to anything but `ra` that no recovered table claimed:
+    // a dispatch the jump-table recognizer refused, or a register tail call. The message says both,
+    // and so does the label, dispatch side first. Its first row is IDO's second table in one
+    // function, read at `lw t9,32(at)` (`sw_jtloop2:ido7.1`), which the recognizer does not take.
+    // Thumb's "indirect/computed jump" has no row and stays in the residue.
+    key: 'indirect-jump',
+    label: 'Indirect jumps no table claimed (an unrecovered jump-table dispatch, or a register tail call)',
+    pattern: /indirect jump 'jr /,
   },
   {
     key: 'block-boundary',
