@@ -61,8 +61,9 @@ import { volatileValueLocals } from './l3/volatileval';
 import { volatileDeviceStores } from './l3/volstore';
 import { zeroSubNegates } from './l3/zerosub';
 import { RewritePattern } from './pattern/engine';
-import { applyIdiomPatterns, liftStamped, raiseRecovered, structureChecked } from './pipeline';
+import { applyIdiomPatterns, liftStamped, raiseRecovered, stampBehaviorsFor, structureChecked } from './pipeline';
 import { type Prototypes, declaresVoidReturn, prototypesFromSymbols } from './proto';
+import type { ContextGlobals } from './proto-context';
 import { inferGlobalArrays, orderLicensedGlobals, sameDerivedShape } from './raise/globalshape';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { runPreRecovery } from './raise/pre-recovery';
@@ -164,8 +165,8 @@ export interface EnumerateOptions {
   asmData?: AsmData;
   /** address→symbol map (symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
-  /** same contract as DecompileOptions.aggregateGlobals */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** same contract as DecompileOptions.contextGlobals */
+  contextGlobals?: ContextGlobals;
   /** Called when a respell variation THROWS or fails a boundary contract, so the failure is visible
    *  instead of the candidate silently not existing. Enumeration continues either way — the default
    *  candidate is unaffected — but a variation that never fires because it always throws is a defect,
@@ -491,7 +492,7 @@ export function enumerateCandidates(
     // every candidate carries it, the whole row).
     spellSwitchFallthrough: backend.spellsSwitchFallthrough,
     ...(opts.symbols ? { symbols: symbolsByName(opts.symbols) } : {}),
-    ...(opts.aggregateGlobals?.size ? { aggregateGlobals: opts.aggregateGlobals } : {}),
+    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
   };
   // Branch-sense is a differ-ranked VARIATION, the same class as param signedness: a divergent `if`
   // can be spelled with either sense (`if (c) A else B` vs `if (!c) B else A`), and which one the
@@ -618,7 +619,7 @@ export function enumerateCandidates(
   // pointers/aggregates so they are excluded from the signedness variation (see NO_PIN_KINDS). One
   // extra lift+recover, no compile. (The shared lift deliberately stops after recoverTypes — it only reads the param KINDS, so
   // the totality contract / return-sinking of the full spine are not run on it.)
-  const sharedLift = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols);
+  const sharedLift = liftStamped(name, asm, target, prototypes, opts.asmData, opts.symbols, opts.contextGlobals);
   // The ARRAY SHAPES the input assembly evidences (raise/globalshape.ts), for the DECLARATION
   // half. Read off the shared lift's LIFTED form — before the fold below and the tower rewrite it —
   // because the base-materialization order the derivation's licence reads does not survive them.
@@ -669,7 +670,7 @@ export function enumerateCandidates(
     if (symbols === opts.symbols) {
       return { treeOwned: sharedLiftTreeOwned, extendedReaders: sharedLiftExtendedReaders };
     }
-    const p = liftStamped(name, asm, target, prototypes, opts.asmData, symbols);
+    const p = liftStamped(name, asm, target, prototypes, opts.asmData, symbols, opts.contextGlobals);
     applyIdiomPatterns(p, target, opts.patterns);
     const seen = { treeOwned: false, extendedReaders: false };
     runPreRecovery(p, target, () => verify(p), prototypes[name], {
@@ -1894,7 +1895,7 @@ export function enumerateCandidates(
       if (cand.signed && !pinnable) {
         break;
       }
-      const base = liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
+      const base = liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols, opts.contextGlobals);
       // `/setup-args` — pass a prototype-less callee only what the CALLING BLOCK set up; which of
       // the two readings the source spelled is genuinely ambiguous, and frontend/ssa.ts
       // narrowToSetupArgs carries the argument for why the differ is what settles it.
@@ -1993,7 +1994,7 @@ export function enumerateCandidates(
           fn =
             liftSetting.variations.length === 0
               ? base
-              : liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols);
+              : liftStamped(name, asm, target, prototypes, opts.asmData, symbolSetting.symbols, opts.contextGlobals);
           if (liftSetting.narrow && !narrowToSetupArgs(fn)) {
             continue; // nothing to cut after all — the default lift's own candidates already cover it
           }
@@ -2031,7 +2032,7 @@ export function enumerateCandidates(
           // `/raw-globals` sibling has no map and so no name to reach. AFTER the two readings, and
           // the staleness that leaves them is priced in pipeline.ts's copy of this note.
           if (symbolSetting.symbols) {
-            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols, target.compilerBehaviors);
+            OFFSET_NAME_PASS.run(fn, symbolSetting.symbols, stampBehaviorsFor(target, opts.contextGlobals));
           }
           for (const [n, si] of [...inferredSymbols]) {
             if (baseOpts.symbols?.has(n) === true || !sameDerivedShape(declSymbols.get(n), si)) {

@@ -3,12 +3,12 @@
 // has no shape for it, and an access at offset 0 alone reads as a scalar: `v = gInfo;`. Against the
 // project's `extern struct Info gInfo;` that is "incompatible types in assignment", and against an
 // `extern u16 gTab[];` it reads the array's address. The context declares the type, so the lift
-// takes the aggregate spelling `*(T *)&g` from it (core proto-context.ts `aggregateObjectsFromContext`).
+// takes the aggregate spelling `*(T *)&g` from it (core proto-context.ts `globalsFromContext`).
 //
 // THE ALIAS SET. A byte read spelled `*(u8 *)&g` is a `char` access, alias set 0, which conflicts with
 // every other set (c-common.c `c_get_alias_set`), so agbcc can move it past no store.
 import { decompile } from '@asmlift/core/pipeline';
-import { aggregateObjectsFromContext } from '@asmlift/core/proto-context';
+import { globalsFromContext } from '@asmlift/core/proto-context';
 import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 import { assembleTarget, compileTargetAsm, scoreC } from '@asmlift/toolchains';
 import { describe, expect, test } from 'vitest';
@@ -31,8 +31,8 @@ describe('a context-declared aggregate the map does not describe — real agbcc'
     { sym: 'ra', c: 'u16 ra(void){ return gTab[0]; }', spelled: '*(u16 *)&gTab', match: true },
   ])('$sym spells $spelled and compiles against the header', ({ sym, c, spelled, match }) => {
     const asm = compileTargetAsm(H + c, FLAGS);
-    const aggregateGlobals = aggregateObjectsFromContext(H, 'c');
-    const r = decompile(sym, asm, ARMV4T_AGBCC, { prototypes: P, aggregateGlobals });
+    const contextGlobals = globalsFromContext(H, 'c');
+    const r = decompile(sym, asm, ARMV4T_AGBCC, { prototypes: P, contextGlobals });
     expect(r.source).toContain(spelled);
     const score = scoreC(H + r.source, sym, assembleTarget(asm), FLAGS).score;
     expect(score === 0, r.source).toBe(match);
@@ -50,28 +50,47 @@ describe('a context-declared aggregate the map does not describe — real agbcc'
   });
 });
 
-// A VOLATILE AGGREGATE stays out of the set (proto-context.ts `hasVolatileStorage`). `*(u16 *)&gV`
-// drops the qualifier: agbcc then loads `gV.a` once and spins on the register forever (score 8), and
-// merges the two reads of `gV.a + gV.a`. Left out, the read keeps the bare spelling, which the header
-// refuses: a lift that does not compile, never one that compiles to other code.
-describe('a context-declared volatile aggregate keeps the bare spelling — real agbcc', () => {
+// A VOLATILE AGGREGATE is read through a qualified cast (core raise/declared-volatile.ts, from the
+// context's volatile objects). `*(u16 *)&gV` would drop the qualifier: agbcc then loads `gV.a` once
+// and spins on the register forever (score 8), and merges the two reads of `gV.a + gV.a`.
+describe('a context-declared volatile aggregate reads through a qualified cast — real agbcc', () => {
   const V =
     'struct V { u16 a; u16 b; }; extern volatile struct V gV;\n' +
     'struct V2 { volatile u16 a; u16 b; }; extern struct V2 gV2;\n' +
     'typedef volatile struct V VV; extern VV gVV;\n' +
-    'typedef struct { volatile u16 a; u16 b; } VW; extern VW gVW;\n';
+    'typedef struct { volatile u16 a; u16 b; } VW; extern VW gVW;\n' +
+    'struct W { s32 a; s32 b; }; extern volatile struct W gW;\n' +
+    'void vloop(void); void vmember(void); void vtypedef(void); void vbodytypedef(void); void vpollb(void);\n' +
+    's32 vtwb(void);\n';
+  const VP = Object.fromEntries(
+    ['vloop', 'vmember', 'vtypedef', 'vbodytypedef', 'vpollb'].map((s) => [s, { params: [], returnsVoid: true }]),
+  );
   test.each([
-    { sym: 'vloop', c: 'void vloop(void){ while (gV.a == 0) ; }', g: 'gV' },
-    { sym: 'vmember', c: 'void vmember(void){ while (gV2.a == 0) ; }', g: 'gV2' },
-    { sym: 'vtypedef', c: 'void vtypedef(void){ while (gVV.a == 0) ; }', g: 'gVV' },
-    { sym: 'vtwice', c: 'int vtwice(void){ return gV.a + gV.a; }', g: 'gV' },
-    { sym: 'vbodytypedef', c: 'void vbodytypedef(void){ while (gVW.a == 0) ; }', g: 'gVW' },
-  ])('$sym does not cast $g and does not compile against the header', ({ sym, c, g }) => {
+    { sym: 'vloop', c: 'void vloop(void){ while (gV.a == 0) ; }', spelled: '*(volatile u16 *)&gV', reads: 1 },
+    { sym: 'vmember', c: 'void vmember(void){ while (gV2.a == 0) ; }', spelled: '*(volatile u16 *)&gV2', reads: 1 },
+    { sym: 'vtypedef', c: 'void vtypedef(void){ while (gVV.a == 0) ; }', spelled: '*(volatile u16 *)&gVV', reads: 1 },
+    {
+      sym: 'vbodytypedef',
+      c: 'void vbodytypedef(void){ while (gVW.a == 0) ; }',
+      spelled: '*(volatile u16 *)&gVW',
+      reads: 1,
+    },
+    { sym: 'vpollb', c: 'void vpollb(void){ while (gV.b == 0) ; }', spelled: '((volatile u16 *)&gV)[1]', reads: 1 },
+    { sym: 'vtwb', c: 's32 vtwb(void){ return gW.b + gW.b; }', spelled: '((volatile s32 *)&gW)[1]', reads: 2 },
+  ])('$sym reads $spelled and compiles to the same loads', ({ sym, c, spelled, reads }) => {
     const asm = compileTargetAsm(V + c, FLAGS);
-    const aggregateGlobals = aggregateObjectsFromContext(V, 'c');
-    expect(aggregateGlobals.has(g)).toBe(false);
-    const r = decompile(sym, asm, ARMV4T_AGBCC, { aggregateGlobals });
-    expect(r.source).not.toContain(`*)&${g}`);
-    expect(() => scoreC(V + r.source, sym, assembleTarget(asm), FLAGS), r.source).toThrow();
+    const contextGlobals = globalsFromContext(V, 'c');
+    const r = decompile(sym, asm, ARMV4T_AGBCC, { prototypes: VP, contextGlobals });
+    expect(r.source.split(spelled).length - 1, r.source).toBe(reads);
+    // every load the target makes, the candidate makes, and a poll's load stays inside its loop: a
+    // plain cast lets agbcc merge the two reads, or hoist the load above the loop's label
+    const cand = compileTargetAsm(V + r.source, FLAGS);
+    const loads = (a: string): number => (a.match(/\tldrh?\t/g) ?? []).length;
+    expect(loads(cand), r.source).toBe(loads(asm));
+    const polls = (a: string): boolean => {
+      const m = /\tbeq\t(\.L\d+)/.exec(a);
+      return m !== null && new RegExp(`${m[1].replace('.', '\\.')}:\\n\\tldrh`).test(a);
+    };
+    expect(polls(cand), cand).toBe(polls(asm));
   });
 });

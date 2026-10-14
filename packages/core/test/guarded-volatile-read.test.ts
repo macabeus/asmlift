@@ -10,7 +10,7 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
-import { decompile } from '../src/pipeline';
+import { decompile, stampBehaviorsFor } from '../src/pipeline';
 import { stampDeclaredVolatile } from '../src/raise/declared-volatile';
 import { recoverTypes } from '../src/raise/recover';
 import { enumerateCandidates } from '../src/rank';
@@ -22,7 +22,7 @@ import { ARMV4T_AGBCC } from '../src/target';
 const emitWith = (ir: string, symbols?: Map<string, SymbolInfo>): string => {
   const fn = parse(ir);
   verify(fn);
-  stampDeclaredVolatile(fn, symbols, ARMV4T_AGBCC.compilerBehaviors);
+  stampDeclaredVolatile(fn, symbols, stampBehaviorsFor(ARMV4T_AGBCC, undefined));
   recoverTypes(fn);
   return cBackend.emit(structure(fn, { returnsVoid: true, ...(symbols ? { symbols } : {}) }));
 };

@@ -15,6 +15,10 @@
 //     s32 bssuse(s32 i) { static u8 a[64]; static u8 b[64]; a[i] = 1; b[i] = 2; return a[0] + b[1]; }
 //   corpus/mwcc-bss-zero-statics.{txt,asm}  the same with `-sdata 0 -sdata2 0`, over
 //     s32 bsszero(s32 i) { static s32 c; static s32 a = 0; if (i) return c; return a; }
+//   corpus/mwcc-escaped-table.{txt,asm}  the side table and disassembly of mwcc_242_81 at its
+//                                  canonical flags over
+//     extern s32 ga, gb, gc; void take(const void *p);
+//     void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }
 //
 // agbcc-local-statics.s:
 //   int fa(int i) { static const u8 tide[] = {1,2,3}; return tide[i]; }
@@ -264,6 +268,23 @@ test('mwcc: the symbol table gives the section and size, the section contents th
   });
   // an aggregate initialized to zero stays in .data under mwcc
   expect(bytes(readObjectLocalObject(ad, 'zz$23', 'zdata'))).toEqual([0, 0, 0, 0]);
+});
+
+test('mwcc: `.comment` is read past its version byte, which 2.3.3 writes as 0x08 and 2.4.x as 0x0a', () => {
+  const ad = dump('mwcc-local-statics.txt');
+  const withComment = (edit: (c: Uint8Array) => void) => {
+    const c = Uint8Array.from(ad.sections.get('.comment')!);
+    edit(c);
+    return { ...ad, sections: new Map([...ad.sections, ['.comment', c]]) };
+  };
+  expect(ad.sections.get('.comment')![11]).toBe(0x0a);
+  const at233 = withComment((c) => (c[11] = 0x08));
+  expect(readObjectLocalObject(at233, 'kt$18', 'rtab')).toEqual(readObjectLocalObject(ad, 'kt$18', 'rtab'));
+  // the eleven letters still decide whose records these are
+  const other = withComment((c) => (c[0] = 0x63));
+  expect(readObjectLocalObject(other, 'kt$18', 'rtab')).toMatchObject({
+    refused: expect.stringContaining('`.comment` section does not record'),
+  });
 });
 
 test('mwcc: a bss static laid out ahead of a later-declared one had `= 0`', () => {
@@ -601,6 +622,20 @@ test('an address in an element narrower than a pointer declines, and an image of
   );
   expect(() => decompile('f', image, ARMV4T_AGBCC)).toThrow(
     "reads the compiler's anonymous constant ('.LC0') which no top-level block-copy call (memcpy) takes as its source",
+  );
+});
+
+test('mwcc: a table only handed to a callee takes a pointer-wide element from its relocations', () => {
+  // mwcc_242_81 of `void tabesc(void) { static s32 *const tbl[3] = { &ga, &gb, &gc }; take(tbl); }`:
+  // nothing reads an element and mwcc writes no directive, so only the three ADDR32 words say the
+  // width; read as bytes, each address would sit in an element a quarter its size
+  const asm = corpus('mwcc-escaped-table.asm');
+  const prototypes = {
+    take: { params: ['const void *'], returnsVoid: true },
+    tabesc: { params: [], returnsVoid: true },
+  };
+  expect(decompile('tabesc', asm, PPC_MWCC, { asmData: dump('mwcc-escaped-table.txt'), prototypes }).source).toContain(
+    '    static const u32 tbl[3] = { (u32)&ga, (u32)&gb, (u32)&gc };\n',
   );
 });
 

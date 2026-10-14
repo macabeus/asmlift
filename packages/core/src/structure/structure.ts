@@ -93,6 +93,7 @@ import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
 import { exprCType, exprIntWidth, provablyNonNegative, renderedIntSignedness } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
+import type { ContextGlobals } from '../proto-context';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
 import { stampDeclaredVolatile } from '../raise/declared-volatile';
 import { returnType } from '../raise/recover';
@@ -1816,10 +1817,11 @@ export interface StructureOptions extends ArithCompilerFacts {
    *  they would read the map's `shape:'pointer'`. The operand-order rules do not read it: no element
    *  or field spelling folds from a name with no pointee. */
   pointerGlobals?: ReadonlySet<string>;
-  /** The globals the declaration context states are structs, unions or arrays
-   *  (proto-context.ts `aggregateObjectsFromContext`). Read with the map setting and without it: a
-   *  context declaration is what every candidate compiles against, whichever names it spells. */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** What the declaration context states about its globals (proto-context.ts `globalsFromContext`):
+   *  which are structs, unions or arrays, and which are volatile, read by the stamp this structuring
+   *  re-derives. Read with the map setting and without it: a context declaration is what every
+   *  candidate compiles against, whichever names it spells. */
+  contextGlobals?: ContextGlobals;
 }
 
 /** The named global an `index` node's base denotes DIRECTLY, or undefined: the bare `&gSym` an
@@ -2307,13 +2309,16 @@ export function structure(
     inferredSymbols,
     orderLicensedGlobals,
     pointerGlobals,
-    aggregateGlobals,
+    contextGlobals,
   } = opts;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
   // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
   // branch, which is right only for one no fold could move, so this read declines instead.
-  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, opts);
+  const stampedLate = stampDeclaredVolatile(fn, mapSymbols, {
+    volatileReadsExtendInRegister: opts.volatileReadsExtendInRegister,
+    contextGlobals,
+  });
   if (stampedLate.length > 0) {
     const defsNow = defOpMap(fn);
     const guarded = shortCircuitGuardedValues(fn, defsNow);
@@ -2677,7 +2682,7 @@ export function structure(
     // the map instead of copying it: a name outside `scalarGlobals` has nothing to override.
     for (const n of [...scalarGlobals]) {
       const shape = symbols?.get(n)?.shape;
-      if (shape === 'array' || shape === 'struct' || aggregateGlobals?.has(n) === true) {
+      if (shape === 'array' || shape === 'struct' || contextGlobals?.aggregates.has(n) === true) {
         scalarGlobals.delete(n);
       }
     }
@@ -3944,12 +3949,43 @@ export function structure(
   // hoist. It carries it where ir/discipline.ts `qualifiedBy` says: on its cast, or through the
   // object's declaration and on its cast where it reaches the object through one, since a cast's
   // pointee drops the declaration's qualifiers.
+  //
+  // Whether a cast stands between the access and the object is the PRINTER's question
+  // (backend/cfamily.ts `legalizedIndexBase`), so it is asked of the env the printer judges by:
+  // the declared variables over the globals this structuring typed for the tree (`SFn.globals`,
+  // l3/typing.ts `declaredTypes`). Asked of the variables alone, a global subscript the printer
+  // spells through its own name (`gVA[i]`, already volatile by its declaration) reads as one it
+  // casts, and the qualified cast agbcc compiles differently is put on a name that needed none.
+  const printedType = (n: string): IrType | undefined => varType.get(n) ?? shapedGlobalTypes.get(n);
+  const printedCType = (e0: Expr): IrType | undefined => exprCType(e0, printedType);
+  // A declared access reaches its object through the declaration only where its address is spelled
+  // from the object's own name. Through a local or a parameter — a pointer one of two addresses of
+  // the object joined into, or one a loop steps through it — the declaration qualifies nothing, and
+  // the qualifier goes on a cast.
+  const throughLocal = (access: Expr): boolean => {
+    let b: Expr | undefined = access.k === 'index' || access.k === 'field' ? access.base : undefined;
+    while (b !== undefined) {
+      if (b.k === 'var') {
+        return varType.has(b.name);
+      }
+      if (b.k === 'index' || b.k === 'field') {
+        b = b.base;
+      } else if (b.k === 'cast') {
+        b = b.e;
+      } else if (b.k === 'bin' && (b.op === '+' || b.op === '-')) {
+        b = b.l.k === 'const' ? b.r : b.l;
+      } else {
+        return false;
+      }
+    }
+    return false;
+  };
   const pinnedAccess = (op: Op, access: Expr): Expr => {
     const by = qualifiedBy(op);
-    if (by === null || (by === 'declaration' && !castOffDeclaration(access, ctype))) {
+    if (by === null || (by === 'declaration' && !castOffDeclaration(access, printedCType) && !throughLocal(access))) {
       return access;
     }
-    const q = qualifiedMemoryAccess(access, ctype);
+    const q = qualifiedMemoryAccess(access, printedCType);
     if (q === null) {
       throw new StructureError(
         `cannot structure '${fn.name}': a ${placedAt(op)} ${op.opcode} that must stay volatile is reached through a ` +

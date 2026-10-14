@@ -15,7 +15,7 @@ import { describe, expect, test } from 'vitest';
 
 import { frontendFor } from '../src/frontend/registry';
 import { without } from '../src/l3/gates';
-import { decompile } from '../src/pipeline';
+import { decompile, stampBehaviorsFor } from '../src/pipeline';
 import { OFFSET_NAME_GATES, OFFSET_NAME_PASS, nameOffsetAddresses, offsetNameRefusals } from '../src/raise/offsetnames';
 import { enumerateCandidates } from '../src/rank';
 import type { SymbolInfo, SymbolMap } from '../src/symbols';
@@ -423,7 +423,7 @@ describe('the gates are load-bearing', () => {
    *  branch in the shipped path. */
   const namedWithout = (id: string, symbols: SymbolMap, asm = WALK): string[] => {
     const fn = lift('walk', asm, symbols);
-    nameOffsetAddresses(fn, symbols, ARMV4T_AGBCC.compilerBehaviors, without(OFFSET_NAME_GATES, id));
+    nameOffsetAddresses(fn, symbols, stampBehaviorsFor(ARMV4T_AGBCC, undefined), without(OFFSET_NAME_GATES, id));
     return fn.blocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'gaddr').map((op) => op.attrs.sym as string));
   };
 

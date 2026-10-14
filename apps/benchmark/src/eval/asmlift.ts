@@ -9,6 +9,7 @@ import type { MatchScore } from '@asmlift/cli/score';
 import type { SymbolRef } from '@asmlift/core/l3/symbol-refs';
 import { decompile } from '@asmlift/core/pipeline';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { ContextGlobals } from '@asmlift/core/proto-context';
 import { NoScorableCandidateError, type NotCompiledCandidate } from '@asmlift/core/rank';
 import type { SymbolInfo, SymbolMap } from '@asmlift/core/symbols';
 import type { ResolvedTarget } from '@asmlift/core/target';
@@ -59,9 +60,12 @@ export function rankOptionsFor(
   prototypes?: Prototypes,
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
-  // A default, so `Function.length` stays the 7 `bench sweep --base` checks a tree by: an older
-  // tree's builder ignores the trailing argument, and lifts as that tree always did.
-  aggregateGlobals: ReadonlySet<string> | undefined = undefined,
+  // Optional but with NO default, so `Function.length` counts it and is 8 — which is how `bench
+  // sweep --base` tells this signature from the one before it, whose eighth place held the bare set
+  // of context aggregates behind a default (length 7). A driver that passed one tree's argument to
+  // the other would lift a side without the context its own rows read, and a moved `src` would
+  // read as a decompiler change (run/sweep-driver.ts `contextArgument`).
+  contextGlobals?: ContextGlobals,
 ): RankOptions {
   // Side-table: extract the data-section jump table + relocations from the SAME target object so a
   // dense MIPS/PPC switch can recover, reading the section that defines `sym` — a CodeWarrior object
@@ -82,7 +86,7 @@ export function rankOptionsFor(
     // the project's vendored symbol map (names + declaration shapes). The '/raw-globals'
     // ranked variation rides along, so a symbol-fed row can never score worse than without.
     ...(symbols ? { symbols } : {}),
-    ...(aggregateGlobals ? { aggregateGlobals } : {}),
+    ...(contextGlobals ? { contextGlobals } : {}),
   };
 }
 
@@ -247,9 +251,9 @@ export async function runAsmlift(
   contextCompile?: CandidateCompiler,
   symbols?: SymbolMap,
   onProgress?: RankOptions['onProgress'],
-  aggregateGlobals?: ReadonlySet<string>,
+  contextGlobals?: ContextGlobals,
 ): Promise<DecompilerResult> {
-  const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols, aggregateGlobals);
+  const opts = rankOptionsFor(tc, codegen, obj, sym, prototypes, contextCompile, symbols, contextGlobals);
   // Phase 1 — single-shot decompile in annotate mode: every detected gap becomes an inline
   // ASMLIFT_ERROR marker plus a structured diagnostic. Gapped ⇒ outcome "declined", never
   // scored (the marker could compile via an implicit declaration and grade meaningless code).

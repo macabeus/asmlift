@@ -8,6 +8,7 @@ import type { AsmData } from '@asmlift/core/frontend/asmdata';
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { RewritePattern } from '@asmlift/core/pattern/engine';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { ContextGlobals } from '@asmlift/core/proto-context';
 import {
   type Candidate,
   type RankedResult as CoreRankedResult,
@@ -35,8 +36,8 @@ export interface RankOptions {
   asmData?: AsmData;
   /** address→symbol map (core symbols.ts) — same contract as DecompileOptions.symbols */
   symbols?: SymbolMap;
-  /** same contract as DecompileOptions.aggregateGlobals */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** same contract as DecompileOptions.contextGlobals */
+  contextGlobals?: ContextGlobals;
   /** a project's own toolchain — overrides the compiler registry */
   compile?: CandidateCompiler;
   /** Liveness only, never a measurement: called once per candidate as it is scored, carrying the
@@ -78,7 +79,7 @@ export const enumerateRanked = (name: string, asm: string, target: TargetDescrip
     prototypes: opts.prototypes,
     asmData: opts.asmData,
     symbols: opts.symbols,
-    ...(opts.aggregateGlobals ? { aggregateGlobals: opts.aggregateGlobals } : {}),
+    ...(opts.contextGlobals ? { contextGlobals: opts.contextGlobals } : {}),
     ...(opts.onEnumerationError ? { onEnumerationError: opts.onEnumerationError } : {}),
     ...perSiteSenseProbe(),
   });

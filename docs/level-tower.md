@@ -897,7 +897,7 @@ localized _there_ instead of surfacing three stages later as mysterious wrong C.
   the count cannot tell one indirect callee from another; `device:r:0x<address>` and `device:w:0x<address>` for a read and a
   write the lift pinned `volatile`, with `?` for the address where a side cannot read one off, a `?`
   on either side standing for any address and each render for one access; and `declared:<object>`
-  for a read of an object the symbol map declares volatile. A pinned access through a named global
+  for a read of an object the symbol map or the declaration context declares volatile. A pinned access through a named global
   and a declared read are counted for re-runs only, because their qualifier may be the declaration,
   which leaves nothing in the tree to find; a declared read or store that reaches its object through
   a cast with no `volatile` is refused, since the cast's pointee drops the declaration's qualifier. The
@@ -916,8 +916,16 @@ computed by calling a runtime routine; `device` is the `volatile` the frontend's
 ([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
 access; `declared` is the stamp
 [`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
-a map-declared volatile object as the lift is made, from the map and the compiler the function is
-lifted and structured under, before any pass asks whether a read may be deleted. A read the
+an object the symbol map or the declaration context declares volatile as the lift is made, from the
+map, the context's globals and the compiler the function is lifted and structured under, before any
+pass asks whether a read may be deleted. The map answers per byte where it lays an object out; the
+context answers per object (`ContextGlobals.volatiles`), and only for an object the map does not lay
+out. The object is read through a join every edge of which reaches it, a pointer a loop steps
+through it included. The context also names the pointers whose pointee is volatile
+(`ContextGlobals.pointeeVolatiles`), and an access through such a pointer's value is placed, read
+through the same joins and loop steps by the same reader, so the object and pointee paths cannot
+reach different shapes. An access
+that does not reach its object through the object's own name carries the qualifier on a cast. A read the
 compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
 by this stamp and by the device pin alike, through the one predicate both ask. Every
 pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,

@@ -7,6 +7,7 @@ import { canonicalFlagsOf } from '@asmlift/core/target';
 import { SYNTHETIC, SYNTHETIC_CPP } from '../../dataset/synthetic';
 import { cachedBuildTarget } from '../cache';
 import { TOOLCHAINS, type ToolchainId, codegenFor } from '../toolchains';
+import { contextGlobalsNamed } from './context-proto';
 import type { Case } from './types';
 
 /** THE MAP, RENDERED FOR THE OTHER DECOMPILER — the synthetic tier's symmetry, made structural.
@@ -43,6 +44,14 @@ const withMapDeclarations = (ctx: string | undefined, symbols: NonNullable<Case[
   return `${selfDeclaredContext(renderDeclarations(refs))}\n${ctx ?? ''}`;
 };
 
+/** WHAT THE ROW'S CONTEXT STATES ABOUT ITS GLOBALS, read by the real tier's reader
+ *  (`context-proto.ts` `contextGlobalsNamed`): which are structs, unions or arrays, which are
+ *  volatile and which point at a volatile. Every candidate compiles against the ctx, so the lift is
+ *  told it too. Read from the ctx as m2c is handed it, map declarations included; a name the map
+ *  describes answers from the map first (structure.ts, the stamp). */
+const contextGlobalsOf = (ctx: string | undefined, language: 'c' | 'c++'): Case['contextGlobals'] =>
+  ctx === undefined ? undefined : contextGlobalsNamed(`text ${ctx}`, ctx, language);
+
 export interface SyntheticFilter {
   only?: string; // substring match on the symbol
   toolchain?: ToolchainId;
@@ -70,6 +79,8 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
       }
       const tc = TOOLCHAINS[tcId];
       const codegen = codegenFor(tcId, cflags);
+      const ctx = spec.symbols ? withMapDeclarations(spec.ctx, spec.symbols) : spec.ctx;
+      const contextGlobals = contextGlobalsOf(ctx, spec.lang ?? 'c');
       cases.push({
         id: `synthetic:${spec.sym}:${tcId}`,
         tier: 'synthetic',
@@ -79,8 +90,9 @@ export function syntheticCases(filter: SyntheticFilter = {}): Case[] {
         features: spec.features,
         loc: spec.src.split('\n').length,
         refSource: spec.src,
-        ctx: spec.symbols ? withMapDeclarations(spec.ctx, spec.symbols) : spec.ctx,
+        ctx,
         proto: spec.proto,
+        ...(contextGlobals ? { contextGlobals } : {}),
         ...(spec.symbols ? { symbols: spec.symbols } : {}),
         note: spec.note,
         toolchain: tc,

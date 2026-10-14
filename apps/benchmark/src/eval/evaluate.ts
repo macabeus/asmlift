@@ -7,6 +7,7 @@ import type { RankOptions } from '@asmlift/cli/rank';
 import type { MatchScore } from '@asmlift/cli/score';
 import { renderDeclarations } from '@asmlift/core/declare';
 import type { Prototypes } from '@asmlift/core/proto';
+import type { ContextGlobals } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import { type ResolvedTarget, TOOLCHAIN_TARGETS } from '@asmlift/core/target';
 
@@ -38,8 +39,8 @@ interface EvalSpecFields {
   ctxRef?: string; // published on the row in place of large vendored ctx text
   ctxProto?: string; // the one line appended after the vendored blob, published verbatim
   proto?: Prototypes; // asmlift prototypes
-  /** the globals the context declares as aggregates (cases/types.ts) — asmlift-only */
-  aggregateGlobals?: ReadonlySet<string>;
+  /** what the context states about its globals (cases/types.ts) — asmlift-only */
+  contextGlobals?: ContextGlobals;
   /** the project's vendored symbol map — asmlift-only input (m2c's analogue is its ctx) */
   symbols?: SymbolMap;
   /** the flags this row's target and candidates compile at, and asmlift's description from them */
@@ -283,7 +284,7 @@ export async function evaluate(
     compile,
     spec.symbols,
     onRankProgress,
-    spec.aggregateGlobals,
+    spec.contextGlobals,
   );
   // A real row m2c is not given its project's context for gets the callee declarations asmlift's lift
   // read, as C its parser reads — the same facts through each tool's own channel.

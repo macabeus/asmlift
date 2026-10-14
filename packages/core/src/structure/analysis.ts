@@ -2248,7 +2248,7 @@ function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access
   // order is the compiler's to choose (`gY = VCOUNT - TM0CNT_L` reads VCOUNT first); a
   // qualified read spelled as a bare statement because nothing uses it is an access too.
   if (once && !isCall && (x.opcode === 'load' || x.opcode === 'aload') && counted(x)) {
-    return true;
+    return !interchangeableReads(rules, x, op);
   }
   if (!isCall) {
     return false;
@@ -2257,6 +2257,148 @@ function isBarrier(rules: MaterializeRules, materialize: ReadonlySet<Op>, access
     return !x.results.length || !rules.uses.useSitesOf.has(x.results[0])
       ? false // dead load: never emitted at all
       : materialize.has(x) || !sameStatement(rules.render, access, x);
+  }
+  return false;
+}
+
+const COMMUTATIVE_OPS: ReadonlySet<string> = new Set(['add', 'mul', 'and', 'or', 'xor']);
+
+/** One op's identity apart from its operands: opcode, result count and attributes, keys sorted. */
+const opShape = (op: Op): string =>
+  `${op.opcode}/${op.results.length}/${JSON.stringify(Object.entries(op.attrs).sort(([a], [b]) => a.localeCompare(b)))}`;
+
+/** Do two values name the same address: one value, or two `gaddr`s of one symbol? */
+function sameAddress(defOf: Map<Value, Op>, a: Value, b: Value): boolean {
+  if (a === b) {
+    return true;
+  }
+  const da = defOf.get(a);
+  const db = defOf.get(b);
+  return (
+    da !== undefined &&
+    db !== undefined &&
+    da.opcode === 'gaddr' &&
+    db.opcode === 'gaddr' &&
+    opShape(da) === opShape(db)
+  );
+}
+
+/** Are two qualified reads of ONE cell interchangeable in the one expression they feed: the same
+ *  access of the same address, each the sole use of its value up a chain of ops alike but for it,
+ *  the two chains meeting as the two operands of one commutative op? Then the expression's value is
+ *  the same whichever read the compiler makes first, and its order is the compiler's to choose:
+ *  `gR + gR` over `extern volatile u32 gR;` and `*gPV + *gPV` over `u16 *volatile gPV` read the
+ *  object twice, in an order the source never stated, so naming the first read into a temp spells
+ *  an order the source did not have (ido 7.1 loads `gR + gR` in the other order). The meeting op
+ *  may also be a sum both reads enter with one sign, past a reassociation (`sameSignInOneSum`).
+ *  `gR - gR` is not symmetric — the order decides which read is the minuend — and stays sequenced.
+ *  `a` is the later read, `b` the earlier one placed past it. */
+function interchangeableReads(rules: MaterializeRules, a: Op, b: Op): boolean {
+  const { defOf } = rules;
+  if (
+    a === b ||
+    opShape(a) !== opShape(b) ||
+    a.operands.length !== b.operands.length ||
+    !a.operands.every((v, i) => sameAddress(defOf, v, b.operands[i]))
+  ) {
+    return false;
+  }
+  return mirroredChains(rules, a, b) || sameSignInOneSum(rules, b, a);
+}
+
+/** The two reads' sole-use chains are alike but for them and meet as the two operands of one
+ *  commutative op: `(gR << 1) * (gR << 1)`. */
+function mirroredChains(rules: MaterializeRules, a: Op, b: Op): boolean {
+  const { useSitesOf } = rules.uses;
+  let ca = a;
+  let cb = b;
+  for (let depth = 0; depth < 8; depth++) {
+    const va = ca.results[0];
+    const vb = cb.results[0];
+    const ua = va === undefined ? undefined : useSitesOf.get(va);
+    const ub = vb === undefined ? undefined : useSitesOf.get(vb);
+    if (ua?.length !== 1 || ub?.length !== 1) {
+      return false;
+    }
+    const na = ua[0].op;
+    const nb = ub[0].op;
+    if (na === nb) {
+      return (
+        COMMUTATIVE_OPS.has(na.opcode) &&
+        na.successors.length === 0 &&
+        na.operands.length === 2 &&
+        ((na.operands[0] === va && na.operands[1] === vb) || (na.operands[0] === vb && na.operands[1] === va))
+      );
+    }
+    if (
+      opShape(na) !== opShape(nb) ||
+      na.successors.length > 0 ||
+      nb.successors.length > 0 ||
+      (MEM_BASE_OPS.has(na.opcode) && counted(na)) ||
+      na.operands.length !== nb.operands.length ||
+      !na.operands.every((v, i) => (v === va ? nb.operands[i] === vb : v === nb.operands[i] && v !== vb))
+    ) {
+      return false;
+    }
+    ca = na;
+    cb = nb;
+  }
+  return false;
+}
+
+/** Each read's sole-use chain up through `add`/`sub` ops, as the ops it passes and the read's sign in
+ *  each: entering an `add`, or a `sub` as its minuend, keeps the sign; entering a `sub` as its
+ *  subtrahend flips it. The value of every op on the chain is then that sign times the read, plus
+ *  terms the read is not in. */
+function additiveChain(rules: MaterializeRules, read: Op): Map<Op, { sign: number; operand: number }> {
+  const { useSitesOf } = rules.uses;
+  const chain = new Map<Op, { sign: number; operand: number }>();
+  let v = read.results[0];
+  let sign = 1;
+  for (let depth = 0; depth < 8 && v !== undefined; depth++) {
+    const uses = useSitesOf.get(v);
+    if (uses?.length !== 1) {
+      break;
+    }
+    const n = uses[0].op;
+    const operand = n.operands.indexOf(v);
+    if (
+      (n.opcode !== 'add' && n.opcode !== 'sub') ||
+      n.operands.length !== 2 ||
+      n.results.length !== 1 ||
+      n.successors.length > 0 ||
+      n.operands.lastIndexOf(v) !== operand
+    ) {
+      break;
+    }
+    sign = n.opcode === 'sub' && operand === 1 ? -sign : sign;
+    chain.set(n, { sign, operand });
+    v = n.results[0];
+  }
+  return chain;
+}
+
+/** The two reads meet in one sum with the same sign: their sole-use chains run through `add`/`sub`
+ *  ops only, to an op one reaches through each operand, where each counts with the same sign. The
+ *  sum is then the same whichever read is made first, however the compiler reassociated it:
+ *  ido 7.1 compiles `(gR - x) + (gR - x)` as `((gR - x) + gR) - x`, where one read passes a `sub`
+ *  before the `add` they meet in and the other does not, so the chains are not mirrored. `gR - gR`
+ *  meets with opposite signs and stays sequenced. Wrapping arithmetic keeps the sum associative.
+ *  The value is then right in either order, but the match is not: the earlier read must also be
+ *  the one the expression spells first, entering the meeting op as its left operand, or a compiler
+ *  that reads operands left to right reverses the asm's two loads. mwcc 2.4.2 reads
+ *  `gMS.f + ((t + gMS.f) + t)`'s right-hand `gMS.f` first, so spelling both in one expression
+ *  there puts the asm's second load first. */
+function sameSignInOneSum(rules: MaterializeRules, earlier: Op, later: Op): boolean {
+  const ofEarlier = additiveChain(rules, earlier);
+  if (ofEarlier.size === 0) {
+    return false;
+  }
+  for (const [n, inLater] of additiveChain(rules, later)) {
+    const inEarlier = ofEarlier.get(n);
+    if (inEarlier !== undefined) {
+      return inEarlier.operand === 0 && inLater.operand === 1 && inEarlier.sign === inLater.sign;
+    }
   }
   return false;
 }

@@ -172,6 +172,12 @@ const pooledMwcc = dockerCachedBy(
   pooledMwccSpec,
   (flags: readonly string[]) => (tu) => compileCandPpc('mwcc_242_81', tu, flags),
 );
+/** The pooled pair compiles in the SELF-DECLARED world the command path probes its way to
+ *  (@asmlift/cli compile-command.ts): the typedef prelude, then the candidate's own declaration
+ *  block (core declare.ts), then the candidate. The prelude is the toolchain compile's own; the
+ *  block is put ahead of the candidate here. Dropped, a candidate naming a global the row's
+ *  `symbols` or context gave it is `undeclared` on these two toolchains alone, while agbcc and
+ *  ido7.1 compile it. */
 const cachedPooled =
   (
     uncached: (flags: readonly string[]) => CandidateCompiler,
@@ -180,7 +186,9 @@ const cachedPooled =
   (flags: readonly string[]): CandidateCompiler => {
     const pascal = uncached(flags);
     return async (source, symbol, backendId, declarations) =>
-      backendId === 'pascal' ? pascal(source, symbol, backendId, declarations) : cached(flags)(source, symbol);
+      backendId === 'pascal'
+        ? pascal(source, symbol, backendId, declarations)
+        : cached(flags)(declarations ? `${declarations}\n${source}` : source, symbol);
   };
 
 /** The pooled pair: candidates compile through @asmlift/toolchains' own compiler (long-lived

@@ -1,32 +1,53 @@
 // asmlift — the decider for ir/discipline.ts's `declared` placement: a memory access of an object
-// the project's symbol map declares volatile.
+// the project's symbol map, or its declaration context, declares volatile.
 //
-// The stamp is a function of the IR, the map the function is lifted and structured under, and the
-// compiler, and nothing else: an access whose base reaches a global the map qualifies, at the byte
-// the access names (`declaresVolatile`) — and, for a read, one the compiler could have made of a
-// `volatile` (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
+// The stamp is a function of the IR, the map the function is lifted and structured under, the
+// declaration context's globals and the compiler, and nothing else: an access whose base reaches a
+// global the map qualifies, at the byte the access names (`declaresVolatile`), or one the context
+// declares with a volatile byte and the map does not lay out (`ContextGlobals.volatiles`, per
+// object, not per byte), or one through the value of a pointer the context declares to point at a
+// volatile (`ContextGlobals.pointeeVolatiles`) — and, for a read, one the compiler could have made
+// of a `volatile` (target.ts `readCouldBeVolatile`, which the device pin asks too). It is put as the
 // lift is made (pipeline.ts `liftStamped`), before the first pass that asks whether a read may be
 // deleted, folded or moved, and re-derived by every pass that changes which object an access names
 // and by structuring. Structuring the same function under another map — the `/raw-globals` setting
 // has none — re-runs it, and an op the new map does not qualify loses the stamp, so a structuring
-// never answers for a map it was not given. The base is read as the structurer will read it: a join
-// whose every edge passes one address is that address (`addressThroughJoins`). A base that reaches
-// no name is a pointer parameter, a raw address or a genuine join: no declaration is in evidence,
-// and the access stays unplaced unless the lift pinned it (`device`).
+// never answers for a map it was not given. The context is not the map: every candidate compiles
+// against it whichever names it spells, so it is read in both settings.
+//
+// The base is read as the structurer will read it: a join whose every edge passes one address is
+// that address (`addressThroughJoins`), and one every edge of which reaches one object — two of its
+// addresses, or a pointer a loop steps through it — is an access of that object, as one every edge
+// of which moves a pointer global's value is an access of its pointee (`reachThroughJoins`, one
+// reader for both). A join whose edges reach different globals (`c ? gP : &gV`) is an access of any
+// of them, placed only where every one is declared. A base with an edge that reaches no name — a
+// pointer parameter, a raw address — has no declaration in evidence, and the access stays
+// unplaced unless the lift pinned it (`device`).
 //
 // A read structuring stamps that the earlier stamps left plain was plain to every raising pass, and a
 // short-circuit fold may have lifted it out of the arm it ran in. structure.ts declines on such a
 // read in a `&&`/`||`'s guarded operand rather than place it.
-import { globalBaseOf, globalCellOf } from '../ir/alias';
+import { globalCellOf } from '../ir/alias';
 import { type Fn, type Op, type Value, defOpMap } from '../ir/core';
 import { DECLARED_VOLATILE } from '../ir/discipline';
 import { MEM_BASE_OPS } from '../ir/opcodes';
+import type { ContextGlobals } from '../proto-context';
 import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
 import { valueNumberOf } from './gvn';
 
-/** The compiler fact the stamp reads. */
-export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'>;
+/** The compiler fact the stamp reads, and the declaration context's globals when there is one.
+ *  The context is a REQUIRED key, `undefined` when there is none: the stamp clears every stamp it
+ *  does not re-derive, so a re-stamp handed the compiler behaviors alone would unplace every read
+ *  the context made volatile. Build one with pipeline.ts `stampBehaviorsFor`. */
+export type StampBehaviors = Pick<TargetDescription['compilerBehaviors'], 'volatileReadsExtendInRegister'> & {
+  readonly contextGlobals: ContextGlobals | undefined;
+};
+
+/** Does the map lay out this object's volatility itself? A layout answers per member, which is
+ *  finer than the context's per-object fact; an entry with none (a name and a size off the symbol
+ *  table) leaves the context's answer standing. */
+const laysOut = (info: SymbolInfo | undefined): boolean => Array.isArray(info?.layout) && info.layout.length > 0;
 
 /** May this memory access be stamped: a store, or a read the compiler could have made of a
  *  `volatile`? */
@@ -41,21 +62,7 @@ const stampable = (op: Op, behaviors: StampBehaviors): boolean =>
  *  is such a parameter, and the stamp is put before that pass, so it reads the base the structurer
  *  will. */
 function addressThroughJoins(fn: Fn): (v: Value) => Value {
-  const incoming = new Map<Value, Value[]>();
-  for (const b of fn.blocks) {
-    for (const op of b.ops) {
-      for (const s of op.successors) {
-        if (s.block === fn.blocks[0]) {
-          continue;
-        }
-        s.block.params.forEach((param, i) => {
-          if (i < s.args.length) {
-            (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(s.args[i]);
-          }
-        });
-      }
-    }
-  }
+  const incoming = joinIncoming(fn);
   const numberOf = valueNumberOf(fn);
   const through = (v: Value, onWalk: Set<Value>): Value | null => {
     const ins = incoming.get(v);
@@ -76,28 +83,197 @@ function addressThroughJoins(fn: Fn): (v: Value) => Value {
   return (v) => through(v, new Set()) ?? v;
 }
 
-/** Stamp every memory access of `fn` to an object `symbols` declares volatile — a read only where a
- *  compiler behaving as `behaviors` says could have made it of one — and clear the stamp from every
- *  other op. Returns the ops it stamped that were not stamped before. */
+/** Every block parameter's incoming values, one per in-edge (the entry block's excepted). */
+function joinIncoming(fn: Fn): Map<Value, Value[]> {
+  const incoming = new Map<Value, Value[]>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      for (const s of op.successors) {
+        if (s.block === fn.blocks[0]) {
+          continue;
+        }
+        s.block.params.forEach((param, i) => {
+          if (i < s.args.length) {
+            (incoming.get(param) ?? incoming.set(param, []).get(param)!).push(s.args[i]);
+          }
+        });
+      }
+    }
+  }
+  return incoming;
+}
+
+/** What an address reaches: an access of a global OBJECT (`gW.b`, `gVA[i]`), or of what the pointer a
+ *  global holds points at (`*gP`, `gQ->b`) — the POINTEE of that global. */
+type Reach = { readonly kind: 'object' | 'pointee'; readonly sym: string };
+
+/** The globals an address reaches, one per edge that reaches a different one, each as an object or
+ *  as a pointer's pointee, read through address arithmetic and joins alike: a `gaddr` is its object;
+ *  a word read from a global's own first byte is that global's value, so an address moved from it
+ *  reaches the global's pointee (asked only of a global in `pointers`, the ones the context declares
+ *  to point at a volatile: any other word read is an index, not a base) — and so is a word read from
+ *  a join every edge of which is such a global's address; an `add` with one reaching operand and a
+ *  `sub` from one reach what they do; and a block parameter reaches what each in-edge's value
+ *  reaches, an edge that passes the parameter itself moved by an offset (a strength-reduced loop
+ *  pointer `v0 = v0 + 2`) aside. So `c ? &gW.a : &gW.b` and a pointer seeded with `&gVA` and stepped
+ *  through it are accesses of that one object, `c ? gP + 1 : gP + 2` and a pointer seeded with `gP`
+ *  and stepped are accesses of gP's pointee, and `c ? gP : gQ` or `c ? gP : &gV` is an access of
+ *  either, which the caller places only where every one is declared. ONE reader answers all of
+ *  them, so a shape the object path reads the pointee path reads too. Null where an edge reaches
+ *  none. `addressThroughJoins` — one value on every edge — is narrower. */
+function reachThroughJoins(
+  fn: Fn,
+  defs: Map<Value, Op>,
+  pointers: ReadonlySet<string> | undefined,
+): (v: Value) => readonly Reach[] | null {
+  const incoming = joinIncoming(fn);
+  const SELF = Symbol('self');
+  type Step = readonly Reach[] | typeof SELF | null;
+  const union = (steps: readonly (readonly Reach[])[]): Reach[] => {
+    const out: Reach[] = [];
+    for (const r of steps.flat()) {
+      if (!out.some((o) => o.kind === r.kind && o.sym === r.sym)) {
+        out.push(r);
+      }
+    }
+    return out;
+  };
+  /** The globals whose own address every edge of `v` passes, unmoved; null where one passes anything else. */
+  // A value's answer is the same from every walk that never cut a cycle below it, so those are
+  // remembered: without that, a chain of diamonds whose arms both step one pointer is walked once
+  // per path, 2^n times, on every stamp. An answer that cut a cycle depends on the walk and is not.
+  let cuts = 0;
+  const addressMemo = new Map<Value, string[] | null>();
+  const reachMemo = new Map<Value, Step>();
+  const addresses = (v: Value, onWalk: Set<Value>): string[] | null => {
+    const d = defs.get(v);
+    if (d?.opcode === 'gaddr') {
+      return [d.attrs.sym as string];
+    }
+    const ins = d === undefined ? incoming.get(v) : undefined;
+    if (ins === undefined) {
+      return null;
+    }
+    if (onWalk.has(v)) {
+      cuts++;
+      return null;
+    }
+    if (addressMemo.has(v)) {
+      return addressMemo.get(v)!;
+    }
+    const before = cuts;
+    onWalk.add(v);
+    const each = ins.filter((a) => a !== v).map((a) => addresses(a, onWalk));
+    onWalk.delete(v);
+    const out = each.length > 0 && each.every((a) => a !== null) ? [...new Set(each.flat())] : null;
+    if (cuts === before) {
+      addressMemo.set(v, out);
+    }
+    return out;
+  };
+  const reach = (v: Value, onWalk: Set<Value>): Step => {
+    if (reachMemo.has(v)) {
+      return reachMemo.get(v)!;
+    }
+    const before = cuts;
+    const out = reachOnce(v, onWalk);
+    if (cuts === before) {
+      reachMemo.set(v, out);
+    }
+    return out;
+  };
+  const reachOnce = (v: Value, onWalk: Set<Value>): Step => {
+    const d = defs.get(v);
+    if (d?.opcode === 'gaddr') {
+      return [{ kind: 'object', sym: d.attrs.sym as string }];
+    }
+    if (d?.opcode === 'load' && ((d.attrs.off as number | undefined) ?? 0) === 0) {
+      const syms = addresses(d.operands[0], new Set());
+      return syms !== null && syms.every((sym) => pointers?.has(sym) === true)
+        ? syms.map((sym) => ({ kind: 'pointee', sym }))
+        : null;
+    }
+    if (d?.opcode === 'add' && d.operands.length === 2) {
+      const a = reach(d.operands[0], onWalk);
+      const b = reach(d.operands[1], onWalk);
+      if (a !== null && b !== null) {
+        // An object's address plus a pointer's value is an index into the object (a byte array
+        // subscripted by a global the context also declares a pointer, or by a join of two such
+        // values); two of a kind name none, and neither does a side that mixes the kinds.
+        if (a === SELF || b === SELF) {
+          return null;
+        }
+        const all = (r: readonly Reach[], kind: Reach['kind']): boolean => r.every((x) => x.kind === kind);
+        if (all(a, 'object') && all(b, 'pointee')) {
+          return a;
+        }
+        return all(b, 'object') && all(a, 'pointee') ? b : null;
+      }
+      return a ?? b;
+    }
+    if (d?.opcode === 'sub' && d.operands.length === 2) {
+      return reach(d.operands[0], onWalk);
+    }
+    const ins = d === undefined ? incoming.get(v) : undefined;
+    if (ins === undefined) {
+      return null;
+    }
+    if (onWalk.has(v)) {
+      cuts++;
+      return SELF;
+    }
+    onWalk.add(v);
+    const each = ins.map((a) => reach(a, onWalk)).filter((r) => r !== SELF);
+    onWalk.delete(v);
+    return each.length > 0 && each.every((r) => r !== null) ? union(each as (readonly Reach[])[]) : null;
+  };
+  return (v) => {
+    const r = reach(v, new Set());
+    return r === null || r === SELF ? null : r;
+  };
+}
+
+/** Stamp every memory access of `fn` to an object `symbols` or `behaviors.contextGlobals` declares
+ *  volatile — a read only where a compiler behaving as `behaviors` says could have made it of one —
+ *  and clear the stamp from every other op. Returns the ops it stamped that were not stamped before. */
 export function stampDeclaredVolatile(
   fn: Fn,
   symbols: ReadonlyMap<string, SymbolInfo> | undefined,
   behaviors: StampBehaviors,
 ): Op[] {
   const added: Op[] = [];
-  const defs = symbols ? defOpMap(fn) : undefined;
-  const addressOf = symbols ? addressThroughJoins(fn) : undefined;
+  const contextVolatiles = behaviors.contextGlobals?.volatiles;
+  const pointees = behaviors.contextGlobals?.pointeeVolatiles;
+  const reads =
+    symbols !== undefined ||
+    (contextVolatiles !== undefined && contextVolatiles.size > 0) ||
+    (pointees !== undefined && pointees.size > 0);
+  const defs = reads ? defOpMap(fn) : undefined;
+  const addressOf = reads ? addressThroughJoins(fn) : undefined;
+  const reachOf = reads ? reachThroughJoins(fn, defs!, pointees) : undefined;
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       const addr = defs && stampable(op, behaviors) ? addressOf!(op.operands[0]) : undefined;
-      const base = addr !== undefined ? globalBaseOf(defs!, addr) : null;
+      const reached = addr !== undefined ? reachOf!(addr) : null;
       // A subscript reaches the object while naming no cell, so only a `load`/`store` asks by byte,
-      // and an access that names no byte is placed only where every byte it could reach is qualified.
+      // and an access that names no byte is placed only where every byte it could reach is
+      // qualified. An access that may reach any of several globals is placed only where each one
+      // declares it.
       const cell =
-        base !== null && (op.opcode === 'load' || op.opcode === 'store')
+        reached?.length === 1 && reached[0].kind === 'object' && (op.opcode === 'load' || op.opcode === 'store')
           ? globalCellOf(defs!, addr!, op.attrs.off as number)
           : null;
-      const declared = base !== null && declaresVolatile(symbols!.get(base), cell === null ? null : cell.byte);
+      const declares = (r: Reach): boolean => {
+        if (r.kind === 'pointee') {
+          return pointees?.has(r.sym) === true;
+        }
+        const info = symbols?.get(r.sym);
+        return (
+          declaresVolatile(info, cell === null ? null : cell.byte) ||
+          (contextVolatiles?.has(r.sym) === true && !laysOut(info))
+        );
+      };
+      const declared = reached !== null && reached.every(declares);
       // A fresh record either way: a rebuilder may hand two ops one `attrs` object.
       if (declared && op.attrs[DECLARED_VOLATILE] !== true) {
         op.attrs = { ...op.attrs, [DECLARED_VOLATILE]: true };

@@ -1,0 +1,53 @@
+
+/host-tmp/asmlift-ppc-ref-d9f1fc82ad194de3/ref.o:     file format elf32-powerpc
+
+SYMBOL TABLE:
+00000000 l    df *ABS*	00000000 ref.c
+00000000 l    d  .text	00000000 .text
+00000000 l    d  .rodata	00000000 .rodata
+00000000 l    d  .mwcats.text	00000000 .mwcats.text
+00000000 l     O .rodata	0000000c tbl$4
+00000000         *UND*	00000000 gc
+00000000         *UND*	00000000 gb
+00000000         *UND*	00000000 ga
+00000000         *UND*	00000000 take
+00000000 g     F .text	00000028 tabesc
+
+
+RELOCATION RECORDS FOR [.text]:
+OFFSET   TYPE              VALUE
+0000000a R_PPC_ADDR16_HA   tbl$4
+00000012 R_PPC_ADDR16_LO   tbl$4
+00000014 R_PPC_REL24       take
+
+
+RELOCATION RECORDS FOR [.rodata]:
+OFFSET   TYPE              VALUE
+00000008 R_PPC_ADDR32      gc
+00000004 R_PPC_ADDR32      gb
+00000000 R_PPC_ADDR32      ga
+
+
+RELOCATION RECORDS FOR [.mwcats.text]:
+OFFSET   TYPE              VALUE
+00000004 R_PPC_ADDR32      tabesc
+
+
+Contents of section .text:
+ 0000 9421fff0 7c0802a6 3c600000 90010014  .!..|...<`......
+ 0010 38630000 48000001 80010014 7c0803a6  8c..H.......|...
+ 0020 38210010 4e800020                    8!..N..         
+Contents of section .rodata:
+ 0000 00000000 00000000 00000000           ............    
+Contents of section .mwcats.text:
+ 0000 02000028 00000000                    ...(....        
+Contents of section .comment:
+ 0000 436f6465 57617272 696f720a 02040201  CodeWarrior.....
+ 0010 01020016 2c000000 00000000 00000000  ....,...........
+ 0020 00000000 00000000 00000000 00000000  ................
+ 0030 00000000 00000001 00000000 00000004  ................
+ 0040 00000000 00000008 00000000 00000004  ................
+ 0050 00000000 00000004 00000000 00000000  ................
+ 0060 00000000 00000000 00000000 00000000  ................
+ 0070 00000000 00000000 00000000 00000004  ................
+ 0080 00000000                             ....            

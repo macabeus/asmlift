@@ -948,7 +948,7 @@ export async function fan(rowId: string, o: FanOptions = {}): Promise<number> {
   }
   const { obj, asm: raw } = built;
   const asm = scrubObjectHeader(raw);
-  const opts = rankOptionsFor(c.toolchain, c.codegen, obj, c.sym, c.proto, c.compile, c.symbols, c.aggregateGlobals);
+  const opts = rankOptionsFor(c.toolchain, c.codegen, obj, c.sym, c.proto, c.compile, c.symbols, c.contextGlobals);
   note(`${c.id} — tier ${c.tier}, toolchain ${c.toolchain.id}${c.symbols ? ', symbol map' : ''}`);
 
   // The harness's PHASE 1 verdict, stated before any number: a gapped row is published `declined`

@@ -1542,7 +1542,7 @@ export function structureOptionsFor(
   const { spillSlotOrder, ...behaviors } = t.compilerBehaviors;
   return {
     returnsVoid,
-    declaredArgs: declaredArgTypes(prototypes),
+    declaredArgs: declaredArgTypes(prototypes, t.dialect !== 'c++'),
     declaredReturns: declaredReturnTypes(prototypes),
     ...(t.dialect === 'c++' ? { dialect: 'c++' as const } : {}),
     littleEndian: t.capabilities.endianness === 'little',
@@ -1563,17 +1563,31 @@ export const C_TYPEDEFS = `${[...PRELUDE_TYPEDEFS].map(([name, base]) => `typede
 
 /** Each declared callee's parameter types, where one can be PRINTED as a cast — the argument
  *  conversions C++ refuses to make implicitly (backend/cfamily.ts `argConversion`), and a pointer
- *  cell's integer arguments (l3/ptrcell.ts). An entry this cannot spell is `undefined`, and that
- *  argument is printed uncast. */
-function declaredArgTypes(prototypes: Prototypes): Record<string, readonly (ParamType | undefined)[]> {
+ *  cell's integer arguments (l3/ptrcell.ts). In C (`opaquePointers`), an object pointer to a type
+ *  this cannot spell — `struct S *` — is kept too: the printer casts its argument through `void *`,
+ *  which C converts to any object pointer implicitly, where a strict front end (mwcc) refuses
+ *  `use2(s)` for a `u32 s[2]` the static's bytes were typed as. Any other entry this cannot spell is
+ *  `undefined`, and that argument is printed uncast. */
+function declaredArgTypes(
+  prototypes: Prototypes,
+  opaquePointers: boolean,
+): Record<string, readonly (ParamType | undefined)[]> {
   const out: Record<string, readonly (ParamType | undefined)[]> = {};
   for (const [name, p] of Object.entries(prototypes)) {
     if (Array.isArray(p.params)) {
-      out[name] = p.params.map((t) => (spellableType(t) && declaredWidth(t) !== undefined ? t : undefined));
+      out[name] = p.params.map((t) =>
+        (spellableType(t) && declaredWidth(t) !== undefined) || (opaquePointers && objectPointerType(t))
+          ? t
+          : undefined,
+      );
     }
   }
   return out;
 }
+
+/** A pointer to an object, a pointer to a function excluded: `void *` converts to it implicitly in
+ *  C, which it does not to a function pointer. */
+const objectPointerType = (t: ParamType): boolean => /\*\s*(?:const|volatile|\s)*$/.test(t) && !t.includes('(');
 
 /** Each declared callee's return type as the project spells it, which is never printed: whether a
  *  pointer cell compared with the call meets a pointer (l3/ptrcell.ts). */

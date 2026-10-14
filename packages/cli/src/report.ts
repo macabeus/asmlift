@@ -14,6 +14,7 @@ import type { Block, Fn, ParamEvidence, SlotHomes, Value, WriteOrder } from '@as
 import type { LanguageBackend } from '@asmlift/core/l3/ast';
 import { raiseRecovered, structureChecked } from '@asmlift/core/pipeline';
 import { type FnProto, type Prototypes, declaresVoidReturn, prototypesFromSymbols } from '@asmlift/core/proto';
+import type { ContextGlobals } from '@asmlift/core/proto-context';
 import { type SymbolInfo, symbolsByName } from '@asmlift/core/symbols';
 import { type ResolvedTarget, type TargetDescription, structureOptionsFor } from '@asmlift/core/target';
 import { type PatternEvent, type TraceOptions, type TraceReport, decompileTraced } from '@asmlift/core/trace';
@@ -77,7 +78,7 @@ export async function decompileWithReport(
           prototypesFromSymbols(opts.symbols, opts.prototypes ?? {}),
           inferredSymbols,
           mapSymbols,
-          opts.aggregateGlobals,
+          opts.contextGlobals,
         )
     : undefined;
 
@@ -161,7 +162,7 @@ function probedSource(
   prototypes: Prototypes,
   inferredSymbols: Map<string, SymbolInfo>,
   mapSymbols: Map<string, SymbolInfo> | undefined,
-  aggregateGlobals: ReadonlySet<string> | undefined,
+  contextGlobals: ContextGlobals | undefined,
 ): string | undefined {
   try {
     const clone = structuredCloneFn(fn);
@@ -182,7 +183,7 @@ function probedSource(
       ...structureOptionsFor(target, returnsVoid, prototypes),
       spellSwitchFallthrough: backend.spellsSwitchFallthrough,
       ...(mapSymbols ? { symbols: mapSymbols } : {}),
-      ...(aggregateGlobals?.size ? { aggregateGlobals } : {}),
+      ...(contextGlobals ? { contextGlobals } : {}),
       ...(inferredSymbols.size ? { inferredSymbols } : {}),
     });
     return backend.emit(sfn);

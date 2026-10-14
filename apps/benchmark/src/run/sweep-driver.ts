@@ -285,7 +285,8 @@ export const TREE_MODULES = [
   'apps/benchmark/src/toolchains.ts',
 ] as const;
 
-/** How many parameters `rankOptionsFor` declares, in a tree this driver can sweep.
+/** How many parameters `rankOptionsFor` declares, in a tree this driver can sweep: this tree's own
+ *  count, or the one before it (`LEGACY_RANK_OPTIONS_ARITY`).
  *
  *  THE ONE SIGNATURE CHECK, and a compensating control `sweep.ts`'s floor note asks for:
  *  `TREE_MODULES` proves a module EXISTS, and a module that exists with a CHANGED SIGNATURE is
@@ -295,7 +296,21 @@ export const TREE_MODULES = [
  *
  *  WHAT IT CANNOT SEE, said out loud: a signature whose parameter COUNT is unchanged and whose
  *  meaning is not. That one is still the `opts` digest's to report. */
-export const RANK_OPTIONS_ARITY = 7;
+export const RANK_OPTIONS_ARITY = 8;
+
+/** The count of the signature before this one: the same parameters, the eighth (behind a default,
+ *  so not counted) being the bare set of context aggregates a case carried as `aggregateGlobals`,
+ *  where this tree's carries `contextGlobals`. A tree older still has no eighth parameter at all and
+ *  the same count, and ignores what it is handed. */
+export const LEGACY_RANK_OPTIONS_ARITY = 7;
+
+/** The eighth argument a tree's own `rankOptionsFor` takes, off that tree's own case: the meaning of
+ *  the position changed with the count, so each side is handed the field its own rows carry. Passed
+ *  across, the base side of `bench sweep --base` lifts without the context aggregates its rows
+ *  read. */
+export function contextArgument(arity: number, c: { contextGlobals?: unknown; aggregateGlobals?: unknown }): unknown {
+  return arity === LEGACY_RANK_OPTIONS_ARITY ? c.aggregateGlobals : c.contextGlobals;
+}
 
 /** Everything this driver needs out of the tree under test, loaded by absolute path. */
 async function treeModules(root: string) {
@@ -303,15 +318,15 @@ async function treeModules(root: string) {
     TREE_MODULES.map((p) => import(`${root}/${p}`)),
   );
   const arity = (evalAsmlift.rankOptionsFor as (...args: unknown[]) => unknown).length;
-  if (arity !== RANK_OPTIONS_ARITY) {
+  if (arity !== RANK_OPTIONS_ARITY && arity !== LEGACY_RANK_OPTIONS_ARITY) {
     throw new Error(
       `tree ${root}: its \`rankOptionsFor\` declares ${arity} parameters and this driver calls it with ` +
-        `${RANK_OPTIONS_ARITY} — it is on the other side of a signature change, so every row it lifted would be ` +
+        `${RANK_OPTIONS_ARITY} (or ${LEGACY_RANK_OPTIONS_ARITY}) — it is on the other side of a signature change, so every row it lifted would be ` +
         'lifted under options this command chose by accident. Compare against a newer revision, or use ' +
         '`bench diff` against the published artifact.',
     );
   }
-  return { synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains };
+  return { synthetic, real, manifests, scrub, evalAsmlift, pipeline, rank, symbols, toolchains, arity };
 }
 
 /** Recursively, every `.s`/`.inc` under `dir` — the shape that sweeps a project's `asm/matchings`
@@ -463,7 +478,7 @@ export async function collect(root: string, sel: SweepSelection): Promise<SweepR
         c.proto,
         c.compile,
         withMap ? c.symbols : undefined,
-        c.aggregateGlobals,
+        contextArgument(m.arity, c),
       ),
     );
     const fanAllowed = sel.force === true || overLimit[c.id] === undefined;
