@@ -31,12 +31,12 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 102 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       30  ARM-mode function, raw data in the code stream, a base alignment the
-//                               input does not determine, pc used as a data base, an operand that
+//   frontend/thumb.ts       27  ARM-mode function, raw data in the code stream, literal pools no base
+//                               alignment fits, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
 //                               `bl` whose target this asm defines as a data label, a call
@@ -79,13 +79,12 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/call-plan.ts    6  a call to a function declared to return a struct it cannot lower (its
-//                               interpolated reason), one whose parameters nothing sizes, one whose
-//                               declaration the lifted source cannot print (a type it has no spelling
-//                               for, or a bare parameter count that states none), one declared to
-//                               return both a struct and a 64-bit value, and one declared to return a
-//                               struct or union by value to a lowering that receives none through
-//                               memory (its two 64-bit refusals are NOT here — both carry
+//   frontend/call-plan.ts    4  a call returning a struct through a hidden pointer whose parameters
+//                               nothing sizes, one whose declaration the lifted source cannot print (a
+//                               type it has no spelling for, or a bare parameter count that states
+//                               none), and one declared to return both a struct and a 64-bit value
+//                               (its two refusals of the struct return itself are `struct-return`'s,
+//                               and its two 64-bit refusals are NOT here either — both carry
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
@@ -141,9 +140,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // throw and spell it ("address-taken stack local"); `frontend/ppc.ts` and `frontend/mips.ts` read the same guard —
     // their own comments say so, "mirroring the PPC frontend's r1" — and refuse without resolving
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
-    // thumb.ts's own sp-as-data throw. One phrase, three frontends, one class — and that
-    // disjunction is 1 of the 4 rows, so a pattern requiring the word only Thumb writes claims
-    // 3 of them and leaves the rest to a class whose label reads "other sp uses".
+    // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
+    // label does not name. One phrase, three frontends, one class — and that
+    // disjunction is 7 of the 12 rows, so a pattern requiring the decided spelling claims 5 of
+    // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by
     // `apps/web/test/declines.test.ts` ("the disjunction share this paragraph names is the share
@@ -577,6 +577,25 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /has no prototype/,
   },
   {
+    // A CALL DECLARED TO RETURN A STRUCT OR UNION BY VALUE that the call plan cannot lower: whether
+    // it comes back through a hidden pointer or in registers is a fact of the target and the
+    // struct's layout, and `frontend/call-plan.ts` refuses where it has neither. Two throws spell
+    // it — `structReturnOf`'s, whose reason is interpolated ("nothing here says whether it comes
+    // back through a hidden pointer", a type no local can be declared with, a union), and `plan`'s
+    // for a lowering that receives no struct through memory (MIPS, PowerPC) — and both open on
+    // the same clause, straight after the function's name and the callee's.
+    //
+    // ITS FIRST INHABITANTS ARE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc: a four-byte
+    // struct the O32 target states no return rule for. The same rows on agbcc are not here — agbcc
+    // returns it through memory, the call lowers, and what refuses is the frame temp it lands in
+    // (`address-taken-local`). The call-plan refusals that only HAVE a struct return in them — its
+    // parameters unsized, its declaration unprintable, a struct and a 64-bit value at once — stay
+    // in the residue: what each names to build is the declaration, not the return.
+    key: 'struct-return',
+    label: 'Struct returns a call plan cannot lower (hidden pointer or registers undecided)',
+    pattern: /is declared to return [^,—]+ by value(?:, and | — )/,
+  },
+  {
     // The ABI destroyed the value, and nothing about the register file says so: the read has a
     // reaching definition, and it names bytes the callee overwrote. A capability rather than an
     // input error — what closes it is being TOLD what the callee left there, since the assembly
@@ -604,6 +623,27 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'return-address',
     label: 'The return address read as a value (an `mflr` copy used as data)',
     pattern: /copies out is used as a value/,
+  },
+  {
+    // ONE CAPABILITY, THREE MESSAGES, AND NONE OF THEM SAYS IT. agbcc spells a branch past Thumb's
+    // ±2 KB reach as `bl .Lx @far jump` (thumb.md `*cond_branch` and `jump`); the `@` comment that
+    // says so is dropped before decoding, so `frontend/thumb.ts` reads the `bl` as a call and
+    // refuses wherever that reading breaks first: the `bl` names a label of this function, an
+    // `.align` behind the relay decodes differently under base 0 and base 2, or — once an earlier
+    // pool fixed the parity — the block before the pool runs into it. The kleod census pinned all
+    // three to the relay by ablation (lowering it to `b` lifts and MATCHes), and the rows
+    // `farjump_cond`, `farjump_pool` and `farjump_sealed` are one each.
+    //
+    // ALL THREE ARE KEYED ON THEIR OWN WORDS, and those words are wider than the relay: the `bl`
+    // refusal names its other reading itself (a locally-defined call thunk), and hand-written asm
+    // whose alignment fill really is undetermined, or whose code really does run into data,
+    // reaches the two layout throws. No row does — every one the corpus has is the relay — so the
+    // label names the cause they have today. The durable fix is in core: read the `@far jump`
+    // comment as the branch it is, and these throws go back to meaning only what they say.
+    key: 'far-jump',
+    label: 'Thumb far-jump relays (`bl .Lx @far jump` read as a call)',
+    pattern:
+      /targets a label inside this function|alignment padding depends on the function's base alignment|falls through into data bytes/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.

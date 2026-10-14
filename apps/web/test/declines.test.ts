@@ -1027,9 +1027,20 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // matched by no other class, so the ordering is no longer load-bearing for any of them. The
   // transfer pair is a control-transfer capability sitting above `branch-form`, and
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
+  //
+  // THE TWO STACK PAIRS ARE ONE THROW PER FRONTEND, and `stack-frames` says why it loses both: an
+  // sp-as-data refusal is keyed on the throw, and its `why` is what names a capability. Five of
+  // the six `address-taken-local` markers are the kleod census rows — `byvalregs` on ido7.1 and
+  // gcc2.7.2kmc by `mips.ts`'s spelling, and `byvalregs`, `sret4two` and `uninitfirst` on agbcc by
+  // `thumb.ts`'s fallback `why`, the disjunction the class comment names. The
+  // `outgoing-stack-args` one is `spilldead:agbcc`, whose `why` comes from `frontend/stackargs.ts`
+  // ("it may be that call's outgoing stack argument"). The census found that store a dead spill,
+  // so the row is filed where its message's own hedge points — the refusal is what is attributed,
+  // and a reader of this pair should know the hedge is there.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
-    ['address-taken-local > stack-frames', 1],
+    ['address-taken-local > stack-frames', 6],
+    ['outgoing-stack-args > stack-frames', 1],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
@@ -1083,7 +1094,7 @@ describe('a class may not outlive the message it classifies', () => {
   // reworded `gapReasonFor` sends `float` and `opaque-ops` — 82 of 307 declines — into "other"
   // with this list green.
   //
-  // FREEZING 65 PHRASES ACROSS 12 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
+  // FREEZING 88 PHRASES ACROSS 19 FILES HAS A RELEASE VALVE, and it is the same one `NO_ROWS`
   // carries: a red line here is an instruction, not a veto. If core reworded the message on
   // purpose, reword the pattern and the entry in that commit; the point is that the two move
   // together and that the second app hears about it.
@@ -1164,8 +1175,14 @@ describe('a class may not outlive the message it classifies', () => {
     ['reloc-halves', "carries the '@l' half", 'packages/core/src/frontend/ppc.ts'],
     ['reloc-halves', "carries the '@ha' half", 'packages/core/src/frontend/ppc.ts'],
     ['no-prototype-args', 'has no prototype', 'packages/core/src/frontend/ssa.ts'],
+    ['struct-return', 'is declared to return ', 'packages/core/src/frontend/call-plan.ts'],
+    ['struct-return', ' by value, and ', 'packages/core/src/frontend/call-plan.ts'],
+    ['struct-return', ' by value — ', 'packages/core/src/frontend/call-plan.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['return-address', 'copies out is used as a value', 'packages/core/src/frontend/ppc.ts'],
+    ['far-jump', 'targets a label inside this function', 'packages/core/src/frontend/thumb.ts'],
+    ['far-jump', "alignment padding depends on the function's base alignment", 'packages/core/src/frontend/thumb.ts'],
+    ['far-jump', 'falls through into data bytes', 'packages/core/src/frontend/thumb.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
@@ -1232,18 +1249,18 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 30],
+    ['frontend/thumb.ts', 27],
     ['structure/structure.ts', 21],
     ['frontend/mips.ts', 15],
     ['frontend/ppc.ts', 15],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/call-plan.ts', 6],
+    ['frontend/call-plan.ts', 4],
     ['frontend/ssa.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 107;
+  const RESIDUE_TOTAL = 102;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
