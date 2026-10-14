@@ -9723,6 +9723,246 @@ export const SYNTHETIC: SynthSpec[] = [
       h8: { params: ['Fmt', 's32', 's32', 's32', 's32', 's32', 's32'], wordParams: [0] },
     },
   },
+  // ── kleod decline census: the ten most common causes a kleod function still declines ──────
+  // Every function in kleod's eighteen agbcc units (396; m4a and eeprom build with old_agbcc
+  // and are left out) was lifted from agbcc's own `.s` with the project's ELF symbol map and its
+  // unit's preprocessed `.i` as `--context`. 39 still decline at f882946. Each one's FIRST blocker
+  // was pinned by instrumenting or ablating the refusing site, never by its message: the message
+  // names where asmlift stopped, not why, and the census proved the two far apart. Three
+  // different messages are ONE cause (the far jump below), and one loop-recovery message is six
+  // different causes. None of the 39 is a row, and no row exercised any of these shapes before.
+  // Ranked by how many of the 39 each cause blocks first:
+  //   1. farjump_cond / farjump_pool / farjump_sealed (17). agbcc spells a branch past Thumb's
+  //      ±2 KB reach as `bl .Lx @far jump` (thumb.md `*cond_branch` and `jump`) and pushes lr in
+  //      any function that does (thumb.c far_jump_used_p), so lr is dead there. asmlift drops the
+  //      `@` comment that says so before decoding, reads the `bl` as a call, and refuses three
+  //      different ways depending on what follows it: a `bl` to a label of this function
+  //      (_cond), an unsealed `.align` after the relay that base 0 and base 2 decode differently
+  //      (_pool), or, when an earlier pool already fixed the parity, a block that runs into the
+  //      pool (_sealed). Lowering the relay to `b` in the probes' `.s` lifts and MATCHes them.
+  //      Thumb only: no other synthetic toolchain has a branch this short.
+  //   2. sret4two / sret4mem (3). A struct of four bytes or less returned by value comes back
+  //      through a hidden pointer to a frame temp on agbcc. With one word of frame, the read of a
+  //      member is what is not modelled (sret4mem); with two temps, the offset-0 capture is not an
+  //      object at all and the load is `sp` read as data (sret4two). On ido7.1 and gcc2.7.2kmc
+  //      both decline earlier, on the return convention of a 4-byte struct the target does not
+  //      state; on mwcc_242_81, on r3 read after the call destroyed it.
+  //   3. break_value (2). A `break` that carries a different value than the normal exit gets its
+  //      own empty edge block, so the loop has two exit targets and none is a return. agbcc only:
+  //      ido7.1 and gcc2.7.2kmc decline first on a `%hi` half read as a value, and mwcc_242_81 on
+  //      `lbzu`, so the row would measure those links there instead.
+  //   4. spilldead (2). A spilled loop local whose last store reaches `bl done` unread reads as
+  //      that call's outgoing stack argument, although `done` is declared with one parameter and
+  //      the slot is reloaded inside the loop. gcc2.7.2kmc and mwcc_242_81 lift it (controls);
+  //      ido7.1 is off because it declines first on a pre-update loop variable.
+  //   5. break_code (1, plus one that pairs it with a `goto`). The break arm runs code, so it is
+  //      outside the natural loop and becomes a second live exit. Declines the same way on ido7.1
+  //      and mwcc_242_81; gcc2.7.2kmc is off (the `%hi` link again).
+  // The last five are one-function causes, picked from the twelve such causes for being real gaps
+  // whose shape is not Thumb-specific, so each row measures more than one compiler:
+  //   6. forever_noexit: `while (1)` with no exit edge. The forever classifier iterates over exit
+  //      targets and finds none. Declines on all four toolchains.
+  //   7. loop_elsebreak: an `else break` one level inside an if/else-if chain makes the branch's
+  //      post-dominator the loop exit, so the if joins outside the body. Declines on agbcc,
+  //      ido7.1 and gcc2.7.2kmc; mwcc_242_81 lifts it (a control).
+  //   8. sw_jtholeif: a jump table with holes and no `default`, two of whose arms hold an if
+  //      that leaves the switch. The early-end retry finds the default block, which is also the
+  //      holes' arm, and refuses. Declines on agbcc and ido7.1; gcc2.7.2kmc and mwcc_242_81 MATCH.
+  //   9. uninitfirst: uninit_spill's local read BEFORE any store, so no store reaches the slot on
+  //      any path. agbcc refuses the load as `sp` data; ido7.1 as a never-stored slot; mwcc_242_81
+  //      as r1 used as data (not instrumented there, so that attribution is a prediction).
+  //      gcc2.7.2kmc lifts it to a nonmatch.
+  //  10. byvalregs: a by-value struct argument built in the frame and passed in registers.
+  //      Declines on all four: agbcc reads the frame words as `sp` data, the MIPS frontends refuse
+  //      the frame, and mwcc_242_81 refuses the by-value parameter itself (it passes a copy's
+  //      address, `tbval`).
+  // Set aside, each one kleod function: a `goto` into a shared tail (sound under the no-goto
+  // rule), a jump-threaded break, a struct return inside a loop, a table case aliasing `default`,
+  // a cross-jumped case `break`, `ldrsb` through a zero offset register, two indexed local tables,
+  // and a straddling u8 bitfield.
+  {
+    sym: 'farjump_cond',
+    src:
+      'extern void h(void);\n' +
+      '#define H4 h(); h(); h(); h();\n' +
+      '#define H32 H4 H4 H4 H4 H4 H4 H4 H4\n' +
+      '#define H512 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32 H32\n' +
+      'void farjump_cond(s32 a)\n{\n    if (a > 5)\n        return;\n    H512\n}',
+    features: ['branch', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void h(void); void farjump_cond(s32 a);',
+    proto: { h: { params: 0, returnsVoid: true }, farjump_cond: { returnsVoid: true } },
+  },
+  {
+    sym: 'farjump_pool',
+    src:
+      'extern void f(s32 n);\n' +
+      '#define A(n) f(n); f(n + 0x10000); f(n + 0x20000); f(n + 0x30000);\n' +
+      '#define B(n) A(n) A(n + 1) A(n + 2) A(n + 3)\n' +
+      '#define C(n) B(n) B(n + 4) B(n + 8) B(n + 12)\n' +
+      'void farjump_pool(s32 x)\n{\n    if (x) {\n        f(0x12345);\n    } else {\n' +
+      '        C(0x1000) C(0x1100) C(0x1200) C(0x1300) C(0x1400)\n    }\n    f(2);\n}',
+    features: ['branch', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void f(s32 n); void farjump_pool(s32 x);',
+    proto: { f: { params: 1, returnsVoid: true }, farjump_pool: { returnsVoid: true } },
+  },
+  {
+    sym: 'farjump_sealed',
+    src:
+      'extern void f(s32 n);\n' +
+      '#define A(n) f(n); f(n + 0x10000); f(n + 0x20000); f(n + 0x30000);\n' +
+      '#define B(n) A(n) A(n + 1) A(n + 2) A(n + 3)\n' +
+      '#define C(n) B(n) B(n + 4) B(n + 8) B(n + 12)\n' +
+      'void farjump_sealed(s32 x, s32 y)\n{\n    if (y) {\n        f(0x54321);\n    } else {\n        f(3);\n    }\n' +
+      '    if (x) {\n        f(0x12345);\n    } else {\n' +
+      '        C(0x1000) C(0x1100) C(0x1200) C(0x1300) C(0x1400)\n    }\n    f(2);\n}',
+    features: ['branch', 'macro'],
+    toolchains: ['agbcc'],
+    ctx: 'void f(s32 n); void farjump_sealed(s32 x, s32 y);',
+    proto: { f: { params: 1, returnsVoid: true }, farjump_sealed: { returnsVoid: true } },
+  },
+  {
+    sym: 'sret4two',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\nextern u16 gOut, gOut2;\n' +
+      'void sret4two(u16 x)\n{\n    struct S4 s;\n    s = mk(x, 0, 0x10);\n' +
+      '    if (s.a != 0xFFFF) {\n        gOut = s.a;\n        gOut2 = s.b;\n    }\n' +
+      '    s = mk(x + 4, 0, 0x10);\n    if (s.a != 0xFFFF) {\n        gOut = s.a;\n        gOut2 = s.b;\n    }\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ALL,
+    ctx: 'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nvoid sret4two(u16 x);',
+    proto: {
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+      sret4two: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sret4mem',
+    src:
+      'struct S4 { u16 a; u8 b; u8 pad; };\nextern struct S4 mk(u16 x, u16 y, u8 z);\nextern u16 gOut;\n' +
+      'void sret4mem(u16 x)\n{\n    struct S4 s = mk(x, 0, 0x10);\n    gOut = s.a;\n}',
+    features: ['struct-return', 'field'],
+    toolchains: ALL,
+    ctx: 'struct S4 { u16 a; u8 b; u8 pad; };\nstruct S4 mk(u16 x, u16 y, u8 z);\nvoid sret4mem(u16 x);',
+    proto: {
+      mk: {
+        params: ['u16', 'u16', 'u8'],
+        returns: 'struct S4',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'a', type: 'u16' },
+            { name: 'b', type: 'u8' },
+            { name: 'pad', type: 'u8' },
+          ],
+        },
+      },
+      sret4mem: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'break_value',
+    src:
+      'extern u8 gTab[16];\nextern u8 gVal[16];\nextern s32 gOut;\n' +
+      'void break_value(void)\n{\n    u32 i;\n    u32 r = 1;\n    for (i = 1; i < 9; i++) {\n' +
+      '        if (gTab[i] == 0x1C) {\n            r = i;\n            break;\n        }\n    }\n    gOut = gVal[r];\n}',
+    features: ['break', 'array'],
+    toolchains: ['agbcc'],
+    ctx: 'void break_value(void);',
+    proto: { break_value: { returnsVoid: true } },
+  },
+  {
+    sym: 'break_code',
+    src:
+      'extern u8 gTab[16];\nextern s32 gHit;\nextern s32 gOut;\n' +
+      'void break_code(void)\n{\n    u32 i;\n    for (i = 0; i < 16; i++) {\n' +
+      '        if (gTab[i] == 7) {\n            gHit = 1;\n            break;\n        }\n    }\n    gOut = 0;\n}',
+    features: ['break', 'array'],
+    toolchains: ['agbcc', 'ido7.1', 'mwcc_242_81'],
+    ctx: 'void break_code(void);',
+    proto: { break_code: { returnsVoid: true } },
+  },
+  {
+    sym: 'spilldead',
+    src:
+      'void done(s32 s);\n' +
+      'void spilldead(s32 k, s32 *p)\n{\n    s32 v0, v1, v2, v3, v4, v5, v6, v7, v8, v9;\n    s32 i, s = 0;\n' +
+      '    v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9];\n' +
+      '    for (i = 0; i < k; i++) {\n' +
+      '        s += p[i] * v0 + v1 * v2 + v3 * v4 + v5 * v6 + v7 * v8 + v9 * i;\n    }\n    done(s);\n}',
+    features: ['value-home', 'array'],
+    toolchains: ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81'],
+    ctx: 'void done(s32 s); void spilldead(s32 k, s32 *p);',
+    proto: { done: { params: 1, returnsVoid: true }, spilldead: { returnsVoid: true } },
+  },
+  {
+    sym: 'forever_noexit',
+    src: 'extern s32 gCount;\nvoid step(void);\nvoid forever_noexit(void)\n{\n    while (1) {\n        step();\n        gCount = 0;\n    }\n}',
+    features: [],
+    toolchains: ALL,
+    ctx: 'void step(void); void forever_noexit(void);',
+    proto: { step: { params: 0, returnsVoid: true }, forever_noexit: { returnsVoid: true } },
+  },
+  {
+    sym: 'loop_elsebreak',
+    src:
+      'extern u16 gBuf[64];\nextern u32 gBits;\n' +
+      'void loop_elsebreak(void)\n{\n    u32 off = -1;\n    u32 bits = gBits;\n    u32 k;\n' +
+      '    for (k = 0; k < 3; k++) {\n        if (bits & 1) {\n            off += 1;\n            bits &= ~1;\n' +
+      '        } else if (bits & 2) {\n            off += 1;\n            bits &= ~2;\n        } else {\n            break;\n        }\n' +
+      '        gBuf[off * 2] = gBuf[off * 2 + 1];\n    }\n}',
+    features: ['break', 'array'],
+    toolchains: ALL,
+    ctx: 'void loop_elsebreak(void);',
+    proto: { loop_elsebreak: { returnsVoid: true } },
+  },
+  {
+    sym: 'sw_jtholeif',
+    src:
+      'void sw_jtholeif(s32 x, s32 *p)\n{\n    switch (x) {\n    case 0: p[0] = 1; break;\n    case 2: p[1] = 2; break;\n' +
+      '    case 5: p[3] += 2; if (p[3] > 9) { p[4] = 7; p[5] = 0; } break;\n    case 6: p[6] = 4; break;\n' +
+      '    case 7: p[3] -= 2; if (p[3] > 8) { p[4] = 3; p[5] = 1; } break;\n    }\n}',
+    features: ['sparse', 'branch'],
+    toolchains: ALL,
+    ctx: 'void sw_jtholeif(s32 x, s32 *p);',
+    proto: { sw_jtholeif: { returnsVoid: true } },
+  },
+  {
+    sym: 'uninitfirst',
+    src:
+      'extern s32 gOut;\n' +
+      's32 uninitfirst(s32 k, s32 *p)\n{\n    s32 v0, v1, v2, v3, v4, v5, v6, v7, v8, v9;\n    s32 i, s = 0;\n' +
+      '    if (k > 5)\n        gOut = v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9;\n' +
+      '    switch (k) {\n' +
+      '    case 0: v0 = p[0]; v1 = p[1]; v2 = p[2]; v3 = p[3]; v4 = p[4]; v5 = p[5]; v6 = p[6]; v7 = p[7]; v8 = p[8]; v9 = p[9]; break;\n' +
+      '    case 1: v0 = p[10]; v1 = p[11]; v2 = p[12]; v3 = p[13]; v4 = p[14]; v5 = p[15]; v6 = p[16]; v7 = p[17]; v8 = p[18]; v9 = p[19]; break;\n' +
+      '    }\n    for (i = 0; i < 8; i++)\n        s += p[i] * v0 + v1 * v2 + v3 * v4 + v5 * v6 + v7 * v8 + v9;\n    return s;\n}',
+    features: ['uninit-local', 'array'],
+    toolchains: ALL,
+  },
+  {
+    sym: 'byvalregs',
+    src:
+      'struct A { u16 a, b, c, d; s8 e, f; };\nvoid take2(struct A a);\n' +
+      'void byvalregs(u16 x, u16 y)\n{\n    struct A a;\n    a.a = x;\n    a.b = y;\n    a.c = 0xF0;\n    a.d = 0x78;\n' +
+      '    a.e = a.f = 4;\n    take2(a);\n}',
+    features: ['struct', 'field'],
+    toolchains: ALL,
+    ctx: 'struct A { u16 a, b, c, d; s8 e, f; };\nvoid take2(struct A a);\nvoid byvalregs(u16 x, u16 y);',
+    proto: { take2: { params: ['struct A'], returnsVoid: true }, byvalregs: { returnsVoid: true } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
