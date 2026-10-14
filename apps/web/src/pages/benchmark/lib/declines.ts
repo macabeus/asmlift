@@ -26,21 +26,24 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 222 distinct decline messages (the texts reached by
+// `packages/core/src` throws 226 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 102 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       27  ARM-mode function, raw data in the code stream, literal pools no base
-//                               alignment fits, pc used as a data base, an operand that
+//   frontend/thumb.ts       31  ARM-mode function, raw data in the code stream, literal pools no base
+//                               alignment fits, alignment fill that depends on the function's base
+//                               alignment, code that runs into data, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
-//                               `bl` whose target this asm defines as a data label, a call
-//                               through `sp` or `lr`, a struct a call
+//                               `bl` whose target this asm defines as a data label, an unmarked `bl`
+//                               to a label of this function (a call thunk), a call
+//                               through `sp` or `lr`, a return that does not jump through the
+//                               caller's lr, a struct a call
 //                               returns into anything but a local, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
@@ -625,25 +628,20 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     pattern: /copies out is used as a value/,
   },
   {
-    // ONE CAPABILITY, THREE MESSAGES, AND NONE OF THEM SAYS IT. agbcc spells a branch past Thumb's
-    // ±2 KB reach as `bl .Lx @far jump` (thumb.md `*cond_branch` and `jump`); the `@` comment that
-    // says so is dropped before decoding, so `frontend/thumb.ts` reads the `bl` as a call and
-    // refuses wherever that reading breaks first: the `bl` names a label of this function, an
-    // `.align` behind the relay decodes differently under base 0 and base 2, or — once an earlier
-    // pool fixed the parity — the block before the pool runs into it. The kleod census pinned all
-    // three to the relay by ablation (lowering it to `b` lifts and MATCHes), and the rows
-    // `farjump_cond`, `farjump_pool` and `farjump_sealed` are one each.
+    // agbcc spells a branch past Thumb's ±2 KB reach as `bl .Lx @far jump` (thumb.md `jump`,
+    // `*cond_branch`, `*cond_branch_reversed`), and `frontend/thumb.ts` lowers it to `b`.
     //
-    // ALL THREE ARE KEYED ON THEIR OWN WORDS, and those words are wider than the relay: the `bl`
-    // refusal names its other reading itself (a locally-defined call thunk), and hand-written asm
-    // whose alignment fill really is undetermined, or whose code really does run into data,
-    // reaches the two layout throws. No row does — every one the corpus has is the relay — so the
-    // label names the cause they have today. The durable fix is in core: read the `@far jump`
-    // comment as the branch it is, and these throws go back to meaning only what they say.
+    // THE CLASS IS THE LOWERING'S OWN REFUSALS, AND NOTHING ELSE: a marked relay whose lr is not
+    // provably dead (no `push` of lr in the entry block, a branch or jump table back to the entry,
+    // or another instruction naming lr) or whose target is not a code label of this function. An
+    // UNMARKED `bl` to a label of this function (a call thunk like m4a's `bl call_r3`, or a relay
+    // whose comment a splitter dropped), alignment fill the input leaves open, and code that runs
+    // into data are in the residue: a marked relay never reaches them, so counting them here would
+    // book a thunk or a layout gap as a far jump. No row reaches either refusal, so the class is in
+    // `NO_ROWS`.
     key: 'far-jump',
-    label: 'Thumb far-jump relays (`bl .Lx @far jump` read as a call)',
-    pattern:
-      /targets a label inside this function|alignment padding depends on the function's base alignment|falls through into data bytes/,
+    label: 'Thumb far-jump relays whose lr is not provably dead, or that leave the function',
+    pattern: /would drop the lr write a|does not target a code label of this function/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.

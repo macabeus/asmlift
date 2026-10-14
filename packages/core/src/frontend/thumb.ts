@@ -71,6 +71,12 @@ interface Instr {
    *  Messages must use this: a decline naming `ldrsh` for a file containing `ldsh` sends the
    *  reader looking for an instruction that is not there. */
   asWritten?: string;
+  /** set only on a `bl <label>` whose line carried the target's far-jump mark — agbcc's
+   *  `@far jump` / `@ far jump`, the relay it spells a branch past Thumb's ±2 KB reach with (see
+   *  `compilerBehaviors.farJumpRelay`); never on a target that declares no mark. The
+   *  comment is the ONLY text that separates it from a call: everything else on the line is
+   *  dropped at tokenizing, and a call thunk is the same `bl` to a label of this function. */
+  farJump?: true;
 }
 interface AsmBlock {
   label: string;
@@ -240,15 +246,21 @@ const controlContinuesPast = (ins: Instr) => {
  *  `mov pc, rN`.) */
 function classifyXfer(ins: Instr): XferKind | null {
   const mn = ins.mnemonic;
-  if (mn === 'b') {
+  // agbcc's far-jump relay is a branch wearing the call mnemonic. Classified here so the layout
+  // questions asked BEFORE it is lowered to `b` (`readThumbText`: `lowerFarJumpRelays`) — whether
+  // a fill after it is sealed, whether the block before a pool falls into data — read it as the
+  // transfer it is; it keeps its 4 bytes there because the mnemonic is still `bl`.
+  if (mn === 'b' || (mn === 'bl' && ins.farJump)) {
     return 'uncond';
   }
   if (COND_OPCODE[mn]) {
     return 'cond';
   }
-  // `bx rN`: agbcc's return is `bx lr` or `pop {rN}; bx rN` (rN holds the restored LR) — a return.
-  // (agbcc emits jump tables via `mov pc`, NOT `bx`; a computed tail-call `bx rN` is out of scope and
-  // would need call modelling — accepted limitation, not a jump-table dispatch form.)
+  // `bx rN`: agbcc's return is `bx lr` or `pop {…, rN}; bx rN` (rN holds the restored LR) — a return.
+  // This sees one instruction, so it cannot tell what rN holds; once the CFG exists, every return
+  // of the selected function is asked whether it reads the caller's lr from the frame word the
+  // prologue saved it in (`refuseReturnsNotThroughCallersLr`), and any other declines as the
+  // indirect jump it is. (agbcc emits jump tables via `mov pc`, NOT `bx`.)
   if (mn === 'bx') {
     return 'return';
   }
@@ -974,6 +986,7 @@ const sayFact = (f: LayoutFact): string => {
 function decode(
   name: string,
   asm: string,
+  farJumpMark?: RegExp,
 ): {
   blocks: AsmBlock[];
   dataWords: Map<string, string[]>;
@@ -1030,10 +1043,19 @@ function decode(
   //     `.Letext0`) that no code line names. A label starts a block, and a block split at a
   //     lexical-scope marker restructures the loop around it: kept, it lifts the pair's `gcd` loop as
   //     an `if` around a `do` instead of a `while`.
+  //
+  // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line carried the
+  // target's far-jump mark (`farJumpMark`, from `compilerBehaviors.farJumpRelay`). Kept as a set of
+  // line positions, not as text, so nothing downstream can read any other comment.
   const codeLines: string[] = [];
+  const farJumpLines = new Set<number>();
   for (const rawLine of withoutDebugSections(asm).split('\n')) {
-    const line = rawLine.split('@')[0].trim();
+    const at = rawLine.indexOf('@');
+    const line = (at === -1 ? rawLine : rawLine.slice(0, at)).trim();
     if (line) {
+      if (at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
+        farJumpLines.add(codeLines.length);
+      }
       codeLines.push(line);
     }
   }
@@ -1045,7 +1067,8 @@ function decode(
     }
   }
   const isDebugMarker = (label: string) => /^\.L(?:FB|FE|M|BB|BE|etext)\d+$/.test(label) && !namedByCode.has(label);
-  for (let rest of codeLines) {
+  for (const [lineNo, line] of codeLines.entries()) {
+    let rest = line;
     // A label may share the line with what follows it (pret pools: `_08x: .4byte 0x…`) — peel it.
     const lm = rest.match(/^([A-Za-z_.$][\w.$]*):\s*(.*)$/);
     if (lm && isDebugMarker(lm[1]) && lm[2] === '') {
@@ -1242,6 +1265,7 @@ function decode(
         mnemonic: canon,
         ops,
         ...(canon === m[1] ? {} : { asWritten: m[1] }),
+        ...(canon === 'bl' && ops.length === 1 && farJumpLines.has(lineNo) ? { farJump: true as const } : {}),
       },
     });
   }
@@ -1795,7 +1819,9 @@ function decode(
     for (const b of aliasOf.size ? blocks : []) {
       for (const ins of b.instrs) {
         const k = ins.ops.length - 1;
-        if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic]) && k >= 0) {
+        // A marked relay is a branch here too (classifyXfer), though still spelt `bl` until
+        // `lowerFarJumpRelays`: a relay to a dropped alias must name the label it stands for.
+        if ((ins.mnemonic === 'b' || COND_OPCODE[ins.mnemonic] || ins.farJump) && k >= 0) {
           ins.ops[k] = aliasOf.get(ins.ops[k]) ?? ins.ops[k];
         }
       }
@@ -2449,6 +2475,9 @@ function liftOnce(
     fillThumbBlock(fill, ab, bi);
     ssa.markFilled(bi);
   });
+  // After the fill, so a block's own refusal (the frame's, the operands') keeps its place in the
+  // refusal order: the proof reads only the text and the CFG, and changes nothing.
+  refuseReturnsNotThroughCallersLr(name, cfg);
 
   pairs.refuseWordReturns();
   // An argument register by its place in `argRegs`, an incoming stack word by its index after them.
@@ -2504,9 +2533,296 @@ interface ThumbText {
   readonly poolNamesSymbols: boolean;
 }
 
-function readThumbText(name: string, asm: string): ThumbText {
+// One spelling per register for the return proof below, which tracks registers by identity:
+// `r14` and `lr` are one register, and so are `ip` and `r12`.
+const REG_ALIAS: Readonly<Record<string, string>> = {
+  sp: 'r13',
+  lr: 'r14',
+  pc: 'r15',
+  sb: 'r9',
+  sl: 'r10',
+  fp: 'r11',
+  ip: 'r12',
+};
+const canonReg = (r: string): string | null => {
+  const t = r.replace(/!$/, '');
+  return /^r(\d|1[0-5])$/.test(t) ? t : (REG_ALIAS[t] ?? null);
+};
+const regIndex = (r: string): number => Number(r.slice(1));
+// Registers `ins` may write, besides sp and besides a `pop`'s list (the proof reads both itself).
+// OVER-approximate: naming a register here that the instruction does not write costs a decline,
+// and missing one costs a wrong return. 'all' for a call, and for anything this cannot read.
+const NO_REG_WRITE: ReadonlySet<string> = new Set([
+  'str',
+  'strb',
+  'strh',
+  'push',
+  'cmp',
+  'cmn',
+  'tst',
+  'nop',
+  'b',
+  'bx',
+]);
+function regWritesOf(ins: Instr): readonly string[] | 'all' {
+  const mn = ins.mnemonic;
+  if (NO_REG_WRITE.has(mn) || COND_OPCODE[mn]) {
+    return [];
+  }
+  if (mn === 'bl' || mn === 'blx' || mn === 'swi') {
+    return 'all';
+  }
+  if (/^(ldm|stm)/.test(mn)) {
+    const base = canonReg(ins.ops[0] ?? '');
+    const list = /^ldm/.test(mn) ? regListOf(ins.ops.slice(1)) : [];
+    if (base === null || list === null) {
+      return 'all';
+    }
+    const listed = list.map(canonReg);
+    return listed.some((r) => r === null) ? 'all' : [base, ...(listed as string[])];
+  }
+  const dest = canonReg(ins.ops[0] ?? '');
+  return dest === null ? 'all' : [dest];
+}
+
+/** What the return proof knows at one point of the function: the frame depth `makeFrameWalk`
+ *  measures, which word of the frame holds the caller's lr (`slot`, as the depth at which it sits:
+ *  the word at entry sp − slot), and which registers hold it. */
+interface LrState {
+  readonly depth: number | null;
+  readonly slot: number | null;
+  readonly regs: ReadonlySet<string>;
+}
+
+/** EVERY RETURN OF THIS FUNCTION RETURNS THROUGH THE CALLER'S lr, or the lift declines.
+ *
+ *  `classifyXfer` reads `bx rN`, `pop {…, pc}` and `mov pc, lr` as returns from the instruction
+ *  alone, and each is one only when the word it transfers to is the lr this function was called
+ *  with: in lr itself, in the frame word the prologue's `push` saved it to, or in a register a
+ *  `pop` loaded from that word. Which word a `pop` reads is a question about the FRAME, not about
+ *  register names — a `pop` fills its list in register-number order from the lowest address up —
+ *  so this walks the frame (`makeFrameWalk`) over the CFG and tracks where the caller's lr is:
+ *    • a `push` that saves a register holding it records the word it went to;
+ *    • a `pop` whose k-th register (by number) reads that word puts it in that register, and every
+ *      other register it fills loses it;
+ *    • the word stops holding it when sp rises past it (a `pop` or `add sp` releases it), a
+ *      `str` through sp overwrites it, or the depth stops being one number;
+ *    • a register stops holding it when anything writes the register (a call writes them all);
+ *      a `mov` copies it.
+ *  Paths meet by agreement: a depth or a word the predecessors disagree on is unknown, and a
+ *  register holds lr only if it does on every path in.
+ *
+ *  So `push {r4, lr}; pop {r0}; bx r0` (the saved r4), `push {lr}; sub sp, #8; pop {r1}; bx r1` (a
+ *  local), `pop {r4, r1}` after `push {r4, lr}` (r1 is filled first, from r4's word) and
+ *  `mov r0, #7; bx r3` all decline, where agbcc's `pop {r4}; pop {r0}; bx r0` and its variadic
+ *  `push {r0-r3}; push {lr}; … pop {r3}; add sp, sp, #0x10; bx r3` are returns. It is also what the
+ *  far-jump relay's lowering needs and does not itself prove (`lowerFarJumpRelays`): with every
+ *  return reading the CALLER's lr, the lr a relay writes cannot be what a return jumps to.
+ *
+ *  NOT ASKED: `bx lr` and `mov pc, lr` are returns by the register's name, whether or not a call
+ *  has since overwritten lr. A compiler saves lr before it calls, so no compiled function reaches
+ *  that case. The far-jump relay does not lean on it: its lowering declines any function in which
+ *  an instruction other than the entry `push` names lr.
+ *
+ *  Blocks no path from the entry reaches are not asked: they never run. */
+function refuseReturnsNotThroughCallersLr(name: string, cfg: ThumbCfg): void {
+  const { asmBlocks, preds, entryReachable } = cfg;
+  const succs: number[][] = asmBlocks.map(() => []);
+  preds.forEach((ps, b) => ps.forEach((p) => succs[p].push(b)));
+  const LR = 'r14';
+  const join = (a: LrState, b: LrState): LrState => {
+    const depth = a.depth !== null && a.depth === b.depth ? a.depth : null;
+    return {
+      depth,
+      slot: depth !== null && a.slot !== null && a.slot === b.slot ? a.slot : null,
+      regs: new Set([...a.regs].filter((r) => b.regs.has(r))),
+    };
+  };
+  const same = (a: LrState, b: LrState) =>
+    a.depth === b.depth && a.slot === b.slot && a.regs.size === b.regs.size && [...a.regs].every((r) => b.regs.has(r));
+  const refuse = (ins: Instr): never => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' is not a return ` +
+        `through the caller's lr — on some path what it jumps to is not lr, nor the frame word the prologue ` +
+        `saved lr in — jump tables / computed gotos / register tail calls not supported`,
+    );
+  };
+  // A pop/ldm list in the order the machine fills it: by register number, lowest address first.
+  const byNumber = (list: readonly string[]): string[] | null => {
+    const regs = list.map(canonReg);
+    return regs.some((r) => r === null) ? null : (regs as string[]).sort((x, y) => regIndex(x) - regIndex(y));
+  };
+
+  // Run one block from its in-state, asking each return as it is reached; the out-state.
+  const run = (b: number, inState: LrState): LrState => {
+    const walk = makeFrameWalk({ argRegs: [], start: inState.depth });
+    let slot = inState.slot;
+    const regs = new Set(inState.regs);
+    for (const ins of asmBlocks[b].instrs) {
+      const mn = ins.mnemonic;
+      const depth = walk.depthNow();
+      const xfer = classifyXfer(ins);
+      const isPop =
+        mn === 'pop' || ((mn === 'ldmia' || mn === 'ldmfd') && isSpReg((ins.ops[0] ?? '').replace(/!$/, '')));
+      if (isPop) {
+        const list = byNumber(regListOf(mn === 'pop' ? ins.ops : ins.ops.slice(1)) ?? []);
+        if (list === null || list.length === 0) {
+          if (xfer === 'return') {
+            refuse(ins);
+          }
+          regs.clear();
+        } else {
+          list.forEach((r, k) => {
+            if (depth !== null && slot !== null && depth - 4 * k === slot) {
+              regs.add(r);
+            } else {
+              regs.delete(r);
+            }
+          });
+          if (xfer === 'return' && !regs.has('r15')) {
+            refuse(ins); // `pop {…, pc}` that does not load pc from the saved lr's word
+          }
+        }
+      } else if (xfer === 'return') {
+        // `bx rN`: the register itself must hold the caller's lr. `bx lr` and `mov pc, lr` are
+        // returns by name (see the doc comment).
+        const via = canonReg(mn === 'bx' ? (ins.ops[0] ?? '') : (ins.ops[1] ?? ''));
+        if (via !== LR && (via === null || !regs.has(via))) {
+          refuse(ins);
+        }
+      } else if (mn === 'push') {
+        const list = byNumber(regListOf(ins.ops) ?? []);
+        const k = list?.findIndex((r) => regs.has(r)) ?? -1;
+        if (list !== null && k >= 0 && depth !== null) {
+          slot = depth + 4 * list.length - 4 * k;
+        }
+      } else if (/^str[bh]?$/.test(mn)) {
+        const { base, off, regOff } = parseAddr(ins.ops[1] ?? '');
+        if (isSpReg(base) && slot !== null) {
+          const width = mn === 'strb' ? 1 : mn === 'strh' ? 2 : 4;
+          const at = depth === null || regOff !== undefined ? null : depth - off; // the word's depth
+          if (at === null || (at - width < slot && at > slot - 4)) {
+            slot = null;
+          }
+        }
+      } else if (!isSpReg(ins.ops[0])) {
+        const writes = regWritesOf(ins);
+        if (writes === 'all') {
+          regs.clear();
+        } else {
+          const src = /^movs?$/.test(mn) ? canonReg(ins.ops[1] ?? '') : null;
+          const copies = src !== null && regs.has(src);
+          writes.forEach((r) => regs.delete(r));
+          if (copies) {
+            regs.add(writes[0]);
+          }
+        }
+      }
+      walk.step(ins);
+      const after = walk.depthNow();
+      if (slot !== null && (after === null || slot > after)) {
+        slot = null; // released, or the frame is no longer one number
+      }
+    }
+    return { depth: walk.depthNow(), slot, regs };
+  };
+
+  const inStates = new Map<number, LrState>([[0, { depth: 0, slot: null, regs: new Set([LR]) }]]);
+  const work = [0];
+  while (work.length > 0) {
+    const b = work.pop()!;
+    const out = run(b, inStates.get(b)!);
+    for (const s of succs[b]) {
+      if (!entryReachable.has(s)) {
+        continue;
+      }
+      const prev = inStates.get(s);
+      const next = prev === undefined ? out : join(prev, out);
+      if (prev === undefined || !same(prev, next)) {
+        inStates.set(s, next);
+        work.push(s);
+      }
+    }
+  }
+}
+
+/** Lower every far-jump relay the target marks (`bl .Lx @far jump`, agbcc's; see
+ *  `compilerBehaviors.farJumpRelay`) in the selected function to the `b .Lx` it stands for, in
+ *  place, or decline. Only a target that declares the mark gets here with one: `decode` sets
+ *  `farJump` from that declaration alone.
+ *
+ *  A relay and a call differ in one effect: `bl` writes lr, `b` does not. So the lowering is sound
+ *  exactly when nothing can observe the lr the relay wrote. What the mark MEANS is the compiler's
+ *  fact, declared with it. That nothing observes lr is checked here on the function's own text,
+ *  not assumed from agbcc's habit (thumb.c `far_jump_used_p` makes it push lr in any function with
+ *  a far jump, which is why every relay in practice passes):
+ *    • the entry block saves lr with a `push`, and no branch of this function names the entry
+ *      label, so that push runs once, before any relay, and saves the CALLER's lr. A recovered
+ *      jump table is the other way back to the entry, and `readThumbText` asks that once the
+ *      tables exist (`relayed`). A `.word` naming the entry is not one: `dataWords` is the whole
+ *      file's, and a function stored as a callback in another function's pool is a pointer;
+ *    • no other instruction of the function names lr at all — no `bx lr`, no `mov pc, lr`, no
+ *      `mov rX, lr`, no second `push`. So the lr the relay writes never reaches a register, and no
+ *      code can return to it: `b` dropping that write is unobservable.
+ *  That every RETURN jumps through the caller's lr — not through a word the relay's lr could have
+ *  reached, nor through a saved callee register — is the other half of the argument, and it is
+ *  asked of every Thumb function once the CFG exists (`refuseReturnsNotThroughCallersLr`), where
+ *  the frame walk says which word each `pop` reads.
+ *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
+ *  function that pushes lr too) has the same shape and no mark, and declines below.
+ *
+ *  The relay must also target a code label of THIS function that is not a declared function start:
+ *  agbcc only relays within a function, and a marked `bl` anywhere else is not its relay. */
+function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabels: ReadonlySet<string>): Instr | null {
+  const instrs = blocks.flatMap((b) => b.instrs);
+  const relays = instrs.filter((ins) => ins.farJump);
+  if (relays.length === 0) {
+    return null;
+  }
+  const blockLabels = new Set(blocks.map((b) => b.label));
+  // The compiler is the target's declaration, not a name this function knows: "a far-jump relay".
+  const say = (ins: Instr) => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' (a far-jump relay)`;
+  const refuse = (ins: Instr, why: string) => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': ${say(ins)} ${why} — lowering it to a branch would drop the lr write a \`bl\` makes`,
+    );
+  };
+  for (const relay of relays) {
+    const target = relay.ops[0];
+    if (!blockLabels.has(target) || funcLabels.has(target)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${say(relay)} does not target a code label of this function`,
+      );
+    }
+  }
+  const namesLr = (ins: Instr) => mentionsReg(ins, 'lr') || mentionsReg(ins, 'r14');
+  const entry = blocks[0];
+  const save = entry?.instrs.find(namesLr);
+  if (!save || save.mnemonic !== 'push' || !(regListOf(save.ops) ?? []).some((r) => r === 'lr' || r === 'r14')) {
+    refuse(relays[0], 'is in a function whose entry block does not save lr with a `push`');
+  }
+  if (instrs.some((ins) => classifyXfer(ins) !== null && ins.ops.includes(entry.label))) {
+    refuse(relays[0], `is in a function that branches back to its entry '${entry.label}', past the lr save`);
+  }
+  const reader = instrs.find((ins) => ins !== save && namesLr(ins));
+  if (reader) {
+    refuse(relays[0], `is in a function that names lr after saving it ('${reader.mnemonic} ${reader.ops.join(', ')}')`);
+  }
+  for (const relay of relays) {
+    relay.mnemonic = 'b';
+    relay.asWritten = 'bl';
+  }
+  return relays[0];
+}
+
+/** `farJumpMark` is the target's `compilerBehaviors.farJumpRelay` comment; absent, no `bl` is a
+ *  relay, and one to a label of this function declines below. */
+function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
+  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm, farJumpMark);
+  // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
+  // relay is one.
+  const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
@@ -2563,6 +2879,16 @@ function readThumbText(name: string, asm: string): ThumbText {
     }
   });
   const asmBlocks = rawBlocks.filter((b) => !elided.has(b));
+  // The far-jump lowering's last question, askable only now: a recovered table dispatching to the
+  // entry would re-run the lr save after a relay clobbered lr (see `lowerFarJumpRelays`).
+  const entryLabel = rawBlocks[0]?.label;
+  if (relayed && [...tables.values()].some((t) => [...t.caseLabels, t.defaultLabel].includes(entryLabel))) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${relayed.asWritten} ${relayed.ops.join(', ')}' (a far-jump relay) is in a function ` +
+        `whose jump table dispatches back to its entry '${entryLabel}', past the lr save — lowering it to a branch ` +
+        `would drop the lr write a \`bl\` makes`,
+    );
+  }
 
   // TRUSTWORTHINESS: loud-fail on a control transfer this frontend cannot model, rather than
   // silently dropping it. A computed/loaded PC write (`mov pc, rN`, `ldr pc, …`, `add/sub pc`,
@@ -2578,13 +2904,14 @@ function readThumbText(name: string, asm: string): ThumbText {
   // lift emits a call to a block label (`.L3(a0, a1, a2)`): not a branch that vanished but a
   // transfer turned into something that RETURNS, and syntactically not C.
   //
-  // The refusal is wider than that one shape because the asm does not separate it from a
+  // A relay agbcc MARKED (`@far jump`) never reaches here: `lowerFarJumpRelays` has already lowered
+  // it to `b`, behind a proof that lr is dead. What is left is a `bl` to a label of this function
+  // with no mark, and the shape does not separate a relay whose comment a splitter dropped from a
   // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
   // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
   // Both are a `bl` to a bare label the slice defines, both sit under a conditional branch that
-  // skips them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
-  // Lifting the relay as a `br` is the other half of the gap and needs the same distinction plus a
-  // proof that `lr` is dead there, since `bl` overwrites it and a branch must not.
+  // skips them, both leave `lr` clobbered, and the thunk's function pushes lr too (`push {r0, lr}`),
+  // so no liveness, layout or prologue fact tells them apart. Only the mark does.
   //
   // DECLARED function starts are excluded: a `.thumb_func`/`thumb_func_start` label is a function
   // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
@@ -4205,7 +4532,7 @@ function thumbFillOf(
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
 ): ThumbFill {
-  const text = readThumbText(name, asm);
+  const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
   assertScratchRegsPartitioned(target); // first, for the refusal order; `registerLiveIns` asks again
   const calls = callDeclarations(name, target, prototypes, THUMB_CALL_LOWERING, (message) => {
@@ -5359,6 +5686,7 @@ export const thumbFrontend: Frontend = { id: 'thumb', inputFormat: 'gnu-as', lif
  *  package's public API, where no consumer should be able to depend on them. The name says what it
  *  is; nothing in `src` reads it. */
 export const __testing = {
+  decode,
   PAD_ENCODINGS,
   isPadInstr,
   factKey,

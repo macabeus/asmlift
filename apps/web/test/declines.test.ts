@@ -946,6 +946,10 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // describe — a second push, a depth r1 does not hold, a reload nothing stored — and no benchmark
   // row reaches any of them.
   //
+  // `far-jump` keys on the far-jump lowering's own refusals in `frontend/thumb.ts` — a relay whose
+  // lr is not provably dead, or whose target is not a code label of this function — and no row
+  // reaches either.
+  //
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
@@ -954,6 +958,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'branch-likely',
     'cross-block-flags',
     'ctr-transfer',
+    'far-jump',
     'no-prototype-args',
     'pool-word-shape',
     'stack-frames',
@@ -1180,9 +1185,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['struct-return', ' by value — ', 'packages/core/src/frontend/call-plan.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['return-address', 'copies out is used as a value', 'packages/core/src/frontend/ppc.ts'],
-    ['far-jump', 'targets a label inside this function', 'packages/core/src/frontend/thumb.ts'],
-    ['far-jump', "alignment padding depends on the function's base alignment", 'packages/core/src/frontend/thumb.ts'],
-    ['far-jump', 'falls through into data bytes', 'packages/core/src/frontend/thumb.ts'],
+    ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
+    ['far-jump', 'does not target a code label of this function', 'packages/core/src/frontend/thumb.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],
@@ -1249,7 +1253,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // are named in prose rather than given classes with no inhabitant. What this gate buys is that
   // the paragraph cannot drift: move a family into a class and this goes red with the new number.
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
-    ['frontend/thumb.ts', 27],
+    ['frontend/thumb.ts', 31],
     ['structure/structure.ts', 21],
     ['frontend/mips.ts', 15],
     ['frontend/ppc.ts', 15],
@@ -1260,7 +1264,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 102;
+  const RESIDUE_TOTAL = 106;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
