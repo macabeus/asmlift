@@ -253,7 +253,11 @@ const controlContinuesPast = (ins: Instr) => {
  *  `mov pc, rN`.) */
 function classifyXfer(ins: Instr): XferKind | null {
   const mn = ins.mnemonic;
-  if (mn === 'b') {
+  // agbcc's far-jump relay is a branch wearing the call mnemonic. Classified here so the layout
+  // questions asked BEFORE it is lowered to `b` (`readThumbText`: `lowerFarJumpRelays`) — whether
+  // a fill after it is sealed, whether the block before a pool falls into data — read it as the
+  // transfer it is; it keeps its 4 bytes there because the mnemonic is still `bl`.
+  if (mn === 'b' || (mn === 'bl' && ins.farJump)) {
     return 'uncond';
   }
   if (COND_OPCODE[mn]) {
@@ -2528,9 +2532,74 @@ interface ThumbText {
   readonly poolNamesSymbols: boolean;
 }
 
+/** Lower every agbcc far-jump relay (`bl .Lx @far jump`, see `FAR_JUMP_COMMENT`) in the selected
+ *  function to the `b .Lx` it stands for, in place, or decline.
+ *
+ *  A relay and a call differ in one effect: `bl` writes lr, `b` does not. So the lowering is sound
+ *  exactly when nothing can observe the lr the relay wrote, and that is PROVED here rather than
+ *  assumed from agbcc's habit (thumb.c `far_jump_used_p` makes it push lr in any function with a
+ *  far jump, which is why every relay in practice passes):
+ *    • the entry block saves lr with a `push`, and no branch of this function names the entry
+ *      label, so that push runs once, before any relay, and saves the CALLER's lr. A recovered
+ *      jump table is the other way back to the entry, and `readThumbText` asks that once the
+ *      tables exist (`relayed`). A `.word` naming the entry is NOT one by itself: `dataWords` is
+ *      the whole file's, and a state machine storing its own address as a callback (kleod's
+ *      `WorldMapScreenHandler`, from another function's pool) is a pointer, not a branch;
+ *    • no other instruction of the function names lr at all — no `bx lr`, no `mov pc, lr`, no
+ *      `mov rX, lr`, no second `push`. The return goes through the saved copy (`pop {rN}; bx rN` or
+ *      `pop {…, pc}`), which a relay cannot have touched.
+ *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
+ *  function that pushes lr too) has the same shape and no mark, and still declines below.
+ *
+ *  The relay must also target a code label of THIS function that is not a declared function start:
+ *  agbcc only relays within a function, and a marked `bl` anywhere else is not its relay. */
+function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabels: ReadonlySet<string>): Instr | null {
+  const instrs = blocks.flatMap((b) => b.instrs);
+  const relays = instrs.filter((ins) => ins.farJump);
+  if (relays.length === 0) {
+    return null;
+  }
+  const blockLabels = new Set(blocks.map((b) => b.label));
+  const say = (ins: Instr) => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' (agbcc's far-jump relay)`;
+  const refuse = (ins: Instr, why: string) => {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': ${say(ins)} ${why} — lowering it to a branch would drop the lr write a \`bl\` makes`,
+    );
+  };
+  for (const relay of relays) {
+    const target = relay.ops[0];
+    if (!blockLabels.has(target) || funcLabels.has(target)) {
+      throw new FrontendUnsupportedError(
+        `cannot lift '${name}': ${say(relay)} does not target a code label of this function`,
+      );
+    }
+  }
+  const namesLr = (ins: Instr) => mentionsReg(ins, 'lr') || mentionsReg(ins, 'r14');
+  const entry = blocks[0];
+  const save = entry?.instrs.find(namesLr);
+  if (!save || save.mnemonic !== 'push' || !(regListOf(save.ops) ?? []).some((r) => r === 'lr' || r === 'r14')) {
+    refuse(relays[0], 'is in a function whose entry block does not save lr with a `push`');
+  }
+  if (instrs.some((ins) => classifyXfer(ins) !== null && ins.ops.includes(entry.label))) {
+    refuse(relays[0], `is in a function that branches back to its entry '${entry.label}', past the lr save`);
+  }
+  const reader = instrs.find((ins) => ins !== save && namesLr(ins));
+  if (reader) {
+    refuse(relays[0], `is in a function that names lr after saving it ('${reader.mnemonic} ${reader.ops.join(', ')}')`);
+  }
+  for (const relay of relays) {
+    relay.mnemonic = 'b';
+    relay.asWritten = 'bl';
+  }
+  return relays[0];
+}
+
 function readThumbText(name: string, asm: string): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
   const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
+  // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
+  // relay is one.
+  const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
 
   // Regime B: recover agbcc jump tables. A dispatch block (`mov pc, rN`) plus its bounds
   // predecessor (`cmp; bhi DEF`) collapse into a `switch_br` emitted from the BOUNDS block; the
@@ -2587,6 +2656,16 @@ function readThumbText(name: string, asm: string): ThumbText {
     }
   });
   const asmBlocks = rawBlocks.filter((b) => !elided.has(b));
+  // The far-jump lowering's last question, askable only now: a recovered table dispatching to the
+  // entry would re-run the lr save after a relay clobbered lr (see `lowerFarJumpRelays`).
+  const entryLabel = rawBlocks[0]?.label;
+  if (relayed && [...tables.values()].some((t) => [...t.caseLabels, t.defaultLabel].includes(entryLabel))) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name}': '${relayed.asWritten} ${relayed.ops.join(', ')}' (agbcc's far-jump relay) is in a function ` +
+        `whose jump table dispatches back to its entry '${entryLabel}', past the lr save — lowering it to a branch ` +
+        `would drop the lr write a \`bl\` makes`,
+    );
+  }
 
   // TRUSTWORTHINESS: loud-fail on a control transfer this frontend cannot model, rather than
   // silently dropping it. A computed/loaded PC write (`mov pc, rN`, `ldr pc, …`, `add/sub pc`,
@@ -2602,13 +2681,14 @@ function readThumbText(name: string, asm: string): ThumbText {
   // lift emits a call to a block label (`.L3(a0, a1, a2)`): not a branch that vanished but a
   // transfer turned into something that RETURNS, and syntactically not C.
   //
-  // The refusal is wider than that one shape because the asm does not separate it from a
+  // A relay agbcc MARKED (`@far jump`) never reaches here: `lowerFarJumpRelays` has already lowered
+  // it to `b`, behind a proof that lr is dead. What is left is a `bl` to a label of this function
+  // with no mark, and the shape does not separate a relay whose comment a splitter dropped from a
   // locally-defined call thunk — `call_r3: bx r3`, ARMv4T's stand-in for the `blx rN` it has no
   // encoding for, which pokeemerald's m4a_1.s calls four times from inside MPlayMain's own slice.
   // Both are a `bl` to a bare label the slice defines, both sit under a conditional branch that
-  // skips them, and both leave `lr` clobbered, so no liveness or layout fact tells them apart.
-  // Lifting the relay as a `br` is the other half of the gap and needs the same distinction plus a
-  // proof that `lr` is dead there, since `bl` overwrites it and a branch must not.
+  // skips them, both leave `lr` clobbered, and the thunk's function pushes lr too (`push {r0, lr}`),
+  // so no liveness, layout or prologue fact tells them apart. Only the mark does.
   //
   // DECLARED function starts are excluded: a `.thumb_func`/`thumb_func_start` label is a function
   // by declaration, so `bl` to one is a call however the slice came to contain it — the entry

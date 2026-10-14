@@ -1183,6 +1183,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['far-jump', 'targets a label inside this function', 'packages/core/src/frontend/thumb.ts'],
     ['far-jump', "alignment padding depends on the function's base alignment", 'packages/core/src/frontend/thumb.ts'],
     ['far-jump', 'falls through into data bytes', 'packages/core/src/frontend/thumb.ts'],
+    ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
+    ['far-jump', 'does not target a code label of this function', 'packages/core/src/frontend/thumb.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', 'CTR-counted loop', 'packages/core/src/frontend/ppc.ts'],
     ['ctr-transfer', "without a reaching 'mtctr'", 'packages/core/src/frontend/ppc.ts'],

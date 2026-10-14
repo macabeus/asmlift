@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 222 distinct decline messages (the texts reached by
+// `packages/core/src` throws 225 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -643,7 +643,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'far-jump',
     label: 'Thumb far-jump relays (`bl .Lx @far jump` read as a call)',
     pattern:
-      /targets a label inside this function|alignment padding depends on the function's base alignment|falls through into data bytes/,
+      /targets a label inside this function|alignment padding depends on the function's base alignment|falls through into data bytes|would drop the lr write a|does not target a code label of this function/,
   },
   // The three control-transfer gaps, ABOVE `branch-form`, which would otherwise take all of them on
   // `unmodelled control transfer`.
