@@ -167,11 +167,13 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *
  *  THREE WAYS TO SAY NOTHING, AND THEY ARE ONE ANSWER. `params` omitted; `params` malformed (a
  *  bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits); and a list holding a
- *  spelling `declaredWidth` cannot read — a project typedef (`bool8`, `Direction`, `TaskFunc`), a
- *  by-value struct, a floating type. The first two are not a reading of the list at all. The third
- *  is a list read to the end that cannot be CONVERTED: a parameter of unknown width occupies one
- *  argument register or two, the choice moves every later argument's home, and nothing a
- *  declaration holds settles it.
+ *  spelling neither `declaredWidth` reads nor the declaration sizes — a project typedef
+ *  (`bool8`, `Direction`, `TaskFunc`) that `wordParams` does not list, a by-value struct, a
+ *  floating type. The first two are not a reading of the list at all. The third is a list read to
+ *  the end that cannot be CONVERTED: a parameter of unknown width occupies one argument register
+ *  or two, and the choice moves every later argument's home. Where the declaration does settle it
+ *  — a typedef'd enum, an array or a function type the context resolved to one word, which
+ *  `wordParams` lists (`paramClassOf`) — the parameter is 32 bits and the list converts.
  *
  *  SO IT ABSTAINS, AND ABSTAINING IS NEITHER A REFUSAL NOR A GUESS. The caller falls back to its
  *  own contiguous-arg-register scan — exactly what it does for a callee the project never declared

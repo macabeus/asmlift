@@ -301,9 +301,11 @@ export function callDeclarations(
   // WHAT THE CONVERSION CANNOT DO ON ITS OWN. `declaredWidth` answers for every type asmlift can
   // spell, `long long` included, and `undefined` for a project typedef, a by-value struct or a
   // floating type. `declaredCallArgs` sizes a `double` from the target
-  // (`TargetDescription.doubleArgWords`); one other such spelling and it states no layout at all,
-  // because the question here is not how wide that parameter is but whether it occupies one
-  // argument register or two, and the choice moves every later argument's home. So the declaration licenses no outgoing block and this returns `null`:
+  // (`TargetDescription.doubleArgWords`) and a typedef the declaration lists in `wordParams` (an
+  // enum, an array or a function type: `proto.ts` `paramClassOf`) at one word; one other such
+  // spelling and it states no layout at all, because the question here is not how wide that
+  // parameter is but whether it occupies one argument register or two, and the choice moves every
+  // later argument's home. So the declaration licenses no outgoing block and this returns `null`:
   // the call is lifted at the arg-register guess, exactly as a callee the project never declared
   // is, and the guess retracts the registers a call destroyed where a stated width would assert
   // them.
