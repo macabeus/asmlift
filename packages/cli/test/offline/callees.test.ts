@@ -85,6 +85,16 @@ describe('guessedArityCallees', () => {
     expect(guessedArityCallees(LBG, 'LoadBGTilemapData', PPC_MWCC, typed)).toEqual(['thunk_HeapFree']);
   });
 
+  it('counts a struct passed by value that the declaration lays out, where the target passes it in words', () => {
+    const layout = { kind: 'struct' as const, members: [{ name: 'a', type: 'u32' }] };
+    const typed = {
+      thunk_HeapFree: { params: ['struct S'], byValueLayouts: { 0: layout } },
+      DecompressAlloc: { params: 2 },
+    };
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, typed)).toEqual([]);
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', PPC_MWCC, typed)).toEqual(['thunk_HeapFree']);
+  });
+
   it('counts a signature the project ELF declares', () => {
     const symbols: SymbolMap = new Map([
       [
