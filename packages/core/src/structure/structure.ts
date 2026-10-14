@@ -2167,7 +2167,7 @@ function leftOutOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>, anchor
  *  the fn as raised and again of the sunk fn; a superset, since it asks `sharedRetsOf` and none of
  *  the follow's three later refusals. An `if`, specifically: see the restriction at the `some`. */
 export function hasDivergentSharedRet(fn: Fn): boolean {
-  const ipdom = postDominators(fn);
+  const ipdom = functionPostDominators(fn);
   const reach = new Map<Block, Set<Block>>();
   const reachFrom = (b: Block): Set<Block> => {
     let out = reach.get(b);
@@ -2464,15 +2464,7 @@ export function structure(
   const dom = dominators(fn);
   // --- loop discovery (ir/loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
-  // A loop no edge leaves reaches no `ret`, so post-dominance would hand every block before it every
-  // block as a post-dominator, and an `if` ahead of it an arbitrary join. Its header ENDS paths as a
-  // `ret` does: the region holding the loop ends there (`emitForever`).
-  const ipdom = postDominators(
-    fn,
-    undefined,
-    undefined,
-    new Set([...forest.byHeader.values()].filter((nl) => nl.exitEdges.length === 0).map((nl) => nl.header)),
-  );
+  const ipdom = functionPostDominators(fn, forest);
 
   /** The byte step `raise/const.ts` recorded on the literal that feeds this access's address, or
    *  `undefined` where the address was not reached by advancing a register. Read at the two
@@ -7654,6 +7646,20 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
       }
     }
   }
+}
+
+/** THE function-level immediate post-dominators, the one definition `structure()` and its
+ *  enumeration gate `hasDivergentSharedRet` both read, so the gate's join for an `if` is the join
+ *  the follow sees. A loop no edge leaves reaches no `ret`, so plain post-dominance would hand
+ *  every block before it every block as a post-dominator, and an `if` ahead of it an arbitrary
+ *  join. Its header ENDS paths as a `ret` does: the region holding the loop ends there
+ *  (`emitForever`). `forest` is the caller's, when it already has one. */
+export function functionPostDominators(
+  fn: Fn,
+  forest: { byHeader: ReadonlyMap<Block, NaturalLoop> } = analyzeLoops(fn, dominators(fn)),
+): Map<Block, Block | null> {
+  const exitless = [...forest.byHeader.values()].filter((nl) => nl.exitEdges.length === 0).map((nl) => nl.header);
+  return postDominators(fn, undefined, undefined, new Set(exitless));
 }
 
 // Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do the

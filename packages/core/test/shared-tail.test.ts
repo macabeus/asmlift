@@ -100,6 +100,36 @@ test('an `if` whose returning arms share nothing keeps them divergent', () => {
   expect(emit(fn, true)).toBe(emit(fn, false));
 });
 
+test('the gate sees the same join as the follow when one arm runs into a loop no edge leaves', () => {
+  // `^bb3` is a `while (1)`: it reaches no `ret`. structure() ends paths at its header, so `^bb1`
+  // has no join and its `ret` arm and `^bb2`'s share `^bb4`, which the follow writes once. The gate
+  // must read that same post-dominance; with plain post-dominance the exitless cycle hands `^bb1`
+  // a join, the gate answers false, and rank never builds the twin the follow re-spells.
+  const fn = parse(`fn k {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=0}
+  %3: u32 = icmp_ne %0, %2
+  cond_br %3, ^bb1(), ^bb2()
+^bb1():
+  %4: u32 = icmp_ne %1, %2
+  cond_br %4, ^bb3(), ^bb4()
+^bb2():
+  %5: s32 = call %0 {target="g"}
+  br ^bb4()
+^bb3():
+  %6: s32 = call %1 {target="h"}
+  br ^bb3()
+^bb4():
+  ret %2
+}
+`);
+  verify(fn);
+  expect(hasDivergentSharedRet(fn)).toBe(true);
+  const spell = (follow: boolean) => cBackend.emit(structure(fn, { followEarlyReturns: follow }));
+  expect(count(spell(false), 'return v0;')).toBe(2);
+  expect(count(spell(true), 'return v0;')).toBe(1);
+});
+
 test("the enclosing region's follow is never emitted inside an arm", () => {
   // Inside the else side, `^bb2`'s arms share `^bb6` — but `^bb5` also reaches `^bb7`, the OUTER
   // `if`'s follow, without passing `^bb6`. Taking `^bb6` as `^bb2`'s follow would structure that
