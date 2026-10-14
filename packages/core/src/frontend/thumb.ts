@@ -2500,6 +2500,7 @@ function liftOnce(
     escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
     returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
+    byValueArgs: (callee) => fill.calls.declaredCall(callee)?.byValue,
     symbols,
     target,
     oneObject,
@@ -3427,6 +3428,40 @@ function measureThumbFrame({
     ),
   );
 
+  // A STRUCT PASSED BY VALUE, LOADED OFF THE FRAME A WORD AT A TIME. agbcc builds the argument in
+  // the frame — through a copy of sp, Thumb having no sp-relative halfword or byte store — and
+  // then loads its words into the argument registers the declaration places it in (`struct A
+  // {u16 a,b,c,d; s8 e,f;} a; a.a = x; … take2(a);` is `mov r2, sp / strh r0, [r2] / … / ldr r0,
+  // [sp] / ldr r1, [sp, #0x4] / ldr r2, [sp, #0x8] / bl take2`). Those words are the object's, not
+  // slots: each `[sp,#k]` inside such a block is routed through an `laddr` (`isFrameObjectAccess`),
+  // and the frame-object audit folds the loads into the object passed whole or refuses
+  // (frame-objects.ts `foldByValueArgs`). A block is read only where every one of its registers is
+  // last written, in the call's own block, by a word load at the next word of one frame range.
+  const byValueBlocks: FrameRange[] = [];
+  for (const b of entryReachable) {
+    const instrs = asmBlocks[b].instrs;
+    instrs.forEach((call, at) => {
+      if (call.mnemonic !== 'bl' || calleeRegister(call, target) !== null) {
+        return;
+      }
+      for (const arg of calls.declaredCall(call.ops[0] ?? '?')?.byValue ?? []) {
+        const offs = target.argRegs.slice(arg.word, arg.word + arg.words).map((r) => {
+          const def = instrs
+            .slice(0, at)
+            .reverse()
+            .find((ins) => mayWriteReg(ins, r));
+          const acc = def !== undefined && def.mnemonic === 'ldr' && def.ops[0] === r ? spMemAccess(def) : null;
+          return acc !== null && !acc.regOff && acc.width === 4 ? acc.off : null;
+        });
+        if (offs.every((o, i) => o !== null && o === offs[0]! + 4 * i)) {
+          byValueBlocks.push({ from: offs[0]!, to: offs[0]! + 4 * arg.words });
+        }
+      }
+    });
+  }
+  const inByValueBlock = (off: number, width: number): boolean =>
+    byValueBlocks.some((r) => off >= r.from && off + width <= r.to);
+
   // THE OUTGOING STACK-ARGUMENT AREA. `frontend/stackargs.ts` holds the licence and every refusal;
   // what belongs HERE is the decoding it deliberately does not do — which accesses are whole frame
   // slots, which instructions are calls, and what each callee's DECLARATION asks for. `blx rN`
@@ -3455,7 +3490,7 @@ function measureThumbFrame({
         return escaped;
       }
       const off = slotAcc(ins);
-      if (off !== null && !constantCaptureOffsets.has(off)) {
+      if (off !== null && !constantCaptureOffsets.has(off) && !inByValueBlock(off, 4)) {
         return [{ kind: /^str/.test(ins.mnemonic) ? 'store' : 'load', off }];
       }
       if (ins.mnemonic === 'bl' || ins.mnemonic === 'blx') {
@@ -3562,6 +3597,7 @@ function measureThumbFrame({
     width === 4 &&
     ((capturedObjectIsTheWholeFrame && off === 0) ||
       (constantCaptureOffsets.has(off) && off >= outgoingArgs.area && off + 4 <= localArea) ||
+      (inByValueBlock(off, 4) && off >= outgoingArgs.area && off + 4 <= localArea) ||
       (oneObject !== undefined && off >= oneObject.from && off + 4 <= oneObject.to));
 
   // LOCAL STACK SLOTS. A spill or a local that never has its address taken is transparent to

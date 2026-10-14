@@ -185,7 +185,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
   const declaredTypedefs = new Set<string>();
-  for (const { name, info, access, proto, returned, holdsPointer, implicitCall } of refs) {
+  for (const { name, info, access, proto, returned, passed, holdsPointer, implicitCall } of refs) {
     // An address-cast macro declares itself: the header's own body, verbatim. It must NOT become
     // an `extern` — that is the whole point of the fact (an extern emits a relocated pool word
     // where the macro emits the numeric one the target shows).
@@ -203,14 +203,15 @@ export function renderDeclarations(refs: SymbolRef[]): string {
       // A STRUCT IT RETURNS THROUGH MEMORY is the headers' type, spelled as they spell it, so it is
       // defined here with the rest of what they own: by its tag, once, whoever else declares that
       // tag — and a typedef name is bound to it on top.
-      if (returned?.declared !== undefined) {
-        if (!declaredTags.has(returned.name)) {
-          declaredTags.add(returned.name);
-          lines.push(declaredStructDecl(returned.name, returned.layout));
+      // …and so is a struct it is passed by value, the same way.
+      for (const s of [...(returned?.declared !== undefined ? [returned] : []), ...(passed ?? [])]) {
+        if (!declaredTags.has(s.name)) {
+          declaredTags.add(s.name);
+          lines.push(declaredStructDecl(s.name, s.layout));
         }
-        if (!/^(?:struct|union)\s/.test(returned.declared) && !declaredTypedefs.has(returned.declared)) {
-          declaredTypedefs.add(returned.declared);
-          lines.push(`typedef struct ${returned.name} ${returned.declared};`);
+        if (!/^(?:struct|union)\s/.test(s.declared) && !declaredTypedefs.has(s.declared)) {
+          declaredTypedefs.add(s.declared);
+          lines.push(`typedef struct ${s.name} ${s.declared};`);
         }
       }
       lines.push(`${proto.returns} ${name}(${proto.params.length > 0 ? proto.params.join(', ') : 'void'});`);

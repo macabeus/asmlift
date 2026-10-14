@@ -12,9 +12,16 @@
 // lowers to is built here too (`CallDeclarations.lower`), and asks the frontend (`CallSite`) only
 // what its ISA alone knows: how it reads and writes a register, where an argument word past the
 // registers lives, and how it builds a pair.
-import { aggregateType, returnedAggregate, returnsInMemory, returnsWithoutHiddenPointer } from '../aggregate';
+import {
+  type ByValueArg,
+  aggregateType,
+  byValueCallArgs,
+  returnedAggregate,
+  returnsInMemory,
+  returnsWithoutHiddenPointer,
+} from '../aggregate';
 import { type Value, mkOp, mkValue } from '../ir/core';
-import { type IrType, T, typeToString } from '../ir/types';
+import { type IrType, T, structSpelling, typeToString } from '../ir/types';
 import {
   type FnProto,
   type ParamClass,
@@ -70,6 +77,8 @@ export interface DeclaredCall {
   /** the declared parameter count, a hidden pointer aside */
   readonly params: number;
   readonly returned?: StructReturn | 'register';
+  /** each struct passed by value, by its first word in `widths` (a hidden pointer counted) */
+  readonly byValue?: readonly ByValueArg[];
 }
 
 /** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes (`paramClassOf`,
@@ -89,6 +98,8 @@ export interface CallPlan {
   readonly widths: readonly number[] | null;
   /** the indices into `widths` its declaration types `double` */
   readonly doubles: ReadonlySet<number>;
+  /** the structs its declaration passes by value, by their words in `widths` */
+  readonly byValue?: readonly ByValueArg[];
   readonly returns:
     | { readonly kind: 'word' }
     | { readonly kind: 'void' }
@@ -349,7 +360,9 @@ export function callDeclarations(
     // read a `Function` off `Object.prototype` as its prototype entry.
     const own = known(prototypes, callee);
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
-    const declared = declaredCallArgs(declarationOf(callee), target);
+    const declared:
+      { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
+      declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -366,7 +379,12 @@ export function callDeclarations(
     // (`double *`, `size_t`, or a bare parameter count, which states no type) lifts to a candidate
     // that does not compile. Asked of the printer's own predicate, so the two cannot disagree; a
     // headers world, which would declare the callee itself, loses the lift with it.
-    if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
+    const byValueParams = new Set((declared?.byValue ?? []).map((b) => b.param));
+    if (
+      returned !== undefined &&
+      returned !== 'register' &&
+      spellableProto(own, target, returned.type, byValueParams) === undefined
+    ) {
       const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in ${target.argRegs[0]}`;
       if (typeof own!.params === 'number') {
         fail(
@@ -380,11 +398,25 @@ export function callDeclarations(
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const widths = hidden === 0 ? params : [32, ...params];
     const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
+    const byValue = (declared!.byValue ?? []).map((b) => ({
+      ...b,
+      word: b.word + hidden,
+    }));
+    // a struct partly in the registers and partly on the stack (FUNCTION_ARG_PARTIAL_NREGS) is
+    // one value read from two places, which no lowering here builds
+    const past = byValue.find((b) => wordsOf(widths.slice(0, b.word)) + b.words > target.argRegs.length);
+    if (past !== undefined) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` takes ${structSpelling(past.type)} by value as its parameter ${past.param + 1}, ` +
+          'and it does not fit in the argument registers — a struct passed on the stack is not modelled',
+      );
+    }
     return {
       widths,
       doubles,
-      params: params.length,
+      params: declared!.widths.length - byValue.reduce((n, b) => n + b.words - 1, 0),
       ...(returned === undefined ? {} : { returned }),
+      ...(byValue.length === 0 ? {} : { byValue }),
     };
   };
   // ONE CALL, IN THE ORDER ITS QUESTIONS REFUSE: a struct the lowering cannot receive and a float,
@@ -473,6 +505,7 @@ export function callDeclarations(
     return {
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
+      ...(declared?.byValue === undefined ? {} : { byValue: declared.byValue }),
       returns: voided
         ? { kind: 'void' }
         : pair
@@ -642,6 +675,11 @@ export function callDeclarations(
     // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
     // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
     const doubles = p.doubles.size ? [...p.doubles] : undefined;
+    // A STRUCT PASSED BY VALUE IS ITS WORDS HERE, one operand each, and the call names them as
+    // (first operand, words) pairs: the frame-object audit folds words loaded off one frame object
+    // of that struct into the object passed whole, and refuses every other source
+    // (frame-objects.ts `foldByValueArgs`).
+    const byValue = p.byValue?.flatMap((b) => [b.word, b.words]);
     const call = mkOp('call', {
       operands: indirect === undefined ? args : [...args, indirect.address],
       results: [res],
@@ -649,6 +687,7 @@ export function callDeclarations(
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
         ...(doubles === undefined ? {} : { doubles }),
+        ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },
     });
     ssa.irBlocks[bi].ops.push(call);

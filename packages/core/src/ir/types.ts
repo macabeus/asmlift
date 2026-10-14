@@ -127,6 +127,11 @@ function viewBytes(t: IrType): number {
   return e.width / 8;
 }
 
+/** A struct as its declaration spells it (`declared`), else by its tag; any other type as printed. */
+export function structSpelling(t: IrType): string {
+  return t.kind === 'struct' ? (t.declared ?? `struct ${t.name}`) : typeToString(t);
+}
+
 /** The member `name` of an aggregate — a struct's field or a union's view — or undefined when `t`
  *  is not an aggregate or declares no such member. THE one lookup the typing walk and the deref
  *  contract share, so the two cannot disagree on which member access is well-typed. */

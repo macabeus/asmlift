@@ -4411,12 +4411,27 @@ export function structure(
       // assigned to a 32-bit one truncates — but it is a pass this branch did not set out to move.
       const wide64 = d.results[0] !== undefined && intWidth(d.results[0].type) === 64;
       const through = calleeValue(d);
+      // a struct passed by value is the frame object its operand addresses, spelled bare
+      const byValue = ((d.attrs.byValue as number[] | undefined) ?? [])
+        .filter((_, i) => i % 2 === 0)
+        .map((at) => {
+          const t = d.operands[at].type;
+          if (defs.get(d.operands[at])?.opcode !== 'laddr' || t.kind !== 'ptr') {
+            throw new Error(`internal: a by-value argument of '${d.attrs.target}' is not a frame object's address`);
+          }
+          return { at, type: t.to };
+        });
+      const args = callArgs(d).map((v, i): Expr => {
+        const x = e(v);
+        return byValue.some((b) => b.at === i) && x.k === 'addr' ? { k: 'var', name: x.name } : x;
+      });
       return {
         k: 'call',
         fn: through === undefined ? (d.attrs.target as string) : e(through),
-        args: callArgs(d).map(e),
+        args,
         ...(wide64 ? { wide64: true as const } : {}),
         ...(d.attrs.sret === true ? { sret: d.results[0].type } : {}),
+        ...(byValue.length > 0 ? { byValue } : {}),
       };
     }
     if (d.opcode === 'laddr') {
@@ -7038,8 +7053,16 @@ export function structure(
             stores++;
           }
         }
+        // a struct passed by value is read whole at the call: the word loads the asm made of it
+        const passed = ((op.attrs.byValue as number[] | undefined) ?? []).filter(
+          (at, i) => i % 2 === 0 && roots.has(op.operands[at]),
+        );
+        passed.forEach((at) => {
+          const t = op.operands[at].type;
+          loads += t.kind === 'ptr' && t.to.kind === 'struct' ? Math.ceil((t.to.size ?? 4) / 4) : 1;
+        });
         // every OTHER mention of the address, operands and branch arguments alike
-        const elsewhere = op.operands.some((v, i) => roots.has(v) && !(access && i === 0));
+        const elsewhere = op.operands.some((v, i) => roots.has(v) && !(access && i === 0) && !passed.includes(i));
         if (elsewhere || op.successors.some((sx) => sx.args.some((v) => roots.has(v)))) {
           return {};
         }
