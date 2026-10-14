@@ -309,7 +309,8 @@ function traceTower(
       afterLatchFold: () =>
         trace.push({
           id: 'stage:latchfold',
-          title: 'Empty-latch and exit-trampoline folding (splice out an SSA-emptied back-edge or loop-exit block)',
+          title:
+            'Empty-latch and exit-trampoline folding, peeled-test re-rolling (CFG canonicalization before structuring)',
           irDump: irDump(fn),
           verified: true,
         }),

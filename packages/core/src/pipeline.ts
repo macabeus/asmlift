@@ -34,6 +34,7 @@ import { foldEmptyLatches, foldExitTrampolines } from './raise/latch';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
 import { recoverTypes } from './raise/recover';
+import { rerollPeeledTests } from './raise/reroll';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
@@ -383,7 +384,7 @@ export function raiseRecovered(
     verify(fn);
     hooks.afterRetsink?.();
   }
-  if (foldEmptyLatches(fn) + foldExitTrampolines(fn) > 0) {
+  if (foldEmptyLatches(fn) + foldExitTrampolines(fn) + rerollPeeledTests(fn) > 0) {
     verify(fn);
     hooks.afterLatchFold?.();
   }
