@@ -604,6 +604,26 @@ export interface TargetDescription {
     //
     // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
     o32LocalArea?: 'above-outgoing-area' | 'above-saved-registers';
+    // WHERE A FUNCTION THAT PUSHES ONE FRAME KEEPS ITS LOCALS, on a target whose frame starts with a
+    // fixed LINKAGE area: the bytes at the pushed stack pointer that hold the back chain and the
+    // callee's link-register save word. Above it the OUTGOING area holds the stack words of the
+    // widest call (none in a function whose calls take none), and the locals and spill temps share
+    // what is left below the lowest saved register:
+    //   [linkageBytes + 4 * (stack words of the widest call), lowest saved register)
+    // in post-push offsets. The PPC frontend hands it to the frame-object audit as
+    // `ownedLocals`/`declaredLocals`. No object start inside it is fixed: the compiler chooses
+    // where in the area each local goes.
+    //
+    // MEASURED on mwcc 2.3.3, 2.4.2 (at -O4,p and at Mario Party 4's -O0,p) and 2.4.7 off
+    // `corpus/probe-mwcc-frame.c` (`scripts/regen-mwcc-frame-probes.ts`, read by
+    // `mwcc-frame-probes.test.ts`): every local and every home or spill lies in the area, a leaf
+    // with a local still pushes a frame whose area starts at 8, one or two stack words of a call push
+    // the locals past them, and the widest call sizes the area for every call. The first local's
+    // offset inside it differs per build and per function (8, 12 or 16 on 2.3.3; a homed parameter
+    // takes 8 at -O0,p), which is why this is an area and not a start.
+    //
+    // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
+    linkageLocalArea?: { readonly linkageBytes: number };
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
     // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
@@ -1357,6 +1377,9 @@ export const PPC_MWCC: TargetDescription = {
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
     // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through that pass.
     narrowParamWitness: 'prologue-extension',
+    // MEASURED on all three builds: the note at the field. The linkage is the back chain and the
+    // callee's link-register save word.
+    linkageLocalArea: { linkageBytes: 8 },
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at

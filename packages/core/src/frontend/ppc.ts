@@ -59,6 +59,7 @@ import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { inheritFlags } from './flags-edge';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
+import type { FrameRange } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
@@ -2359,5 +2360,27 @@ function mkCmp(ops: Op[], opc: Opcode, l: Value, r: Value): Value {
   return v;
 }
 
+/** THE LOCAL AREA OF A FRAME BEHIND A LINKAGE AREA, `[from, to)` in post-push `r1` offsets: where
+ *  this compiler keeps the locals and spill temps (`compilerBehaviors.linkageLocalArea`), so where a
+ *  captured frame address may name a local and nothing else does. Below it are the linkage (the back
+ *  chain and the callee's link-register save word) and the `stackWords` the widest call takes;
+ *  above it the registers the prologue saved at `saves`. Null where the target states no layout, or
+ *  the area is empty. */
+function linkageLocalArea(
+  rule: TargetDescription['compilerBehaviors']['linkageLocalArea'],
+  { frameSize, stackWords, saves }: { frameSize: number; stackWords: number; saves: readonly number[] },
+): FrameRange | null {
+  if (rule === undefined) {
+    return null;
+  }
+  const from = rule.linkageBytes + 4 * stackWords;
+  const area = { from, to: Math.min(frameSize, ...saves.filter((o) => o >= from)) };
+  return area.from < area.to ? area : null;
+}
+
 /** The PowerPC / CodeWarrior frontend, registered for the `ppc` target. */
 export const ppcFrontend: Frontend = { id: 'ppc', inputFormat: 'objdump', lift };
+
+/** Internal surface for this module's own tests, and for nothing else (`frontend/frame-objects.ts`
+ *  says why it is not a plain export). */
+export const __testing = { linkageLocalArea };
