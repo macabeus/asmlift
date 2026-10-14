@@ -19,9 +19,10 @@
 // that address (`addressThroughJoins`), and one every edge of which reaches one object — two of its
 // addresses, or a pointer a loop steps through it — is an access of that object, as one every edge
 // of which moves a pointer global's value is an access of its pointee (`reachThroughJoins`, one
-// reader for both). A base that reaches no name is a pointer parameter, a raw address or a join of
-// two objects: no declaration is in evidence, and the access stays unplaced unless the lift pinned
-// it (`device`).
+// reader for both). A join whose edges reach different globals (`c ? gP : &gV`) is an access of any
+// of them, placed only where every one is declared. A base with an edge that reaches no name — a
+// pointer parameter, a raw address — has no declaration in evidence, and the access stays
+// unplaced unless the lift pinned it (`device`).
 //
 // A read structuring stamps that the earlier stamps left plain was plain to every raising pass, and a
 // short-circuit fold may have lifted it out of the arm it ran in. structure.ts declines on such a
@@ -106,47 +107,74 @@ function joinIncoming(fn: Fn): Map<Value, Value[]> {
  *  global holds points at (`*gP`, `gQ->b`) — the POINTEE of that global. */
 type Reach = { readonly kind: 'object' | 'pointee'; readonly sym: string };
 
-/** The ONE global an address reaches, as an object or as a pointer's pointee, read through address
- *  arithmetic and joins alike: a `gaddr` is its object; a word read from a global's own first byte
- *  is that global's value, so an address moved from it reaches the global's pointee (asked only of a
- *  global in `pointers`, the ones the context declares to point at a volatile: any other word read
- *  is an index, not a base); an `add` with one reaching operand and a `sub` from one reach what it
- *  does; and a block parameter reaches what every in-edge's value reaches, an edge that passes the
- *  parameter itself moved by an offset (a strength-reduced loop pointer `v0 = v0 + 2`) aside. So
- *  `c ? &gW.a : &gW.b` and a pointer seeded with `&gVA` and stepped through it are accesses of that
- *  object, and `c ? gP + 1 : gP + 2` and a pointer seeded with `gP` and stepped are accesses of gP's
- *  pointee. ONE reader answers both, so a shape the object path reads the pointee path reads too.
- *  Null where an edge reaches another global, the other kind, or none. `addressThroughJoins` — one
- *  value on every edge — is narrower. */
+/** The globals an address reaches, one per edge that reaches a different one, each as an object or
+ *  as a pointer's pointee, read through address arithmetic and joins alike: a `gaddr` is its object;
+ *  a word read from a global's own first byte is that global's value, so an address moved from it
+ *  reaches the global's pointee (asked only of a global in `pointers`, the ones the context declares
+ *  to point at a volatile: any other word read is an index, not a base) — and so is a word read from
+ *  a join every edge of which is such a global's address; an `add` with one reaching operand and a
+ *  `sub` from one reach what they do; and a block parameter reaches what each in-edge's value
+ *  reaches, an edge that passes the parameter itself moved by an offset (a strength-reduced loop
+ *  pointer `v0 = v0 + 2`) aside. So `c ? &gW.a : &gW.b` and a pointer seeded with `&gVA` and stepped
+ *  through it are accesses of that one object, `c ? gP + 1 : gP + 2` and a pointer seeded with `gP`
+ *  and stepped are accesses of gP's pointee, and `c ? gP : gQ` or `c ? gP : &gV` is an access of
+ *  either, which the caller places only where every one is declared. ONE reader answers all of
+ *  them, so a shape the object path reads the pointee path reads too. Null where an edge reaches
+ *  none. `addressThroughJoins` — one value on every edge — is narrower. */
 function reachThroughJoins(
   fn: Fn,
   defs: Map<Value, Op>,
   pointers: ReadonlySet<string> | undefined,
-): (v: Value) => Reach | null {
+): (v: Value) => readonly Reach[] | null {
   const incoming = joinIncoming(fn);
   const SELF = Symbol('self');
-  type Step = Reach | typeof SELF | null;
-  const same = (a: Reach, b: Reach): boolean => a.kind === b.kind && a.sym === b.sym;
+  type Step = readonly Reach[] | typeof SELF | null;
+  const union = (steps: readonly (readonly Reach[])[]): Reach[] => {
+    const out: Reach[] = [];
+    for (const r of steps.flat()) {
+      if (!out.some((o) => o.kind === r.kind && o.sym === r.sym)) {
+        out.push(r);
+      }
+    }
+    return out;
+  };
+  /** The globals whose own address every edge of `v` passes, unmoved; null where one passes anything else. */
+  const addresses = (v: Value, onWalk: Set<Value>): string[] | null => {
+    const d = defs.get(v);
+    if (d?.opcode === 'gaddr') {
+      return [d.attrs.sym as string];
+    }
+    const ins = d === undefined ? incoming.get(v) : undefined;
+    if (ins === undefined || onWalk.has(v)) {
+      return null;
+    }
+    onWalk.add(v);
+    const each = ins.filter((a) => a !== v).map((a) => addresses(a, onWalk));
+    onWalk.delete(v);
+    return each.length > 0 && each.every((a) => a !== null) ? [...new Set(each.flat())] : null;
+  };
   const reach = (v: Value, onWalk: Set<Value>): Step => {
     const d = defs.get(v);
     if (d?.opcode === 'gaddr') {
-      return { kind: 'object', sym: d.attrs.sym as string };
+      return [{ kind: 'object', sym: d.attrs.sym as string }];
     }
     if (d?.opcode === 'load' && ((d.attrs.off as number | undefined) ?? 0) === 0) {
-      const g = defs.get(d.operands[0]);
-      const sym = g?.opcode === 'gaddr' ? (g.attrs.sym as string) : undefined;
-      return sym !== undefined && pointers?.has(sym) === true ? { kind: 'pointee', sym } : null;
+      const syms = addresses(d.operands[0], new Set());
+      return syms !== null && syms.every((sym) => pointers?.has(sym) === true)
+        ? syms.map((sym) => ({ kind: 'pointee', sym }))
+        : null;
     }
     if (d?.opcode === 'add' && d.operands.length === 2) {
       const a = reach(d.operands[0], onWalk);
       const b = reach(d.operands[1], onWalk);
       if (a !== null && b !== null) {
         // An object's address plus a pointer's value is an index into the object (a byte array
-        // subscripted by a global the context also declares a pointer); two of a kind name none.
-        if (a === SELF || b === SELF || a.kind === b.kind) {
+        // subscripted by a global the context also declares a pointer); two of a kind name none,
+        // and neither does a sum where either side may reach more than one global.
+        if (a === SELF || b === SELF || a.length !== 1 || b.length !== 1 || a[0].kind === b[0].kind) {
           return null;
         }
-        return a.kind === 'object' ? a : b;
+        return a[0].kind === 'object' ? a : b;
       }
       return a ?? b;
     }
@@ -163,8 +191,7 @@ function reachThroughJoins(
     onWalk.add(v);
     const each = ins.map((a) => reach(a, onWalk)).filter((r) => r !== SELF);
     onWalk.delete(v);
-    const [first] = each;
-    return first !== undefined && first !== null && each.every((r) => r !== null && same(r, first)) ? first : null;
+    return each.length > 0 && each.every((r) => r !== null) ? union(each as (readonly Reach[])[]) : null;
   };
   return (v) => {
     const r = reach(v, new Set());
@@ -194,20 +221,25 @@ export function stampDeclaredVolatile(
     for (const op of b.ops) {
       const addr = defs && stampable(op, behaviors) ? addressOf!(op.operands[0]) : undefined;
       const reached = addr !== undefined ? reachOf!(addr) : null;
-      const base = reached?.kind === 'object' ? reached.sym : null;
       // A subscript reaches the object while naming no cell, so only a `load`/`store` asks by byte,
-      // and an access that names no byte is placed only where every byte it could reach is qualified.
+      // and an access that names no byte is placed only where every byte it could reach is
+      // qualified. An access that may reach any of several globals is placed only where each one
+      // declares it.
       const cell =
-        base !== null && (op.opcode === 'load' || op.opcode === 'store')
+        reached?.length === 1 && reached[0].kind === 'object' && (op.opcode === 'load' || op.opcode === 'store')
           ? globalCellOf(defs!, addr!, op.attrs.off as number)
           : null;
-      const info = base !== null ? symbols?.get(base) : undefined;
-      const pointer = reached?.kind === 'pointee' ? reached.sym : null;
-      const declared =
-        (base !== null &&
-          (declaresVolatile(info, cell === null ? null : cell.byte) ||
-            (contextVolatiles?.has(base) === true && !laysOut(info)))) ||
-        (pointer !== null && pointees?.has(pointer) === true);
+      const declares = (r: Reach): boolean => {
+        if (r.kind === 'pointee') {
+          return pointees?.has(r.sym) === true;
+        }
+        const info = symbols?.get(r.sym);
+        return (
+          declaresVolatile(info, cell === null ? null : cell.byte) ||
+          (contextVolatiles?.has(r.sym) === true && !laysOut(info))
+        );
+      };
+      const declared = reached !== null && reached.every(declares);
       // A fresh record either way: a rebuilder may hand two ops one `attrs` object.
       if (declared && op.attrs[DECLARED_VOLATILE] !== true) {
         op.attrs = { ...op.attrs, [DECLARED_VOLATILE]: true };

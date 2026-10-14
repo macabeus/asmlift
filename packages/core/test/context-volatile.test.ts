@@ -273,6 +273,26 @@ describe('an access through a context-declared pointer to volatile, reached thro
     ).not.toContain('volatile');
   });
 
+  test('a join of the pointer and a different volatile object polls through a qualified cast only while both declare it', () => {
+    // agbcc -O2 of `void j2(int c){ volatile u16 *q = c ? gP : &gV; while (*q == 0) ; }`
+    const J2 =
+      'j2:\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tldr\tr0, .L9\n\tldr\tr1, [r0]\n\tb\t.L4\n.L9:\n\t.word\tgP\n' +
+      '.L3:\n\tldr\tr1, .L11\n.L4:\n.L5:\n\tldrh\tr0, [r1]\n\tcmp\tr0, #0\n\tbeq\t.L5\n\tbx\tlr\n.L11:\n\t.word\tgV\n';
+    const protos = { j2: { params: 1, returnsVoid: true } };
+    const both = globalsFromContext(
+      'typedef unsigned short u16; extern volatile u16 *gP; extern volatile u16 gV;',
+      'c',
+    );
+    expect(decompile('j2', J2, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: both }).source).toMatch(
+      /while \(\*\(volatile u16 \*\)v\d+ == 0\)/,
+    );
+    // one edge reaches a plain object: no declaration covers every global the poll may read
+    const one = globalsFromContext('typedef unsigned short u16; extern volatile u16 *gP; extern u16 gV;', 'c');
+    expect(decompile('j2', J2, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: one }).source).not.toContain(
+      'volatile',
+    );
+  });
+
   test('a loop pointer seeded with the pointer and stepped reads through a qualified cast', () => {
     // agbcc -O2 of `void pvloop(int n){ u16 s = 0; volatile u16 *p = gP; while (n-- != 0) s += *p++; gS = s; }`
     const PVLOOP =

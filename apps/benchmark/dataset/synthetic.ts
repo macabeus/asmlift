@@ -9514,6 +9514,19 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'struct V { u16 a; u16 b; }; extern volatile struct V *gQ; void volpollp(void);',
     proto: { volpollp: { returnsVoid: true } },
   },
+  // …and through a JOIN of two different volatiles the context declares, the pointer's pointee on
+  // one edge and an object on the other: the poll may read either, and each declares it volatile, so
+  // it keeps the qualifier, or the read is hoisted out of the loop.
+  {
+    sym: 'volpollj',
+    src:
+      'extern volatile u16 *gP;\nextern volatile u16 gW;\n' +
+      'void volpollj(int c){ volatile u16 *q = c ? gP : &gW; while (*q == 0) ; }',
+    features: ['global', 'pointer'],
+    toolchains: ALL,
+    ctx: 'extern volatile u16 *gP; extern volatile u16 gW; void volpollj(int c);',
+    proto: { volpollj: { params: ['int'], returnsVoid: true } },
+  },
   // A FUNCTION-SCOPE TABLE OF ADDRESSES ONLY HANDED TO A CALLEE: nothing reads an element, so only
   // the relocations in it say how wide its elements are, which matters where the compiler writes no
   // directive that would (mwcc). Not on MIPS, which addresses a function-scope static
