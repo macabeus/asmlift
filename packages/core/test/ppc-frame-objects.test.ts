@@ -286,6 +286,18 @@ describe('what the local area refuses', () => {
     ).toThrow(/takes its parameter 2 as 'B_t', which no word holds/);
   });
 
+  test('an enum, or an array behind a typedef, is no by-value copy where the context says so', () => {
+    // `GXInitTexObj`-style: the enum and the `Mtx` travel in one register each, and the callee is
+    // handed a local array by address, as for any pointer
+    const call = ['addi    r3,r1,8', 'li      r4,1', 'bl tx', 'lwz     r3,8(r1)', ...tail];
+    const declared = { tx: { params: ['Mtx', 'GXTexFmt'], wordParams: [0, 1], returnsVoid: true } };
+    expect(lift('f', frame(call), declared)).toContain('tx(sp8, 1)');
+    // …and the same spellings a table states without the fact may name a struct passed by value
+    expect(() => lift('f', frame(call), { tx: { params: ['Mtx', 'GXTexFmt'], returnsVoid: true } })).toThrow(
+      /takes its parameter 1 as 'Mtx', which no word holds/,
+    );
+  });
+
   test('a floating parameter is no by-value copy, and keeps its own refusal', () => {
     expect(() =>
       lift('f', frame(['addi    r3,r1,8', 'bl fill', 'li      r3,1', 'bl fl', 'lwz     r3,8(r1)', ...tail]), {

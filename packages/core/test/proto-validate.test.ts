@@ -50,8 +50,15 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
 
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
-      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns" or "returnLayout")',
+      'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout" or "wordParams")',
     ]);
+  });
+
+  test('word parameters that index no typed parameter list', () => {
+    const bad = ['f: "wordParams" must list indices into a typed "params" list'];
+    expect(validatePrototypes({ f: { params: 2, wordParams: [0] } })).toEqual(bad);
+    expect(validatePrototypes({ f: { params: ['GXTexFmt'], wordParams: [1] } })).toEqual(bad);
+    expect(validatePrototypes({ f: { params: ['GXTexFmt'], wordParams: [0] } })).toEqual([]);
   });
 
   test.each([

@@ -223,6 +223,31 @@ describe('prototypes from a declaration context', () => {
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
   });
 
+  test('a parameter nothing sizes is listed where it still travels in one register', () => {
+    // an enum, and an array or a function behind a typedef name, which the parameter adjusts to a
+    // pointer; a struct or union is passed by value, and a name never seen states nothing
+    const p = prototypesFromContext(
+      `typedef float f32; typedef enum { GX_TF_I4 } GXTexFmt; typedef f32 Mtx[3][4];
+       typedef struct __va_list_struct { char a; } __va_list[1]; typedef void Fn(int);
+       typedef struct { unsigned char r, g, b, a; } GXColor; typedef struct B { int x; } B_t;
+       void f(GXTexFmt, Mtx, __va_list, Fn, enum E, GXColor, B_t, struct B, Unknown_t, int);`,
+      'c',
+    );
+    expect(p.f?.params).toEqual([
+      'GXTexFmt',
+      'Mtx',
+      '__va_list',
+      'Fn',
+      'enum E',
+      'GXColor',
+      'B_t',
+      'struct B',
+      'Unknown_t',
+      'int',
+    ]);
+    expect(p.f?.wordParams).toEqual([0, 1, 2, 3, 4]);
+  });
+
   test('a word C++ alone reserves names a parameter or a member in C', () => {
     const src = `typedef unsigned char u8; typedef unsigned short u16;
        void named(int class, int operator, int friend, int y);
@@ -765,7 +790,7 @@ describe('a context register return under a mapped signature', () => {
 
   test('a return the map contradicts is not kept', () => {
     // a width the definition disagrees with, and a value the definition calls void
-    expect(ctx.nar).toEqual({ params: ['enum Mode'], returns: 'int' });
+    expect(ctx.nar).toEqual({ params: ['enum Mode'], returns: 'int', wordParams: [0] });
     expect(merged.nar).toBeUndefined();
     expect(merged.gone).toBeUndefined();
   });

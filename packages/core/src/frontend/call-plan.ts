@@ -72,12 +72,13 @@ export interface DeclaredCall {
 }
 
 /** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes: a value of one word
- *  (`declaredWidth` sizes it at 32 bits or less), one wider than a word, a floating type
- *  (`isFloatingSpelling`), or a spelling neither reads — a struct or union passed BY VALUE, or a
- *  project typedef this cannot see through (`B_t`, `GXColor`), which `declaredCall` answers with
- *  null for. A count (`{ params: 3 }`) states words. A frontend asks it where the answer `declaredCall`
- *  gives — null for every one of the last two — is not enough: a by-value aggregate travels as the
- *  address of a copy the caller builds in its own frame on mwcc, which a float never does. */
+ *  (`declaredWidth` sizes it at 32 bits or less, or the declaration lists it in `wordParams`: an
+ *  enum, an array or a function type behind a typedef name), one wider than a word, a floating type
+ *  (`isFloatingSpelling`), or a spelling none of those reads — a struct or union passed BY VALUE
+ *  (`B_t`, `GXColor`), or a name nothing here saw. `declaredCall` answers null for all but the
+ *  sized words. A count (`{ params: 3 }`) states words. A frontend asks it where that null is not
+ *  enough: a by-value aggregate travels as the address of a copy the caller builds in its own
+ *  frame on mwcc, which a float or an enum never does. */
 export type ParamClass = 'word' | 'wide' | 'float' | 'unsized';
 
 /** One declared parameter: its class, and the spelling it was read from (empty for a count). */
@@ -333,9 +334,19 @@ export function callDeclarations(
     if (!Array.isArray(params)) {
       return null;
     }
-    return params.map((spelling) => {
+    const words = new Set(declarationOf(callee)?.wordParams ?? []);
+    return params.map((spelling, k) => {
       const w = declaredWidth(spelling);
-      const kind = w !== undefined ? (w > 32 ? 'wide' : 'word') : isFloatingSpelling(spelling) ? 'float' : 'unsized';
+      const kind =
+        w !== undefined
+          ? w > 32
+            ? 'wide'
+            : 'word'
+          : isFloatingSpelling(spelling)
+            ? 'float'
+            : words.has(k)
+              ? 'word'
+              : 'unsized';
       return { kind, spelling };
     });
   };

@@ -35,6 +35,14 @@ export interface FnProto {
    *  the second. Omit — or spell a parameter that conversion cannot size — to let the frontend
    *  fall back to its contiguous-arg-register heuristic. */
   params?: number | ParamType[];
+  /** The parameters, by index into a typed `params`, whose spelling `declaredWidth` cannot size and
+   *  which still travel in one register: an enum, or an array or function type a typedef name
+   *  stands for, which the parameter adjusts to a pointer. A context states it, reading the types
+   *  behind the names (`prototypesFromContext`). Any other spelling nothing sizes may be a struct or
+   *  union passed BY VALUE, which mwcc passes as the address of a copy in the caller's frame
+   *  (`frontend/call-plan.ts` `ParamClass`); a table that omits this says so of every such one,
+   *  which only costs a lift. */
+  wordParams?: readonly number[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
    *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
@@ -618,16 +626,35 @@ export function validatePrototypes(value: unknown): string[] {
       continue;
     }
     for (const key of Object.keys(proto)) {
-      if (key !== 'params' && key !== 'returnsVoid' && key !== 'returns' && key !== 'returnLayout') {
-        problems.push(`${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns" or "returnLayout")`);
+      if (
+        key !== 'params' &&
+        key !== 'returnsVoid' &&
+        key !== 'returns' &&
+        key !== 'returnLayout' &&
+        key !== 'wordParams'
+      ) {
+        problems.push(
+          `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout" or "wordParams")`,
+        );
       }
     }
-    const { params, returnsVoid, returns, returnLayout } = proto as {
+    const { params, returnsVoid, returns, returnLayout, wordParams } = proto as {
       params?: unknown;
       returnsVoid?: unknown;
       returns?: unknown;
       returnLayout?: unknown;
+      wordParams?: unknown;
     };
+    if (
+      wordParams !== undefined &&
+      !(
+        Array.isArray(params) &&
+        Array.isArray(wordParams) &&
+        wordParams.every((k) => Number.isInteger(k) && k >= 0 && k < params.length)
+      )
+    ) {
+      problems.push(`${sym}: "wordParams" must list indices into a typed "params" list`);
+    }
     if (returnLayout !== undefined) {
       problems.push(...layoutProblems(`${sym}: "returnLayout"`, returnLayout));
       // A layout beside a return that says `void` or spells a scalar is two answers to one question
