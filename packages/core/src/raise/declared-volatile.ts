@@ -169,12 +169,16 @@ function reachThroughJoins(
       const b = reach(d.operands[1], onWalk);
       if (a !== null && b !== null) {
         // An object's address plus a pointer's value is an index into the object (a byte array
-        // subscripted by a global the context also declares a pointer); two of a kind name none,
-        // and neither does a sum where either side may reach more than one global.
-        if (a === SELF || b === SELF || a.length !== 1 || b.length !== 1 || a[0].kind === b[0].kind) {
+        // subscripted by a global the context also declares a pointer, or by a join of two such
+        // values); two of a kind name none, and neither does a side that mixes the kinds.
+        if (a === SELF || b === SELF) {
           return null;
         }
-        return a[0].kind === 'object' ? a : b;
+        const all = (r: readonly Reach[], kind: Reach['kind']): boolean => r.every((x) => x.kind === kind);
+        if (all(a, 'object') && all(b, 'pointee')) {
+          return a;
+        }
+        return all(b, 'object') && all(a, 'pointee') ? b : null;
       }
       return a ?? b;
     }

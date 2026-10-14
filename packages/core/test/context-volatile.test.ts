@@ -293,6 +293,24 @@ describe('an access through a context-declared pointer to volatile, reached thro
     );
   });
 
+  test('a volatile array subscripted by a join of two pointers-to-volatile values keeps its qualifier', () => {
+    // agbcc -O2 of `void jidxl(int c){ while (gV[(u32)(c ? gP8 : gQ8)] == 0) ; }`: the join of the two
+    // pointer values is an index into gV, so the poll reads gV and must stay volatile
+    const JIDXL =
+      'jidxl:\n\tpush\t{r4, lr}\n\tadd\tr1, r0, #0\n\tldr\tr4, .L9\n\tldr\tr3, .L9+0x4\n\tldr\tr2, .L9+0x8\n' +
+      '.L3:\n\tcmp\tr1, #0\n\tbne\t.L6\n\tldr\tr0, [r3]\n\tb\t.L7\n.L10:\n\t.align\t2, 0\n' +
+      '.L9:\n\t.word\tgV\n\t.word\tgQ8\n\t.word\tgP8\n.L6:\n\tldr\tr0, [r2]\n.L7:\n\tadd\tr0, r4, r0\n' +
+      '\tldrb\tr0, [r0]\n\tcmp\tr0, #0\n\tbeq\t.L3\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
+    const protos = { jidxl: { params: 1, returnsVoid: true } };
+    const pv = globalsFromContext(
+      'typedef unsigned char u8; extern volatile u8 gV[256]; extern volatile u8 *gP8; extern volatile u8 *gQ8;',
+      'c',
+    );
+    expect(decompile('jidxl', JIDXL, ARMV4T_AGBCC, { prototypes: protos, contextGlobals: pv }).source).toContain(
+      '((volatile u8 *)&gV)[',
+    );
+  });
+
   test('a loop pointer seeded with the pointer and stepped reads through a qualified cast', () => {
     // agbcc -O2 of `void pvloop(int n){ u16 s = 0; volatile u16 *p = gP; while (n-- != 0) s += *p++; gS = s; }`
     const PVLOOP =
