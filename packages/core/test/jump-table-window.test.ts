@@ -420,3 +420,66 @@ test('…and refuses a base some path does not bring, or anything else reads', (
   // header makes, which is then what reaches the dispatch.
   expect(() => liftMipsLoop(mipsLoop({ arm: ['sw\tt6,4(a1)'] }))).toThrow(proof);
 });
+
+/** IDO's rotated `while` loop: the bounds `sltiu` in the delay slot of the loop-entry `beqz` and in
+ *  the likely slot of the latch `bnezl`, none in the bounds block itself. `entry`/`latch` replace
+ *  the two slots. */
+const idoWhile = (o: { entry?: string; latch?: string; latchOp?: string } = {}) =>
+  listing(
+    [
+      'lw\tv0,0(a0)',
+      'move\tv1,zero',
+      'beqz\tv0,@END',
+      o.entry ?? 'sltiu\tat,v0,4',
+      'BOUND:',
+      'beqz\tat,@NEXT',
+      'addiu\ta0,a0,4',
+      'sll\tt6,v0,0x2',
+      'LUI:',
+      'lui\tat,0x0',
+      'addu\tat,at,t6',
+      'lw\tt6,0(at)',
+      'jr\tt6',
+      'nop',
+      'C0:',
+      'b\t@NEXT',
+      'addiu\tv1,v1,1',
+      'C1:',
+      'b\t@NEXT',
+      'addiu\tv1,v1,5',
+      'C2:',
+      'b\t@NEXT',
+      'xori\tv1,v1,0x6',
+      'C3:',
+      'addiu\tv1,v1,7',
+      'NEXT:',
+      'lw\tv0,0(a0)',
+      `${o.latchOp ?? 'bnezl'}\tv0,@BOUND`,
+      o.latch ?? 'sltiu\tat,v0,4',
+      'END:',
+      'jr\tra',
+      'move\tv0,v1',
+    ],
+    MIPS_HEAD,
+  );
+
+test('an IDO bound in the delay slots of the edges into its block lifts', () => {
+  const src = liftMips(idoWhile(), MIPS_IDO);
+  expect(src).toMatch(/switch \(\w+\)/);
+  expect(src).toMatch(/case 1:\s*\n\s*\w+ = \w+ \+ 5;/);
+});
+
+test('…and refuses an edge that does not run the same bound', () => {
+  const jr = /indirect jump 'jr t6'/;
+  // the latch bounds by another count
+  expect(() => liftMips(idoWhile({ latch: 'sltiu\tat,v0,5' }), MIPS_IDO)).toThrow(jr);
+  // the entry edge runs something else in that slot
+  expect(() => liftMips(idoWhile({ entry: 'nop' }), MIPS_IDO)).toThrow(jr);
+  // an ordinary latch branch runs its slot on the not-taken edge too, but the likely one is what
+  // keeps the fall-through edge out: here the entry edge is a likely branch's not-taken edge, which
+  // annuls the slot
+  const annulled = idoWhile();
+  expect(() =>
+    liftMips({ ...annulled, asm: annulled.asm.replace(/beqz\tv0,(\S+ <f\+0x\w+>)\n/, 'beqzl\tv0,$1\n') }, MIPS_IDO),
+  ).toThrow(jr);
+});

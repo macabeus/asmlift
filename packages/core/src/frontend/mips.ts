@@ -283,6 +283,9 @@ interface MipsJT {
   caseAddrs: number[];
   defaultAddr: number;
   jrAddr: number;
+  /** The start of the bounds block when its `sltiu` runs on the edges into it, not inside it
+   *  (`mipsBounds`); null otherwise. */
+  entry: number | null;
   /** The base register and table of a dispatch whose block does not form its base (KMC and gcc
    *  2.7.2 hoist the `lui`/`addiu` pair into a loop's preheader): `lift` proves the base reaches it
    *  (frontend/jump-table.ts). Null when the pruned block forms the base itself. */
@@ -290,14 +293,24 @@ interface MipsJT {
 }
 
 /** A MIPS jump table's bounds guard for the dispatch whose `jr` is at `i`: `sltiu tmp,scrutReg,N`
- *  then `beqz tmp,DEF`, where the beqz is the nearest transfer before the `jr`. Between the two,
- *  inside the beqz's block, nothing may write `tmp` or the scrutinee or transfer control (IDO
- *  schedules `move s0,a1` there). `at` is the beqz's index. */
+ *  then `beqz tmp,DEF`, where the beqz is the nearest transfer before the `jr`. `at` is the beqz's
+ *  index.
+ *
+ *  The `sltiu` is the last write of `tmp` on EVERY path into the beqz, so it is found per entry of
+ *  the beqz's block, and every entry must run the same one: inside the block, after nothing that
+ *  writes `tmp` or the scrutinee (IDO schedules `move s0,a1` between the two); or, where the block
+ *  holds none, as the last word each edge into it runs. IDO rotates a `while` loop so that both of
+ *  its entries do: the bounds `sltiu` sits in the delay slot of the loop-entry `beqz` (which runs it
+ *  on the fall-through) and in the LIKELY slot of the latch `bnezl` (which runs it on the taken edge
+ *  alone). An edge whose last word is not that `sltiu` — the not-taken edge of a likely branch, a
+ *  call's return, the function's entry — leaves `tmp` unknown, and declines. `likely` holds the
+ *  branch-likely addresses `normaliseBranchLikely` rewrote. */
 function mipsBounds(
   instrs: Instr[],
   i: number,
   scrutReg: string,
-): { at: number; addr: number; n: number; def: number } | null {
+  likely: ReadonlySet<number>,
+): { at: number; addr: number; n: number; def: number; entry: number | null } | null {
   let k = i - 1;
   while (k >= 0 && !isControlTransfer(instrs[k])) {
     k--;
@@ -307,26 +320,71 @@ function mipsBounds(
     return null;
   }
   const tmp = beqz.ops[0];
-  for (let j = k - 1; j >= 0 && !isControlTransfer(instrs[j]); j--) {
+  const isBound = (c: Instr | undefined) => c?.mnemonic === 'sltiu' && c.ops[0] === tmp && c.ops[1] === scrutReg;
+  const bound = (c: Instr, entry: number | null) => {
+    // `sltiu tmp, scrut, N` bounds `scrut < N`: the immediate IS the case count (PPC's `cmplwi`
+    // states the max index).
+    const n = parseImm(c.ops[2]);
+    return n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target!, entry };
+  };
+  const isTarget = (addr: number) => instrs.some((x) => x.target === addr);
+  // The beqz's block: back to a branch target, or to the word after a transfer's delay slot.
+  let s = k;
+  while (
+    s > 0 &&
+    !isTarget(instrs[s].addr) &&
+    !isControlTransfer(instrs[s - 1]) &&
+    !(s > 1 && isControlTransfer(instrs[s - 2]))
+  ) {
+    s--;
+  }
+  for (let j = k - 1; j >= s; j--) {
     const c = instrs[j];
-    if (c.mnemonic === 'sltiu' && c.ops[0] === tmp && c.ops[1] === scrutReg) {
-      // A delay slot belongs to the transfer before it, not to the beqz's block.
-      if (j > 0 && isControlTransfer(instrs[j - 1])) {
-        return null;
-      }
-      // `sltiu tmp, scrut, N` bounds `scrut < N`: the immediate IS the case count (PPC's `cmplwi`
-      // states the max index).
-      const n = parseImm(c.ops[2]);
-      return n < 2 ? null : { at: k, addr: beqz.addr, n, def: beqz.target };
+    if (isBound(c)) {
+      return bound(c, null);
     }
     if (writtenReg(c) === tmp || writtenReg(c) === scrutReg) {
       return null;
     }
   }
-  return null;
+  // No `sltiu` in the block: the last word each edge into it runs.
+  const last: Array<Instr | undefined> = [];
+  const p = instrs[s - 1];
+  const t = instrs[s - 2];
+  if (p === undefined || isControlTransfer(p)) {
+    return null;
+  }
+  if (t !== undefined && isControlTransfer(t)) {
+    // `p` is a delay slot: the fall-through edge runs it after a branch that is neither likely (its
+    // not-taken edge annuls the slot) nor a call (which returns here from the callee); a jump has no
+    // fall-through edge at all.
+    if (likely.has(t.addr) || isCallInstr(t)) {
+      return null;
+    }
+    if (!isUncond(t) && !isReturn(t)) {
+      last.push(p);
+    }
+  } else {
+    last.push(p);
+  }
+  // A taken edge runs the branch's delay slot, a likely one's included.
+  instrs.forEach((x, o) => {
+    if (x.target === instrs[s].addr) {
+      last.push(isCallInstr(x) ? undefined : instrs[o + 1]);
+    }
+  });
+  const first = last[0];
+  if (
+    first === undefined ||
+    !isBound(first) ||
+    !last.every((c) => c !== undefined && c.ops.join() === first.ops.join() && c.mnemonic === 'sltiu')
+  ) {
+    return null;
+  }
+  return bound(first, instrs[s].addr);
 }
 
-function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT> {
+function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet<number>): Map<number, MipsJT> {
   // Nearest def of `reg` strictly before index `p`, not crossing a control transfer (so the trace
   // stays inside the dispatch's extended block). Returns the instruction index, or -1.
   const defBefore = (reg: string, p: number): number => {
@@ -452,7 +510,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
     }
     // Bounds: `sltiu tmp, scrutReg, N ; beqz tmp, DEF`, the beqz the nearest transfer before the
     // dispatch. Its block emits the `switch_br`, reading the scrutinee where the beqz reads `tmp`.
-    const bounds = mipsBounds(instrs, i, scrutReg);
+    const bounds = mipsBounds(instrs, i, scrutReg, likely);
     if (!bounds) {
       continue;
     }
@@ -480,8 +538,17 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData): Map<number, MipsJT
       caseAddrs,
       defaultAddr: bounds.def,
       jrAddr: jr.addr,
+      entry: bounds.entry,
       hoisted,
     });
+  }
+  // A bound read off its block's ENTRY EDGES holds only for the edges `mipsBounds` saw. A table's
+  // arm is an edge too, and no table existed while it looked: one landing there declines.
+  const arms = new Set([...out.values()].flatMap((jt) => [...jt.caseAddrs, jt.defaultAddr]));
+  for (const [addr, jt] of out) {
+    if (jt.entry !== null && arms.has(jt.entry)) {
+      out.delete(addr);
+    }
   }
   return out;
 }
@@ -914,7 +981,7 @@ function liftOnce(
   // Regime B: recover jump tables from the `jr`-dispatch idiom + the AsmData table. A recovered
   // dispatch's `jr` is subsumed into a `switch_br` (emitted from its bounds block), so it is
   // exempted from the loud-fail below; an UNrecovered `jr <non-ra>` still fails loud.
-  const jts = asmData ? recoverMipsJumpTables(instrs, asmData) : new Map<number, MipsJT>();
+  const jts = asmData ? recoverMipsJumpTables(instrs, asmData, likelyAddrs) : new Map<number, MipsJT>();
   const recoveredJr = new Set([...jts.values()].map((j) => j.jrAddr));
   // THE TWO WAYS A RECOVERED TABLE MEETS AN ANNULLED SLOT, neither of which `normaliseBranchLikely`
   // can see: the table does not exist while it runs. (1) The dispatch's bounds branch emits a
