@@ -361,6 +361,27 @@ test('a `bgtlr` bound sends the default to a return of what r3 holds', () => {
   expect(() => liftPpc({ asm: cr1, at })).toThrow(/unmodelled control transfer 'bctr'/);
 });
 
+test('a return nothing wrote r3 for still returns r3, when another return hands back a word', () => {
+  // `int f(int a, unsigned x) { switch (x) { case 0: return 10; … default: return a; } }`: the
+  // `bgtlr` default never touches r3, so it returns the caller's r3 — the first argument.
+  const { asm, at } = ppcBoundsWindow(
+    ['cmplwi  r4,3'],
+    ['lis     r5,0 #HA tbl', 'slwi    r0,r4,2', 'addi    r5,r5,0 #LO tbl', 'lwzx    r0,r5,r0', 'mtctr   r0'],
+  );
+  const src = liftPpc({ asm: asm.replace(/bgt-\s+\S+ <f\+0x\w+>/, 'bgtlr-'), at });
+  expect(src).toContain('switch (a1)');
+  expect(src).toMatch(/default:\s*\n\s*return a0;/);
+  // `if (x) return a; … return 5;` — the same conditional return, outside a switch
+  const condret = listing(['cmpwi   r4,0', 'bnelr-', 'li      r0,1', 'stw     r0,0(r5)', 'li      r3,5', 'blr']);
+  const cond = decompile('f', condret.asm, PPC_MWCC).source;
+  expect(cond).toContain('return a0;');
+  expect(cond).toContain('return 5;');
+  expect(cond).not.toMatch(/return;/);
+  // a function no return hands a word back stays void
+  const bare = listing(['cmpwi   r4,0', 'bnelr-', 'li      r0,1', 'stw     r0,0(r5)', 'blr']);
+  expect(decompile('f', bare.asm, PPC_MWCC).source).toMatch(/^void f\(/m);
+});
+
 /** KMC's / gcc 2.7.2's loop with the table base hoisted into the preheader: `lui t6 ; addiu t6,t6`
  *  before the loop, the dispatch adding t6 inside it. `pre` runs before the pair, `mid` inside it,
  *  `post` after it,

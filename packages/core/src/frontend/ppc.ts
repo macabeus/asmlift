@@ -1078,6 +1078,40 @@ export function lift(
       : ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v))
         ? [readReg(RET, bi)]
         : [];
+  // A RETURN NOTHING WROTE r3 FOR STILL RETURNS r3 — the caller's value, which on PowerPC is the
+  // first argument. `int f(int a, int x) { if (x) return a; … return 5; }` is `cmpwi r4,0 ; bnelr`:
+  // that path neither reads nor writes r3, so `returnOperands` finds no definition and returns
+  // nothing, while every other path returns a word — C that falls off the end of an `int` function,
+  // and that loses `a`. Whether the function returns a word is known only once every block is
+  // filled, so a bare return is recorded here and given r3's entry value after the fill
+  // (`returnUntouchedArg`) when another return hands back a word. Only where r3 still holds the
+  // entry value on every path into it: a path a call destroyed r3 on returns nothing a C expression
+  // names, and stays bare.
+  const bareReturns: Array<{ op: Op; bi: number }> = [];
+  let wordReturn = false;
+  const emitReturn = (ops: Op[], bi: number) => {
+    const op = mkOp('ret', { operands: returnOperands(bi) });
+    ops.push(op);
+    if (floatReturn) {
+      return;
+    }
+    if (op.operands.length > 0) {
+      wordReturn = true;
+    } else {
+      bareReturns.push({ op, bi });
+    }
+  };
+  const returnUntouchedArg = () => {
+    if (!wordReturn) {
+      return;
+    }
+    for (const { op, bi } of bareReturns) {
+      const v = ssa.entryValue(RET, bi);
+      if (v !== undefined) {
+        op.operands = [v];
+      }
+    }
+  };
 
   const fillBlock = (b: PpcBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
@@ -1085,8 +1119,7 @@ export function lift(
 
     // A synthetic conditional-return block: just return the current return register.
     if (b.synthReturn) {
-      const retOps = returnOperands(bi);
-      ops.push(mkOp('ret', { operands: retOps }));
+      emitReturn(ops, bi);
       return;
     }
 
@@ -2153,7 +2186,7 @@ export function lift(
             `terminator and no successor${last ? `; its last instruction is at 0x${last.addr.toString(16)}` : ''})`,
         );
       }
-      ops.push(mkOp('ret', { operands: returnOperands(bi) }));
+      emitReturn(ops, bi);
       return;
     }
     // unconditional branch
@@ -2164,6 +2197,7 @@ export function lift(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  returnUntouchedArg();
   // A high half no `@l` ever completed — every `@l` consumer this frontend does not model (`ori`, a
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
