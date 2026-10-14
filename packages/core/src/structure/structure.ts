@@ -23,7 +23,7 @@
 //     parallel block-argument update, sequentialised so an assignment never clobbers a
 //     value a later one still needs.
 //
-// Module layout: loop DISCOVERY is loops.ts; the pure ANALYSIS phase (use registry, liveness,
+// Module layout: loop DISCOVERY is ../ir/loops.ts (raise/ reads it too); the pure ANALYSIS phase (use registry, liveness,
 // materialization) is analysis.ts; comparison-tree switch recovery is switch-recover.ts
 // (explicit-deps factory). THIS file keeps the mutually-entangled remainder: SSA-destruction
 // coalescing (canTakeName + seeding) and emission (structureBlock + the loop emitters) — they
@@ -2462,7 +2462,7 @@ export function structure(
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);
   const dom = dominators(fn);
-  // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
+  // --- loop discovery (ir/loops.ts): natural loops via dominator back-edges + the nesting forest ---
   const forest = analyzeLoops(fn, dom);
   // A loop no edge leaves reaches no `ret`, so post-dominance would hand every block before it every
   // block as a post-dominator, and an `if` ahead of it an arbitrary join. Its header ENDS paths as a
@@ -3926,7 +3926,7 @@ export function structure(
     // entry consts anchored at their own def sites would still order correctly, and this refuses
     // the shape rather than reasoning about it. The other half of "entered only through its
     // header" needs no test — `analyzeLoops` builds the body as the backward closure from the
-    // latches with the header already in it (loops.ts), so a body block's predecessors are all in
+    // latches with the header already in it (ir/loops.ts), so a body block's predecessors are all in
     // the body by construction.
     const singleEntry = (nl: NaturalLoop): boolean => nl.forwardPreds.length === 1;
     for (const M of fn.blocks) {

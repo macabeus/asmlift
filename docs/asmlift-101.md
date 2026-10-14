@@ -417,7 +417,9 @@ packages/core/            @asmlift/core — the pipeline
                           split across two instructions (`%hi`/`%lo`, `@ha`/`@l`): it pairs the
                           halves BY SSA VALUE and refuses every path that would leave the
                           link-time placeholder standing for the symbol
-  src/ir/                 the IR substrate: types, ops, printer/parser, verifier
+  src/ir/                 the IR substrate: types, ops, printer/parser, verifier, and the CFG
+                          analyses raise/ and structure/ both read: natural-loop discovery
+                          (loops.ts) and entry-state equality of a loop test (entry.ts)
   src/pattern/            rewrite-patterns-as-data + the greedy driver
   src/raise/              L1→L2: recognizers (magicdiv, divpow2, softdiv, widehelpers — the
                           64-bit sibling of softdiv, gated on the target's runtime-helper TABLE
@@ -429,7 +431,7 @@ packages/core/            @asmlift/core — the pipeline
                           order to decide whether a map-less global was declared an array)
                           + type recovery (recover.ts) — paramwidth decides a parameter's declared
                           WIDTH, so parameter types are not recover.ts's alone
-  src/structure/          L2→L3: loop discovery, switch recovery, SSA destruction, emission
+  src/structure/          L2→L3: loop and switch recovery, SSA destruction, emission
                           + hazards.ts — pure checks that decline a loop form instead of
                           emitting one whose reads would see a clobbered value
   src/l3/ + src/backend/  the neutral AST + its rewrites (gates.ts holds the admission rules as
