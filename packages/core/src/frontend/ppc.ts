@@ -791,9 +791,9 @@ function prologueSaveOffsets(
   return offs;
 }
 
-/** THE LOCAL AREA of a function that takes a frame address or reaches its frame below a word, and
- *  the size of the one frame it pushes — or null, which leaves every such access the refusal it had
- *  without one. Null where neither happens; where the function does not push exactly one frame, with `stwu r1,-N(r1)` at entry depth;
+/** THE LOCAL AREA of a function that takes a frame address, reaches its frame below a word, or
+ *  keeps a dead local there, and the size of the one frame it pushes — or null, which leaves every
+ *  such access the refusal it had without one. Null where none of the three happens; where the function does not push exactly one frame, with `stwu r1,-N(r1)` at entry depth;
  *  where a capture runs at another depth; where the target states no layout or leaves no area; and
  *  where an r1 access at another depth lands on the area's bytes, which the routing by post-push
  *  offset would then misname.
@@ -801,18 +801,22 @@ function prologueSaveOffsets(
  *  The area starts past the stack words of the widest call (`linkageLocalArea`), read off each
  *  callee's declaration (`stackWordsOf`); a call nothing declares counts none here, and its lowering
  *  refuses one whose guess cannot see where its arguments end (`lift`, the guess's `refuse`). The
- *  saves are the prologue's (`prologueSaveOffsets`). */
+ *  saves are the prologue's (`prologueSaveOffsets`). A dead local alone draws it only where one lies
+ *  inside it. */
 function measurePpcFrame({
   code,
   entry,
   r1At,
   target,
+  makesCall,
   stackWordsOf,
 }: {
   code: readonly Instr[];
   entry: readonly Instr[];
   r1At: ReadonlyMap<Instr, number | string>;
   target: TargetDescription;
+  /** whether control leaves the function into other code before it returns: a call or a tail branch */
+  makesCall: boolean;
   /** the stack words a `bl`'s callee takes, by its declaration; null where nothing declares it */
   stackWordsOf: (callee: string) => number | null;
 }): { area: FrameRange; size: number } | null {
@@ -823,7 +827,27 @@ function measurePpcFrame({
   };
   const captures = code.filter((ins) => takesFrameAddress(ins, frameReg));
   const subword = code.filter((ins) => SUBWORD_MEM.has(ins.mnemonic) && r1Mem(ins) !== undefined);
-  if (captures.length === 0 && subword.length === 0) {
+  // A word stored to the frame that no word load reads back, in a function that hands control to
+  // no other code, is a DEAD LOCAL: no callee can take it as a stack argument. Kept as a store to a
+  // frame object, so the recompile writes it too (mwcc at -O0,p keeps such stores).
+  const loaded = (ins: Instr) => {
+    const at = r1At.get(ins);
+    return typeof at === 'number' ? r1Mem(ins)!.off + at : undefined;
+  };
+  const loadedWords = new Set(
+    code.flatMap((ins) => {
+      const at = r1Mem(ins) && /^(lwz|lmw)$/.test(ins.mnemonic) ? loaded(ins) : undefined;
+      return at === undefined
+        ? []
+        : ins.mnemonic === 'lmw'
+          ? [...Array(32 - Number(ins.ops[0].slice(1))).keys()].map((k) => at + 4 * k)
+          : [at];
+    }),
+  );
+  const deadStores = makesCall
+    ? []
+    : code.filter((ins) => ins.mnemonic === 'stw' && r1Mem(ins) !== undefined && !loadedWords.has(loaded(ins) ?? NaN));
+  if (captures.length === 0 && subword.length === 0 && deadStores.length === 0) {
     return null;
   }
   const pushes = code.filter((ins) => ins.mnemonic === 'stwu' && ins.ops[0] === 'r1');
@@ -858,6 +882,14 @@ function measurePpcFrame({
     if (at < area.to && at + 4 > area.from) {
       return null;
     }
+  }
+  // Drawn for dead stores alone, the area must hold one: a save the prologue made is no local.
+  const inArea = (ins: Instr) => {
+    const at = (loaded(ins) ?? NaN) + size;
+    return at >= area.from && at < area.to;
+  };
+  if (captures.length === 0 && subword.length === 0 && !deadStores.some(inArea)) {
+    return null;
   }
   return { area, size };
 }
@@ -1028,17 +1060,23 @@ function liftOnce(
     fail,
   );
 
-  // THE LOCAL AREA, where a function takes a frame address or reaches its frame below a word
-  // (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1 access inside it, any width,
+  // THE LOCAL AREA, where a function takes a frame address, reaches its frame below a word, or
+  // keeps a dead local there (`measurePpcFrame`, `compilerBehaviors.linkageLocalArea`): every r1 access inside it, any width,
   // is MEMORY through an `laddr` the shared frame-object audit then proves, as on Thumb and MIPS,
   // and every word access outside it keeps the slot model below. Null where neither happens, or the
   // frame is one this cannot partition, and then every capture keeps its r1-as-data refusal and
   // every sub-word access its own.
+  // A `b` out of the function is a tail call: the callee takes over this frame's caller's parameter
+  // area, so a word stored there may be its stack argument.
+  const tailBranch = instrs.find(
+    (i) => isUncond(i) && i.target !== undefined && !instrs.some((j) => j.addr === i.target),
+  );
   const frame = measurePpcFrame({
     code: blocks.flatMap((b) => [...b.body, ...(b.branch ? [b.branch] : [])]),
     entry: entryBody,
     r1At,
     target,
+    makesCall: callInsn !== undefined || tailBranch !== undefined,
     stackWordsOf: (callee) => {
       const declared = calls.declaredCall(callee);
       return declared === null ? null : Math.max(0, wordsOf(declared.widths) - target.argRegs.length);
@@ -2721,6 +2759,7 @@ export const __testing = {
       entry: blocks[0].body,
       r1At: r1Displacements(blocks, succIdx),
       target,
+      makesCall: instrs.some((i) => i.mnemonic === 'bl' && !saveRoutineOf(target, i)),
       stackWordsOf: (callee) => {
         const declared = calls.declaredCall(callee);
         return declared === null ? null : Math.max(0, wordsOf(declared.widths) - target.argRegs.length);

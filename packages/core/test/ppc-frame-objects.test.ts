@@ -285,3 +285,29 @@ describe('what the local area refuses', () => {
     ).toThrow(/reloads r30 out of '8\(r1\)', inside the local area/);
   });
 });
+
+describe('a word stored and never read back', () => {
+  // fn_1_3994's shape at mwcc_242_81 -O0,p: `sp8 = p->unk0` in a loop, never read
+  const dead = (call: string[]) => [
+    'stwu    r1,-32(r1)',
+    'stw     r31,28(r1)',
+    ...call,
+    'lwz     r0,0(r3)',
+    'stw     r0,8(r1)',
+    'lwz     r31,28(r1)',
+    'addi    r1,r1,32',
+    'blr',
+  ];
+
+  test('in a function that makes no call, is a dead local, kept as a store', () => {
+    expect(lift('f', dead([]), { f: { params: ['s32 *'], returnsVoid: true } })).toBe(
+      'void f(s32 *a0) {\n    u32 sp8;\n    sp8 = *a0;\n}\n',
+    );
+  });
+
+  test('with a call, may be its stack argument, and still refuses', () => {
+    expect(() => lift('f', dead(['mr      r31,r3', 'bl unk', 'mr      r3,r31']))).toThrow(
+      /'8\(r1\)' is stored at 0x\w+ and never read back/,
+    );
+  });
+});
