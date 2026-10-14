@@ -789,3 +789,49 @@ test('a loop no edge leaves ends the arm that enters it', () => {
   expect(r.agreement.judged).toBeGreaterThan(0);
   expect(r.shipped.disagree).toBe(0);
 });
+
+// THE VBLANK WAIT AT THE FOOT OF A MAIN LOOP. With the edges back to the header deleted, the inner
+// wait loop keeps only its own back edge, so its paths never end and no `if` above it found a join:
+// each re-emitted the rest of the body, the wait loop 2^k times for k ifs (sa3 EngineMainLoop
+// lifted to 650 lines). A cycle no path leaves now ends its paths at its edge out.
+
+/** `while (1) { if (g(0)) h(1); else h(2); if (g(1)) h(3); else h(4); while (q() == 3); }` */
+const WAIT_AT_FOOT = `fn waitfoot {
+^bb0():
+  br ^bb1()
+^bb1():
+  %0: s32 = const {value=0}
+  %1: s32 = call %0 {target="g"}
+  cond_br %1, ^bb2(), ^bb3()
+^bb2():
+  %2: s32 = const {value=1}
+  %3: s32 = call %2 {target="h"}
+  br ^bb4()
+^bb3():
+  %4: s32 = const {value=2}
+  %5: s32 = call %4 {target="h"}
+  br ^bb4()
+^bb4():
+  %6: s32 = const {value=1}
+  %7: s32 = call %6 {target="g"}
+  cond_br %7, ^bb5(), ^bb6()
+^bb5():
+  %8: s32 = const {value=3}
+  %9: s32 = call %8 {target="h"}
+  br ^bb7()
+^bb6():
+  %10: s32 = const {value=4}
+  %11: s32 = call %10 {target="h"}
+  br ^bb7()
+^bb7():
+  %12: s32 = call {target="q"}
+  %13: s32 = const {value=3}
+  %14: u32 = icmp_eq %12, %13
+  cond_br %14, ^bb7(), ^bb1()
+}`;
+
+test('an inner wait loop at the foot of a `while (1)` is the join of the ifs above it, written once', () => {
+  const src = judged(WAIT_AT_FOOT).src;
+  expect(src.split('q()').length - 1).toBe(1);
+  expect(src.split('h(').length - 1).toBe(4);
+});

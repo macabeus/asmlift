@@ -6613,7 +6613,26 @@ export function structure(
         n.ops[n.ops.length - 1].opcode === 'br' &&
         n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
         !(successorsOf(n)[0] === loop.header && new Set(preds.get(n)?.filter((q) => loop.body.has(q))).size > 1);
-      ipdom = postDominators(fn, loop.body, (n) => inBody(n).filter((x) => !ends(x)));
+      const onward = (n: Block): Block[] => inBody(n).filter((x) => !ends(x));
+      // A CYCLE NO PATH LEAVES. An inner loop at the foot of the body — the vblank wait closing a
+      // `while (1)` main loop, `while (q() == 3);` — keeps only its own back edge once the edges
+      // to the header and to the ends are deleted, so its paths never end and post-dominance
+      // over it is undefined: no branch above it found a join, and each re-emitted the rest of the
+      // body, doubling per `if`. Such a block ends its path at the edge it leaves the cycle by. A
+      // block that reaches an end keeps its edges as they are, so no join that was defined moves.
+      const reachesEnd = new Set<Block>();
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const n of loop.body) {
+          if (!reachesEnd.has(n) && (onward(n).length === 0 || onward(n).some((x) => reachesEnd.has(x)))) {
+            reachesEnd.add(n);
+            grew = true;
+          }
+        }
+      }
+      ipdom = postDominators(fn, loop.body, (n) =>
+        reachesEnd.has(n) || successorsOf(n).every((x) => onward(n).includes(x)) ? onward(n) : [...onward(n), null],
+      );
       cache.set(loop.header, ipdom);
     }
     return ipdom.get(b) ?? null;
@@ -7640,12 +7659,12 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
 // Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do the
 // blocks of `ends` besides their own successors. Over the
 // subgraph `keep` induces when given, every member of which must still reach a `ret` inside it — or,
-// with `onward`, over only the edges it names between members of `keep`: a block it names no edge
-// from ends its paths, post-dominated by nothing but itself.
+// with `onward`, over only the edges it names between members of `keep` (and to EXIT, where it
+// names `null`): a block it names no edge from ends its paths, post-dominated by nothing but itself.
 function postDominators(
   fn: Fn,
   keep?: ReadonlySet<Block>,
-  onward?: (b: Block) => Block[],
+  onward?: (b: Block) => (Block | null)[],
   ends?: ReadonlySet<Block>,
 ): Map<Block, Block | null> {
   const blocks = keep ? fn.blocks.filter((b) => keep.has(b)) : fn.blocks;
