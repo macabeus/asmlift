@@ -26,21 +26,22 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 225 distinct decline messages (the texts reached by
+// `packages/core/src` throws 226 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 102 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 103 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
-//   frontend/thumb.ts       27  ARM-mode function, raw data in the code stream, literal pools no base
+//   frontend/thumb.ts       28  ARM-mode function, raw data in the code stream, literal pools no base
 //                               alignment fits, pc used as a data base, an operand that
 //                               names no register read as one, `stm` with its own base in the list,
 //                               control falling off the end, a register spelled in upper case, a
 //                               `bl` whose target this asm defines as a data label, a call
-//                               through `sp` or `lr`, a struct a call
+//                               through `sp` or `lr`, a `bx rN` that is not a return through a
+//                               just-popped saved lr, a struct a call
 //                               returns into anything but a local, and the reaching-compare throw
 //                               whose reason is interpolated (`cross-block-flags` keys on one of its
 //                               reasons, so the template with a placeholder in it matches nothing)
@@ -637,9 +638,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // an UNMARKED `bl` to a label of this function (a call thunk, or a relay whose comment a
     // splitter dropped), alignment fill the input really leaves open, and code that really runs
     // into data. The lowering adds its own refusals, for a marked relay whose lr is not provably
-    // dead (no `push` of lr in the entry block, a branch or jump table back to the entry, another
-    // instruction naming lr, or a `bx rN` that is not a return through a just-popped saved lr) or
-    // whose target is not a code label of this function. The mark is agbcc's declared
+    // dead (no `push` of lr in the entry block, a branch or jump table back to the entry, or another
+    // instruction naming lr) or whose target is not a code label of this function. A `bx rN` that
+    // is not a return through a just-popped saved lr declines in every Thumb function, relay or
+    // not, as Thumb's "indirect/computed jump" below. The mark is agbcc's declared
     // `compilerBehaviors.farJumpRelay`: a target that does not declare it keeps the first refusal.
     // No row reaches any of them, so the class is in `NO_ROWS`; it stays because the refusals are
     // still core's.

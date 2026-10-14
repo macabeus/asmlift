@@ -256,9 +256,10 @@ function classifyXfer(ins: Instr): XferKind | null {
   if (COND_OPCODE[mn]) {
     return 'cond';
   }
-  // `bx rN`: agbcc's return is `bx lr` or `pop {rN}; bx rN` (rN holds the restored LR) — a return.
-  // (agbcc emits jump tables via `mov pc`, NOT `bx`; a computed tail-call `bx rN` is out of scope and
-  // would need call modelling — accepted limitation, not a jump-table dispatch form.)
+  // `bx rN`: agbcc's return is `bx lr` or `pop {…, rN}; bx rN` (rN holds the restored LR) — a return.
+  // This sees one instruction, so it cannot tell that `rN` was just popped; `readThumbText` asks
+  // that of every `bx rN` of the selected function (`bxReturnsThroughPop`) and declines any other
+  // as the indirect jump it is. (agbcc emits jump tables via `mov pc`, NOT `bx`.)
   if (mn === 'bx') {
     return 'return';
   }
@@ -2528,6 +2529,35 @@ interface ThumbText {
   readonly poolNamesSymbols: boolean;
 }
 
+/** Whether the `bx rN` at `instrs[i]` returns through the lr the prologue saved: the
+ *  instruction before it in its block is a `pop` whose highest register is rN, the slot the entry
+ *  `push` put lr in, with at most the release of pretend-argument space between them (agbcc's
+ *  variadic epilogue: `pop {r3}; add sp, sp, #0x10; bx r3`). `bx lr` is a return by itself.
+ *
+ *  STRUCTURAL, by design. Which word of the frame the `pop` reads is the frame walk's question; this
+ *  holds for the return shapes agbcc emits — every `bx` in the benchmark's 548 Thumb target listings
+ *  and in the kleod and sa3 builds is one — and declines anything else. Without it `classifyXfer`
+ *  reads every `bx rN` as a return, and `mov r0, #7; bx r3` lifts to `return 7;` although it jumps
+ *  wherever r3 points, and `pop {r0, r4}; bx r0` lifts to a return although it jumps to the saved
+ *  r4. */
+function bxReturnsThroughPop(instrs: readonly Instr[], i: number): boolean {
+  const reg = instrs[i].ops[0];
+  if (reg === 'lr' || reg === 'r14') {
+    return true;
+  }
+  let j = i - 1;
+  while (
+    j >= 0 &&
+    instrs[j].mnemonic === 'add' &&
+    instrs[j].ops[0] === 'sp' &&
+    instrs[j].ops[instrs[j].ops.length - 1].startsWith('#')
+  ) {
+    j--;
+  }
+  const popped = j >= 0 && instrs[j].mnemonic === 'pop' ? regListOf(instrs[j].ops) : null;
+  return popped !== null && popped[popped.length - 1] === reg;
+}
+
 /** Lower every far-jump relay the target marks (`bl .Lx @far jump`, agbcc's; see
  *  `compilerBehaviors.farJumpRelay`) in the selected function to the `b .Lx` it stands for, in
  *  place, or decline. Only a target that declares the mark gets here with one: `decode` sets
@@ -2545,14 +2575,11 @@ interface ThumbText {
  *      the whole file's, and a state machine storing its own address as a callback (kleod's
  *      `WorldMapScreenHandler`, from another function's pool) is a pointer, not a branch;
  *    • no other instruction of the function names lr at all — no `bx lr`, no `mov pc, lr`, no
- *      `mov rX, lr`, no second `push`;
- *    • every `bx rN` is a return through the saved copy: the instruction just before it, in its
- *      own block, is a `pop` whose highest register is rN, the slot the entry `push` put lr in
- *      (`pop {…, pc}` is the other spelling of that return). Without this, a `bx rN` the relay can
- *      reach could be an indirect jump that `classifyXfer` reads as a return, and code that
- *      returns to the relay's lr would run on past it, which the `bl` allows and the `b` drops.
- *  That last check is structural: which word of the frame the `pop` reads is the frame walk's
- *  question, not this one's. So it holds for the return shapes agbcc emits and declines any other.
+ *      `mov rX, lr`, no second `push`. So the lr the relay writes never reaches a register, and no
+ *      code can return to it: `b` dropping that write is unobservable.
+ *  Whether a `bx rN` is a return or an indirect jump is NOT this proof's question: the relay's lr
+ *  cannot reach rN, and the misreading of a non-return `bx rN` is the same with or without a relay.
+ *  `readThumbText` asks it of every function (`bxReturnsThroughPop`).
  *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
  *  function that pushes lr too) has the same shape and no mark, and still declines below.
  *
@@ -2565,7 +2592,8 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
     return null;
   }
   const blockLabels = new Set(blocks.map((b) => b.label));
-  const say = (ins: Instr) => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' (agbcc's far-jump relay)`;
+  // The compiler is the target's declaration, not a name this function knows: "a far-jump relay".
+  const say = (ins: Instr) => `'${ins.asWritten ?? ins.mnemonic} ${ins.ops.join(', ')}' (a far-jump relay)`;
   const refuse = (ins: Instr, why: string) => {
     throw new FrontendUnsupportedError(
       `cannot lift '${name}': ${say(ins)} ${why} — lowering it to a branch would drop the lr write a \`bl\` makes`,
@@ -2591,16 +2619,6 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
   const reader = instrs.find((ins) => ins !== save && namesLr(ins));
   if (reader) {
     refuse(relays[0], `is in a function that names lr after saving it ('${reader.mnemonic} ${reader.ops.join(', ')}')`);
-  }
-  for (const b of blocks) {
-    b.instrs.forEach((ins, i) => {
-      const reg = ins.mnemonic === 'bx' ? ins.ops[0] : undefined;
-      const pop = b.instrs[i - 1];
-      const popped = pop?.mnemonic === 'pop' ? regListOf(pop.ops) : null;
-      if (reg !== undefined && popped?.[popped.length - 1] !== reg) {
-        refuse(relays[0], `is in a function whose 'bx ${reg}' is not a return through a just-popped saved lr`);
-      }
-    });
   }
   for (const relay of relays) {
     relay.mnemonic = 'b';
@@ -2678,7 +2696,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   const entryLabel = rawBlocks[0]?.label;
   if (relayed && [...tables.values()].some((t) => [...t.caseLabels, t.defaultLabel].includes(entryLabel))) {
     throw new FrontendUnsupportedError(
-      `cannot lift '${name}': '${relayed.asWritten} ${relayed.ops.join(', ')}' (agbcc's far-jump relay) is in a function ` +
+      `cannot lift '${name}': '${relayed.asWritten} ${relayed.ops.join(', ')}' (a far-jump relay) is in a function ` +
         `whose jump table dispatches back to its entry '${entryLabel}', past the lr save — lowering it to a branch ` +
         `would drop the lr write a \`bl\` makes`,
     );
@@ -2711,7 +2729,7 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
   // by declaration, so `bl` to one is a call however the slice came to contain it — the entry
   // itself (recursion), or a sibling a shared-tail slice extends through.
   for (const ab of asmBlocks) {
-    for (const ins of ab.instrs) {
+    for (const [i, ins] of ab.instrs.entries()) {
       // Asked of the SELECTED function's blocks, not of the file as it is parsed: an upper-case
       // register in some other function's body is not this one's problem.
       const upper = upperCaseRegIn(ins.ops);
@@ -2719,6 +2737,14 @@ function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbTe
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': register '${upper}' in '${ins.mnemonic} ${ins.ops.join(', ')}' is spelled in ` +
             `upper case — this frontend identifies registers by spelling and models the lower-case forms only`,
+        );
+      }
+      // A `bx rN` that `classifyXfer` reads as a return without seeing what rN holds: only the
+      // pop-restored lr makes it one. Any other is a jump through a register.
+      if (ins.mnemonic === 'bx' && !bxReturnsThroughPop(ab.instrs, i)) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': indirect/computed jump '${ins.mnemonic} ${ins.ops.join(', ')}' is not a return ` +
+            `through a just-popped saved lr — jump tables / computed gotos / register tail calls not supported`,
         );
       }
       if (classifyXfer(ins) === 'indirect') {

@@ -154,20 +154,22 @@ describe('what is not provably a relay declines loud', () => {
     );
   });
 
-  // A `bx r3` the relay reaches is not agbcc's return: whatever r3 holds may return to the relay's
-  // lr, and run on into `.LCB0`, which the `b` it would be lowered to drops.
+  // A `bx` that is not a return declines in a relay's function as it does in any other — the near
+  // `b` twins of these two are `thumb-frontend.test.ts`'s. It is not part of the relay's lr proof:
+  // nothing but the entry `push` names lr, so the relay's lr never reaches r3 or r0. Pinned here
+  // because lowering the relay must not let either one through as a return.
   test('a relay in a function with a `bx` that is not a just-popped return declines', () => {
     declines(
       `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n` +
         '.L2:\n\tmov\tr0, #7\n\tbx\tr3\n',
-      /'bx r3' is not a return through a just-popped saved lr/,
+      /indirect\/computed jump 'bx r3' is not a return through a just-popped saved lr/,
     );
   });
 
   test('a `bx` through a register the `pop` did not load last declines', () => {
     declines(
       `${H}\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n.L2:\n\tpop\t{r0, r4}\n\tbx\tr0\n`,
-      /'bx r0' is not a return through a just-popped saved lr/,
+      /indirect\/computed jump 'bx r0' is not a return through a just-popped saved lr/,
     );
   });
 

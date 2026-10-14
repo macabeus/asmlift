@@ -86,6 +86,46 @@ describe('a PC write is a control transfer under either spelling', () => {
   });
 });
 
+// THE SAME QUESTION FOR `bx`. `classifyXfer` sees one instruction and reads every `bx rN` as a
+// return, which is only true when rN holds the lr the prologue saved. Both shapes below lifted
+// silently — `mov r0, #7; bx r3` to `return 7;` although it jumps wherever r3 points, and
+// `pop {r0, r4}; bx r0` to a return although r0 holds the saved r4 — so a `bx rN` is a return only
+// through a just-popped saved lr, and declines otherwise.
+describe('a `bx rN` is a return only through a just-popped saved lr', () => {
+  test.each([
+    ['a register nothing popped', '\tpush\t{lr}\n\tmov\tr0, #7\n\tbx\tr3\n', 'bx r3'],
+    [
+      'a register nothing popped, reached by a branch',
+      '\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tb\t.L2\n.LCB0:\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n.L2:\n\tmov\tr0, #7\n\tbx\tr3\n',
+      'bx r3',
+    ],
+    [
+      'a register the `pop` did not load last',
+      '\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tb\t.L2\n.LCB0:\n\tbl\th\n.L2:\n\tpop\t{r0, r4}\n\tbx\tr0\n',
+      'bx r0',
+    ],
+    ['a pop in another block', '\tpush\t{lr}\n\tpop\t{r1}\n.L1:\n\tbx\tr1\n', 'bx r1'],
+  ])('`bx` through %s declines', (_, body, bx) => {
+    expect(() => dc('f', body)).toThrow(new RegExp(`indirect/computed jump '${bx}' is not a return`));
+  });
+
+  test.each([
+    ['`bx lr`', '\tmov\tr0, #5\n\tbx\tlr\n'],
+    ['`pop {rN}; bx rN`', '\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r1}\n\tbx\tr1\n'],
+    ['`pop {r4, rN}; bx rN`', '\tpush\t{r4, lr}\n\tmov\tr0, #5\n\tpop\t{r4, r1}\n\tbx\tr1\n'],
+  ])('%s is the return', (_, body) => {
+    expect(dc('f', body).source).toContain('return 5;');
+  });
+
+  // agbcc's variadic epilogue releases the pretend-argument area between the pop and the `bx`
+  // (sa3 hariisen_proj.s: `pop {r3}; add sp, sp, #0x10; bx r3`). Asked of the `bx` alone, so the
+  // frame walk's own verdict on the variadic frame is whatever it was.
+  test('a release of sp between the `pop` and the `bx` keeps it a return', () => {
+    const body = '\tpush\t{r0, r1, r2, r3}\n\tpush\t{lr}\n\tmov\tr0, #5\n\tpop\t{r3}\n\tadd\tsp, sp, #0x10\n\tbx\tr3\n';
+    expect(() => dc('f', body)).not.toThrow(/indirect\/computed jump/);
+  });
+});
+
 // THE SAME QUESTION FOR A REGISTER'S CASE. GNU as accepts `R2` for `r2`; this frontend identifies
 // registers by spelling, and its predicates disagreed about that — `isSpReg` folds case, the
 // flag-clobber test and `isThumbReg` did not. Each thing the non-folding ones then missed was
