@@ -215,6 +215,7 @@ function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[]): boolean {
         }
       }
     }
+    rotateWriteOrder(fn, { E, H, T, B, q });
     eTerm.opcode = 'br';
     eTerm.operands = [];
     eTerm.successors = [{ block: T, args: [...A] }];
@@ -239,6 +240,56 @@ function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[]): boolean {
     return true;
   }
   return false;
+}
+
+/** THE WRITE-ORDER BOOKKEEPING THE ROTATION OWES (ir/core.ts `WriteOrder`). A missing `lastWrite`
+ *  entry on a measured block says "this block left the key as it was", which the structurer reads as
+ *  a licence to name a nested loop's parameter after the enclosing header's, so every edge the
+ *  rotation re-targets keeps saying who wrote each key. T's param `q[k]` stands for the key H's
+ *  `p[k]` did: it receives the same values on the same register.
+ *  • E → T(A) is E's old edge into H, re-targeted: E's records for `p[k]` are its records for `q[k]`.
+ *  • H → T(B) is the old back edge T → H(B), seen from the other end. T's copies on it (a record of
+ *    T's for `p[k]`) land at the end of H, as `foldWriteOrder` puts a folded block's writes. Where T
+ *    made none and `B[k]` is not `p[k]`, the key took a new value before T, so H wrote it — at an
+ *    ordinal among H's own writes the record never measured; it takes H's last, the bound every
+ *    later write sorts after. Saying "written" where it may not have been costs a spelling at most;
+ *    the reverse licenses a name. A `B[k]` that is `p[k]` passes through: no entry, as before.
+ *  • T → H(q) passes T's own params on: T writes none of those keys, so its records for `p[k]` go. */
+function rotateWriteOrder(fn: Fn, r: { E: Block; H: Block; T: Block; B: readonly Value[]; q: readonly Value[] }): void {
+  const order = fn.writeOrder;
+  if (order === undefined) {
+    return;
+  }
+  const { E, H, T, B, q } = r;
+  const p = H.params;
+  const eRec = order.lastWrite.get(E);
+  if (eRec !== undefined) {
+    p.forEach((pk, k) => {
+      const at = eRec.get(pk);
+      eRec.delete(pk);
+      if (at !== undefined) {
+        eRec.set(q[k], at);
+      }
+    });
+  }
+  const hBase = order.writes.get(H);
+  const tWrites = order.writes.get(T);
+  if (hBase === undefined || tWrites === undefined) {
+    return; // H or T unmeasured: nobody measured this fn, and nothing reads its absences
+  }
+  const tRec = order.lastWrite.get(T);
+  const hRec = order.lastWrite.get(H) ?? new Map<Value, number>();
+  p.forEach((pk, k) => {
+    const at = tRec?.get(pk);
+    tRec?.delete(pk);
+    if (at !== undefined) {
+      hRec.set(q[k], hBase + at);
+    } else if (B[k] !== pk && hBase > 0) {
+      hRec.set(q[k], hBase - 1);
+    }
+  });
+  order.lastWrite.set(H, hRec);
+  order.writes.set(H, hBase + tWrites);
 }
 
 /** The ops in `blk` the values `roots` are computed from. */

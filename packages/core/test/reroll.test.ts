@@ -182,3 +182,25 @@ test('each refusal above is its rule’s alone', () => {
     expect(n, id).toBe(1);
   }
 });
+
+test('the rotation keeps the write-order record saying who wrote each key it re-targets', () => {
+  // Measured as a frontend would: E wrote the key of H's param, H computed the back-edge value,
+  // T copied nothing. A missing entry on a measured block reads as "key unwritten" (ir/core.ts
+  // `WriteOrder`), which licenses a nested loop's parameter to take the enclosing header's name.
+  const fn = parse(PEELED);
+  verify(fn);
+  recoverTypes(fn);
+  const [E, H, T] = fn.blocks;
+  const p = H.params[0];
+  fn.writeOrder = {
+    lastWrite: new Map([[E, new Map([[p, 0]])]]),
+    writes: new Map(fn.blocks.map((b, i) => [b, i === 2 ? 1 : 2] as const)),
+  };
+  expect(rerollPeeledTests(fn)).toBe(1);
+  verify(fn); // ordinals inside each block's count
+  const q = T.params[0];
+  expect(fn.writeOrder.lastWrite.get(E)?.get(q)).toBe(0); // E's edge, re-targeted: same write
+  expect(fn.writeOrder.lastWrite.get(E)?.has(p)).toBe(false);
+  expect(fn.writeOrder.lastWrite.get(H)?.has(q)).toBe(true); // H computes what the back edge carries
+  expect(fn.writeOrder.lastWrite.get(T)?.has(p) ?? false).toBe(false);
+});
