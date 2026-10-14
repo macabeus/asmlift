@@ -546,8 +546,12 @@ export interface TargetDescription {
     // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
     // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`
     // stores its ninth argument again before its second call. The frame-object audit is the only
-    // reader there too, and the PPC frontend lowers no call that takes a stack word, so the
-    // contrapositive only ever proves an area word a local.
+    // reader there too, and on mwcc it is LOAD-BEARING: the PPC frontend lowers no call that takes a
+    // stack word ON PURPOSE, but a call nothing declares that passes incoming argument registers
+    // straight through (`g9(a, …, h, 77)` in a function taking a..h) slips past its guess, and the
+    // local area it draws then holds g9's ninth argument at r1+8. The audit's survivor rule is what
+    // refuses it: a load after the call proves only the words at and above it locals, and the store
+    // to r1+8 below them reaches the call unread (frontend/ppc.ts `measurePpcFrame`).
     localsAboveOutgoingArea?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability

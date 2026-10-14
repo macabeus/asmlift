@@ -9641,7 +9641,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // registers. `subslot` is a halfword array, every access to it below a word. `u64loc` hands a
   // 64-bit local to a callee and reads both of its words back, as SLSerialNoCheck does. `deadloc` is
   // fn_1_3994's: a local written in a loop and never read, in a function that makes no call, which
-  // -O0,p keeps and the lift keeps as a store.
+  // -O0,p keeps; the lift keeps it as a local assigned a load, which no dead-store pass drops (a
+  // scalar assigned a value it can drop, `int v; v = x;`, lifts to an empty body).
   {
     sym: 'framelist',
     src:

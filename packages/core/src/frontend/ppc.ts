@@ -803,18 +803,31 @@ const takesFrameAddress = (ins: Instr, frameReg: string | undefined): boolean =>
  *  drawn, rather than leaving the partition sound only through the lowering's own refusal: one
  *  declared with more parameter words than argument registers, with a 64-bit parameter (the EABI
  *  aligns a pair to an odd register, so a packed word count does not say where the stack words
- *  start), or with more floating parameters than f1..f8. A call nothing declares counts none here,
- *  and its lowering refuses one whose guess cannot see where its arguments end (`lift`, the guess's
- *  `refuse`). So does a parameter whose spelling the declaration machinery reads as neither
- *  (`ParamClass` `unsized`): a struct or union passed by value, which mwcc passes as the address of
- *  a copy in this area (`tb(1, b)` copies `b` to r1+8 and passes `addi r4,r1,8` at -O4,p) — a copy
- *  no source declares, whose address the lift would pass where the callee takes the struct.
+ *  start), or with more floating parameters than f1..f8. So does a parameter whose spelling the
+ *  declaration machinery reads as neither (`ParamClass` `unsized`): a struct or union passed by
+ *  value, which mwcc passes as the address of a copy in this area (`tb(1, b)` copies `b` to r1+8 and
+ *  passes `addi r4,r1,8` at -O4,p) — a copy no source declares, whose address the lift would pass
+ *  where the callee takes the struct.
+ *
+ *  A CALL NOTHING DECLARES IS NOT PROVEN CLEAR OF THE AREA HERE, and neither does its lowering's
+ *  guess prove it: the guess refuses a call whose guessed arity reaches seven argument registers
+ *  (`lift`, the guess's `refuse`), but it counts only the registers this function sets, none it
+ *  passes straight through, so `g9(a, …, h, 77)` with r3..r10 untouched passes it and the word at
+ *  r1+8 is g9's ninth argument, inside the area. What refuses that call is the shared audit
+ *  (frame-objects.ts `storedNeverRead`): the store to r1+8 reaches the call unread, below every
+ *  area word a load after a call proves a local's (`compilerBehaviors.localsAboveOutgoingArea`).
+ *  That audit is the backstop this partition rests on for an undeclared callee; a change to the
+ *  guess or to the audit's survivor rule moves it.
  *
  *  A word stored to the frame that no word load reads back, in a function that makes no call, is a
  *  DEAD LOCAL: no callee can take it as a stack argument. A tail branch, which would hand this
- *  frame's caller's parameter area to another function, refuses before this runs (`liftPrelude`). Kept as
- *  a store to a frame object, so the recompile writes it too (mwcc at -O0,p keeps such stores). A
- *  dead local alone draws the area only where one lies inside it. */
+ *  frame's caller's parameter area to another function, refuses before this runs (`liftPrelude`).
+ *  It lifts as a store to a frame object, and what reaches the C is then the shared lift's, as for
+ *  the same store on Thumb and MIPS: a fixed-offset scalar becomes a local, which the dead-store
+ *  pass drops (`l3/dce.ts`) unless its value is a read it keeps (`sp8 = *a0`), so `int v; v = x;`
+ *  at -O0,p lifts to an empty body and a `volatile` local's stores are lost with it — no code can
+ *  observe that word — and only a store at a runtime index stays one, into the frame array. A dead
+ *  local alone draws the area only where one lies inside it. */
 function measurePpcFrame({
   name,
   blocks,

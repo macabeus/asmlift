@@ -327,6 +327,30 @@ describe('what the local area refuses', () => {
     );
   });
 
+  test('an undeclared call passing its incoming argument registers through is refused by the audit', () => {
+    // `pt9` at mwcc_242_81 -O4,p: `g9(a, …, h, 77); use(&x); return x;` with r3..r10 untouched, so
+    // the guess counts no register and does not refuse; the ninth argument at r1+8 lies in the
+    // area, and the audit's survivor rule is what keeps it from being lifted as a dead local
+    const pt9 = [
+      'stwu    r1,-32(r1)',
+      'mflr    r0',
+      'stw     r0,36(r1)',
+      'li      r0,77',
+      'stw     r0,8(r1)',
+      'bl g9',
+      'addi    r3,r1,16',
+      'bl use',
+      'lwz     r0,36(r1)',
+      'lwz     r3,16(r1)',
+      'mtlr    r0',
+      'addi    r1,r1,32',
+      'blr',
+    ];
+    expect(() => lift('f', pt9, { use: { params: ['s32 *'], returnsVoid: true } })).toThrow(
+      /the 4-byte store at \[sp,#8\) through a captured address reaches the call to `g9` unread .* may be that call's stack argument/,
+    );
+  });
+
   test('a frame address plus a runtime index carried across a join', () => {
     // `p = a + i` on one arm, `p = a + j` on the other, then `*p`: which object the sum indexes is
     // not known at the join
