@@ -21,11 +21,12 @@
 //
 //     E:  br T(A)           T(q): test(q) ? X : H(q)           H(p): …; cond ? out : T(B)
 //
-// Sound when T computes what E computes on E's values, which is what the checks below establish:
-//   • the loop has one forward predecessor E and one latch T, whose only predecessor is the header H;
-//     T's other edge leaves the loop for X, and E's other edge reaches X too;
-//   • T reads nothing H defines except its back-edge arguments B (so, renamed to T's own params, its
-//     ops are a function of the values it hands round);
+// Sound when T computes what E computes on E's values. The SHAPE comes first and is not tabled — it
+// is what names E, H, T and X at all: one forward predecessor E and one latch T, distinct from H,
+// both ending in a `cond_br`, T's only predecessor H by one edge, no params on T, and T's other edge
+// leaving the loop for the X that E's other edge reaches too. Then the admission, `REROLL_GATES`:
+//   • T reads nothing H defines except its back-edge arguments B, which are H's and distinct (so,
+//     renamed to T's own params, its ops are a function of the values it hands round);
 //   • E's condition and arguments into X are T's, with B replaced by E's arguments A into H — the
 //     question guard fusion asks of a rotated loop's guard, answered by the one predicate both read
 //     (`sameAtEntry`, ir/entry.ts), with its identities on (`str[0]` is `str[i]` at `i = 0`);
@@ -33,24 +34,91 @@
 //     iteration as well, where E's own copies of anything else would still run;
 //   • E runs no effect after the first op its test reads, so the test reads the same memory moved to
 //     the head of T as it did at the end of E.
+// An effect in E's compared slice needs no rule of its own: the comparison matches it only with an
+// op of T of the same opcode, which the third rule refuses, or with itself, which stays.
 // Every check that fails leaves the function as it was.
 import { Block, Fn, Op, Value, dominators, mkValue, predecessors, successorsOf } from '../ir/core';
 import { effectful, spelledWhenDead } from '../ir/discipline';
 import { type EntryReading, sameAtEntry } from '../ir/entry';
 import { analyzeLoops } from '../ir/loops';
 import { simplifyTrivialPhis } from '../ir/simplify';
+import { type Gate, firstRejection } from '../l3/gates';
+
+/** One loop whose shape admits a re-roll, and the facts its admission reads. */
+export interface PeeledTest {
+  /** does T read a value H defines that is not one of its back-edge args? */
+  readsHeader: boolean;
+  /** is a back-edge arg defined in T itself? */
+  backArgInLatch: boolean;
+  /** does T hand H one value for two params? */
+  backArgRepeated: boolean;
+  /** are E's test and its args into X T's own, read on E's values? */
+  sameTest: boolean;
+  /** does T run an effect, or a read outside its compared slice? */
+  latchRunsMore: boolean;
+  /** does E run an effect after the first op its compared slice reads? */
+  entryWritesAfterRead: boolean;
+}
+
+export const REROLL_GATES: readonly Gate<PeeledTest>[] = [
+  {
+    id: 'latch-reads-header',
+    why: 'the rotated latch heads the loop, where a header value other than its back-edge args does not exist',
+    sound: true,
+    guardedBy: 'reroll.test.ts: a latch that reads a header value it does not hand round is left alone',
+    rejects: (c) => c.readsHeader,
+  },
+  {
+    id: 'back-arg-in-latch',
+    why: 'the header hands the rotated latch its back-edge args, so they must be the header’s values',
+    sound: true,
+    guardedBy: 'reroll.test.ts: a back-edge arg the latch computes itself is left alone',
+    rejects: (c) => c.backArgInLatch,
+  },
+  {
+    id: 'back-arg-repeated',
+    why: 'one value handed round to two params renames to one of them, and the other loses its entry value',
+    sound: true,
+    guardedBy: 'reroll.test.ts: a latch that hands one value to two header params is left alone',
+    rejects: (c) => c.backArgRepeated,
+  },
+  {
+    id: 'not-the-entry-test',
+    why: 'only an entry test that is the latch’s own on the entry values is the first iteration',
+    sound: true,
+    guardedBy: 'reroll.test.ts: an entry test that differs from the loop’s at its first values is left alone',
+    rejects: (c) => !c.sameTest,
+  },
+  {
+    id: 'latch-runs-more',
+    why: 'the rotated latch runs whole on the first iteration, where the entry’s own copy of anything else still runs',
+    sound: true,
+    guardedBy: [
+      'reroll.test.ts: a latch that runs an effect besides its test is left alone — the entry’s peeled copy stays',
+      'reroll.test.ts: a latch that reads memory outside its test is left alone — the first iteration would read it once more',
+    ],
+    rejects: (c) => c.latchRunsMore,
+  },
+  {
+    id: 'entry-writes-after-read',
+    why: 'the entry’s test moves to the head of the latch, past whatever the entry runs after reading it',
+    sound: true,
+    guardedBy: 'reroll.test.ts: an entry that writes memory after its test reads it is left alone',
+    rejects: (c) => c.entryWritesAfterRead,
+  },
+];
 
 /** Re-roll every peeled loop test the conditions above admit; returns how many. */
-export function rerollPeeledTests(fn: Fn): number {
+export function rerollPeeledTests(fn: Fn, gates: readonly Gate<PeeledTest>[] = REROLL_GATES): number {
   let done = 0;
   // one at a time: each rotation changes the loop forest
-  while (rerollOne(fn)) {
+  while (rerollOne(fn, gates)) {
     done++;
   }
   return done;
 }
 
-function rerollOne(fn: Fn): boolean {
+function rerollOne(fn: Fn, gates: readonly Gate<PeeledTest>[]): boolean {
   const preds = predecessors(fn);
   const defs = new Map<Value, Op>();
   const defBlock = new Map<Value, Block>();
@@ -96,19 +164,10 @@ function rerollOne(fn: Fn): boolean {
     }
     const B = tTerm.successors[tBack].args;
     const A = eTerm.successors[eIn].args;
-    // T reads nothing H defines but B
-    const fromH = (v: Value) => defBlock.get(v) === H;
     const tReads = [
       ...T.ops.flatMap((op) => op.operands),
       ...T.ops.flatMap((op) => op.successors.flatMap((s) => s.args)),
     ];
-    if (tReads.some((v) => fromH(v) && !B.includes(v))) {
-      continue;
-    }
-    // one back-edge arg per param: a value handed round twice would be renamed to one of them only
-    if (new Set(B).size !== B.length) {
-      continue;
-    }
     // compare E's test with T's at E's values: T's read with each B[k] as E's A[k], through the ops
     // of T and E only — a read anywhere else may see other memory
     const reading: EntryReading = {
@@ -118,35 +177,24 @@ function rerollOne(fn: Fn): boolean {
     };
     const tXArgs = tTerm.successors[tOut].args;
     const eXArgs = eTerm.successors[eOut].args;
-    if (
-      // the sense: which arm of each condition leaves for X
-      !sameAtEntry(defs, tTerm.operands[0], eTerm.operands[0], reading, tOut !== eOut) ||
-      tXArgs.length !== eXArgs.length ||
-      tXArgs.some((a, k) => !sameAtEntry(defs, a, eXArgs[k], reading))
-    ) {
-      continue;
-    }
-    // What the comparison above covers: in each block, the ops its condition and its args into X are
+    // What the comparison covers: in each block, the ops its condition and its args into X are
     // computed from. Only E's copies of those are deleted below.
-    const slice = sliceOf(defs, E, [eTerm.operands[0], ...eTerm.successors[eOut].args]);
-    const tSlice = sliceOf(defs, T, [tTerm.operands[0], ...tTerm.successors[tOut].args]);
-    // After the rotation T runs WHOLE on the first iteration too, where before E ran in its place.
-    // So T may hold nothing but what was compared, and nothing E would also have run: no effect at
-    // all (E keeps its own peeled copy, and the first iteration would run it twice — agbcc peels
-    // `gCnt++` with the test), and no read outside the compared slices (a read the asm kept is
-    // evidence of `volatile`, and one more would run). Its back-edge args must be H's, not T's own:
-    // H hands them to T after the rotation.
-    if (
-      T.ops.some((op) => op !== tTerm && (effectful(op) || (spelledWhenDead(op) && !tSlice.has(op)))) ||
-      [...slice].some(effectful) ||
-      B.some((v) => defBlock.get(v) === T)
-    ) {
-      continue;
-    }
-    // E runs no effect after the first op its compared slice reads, so that slice reads the same
-    // memory moved to the head of T as it did at the end of E
+    const slice = sliceOf(defs, E, [eTerm.operands[0], ...eXArgs]);
+    const tSlice = sliceOf(defs, T, [tTerm.operands[0], ...tXArgs]);
     const firstRead = E.ops.findIndex((op) => slice.has(op));
-    if (firstRead >= 0 && E.ops.slice(firstRead, -1).some((op) => !slice.has(op) && effectful(op))) {
+    const site: PeeledTest = {
+      readsHeader: tReads.some((v) => defBlock.get(v) === H && !B.includes(v)),
+      backArgInLatch: B.some((v) => defBlock.get(v) === T),
+      backArgRepeated: new Set(B).size !== B.length,
+      sameTest:
+        // the sense: which arm of each condition leaves for X
+        sameAtEntry(defs, tTerm.operands[0], eTerm.operands[0], reading, tOut !== eOut) &&
+        tXArgs.length === eXArgs.length &&
+        tXArgs.every((a, k) => sameAtEntry(defs, a, eXArgs[k], reading)),
+      latchRunsMore: T.ops.some((op) => op !== tTerm && (effectful(op) || (spelledWhenDead(op) && !tSlice.has(op)))),
+      entryWritesAfterRead: firstRead >= 0 && E.ops.slice(firstRead, -1).some((op) => !slice.has(op) && effectful(op)),
+    };
+    if (firstRejection(gates, site) !== null) {
       continue;
     }
     // ROTATE: T(q) heads the loop; H hands it B, E hands it A, and T hands H its own params.
@@ -178,7 +226,7 @@ function rerollOne(fn: Fn): boolean {
         fn.blocks.flatMap((b) => b.ops.flatMap((op) => [...op.operands, ...op.successors.flatMap((s) => s.args)])),
       );
       E.ops = E.ops.filter((op) => {
-        const dead = slice.has(op) && op.results.every((r) => !used.has(r));
+        const dead = slice.has(op) && !effectful(op) && op.results.every((r) => !used.has(r));
         changed ||= dead;
         return !dead;
       });

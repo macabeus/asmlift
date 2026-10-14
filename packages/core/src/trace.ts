@@ -306,11 +306,10 @@ function traceTower(
           irDump: irDump(fn),
           verified: true,
         }),
-      afterLatchFold: () =>
+      afterFold: (fold) =>
         trace.push({
-          id: 'stage:latchfold',
-          title:
-            'Empty-latch and exit-trampoline folding, peeled-test re-rolling (CFG canonicalization before structuring)',
+          id: `stage:${fold.id}`,
+          title: fold.title,
           irDump: irDump(fn),
           verified: true,
         }),

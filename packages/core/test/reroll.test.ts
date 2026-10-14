@@ -9,9 +9,10 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { type Gate, without } from '../src/l3/gates';
 import { readabilityRewrites } from '../src/pipeline';
 import { recoverTypes } from '../src/raise/recover';
-import { rerollPeeledTests } from '../src/raise/reroll';
+import { type PeeledTest, REROLL_GATES, rerollPeeledTests } from '../src/raise/reroll';
 import { structure } from '../src/structure/structure';
 import { irAgreement } from './helpers';
 
@@ -42,11 +43,11 @@ const PEELED = `fn peeled {
   ret %14
 }`;
 
-const rerolled = (ir: string) => {
+const rerolled = (ir: string, gates: readonly Gate<PeeledTest>[] = REROLL_GATES) => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  const n = rerollPeeledTests(fn);
+  const n = rerollPeeledTests(fn, gates);
   verify(fn);
   return { n, fn };
 };
@@ -125,4 +126,59 @@ test('a latch that reads memory outside its test is left alone — the first ite
     '^bb2():\n  %30: s32* = gaddr {sym="gReg"}\n  %31: s32 = load %30 {off=0, signed=false, width=1}\n',
   );
   expect(rerolled(reads).n).toBe(0);
+});
+
+// The loop's admission is `REROLL_GATES`; each fixture below is refused by one rule alone.
+
+/** The latch compares with a `7` the header computes, not the entry's. */
+const READS_HEADER = PEELED.replace('^bb1(%6: s32):\n', '^bb1(%6: s32):\n  %40: s32 = const {value=7}\n').replace(
+  '%12: u32 = icmp_eq %11, %4',
+  '%12: u32 = icmp_eq %11, %40',
+);
+
+test('a latch that reads a header value it does not hand round is left alone', () => {
+  expect(rerolled(READS_HEADER).n).toBe(0);
+});
+
+/** A second header param, which the latch hands a constant of its own. */
+const BACK_ARG_IN_LATCH = PEELED.replace('cond_br %5, ^bb3(), ^bb1(%2)', 'cond_br %5, ^bb3(), ^bb1(%2, %2)')
+  .replace('^bb1(%6: s32):', '^bb1(%6: s32, %41: s32):')
+  .replace('  cond_br %12, ^bb3(), ^bb1(%8)', '  %42: s32 = const {value=5}\n  cond_br %12, ^bb3(), ^bb1(%8, %42)');
+
+test('a back-edge arg the latch computes itself is left alone', () => {
+  expect(rerolled(BACK_ARG_IN_LATCH).n).toBe(0);
+});
+
+/** The latch hands `i` to both header params, which enter as `0` and `a1`; the entry tests `p[a1]`,
+ *  which is the latch's test if `i` enters as `a1` — true of the second param only. */
+const BACK_ARG_REPEATED = PEELED.replace(
+  '  %3: s32 = load %0 {off=0, signed=false, width=1}',
+  '  %50: u8* = add %1, %0\n  %3: s32 = load %50 {off=0, signed=false, width=1}',
+)
+  .replace('cond_br %5, ^bb3(), ^bb1(%2)', 'cond_br %5, ^bb3(), ^bb1(%2, %1)')
+  .replace('^bb1(%6: s32):', '^bb1(%6: s32, %41: s32):')
+  .replace('cond_br %12, ^bb3(), ^bb1(%8)', 'cond_br %12, ^bb3(), ^bb1(%8, %8)');
+
+test('a latch that hands one value to two header params is left alone', () => {
+  expect(rerolled(BACK_ARG_REPEATED).n).toBe(0);
+});
+
+test('each refusal above is its rule’s alone', () => {
+  const cases: [string, string][] = [
+    ['latch-reads-header', READS_HEADER],
+    ['back-arg-in-latch', BACK_ARG_IN_LATCH],
+    ['back-arg-repeated', BACK_ARG_REPEATED],
+    ['latch-runs-more', PEELED_EFFECT],
+  ];
+  for (const [id, ir] of cases) {
+    const ablated = without(REROLL_GATES, id);
+    // without the rule the rotation goes ahead, and either breaks the IR or changes what it computes
+    let n: number;
+    try {
+      n = rerolled(ir, ablated).n;
+    } catch {
+      n = 1;
+    }
+    expect(n, id).toBe(1);
+  }
 });

@@ -24,10 +24,11 @@
 // NOT sufficient — `git grep -lE "gates\??: readonly Gate<" packages/core/src` lists the files
 // that do, and carrying the count here instead would be the smallest possible copy of that list.
 // The census also needs a CALLER-SIDE SEAM a process outside core can reach: a MUTABLE RECORD
-// holding the call. Eight passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
+// holding the call. Eleven passes have one — `unmergeJoins` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`, five passes in
 // `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`: the branch short-circuit fold (this registry's
-// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal` and `paramwidth`, whose entries a
-// script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
+// `arm-reread`), `truncload`, `member-arrays`, `narrowlocal` and `paramwidth`, the three loop folds
+// in `raise/pre-structure.ts`'s `PRE_STRUCTURE_FOLDS` (`latchfold`, `trampoline`, `reroll`), whose
+// entries a script outside core swaps and the driver then calls, and `nameOffsetAddresses` and the
 // frame-object audit, whose records stand alone (`OFFSET_NAME_PASS`,
 // `FRAME_OBJECT_AUDIT`) because each has one seat rather than a position in a list. A
 // LIST is not what makes a pass censusable; a record is. Being in `raise/` is not the seam either —
@@ -49,6 +50,7 @@ import {
   type FrameEscape,
   auditFrameObjects,
 } from '@asmlift/core/frontend/frame-objects';
+import type { Fn } from '@asmlift/core/ir/core';
 import type { Gate } from '@asmlift/core/l3/gates';
 import { tallying } from '@asmlift/core/l3/gates';
 import type { UnmergeGates } from '@asmlift/core/l3/unmerge';
@@ -61,6 +63,14 @@ import {
   unmergeJoins,
 } from '@asmlift/core/l3/unmerge';
 import {
+  EXIT_TRAMPOLINE_GATES,
+  type ExitTrampoline,
+  LATCH_GATES,
+  type LatchCandidate,
+  foldEmptyLatches,
+  foldExitTrampolines,
+} from '@asmlift/core/raise/latch';
+import {
   OFFSET_NAME_GATES,
   OFFSET_NAME_PASS,
   type OffsetAddress,
@@ -68,6 +78,8 @@ import {
 } from '@asmlift/core/raise/offsetnames';
 import { type NarrowParamCandidate, PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES } from '@asmlift/core/raise/paramwidth';
 import { PRE_RECOVERY_PASSES, narrowParamWidths } from '@asmlift/core/raise/pre-recovery';
+import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
+import { type PeeledTest, REROLL_GATES, rerollPeeledTests } from '@asmlift/core/raise/reroll';
 import { ARM_REREAD_GATES, type ArmRereadSite } from '@asmlift/core/raise/shortcircuit';
 import { TRUNC_LOAD_GATES, type TruncatedLoad, foldTruncatedLoads } from '@asmlift/core/raise/truncload';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
@@ -87,6 +99,19 @@ import { selectCases } from './fan';
 interface CensusablePass {
   readonly tables: readonly (readonly [string, readonly Gate<never>[]])[];
   readonly install: (wrapped: readonly (readonly Gate<never>[])[]) => () => void;
+}
+
+/** Swap a `PRE_STRUCTURE_FOLDS` entry's call for one through the census's tables, BY ID. */
+function installFold(id: string, run: (fn: Fn) => number): () => void {
+  const fold = PRE_STRUCTURE_FOLDS.find((f) => f.id === id);
+  if (!fold) {
+    throw new Error(`no PRE_STRUCTURE_FOLDS entry '${id}' — the fold's caller-side seam moved`);
+  }
+  const restore = fold.run;
+  fold.run = run;
+  return () => {
+    fold.run = restore;
+  };
 }
 
 export const PASSES: Record<string, CensusablePass> = {
@@ -205,6 +230,25 @@ export const PASSES: Record<string, CensusablePass> = {
         OFFSET_NAME_PASS.run = restore;
       };
     },
+  },
+  latchfold: {
+    // raise/latch.ts's `LATCH_GATES` — which back-edge blocks fold into their edge. Asked once per block
+    // with one successor, on every round of the fold's fixpoint, so a block refused twice counts twice.
+    tables: [['latch', LATCH_GATES as readonly Gate<never>[]]],
+    install: (w) => installFold('latchfold', (fn) => foldEmptyLatches(fn, w[0] as readonly Gate<LatchCandidate>[])),
+  },
+  trampoline: {
+    // raise/latch.ts's `EXIT_TRAMPOLINE_GATES` — which blocks on a loop's way out fold into their edge.
+    // Asked once per block with a successor, on every round of the fold's fixpoint, so most counts
+    // are blocks that were never trampolines (`trampoline-not-a-second-exit`).
+    tables: [['trampoline', EXIT_TRAMPOLINE_GATES as readonly Gate<never>[]]],
+    install: (w) => installFold('trampoline', (fn) => foldExitTrampolines(fn, w[0] as readonly Gate<ExitTrampoline>[])),
+  },
+  reroll: {
+    // raise/reroll.ts's `REROLL_GATES` — which loops with a peeled entry test rotate back. Asked once per
+    // loop whose SHAPE admits a re-roll (the untabled residue its header names), per round.
+    tables: [['loop', REROLL_GATES as readonly Gate<never>[]]],
+    install: (w) => installFold('reroll', (fn) => rerollPeeledTests(fn, w[0] as readonly Gate<PeeledTest>[])),
   },
   'frame-objects': {
     // frontend/frame-objects.ts's `FRAME_ESCAPE_GATES` — what an escaped frame address retracts.

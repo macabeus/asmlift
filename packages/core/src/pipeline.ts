@@ -30,11 +30,10 @@ import type { ContextGlobals } from './proto-context';
 import { type StampBehaviors, stampDeclaredVolatileUnder } from './raise/declared-volatile';
 import { RaiseUnsupportedError } from './raise/errors';
 import { assumedShapes, inferGlobalArrays, orderLicensedGlobals } from './raise/globalshape';
-import { foldEmptyLatches, foldExitTrampolines } from './raise/latch';
 import { OFFSET_NAME_PASS } from './raise/offsetnames';
 import { type PreRecoveryOptions, type PreRecoveryPass, runPreRecovery } from './raise/pre-recovery';
+import { PRE_STRUCTURE_FOLDS, type PreStructureFold } from './raise/pre-structure';
 import { recoverTypes } from './raise/recover';
-import { rerollPeeledTests } from './raise/reroll';
 import { sinkReturns } from './raise/retsink';
 import { StructureError, structure } from './structure/structure';
 import { type SymbolInfo, type SymbolMap, symbolsByName } from './symbols';
@@ -326,16 +325,17 @@ export interface RaiseHooks {
   afterRecover?: () => void;
   /** after return-sinking, only when it changed the fn (fires after its verify) */
   afterRetsink?: () => void;
-  /** after empty-latch folding, only when it removed a block (fires after its verify) */
-  afterLatchFold?: () => void;
+  /** after each pre-structure fold (raise/pre-structure.ts) that changed the fn (fires after its verify) */
+  afterFold?: (fold: PreStructureFold) => void;
 }
 
 /** Stages 2.35–3.5 — pre-recovery recognizers (the shared ordered list in raise/pre-recovery.ts)
  *  → type recovery (boundary contract: no `unknown` survives) → return-sinking (tail-duplicate a
- *  return-only merge so short-circuits emit early returns) → empty-latch folding (splice out a
- *  back-edge block SSA construction emptied). `verify` after every pass that changed the IR.
+ *  return-only merge so short-circuits emit early returns) → the pre-structure folds
+ *  (raise/pre-structure.ts: empty latches, exit trampolines, peeled loop tests). `verify` after
+ *  every pass that changed the IR.
  *
- *  The two CFG passes look ordered and are not: running latch folding FIRST instead changes
+ *  Return-sinking and latch folding look ordered and are not: running latch folding FIRST instead changes
  *  nothing across a 3337-function agbcc corpus. Worth saying, because folding an empty block ahead
  *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
  *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
@@ -384,9 +384,11 @@ export function raiseRecovered(
     verify(fn);
     hooks.afterRetsink?.();
   }
-  if (foldEmptyLatches(fn) + foldExitTrampolines(fn) + rerollPeeledTests(fn) > 0) {
-    verify(fn);
-    hooks.afterLatchFold?.();
+  for (const fold of PRE_STRUCTURE_FOLDS) {
+    if (fold.run(fn) > 0) {
+      verify(fn);
+      hooks.afterFold?.(fold);
+    }
   }
   // THE BOUNDARY POSTCONDITION. Above this line passes move the CFG; below it nothing does, and the
   // structurer reads a block parameter as a JOIN — a name it must give a local of its own. A param

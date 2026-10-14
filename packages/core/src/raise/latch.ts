@@ -30,7 +30,7 @@ import { analyzeLoops } from '../ir/loops';
 import { type Gate, firstRejection } from '../l3/gates';
 
 /** What the gates below judge: one candidate block and the block its `br` goes to. */
-interface LatchCandidate {
+export interface LatchCandidate {
   block: Fn['blocks'][number];
   target: Fn['blocks'][number];
   dominatesBlock: boolean;
@@ -144,7 +144,7 @@ export function foldEmptyLatches(fn: Fn, gates: readonly Gate<LatchCandidate>[] 
 // every value its `br` passes dominates it, and therefore the end of each of its predecessors.
 
 /** One candidate trampoline: the block, where its `br` goes, and the loops it may leave. */
-interface ExitTrampoline {
+export interface ExitTrampoline {
   block: Block;
   target: Block;
   /** the predecessors of `block` */
