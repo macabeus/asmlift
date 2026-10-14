@@ -263,6 +263,42 @@ test('the MIPS dispatch block holds the idiom and nothing else', () => {
   expect(() => liftMips(mipsSwitch({ def: ['b\t@LUI', 'nop'] }))).toThrow(jr);
 });
 
+test('a table case into its own dispatch block keeps the block reachable, and declines', () => {
+  // No table existed while the recognizer looked, so only the built CFG can see this edge. Lifted,
+  // the reachable block's `jr v0` would read as a return: `case 3: return a1[a0];`.
+  const reachable = /recovered jump table's 'jr' at 0x18 is still reachable/;
+  for (const into of ['ADDU', 'LW', 'JR']) {
+    const s = listing(
+      [
+        'sltiu\tv0,a0,4',
+        'beqz\tv0,@DEF',
+        'sll\tv0,a0,0x2',
+        'LUI:',
+        'lui\tat,0x0',
+        'ADDU:',
+        'addu\tat,at,v0',
+        'LW:',
+        'lw\tv0,0(at)',
+        'JR:',
+        'jr\tv0',
+        'nop',
+        ...['C0', 'C1', 'C2'].flatMap((c, k) => [`${c}:`, 'jr\tra', `li\tv0,${10 * (k + 1)}`]),
+        'DEF:',
+        'jr\tra',
+        'move\tv0,zero',
+      ],
+      MIPS_HEAD,
+    );
+    const asmData = mipsTable(
+      s.at.get('LUI')!,
+      ['C0', 'C1', 'C2', into].map((k) => s.at.get(k)!),
+    );
+    for (const target of [MIPS_GCC, MIPS_IDO]) {
+      expect(() => decompile('f', s.asm, target, { asmData })).toThrow(reachable);
+    }
+  }
+});
+
 test('the PPC idiom is found by register, in whatever order the block holds it', () => {
   const [lis, slwi, addi] = ['lis     r4,0 #HA tbl', 'slwi    r0,r3,2', 'addi    r4,r4,0 #LO tbl'];
   const tail = ['lwzx    r0,r4,r0', 'mtctr   r0'];

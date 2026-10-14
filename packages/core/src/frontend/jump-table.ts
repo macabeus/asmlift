@@ -9,7 +9,11 @@
 //   block it enters is the one pruned (`entersBetween`). Nor may one land between the bounds
 //   compare and the branch that reads it: that path brings its own compare, and the `switch_br`
 //   would bound it by one it never ran (PowerPC's `boundsCompare`; MIPS's `mipsBounds` reads each
-//   edge into the block instead, because IDO puts the `sltiu` in their delay slots).
+//   edge into the block instead, because IDO puts the `sltiu` in their delay slots). The pruning is
+//   then CHECKED on the built CFG, not assumed (`refuseReachableDispatch`): a table's case is an
+//   edge too, and no table existed while the recognizer looked, so a case landing in its own or
+//   another table's dispatch block keeps that block reachable, and its indirect jump would lift as
+//   whatever the frontend reads it as (MIPS reads a non-`ra` `jr` as a return).
 // - A TABLE BASE FORMED OUTSIDE THAT BLOCK IS NOT PRUNED WITH IT. KMC and gcc 2.7.2 hoist the
 //   `lui ; addiu` pair into a loop's preheader, mwcc 2.3.3 hoists `lis ; addi` to the entry, and a
 //   register allocator puts the base wherever it likes — a temporary in a leaf, a callee-saved
@@ -37,6 +41,27 @@ export const entersBetween = (
   afterAddr: number,
   lastAddr: number,
 ): boolean => instrs.some((x) => x.target !== undefined && x.target > afterAddr && x.target <= lastAddr);
+
+/** Refuse a function whose CFG, pruned to what the entry reaches, still holds a block ending in a
+ *  recovered dispatch's indirect jump. Recovery replaces that jump with the bounds block's
+ *  `switch_br` and lifts nothing of the block it ends, so the block must be unreachable; a branch
+ *  or a table case into it says otherwise. `blocks` are the reachable blocks, `recovered` the
+ *  addresses of the recovered indirect jumps. */
+export function refuseReachableDispatch(
+  name: string,
+  blocks: ReadonlyArray<{ branch: { addr: number; mnemonic: string } | null }>,
+  recovered: ReadonlySet<number>,
+  fail: FrontendRefusal,
+): void {
+  for (const { branch } of blocks) {
+    if (branch !== null && recovered.has(branch.addr)) {
+      fail(
+        `cannot lift '${name}': the recovered jump table's '${branch.mnemonic}' at 0x${branch.addr.toString(16)} ` +
+          `is still reachable — a branch or a table case enters its dispatch block past the bounds check`,
+      );
+    }
+  }
+}
 
 /** Where a jump table is: the symbol a base's relocations name, and the byte offset into it. */
 export interface TableKey {

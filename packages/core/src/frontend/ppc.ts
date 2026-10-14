@@ -59,7 +59,14 @@ import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
-import { type HoistedDispatch, type TableKey, agreedTable, entersBetween, makeTableBases } from './jump-table';
+import {
+  type HoistedDispatch,
+  type TableKey,
+  agreedTable,
+  entersBetween,
+  makeTableBases,
+  refuseReachableDispatch,
+} from './jump-table';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
@@ -796,6 +803,9 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  refuseReachableDispatch(name, blocks, recoveredBctr, (m) => {
+    throw new PpcUnsupportedError(m);
+  });
   const savedRegs = prologueSavedRegs(blocks[0].body, target);
   // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
   // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead

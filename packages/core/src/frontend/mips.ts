@@ -42,7 +42,14 @@ import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } fro
 import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange, liftWithRelift } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
-import { type HoistedDispatch, type TableKey, agreedTable, entersBetween, makeTableBases } from './jump-table';
+import {
+  type HoistedDispatch,
+  type TableKey,
+  agreedTable,
+  entersBetween,
+  makeTableBases,
+  refuseReachableDispatch,
+} from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
 import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgKey, stackArgSlots, stackSlotKey } from './ssa';
@@ -124,7 +131,8 @@ const SUBWORD_MEM = new Set(['lb', 'lbu', 'lh', 'lhu', 'sb', 'sh']);
 const isMipsReg = (s: string | undefined): s is string =>
   /^(\$\d+|[a-z][a-z0-9]*)$/i.test(s ?? '') && !/^0x/i.test(s ?? '');
 // `jr ra`. A non-ra `jr` also lands here, but by block-fill time it is either a recovered
-// switch dispatch (its block is pruned as unreachable) or has already loud-failed in `lift`.
+// switch dispatch (its block is pruned as unreachable, which `refuseReachableDispatch` checks) or
+// has already loud-failed in `lift`.
 const isReturn = (ins: Instr) => ins.mnemonic === 'jr';
 const isUncond = (ins: Instr) => ins.mnemonic === 'b' || ins.mnemonic === 'j';
 const isCond = (ins: Instr) => ins.mnemonic in COND_Z || ins.mnemonic in COND_RR;
@@ -1045,6 +1053,11 @@ function liftOnce(
   }
   checkDelaySlots(name, instrs);
   const { blocks, succAddrs } = toBlocks(instrs, jts, likelyAddrs);
+  // `isReturn` reads every surviving non-`ra` `jr` as a return, which holds only while each
+  // recovered dispatch's block is pruned (frontend/jump-table.ts).
+  refuseReachableDispatch(name, blocks, recoveredJr, (m) => {
+    throw new FrontendUnsupportedError(m);
+  });
   // PREHEADER, as in frontend/ppc.ts: an entry that is a branch target gets an empty block ahead of
   // it, whose live-ins are the function's parameters. One word below the function, so it falls
   // through to it.
