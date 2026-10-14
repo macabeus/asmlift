@@ -39,8 +39,14 @@ describe('a real row prototype table', () => {
     ]);
     expect(rowPrototypes(undefined, at(ctx, 'precedence.i'), 'c', 'self', map as never, ARMV4T_AGBCC)).toEqual({
       callee: { returns: 's32', params: ['s32'] },
-      // the context states the struct a by-value parameter as the positive fact it is
-      opaque: { returnsVoid: true, params: ['S'], byValueParams: [0] },
+      // the context states the struct a by-value parameter as the positive fact it is, and the
+      // members it defines it with
+      opaque: {
+        returnsVoid: true,
+        params: ['S'],
+        byValueParams: [0],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'v', type: 's32' }] } },
+      },
     });
   });
 
