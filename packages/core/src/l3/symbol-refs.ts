@@ -66,6 +66,9 @@ export interface SymbolRef {
   /** The structs a call target is passed BY VALUE (`byValue` on the call), defined the same way
    *  from the declaration's `byValueLayouts`. */
   passed?: readonly { readonly name: string; readonly declared: string; readonly layout: AggregateLayout }[];
+  /** A global the body passes BARE as a struct by value (`take(gS)`), as `struct <tag>`: a
+   *  name-only declaration of it is that struct, which the call needs and an integer cell rejects. */
+  passedAs?: string;
   /** The bare name holds a pointer (l3/ptrcell.ts): the body stores one into it, or it meets such a
    *  cell bare and nothing reads it as an integer (`pointerPartners`). A name-only declaration of it
    *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
@@ -113,6 +116,8 @@ export function collectSymbolRefs(
   const returned = new Map<string, Extract<IrType, { kind: 'struct' }>>();
   // …and the structs it is passed by value, by declared parameter index
   const passedTo = new Map<string, Map<number, Extract<IrType, { kind: 'struct' }>>>();
+  // …and the globals passed bare as one, by its spelling
+  const passedAs = new Map<string, string>();
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
@@ -125,6 +130,11 @@ export function collectSymbolRefs(
         if (b.type.kind === 'struct') {
           const params = passedTo.get(e.fn) ?? passedTo.set(e.fn, new Map()).get(e.fn)!;
           params.set(b.at - (e.sret === undefined ? 0 : 1), b.type);
+          const arg = e.args[b.at];
+          if (arg?.k === 'var' && symbols.has(arg.name)) {
+            // by its tag, which declares even ahead of the definition and of a typedef of it
+            passedAs.set(arg.name, `struct ${b.type.name}`);
+          }
         }
       }
     } else if (named !== undefined && symbols.has(named)) {
@@ -212,6 +222,7 @@ export function collectSymbolRefs(
         ...(p ? { proto: p } : {}),
         ...(definition ? { returned: definition } : {}),
         ...(passed.length > 0 ? { passed } : {}),
+        ...(passedAs.has(n) ? { passedAs: passedAs.get(n)! } : {}),
         ...(holdsPointer.has(n) ? { holdsPointer: true as const } : {}),
         ...(called.has(n) && !p ? { implicitCall: true as const } : {}),
       };

@@ -49,6 +49,53 @@ const ESC =
   '\tstrb\tr0, [r2, #0x8]\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n\tldr\tr2, [sp, #0x8]\n' +
   '\tbl\ttake2\n\tmov\tr0, sp\n\tbl\tuse\n\tadd\tsp, sp, #0xc\n\tpop\t{r0}\n\tbx\tr0\n';
 
+// `struct Big3 { struct A a; u16 x; }; void big3(u16 x) { struct Big3 g; g.x = x; g.a.a = x; …; take2(g.a);
+//  gOut = g.x; }` — the struct passed is the first 12 bytes of a 16-byte local
+const BIG3 =
+  'big3:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x10\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+  '\tmov\tr1, sp\n\tstrh\tr0, [r1, #0xc]\n\tstrh\tr0, [r1]\n\tmov\tr0, #0x1\n' +
+  '\tstrh\tr0, [r1, #0x2]\n\tmov\tr0, #0x2\n\tstrh\tr0, [r1, #0x4]\n\tmov\tr0, #0x3\n' +
+  '\tstrh\tr0, [r1, #0x6]\n\tmov\tr0, #0x4\n\tstrb\tr0, [r1, #0x8]\n\tmov\tr0, #0x5\n' +
+  '\tstrb\tr0, [r1, #0x9]\n\tldr\tr0, [sp]\n\tldr\tr1, [sp, #0x4]\n\tldr\tr2, [sp, #0x8]\n' +
+  '\tbl\ttake2\n\tldr\tr1, .L3\n\tmov\tr0, sp\n\tldrh\tr0, [r0, #0xc]\n\tstrh\tr0, [r1]\n' +
+  '\tadd\tsp, sp, #0x10\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgOut\n';
+// `void inner(void) { struct A v[2]; fillA(v); take2(v[1]); }` — the struct passed is an element of an
+//  escaped array
+const INNER =
+  'inner:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x18\n\tmov\tr0, sp\n\tbl\tfillA\n' +
+  '\tldr\tr0, [sp, #0xc]\n\tldr\tr1, [sp, #0x10]\n\tldr\tr2, [sp, #0x14]\n\tbl\ttake2\n' +
+  '\tadd\tsp, sp, #0x18\n\tpop\t{r0}\n\tbx\tr0\n';
+// `extern struct A gA; void glob(void) { take2(gA); }` — the words come off the global
+const GLOB =
+  'glob:\n\tpush\t{lr}\n\tldr\tr2, .L3\n\tldr\tr0, [r2]\n\tldr\tr1, [r2, #0x4]\n' +
+  '\tldr\tr2, [r2, #0x8]\n\tbl\ttake2\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+  '\t.word\tgA\n';
+// `void taked3(u16 x, struct D c); void copy(u16 x, int i) { gD = gDT[i]; taked3(x, gD); }` — agbcc passes
+//  the registers it just stored to `gD`
+const COPY =
+  'copy:\n\tpush\t{lr}\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n\tldr\tr3, .L3\n' +
+  '\tldr\tr2, .L3+0x4\n\tlsl\tr1, r1, #0x3\n\tadd\tr1, r1, r2\n\tldr\tr2, [r1, #0x4]\n' +
+  '\tldr\tr1, [r1]\n\tstr\tr1, [r3]\n\tstr\tr2, [r3, #0x4]\n\tbl\ttaked3\n\tpop\t{r0}\n' +
+  '\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgD\n\t.word\tgDT\n';
+// `void stale(void) { struct D t = gD; gD.a = 1; taked1(t); }` — a store to the global lies between its
+//  loads and the call
+const STALE =
+  'stale:\n\tpush\t{lr}\n\tldr\tr3, .L3\n\tldr\tr0, [r3]\n\tldr\tr1, [r3, #0x4]\n' +
+  '\tmov\tr2, #0x1\n\tstrh\tr2, [r3]\n\tbl\ttaked1\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n' +
+  '\t.align\t2, 0\n.L3:\n\t.word\tgD\n';
+// `void taked(u64 x, struct D c); void wide(u16 a, int i) { struct D c; c.a = a; …; ((u16 *)&c)[i] = 9;
+//  taked(gX, c); }` — the u64 takes r0/r1, so the struct is r2/r3
+const WIDE =
+  'wide:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tldr\tr3, .L3\n' +
+  '\tldr\tr4, .L3+0x4\n\tlsr\tr0, r0, #0x10\n\tmov\tr2, #0x80\n\tlsl\tr2, r2, #0x9\n' +
+  '\torr\tr0, r0, r2\n\tstr\tr0, [sp]\n\tldr\tr0, [sp, #0x4]\n\tand\tr0, r0, r3\n' +
+  '\tmov\tr2, #0x2\n\torr\tr0, r0, r2\n\tand\tr0, r0, r4\n\tmov\tr2, #0xc0\n' +
+  '\tlsl\tr2, r2, #0xa\n\torr\tr0, r0, r2\n\tstr\tr0, [sp, #0x4]\n\tlsl\tr1, r1, #0x1\n' +
+  '\tadd\tr1, r1, sp\n\tmov\tr0, #0x9\n\tstrh\tr0, [r1]\n\tldr\tr0, .L3+0x8\n' +
+  '\tldr\tr1, [r0, #0x4]\n\tldr\tr0, [r0]\n\tldr\tr2, [sp]\n\tldr\tr3, [sp, #0x4]\n\tbl\ttaked\n' +
+  '\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n' +
+  '\t.word\t-0x10000\n\t.word\t0xffff\n\t.word\tgX\n';
+
 const A = {
   kind: 'struct' as const,
   members: [
@@ -58,6 +105,7 @@ const A = {
   ],
 };
 const take2 = { params: ['struct A'], byValueLayouts: { 0: A }, returnsVoid: true };
+const D = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u16' })) };
 
 describe('a struct passed by value in argument registers', () => {
   test('is the frame object its words are loaded off, passed whole and written member by member', () => {
@@ -87,7 +135,7 @@ describe('a struct passed by value in argument registers', () => {
 
   test('words loaded off a pointer, or off two places, decline', () => {
     expect(() => decompile('ptr', PTR, ARMV4T_AGBCC, { prototypes: { take2 } })).toThrow(
-      /the call to `take2` passes struct A by value, and its words are not word loads off consecutive words of this function's frame/,
+      /the call to `take2` passes struct A by value, and its words are not one frame object or one global, read whole just before the call/,
     );
     // hand-edited: the last word comes off [sp,#4] again, so no frame range is the struct's and the
     // words are read as the frame's own
@@ -104,7 +152,48 @@ describe('a struct passed by value in argument registers', () => {
       '\tmov\tr3, #0x4\n\tstrb\tr3, [r1, #0x8]\n\tbl\ttake2\n',
     );
     expect(() => decompile('byvalregs', late, ARMV4T_AGBCC, { prototypes: { take2 } })).toThrow(
-      /a store or a call lies between a word's load and the call/,
+      /the call to `take2` passes struct A by value, and its words are not one frame object or one global/,
+    );
+  });
+
+  test('a struct inside a larger local, or an element of an escaped one, declines', () => {
+    // the per-object model refuses `g.x` past the struct, and the one object is not on offer: a call
+    // handed it would pass a pointer
+    expect(() => decompile('big3', BIG3, ARMV4T_AGBCC, { prototypes: { take2 } })).toThrow(/overlap/);
+    const fillA = { params: ['struct A *'], returnsVoid: true };
+    expect(() => decompile('inner', INNER, ARMV4T_AGBCC, { prototypes: { take2, fillA } })).toThrow(
+      /address-taken stack local/,
+    );
+  });
+
+  test('a global loaded whole is passed bare, and declared as the struct', () => {
+    const { source } = decompile('glob', GLOB, ARMV4T_AGBCC, { prototypes: { take2 } });
+    expect(source).toContain('    take2(gA);\n');
+    const [c] = enumerateCandidates('glob', GLOB, ARMV4T_AGBCC, { prototypes: { take2 } });
+    const decls = renderDeclarations(c.symbolRefs ?? []);
+    expect(decls).toContain('extern struct A gA;');
+    expect(decls).toContain('void take2(struct A);');
+  });
+
+  test('a global just stored with the words passed is passed bare', () => {
+    const taked3 = { params: ['u16', 'struct D'], byValueLayouts: { 1: D }, returnsVoid: true };
+    const { source } = decompile('copy', COPY, ARMV4T_AGBCC, { prototypes: { taked3 } });
+    expect(source).toContain('    taked3(a0, gD);\n');
+  });
+
+  test('a global written between its loads and the call declines', () => {
+    const taked1 = { params: ['struct D'], byValueLayouts: { 0: D }, returnsVoid: true };
+    expect(() => decompile('stale', STALE, ARMV4T_AGBCC, { prototypes: { taked1 } })).toThrow(
+      /the call to `taked1` passes struct D by value, and its words are not one frame object or one global/,
+    );
+  });
+
+  test('after a 64-bit argument it is the registers past both of its words', () => {
+    // r2/r3 are read as the struct, which the audit then judges: indexed, so refused there rather
+    // than as the slot model's `stack pointer used as data`
+    const taked = { params: ['u64', 'struct D'], byValueLayouts: { 1: D }, returnsVoid: true };
+    expect(() => decompile('wide', WIDE, ARMV4T_AGBCC, { prototypes: { taked } })).toThrow(
+      /the object at \[sp,#0\) is passed by value as struct D, and this function also indexes it/,
     );
   });
 

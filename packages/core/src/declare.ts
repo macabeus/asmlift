@@ -185,7 +185,7 @@ export function renderDeclarations(refs: SymbolRef[]): string {
   const lines: string[] = [];
   const declaredTags = new Set<string>();
   const declaredTypedefs = new Set<string>();
-  for (const { name, info, access, proto, returned, passed, holdsPointer, implicitCall } of refs) {
+  for (const { name, info, access, proto, returned, passed, passedAs, holdsPointer, implicitCall } of refs) {
     // An address-cast macro declares itself: the header's own body, verbatim. It must NOT become
     // an `extern` — that is the whole point of the fact (an extern emits a relocated pool word
     // where the macro emits the numeric one the target shows).
@@ -323,6 +323,12 @@ export function renderDeclarations(refs: SymbolRef[]): string {
         // pointer converts to without a cast; the qualifiers bind to the cell.
         if (holdsPointer) {
           lines.push(`extern void *${info.volatile ? 'volatile ' : ''}${info.const ? 'const ' : ''}${name};`);
+          break;
+        }
+        // A global passed bare as a struct by value is that struct, which its callee's prototype
+        // defines (`passed`); a declaration of an incomplete tag is completed by that definition.
+        if (passedAs !== undefined) {
+          lines.push(`extern ${quals(info)}${passedAs} ${name};`);
           break;
         }
         const t = access ? intType(access.width, access.signed) : null;

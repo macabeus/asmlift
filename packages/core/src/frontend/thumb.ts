@@ -25,7 +25,7 @@ import { type Prototypes, wordsOf } from '../proto';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
-import { type CallDeclarations, type CallLowering, callDeclarations } from './call-plan';
+import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeviceAccesses } from './device-pins';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
@@ -2488,6 +2488,10 @@ function liftOnce(
   mintArgSlotHoles(ssa, cfg.preds[0].length > 0, argSlots);
   ssa.finish();
 
+  // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
+  // before the audit judges the frame objects, that one among them.
+  foldByValueArgs(name, irBlocks, fill.calls);
+
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
   // a shape the machine states, or decline (auditFrameObjects); an accepted function then gets the
   // device pin the audit answers (pinDeviceAccesses).
@@ -2500,7 +2504,6 @@ function liftOnce(
     escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
     returnsWithoutHiddenPointer: fill.calls.returnsWithoutHiddenPointer,
-    byValueArgs: (callee) => fill.calls.declaredCall(callee)?.byValue,
     symbols,
     target,
     oneObject,
@@ -3434,8 +3437,8 @@ function measureThumbFrame({
   // {u16 a,b,c,d; s8 e,f;} a; a.a = x; … take2(a);` is `mov r2, sp / strh r0, [r2] / … / ldr r0,
   // [sp] / ldr r1, [sp, #0x4] / ldr r2, [sp, #0x8] / bl take2`). Those words are the object's, not
   // slots: each `[sp,#k]` inside such a block is routed through an `laddr` (`isFrameObjectAccess`),
-  // and the frame-object audit folds the loads into the object passed whole or refuses
-  // (frame-objects.ts `foldByValueArgs`). A block is read only where every one of its registers is
+  // and the loads are folded into the object passed whole or refused (call-plan.ts
+  // `foldByValueArgs`). A block is read only where every one of its registers is
   // last written, in the call's own block, by a word load at the next word of one frame range.
   const byValueBlocks: FrameRange[] = [];
   for (const b of entryReachable) {
@@ -3444,8 +3447,11 @@ function measureThumbFrame({
       if (call.mnemonic !== 'bl' || calleeRegister(call, target) !== null) {
         return;
       }
-      for (const arg of calls.declaredCall(call.ops[0] ?? '?')?.byValue ?? []) {
-        const offs = target.argRegs.slice(arg.word, arg.word + arg.words).map((r) => {
+      const declared = calls.declaredCall(call.ops[0] ?? '?');
+      for (const arg of declared?.byValue ?? []) {
+        // `word` indexes the call's widths, where a 64-bit argument is one entry of two registers
+        const reg = wordsOf(declared!.widths.slice(0, arg.word));
+        const offs = target.argRegs.slice(reg, reg + arg.words).map((r) => {
           const def = instrs
             .slice(0, at)
             .reverse()

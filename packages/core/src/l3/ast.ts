@@ -64,9 +64,10 @@ export type Expr =
   // the call fills — and the rest are the declared arguments. The only C spelling is a statement,
   // `dest = fn(rest)`, so such a call stands alone.
   //
-  // `byValue` names the arguments that are a struct passed BY VALUE — a local spelled bare, `take(s)`
-  // — by their place in `args`, with the struct the declaration passes (frame-objects.ts
-  // `foldByValueArgs`); the declarations block defines each beside the callee's prototype.
+  // `byValue` names the arguments that are a struct passed BY VALUE — a local or a global spelled
+  // bare, `take(s)` — by their place in `args`, with the struct the declaration passes
+  // (frontend/call-plan.ts `foldByValueArgs`); the declarations block defines each beside the
+  // callee's prototype.
   //
   // `fn` is the callee's NAME, or for an indirect call the EXPRESSION whose value is the address
   // called (ir/core.ts `calleeValue`) — a child of the node like its arguments, listed first in

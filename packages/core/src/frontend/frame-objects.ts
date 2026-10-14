@@ -17,9 +17,7 @@
  *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
-import type { ByValueArg } from '../aggregate';
 import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
-import { qualified } from '../ir/discipline';
 import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
@@ -49,10 +47,6 @@ export interface FrameObjectAudit {
    *  argument 0 (aggregate.ts `returnsWithoutHiddenPointer`), asked of the frontend's call
    *  declarations */
   returnsWithoutHiddenPointer: CallDeclarations['returnsWithoutHiddenPointer'];
-  /** the structs a callee's declaration passes by value in argument words (aggregate.ts
-   *  `byValueCallArgs`), for the calls the lowering stamped `byValueWords` (`foldByValueArgs`);
-   *  absent on a frontend that lowers none */
-  byValueArgs?: (callee: string) => readonly ByValueArg[] | undefined;
   symbols: SymbolMap | undefined;
   target: TargetDescription;
   /** the retraction rules an escape is judged by; `FRAME_ESCAPE_GATES` when absent, and a
@@ -353,13 +347,11 @@ export function auditFrameObjects({
   escapesReliedOn = new Set(),
   movedCaptures,
   returnsWithoutHiddenPointer,
-  byValueArgs,
   symbols,
   target,
   gates = FRAME_ESCAPE_GATES,
   oneObject,
 }: FrameObjectAudit): FrameObjectVerdict {
-  foldByValueArgs(irBlocks, byValueArgs, frameRefusal(name));
   const { laddrs: captures, foldedHere } = foldMovedCaptures(irBlocks, movedCaptures);
   // …and the audit runs for a licensed acceptance with no object at all, so the premise re-check
   // is total rather than resting on "the capture always survives into the IR".
@@ -381,7 +373,6 @@ export function auditFrameObjects({
     facts,
     splitRefusal,
     oneObject,
-    byValueArgs,
     target,
     fail,
   });
@@ -450,98 +441,9 @@ function frameRefusal(name: string): Refuse {
   };
 }
 
-/** A CAPTURE MOVED BY A CONSTANT IS THE CAPTURE AT THE SUM, and here the constant is exact: an
- *  `add` of a `laddr` and a `const` — a register the lift could not see through, `mov r0, sp /
- *  movs r2, #0 / ldrsh r1, [r0, r2]`, or a move the pre-lift walk does not follow — is re-minted
- *  as the `laddr` it names. The walk still decides which `[sp,#k]` words are routed to an object
- *  rather than keyed as slots, so a fold it did not make is remembered (`foldedHere`): an object it
- *  lands on a keyed slot is refused as the move, the capability that is missing
- *  (`failIfSlotKeysIt`).
- *
- *  Returns every `laddr` that survives, in block order. */
-/** A STRUCT PASSED BY VALUE IS THE FRAME OBJECT ITS WORDS ARE LOADED OFF. The call lowering hands a
- *  by-value struct's argument words over one operand each and stamps their places
- *  (`byValueWords`, pairs of first operand and word count); C passes the struct, so the words must
- *  be ONE object's, read whole: each a word load off the frame, at consecutive words from one
- *  offset, in the call's own block with no store or call between it and the call — so the object
- *  holds at the call what the loads read. Those operands become the object's address, and the call
- *  says which operands it passes by value (`byValue`, pairs of operand and the declaration's word);
- *  the audit then judges the object as the struct (`objectShapes`). Any other source of the words
- *  — registers computed in place, words off two objects, a load the call does not see last — has
- *  no C spelling as one struct, and refuses. */
-function foldByValueArgs(irBlocks: Block[], byValueArgs: FrameObjectAudit['byValueArgs'], fail: Refuse): void {
-  const defs = new Map<Value, { op: Op; blk: Block }>();
-  for (const blk of irBlocks) {
-    for (const op of blk.ops) {
-      op.results.forEach((r) => defs.set(r, { op, blk }));
-    }
-  }
-  for (const blk of irBlocks) {
-    for (const call of [...blk.ops]) {
-      const words = call.attrs.byValueWords as number[] | undefined;
-      if (call.opcode !== 'call' || words === undefined) {
-        continue;
-      }
-      const callee = calleeName(call) ?? '?';
-      const pairs = Array.from({ length: words.length / 2 }, (_, i) => [words[2 * i], words[2 * i + 1]] as const);
-      // highest first, so folding one leaves the operand places of those below it as they were
-      for (const [first, n] of [...pairs].sort((x, y) => y[0] - x[0])) {
-        const at = blk.ops.indexOf(call);
-        const type = byValueArgs?.(callee)?.find((b) => b.word === first)?.type;
-        const refuse = (why: string): never =>
-          fail(
-            `the call to \`${callee}\` passes ${type === undefined ? 'a struct' : structSpelling(type)} by value, and ${why} ` +
-              '— only one frame object, loaded whole just before the call, is modelled',
-          );
-        const loads = call.operands.slice(first, first + n).map((v) => defs.get(v));
-        const frameAt = loads.map((d) => {
-          const base = d?.op.opcode === 'load' ? defs.get(d.op.operands[0])?.op : undefined;
-          return d !== undefined &&
-            d.blk === blk &&
-            base?.opcode === 'laddr' &&
-            (d.op.attrs.width as number) === 4 &&
-            !qualified(d.op)
-            ? (base.attrs.off as number) + (d.op.attrs.off as number)
-            : undefined;
-        });
-        if (type === undefined || frameAt.some((o, i) => o === undefined || o !== frameAt[0]! + 4 * i)) {
-          refuse("its words are not word loads off consecutive words of this function's frame");
-        }
-        const earliest = Math.min(...loads.map((d) => blk.ops.indexOf(d!.op)));
-        if (blk.ops.slice(earliest, at).some((op) => op.opcode === 'store' || op.opcode === 'call')) {
-          refuse("a store or a call lies between a word's load and the call");
-        }
-        const object = mkOp('laddr', { results: [mkValue(T.unk(32))], attrs: { off: frameAt[0]! } });
-        blk.ops.splice(blk.ops.indexOf(call), 0, object);
-        call.operands.splice(first, n, object.results[0]);
-        // the word loads, and an address only they read, are dead now, and would otherwise be
-        // judged as accesses of their own
-        for (const d of loads) {
-          dropIfUnread(irBlocks, d!.op);
-          const base = defs.get(d!.op.operands[0])?.op;
-          if (base !== undefined) {
-            dropIfUnread(irBlocks, base);
-          }
-        }
-      }
-      // each folded struct is one operand now: its place is its first word less the words folded
-      // below it
-      const sorted = pairs.map(([first]) => first).sort((x, y) => x - y);
-      call.attrs = Object.fromEntries(Object.entries(call.attrs).filter(([k]) => k !== 'byValueWords'));
-      call.attrs.byValue = sorted.flatMap((first) => [
-        first - pairs.filter(([f]) => f < first).reduce((m, [, k]) => m + k - 1, 0),
-        first,
-      ]);
-      call.attrs.byValueSizes = sorted.map((first) => {
-        const t = byValueArgs?.(callee)?.find((b) => b.word === first)?.type;
-        return t?.kind === 'struct' ? t.size! : 0;
-      });
-    }
-  }
-}
-
 /** THE FRAME BYTES A DECLARATION TYPES AS ONE STRUCT: a call's return storage (`sret`) and a
- *  struct passed by value (`byValue`, after `foldByValueArgs`), where the operand is an `laddr`. */
+ *  struct passed by value (`byValue`, call-plan.ts `foldByValueArgs`), where the operand is an
+ *  `laddr`. */
 function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
   const laddrOff = new Map<Value, number>();
   for (const b of irBlocks) {
@@ -563,11 +465,12 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
         out.push({ from, to: from + t.size });
       }
       const byValue = (op.attrs.byValue as number[] | undefined) ?? [];
-      const sizes = (op.attrs.byValueSizes as number[] | undefined) ?? [];
       byValue.forEach((at, i) => {
-        const off = i % 2 === 0 ? laddrOff.get(op.operands[at]) : undefined;
-        if (off !== undefined && sizes[i / 2] !== undefined) {
-          out.push({ from: off, to: off + sizes[i / 2] });
+        const v = i % 2 === 0 ? op.operands[at] : undefined;
+        const off = v === undefined ? undefined : laddrOff.get(v);
+        const t = v?.type.kind === 'ptr' ? v.type.to : undefined;
+        if (off !== undefined && t?.kind === 'struct' && t.size !== undefined) {
+          out.push({ from: off, to: off + t.size });
         }
       });
     }
@@ -575,19 +478,15 @@ function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
   return out;
 }
 
-/** Removes `op` where nothing reads its result. */
-function dropIfUnread(irBlocks: Block[], op: Op): void {
-  const r = op.results[0];
-  const read = irBlocks.some((b) =>
-    b.ops.some((x) => x.operands.includes(r) || x.successors.some((sc) => sc.args.includes(r))),
-  );
-  if (!read) {
-    for (const b of irBlocks) {
-      b.ops = b.ops.filter((x) => x !== op);
-    }
-  }
-}
-
+/** A CAPTURE MOVED BY A CONSTANT IS THE CAPTURE AT THE SUM, and here the constant is exact: an
+ *  `add` of a `laddr` and a `const` — a register the lift could not see through, `mov r0, sp /
+ *  movs r2, #0 / ldrsh r1, [r0, r2]`, or a move the pre-lift walk does not follow — is re-minted
+ *  as the `laddr` it names. The walk still decides which `[sp,#k]` words are routed to an object
+ *  rather than keyed as slots, so a fold it did not make is remembered (`foldedHere`): an object it
+ *  lands on a keyed slot is refused as the move, the capability that is missing
+ *  (`failIfSlotKeysIt`).
+ *
+ *  Returns every `laddr` that survives, in block order. */
 function foldMovedCaptures(
   irBlocks: Block[],
   movedCaptures: ReadonlySet<Value>,
@@ -1047,7 +946,6 @@ function classifyFrameUses({
   facts,
   splitRefusal,
   oneObject,
-  byValueArgs,
   target,
   fail,
 }: {
@@ -1057,7 +955,6 @@ function classifyFrameUses({
   facts: FrameAddressFacts;
   splitRefusal: ReadonlyMap<Value, string>;
   oneObject: FrameRange | undefined;
-  byValueArgs?: FrameObjectAudit['byValueArgs'];
   target: TargetDescription;
   fail: Refuse;
 }): FrameUses {
@@ -1195,9 +1092,9 @@ function classifyFrameUses({
           continue;
         }
         const byValue = op.opcode === 'call' ? (op.attrs.byValue as number[] | undefined) : undefined;
-        const word = byValue?.find((_, i) => i % 2 === 1 && byValue[i - 1] === idx);
-        if (word !== undefined) {
-          const type = byValueArgs?.(calleeName(op) ?? '?')?.find((b) => b.word === word)?.type;
+        if (byValue?.some((at, i) => i % 2 === 0 && at === idx)) {
+          // the fold types the operand a pointer to the struct passed (call-plan.ts `foldByValueArgs`)
+          const type = v.type.kind === 'ptr' ? v.type.to : undefined;
           if (type?.kind !== 'struct' || type.size === undefined) {
             throw new Error(`internal: a by-value operand of a call to '${calleeName(op)}' has no declared struct`);
           }
@@ -1616,7 +1513,9 @@ function chooseFrameModel({
     oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
   const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
   const escapeFree = oneObject === undefined && uses.escaped.size === 0;
-  const onOffer = (unbounded && writer === null) || escapeFree;
+  // A struct passed by value is ONE object of its declared type, which the call names whole; the
+  // one object is bytes, and a call handed them would pass a pointer.
+  const onOffer = uses.byValueReads.size === 0 && ((unbounded && writer === null) || escapeFree);
   const model: ModelChoice = {
     onOffer,
     refused: false,

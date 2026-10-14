@@ -66,6 +66,7 @@ import {
   UNION_VIEW_NAMES,
   intWidth,
   scalarTypeForAccess,
+  structSpelling,
   typeEquals,
   unionView,
   unionViewAt,
@@ -4411,15 +4412,25 @@ export function structure(
       // assigned to a 32-bit one truncates — but it is a pass this branch did not set out to move.
       const wide64 = d.results[0] !== undefined && intWidth(d.results[0].type) === 64;
       const through = calleeValue(d);
-      // a struct passed by value is the frame object its operand addresses, spelled bare
+      // a struct passed by value is the object its operand addresses — a frame object stamped as
+      // that struct, or a global — spelled bare (frontend/call-plan.ts `foldByValueArgs`)
       const byValue = ((d.attrs.byValue as number[] | undefined) ?? [])
         .filter((_, i) => i % 2 === 0)
         .map((at) => {
+          const o = defs.get(d.operands[at]);
           const t = d.operands[at].type;
-          if (defs.get(d.operands[at])?.opcode !== 'laddr' || t.kind !== 'ptr') {
-            throw new Error(`internal: a by-value argument of '${d.attrs.target}' is not a frame object's address`);
+          const type = t.kind === 'ptr' && t.to.kind === 'struct' ? t.to : undefined;
+          const object =
+            type !== undefined &&
+            (o?.opcode === 'laddr'
+              ? o.attrs.aggregate === true
+              : o?.opcode === 'gaddr' && o.attrs.passedAs === structSpelling(type));
+          if (!object) {
+            throw new Error(
+              `internal: a by-value argument of '${d.attrs.target}' is not the address of an object of the struct it passes`,
+            );
           }
-          return { at, type: t.to };
+          return { at, type };
         });
       const args = callArgs(d).map((v, i): Expr => {
         const x = e(v);
