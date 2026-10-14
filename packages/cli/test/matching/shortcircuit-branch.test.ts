@@ -129,9 +129,10 @@ describe('a three-clause short-circuit chain folds flat', () => {
   });
 
   test('the `llcmp` shape — a 64-bit `<`, mixed compare signedness, 11 without the second fold', async () => {
-    // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast by the
-    // existing `/uns-cmp` variation, NOT as a parameter type: the winner is `signed/defsite/uns-cmp` with
-    // four `s32` params, so the fan reaches the bytes with no per-parameter signedness candidate.
+    // synthetic:llcmp:agbcc's own body. The unsigned half is spelled as a per-SITE cast, which the
+    // default gives an unsigned compare over signed-rendering operands, NOT as a parameter type: the
+    // winner has four `s32` params, so the fan reaches the bytes with no per-parameter signedness
+    // candidate.
     const b = await best(
       'int f(unsigned a,int b,unsigned c,int d){ int r=0; if (d > b || (d == b && c > a)) r=1; return r; }',
     );

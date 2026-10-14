@@ -247,7 +247,7 @@ export type Expr =
 // The divides earned it second, on pokeemerald:GetAnchorCoord — `(u32)(coord * a1) / (u32)a0`
 // standing beside two arithmetic shifts of the same values. Their only other channel is the operand
 // TYPES, reached by flipping a declaration, and there that flip is unreachable and unsound at
-// once: the divisor also feeds a signed compare, so the /uns-cmp reconciliation correctly refuses
+// once: the divisor also feeds a signed compare, so the unsigned-compare reconciliation (structure.ts unsignedCompareSpelling) correctly refuses
 // it, and forcing it anyway makes agbcc delete the comparison as always-false. A per-operand pin is
 // the only spelling that says "this division alone is unsigned".
 //
@@ -479,6 +479,12 @@ export interface SFn {
    *  argument to its declared parameter (`declaredArgs`), and a pointer of another pointee written
    *  into a pointer slot, wherever it would for C++. */
   strictConversions?: true;
+  /** Some unsigned compare was spelled over operands that both render signed, neither provably
+   *  non-negative nor a pointer: C evaluates it signed where the machine compared unsigned. Only
+   *  `StructureOptions.unsignedCompareSpelling` OFF leaves one, and never printed: rank.ts's
+   *  `/signed-cmp` reads it, so a tree whose compares all render unsigned anyway needs no proof. Set
+   *  at emission, so a compare a later pass drops leaves it set, which only withholds more. */
+  signedUnsignedCompare?: true;
 }
 
 /** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s

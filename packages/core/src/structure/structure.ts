@@ -2316,6 +2316,8 @@ export function structure(
     pointerGlobals,
     contextGlobals,
   } = opts;
+  // set where an unsigned compare is left spelled signed (`SFn.signedUnsignedCompare`)
+  let signedUnsignedCompare = false;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
   // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
@@ -2387,8 +2389,9 @@ export function structure(
   //     widens a load's render positions and narrows the write set that bars it, so it removes
   //     materializations rather than minting them. Extra materialization is what this guard is
   //     about (see above), and this variation adds none;
-  //   - `/uns-cmp` (unsignedCompareSpelling) writes `varType` and inserts casts at compares. It
-  //     touches no name and no copy, so no edge copy changes its elision under it;
+  //   - `/signed-cmp` (unsignedCompareSpelling OFF) drops the casts at compares and the u32
+  //     reconciliation of `varType`. It touches no name and no copy, so no edge copy changes its
+  //     elision under it;
   //   - `/copy-defpos` (preferDefPosCopyOrder) REORDERS the copies of one edge and adds or drops
   //     none. rank.ts states the same thing from the variation side, in the terms that matter there: a
   //     reordering cannot rescue a spelling whose OFF sibling failed the boundary contracts.
@@ -4113,15 +4116,18 @@ export function structure(
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';
       };
-      if (
-        unsignedCompareSpelling &&
+      const signedOverUnsigned =
         /^icmp_u/.test(d.opcode) &&
         !ptrSide(l) &&
         !ptrSide(r) &&
         renderedIntSignedness(l, vtEnv) !== false &&
         renderedIntSignedness(r, vtEnv) !== false &&
-        !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
-      ) {
+        !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv));
+      if (signedOverUnsigned && !unsignedCompareSpelling) {
+        // left signed: the `/signed-cmp` spelling, which `SFn.signedUnsignedCompare` reports
+        signedUnsignedCompare = true;
+      }
+      if (signedOverUnsigned && unsignedCompareSpelling) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
         // AT THE OPERAND'S OWN RANK: `(u32)a` over a 64-bit `a` pins nothing, it truncates the
         // compare to its low half. `exprIntWidth` is total and answers 64 only where it proves it.
@@ -7187,6 +7193,7 @@ export function structure(
     ...(dialect !== undefined ? { dialect } : {}),
     ...(designatedInitializers ? { designators: true as const } : {}),
     ...(strictPointerConversions ? { strictConversions: true as const } : {}),
+    ...(signedUnsignedCompare ? { signedUnsignedCompare: true as const } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;

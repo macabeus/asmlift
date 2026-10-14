@@ -87,13 +87,19 @@ describe('legalizePointerCells', () => {
 
   test('leaves a global the cell meets bare as spelled, and declares it a pointer', () => {
     // converted, `gLimit` would be converted under whatever the project declares it, a float
-    // included, where bare a float compared with a pointer does not compile
-    const c = defaultOf('kr1', KR1, SINK);
+    // included, where bare a float compared with a pointer does not compile. The cell meets it bare
+    // under `/signed-cmp`, which leaves the `bcc` uncast; the default casts `(u32)g` for the unsigned
+    // compare, and so reads `gLimit` as the integer it meets.
+    const cands = enumerateCandidates('kr1', KR1, ARMV4T_AGBCC, { prototypes: SINK });
+    const c = cands.find((x) => x.variations.join('/') === 'unsigned/signed-cmp')!;
     expect(c.source).toContain('g = (void *)((u8 *)g + 4);');
     expect(c.source).toContain('if (g >= gLimit) g = gBase;');
     const decls = renderDeclarations(c.symbolRefs!);
     expect(decls).toContain('extern void *gLimit;\n');
     expect(decls).toContain('extern void *gBase;\n');
+    const d = defaultOf('kr1', KR1, SINK);
+    expect(d.source).toContain('if ((u32)g >= gLimit) g = gBase;');
+    expect(renderDeclarations(d.symbolRefs!)).toContain('extern u32 gLimit;\n');
   });
 
   test('prints the conversions on every path that prints the function', () => {

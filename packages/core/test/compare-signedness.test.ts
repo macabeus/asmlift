@@ -1,9 +1,9 @@
-// The /uns-cmp variation (structure.ts unsignedCompareSpelling): an icmp_u* whose operands both
-// render as signed-promoting C compiles to a signed compare — the u32-ness dies when a local
+// The unsigned-compare spelling (structure.ts unsignedCompareSpelling): an icmp_u* whose operands
+// both render as signed-promoting C compiles to a signed compare — the u32-ness dies when a local
 // declares with its first claimant's s32 type or when the operand is an inline `int`-typed
-// tree. With the variation on, one operand takes a (u32) cast (the side whose recovered value type
-// is unsigned) and a mixed-claimant declaration reconciles to u32. Off by default: a signed
-// spelling that byte-matched was proved non-negative by the compiler, so the differ referees.
+// tree. With the option on, one operand takes a (u32) cast (the side whose recovered value type
+// is unsigned) and a mixed-claimant declaration reconciles to u32. On by default; OFF is the
+// `/signed-cmp` variation, which publishes only byte-exact (signed-cmp.test.ts).
 //
 // The refusals are what these tests pin: a provably-unsigned operand leaves the spelling alone,
 // and so does a compare whose operands both provably sit in [0, 2^31) — `(u8)x > 4` is

@@ -421,9 +421,9 @@ test('a CONST init still moves under an effectful condition — nothing crosses 
   expect(r!.body[0]).toEqual(assign('v0', c(0)));
 });
 
-// `/uns-cmp` renders one compare operand `(u32)…` to make the branch unsigned, and on a
-// zero-trip guard that operand IS the init's const. Without the cast tolerance the two variations
-// cannot appear in one candidate, which is what `synthetic:unsguard:agbcc` needs.
+// The unsigned-compare spelling renders one compare operand `(u32)…` to make the branch unsigned,
+// and on a zero-trip guard that operand IS the init's const. Without the cast tolerance it and
+// `/initfirst` cannot appear in one candidate, which is what `synthetic:unsguard:agbcc` needs.
 test('a (u32)-cast comparison side still matches the init it spells: (u32)0 < n → v < n', () => {
   const r = initFirstGuards(
     fnWith(

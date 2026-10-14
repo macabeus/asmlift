@@ -263,7 +263,14 @@ export interface Candidate {
    *   • `l3/intcell.ts` spells a global as the integer a project may have declared it, where a
    *     pointer declaration scales the offset it adds, and no declaration is in the asm.
    *
-   *  What settles both instead is the object: a candidate that assembles to the target's own bytes
+   *
+   *  A STRUCTURE variation can carry the same obligation (`StructureVariation.needsProof`), and one does:
+   *
+   *   • `/signed-cmp` spells an unsigned compare over signed-rendering operands, which compiles to a
+   *     signed compare unless the operands are non-negative, and the compiler's proof of that is not
+   *     in the asm.
+   *
+   *  What settles all three instead is the object: a candidate that assembles to the target's own bytes
    *  IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
    *  either wins on proof or is WITHHELD — never shown as a best-effort answer. Both ranking drivers
    *  ask `withheldReason`, so neither can publish what the other would not. */
@@ -392,6 +399,7 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
 const PROOF_OBLIGATIONS: ReadonlyMap<string, string> = new Map<VariationName, string>([
   ['unreduce', 'a device-behaviour fact no gate over the C can settle'],
   ['int-cell', 'the project declaring the global an integer, which the assembly does not show'],
+  ['signed-cmp', "the compiler having proved every unsigned compare's operands non-negative"],
 ]);
 
 /** What a respell variation hands `respell`: its tree, or — when the variation cannot establish the
@@ -2258,7 +2266,12 @@ export function enumerateCandidates(
             // `LoadBGTilemapData` under docs/ranked-repro.md's flags: 66816 candidates either way,
             // and all 66816 `[score]` lines identical. It splits 0 keys, so the miss it can cause
             // has no inhabitant.
-            const treeKey = JSON.stringify(sfn);
+            // A proof-carrying setting's tree is keyed apart: a SOUND setting that reaches the same
+            // tree must still emit, so the source dedup below can clear `matchOnly` off the text.
+            const settingNeedsProof = STRUCTURE_VARIATIONS.some(
+              (variation) => s[variation.flag] && variation.needsProof?.(sfn) === true,
+            );
+            const treeKey = (settingNeedsProof ? 'proof:' : '') + JSON.stringify(sfn);
             if (seenTrees.has(treeKey)) {
               opts.onTreeDeduped?.();
               continue;
@@ -2286,7 +2299,7 @@ export function enumerateCandidates(
                 // set, not `seenTrees`: adding a rewritten tree there would let it skip a later
                 // STRUCTURED tree that happens to equal it, and that tree's own pre-respell output —
                 // which nothing has computed — would go with it.
-                const madeKey = JSON.stringify(made);
+                const madeKey = (settingNeedsProof ? 'proof:' : '') + JSON.stringify(made);
                 if (seenPreRespell.has(madeKey)) {
                   continue;
                 }
@@ -2356,7 +2369,7 @@ export function enumerateCandidates(
                 // published artifact is the text, so a spelling some sound route also produces is a
                 // proven one however the first route reached it — clear the flag rather than keeping
                 // whichever route the enumeration happened to walk first.
-                if (sp.matchOnly === undefined) {
+                if (sp.matchOnly === undefined && !settingNeedsProof) {
                   delete dup.matchOnly;
                 }
                 if (!discardsPassedResult) {
@@ -2386,7 +2399,7 @@ export function enumerateCandidates(
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
-                ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
+                ...(sp.matchOnly || settingNeedsProof ? { matchOnly: true as const } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
               };
@@ -2569,12 +2582,10 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
  *  would make each preference an accident of two unrelated decisions.
  *
- *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. `/uns-cmp`'s whole output is
- *  that polarity, and it carries in a DECLARED TYPE rather than a cast — `castCount` reads 0 on
- *  both sides of the tie it loses — so at equal bytes enumeration order decides, and a rival
- *  variation's candidate can publish a signed compare where the asm's is unsigned. Weighing it needs
- *  the candidate's own SFn and the icmp facts it was structured from, neither of which this
- *  comparator carries; `deviceVolatile` is the shape such a term would take. */
+ *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. It needs none: the default
+ *  spells every unsigned compare unsigned, and `/signed-cmp`, the one spelling that does not, is
+ *  `matchOnly` — on a nonmatch it is withheld before this comparator sees it, whatever it scores,
+ *  and on a match both spellings are the program. */
 export function compareScored<S extends { score: number }>(
   a: Candidate & { score: S; order: number },
   b: Candidate & { score: S; order: number },

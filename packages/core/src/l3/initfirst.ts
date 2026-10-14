@@ -95,7 +95,7 @@ const hoistableRead = (e: Expr, ownNames: ReadonlySet<string>, volatileLocals: R
 };
 
 /** A compare operand and the init's value denote the same 32-bit value under different SPELLINGS
- *  when a width-32 cast is all that separates them: `/uns-cmp` wraps one side in `(u32)` to make
+ *  when a width-32 cast is all that separates them: the unsigned-compare spelling wraps one side in `(u32)` to make
  *  the branch unsigned, and on a zero-trip guard that side is the very const the init assigns.
  *  The swap is still exact — `v = X` stores X's 32 bits and `v` is 32-bit-declared
  *  (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
@@ -236,7 +236,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
       // A BARE const only, where the guard re-spelling below uses the cast-tolerant `sameValue`:
       // this site does not run `meaningPreserved`, so it may not swap in a name whose declared
       // type could re-render the compare's signedness — which is exactly what peeling a `(u32)`
-      // would put on the table. A row that needs `/uns-cmp`'s spelling hoisted here brings the
+      // would put on the table. A row that needs the unsigned-compare spelling hoisted here brings the
       // gate with it.
       for (const hv of hoisted) {
         if (cond.k === 'bin' && NEGATE_REL[cond.op]) {

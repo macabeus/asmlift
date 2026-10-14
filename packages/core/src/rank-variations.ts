@@ -71,7 +71,7 @@ export interface StructureVariation {
     | 'derivedHome'
     | 'mergeHome'
     | 'escapeHome'
-    | 'unsCmp'
+    | 'signedCmp'
     | 'freshMerge'
     | 'copyDefPos'
     | 'siteSense';
@@ -80,6 +80,11 @@ export interface StructureVariation {
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
   strip: boolean;
+  /** Whether the ON spelling, as structured into `sfn`, can compute something other than the asm,
+   *  which no gate over the C can rule out: every candidate such a tree reaches is
+   *  `Candidate.matchOnly`, published only on a byte-exact score. rank.ts's `PROOF_OBLIGATIONS`
+   *  names the fact the score stands in for. Asked only of a setting with the variation on. */
+  needsProof?: (sfn: SFn) => boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // `/reread-globals` — the VALUE-HOME variation (structure/analysis.ts AnalyzeOptions). Whether the
@@ -225,19 +230,27 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     perLiftGate: hasEscapingExtension,
     strip: true,
   },
-  // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
-  // icmp_u* operand takes a (u32) cast where the rendered operands do not guarantee the
-  // unsignedness, and a mixed-claimant declaration reconciles to u32 when nothing under the
-  // name needs signed. Which side the source spelled is genuinely ambiguous: a signed spelling
-  // that byte-matched was PROVED non-negative by the compiler (only then does it emit the
-  // unsigned branch from a signed compare), and emission's provable set is smaller than the
-  // compiler's. Gated on the function having an unsigned compare at all.
+  // `/signed-cmp` — spell an unsigned compare SIGNED (structure.ts unsignedCompareSpelling OFF): no
+  // `(u32)` cast at an icmp_u* and no u32 reconciliation of a mixed-claimant declaration. The
+  // default spells it unsigned, the one spelling that is value-faithful without a proof. This one
+  // is a real source too: a compiler emits the unsigned branch from a signed compare where it
+  // PROVED both sides non-negative, and emission's provable set is smaller than the compiler's —
+  // before this default flipped, 15 match winners spelled it (results.json at d6e5299: agbcc 5,
+  // gcc2.7.2kmc 8, ido7.1 2). But
+  // where that proof does not hold, it compiles to a different compare, so a tree that spells one
+  // (`SFn.signedUnsignedCompare`) is `needsProof`: offered, scored, and published only byte-exact.
+  // A tree whose compares render unsigned anyway (an unsigned operand, a pointer) needs no proof,
+  // and differs from the default only in a declaration. A tie or a better nonmatch score is no
+  // evidence for it — `synthetic:selloop:gcc2.7.2kmc` once published `return 0 < v1;` over an
+  // s32 `v1` against `sltu v0,zero,v1` that way. Gated on the function having an unsigned compare
+  // at all.
   {
-    flag: 'unsCmp',
-    name: 'uns-cmp',
-    options: (on) => ({ unsignedCompareSpelling: on }),
+    flag: 'signedCmp',
+    name: 'signed-cmp',
+    options: (on) => ({ unsignedCompareSpelling: !on }),
     sharedGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
+    needsProof: (sfn) => sfn.signedUnsignedCompare === true,
   },
   // `/fresh-merge` — the parameter-merge-home variation (structure.ts `freshParamMerge`, whose
   // `FRESH_MERGE_GATES` carry the argument): a merge whose carrier is a parameter takes its own

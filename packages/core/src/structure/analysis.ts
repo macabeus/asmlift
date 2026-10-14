@@ -892,7 +892,7 @@ export interface AnalyzeOptions {
    *  A compiler behavior (TargetDescription.compilerBehaviors `readsStayWhereWritten`), not
    *  a differ-refereed variation, and that distinction is the argument: a variation exists where the asm
    *  UNDERDETERMINES the source, some pass having collapsed two spellings onto one output
-   *  (`/uns-cmp`'s non-negativity proof is the type case). Where the compiler emits a read in the
+   *  (`/signed-cmp`'s non-negativity proof is the type case). Where the compiler emits a read in the
    *  block the source spelled it in, re-spelling it at the block the asm read in reproduces that
    *  asm while the sunk spelling is one it emits only for a source that read per arm — nothing for
    *  the differ to referee, and the extra candidate is pure cost. Which compilers may declare
