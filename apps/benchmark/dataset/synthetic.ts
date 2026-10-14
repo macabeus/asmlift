@@ -9680,6 +9680,29 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void deadloc(s32 **p);',
     proto: { deadloc: { params: ['s32 **'], returnsVoid: true } },
   },
+  // `homecall` is Mario Party 4's -O0,p homing beside a captured local: the parameter's home at r1+8
+  // lies below the array the callee is handed, reaches the call unread and is reloaded after it,
+  // which proves it a local's (`compilerBehaviors.localsAboveOutgoingArea`) rather than the call's
+  // stack argument. `tbval` hands a struct, spelled through a typedef as decomp headers spell
+  // GXColor and Vec, to a callee by value: mwcc passes the address of a copy it builds in the local
+  // area, which the lift declines rather than pass the copy where the callee takes the struct.
+  {
+    sym: 'homecall',
+    src: 'void fill(s32 *p);\ns32 homecall(s32 q){ s32 a[2]; fill(a); return a[0] + q; }',
+    features: ['stack-addr', 'array'],
+    toolchains: ['mwcc_242_81'],
+    cflags: ['-proc', 'gekko', '-O0,p', '-enum', 'int', '-inline', 'auto', '-fp', 'hard', '-Cpp_exceptions', 'off'],
+    ctx: 'void fill(s32 *p); s32 homecall(s32 q);',
+    proto: { fill: { params: ['s32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'tbval',
+    src: 'typedef struct { s32 x, y; } B_t;\ns32 tbT(s32 k, B_t b);\ns32 tbval(B_t *p){ B_t b; b = *p; return tbT(p->x, b); }',
+    features: ['struct', 'struct-copy'],
+    toolchains: ['mwcc_242_81'],
+    ctx: 'typedef struct { s32 x, y; } B_t; s32 tbT(s32 k, B_t b); s32 tbval(B_t *p);',
+    proto: { tbT: { params: ['s32', 'B_t'] } },
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

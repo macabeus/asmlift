@@ -139,3 +139,50 @@ describe('frame objects and incoming stack arguments, lifted and recompiled on e
     }
   }
 });
+
+// TWO SHAPES THAT DO NOT MATCH, pinned on the builds the synthetic tier does not run, beside
+// `synthetic:{homecall,tbval}:mwcc_242_81`. Mario Party 4's -O0,p homes a parameter at r1+8, below
+// the array its callee is handed, and reloads it after the call: the reload proves the word a
+// local's (`compilerBehaviors.localsAboveOutgoingArea`), so the function lifts — to the home as a
+// word of the frame object, which is right and does not recompile to the same frame. A struct a
+// header spells through a typedef, passed by value, is the address of a frame copy, and declines.
+const BEYOND: [MwccToolchainId, readonly string[]][] = [
+  ['mwcc_247_107', MP4_DOL],
+  ['mwcc_233_163n', PIKMIN_C],
+];
+describe('a homed parameter beside a captured local lifts, and a typedef-spelled by-value struct declines', () => {
+  const homecall = 'void fill(s32 *p);\ns32 homecall(s32 q){ s32 a[2]; fill(a); return a[0] + q; }';
+  const tbval =
+    'typedef struct { s32 x, y; } B_t;\ns32 tbT(s32 k, B_t b);\n' +
+    's32 tbval(B_t *p){ B_t b; b = *p; return tbT(p->x, b); }';
+  test.runIf(ppcDockerGate('ppc-frame', 'mwcc_247_107'))(
+    'mwcc_247_107 at Mario Party 4 DOL flags: homecall',
+    () => {
+      const { obj, asm } = compilePpcTarget('mwcc_247_107', homecall, 'homecall', MP4_DOL);
+      expect(asm).toMatch(/\bstw\s+r3,8\(r1\)/);
+      const r = decompile('homecall', asm, targetFor('mwcc_247_107', MP4_DOL).target, {
+        prototypes: { fill: { params: ['s32 *'], returnsVoid: true } },
+      });
+      expect(r.source).toBe(
+        's32 homecall(s32 a0) {\n    u8 sp8[24];\n    *(s32 *)sp8 = a0;\n    fill((s32 *)((u32)sp8 + 4));\n' +
+          '    return ((s32 *)sp8)[1] + *(s32 *)sp8;\n}\n',
+      );
+      const s = scoreCPpc('mwcc_247_107', r.source, 'homecall', obj, MP4_DOL);
+      expect(s.score, JSON.stringify(s)).toBeGreaterThan(0);
+    },
+    BUDGET,
+  );
+  for (const [mwcc, flags] of BEYOND) {
+    test.runIf(ppcDockerGate('ppc-frame', mwcc))(
+      `${mwcc}: tbval`,
+      () => {
+        const { asm } = compilePpcTarget(mwcc, tbval, 'tbval', flags);
+        expect(asm).toMatch(/\baddi\s+r\d+,r1,\d+\b/);
+        expect(() =>
+          decompile('tbval', asm, targetFor(mwcc, flags).target, { prototypes: { tbT: { params: ['s32', 'B_t'] } } }),
+        ).toThrow(/takes its parameter 2 as 'B_t', which no word holds: a struct or union passed by value/);
+      },
+      BUDGET,
+    );
+  }
+});
