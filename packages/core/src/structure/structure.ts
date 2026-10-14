@@ -5903,9 +5903,12 @@ export function structure(
         // re-test, so an unproven fuse would lose the `if` outright and run a loop the source
         // skipped. Structural equality is a sufficient proof, never a necessary one: `str[0]` and
         // `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test
-        // spelled differently, and normalising those needs a canonical form this pass does not
-        // have. An unproven guard therefore KEEPS its `if`, with the loop as a `do-while` inside it
-        // — every test the asm performs is emitted as itself. The proof still gates the SINK below:
+        // spelled differently. The first is one of the identities `sameAtEntry` (ir/entry.ts) reads
+        // under `normalize`, which the raise re-roll turns on; this caller does not yet, because
+        // turning it on re-spells rows (agbcc `while (s[i]) i++` then fuses into a `for`) and is
+        // that round's to measure. The second has no reading at all. An unproven guard KEEPS its
+        // `if`, with the loop as a `do-while` inside it — every test the asm performs is emitted as
+        // itself. The proof still gates the SINK below:
         // a sunk copy runs once per iteration, and only the proof (fused form) or the kept `if`
         // makes the zero-trip path skip it. The kept `if` would widen the sink's key to unproven
         // guards too; no row needs that yet, so it stays keyed on the proof.

@@ -26,8 +26,9 @@
 //     T's other edge leaves the loop for X, and E's other edge reaches X too;
 //   • T reads nothing H defines except its back-edge arguments B (so, renamed to T's own params, its
 //     ops are a function of the values it hands round);
-//   • E's condition and arguments into X are T's, with B replaced by E's arguments A into H, compared
-//     as canonical expression trees (`canon`) over the values both see;
+//   • E's condition and arguments into X are T's, with B replaced by E's arguments A into H — the
+//     question guard fusion asks of a rotated loop's guard, answered by the one predicate both read
+//     (`sameAtEntry`, ir/entry.ts), with its identities on (`str[0]` is `str[i]` at `i = 0`);
 //   • T holds no effect and no read outside what was compared: it now runs whole on the first
 //     iteration as well, where E's own copies of anything else would still run;
 //   • E runs no effect after the first op its test reads, so the test reads the same memory moved to
@@ -35,13 +36,9 @@
 // Every check that fails leaves the function as it was.
 import { Block, Fn, Op, Value, dominators, mkValue, predecessors, successorsOf } from '../ir/core';
 import { effectful, spelledWhenDead } from '../ir/discipline';
+import { type EntryReading, sameAtEntry } from '../ir/entry';
 import { analyzeLoops } from '../ir/loops';
 import { simplifyTrivialPhis } from '../ir/simplify';
-
-/** Commutative opcodes, whose operands `canon` sorts. */
-const COMMUTES = new Set(['add', 'mul', 'and', 'or', 'xor', 'icmp_eq', 'icmp_ne']);
-/** A compare and the one that is its negation, so a test spelled with the arms swapped compares. */
-const NEGATED: Record<string, string> = { icmp_eq: 'icmp_ne', icmp_ne: 'icmp_eq' };
 
 /** Re-roll every peeled loop test the conditions above admit; returns how many. */
 export function rerollPeeledTests(fn: Fn): number {
@@ -108,20 +105,25 @@ function rerollOne(fn: Fn): boolean {
     if (tReads.some((v) => fromH(v) && !B.includes(v))) {
       continue;
     }
-    // compare E's test with T's at E's values: T's spelled with each B[k] replaced by E's A[k]
-    const local = (v: Value) => defBlock.get(v) === T || defBlock.get(v) === E;
-    const ids = new Map<Value, number>();
-    const eCanon = canon(defs, () => null, local, ids);
-    const tCanon = canon(defs, (v) => (B.includes(v) ? eCanon(A[B.indexOf(v)]) : null), local, ids);
-    const tCond = tCanon(tTerm.operands[0]);
-    const eCond = eCanon(eTerm.operands[0]);
-    // the sense: which arm of the condition leaves for X
-    const tX = tOut === 0;
-    const eX = eOut === 0;
-    const sameTest = tX === eX ? tCond === eCond : negatedCanon(tCond) === eCond;
-    const tArgs = tTerm.successors[tOut].args.map(tCanon);
-    const eArgs = eTerm.successors[eOut].args.map(eCanon);
-    if (!sameTest || tArgs.length !== eArgs.length || tArgs.some((a, k) => a !== eArgs[k])) {
+    // one back-edge arg per param: a value handed round twice would be renamed to one of them only
+    if (new Set(B).size !== B.length) {
+      continue;
+    }
+    // compare E's test with T's at E's values: T's read with each B[k] as E's A[k], through the ops
+    // of T and E only — a read anywhere else may see other memory
+    const reading: EntryReading = {
+      entry: new Map(B.map((v, k) => [v, A[k]])),
+      through: (v) => defBlock.get(v) === T || defBlock.get(v) === E,
+      normalize: true,
+    };
+    const tXArgs = tTerm.successors[tOut].args;
+    const eXArgs = eTerm.successors[eOut].args;
+    if (
+      // the sense: which arm of each condition leaves for X
+      !sameAtEntry(defs, tTerm.operands[0], eTerm.operands[0], reading, tOut !== eOut) ||
+      tXArgs.length !== eXArgs.length ||
+      tXArgs.some((a, k) => !sameAtEntry(defs, a, eXArgs[k], reading))
+    ) {
       continue;
     }
     // What the comparison above covers: in each block, the ops its condition and its args into X are
@@ -203,85 +205,4 @@ function sliceOf(defs: ReadonlyMap<Value, Op>, blk: Block, roots: readonly Value
   };
   roots.forEach(walk);
   return out;
-}
-
-/** A canonical spelling of `v` as an expression tree: through the ops `local` admits, down to the
- *  values `leaf` names and to everything else by identity, numbered in `ids` so two spellings that
- *  share it name one value alike. A constant is its value, an `add` of 0 is
- *  its other operand, a load off an `add` of a constant folds the constant into its offset, and a
- *  commutative op sorts its operands. */
-function canon(
-  defs: ReadonlyMap<Value, Op>,
-  leaf: (v: Value) => string | null,
-  local: (v: Value) => boolean,
-  ids: Map<Value, number>,
-) {
-  const id = (v: Value) => ids.get(v) ?? (ids.set(v, ids.size), ids.size - 1);
-  const rec = (v: Value): string => {
-    const named = leaf(v);
-    if (named !== null) {
-      return named;
-    }
-    const d = defs.get(v);
-    if (d?.opcode === 'const') {
-      return `c(${String(d.attrs.value)})`;
-    }
-    if (d?.opcode === 'gaddr') {
-      return `g(${String(d.attrs.sym)})`;
-    }
-    if (d === undefined || !local(v) || d.results.length !== 1) {
-      return `v${id(v)}`;
-    }
-    const ops = d.operands.map(rec);
-    if (d.opcode === 'add' && (ops[0] === 'c(0)' || ops[1] === 'c(0)')) {
-      return ops[0] === 'c(0)' ? ops[1] : ops[0];
-    }
-    if (d.opcode === 'load') {
-      let base = ops[0];
-      let off = Number(d.attrs.off);
-      const m = /^add\((.*)\)$/.exec(base);
-      const parts = m ? splitTop(m[1]) : null;
-      const c = parts?.find((p) => /^c\(-?\d+\)$/.test(p));
-      if (parts?.length === 2 && c !== undefined) {
-        off += Number(c.slice(2, -1));
-        base = parts.find((p) => p !== c) ?? parts[0];
-      }
-      return `load(${base}|${off}|${String(d.attrs.width)}|${String(d.attrs.signed)})`;
-    }
-    const args = COMMUTES.has(d.opcode) ? [...ops].sort() : ops;
-    const attrs = Object.keys(d.attrs)
-      .sort()
-      .map((k) => `${k}=${JSON.stringify(d.attrs[k])}`)
-      .join(',');
-    return `${d.opcode}(${args.join(',')})${attrs ? `{${attrs}}` : ''}`;
-  };
-  return rec;
-}
-
-/** Split a canonical argument list at its top-level commas. */
-function splitTop(s: string): string[] {
-  const out: string[] = [];
-  let depth = 0;
-  let start = 0;
-  for (let i = 0; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === '(' || ch === '{') {
-      depth++;
-    } else if (ch === ')' || ch === '}') {
-      depth--;
-    } else if (ch === ',' && depth === 0) {
-      out.push(s.slice(start, i));
-      start = i + 1;
-    }
-  }
-  out.push(s.slice(start));
-  return out;
-}
-
-/** The canonical spelling of a compare's negation, where one is known; otherwise a spelling no
- *  compare canonicalizes to. */
-function negatedCanon(c: string): string {
-  const m = /^(icmp_[a-z]+)\(/.exec(c);
-  const neg = m ? NEGATED[m[1]] : undefined;
-  return neg !== undefined ? neg + c.slice(m![1].length) : `not(${c})`;
 }

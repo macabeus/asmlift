@@ -4,9 +4,9 @@
 //   • may this loop's updates be emitted before its condition/exit/post-loop reads, or would some
 //     read then see a clobbered (post-update) value that the original IR read PRE-update — and
 //     which of those reads can be REPAIRED by moving the copy into the body (`sinkable…`);
-//   • is a value the emitted form DROPS redundant — `sameAtEntry`, which reads an expression on
-//     the loop's entry state so a guard about to be fused away can be checked against the test
-//     that replaces it.
+//   • is a value the emitted form DROPS redundant — `sameAtEntry` (ir/entry.ts, shared with the
+//     raise re-roll), which reads an expression on the loop's entry state so a guard about to be
+//     fused away can be checked against the test that replaces it.
 //
 // WHAT MAKES A SUNK COPY LEGAL. The exit edge's value is not moved, it is REBUILT: the copy spells
 // the arg's def-tree again inside the body, at the point that tree was already computed at
@@ -50,7 +50,7 @@
 // exist at CALL time (emission runs after naming completes). Snapshotting them would break this.
 import { Block, Op, Value, successorsOf } from '../ir/core';
 import { effectful, orderSensitive, reevalUnsafe } from '../ir/discipline';
-import { NEGATED_ICMP } from '../ir/opcodes';
+import { sameAtEntry } from '../ir/entry';
 import { Expr, Stmt } from '../l3/ast';
 import { type Gate, firstRejection } from '../l3/gates';
 import type { UseSite } from './analysis';
@@ -361,63 +361,6 @@ function unitStep(value: Expr, name: string): 1 | -1 | null {
   const one = (e: Expr): number | null => (e.k === 'const' && Math.abs(e.value) === 1 ? e.value : null);
   const k = isVar(value.l) ? one(value.r) : value.op === '+' && isVar(value.r) ? one(value.l) : null;
   return k === null ? null : ((value.op === '-' ? -k : k) as 1 | -1);
-}
-
-// `x + 0` / `x - 0` / `x | 0` are `x`. Substituting a loop variable by its init constant turns
-// ordinary index arithmetic into exactly these, and a guard that spells the same value without
-// the arithmetic would otherwise compare unequal.
-function fold(defs: Map<Value, Op>, v: Value): Value {
-  const d = defs.get(v);
-  if (!d || d.operands.length !== 2 || !['add', 'sub', 'or'].includes(d.opcode)) {
-    return v;
-  }
-  const z = defs.get(d.operands[1]);
-  return z?.opcode === 'const' && z.attrs?.value === 0 ? fold(defs, d.operands[0]) : v;
-}
-
-// Does `a`, read on a loop's ENTRY values, denote the same thing as `b`? `entry` maps each header
-// param and back-edge arg to the arg the forward edge passes, so substituting through it models
-// the FIRST iteration — the state a guard in front of the loop tested. `negated` compares against
-// b's logical opposite instead, for the usual case where a guard spells the loop's own test the
-// other way round (`beq` to the exit vs `bne` to the header).
-//
-// Structural, not semantic: distinct ops with the same opcode, attributes and operands compare
-// equal (two `const 0`s do), anything else does not. A false negative costs a loud decline, which
-// is the direction to be wrong in. Memoised like `readsClobbered`'s `seen`: a value its own
-// consumer reads twice would otherwise double the work at every level.
-function sameAtEntry(defs: Map<Value, Op>, a: Value, b: Value, entry: Map<Value, Value>, negated = false): boolean {
-  const memo = new Map<Value, Map<Value, boolean>>();
-  const sameOp = (da: Op, db: Op, opcodeOk: boolean): boolean =>
-    opcodeOk &&
-    da.operands.length === db.operands.length &&
-    JSON.stringify(da.attrs ?? null) === JSON.stringify(db.attrs ?? null) &&
-    da.operands.every((o, i) => same(o, db.operands[i]));
-  const same = (x0: Value, y0: Value): boolean => {
-    const x = fold(defs, entry.get(x0) ?? x0);
-    const y = fold(defs, y0);
-    if (x === y) {
-      return true;
-    }
-    let row = memo.get(x);
-    if (!row) {
-      memo.set(x, (row = new Map()));
-    }
-    const hit = row.get(y);
-    if (hit !== undefined) {
-      return hit;
-    }
-    const da = defs.get(x);
-    const db = defs.get(y);
-    const r = !!da && !!db && sameOp(da, db, da.opcode === db.opcode);
-    row.set(y, r);
-    return r;
-  };
-  if (!negated) {
-    return same(a, b);
-  }
-  const da = defs.get(fold(defs, entry.get(a) ?? a));
-  const db = defs.get(fold(defs, b));
-  return !!da && !!db && sameOp(da, db, NEGATED_ICMP[da.opcode] === db.opcode);
 }
 
 // WHERE A SUNK COPY IS REBUILT. The copy is not carried into the body, it is SPELLED AGAIN
@@ -1068,7 +1011,7 @@ export function makeLoopHazards(deps: LoopHazardDeps): LoopHazards {
     testSkipsAnEffect,
     preUpdateCondFold,
     sinkablePreUpdateSlots,
-    sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, entry, negated),
+    sameAtEntry: (a, b, entry, negated = false) => sameAtEntry(defs, a, b, { entry }, negated),
     loopWriteSet,
     loopWriteSetAhead,
   };
