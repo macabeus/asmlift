@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 210 distinct decline messages (the texts reached by
+// `packages/core/src` throws 213 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 107 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -54,8 +54,8 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        16  a relocation with an addend, an address below the symbol, an indirect
-//                               `jr`, a non-numeric immediate, the caller's value a restore writes
+//   frontend/mips.ts        15  a relocation with an addend, an address below the symbol, a
+//                               non-numeric immediate, the caller's value a restore writes
 //                               read as a value (at the read, or through a merge), five refusals
 //                               about a disassembly the reader cannot account for, a `jal` no
 //                               relocation names, one relocated against a section, one in a delay
@@ -115,14 +115,13 @@
 // with a compiler's own error text: 13 `c.c:` markers and 12 more compiler lines in the artifact
 // belong to noncompile rows. Every marker on a declined row opens with `lift:`, `structure:` or
 // `raise:` — 265 / 60 / 13 — and `Diagnostic.stage` in `packages/core/src/pipeline.ts` has no
-// fourth value a decline could carry. Two control-transfer capabilities are in that residue and
-// are worth naming on their own: `frontend/mips.ts`'s "indirect jump 'jr rN' — jump tables / tail
-// calls not supported" and `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
-// gotos / register tail calls". So are two kinds of the naming family: `reloc-symbol.ts`
-// `unspellableReason` refuses eight ways and six have a class here, while "names 'X', which is not
-// a C identifier" and "names the function's predefined name" have none (a Thumb pool word naming
-// the predefined name is the exception: `pool-word-shape` takes it). They have no rows, so they
-// wait for one.
+// fourth value a decline could carry. One control-transfer capability is in that residue and is
+// worth naming on its own: `frontend/thumb.ts`'s "indirect/computed jump — jump tables / computed
+// gotos / register tail calls" (its MIPS sibling has a row, and the class `indirect-jump`). So are
+// two kinds of the naming family: `reloc-symbol.ts` `unspellableReason` refuses eight ways and six
+// have a class here, while "names 'X', which is not a C identifier" and "names the function's
+// predefined name" have none (a Thumb pool word naming the predefined name is the exception:
+// `pool-word-shape` takes it). They have no rows, so they wait for one.
 import type { FunctionResult } from '@asmlift/bench-schema';
 
 export interface DeclineClass {
@@ -472,10 +471,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // the function's own name. It is spelt without the word "falls" because the producer splits
     // the template there (`… falls ` + `through into an arm …`), and a phrase this file keys on has
     // to exist literally in the file that emits it, or the pin below cannot see it.
+    //
+    // A TABLE BASE FORMED OUTSIDE THE DISPATCH BLOCK is the same capability from the frontend's side
+    // (`frontend/jump-table.ts`): a dispatch whose base some path does not bring, and a base read as
+    // a value, are a recovered jump table the lift then refuses. So is a dispatch block the built
+    // CFG still reaches (`refuseReachableDispatch`): a branch or a table case enters it past the
+    // bounds check.
     key: 'switch-shapes',
     label: 'Switch fall-through / jump-table shapes',
     pattern:
-      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge/,
+      /case arms do not linearize|jump-table target is not a block boundary|a case body reaches|jump-table cases share a target block|a jump-table case runs on into the next case|through into an arm that is not the next one emitted|takes a value from the switch edge|reads the base of jump table|'s base, formed at|the recovered jump table's '/,
   },
   {
     key: 'structs',
@@ -609,15 +614,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   {
     // NOT "loop unrolling", although `frontend/ppc.ts` says so. Its branch denylist has one throw
     // with two arms, and the non-`bctrl`/`blrl` arm prints "CTR-counted loop or indirect branch —
-    // mwcc -O4 loop unrolling is not yet supported" for ANY unmodelled `b*`. All three rows that
-    // reach it are a `bctr` the switch recovery did not claim — a jump-table dispatch — and one of
-    // them, `synthetic:sw_jtfall`, is a `switch` with no loop in it at all. A label taken from that
-    // arm sends a reader to build loop unrolling for three dispatch rows.
+    // mwcc -O4 loop unrolling is not yet supported" for ANY unmodelled `b*`, and that includes a
+    // `bctr` the jump-table recognizer did not claim: a dense `switch` with no loop in it at all
+    // whose dispatch the recognizer refuses prints exactly this (core
+    // test/jump-table-window.test.ts). A label taken from that arm sends a reader to build loop
+    // unrolling for a dispatch.
     //
-    // The label therefore names the disjunction the message carries, dispatch side first, because
-    // that is the side the corpus inhabits. The durable fix is to split the arm at the throw, which
-    // is decidable there from the mnemonic and which rewrites three published markers, so it owes a
-    // whole-tier bench of its own.
+    // The label therefore names the disjunction the message carries, dispatch side first. No row
+    // of the artifact reaches the class (`NO_ROWS` in apps/web/test/declines.test.ts). The durable
+    // fix is to split the arm at the throw, which is decidable there from the mnemonic.
     key: 'ctr-transfer',
     label: 'Branches through CTR (an unclaimed jump-table dispatch, or a CTR-counted loop)',
     // `frontend/ppc.ts` refuses a CTR loop at three sites, not one, and the other two are the ones
@@ -625,6 +630,16 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // clobbers CTR. Keyed on the single spelling the artifact carried, both would arrive as
     // unclassified the first time a row reached them.
     pattern: /CTR-counted loop|without a reaching 'mtctr'|clobbers CTR/,
+  },
+  {
+    // `frontend/mips.ts`'s refusal of a `jr` to anything but `ra` that no recovered table claimed:
+    // a dispatch the jump-table recognizer refused, or a register tail call. The message says both,
+    // and so does the label, dispatch side first. Its first row is IDO's second table in one
+    // function, read at `lw t9,32(at)` (`sw_jtloop2:ido7.1`), which the recognizer does not take.
+    // Thumb's "indirect/computed jump" has no row and stays in the residue.
+    key: 'indirect-jump',
+    label: 'Indirect jumps no table claimed (an unrecovered jump-table dispatch, or a register tail call)',
+    pattern: /indirect jump 'jr /,
   },
   {
     key: 'block-boundary',

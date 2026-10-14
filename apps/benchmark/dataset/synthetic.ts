@@ -1248,6 +1248,18 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_jtfalldesc(int,int*);',
     proto: { sw_jtfalldesc: { returnsVoid: true } },
   },
+  // …AND ONE WHOSE `bgtlr` DEFAULT RETURNS AN ARGUMENT IT NEVER TOUCHES. mwcc bounds the table with a
+  // conditional return when the out-of-range path returns `a`, which arrived in r3: that path neither
+  // reads nor writes r3, so the return block has no definition of it, and the lift must still return
+  // the first argument there (frontend/ppc.ts `returnUntouchedArg`) — a bare `return;` in an `int`
+  // function recompiles to the same bytes on mwcc and loses `a`.
+  {
+    sym: 'sw_jtretarg',
+    src: 'int sw_jtretarg(int a,unsigned x,int *p){ switch(x){case 0:p[0]=1;return 3;case 1:p[1]=5;return 4;case 2:p[2]=6;return 7;case 3:p[3]=7;return 1;case 4:p[4]=3;return 9;case 5:p[5]=2;return 2;case 6:p[6]=9;return 0;case 7:p[7]=4;return 8;} return a; }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'int sw_jtretarg(int,unsigned,int*);',
+  },
   {
     sym: 'sw_sparse',
     src: 'int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }',
@@ -1304,6 +1316,67 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['dense', 'switch-arms'],
     toolchains: ALL,
     ctx: 'int sw_jtisoret(int,int*);',
+  },
+  // A DENSE TABLE WHOSE BOUNDS PAIR HAS AN INSTRUCTION SCHEDULED INTO IT. Every arm calls, so the
+  // function saves LR, and mwcc 2.4.2 puts that store between the bound and its branch:
+  // `cmplwi r3,7 ; stw r0,20(r1) ; bgt-`. The PowerPC recognizer finds the compare past it — past
+  // anything that writes neither a CR field nor the scrutinee (frontend/ppc.ts `boundsCompare`).
+  {
+    sym: 'sw_jtsched',
+    src: 'int jg(int);\nvoid jh(int);\nint sw_jtsched(int x,int *p){ switch(x){case 0:jh(1);break;case 1:jh(2);break;case 2:return jg(p[0]);case 3:jh(4);break;case 4:jh(5);break;case 5:jh(6);break;case 6:jh(7);break;case 7:jh(9);break;} return -1; }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'int jg(int); void jh(int); int sw_jtsched(int,int*);',
+    proto: { jg: { params: 1 }, jh: { params: 1, returnsVoid: true } },
+  },
+  // A DENSE TABLE INSIDE A LOOP, whose base KMC forms ONCE, in the loop's preheader
+  // (`lui t6,%hi ; addiu t6,t6,%lo`), and adds to the scaled index inside the loop — so the
+  // dispatch's own block holds no `lui`. The lift decodes that pair into a table base, which nothing
+  // may read as a value, and proves it reaches the dispatch on every path (frontend/jump-table.ts).
+  // mwcc 2.4.2 forms the base inside the loop; mwcc 2.3.3, which hoists it too, has no synthetic
+  // tier, and packages/cli/test/matching/jump-table-window.test.ts pins it there.
+  {
+    sym: 'sw_jtloop',
+    src: 'void sw_jtloop(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){case 0:p[i]=1;break;case 1:p[i]=5;break;case 2:p[i]=6;break;case 3:p[i]=7;break;case 4:p[i]=3;break;case 5:p[i]=2;break;case 6:p[i]=9;break;case 7:p[i]=4;break;} } }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'void sw_jtloop(int,int*);',
+    proto: { sw_jtloop: { returnsVoid: true } },
+  },
+  // IDO ROTATES A `while` LOOP AROUND ITS SWITCH, so the bounds `sltiu` is in no block of its own:
+  // it sits in the delay slot of the loop-entry `beqz` (run on the fall-through) and in the LIKELY
+  // slot of the latch `bnezl` (run on the taken edge alone), and the bounds `beqz` heads the loop.
+  // frontend/mips.ts `mipsBounds` reads the bound off every edge into that block. KMC hoists the
+  // table base into the preheader here too.
+  {
+    sym: 'sw_jtwhile',
+    src: 'int sw_jtwhile(int *p){ int s=0; while(*p){ switch(*p++){case 0:s+=1;break;case 1:s+=5;break;case 2:s^=6;break;case 3:s+=7;break;case 4:s-=3;break;case 5:s+=2;break;case 6:s|=9;break;case 7:s+=4;break;} } return s; }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'int sw_jtwhile(int*);',
+  },
+  // TWO LOOP SWITCHES AND A CALL AFTER THEM. KMC hoists each table base into its loop's preheader,
+  // the second at `.rodata+32`, and the call makes the function non-leaf: the lift asks only that
+  // each base reach its dispatch on every path (frontend/jump-table.ts), not where the allocator put
+  // it. The two tables store different values, so a dispatch read through the other one's base would
+  // not recompile.
+  {
+    sym: 'sw_jtloop2',
+    src: 'void jh(int);\nvoid sw_jtloop2(int n,int *p,int *q){ int k=n; do { switch(*p){case 0:*p=11;break;case 1:*p=15;break;case 2:*p=16;break;case 3:*p=17;break;case 4:*p=13;break;case 5:*p=12;break;case 6:*p=19;break;case 7:*p=14;break;} p++; } while(--k); k=n; do { switch(*q){case 0:*q=21;break;case 1:*q=25;break;case 2:*q=26;break;case 3:*q=27;break;case 4:*q=23;break;case 5:*q=22;break;case 6:*q=29;break;case 7:*q=24;break;} q++; } while(--k); jh(n); }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'void jh(int); void sw_jtloop2(int,int*,int*);',
+    proto: { jh: { params: 1, returnsVoid: true }, sw_jtloop2: { returnsVoid: true } },
+  },
+  // A CALL INSIDE THE LOOP: KMC keeps the hoisted base in a callee-saved register (`lui s5 ; addiu
+  // s5,s5`), which its prologue saves and its epilogue restores around the loop.
+  {
+    sym: 'sw_jtloopcall',
+    src: 'void jh(int);\nvoid sw_jtloopcall(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){case 0:p[i]=11;break;case 1:p[i]=15;break;case 2:p[i]=16;break;case 3:p[i]=17;break;case 4:p[i]=13;break;case 5:p[i]=12;break;case 6:p[i]=19;break;case 7:p[i]=14;break;} jh(i); } }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'void jh(int); void sw_jtloopcall(int,int*);',
+    proto: { jh: { params: 1, returnsVoid: true }, sw_jtloopcall: { returnsVoid: true } },
   },
 
   // ── merged value chains (several values decided by several arms, joined at one point) ───────

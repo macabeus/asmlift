@@ -126,8 +126,9 @@ export interface CallSite {
   stackWord?(k: number): Value;
   /** how this frontend builds and splits a pair (`CallLowering.pairs`) */
   readonly pairs?: CallPairs;
-  /** the high halves this frontend defines registers with, which are no argument */
-  readonly highHalves?: HighHalves;
+  /** what this frontend defines registers with that is no value and so no argument — a pending
+   *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
+  readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
   /** what a guessed arity refuses on; without it a gap in the argument registers ends the count */
   readonly guess?: {
     /** the call's address, for the gap refusal */
@@ -461,7 +462,7 @@ export function callDeclarations(
   // THE CALL A PLAN LOWERS TO, in one order on every ISA: the arity, each argument word, the
   // `call` op, the guessed arity's record, the result and the clobbers.
   const lower = (site: CallSite): void => {
-    const { ssa, bi, pairs, guess, highHalves } = site;
+    const { ssa, bi, pairs, guess, placeholders } = site;
     if (lowering.pairs !== (pairs !== undefined) || lowering.stackArgs !== (site.stackWord !== undefined)) {
       throw new Error(`target '${target.id}': a call site's pairs and stack words must be what its lowering states`);
     }
@@ -502,7 +503,7 @@ export function callDeclarations(
     const argc =
       widths === null
         ? fallbackArgc(ssa, target.argRegs, bi, {
-            accept: (v) => !highHalves?.has(v),
+            accept: (v) => !placeholders?.has(v),
             gap: guess && { name, at: guess.at, fail },
           })
         : wordsOf(widths);
@@ -518,7 +519,7 @@ export function callDeclarations(
       site.leftOut(
         target.argRegs
           .slice(argc)
-          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => !highHalves?.has(v))),
+          .filter((r) => r !== indirect?.reg && ssa.hasReachingDef(r, bi, (v) => !placeholders?.has(v))),
         target.argRegs.slice(0, argc),
       );
     }
@@ -533,7 +534,7 @@ export function callDeclarations(
     const guessed = (k: number): Value => {
       const r = target.argRegs[k];
       const v = ssa.readGuessedArg(r, bi);
-      return highHalves ? highHalves.guardRead(name, r, v) : v;
+      return placeholders ? placeholders.guardRead(name, r, v) : v;
     };
     const args: Value[] = [];
     let k = 0;

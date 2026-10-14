@@ -38,9 +38,11 @@
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core';
+import { spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
-import type { Prototypes } from '../proto';
+import { demangle } from '../mangle';
+import { type Prototypes, declaredWidth, declaresVoidReturn } from '../proto';
 import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
@@ -59,6 +61,14 @@ import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
+import {
+  type HoistedDispatch,
+  type TableKey,
+  agreedTable,
+  entersBetween,
+  makeTableBases,
+  refuseReachableDispatch,
+} from './jump-table';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
@@ -193,99 +203,206 @@ interface PpcBlock {
 }
 
 // A recovered dense-switch jump table (Regime B), keyed
-// by the BOUNDS branch (`bgt DEF`) whose block emits the `switch_br`. `caseAddrs[k]` is the `.text`
+// by the BOUNDS branch (`bgt DEF`, or `bgtlr`) whose block emits the `switch_br`. `caseAddrs[k]` is the `.text`
 // address of case `k` (dense 0..N-1); `bctrAddr` is the elided dispatch's indirect jump. The mwcc
 // idiom:
 //   cmplwi rS,N-1 ; bgt DEF                                        (bounds)
 //   lis rT,0 [ADDR16_HA @tbl] ; slwi rIdx,rS,2 ; addi rB,rT,0 [ADDR16_LO @tbl]
 //   ; lwzx rV,rB,rIdx ; mtctr rV ; bctr                           (dispatch — table in .data)
+// mwcc schedules other words into the bounds pair (`boundsCompare`), orders the dispatch's freely,
+// and 2.3.3 forms the table base outside the dispatch (`hoistedTable`).
 interface PpcJT {
   scrutReg: string;
+  /** The bounds compare's address: nothing may enter after it, up to the `bctr`. */
+  cmpAddr: number;
   caseAddrs: number[];
-  defaultAddr: number;
+  /** The default arm's address, or null for a `bgtlr` bound: out-of-range values return. */
+  defaultAddr: number | null;
   bctrAddr: number;
+  /** The base register and table of a dispatch whose block does not form its base (mwcc 2.3.3
+   *  hoists the `lis`/`addi` pair out of a loop): `lift` proves the base reaches it
+   *  (frontend/jump-table.ts). Null when the pruned block forms the base itself. */
+  hoisted: HoistedDispatch | null;
 }
 
+/** The `cr` field a compare writes or a conditional branch reads: its first operand when it names
+ *  one, else cr0. */
+const crFieldOf = (ins: Instr): string => (ins.ops[0]?.startsWith('cr') ? ins.ops[0] : 'cr0');
+
+/** Whether `ins` may write a CR field. A DENY-LIST, so an unknown writer stops the reader rather
+ *  than being stepped past: the compares, the record forms (`.`), the CR-logical and move-to-CR
+ *  forms, and every branch — a `bl` destroys the volatile fields. */
+const mayWriteCr = (ins: Instr): boolean =>
+  /^(cmp|fcmp|cr|mcr|mtcr|b)/.test(ins.mnemonic) || ins.mnemonic.endsWith('.');
+
+/** Whether `ins` may write GPR `r`. A DENY-LIST like mips.ts's `writtenReg`: an instruction writes
+ *  its first operand unless it is a store, compare, trap, move-to-special or cache op; an update form
+ *  (`lwzu`, `stwux`) also writes its base, `lmw rD` writes rD..r31, and any branch may (a call
+ *  clobbers the volatile registers). */
+const mayWriteGpr = (ins: Instr, r: string): boolean => {
+  const m = ins.mnemonic;
+  if (m.startsWith('b')) {
+    return true;
+  }
+  if (m === 'lmw') {
+    return /^r\d+$/.test(r) && Number(r.slice(1)) >= Number(ins.ops[0]?.slice(1));
+  }
+  if (/^(l|st)\w*ux?$/.test(m) && ins.ops.slice(1).some((o) => new RegExp(`\\b${r}\\b`).test(o))) {
+    return true;
+  }
+  return !/^(st|cmp|fcmp|tw|mt|dc|ic|sync|isync|eieio)/.test(m) && ins.ops[0] === r;
+};
+
+/** The bounds compare of a jump table, or null: the `cmplwi rS,N-1` the bounds branch at `j` reads,
+ *  with its address and the case count `n` it states. Scanned back inside the branch's block, past
+ *  instructions that write neither a CR field nor `rS` — mwcc schedules the default's value or the
+ *  LR save between the two — and it must set the CR field the branch tests. The first CR writer met
+ *  decides: any other one, or a write of `rS` after the compare, declines. So does a branch landing
+ *  after the compare, up to the bounds branch itself: that path brings a CR field of its own, and the
+ *  `switch_br` would bound it by a compare it never ran (`entersBetween`). */
+function boundsCompare(instrs: Instr[], j: number, scrutReg: string): { addr: number; n: number } | null {
+  const crField = crFieldOf(instrs[j]);
+  for (let k = j - 1; k >= 0 && !isXfer(instrs[k]); k--) {
+    const c = instrs[k];
+    if (c.mnemonic === 'cmplwi' && c.ops[c.ops.length - 2] === scrutReg && crFieldOf(c) === crField) {
+      return entersBetween(instrs, c.addr, instrs[j].addr)
+        ? null
+        : { addr: c.addr, n: parseImm(c.ops[c.ops.length - 1]) + 1 };
+    }
+    if (mayWriteCr(c) || mayWriteGpr(c, scrutReg)) {
+      return null;
+    }
+  }
+  return null;
+}
+
+/** The table a base formed OUTSIDE the dispatch block addresses, as far as the instructions say:
+ *  every `addi rB,rX,SYM@l` in the function must name one table, or the guess is left undecided.
+ *  mwcc 2.3.3 forms the base once at entry and dispatches from a loop. Only a guess — `lift` pairs
+ *  the halves and proves the base reaches the dispatch (frontend/jump-table.ts). */
+const hoistedTable = (instrs: Instr[], rB: string): TableKey | null =>
+  agreedTable(
+    instrs.flatMap((x) =>
+      x.mnemonic === 'addi' && x.ops[0] === rB && x.reloc?.type === 'R_PPC_ADDR16_LO' && parseImm(x.ops[2]) === 0
+        ? [{ sym: x.reloc.sym, addend: x.reloc.addend }]
+        : [],
+    ),
+  );
+
 // Recover mwcc jump tables from the dispatch idiom + the AsmData side-table. Fail-closed: any
-// deviation from the exact idiom, or a table that doesn't resolve to N in-function targets, declines
+// deviation from the idiom, or a table that doesn't resolve to N in-function targets, declines
 // (→ the `bctr` loud-fail fires). Index IDENTITY guard: `slwi rIdx,rS,2` must be the bounds-checked
 // scrutinee scaled only by <<2 — no xor/neg/extra op.
 function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> {
   const out = new Map<number, PpcJT>();
-  for (let i = 5; i < instrs.length; i++) {
+  for (let i = 0; i < instrs.length; i++) {
     if (instrs[i].mnemonic !== 'bctr') {
       continue;
     }
-    const [lis, lwzx, mtctr] = [instrs[i - 5], instrs[i - 2], instrs[i - 1]];
-    // The index is scaled and the table's low half formed in either order: mwcc 2.4.2 emits the
-    // `slwi` first, GC/1.2.5n the `addi`. The two instructions are independent.
-    const [slwi, addi] =
-      instrs[i - 4].mnemonic === 'slwi' ? [instrs[i - 4], instrs[i - 3]] : [instrs[i - 3], instrs[i - 4]];
-    if (
-      lis.mnemonic !== 'lis' ||
-      slwi.mnemonic !== 'slwi' ||
-      addi.mnemonic !== 'addi' ||
-      lwzx.mnemonic !== 'lwzx' ||
-      mtctr.mnemonic !== 'mtctr'
-    ) {
+    // THE DISPATCH BLOCK: after the bounds branch, the nearest transfer before the `bctr`.
+    let j = i - 1;
+    while (j >= 0 && !isXfer(instrs[j])) {
+      j--;
+    }
+    const bgt = instrs[j];
+    // `bgt DEF`, or `bgtlr` when the default arm is the return itself: mwcc bounds a switch whose
+    // default falls straight out of a leaf that way.
+    if (!bgt || !((bgt.mnemonic === 'bgt' && bgt.target !== undefined) || bgt.mnemonic === 'bgtlr')) {
       continue;
     }
-    const rV = mtctr.ops[0];
-    if (lwzx.ops[0] !== rV) {
+    // Each piece of the idiom is the LAST write of its register inside the block, so nothing between
+    // a def and its reader can have changed it. The order varies: mwcc 2.4.2 scales the index first,
+    // GC/1.2.5n forms the table's low half first.
+    const defIn = (r: string, before: number): number => {
+      for (let k = before - 1; k > j; k--) {
+        if (mayWriteGpr(instrs[k], r)) {
+          return k;
+        }
+      }
+      return -1;
+    };
+    const mi = i - 1;
+    const mtctr = instrs[mi];
+    if (mtctr?.mnemonic !== 'mtctr' || mi <= j) {
       continue;
-    } // rV = mem[rB + rIdx]
+    }
+    const li = defIn(mtctr.ops[0], mi); // rV = mem[rB + rIdx]
+    const lwzx = instrs[li];
+    if (lwzx?.mnemonic !== 'lwzx') {
+      continue;
+    }
     const [rB, rIdx] = [lwzx.ops[1], lwzx.ops[2]];
-    if (slwi.ops[0] !== rIdx || (slwi.ops[2] !== '2' && slwi.ops[2] !== '0x2')) {
+    const si = defIn(rIdx, li);
+    const slwi = instrs[si];
+    if (slwi?.mnemonic !== 'slwi' || (slwi.ops[2] !== '2' && slwi.ops[2] !== '0x2')) {
       continue;
     } // identity: rIdx = rS<<2
     const scrutReg = slwi.ops[1];
-    if (addi.ops[0] !== rB || parseImm(addi.ops[2]) !== 0) {
+    const ai = defIn(rB, li);
+    const lisI = ai < 0 ? -1 : defIn(instrs[ai].ops[1], ai);
+    const hoisted = ai < 0 ? hoistedTable(instrs, rB) : null;
+    let table: TableKey | null = hoisted;
+    if (ai >= 0) {
+      const [lis, addi] = [instrs[lisI], instrs[ai]];
+      // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the
+      // same evidence — both relocation types, one symbol, one addend — so a dispatch is never
+      // recovered from two instructions that never addressed the table together. It stays a
+      // separate pairing: it runs before the blocks exist, and it wants the table's NAME, for
+      // `readJumpTable`, not its address. It skips the naming policy deliberately — a table base is
+      // read here as data, never written into the candidate as an identifier — so the `@N` and
+      // `.`-prefixed symbols the address fold must refuse (292 of the corpus's `ADDR16` relocations)
+      // are harmless here.
+      table =
+        addi.mnemonic === 'addi' &&
+        parseImm(addi.ops[2]) === 0 &&
+        lis?.mnemonic === 'lis' &&
+        lis.ops[0] === addi.ops[1] &&
+        lis.reloc?.type === 'R_PPC_ADDR16_HA' &&
+        addi.reloc?.type === 'R_PPC_ADDR16_LO' &&
+        addi.reloc.sym === lis.reloc.sym &&
+        addi.reloc.addend === lis.reloc.addend
+          ? { sym: lis.reloc.sym, addend: lis.reloc.addend }
+          : null;
+    }
+    if (table === null) {
       continue;
-    } // rB = &table (lo) + 0
-    const rT = addi.ops[1];
-    // The table's base is the same `@ha`/`@l` pair the address fold consumes and must show the same
-    // evidence — both relocation types, one symbol, one addend — so a dispatch is never recovered
-    // from two instructions that never addressed the table together. It stays a separate pairing:
-    // it runs before the blocks exist, and it wants the table's NAME, for `readJumpTable`, not its
-    // address. It skips the naming policy deliberately — a table base is read here as data, never
-    // written into the candidate as an identifier — so the `@N` and `.`-prefixed symbols the
-    // address fold must refuse (292 of the corpus's `ADDR16` relocations) are harmless here.
-    const tableSym = lis.reloc?.sym;
+    }
+    // The block is pruned unread once the table is recovered, so it may hold the idiom and nothing
+    // else, nothing may branch into it past the bounds check, and none of the idiom may rewrite the
+    // scrutinee before the `slwi` scales it — the `switch_br` reads it at the bounds branch.
+    const idiom = new Set(hoisted === null ? [lisI, si, ai, li, mi] : [si, li, mi]);
     if (
-      lis.ops[0] !== rT ||
-      !tableSym ||
-      lis.reloc?.type !== 'R_PPC_ADDR16_HA' ||
-      addi.reloc?.type !== 'R_PPC_ADDR16_LO' ||
-      addi.reloc.sym !== tableSym ||
-      addi.reloc.addend !== lis.reloc.addend
+      instrs.slice(j + 1, i).some((_, o) => !idiom.has(j + 1 + o)) ||
+      instrs.slice(j + 1, si).some((x) => mayWriteGpr(x, scrutReg)) ||
+      entersBetween(instrs, bgt.addr, instrs[i].addr)
     ) {
       continue;
     }
-    // Bounds: the nearest preceding `cmplwi scrutReg,N-1 ; bgt DEF` guard. The `bgt` is itself a
-    // transfer, so match the pair directly (the cmplwi sits one instruction behind it); a different
-    // transfer before the guard ⇒ decline.
-    let bounds: { addr: number; n: number; def: number } | null = null;
-    for (let j = i - 6; j >= 1; j--) {
-      const bgt = instrs[j];
-      if (bgt.mnemonic === 'bgt' && bgt.target !== undefined) {
-        const c = instrs[j - 1];
-        if (c && c.mnemonic === 'cmplwi' && c.ops[c.ops.length - 2] === scrutReg) {
-          bounds = { addr: bgt.addr, n: parseImm(c.ops[c.ops.length - 1]) + 1, def: bgt.target };
-        }
-        break;
-      }
-      if (isXfer(bgt)) {
-        break;
-      }
-    }
-    if (!bounds || bounds.n < 2) {
+    const bound = boundsCompare(instrs, j, scrutReg);
+    if (bound === null || bound.n < 2) {
       continue;
     }
-    const caseAddrs = readJumpTable(ad, tableSym, 0, bounds.n);
+    const caseAddrs = readJumpTable(ad, table.sym, table.addend, bound.n);
     if (!caseAddrs) {
       continue;
     }
-    out.set(bounds.addr, { scrutReg, caseAddrs, defaultAddr: bounds.def, bctrAddr: instrs[i].addr });
+    out.set(bgt.addr, {
+      scrutReg,
+      cmpAddr: bound.addr,
+      caseAddrs,
+      defaultAddr: bgt.target ?? null,
+      bctrAddr: instrs[i].addr,
+      hoisted: hoisted === null ? null : { reg: rB, table: hoisted },
+    });
+  }
+  // A table's case is a branch target too, which `entersBetween` cannot see before the tables are
+  // read: one landing between a table's bounds compare and its indirect jump — its own table's or
+  // another's — enters that window as a branch would, and that table declines.
+  const cases = [...out.values()].flatMap((jt) => jt.caseAddrs);
+  for (const [at, jt] of out) {
+    if (cases.some((a) => a > jt.cmpAddr && a <= jt.bctrAddr)) {
+      out.delete(at);
+    }
   }
   return out;
 }
@@ -308,7 +425,9 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
     for (const a of jt.caseAddrs) {
       leaders.add(a);
     }
-    leaders.add(jt.defaultAddr);
+    if (jt.defaultAddr !== null) {
+      leaders.add(jt.defaultAddr);
+    }
   }
 
   const blocks: PpcBlock[] = [];
@@ -329,6 +448,13 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
   const idxOf = new Map(blocks.map((b, i) => [b.startAddr, i]));
   const fallAddr = (b: PpcBlock) => (b.branch ?? b.body[b.body.length - 1]).addr + 4;
   const succIdx: number[][] = blocks.map(() => []);
+  /** A conditional return's taken edge: a block of its own that returns, appended past the real ones.
+   *  Its index. */
+  const synthReturn = (): number => {
+    blocks.push({ startAddr: -1 - blocks.length, body: [], branch: null, synthReturn: true });
+    succIdx.push([]);
+    return blocks.length - 1;
+  };
   blocks.forEach((b, i) => {
     const br = b.branch;
     // Recovered switch: the bounds block dispatches to its case blocks + default (the `cmplwi`/`bgt`
@@ -336,7 +462,13 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
     // leader, so all resolve; a target that is not a block boundary makes it malformed → loud-fail.
     const jt = br ? jts.get(br.addr) : undefined;
     if (jt) {
-      const succ = [...jt.caseAddrs, jt.defaultAddr].map((a) => idxOf.get(a));
+      const succ: Array<number | undefined> = jt.caseAddrs.map((a) => idxOf.get(a));
+      if (jt.defaultAddr !== null) {
+        succ.push(idxOf.get(jt.defaultAddr));
+      } else {
+        // A `bgtlr` bound: the default edge is a synthetic return, as for any conditional return.
+        succ.push(synthReturn());
+      }
       if (succ.some((x) => x === undefined)) {
         throw new PpcUnsupportedError(`cannot lift '${name}': jump-table target is not a block boundary`);
       }
@@ -360,10 +492,7 @@ function toBlocks(instrs: Instr[], name: string, jts: Map<number, PpcJT>): { blo
       return;
     }
     if (isCondReturn(br)) {
-      const synth: PpcBlock = { startAddr: -1 - blocks.length, body: [], branch: null, synthReturn: true };
-      const si = blocks.length;
-      blocks.push(synth);
-      succIdx.push([]);
+      const si = synthReturn();
       const fall = idxOf.get(br.addr + 4); // fall = instruction after the cond-return (no delay slot)
       succIdx[i] = fall !== undefined ? [si, fall] : [si];
       return;
@@ -612,7 +741,8 @@ export function lift(
   // placeholder (`lis r4,0` + R_PPC_ADDR16_HA sym): the real value is the symbol's half, and
   // lifting the 0 silently reads the wrong address — plausible-but-wrong C, the forbidden class.
   // The jump-table idiom's own @tbl pair never reaches this guard: a recovered dispatch block
-  // is the bounds branch's replaced fall-through, pruned as unreachable before decode.
+  // is the bounds branch's replaced fall-through, pruned as unreachable before decode, and a
+  // hoisted pair is decoded into a table base (`tableBases`).
   //
   // TWO refusals, because they are different problems and the reader acts on them differently. A
   // symbol the naming policy calls unspellable (frontend/reloc-symbol.ts) is a DEAD END: recovering
@@ -675,6 +805,9 @@ export function lift(
     }
   }
   const { blocks, succIdx } = toBlocks(instrs, name, jts);
+  refuseReachableDispatch(name, blocks, recoveredBctr, (m) => {
+    throw new PpcUnsupportedError(m);
+  });
   const savedRegs = prologueSavedRegs(blocks[0].body, target);
   // PREHEADER. A function whose first block is a branch target (`do b = b * b; while (--n);` is a
   // loop at the entry) would take its parameters as that loop header's phis. An empty block ahead
@@ -752,6 +885,18 @@ export function lift(
     lo: '@l',
     fail,
   });
+  /** The jump-table bases a recovered dispatch reads from outside its own block — the `@l` that
+   *  completes one defines no value but the base (frontend/jump-table.ts). */
+  const tableBases = makeTableBases(
+    [...jts.values()].flatMap((j) => (j.hoisted ? [j.hoisted] : [])),
+    fail,
+  );
+  /** What this frontend defines registers with that is no argument: a pending `@ha` half and a
+   *  table base. */
+  const placeholders = {
+    has: (v: Value) => highHalves.has(v) || tableBases.has(v),
+    guardRead: (n: string, r: string, v: Value) => tableBases.guardRead(n, r, highHalves.guardRead(n, r, v)),
+  };
   /** Reading a register AS A VALUE. A register holding a high half is not one, so this refuses loud
    *  rather than handing back a plausible number standing for an address. `foldLoHalf` is the only
    *  code entitled to look at a high half, which is why it reaches `readVar` directly. */
@@ -762,7 +907,7 @@ export function lift(
           `does not name is not modelled`,
       );
     }
-    const v = highHalves.guardRead(name, r, readVar(r, at));
+    const v = placeholders.guardRead(name, r, readVar(r, at));
     const nv = nonValues.get(v);
     if (nv !== undefined && NON_VALUE_RULES[nv.kind].refuseAtRead) {
       refuseNonValue(nv);
@@ -936,9 +1081,161 @@ export function lift(
       : `the return block '${name}' synthesizes`;
 
   // A FLOAT RETURN is decided for the whole function (frontend/fpu.ts `writesFloatReturn`), and then
-  // r3 is scratch like any other integer register.
+  // r3 is scratch like any other integer register. A table base left in r3 is no return value, as a
+  // pending half is none (`placeholders`); reading one would refuse, and a merge of one with a value
+  // still does.
   const returnOperands = (bi: number): Value[] =>
-    floatReturn ? [readReg(fpu!.returnReg, bi)] : ssa.hasReachingDef(RET, bi) ? [readReg(RET, bi)] : [];
+    floatReturn
+      ? [readReg(fpu!.returnReg, bi)]
+      : ssa.hasReachingDef(RET, bi, (v) => !placeholders.has(v))
+        ? [readReg(RET, bi)]
+        : [];
+  // A RETURN NOTHING WROTE r3 FOR STILL RETURNS r3 — the caller's value, which on PowerPC is the
+  // first argument. `int f(int a, int x) { if (x) return a; … return 5; }` is `cmpwi r4,0 ; bnelr`:
+  // that path neither reads nor writes r3, so `returnOperands` finds no definition and returns
+  // nothing, while every other path returns a word — C that falls off the end of an `int` function,
+  // and that loses `a`. Whether the function returns a word is known only once every block is
+  // filled, so a bare return is recorded here and given r3's entry value after the fill
+  // (`returnUntouchedArg`) when another return hands back a word. Only where r3 still holds the
+  // entry value on every path into it: a path a call destroyed r3 on returns nothing a C expression
+  // names, and stays bare.
+  //
+  // AND ONLY WHERE r3 IS AN ARGUMENT AT ALL (`r3IsAnArgument`). "r3 still holds what the caller
+  // left" says nothing about whether the caller left anything: `void f(void) { if (gA & 2) return;
+  // gB++; }` uses r3 as a temporary on the other path, so that path "returns a word", and filling
+  // the bare return would mint a parameter the ABI never passed — `f(s32 a0)`, which contradicts a
+  // declared `void f(void)` (the candidate does not compile) and a C++ `__Fv` mangling.
+  const bareReturns: Array<{ op: Op; bi: number }> = [];
+  const wordReturns: number[] = [];
+  let wordReturn = false;
+  const emitReturn = (ops: Op[], bi: number) => {
+    const op = mkOp('ret', { operands: returnOperands(bi) });
+    ops.push(op);
+    if (floatReturn) {
+      return;
+    }
+    if (op.operands.length > 0) {
+      wordReturn = true;
+      wordReturns.push(bi);
+    } else {
+      bareReturns.push({ op, bi });
+    }
+  };
+  /** Whether every word return hands back a value computed ONLY to be returned: on every path into
+   *  it, r3's last write is an op with no effect and no memory read (`spelledWhenDead` answers no)
+   *  whose value nothing but a return reads, directly or through the joins that carry it there.
+   *
+   *  The evidence is the compiler's, the claim `spelledWhenDead` already rests on: an optimizing
+   *  compiler deletes a pure computation nobody reads, so one that survives with a return as its
+   *  only reader was written for that return, and the function returns a word. `int f(int a) {
+   *  switch (gS) { case 0: return 3; … } return a; }` is `li r3,3 ; blr` on every case and a bare
+   *  `blr` out of range. A temporary is read again (`lwz r3,gB ; addi r0,r3,1`), and a
+   *  call's result and a load are excluded — a void function's call leaves its callee's result in
+   *  r3, and a discarded `volatile` read is a load nobody reads — so `void f(void) { if (gA & 2)
+   *  return; gB++; }` still answers no.
+   *
+   *  What it cannot tell apart is an `int f(void)` with a path that falls off its end: that path
+   *  returns whatever the caller left in r3 too, and is lifted as returning it — the bytes' own
+   *  behaviour, at the cost of a parameter the source did not name. A CodeWarrior C++ symbol says
+   *  so where there is one (`__Fv`), and a declaration always decides first. */
+  const r3WrittenToReturn = (): boolean => {
+    if (wordReturns.length === 0) {
+      return false;
+    }
+    const defOp = new Map<Value, Op>();
+    const incoming = new Map<Value, Value[]>();
+    const uses = new Map<Value, Array<Op | Value | undefined>>();
+    const push = <K, V>(m: Map<K, V[]>, k: K, v: V) => {
+      const l = m.get(k);
+      if (l) {
+        l.push(v);
+      } else {
+        m.set(k, [v]);
+      }
+    };
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        op.results.forEach((r) => defOp.set(r, op));
+        op.operands.forEach((v) => push(uses, v, op));
+        for (const s of op.successors) {
+          s.args.forEach((v, i) => {
+            const p = s.block.params[i] as Value | undefined;
+            push(uses, v, p);
+            if (p !== undefined) {
+              push(incoming, p, v);
+            }
+          });
+        }
+      }
+    }
+    // A join is followed to what it merges, and every value on the way may have only returns, or
+    // joins that are themselves read only by returns, as readers. A cycle adds nothing the first
+    // visit did not judge.
+    const returnOnly = (v: Value, seen: Set<Value>): boolean => {
+      if (seen.has(v)) {
+        return true;
+      }
+      seen.add(v);
+      return (uses.get(v) ?? []).every(
+        (u) => u !== undefined && ('opcode' in u ? u.opcode === 'ret' : returnOnly(u, seen)),
+      );
+    };
+    const computed = (v: Value, seen: Set<Value>): boolean => {
+      if (seen.has(v)) {
+        return true;
+      }
+      seen.add(v);
+      if (!returnOnly(v, new Set())) {
+        return false;
+      }
+      const op = defOp.get(v);
+      if (op !== undefined) {
+        return !spelledWhenDead(op);
+      }
+      // an entry parameter (the caller's value) merges nothing
+      const ins = incoming.get(v);
+      return ins !== undefined && ins.every((a) => computed(a, seen));
+    };
+    return wordReturns.every((bi) => ssa.everyReachingDef(RET, bi, (v) => computed(v, new Set())));
+  };
+  /** Whether the caller passes r3, so a bare return of it hands back an argument. A declaration
+   *  decides when there is one: a non-void return and at least one integer-class parameter (the
+   *  first such takes r3) or a nonzero register count. Without one, only the body can show it: r3
+   *  is already an entry parameter, or a higher argument register is live in, which puts an
+   *  argument in r3 by position (the obligation `mintArgSlotHoles` discharges), or every word
+   *  return hands back a value computed only to be returned (`r3WrittenToReturn`) — then the
+   *  function returns a word, and a bare return of it hands back what the caller left in r3. */
+  const r3IsAnArgument = (): boolean => {
+    const own = prototypes[name];
+    if (declaresVoidReturn(own)) {
+      return false;
+    }
+    if (typeof own?.params === 'number') {
+      return own.params > 0;
+    }
+    if (Array.isArray(own?.params)) {
+      return own.params.some((t) => declaredWidth(t) !== undefined);
+    }
+    const live = new Set(irBlocks[0].params.map((p) => paramReg.get(p)));
+    if (ARG_REGS.some((r) => live.has(r))) {
+      return true;
+    }
+    // A CodeWarrior C++ symbol is a declaration of its own parameters: `ksNesInit13__Fv` is a free
+    // function of none, which no body evidence overrides.
+    const mangled = demangle(name);
+    return !(mangled !== null && mangled.cls === undefined && mangled.params.length === 0) && r3WrittenToReturn();
+  };
+  const returnUntouchedArg = () => {
+    if (!wordReturn || bareReturns.length === 0 || !r3IsAnArgument()) {
+      return;
+    }
+    for (const { op, bi } of bareReturns) {
+      const v = ssa.entryValue(RET, bi);
+      if (v !== undefined) {
+        op.operands = [v];
+      }
+    }
+  };
 
   const fillBlock = (b: PpcBlock, bi: number) => {
     const ops = irBlocks[bi].ops;
@@ -946,8 +1243,7 @@ export function lift(
 
     // A synthetic conditional-return block: just return the current return register.
     if (b.synthReturn) {
-      const retOps = returnOperands(bi);
-      ops.push(mkOp('ret', { operands: retOps }));
+      emitReturn(ops, bi);
       return;
     }
 
@@ -1262,6 +1558,20 @@ export function lift(
       const hi = highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
       return emitGaddr(hi.sym);
     };
+    /** `addi rD,rHi,SYM@l` completing the base of a jump table a dispatch reads from outside its
+     *  block: the pair is proven as `foldLoHalf` proves it, and rD holds the table base. */
+    const foldTableBase = (ins: Instr, rHi: string): Value | null => {
+      const lo = ins.reloc!;
+      const key = { sym: lo.sym, addend: lo.addend };
+      if (!tableBases.wants(key)) {
+        return null;
+      }
+      relocTaken = true;
+      highHalves.pair(relocSite(ins), rHi, readVar(rHi, bi), lo.sym, (h) => h.addend === lo.addend);
+      const v = mkValue(T.unk(32));
+      tableBases.record(v, key, ins.addr);
+      return v;
+    };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
       const { base, off } = memOperand(ins, mem);
       emit('load', d, [base], { off, width, signed });
@@ -1356,8 +1666,8 @@ export function lift(
             bi,
             read,
             write,
-            // a pending `@ha` half is not an argument
-            highHalves,
+            // a pending `@ha` half and a table base are no argument
+            placeholders,
             guess: {
               // a gap in the argument registers refuses, naming this address (`fallbackArgc`)
               at: ins.addr,
@@ -1509,9 +1819,14 @@ export function lift(
                   `is '${s}', not the expected 0 placeholder`,
               );
             }
+            // A jump table's own name is read as data and never written down, so the naming policy
+            // does not ask it; RELA pairs a half only with a low half of the same symbol and addend,
+            // and that one, with no immediate of its own, makes a table base (`foldTableBase`).
+            const table = tableBases.wants({ sym: ins.reloc.sym, addend: ins.reloc.addend });
+            relocTaken = true;
             const hi = mkValue(T.unk(32));
             highHalves.record(hi, {
-              sym: spellableSym(ins),
+              sym: table ? ins.reloc.sym : spellableSym(ins),
               addend: ins.reloc.addend,
               addr: ins.addr,
               mnemonic: ins.mnemonic,
@@ -1559,6 +1874,11 @@ export function lift(
           // level": no row in this benchmark reaches them. Each refuses at its own guard, and a
           // high half none of them consumed is caught by `readReg` or by the dangling-`@ha` check.
           if (mnem === 'addi' && ins.reloc?.type === 'R_PPC_ADDR16_LO') {
+            const base = parseImm(t) === 0 ? foldTableBase(ins, s) : null;
+            if (base !== null) {
+              write(d, base);
+              break;
+            }
             const g = foldLoHalf(ins, s, t);
             if (ins.reloc.addend === 0) {
               write(d, g);
@@ -1895,6 +2215,9 @@ export function lift(
     // dispatch (`lis…lwzx;mtctr;bctr`) are subsumed.
     const jt = br ? jts.get(br.addr) : undefined;
     if (jt) {
+      if (jt.hoisted) {
+        tableBases.demand(jt.hoisted, bi, jt.bctrAddr);
+      }
       pushSwitchBr(
         ops,
         readReg(jt.scrutReg, bi),
@@ -1987,7 +2310,7 @@ export function lift(
             `terminator and no successor${last ? `; its last instruction is at 0x${last.addr.toString(16)}` : ''})`,
         );
       }
-      ops.push(mkOp('ret', { operands: returnOperands(bi) }));
+      emitReturn(ops, bi);
       return;
     }
     // unconditional branch
@@ -1998,10 +2321,12 @@ export function lift(
     fillBlock(b, bi);
     ssa.markFilled(bi);
   });
+  returnUntouchedArg();
   // A high half no `@l` ever completed — every `@l` consumer this frontend does not model (`ori`, a
   // float load's displacement) lands here, which is what keeps "not modelled" from becoming "not
   // emitted".
   highHalves.assertAllConsumed(name);
+  tableBases.prove(name, ssa);
   // A value stored to the frame that nothing reloads is either a home the body never reads or an
   // OUTGOING stack argument (`stw r4,8(r1)` before a nine-argument `bl` passes the ninth in the
   // callee's parameter area, as ac-decomp's `aQMgr_order_decide_trade_*` do). The two are the same
@@ -2018,6 +2343,7 @@ export function lift(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   ssa.finish();
   highHalves.assertNoneEscaped(name, irBlocks);
+  tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
   assertNoNonValueEscaped(irBlocks);
   assertNonValuesConsumed();
