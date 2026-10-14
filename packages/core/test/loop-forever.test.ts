@@ -6,8 +6,8 @@
 // loop with a `break` (`loop-dowhile-break.test.ts`) — is spelled `while (1)`: every edge back to
 // the header is a continue (implicit at the foot of the region, `continue;` above it), every edge
 // out is a `break` to the one exit the loop is given or an early `return`. An `if` in the body
-// joins where the paths that do not end meet (`loopJoin` with `endsCut`), so an arm that continues does not
-// drag the rest of the iteration into its sibling. The header's params are named as any loop's are,
+// joins where the paths that do not end meet (`loopJoin` with `endsCut`), so an arm that continues
+// does not drag the rest of the iteration into its sibling. The header's params are named as any loop's are,
 // before the body's values: a value the body computes never takes the name of a param the body
 // still reads.
 //
@@ -791,9 +791,9 @@ test('a loop no edge leaves ends the arm that enters it', () => {
 });
 
 // THE VBLANK WAIT AT THE FOOT OF A MAIN LOOP. With the edges back to the header deleted, the inner
-// wait loop keeps only its own back edge, so its paths never end and no `if` above it found a join:
-// each re-emitted the rest of the body, the wait loop 2^k times for k ifs (sa3 EngineMainLoop
-// lifted to 650 lines). A cycle no path leaves now ends its paths at its edge out.
+// wait loop keeps only its own back edge, so its paths never end and no `if` above it would find a
+// join: each would re-emit the rest of the body, the wait loop 2^k times for k ifs. A cycle no path
+// leaves ends its paths at its edge out.
 
 /** `while (1) { if (g(0)) h(1); else h(2); if (g(1)) h(3); else h(4); while (q() == 3); }` */
 const WAIT_AT_FOOT = `fn waitfoot {

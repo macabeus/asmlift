@@ -14,11 +14,11 @@
 // loop-invariant back-edge argument read inside the entry's own expression is itself there, not the
 // param it feeds.
 //
-// `normalize` adds the equalities the re-roll needs and guard fusion does not yet take: an `add` or
+// `normalize` adds the equalities the re-roll needs and guard fusion does not take: an `add` or
 // `or` of a constant 0 on EITHER side, commutative operands in either order, and a load off
 // `base + c` as the same load off `base` at its offset plus `c` (`str[0]` against `str[i]` at
 // `i = 0`). Each is an identity of the integer operators, so turning it on for guard fusion is a
-// spelling decision for the round that measures it, not a soundness one.
+// spelling decision, not a soundness one.
 import { Op, Value } from './core';
 import { spelledWhenDead } from './discipline';
 import { NEGATED_ICMP } from './opcodes';

@@ -850,7 +850,7 @@ test('an arm another path also enters is not a `break` arm, and the loop decline
 // `for (i = 0; i < 3; i++) { if (a(v)) v = x(v); else if (b(v)) v = y(v); else break; z(v); } out();`
 // — `synthetic:loop_elsebreak`'s shape. The first `if`'s paths meet at `z(v)` inside the body, but one
 // of them can leave by the `break`, so its CFG post-dominator is the loop's exit. Joined there, its
-// in-body arm walked through the latch back into the header and declined. Its join is the body's.
+// in-body arm would walk through the latch back into the header (`onStack`). Its join is the body's.
 const ELSE_BREAK = `fn elsebreak {
 ^bb0(%0: s32):
   %1: s32 = const {value=0}

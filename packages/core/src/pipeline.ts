@@ -335,10 +335,10 @@ export interface RaiseHooks {
  *  (raise/pre-structure.ts: empty latches, exit trampolines, peeled loop tests). `verify` after
  *  every pass that changed the IR.
  *
- *  Return-sinking and latch folding look ordered and are not: running latch folding FIRST instead changes
- *  nothing across a 3337-function agbcc corpus. Worth saying, because folding an empty block ahead
+ *  Return-sinking and latch folding look ordered and are not: running latch folding FIRST instead
+ *  changes nothing across a 3337-function agbcc corpus. Worth saying, because folding an empty block ahead
  *  of return-sinking does take away `br` predecessors it needs — the dominance gate is what makes
- *  that unreachable, since the blocks retsink wants are never back-edge sources. It goes last
+ *  that unreachable, since the blocks retsink wants are never back-edge sources. The folds go last
  *  because that is where the CFG stops moving.
  *
  *  The tail is three separate parameters rather than an options bag on purpose: this is the

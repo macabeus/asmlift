@@ -23,8 +23,8 @@
 //     parallel block-argument update, sequentialised so an assignment never clobbers a
 //     value a later one still needs.
 //
-// Module layout: loop DISCOVERY is ../ir/loops.ts (raise/ reads it too); the pure ANALYSIS phase (use registry, liveness,
-// materialization) is analysis.ts; comparison-tree switch recovery is switch-recover.ts
+// Module layout: loop DISCOVERY is ../ir/loops.ts (raise/ reads it too); the pure ANALYSIS phase
+// (use registry, liveness, materialization) is analysis.ts; comparison-tree switch recovery is switch-recover.ts
 // (explicit-deps factory). THIS file keeps the mutually-entangled remainder: SSA-destruction
 // coalescing (canTakeName + seeding) and emission (structureBlock + the loop emitters) — they
 // share varName/backArgName mutation and the activeSub/loopCtx dynamic state.
@@ -1113,10 +1113,9 @@ interface LoopArm {
   owned: Set<Block>;
 }
 
-// A `break` whose arm RUNS CODE first: `if (t[i] == 7) { gHit = 1; break; }`. The arm's blocks sit
-// outside the natural loop (they never reach the latch), so it is a second exit target; it is one
-// exit with code on the way when the arm is a region entered only by this edge, holding no `ret`,
-// every way out of which lands on the loop's exit (`codeBreakArm`).
+// A `break` whose arm RUNS CODE first: `if (t[i] == 7) { gHit = 1; break; }`. The arm's blocks never
+// reach the latch, so they sit outside the natural loop as a second exit target; `codeBreakArm`
+// says when they are one exit with code on the way.
 interface BreakArm {
   from: Block;
   to: Block;
@@ -2208,27 +2207,6 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
   }
   return false;
 }
-// An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
-// every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
-// return site just sets the return register and branches there, so a second body exit that lands on
-// such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
-// merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
-// declining as "multi-exit".
-//
-// The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
-// twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
-// is a FIDELITY rule, not a soundness one: a store or call written twice is source no compiler
-// would have produced from this asm, and the region it drags along is unbounded. A block escapes
-// that on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
-// runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
-// first half, since two predecessors cannot both dominate it. And the region must not be reachable
-// from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
-// post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
-// `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
-// exit reached `to`. The shared epilogue an arm branches to still has to be pure.
-//
-// Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
-// of the update — or null when this is not an early-`return` arm.
 /** The arm `from -> to` breaks to `exit` after running code: `to` is entered by that edge alone, and
  *  the region it heads holds no `ret`, re-enters no `body` block, admits no edge from outside itself,
  *  and leaves only for `exit`. Returns that region, or null. Each region block is then written once,
@@ -2264,6 +2242,27 @@ function codeBreakArm(
   const entered = (x: Block) => (preds.get(x) ?? []).every((p) => region.has(p) || (x === to && p === from));
   return leaves && [...region].every(entered) ? region : null;
 }
+// An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
+// every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
+// return site just sets the return register and branches there, so a second body exit that lands on
+// such a chain is an early RETURN, not a break to a live merge — which is what lets two returns
+// merged through a shared `bx lr` recover as a `while` with an in-body early `return` instead of
+// declining as "multi-exit".
+//
+// The arm is structured AT the edge, so any block in it that a second path also reaches is emitted
+// twice. A duplicated `return v` is harmless — both copies sit on mutually exclusive paths, so this
+// is a FIDELITY rule, not a soundness one: a store or call written twice is source no compiler
+// would have produced from this asm, and the region it drags along is unbounded. A block escapes
+// that on two counts. `from` dominates `to` and `to` dominates the block, so every path reaching it
+// runs this edge's predecessor and then this region — and only one edge into `to` can satisfy the
+// first half, since two predecessors cannot both dominate it. And the region must not be reachable
+// from the loop's own exit, which dominance does NOT rule out: an arm landing straight on the
+// post-loop join dominates itself, and claiming it would emit the epilogue on both paths. Testing
+// `to` covers the whole region — a block dominated by `to` that the exit reached would mean the
+// exit reached `to`. The shared epilogue an arm branches to still has to be pure.
+//
+// Returns the blocks the arm OWNS — its exclusive part, which the loop emits inside its body, ahead
+// of the update — or null when this is not an early-`return` arm.
 function earlyReturnArm(
   { dom, reachFrom }: EarlyReturnArmDeps,
   from: Block,
@@ -5848,14 +5847,13 @@ export function structure(
         // skipped. Structural equality is a sufficient proof, never a necessary one: `str[0]` and
         // `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test
         // spelled differently. The first is one of the identities `sameAtEntry` (ir/entry.ts) reads
-        // under `normalize`, which the raise re-roll turns on; this caller does not yet, because
-        // turning it on re-spells rows (agbcc `while (s[i]) i++` then fuses into a `for`) and is
-        // that round's to measure. The second has no reading at all. An unproven guard KEEPS its
-        // `if`, with the loop as a `do-while` inside it — every test the asm performs is emitted as
-        // itself. The proof still gates the SINK below:
-        // a sunk copy runs once per iteration, and only the proof (fused form) or the kept `if`
-        // makes the zero-trip path skip it. The kept `if` would widen the sink's key to unproven
-        // guards too; no row needs that yet, so it stays keyed on the proof.
+        // under `normalize`, which the raise re-roll turns on; this caller keeps it off, since it
+        // re-spells rows (agbcc `while (s[i]) i++` fuses into a `for`). The second has no reading.
+        // An unproven guard KEEPS its `if`, with the loop as a `do-while` inside it — every test
+        // the asm performs is emitted as itself. The proof still gates the SINK below: a sunk copy
+        // runs once per iteration, and only the proof (fused form) or the kept `if` makes the
+        // zero-trip path skip it. The kept `if` would widen the sink's key to unproven guards too;
+        // no row needs that yet, so it stays keyed on the proof.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
@@ -6261,11 +6259,9 @@ export function structure(
     // the `else break;` of an if/else-if chain — has the loop's exit as its CFG join, and its in-body
     // arm walked from there through the latch back into the header (`onStack`). Its join is where its
     // paths that stay in the body meet: the post-dominator over the body with the back edges and the
-    // exits deleted (`loopJoin`). Asked only where the CFG join leaves the body, no clamp applies
-    // and an arm stays in the body — every input that reached that state declined before — and where
-    // every way out of the body from here is a `break`, the loop's own exit edge or an early-`return`
-    // arm the loop owns (`leavesByOwnedEdges`): a `ret` target nothing owns is copied wherever it is
-    // reached, and joining inside the body would write its tail into the arm as well.
+    // exits deleted (`loopJoin`). Asked only where the CFG join leaves the body, no clamp applies,
+    // one successor stays in the body, and every way out of the body from here is one the loop
+    // renders in place (`leavesByOwnedEdges`).
     const tested =
       loopCtx !== null &&
       inForever === undefined &&
@@ -6609,9 +6605,9 @@ export function structure(
       // A CYCLE NO PATH LEAVES. An inner loop at the foot of the body — the vblank wait closing a
       // `while (1)` main loop, `while (q() == 3);` — keeps only its own back edge once the edges
       // to the header and to the ends are deleted, so its paths never end and post-dominance
-      // over it is undefined: no branch above it found a join, and each re-emitted the rest of the
-      // body, doubling per `if`. Such a block ends its path at the edge it leaves the cycle by. A
-      // block that reaches an end keeps its edges as they are, so no join that was defined moves.
+      // over it is undefined: no branch above it would find a join, and each would re-emit the rest
+      // of the body, doubling per `if`. Such a block ends its path at the edge it leaves the cycle
+      // by. A block that reaches an end keeps its edges as they are, so no defined join moves.
       const reachesEnd = new Set<Block>();
       for (let grew = true; grew;) {
         grew = false;
@@ -7662,11 +7658,11 @@ export function functionPostDominators(
   return postDominators(fn, undefined, undefined, new Set(exitless));
 }
 
-// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do the
-// blocks of `ends` besides their own successors. Over the
-// subgraph `keep` induces when given, every member of which must still reach a `ret` inside it — or,
-// with `onward`, over only the edges it names between members of `keep` (and to EXIT, where it
-// names `null`): a block it names no edge from ends its paths, post-dominated by nothing but itself.
+// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do
+// the blocks of `ends` besides their own successors. Over the subgraph `keep` induces when given,
+// every member of which must still reach a `ret` inside it — or, with `onward`, over only the edges
+// it names between members of `keep` (and to EXIT, where it names `null`): a block it names no edge
+// from ends its paths, post-dominated by nothing but itself.
 function postDominators(
   fn: Fn,
   keep?: ReadonlySet<Block>,
