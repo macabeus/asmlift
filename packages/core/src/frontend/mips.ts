@@ -39,7 +39,14 @@ import { mkEmitKit, pushSwitchBr } from './emit';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
-import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange, liftWithRelift } from './frame-objects';
+import {
+  FRAME_OBJECT_AUDIT,
+  type FrameObjectRelift,
+  type FrameRange,
+  areaAboveOutgoing,
+  landsOnArea,
+  liftWithRelift,
+} from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
 import {
@@ -52,7 +59,14 @@ import {
 } from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
-import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgKey, stackArgSlots, stackSlotKey } from './ssa';
+import {
+  type ArgSlots,
+  abiSortEntryParams,
+  incomingStackArgKey,
+  mintArgSlotHoles,
+  stackArgSlots,
+  stackSlotKey,
+} from './ssa';
 import { makeSsaBuilder } from './ssa';
 
 type Instr = DisasmInstr;
@@ -1183,9 +1197,7 @@ function liftOnce(
   const incomingStackKey = (ins: Instr, off: number): string | undefined => {
     const depth = depthAt?.get(ins);
     const entryOff = depth === undefined ? undefined : off - depth;
-    return entryOff !== undefined && entryOff >= STACK_ARGS_AT && entryOff % 4 === 0
-      ? stackArgKey(ARG_REGS.length + (entryOff - STACK_ARGS_AT) / 4)
-      : undefined;
+    return entryOff === undefined ? undefined : incomingStackArgKey(entryOff, STACK_ARGS_AT, ARG_REGS.length);
   };
 
   // THE FRAME'S SAVES. A word store of `ra`, or of a register O32 does not let a callee destroy,
@@ -2395,8 +2407,7 @@ export function measureO32Frame({
     if (!/\(/.test(last) || !isStackPtr(parseMem(last).base) || depth === frameSize) {
       continue;
     }
-    const at = parseMem(last).off - depth! + frameSize;
-    if (at < area.to && at + 4 > area.from) {
+    if (landsOnArea(area, parseMem(last).off - depth! + frameSize, 4)) {
       return null;
     }
   }
@@ -2418,16 +2429,14 @@ function o32LocalArea(
   rule: TargetDescription['compilerBehaviors']['o32LocalArea'],
   { frameSize, outgoingEnd, saves }: { frameSize: number; outgoingEnd: number; saves: readonly number[] },
 ): FrameRange | null {
-  let area: FrameRange;
   if (rule === 'above-outgoing-area') {
-    const from = Math.ceil(outgoingEnd / 8) * 8;
-    area = { from, to: Math.min(frameSize, ...saves.filter((o) => o >= from)) };
-  } else if (rule === 'above-saved-registers') {
-    area = { from: Math.max(outgoingEnd, ...saves.map((o) => o + 4)), to: frameSize };
-  } else {
-    return null;
+    return areaAboveOutgoing({ frameSize, outgoingEnd, saves, align: 8 });
   }
-  return area.from < area.to ? area : null;
+  if (rule === 'above-saved-registers') {
+    const area = { from: Math.max(outgoingEnd, ...saves.map((o) => o + 4)), to: frameSize };
+    return area.from < area.to ? area : null;
+  }
+  return null;
 }
 
 /** O32's slots: the shared register-then-stack-word rule (`stackArgSlots`), with a floating-point

@@ -21,6 +21,7 @@ import {
   STANDARD_SIGNATURES,
   declaredCallArgs,
   declaredReturnWidth,
+  declaredWidth,
   declaresAggregateReturn,
   declaresParams,
   declaresVoidReturn,
@@ -70,6 +71,21 @@ export interface DeclaredCall {
   readonly returned?: StructReturn | 'register';
 }
 
+/** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes: a value of one word
+ *  (`declaredWidth` sizes it at 32 bits or less), one wider than a word, a floating type
+ *  (`isFloatingSpelling`), or a spelling neither reads — a struct or union passed BY VALUE, or a
+ *  project typedef this cannot see through (`B_t`, `GXColor`), which `declaredCall` answers with
+ *  null for. A count (`{ params: 3 }`) states words. A frontend asks it where the answer `declaredCall`
+ *  gives — null for every one of the last two — is not enough: a by-value aggregate travels as the
+ *  address of a copy the caller builds in its own frame on mwcc, which a float never does. */
+export type ParamClass = 'word' | 'wide' | 'float' | 'unsized';
+
+/** One declared parameter: its class, and the spelling it was read from (empty for a count). */
+export interface DeclaredParam {
+  readonly kind: ParamClass;
+  readonly spelling: string;
+}
+
 /** What one call is, decided from its callee's declaration before any instruction is read. */
 export interface CallPlan {
   /** each argument's width, a hidden pointer first; null when nothing sizes them, so `lower`
@@ -103,6 +119,9 @@ export interface CallDeclarations {
   /** the callee's declared argument widths, for a frontend that places them before it lowers the
    *  call; null where no declaration sizes them */
   declaredCall(callee: string): DeclaredCall | null;
+  /** what each parameter the callee's declaration spells is (`ParamClass`), read through the tiers
+   *  `declaredCall` reads; null where no declaration states the parameters */
+  declaredParams(callee: string): readonly DeclaredParam[] | null;
   /** `lower`'s first half, the call decided from the declaration alone: a value its tests compare
    *  whole, where `lower` leaves IR */
   plan(callee: string): CallPlan;
@@ -299,6 +318,27 @@ export function callDeclarations(
   // A frontend that places the widths before it lowers the call runs this over every call, so a
   // refusal thrown here reaches the caller ahead of every other slot-model refusal, which is right
   // because it is the most specific thing that was seen.
+  const known = (t: Prototypes, callee: string) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+  /** the declaration a callee is read at: the project's, then the runtime table's, then the C
+   *  standard's (the tier order `declaredCall` gives the reasons for) */
+  const declarationOf = (callee: string): FnProto | undefined => {
+    const own = known(prototypes, callee);
+    return declaresParams(own) ? own : (known(helperProtos, callee) ?? known(STANDARD_SIGNATURES, callee));
+  };
+  const declaredParams = (callee: string): readonly DeclaredParam[] | null => {
+    const params = declarationOf(callee)?.params;
+    if (typeof params === 'number') {
+      return Array.from({ length: params }, () => ({ kind: 'word', spelling: '' }));
+    }
+    if (!Array.isArray(params)) {
+      return null;
+    }
+    return params.map((spelling) => {
+      const w = declaredWidth(spelling);
+      const kind = w !== undefined ? (w > 32 ? 'wide' : 'word') : isFloatingSpelling(spelling) ? 'float' : 'unsized';
+      return { kind, spelling };
+    });
+  };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
@@ -312,11 +352,9 @@ export function callDeclarations(
     //
     // `Object.hasOwn` on all three tables: a callee named `toString` or `valueOf` would otherwise
     // read a `Function` off `Object.prototype` as its prototype entry.
-    const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
-    const own = known(prototypes);
+    const own = known(prototypes, callee);
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
-    const proto = declaresParams(own) ? own : (known(helperProtos) ?? known(STANDARD_SIGNATURES));
-    const declared = declaredCallArgs(proto, target);
+    const declared = declaredCallArgs(declarationOf(callee), target);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -675,6 +713,7 @@ export function callDeclarations(
     callClobbers,
     returnsWithoutHiddenPointer: (callee) => returnsWithoutHiddenPointer(callee, prototypes, target),
     declaredCall,
+    declaredParams,
     plan,
     lower,
   };

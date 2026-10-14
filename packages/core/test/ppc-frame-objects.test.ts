@@ -96,16 +96,50 @@ describe('the local area a frame is partitioned by', () => {
   };
 
   test.each([
-    // [fixture, function, area]: past the linkage and the widest call's stack words, under the saves
+    // [fixture, function, area]: past the linkage, under the saves
     ['mwcc242-frame.txt', 'leafarr', { from: 8, to: 32 }],
     ['mwcc242-frame.txt', 'callarr', { from: 8, to: 32 }],
-    ['mwcc242-frame.txt', 'out9arr', { from: 12, to: 44 }],
-    ['mwcc242-frame.txt', 'out10arr', { from: 16, to: 44 }],
-    ['mwcc242-frame.txt', 'mixout', { from: 12, to: 28 }],
-    ['mwcc233-frame.txt', 'mixout', { from: 12, to: 36 }],
     ['mwcc242mp4-frame.txt', 'spillarr', { from: 8, to: 24 }],
   ] as const)('%s %s', (fixture, sym, area) => {
     expect(__testing.frameOf(sym, corpus(fixture), PPC_MWCC, PROBE_PROTOS)?.area).toEqual(area);
+  });
+
+  // The measured rule puts the area past the widest call's stack words (mwcc-frame-probes.test.ts);
+  // no call this frontend lowers takes one, so a declaration that says it may refuses where the
+  // area is drawn rather than only where the call is lowered.
+  test.each([
+    ['mwcc242-frame.txt', 'out9arr', /'h9', called at 0x\w+, is declared with 9 parameter words/],
+    ['mwcc242-frame.txt', 'out10arr', /'h10', called at 0x\w+, is declared with 10 parameter words/],
+    ['mwcc242-frame.txt', 'mixout', /'h9', called at 0x\w+, is declared with 9 parameter words/],
+    ['mwcc233-frame.txt', 'mixout', /'h9', called at 0x\w+, is declared with 9 parameter words/],
+  ] as const)('%s %s: a call that takes stack words refuses the area', (fixture, sym, why) => {
+    expect(() => __testing.frameOf(sym, corpus(fixture), PPC_MWCC, PROBE_PROTOS)).toThrow(why);
+    expect(() => decompile(sym, corpus(fixture), PPC_MWCC, { prototypes: PROBE_PROTOS })).toThrow(why);
+  });
+
+  test('a 64-bit parameter refuses the area: the EABI aligns its pair, so a word count cannot place the stack words', () => {
+    // `h(s32, s64, s64, s64, s32)` is eight words packed, but the pairs take r5:r6, r7:r8 and r9:r10,
+    // skipping r4, so the last s32 is staged at 8(r1), inside an area drawn from 8
+    const staged = [
+      'stwu    r1,-32(r1)',
+      'mflr    r0',
+      'stw     r0,36(r1)',
+      'addi    r3,r1,12',
+      'bl fill',
+      ...[3, 5, 6, 7, 8, 9, 10].map((r) => `li      r${r},${r}`),
+      'li      r0,5',
+      'stw     r0,8(r1)',
+      'bl h',
+      'lwz     r3,12(r1)',
+      'lwz     r0,36(r1)',
+      'mtlr    r0',
+      'addi    r1,r1,32',
+      'blr',
+    ];
+    const protos = { ...PROTOS, h: { params: ['s32', 's64', 's64', 's64', 's32'], returnsVoid: true } };
+    expect(() => __testing.frameOf('f', fn('f', staged), PPC_MWCC, protos)).toThrow(
+      /'h', called at 0x\w+, is declared with a 64-bit parameter/,
+    );
   });
 
   test('nothing is partitioned where nothing takes a frame address or reaches it below a word', () => {
@@ -238,7 +272,39 @@ describe('what the local area refuses', () => {
 
   test('a struct passed by value: mwcc passes the address of a frame copy', () => {
     expect(() => lift('f', frame(['li      r3,1', 'addi    r4,r1,8', 'bl tb', ...tail]))).toThrow(
-      /takes its parameter 2 as 'struct B' by value/,
+      /takes its parameter 2 as 'struct B', which no word holds: a struct or union passed by value/,
+    );
+  });
+
+  test('…and one a header spells through a typedef, as GXColor and Vec are', () => {
+    // the copy built from `*p` (r5) at r1+8, its address in r4: `tbT(1, *p)` with `B_t` a struct
+    const copy = ['lwz     r0,0(r5)', 'stw     r0,8(r1)', 'lwz     r0,4(r5)', 'stw     r0,12(r1)'];
+    expect(() =>
+      lift('f', frame([...copy, 'li      r3,1', 'addi    r4,r1,8', 'bl tbT', ...tail]), {
+        tbT: { returns: 's32', params: ['s32', 'B_t'] },
+      }),
+    ).toThrow(/takes its parameter 2 as 'B_t', which no word holds/);
+  });
+
+  test('a floating parameter is no by-value copy, and keeps its own refusal', () => {
+    expect(() =>
+      lift('f', frame(['addi    r3,r1,8', 'bl fill', 'li      r3,1', 'bl fl', 'lwz     r3,8(r1)', ...tail]), {
+        ...PROTOS,
+        fl: { params: ['s32', 'f32'], returnsVoid: true },
+      }),
+    ).toThrow(/'fl' is declared to take f32 as its parameter 2, which travels in the FPU's registers/);
+  });
+
+  test('a branch out of the function: a tail call takes the caller-owned words as its own arguments', () => {
+    // a dead store in a leaf is a local only while no other function runs on this frame's behalf
+    const leaf = ['stwu    r1,-32(r1)', 'stw     r3,8(r1)', 'addi    r1,r1,32'];
+    const out = fn('f', [...leaf, 'b       @64']);
+    expect(() => __testing.frameOf('f', out, PPC_MWCC, PROTOS)).toThrow(/the 'b' at 0xc leaves the function/);
+    expect(() => decompile('f', out, PPC_MWCC, { prototypes: PROTOS })).toThrow(/the 'b' at 0xc leaves the function/);
+    // relocated, objdump prints it at its own address, which would read as a loop
+    const reloc = `0 <f>:\n0:\tli      r3,1\n4:\tb       4 <f+0x4>\n\t\t\t4: R_PPC_REL24\tother\n`;
+    expect(() => decompile('f', reloc, PPC_MWCC, { prototypes: PROTOS })).toThrow(
+      /the 'b' at 0x4 leaves the function for 'other' — a tail call is not modelled/,
     );
   });
 

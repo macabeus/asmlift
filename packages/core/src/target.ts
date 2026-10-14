@@ -605,14 +605,18 @@ export interface TargetDescription {
     // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
     o32LocalArea?: 'above-outgoing-area' | 'above-saved-registers';
     // WHERE A FUNCTION THAT PUSHES ONE FRAME KEEPS ITS LOCALS, on a target whose frame starts with a
-    // fixed LINKAGE area: the bytes at the pushed stack pointer that hold the back chain and the
-    // callee's link-register save word. Above it the OUTGOING area holds the stack words of the
-    // widest call (none in a function whose calls take none), and the locals and spill temps share
-    // what is left below the lowest saved register:
-    //   [linkageBytes + 4 * (stack words of the widest call), lowest saved register)
-    // in post-push offsets. The PPC frontend hands it to the frame-object audit as
-    // `ownedLocals`/`declaredLocals`. No object start inside it is fixed: the compiler chooses
-    // where in the area each local goes.
+    // fixed LINKAGE area — the back chain and the callee's link-register save word, which the ABI
+    // fixes and the frontend states (`frontend/ppc.ts` `PARAM_AREA_AT`, where the caller's parameter
+    // area starts). Above it the OUTGOING area holds the stack words of the widest call (none in a
+    // function whose calls take none), and the locals and spill temps share what is left below the
+    // lowest saved register:
+    //   [linkage + 4 * (stack words of the widest call), lowest saved register)
+    // in post-push offsets — O32's `above-outgoing-area` rule (`o32LocalArea`) past a linkage area
+    // instead of the a0..a3 home, without the 8-byte rounding (`areaAboveOutgoing`). The PPC
+    // frontend hands it to the frame-object audit as `ownedLocals`/`declaredLocals`; a call it
+    // lowers takes no stack word, so it refuses one whose declaration may and draws the area from
+    // the linkage's end. No object start inside it is fixed: the compiler chooses where in the area
+    // each local goes.
     //
     // MEASURED on mwcc 2.3.3, 2.4.2 (at -O4,p and at Mario Party 4's -O0,p) and 2.4.7 off
     // `corpus/probe-mwcc-frame.c` (`scripts/regen-mwcc-frame-probes.ts`, read by
@@ -623,7 +627,7 @@ export interface TargetDescription {
     // takes 8 at -O0,p), which is why this is an area and not a start.
     //
     // Absent ⇒ no partition is claimed, and a captured frame address keeps its refusal.
-    linkageLocalArea?: { readonly linkageBytes: number };
+    linkageLocalArea?: 'above-outgoing-area';
     // How this compiler calls through a register: `bl <prefix><reg>` enters a runtime thunk that
     // branches to the address in <reg> with every register as the caller left it, so the call is
     // an indirect call through <reg> and the thunk is no function a source names. `regs` are the
@@ -1377,9 +1381,8 @@ export const PPC_MWCC: TargetDescription = {
     // frontend lifts to the same `sext` op agbcc's shift pair folds to — the position shape, on
     // another ISA. `synthetic:{sextb,tos8}:mwcc_242_81` are its rows, MATCH through that pass.
     narrowParamWitness: 'prologue-extension',
-    // MEASURED on all three builds: the note at the field. The linkage is the back chain and the
-    // callee's link-register save word.
-    linkageLocalArea: { linkageBytes: 8 },
+    // MEASURED on all three builds: the note at the field.
+    linkageLocalArea: 'above-outgoing-area',
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at

@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
+import { areaAboveOutgoing } from '../src/frontend/frame-objects';
 import { __testing } from '../src/frontend/ppc';
 import { PPC_MWCC } from '../src/target';
 
@@ -107,10 +108,13 @@ const STACK_WORDS: Record<string, number> = {
   twice9: 1,
 };
 
-// The PPC frontend's own partition (`frontend/ppc.ts` `linkageLocalArea`), asked of each probe.
-const rule = PPC_MWCC.compilerBehaviors.linkageLocalArea!;
+// The rule the target states (`compilerBehaviors.linkageLocalArea`), through the helper the PPC
+// frontend draws its partition with: past the linkage and the widest call's stack words, under the
+// saves. The frontend itself refuses a call that takes stack words, so only the zero-word rows are
+// areas it ever draws; the rest pin the rule it would extend to.
+const LINKAGE = __testing.PARAM_AREA_AT;
 const area = (f: Frame, stackWords: number) =>
-  __testing.linkageLocalArea(rule, { frameSize: f.size, stackWords, saves: f.saves })!;
+  areaAboveOutgoing({ frameSize: f.size, outgoingEnd: LINKAGE + 4 * stackWords, saves: f.saves, align: 4 })!;
 
 describe.each(['mwcc242-frame.txt', 'mwcc242mp4-frame.txt', 'mwcc247-frame.txt', 'mwcc233-frame.txt'])(
   '%s',
@@ -132,14 +136,14 @@ describe.each(['mwcc242-frame.txt', 'mwcc242mp4-frame.txt', 'mwcc247-frame.txt',
       const f = fs.get(fn)!;
       const a = area(f, STACK_WORDS[fn]);
       const outside = [...f.stores, ...f.loads].filter((o) => o < a.from || o >= a.to);
-      expect(outside.every((o) => o >= rule.linkageBytes && o < a.from)).toBe(true);
+      expect(outside.every((o) => o >= LINKAGE && o < a.from)).toBe(true);
       expect(f.loads.filter((o) => o < a.from)).toEqual([]);
     });
 
     test('a function that makes no call still pushes a frame, and its area starts past the linkage', () => {
       const f = fs.get('leafarr')!;
       expect(f.size).toBeGreaterThan(0);
-      expect(area(f, 0).from).toBe(rule.linkageBytes);
+      expect(area(f, 0).from).toBe(LINKAGE);
     });
 
     test('twice9: the ninth argument is stored to 8(r1) again between the two calls', () => {
@@ -157,10 +161,10 @@ describe.each(['mwcc242-frame.txt', 'mwcc242mp4-frame.txt', 'mwcc247-frame.txt',
   },
 );
 
-test('no partition without a stated layout, or with nothing left between the outgoing words and the saves', () => {
-  expect(__testing.linkageLocalArea(undefined, { frameSize: 32, stackWords: 0, saves: [28] })).toBeNull();
-  expect(__testing.linkageLocalArea(rule, { frameSize: 16, stackWords: 1, saves: [12] })).toBeNull();
-  expect(__testing.linkageLocalArea(rule, { frameSize: 64, stackWords: 0, saves: [52, 56, 60] })).toEqual({
+test('the target states the rule, and nothing is left between the outgoing words and a save at their end', () => {
+  expect(PPC_MWCC.compilerBehaviors.linkageLocalArea).toBe('above-outgoing-area');
+  expect(areaAboveOutgoing({ frameSize: 16, outgoingEnd: LINKAGE + 4, saves: [12], align: 4 })).toBeNull();
+  expect(areaAboveOutgoing({ frameSize: 64, outgoingEnd: LINKAGE, saves: [52, 56, 60], align: 4 })).toEqual({
     from: 8,
     to: 52,
   });
