@@ -692,7 +692,7 @@ test('a refused `break` to an exit that ends in a return copies the tail instead
  *  if (p[2] == 0) break; t += 3; } p++; if (--n < 0) break; } G = t; if (n > 5) t = 1; return t; }`.
  *  The `if (p[1] == m)` has `.L4`, the loop's exit, as its CFG join, since its inner `break` leaves
  *  for it. Joined there, `G = t; …; return t;` would render inside the body; joined where its paths
- *  that stay in the body meet (`loopBodyJoin`), the function is its own source. */
+ *  that stay in the body meet (`loopJoin`), the function is its own source. */
 const IF_JOINING_AT_THE_EXIT = `f:
 	push	{r4, r5, r6, lr}
 	add	r4, r0, #0
@@ -845,7 +845,7 @@ test('an arm another path also enters is not a `break` arm, and the loop decline
   expect(() => emit(shared)).toThrow(/unrecovered back-edge/);
 });
 
-// ── AN `else break;` INSIDE A TESTED LOOP (structure.ts `loopBodyJoin`) ─────────────────────────
+// ── AN `else break;` INSIDE A TESTED LOOP (structure.ts `loopJoin`) ─────────────────────────
 //
 // `for (i = 0; i < 3; i++) { if (a(v)) v = x(v); else if (b(v)) v = y(v); else break; z(v); } out();`
 // — `synthetic:loop_elsebreak`'s shape. The first `if`'s paths meet at `z(v)` inside the body, but one

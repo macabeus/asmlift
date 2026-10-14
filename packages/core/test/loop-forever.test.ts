@@ -6,7 +6,7 @@
 // loop with a `break` (`loop-dowhile-break.test.ts`) — is spelled `while (1)`: every edge back to
 // the header is a continue (implicit at the foot of the region, `continue;` above it), every edge
 // out is a `break` to the one exit the loop is given or an early `return`. An `if` in the body
-// joins where the paths that do not end meet (`foreverJoin`), so an arm that continues does not
+// joins where the paths that do not end meet (`loopJoin` with `endsCut`), so an arm that continues does not
 // drag the rest of the iteration into its sibling. The header's params are named as any loop's are,
 // before the body's values: a value the body computes never takes the name of a param the body
 // still reads.

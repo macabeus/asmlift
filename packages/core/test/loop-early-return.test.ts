@@ -228,7 +228,7 @@ test('a conditional-latch arm stores the value the IR read, not the updated one'
 // using it anyway makes each side re-emit everything from the meeting point down: with the clamp's
 // guard dropped this emits `*a0 = 200` twice, correct but doubled, and doubled again per nesting
 // level. ^bb6 is where they meet; ^bb5 is the arm that pushes the CFG join out of the loop. The join
-// over the body with that arm deleted (`loopBodyJoin`) is ^bb6, written once.
+// over the body with that arm deleted (`loopJoin`) is ^bb6, written once.
 const INNER_JOIN = `fn innerjoin {
 ^bb0(%0: s32*):
   %1: s32 = const {value=0}

@@ -6250,7 +6250,7 @@ export function structure(
     // this region — an admitted arm (its `return` terminates that path) or `stop` itself. Two sides
     // meeting somewhere further down instead would each re-emit everything from there to the bottom,
     // doubling per nesting level; those take the post-dominator computed over the body alone with
-    // the back edges and the arms DELETED (`loopBodyJoin`, below) — treating the arms as exits does
+    // the back edges and the arms DELETED (`loopJoin`, below) — treating the arms as exits does
     // not work, since post-dominance cannot express "where the paths that did not return meet".
     const clampToLoop =
       loopCtx !== null &&
@@ -6259,17 +6259,17 @@ export function structure(
       term.successors.some((sc) => isArm(sc.block) || sc.block === stop) &&
       term.successors.every((sc) => loopCtx!.body.has(sc.block) || isArm(sc.block));
     // In a `while (1)` body the join is the body's own, which the CFG's post-dominance cannot see
-    // (`foreverJoin`): a branch whose one arm continues is post-dominated, in the CFG, by wherever
+    // (`loopJoin`): a branch whose one arm continues is post-dominated, in the CFG, by wherever
     // the other arm leaves the loop from.
     const inForever = loopCtx === null ? undefined : foreverLoops.get(loopCtx.header);
     // A break arm's own blocks join as any code outside the loop does: they are not the body's.
     const inArm = loopCtx?.breakArms?.some((a) => a.region.has(b)) === true;
-    const bodyJoin = inForever === undefined || inArm ? undefined : foreverJoin(inForever, b);
+    const bodyJoin = inForever === undefined || inArm ? undefined : loopJoin(inForever, b, true);
     // THE SAME QUESTION IN A TESTED LOOP. A branch whose one way leads out of the body by a `break` —
     // the `else break;` of an if/else-if chain — has the loop's exit as its CFG join, and its in-body
     // arm walked from there through the latch back into the header (`onStack`). Its join is where its
     // paths that stay in the body meet: the post-dominator over the body with the back edges and the
-    // exits deleted (`loopBodyJoin`). Asked only where the CFG join leaves the body, no clamp applies
+    // exits deleted (`loopJoin`). Asked only where the CFG join leaves the body, no clamp applies
     // and an arm stays in the body — every input that reached that state declined before — and where
     // every way out of the body from here is a `break`, the loop's own exit edge or an early-`return`
     // arm the loop owns (`leavesByOwnedEdges`): a `ret` target nothing owns is copied wherever it is
@@ -6284,7 +6284,7 @@ export function structure(
       loopCtx.body.has(b) &&
       term.successors.some((sc) => loopCtx!.body.has(sc.block) && sc.block !== loopCtx!.header) &&
       leavesByOwnedEdges(loopCtx, b)
-        ? loopBodyJoin(loopCtx, b)
+        ? loopJoin(loopCtx, b, false)
         : undefined;
     const merge =
       bodyJoin !== undefined
@@ -6557,16 +6557,11 @@ export function structure(
     return out;
   };
 
-  // THE JOIN OF A BRANCH IN A `while (1)` BODY, over the body with its back edges and exits deleted.
-  // A block that only jumps back to the header or out of the loop, rendering nothing but that edge's
-  // copies, ENDS its path — a `continue`, a `break` — so it constrains no join; the join of `b` is
-  // where the paths that go on meet: its nearest post-dominator over the rest. Null when none goes
-  // on, and the region's own `stop` ends it. Without the deletion, a branch whose one arm continues
-  // joins at the loop bottom, and whatever the other arm runs before its own continue is copied into
-  // both arms. A block that ends every path but TESTS first is still where its predecessors meet,
-  // and so is a latch two body paths reach: the foot of `for (…) { if (c) {…} }`, where deleting it
-  // moves the `if`'s join into one arm, which then copies the latch and adds a `continue` the
-  // source never wrote. A break block two paths share stays an end, each path its own `break`.
+  // MAY A BRANCH IN A TESTED LOOP JOIN INSIDE THE BODY? Only where every way out of the body from `b`
+  // is one the loop's own spelling renders in place: a `break` (an edge of `breaks`, or the edge the
+  // loop tests at its header or latch) or an early-`return` arm the loop owns. Any other edge out
+  // leaves for code that is copied wherever it is reached, and a join inside the body would write
+  // that tail into the arm as well.
   const leavesByOwnedEdges = (frame: LoopFrame, b: Block): boolean => {
     const exitFrom = whileLoops.get(frame.header)?.header ?? doWhileLoops.get(frame.header)?.latch;
     const seen = new Set<Block>();
@@ -6589,30 +6584,37 @@ export function structure(
     }
     return true;
   };
-  const testedJoins = new Map<Block, Map<Block, Block | null>>();
-  const loopBodyJoin = (frame: LoopFrame, b: Block): Block | null => {
-    let ipdom = testedJoins.get(frame.header);
-    if (ipdom === undefined) {
-      ipdom = postDominators(fn, frame.body, (n) =>
-        [...new Set(successorsOf(n))].filter((x) => frame.body.has(x) && x !== frame.header),
-      );
-      testedJoins.set(frame.header, ipdom);
-    }
-    return ipdom.get(b) ?? null;
-  };
-  const foreverJoins = new Map<Block, Map<Block, Block | null>>();
-  const foreverJoin = (fl: ForeverLoopInfo, b: Block): Block | null => {
-    let ipdom = foreverJoins.get(fl.header);
+  // THE JOIN OF A BRANCH IN A LOOP BODY, over the body with its back edges and exits deleted: where
+  // the paths from `b` that stay in the body meet, its nearest post-dominator over the rest. Null
+  // when none goes on, and the region's own `stop` ends it. Without the deletion, a branch whose one
+  // arm continues joins at the loop bottom, and whatever the other arm runs before its own continue
+  // is copied into both arms; in a tested loop, the `else break;` of an if/else-if chain joins at
+  // the loop's exit.
+  //
+  // `endsCut` is the `while (1)` rule, and only `emitForever`'s frames take it: a block that only
+  // jumps back to the header or out of the loop, rendering nothing but that edge's copies, ENDS its
+  // path — a `continue`, a `break` — so it constrains no join either. A block that ends every path
+  // but TESTS first is still where its predecessors meet, and so is a latch two body paths reach: the
+  // foot of `for (…) { if (c) {…} }`, where deleting it moves the `if`'s join into one arm, which then
+  // copies the latch and adds a `continue` the source never wrote. A break block two paths share
+  // stays an end, each path its own `break`. A tested loop's latch is where its test renders, so
+  // there it constrains the join like any block.
+  /** per header, one cache for each value of `endsCut` */
+  const loopJoins = [new Map<Block, Map<Block, Block | null>>(), new Map<Block, Map<Block, Block | null>>()];
+  const loopJoin = (loop: { header: Block; body: Set<Block> }, b: Block, endsCut: boolean): Block | null => {
+    const cache = loopJoins[endsCut ? 1 : 0];
+    let ipdom = cache.get(loop.header);
     if (ipdom === undefined) {
       const inBody = (n: Block): Block[] =>
-        [...new Set(successorsOf(n))].filter((x) => fl.body.has(x) && x !== fl.header);
+        [...new Set(successorsOf(n))].filter((x) => loop.body.has(x) && x !== loop.header);
       const ends = (n: Block): boolean =>
+        endsCut &&
         inBody(n).length === 0 &&
         n.ops[n.ops.length - 1].opcode === 'br' &&
         n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
-        !(successorsOf(n)[0] === fl.header && new Set(preds.get(n)?.filter((q) => fl.body.has(q))).size > 1);
-      ipdom = postDominators(fn, fl.body, (n) => inBody(n).filter((x) => !ends(x)));
-      foreverJoins.set(fl.header, ipdom);
+        !(successorsOf(n)[0] === loop.header && new Set(preds.get(n)?.filter((q) => loop.body.has(q))).size > 1);
+      ipdom = postDominators(fn, loop.body, (n) => inBody(n).filter((x) => !ends(x)));
+      cache.set(loop.header, ipdom);
     }
     return ipdom.get(b) ?? null;
   };
