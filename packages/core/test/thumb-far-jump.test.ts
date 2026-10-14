@@ -10,9 +10,10 @@ import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
 const { decode } = __testing;
+const MARK = ARMV4T_AGBCC.compilerBehaviors.farJumpRelay?.comment;
 
 const bls = (asm: string) =>
-  decode('f', asm)
+  decode('f', asm, MARK)
     .blocks.flatMap((b) => b.instrs)
     .filter((i) => i.mnemonic === 'bl');
 
@@ -32,9 +33,20 @@ describe('the tokenizer keeps the far-jump mark and nothing else of a comment', 
     },
   );
 
+  // The mark is the compiler's declared fact, not the Thumb ISA's: with no mark to test against,
+  // the comment is dropped like every other.
+  test('a target that declares no mark marks nothing', () => {
+    const asm = `f:\n\tpush\t{lr}\n\tbl\t.L2\t@far jump\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n`;
+    expect(
+      decode('f', asm)
+        .blocks.flatMap((b) => b.instrs)
+        .some((i) => i.farJump),
+    ).toBe(false);
+  });
+
   test('the mark lands on a `bl` only, and the comment still never reaches an operand', () => {
     const asm = 'f:\n\tpush\t{lr}\n\tb\t.L2\t@far jump\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n';
-    const ins = decode('f', asm).blocks.flatMap((b) => b.instrs);
+    const ins = decode('f', asm, MARK).blocks.flatMap((b) => b.instrs);
     expect(ins.some((i) => i.farJump)).toBe(false);
     expect(ins.find((i) => i.mnemonic === 'b')?.ops).toEqual(['.L2']);
   });
@@ -140,6 +152,34 @@ describe('what is not provably a relay declines loud', () => {
         '.Lc1:\n\tbl\th\n\tbl\t.L2\t@far jump\n.Ldef:\n\tbl\th\n.L2:\n\tpop\t{r0}\n\tbx\tr0\n',
       /jump table dispatches back to its entry/,
     );
+  });
+
+  // A `bx r3` the relay reaches is not agbcc's return: whatever r3 holds may return to the relay's
+  // lr, and run on into `.LCB0`, which the `b` it would be lowered to drops.
+  test('a relay in a function with a `bx` that is not a just-popped return declines', () => {
+    declines(
+      `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n\tpop\t{r0}\n\tbx\tr0\n` +
+        '.L2:\n\tmov\tr0, #7\n\tbx\tr3\n',
+      /'bx r3' is not a return through a just-popped saved lr/,
+    );
+  });
+
+  test('a `bx` through a register the `pop` did not load last declines', () => {
+    declines(
+      `${H}\tpush\t{r4, lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n.LCB0:\n\tbl\th\n.L2:\n\tpop\t{r0, r4}\n\tbx\tr0\n`,
+      /'bx r0' is not a return through a just-popped saved lr/,
+    );
+  });
+
+  // Only a target that declares the mark lowers it (`compilerBehaviors.farJumpRelay`). Without the
+  // declaration the marked `bl` is the bare `bl` to a local label it always was, and declines so.
+  test('a target that does not declare the mark keeps the bare-`bl` decline', () => {
+    const unmarked = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, farJumpRelay: undefined },
+    };
+    const asm = `${H}\tpush\t{lr}\n\tcmp\tr0, #5\n\tble\t.LCB0\n\tbl\t.L2\t@far jump\n${TAIL}`;
+    expect(() => decompile('f', asm, unmarked)).toThrow(/targets a label inside this function/);
   });
 
   test('a marked `bl` to a symbol outside this function is not a relay', () => {

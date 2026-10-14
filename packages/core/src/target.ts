@@ -49,7 +49,8 @@
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
-//     lowers a `bl` to one as a call through its register), `roundTripsDoubleLiterals`
+//     lowers a `bl` to one as a call through its register), `farJumpRelay` (frontend/thumb.ts,
+//     which lowers a marked `bl` to the branch it stands for), `roundTripsDoubleLiterals`
 //     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
 //     raise/declared-volatile.ts through liftStamped and the offset-name pass). The
 //     field names are a SUPERSET of
@@ -642,6 +643,16 @@ export interface TargetDescription {
     //
     // ABSENT ⇒ a `bl` names a function on this target, whatever it is called.
     callThunks?: { readonly prefix: string; readonly regs: readonly string[] };
+    // How this compiler marks a BRANCH it had to spell as a call: a `bl <label>` whose line carries
+    // a comment matching `comment` (tested against the text from its `@` to the end of the line) is
+    // a relay to that label of the same function, not a call. Two of its facts are this compiler's,
+    // and the Thumb frontend's lowering rests on them (`lowerFarJumpRelays`): what the mark means,
+    // and that the compiler pushes lr in every function with one, so the lr the relay writes is
+    // never the one the function returns through.
+    //
+    // ABSENT ⇒ no comment makes a `bl` anything but a call: a `bl` to a label of the function keeps
+    // its decline, however its line is commented.
+    farJumpRelay?: { readonly comment: RegExp };
     // Regime-A switch recovery: accept a RELATIONAL test as a case where the scrutinee values that
     // can reach it — narrowed by the tests above it — leave exactly one on a side this compiler's
     // dispatch lands a case body on: `'taken'` for its BRANCH only, `'either'` for both sides
@@ -1094,6 +1105,13 @@ export const ARMV4T_AGBCC: TargetDescription = {
       prefix: '_call_via_',
       regs: ['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7', 'r8', 'r9', 'sl', 'fp', 'ip'],
     },
+    // agbcc spells a branch past the ±2 KB reach of Thumb `b` as `bl <label>` with this comment,
+    // from three patterns: `jump` (`bl %l0\t@ far jump`, gcc/thumb.md:837), and the relays of
+    // `*cond_branch` (`.LCB`, :930) and `*cond_branch_reversed` (`.LCBR`, :957), both
+    // `bl %l0\t@far jump`. thumb.c `far_jump_used_p` (:715, read at :785 and :1065) makes it push lr
+    // in any function that has one. Only the WHOLE comment is the mark: a longer comment that
+    // mentions a far jump is not the compiler's.
+    farJumpRelay: { comment: /^@\s*far jump\s*$/ },
   },
 };
 

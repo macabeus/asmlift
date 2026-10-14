@@ -637,9 +637,12 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // an UNMARKED `bl` to a label of this function (a call thunk, or a relay whose comment a
     // splitter dropped), alignment fill the input really leaves open, and code that really runs
     // into data. The lowering adds its own refusals, for a marked relay whose lr is not provably
-    // dead (no `push` of lr in the entry block, a branch or jump table back to the entry, or another
-    // instruction naming lr) or whose target is not a code label of this function. No row reaches
-    // any of them, so the class is in `NO_ROWS`; it stays because the refusals are still core's.
+    // dead (no `push` of lr in the entry block, a branch or jump table back to the entry, another
+    // instruction naming lr, or a `bx rN` that is not a return through a just-popped saved lr) or
+    // whose target is not a code label of this function. The mark is agbcc's declared
+    // `compilerBehaviors.farJumpRelay`: a target that does not declare it keeps the first refusal.
+    // No row reaches any of them, so the class is in `NO_ROWS`; it stays because the refusals are
+    // still core's.
     key: 'far-jump',
     label: 'Thumb far-jump relays (`bl .Lx @far jump` read as a call)',
     pattern:

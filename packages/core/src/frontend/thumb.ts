@@ -71,8 +71,9 @@ interface Instr {
    *  Messages must use this: a decline naming `ldrsh` for a file containing `ldsh` sends the
    *  reader looking for an instruction that is not there. */
   asWritten?: string;
-  /** set only on a `bl <label>` whose line carried agbcc's `@far jump` / `@ far jump` comment —
-   *  the relay agbcc spells a branch past Thumb's ±2 KB reach with (see `FAR_JUMP_COMMENT`). The
+  /** set only on a `bl <label>` whose line carried the target's far-jump mark — agbcc's
+   *  `@far jump` / `@ far jump`, the relay it spells a branch past Thumb's ±2 KB reach with (see
+   *  `compilerBehaviors.farJumpRelay`); never on a target that declares no mark. The
    *  comment is the ONLY text that separates it from a call: everything else on the line is
    *  dropped at tokenizing, and a call thunk is the same `bl` to a label of this function. */
   farJump?: true;
@@ -222,14 +223,6 @@ function padHalfword(v: number): Instr | null {
   const e = PAD_ENCODINGS.find((p) => p.hw === v);
   return e ? { mnemonic: e.mnemonic, ops: [...e.ops] } : null;
 }
-
-// agbcc's far-jump relay comment, as the compiler writes it. agbcc's gcc/thumb.md emits a branch
-// past the ±2 KB reach of Thumb `b` as `bl <label>` with this comment from three patterns: `jump`
-// (`bl %l0\t@ far jump`, thumb.md:837), and the relays of `*cond_branch` (`.LCB`, :930) and
-// `*cond_branch_reversed` (`.LCBR`, :957), both `bl %l0\t@far jump`. Matched against the comment
-// text from its `@` to the end of the line, and only as the WHOLE comment: a longer comment that
-// mentions a far jump is not the compiler's mark.
-const FAR_JUMP_COMMENT = /^@\s*far jump\s*$/;
 
 type XferKind = 'return' | 'uncond' | 'cond' | 'indirect';
 
@@ -991,6 +984,7 @@ const sayFact = (f: LayoutFact): string => {
 function decode(
   name: string,
   asm: string,
+  farJumpMark?: RegExp,
 ): {
   blocks: AsmBlock[];
   dataWords: Map<string, string[]>;
@@ -1048,8 +1042,8 @@ function decode(
   //     lexical-scope marker restructures the loop around it: kept, it lifts the pair's `gcd` loop as
   //     an `if` around a `do` instead of a `while`.
   //
-  // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line was agbcc's
-  // far-jump relay (`FAR_JUMP_COMMENT`). Kept as a set of line texts' positions, not as text, so
+  // Every `@` comment is dropped here save ONE fact read from it: that a `bl` line carried the
+  // target's far-jump mark (`farJumpMark`, from `compilerBehaviors.farJumpRelay`). Kept as a set of line texts' positions, not as text, so
   // nothing downstream can read any other comment.
   const codeLines: string[] = [];
   const farJumpLines = new Set<number>();
@@ -1057,7 +1051,7 @@ function decode(
     const at = rawLine.indexOf('@');
     const line = (at === -1 ? rawLine : rawLine.slice(0, at)).trim();
     if (line) {
-      if (at !== -1 && FAR_JUMP_COMMENT.test(rawLine.slice(at))) {
+      if (at !== -1 && farJumpMark?.test(rawLine.slice(at))) {
         farJumpLines.add(codeLines.length);
       }
       codeLines.push(line);
@@ -2534,13 +2528,16 @@ interface ThumbText {
   readonly poolNamesSymbols: boolean;
 }
 
-/** Lower every agbcc far-jump relay (`bl .Lx @far jump`, see `FAR_JUMP_COMMENT`) in the selected
- *  function to the `b .Lx` it stands for, in place, or decline.
+/** Lower every far-jump relay the target marks (`bl .Lx @far jump`, agbcc's; see
+ *  `compilerBehaviors.farJumpRelay`) in the selected function to the `b .Lx` it stands for, in
+ *  place, or decline. Only a target that declares the mark gets here with one: `decode` sets
+ *  `farJump` from that declaration alone.
  *
  *  A relay and a call differ in one effect: `bl` writes lr, `b` does not. So the lowering is sound
- *  exactly when nothing can observe the lr the relay wrote, and that is PROVED here rather than
- *  assumed from agbcc's habit (thumb.c `far_jump_used_p` makes it push lr in any function with a
- *  far jump, which is why every relay in practice passes):
+ *  exactly when nothing can observe the lr the relay wrote. What the mark MEANS is the compiler's
+ *  fact, declared with it. That nothing observes lr is checked here on the function's own text,
+ *  not assumed from agbcc's habit (thumb.c `far_jump_used_p` makes it push lr in any function with
+ *  a far jump, which is why every relay in practice passes):
  *    • the entry block saves lr with a `push`, and no branch of this function names the entry
  *      label, so that push runs once, before any relay, and saves the CALLER's lr. A recovered
  *      jump table is the other way back to the entry, and `readThumbText` asks that once the
@@ -2548,8 +2545,14 @@ interface ThumbText {
  *      the whole file's, and a state machine storing its own address as a callback (kleod's
  *      `WorldMapScreenHandler`, from another function's pool) is a pointer, not a branch;
  *    • no other instruction of the function names lr at all — no `bx lr`, no `mov pc, lr`, no
- *      `mov rX, lr`, no second `push`. The return goes through the saved copy (`pop {rN}; bx rN` or
- *      `pop {…, pc}`), which a relay cannot have touched.
+ *      `mov rX, lr`, no second `push`;
+ *    • every `bx rN` is a return through the saved copy: the instruction just before it, in its
+ *      own block, is a `pop` whose highest register is rN, the slot the entry `push` put lr in
+ *      (`pop {…, pc}` is the other spelling of that return). Without this, a `bx rN` the relay can
+ *      reach could be an indirect jump that `classifyXfer` reads as a return, and code that
+ *      returns to the relay's lr would run on past it, which the `bl` allows and the `b` drops.
+ *  That last check is structural: which word of the frame the `pop` reads is the frame walk's
+ *  question, not this one's. So it holds for the return shapes agbcc emits and declines any other.
  *  The mark itself is the only thing that makes a `bl` a relay: a call thunk (`bl call_r3`, in a
  *  function that pushes lr too) has the same shape and no mark, and still declines below.
  *
@@ -2589,6 +2592,16 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
   if (reader) {
     refuse(relays[0], `is in a function that names lr after saving it ('${reader.mnemonic} ${reader.ops.join(', ')}')`);
   }
+  for (const b of blocks) {
+    b.instrs.forEach((ins, i) => {
+      const reg = ins.mnemonic === 'bx' ? ins.ops[0] : undefined;
+      const pop = b.instrs[i - 1];
+      const popped = pop?.mnemonic === 'pop' ? regListOf(pop.ops) : null;
+      if (reg !== undefined && popped?.[popped.length - 1] !== reg) {
+        refuse(relays[0], `is in a function whose 'bx ${reg}' is not a return through a just-popped saved lr`);
+      }
+    });
+  }
   for (const relay of relays) {
     relay.mnemonic = 'b';
     relay.asWritten = 'bl';
@@ -2596,9 +2609,11 @@ function lowerFarJumpRelays(name: string, blocks: readonly AsmBlock[], funcLabel
   return relays[0];
 }
 
-function readThumbText(name: string, asm: string): ThumbText {
+/** `farJumpMark` is the target's `compilerBehaviors.farJumpRelay` comment; absent, no `bl` is a
+ *  relay, and one to a label of this function declines below as it always did. */
+function readThumbText(name: string, asm: string, farJumpMark?: RegExp): ThumbText {
   assertInputFormat('thumb', 'gnu-as', asm);
-  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm);
+  const { blocks: rawBlocks, dataWords, nonWordData, funcLabels } = decode(name, asm, farJumpMark);
   // Before anything below reads a `b`: the jump-table recovery counts branch references, and a
   // relay is one.
   const relayed = lowerFarJumpRelays(name, rawBlocks, funcLabels);
@@ -4311,7 +4326,7 @@ function thumbFillOf(
   symbols: SymbolMap | undefined,
   oneObject: FrameRange | undefined,
 ): ThumbFill {
-  const text = readThumbText(name, asm);
+  const text = readThumbText(name, asm, target.compilerBehaviors.farJumpRelay?.comment);
   const cfg = thumbCfg(name, text.blocks, text.tables);
   assertScratchRegsPartitioned(target); // first, for the refusal order; `registerLiveIns` asks again
   const calls = callDeclarations(name, target, prototypes, THUMB_CALL_LOWERING, (message) => {
