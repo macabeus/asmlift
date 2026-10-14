@@ -8,6 +8,8 @@
 //   the push and schedules both, `stw r0,4(r1) ; stwu r1,-8(r1)`).
 // - `fall`: the default falls straight out of a leaf, and all three bound the table with a
 //   conditional return (`bgtlr-`), so the default edge is the return.
+// - `reta`: the same bound, the default returning the first argument, which arrived in r3 and that
+//   edge never touches — it must still return it, not fall off the end.
 // - `loop`: a switch inside a loop. mwcc 2.3.3 alone hoists the table base out of the loop
 //   (`lis r5 ; addi r5,r5` at entry); 2.4.2 and 2.4.7 form it in the dispatch. KMC and gcc 2.7.2
 //   hoist it into the preheader (`lui ; addiu`). Each shape asserts where its compiler put the base,
@@ -59,6 +61,12 @@ const LOOP = {
   head: '',
   c: `void loop(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){${ARMS.replace(/\*p/g, 'p[i]')}} } }`,
 };
+/** A `bgtlr` default returning the first argument, which arrived in r3 and that path never touches. */
+const RETA = {
+  sym: 'reta',
+  head: '',
+  c: 'int reta(int a,unsigned x,int *p){ switch(x){case 0:p[0]=1;return 3;case 1:p[1]=5;return 4;case 2:p[2]=6;return 7;case 3:p[3]=7;return 1;case 4:p[4]=3;return 9;case 5:p[5]=2;return 2;case 6:p[6]=9;return 0;case 7:p[7]=4;return 8;} return a; }',
+};
 const DO = { sym: 'dloop', head: '', c: `void dloop(int n,int *p){ do { switch(*p){${ARMS}} p++; } while(--n); }` };
 const ARMS2 = ARMS.replace(/=(\d);/g, (_, k: string) => `=${20 + Number(k)};`).replace(/\*p/g, '*q');
 const TWO = {
@@ -103,18 +111,30 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
       }).source;
       expect(source).toContain('switch (');
       expect(scoreObjects(obj, compileCandPpc(id, s.head + source, PPC_FLAGS), s.sym).score, source).toBe(0);
-      return asm;
+      return { asm, source };
     };
     const gated = ppcDockerGate('jump-table-window', id);
 
     test.runIf(gated)(
       'an LR save scheduled between the bound and its branch',
       () => {
-        expect(run(SCHED)).toMatch(/cmplwi\s+r3,7\n(\s+[0-9a-f]+:\tstwu?\s+r[01],-?\d+\(r1\)\n)+\s+[0-9a-f]+:\tbgt/);
+        expect(run(SCHED).asm).toMatch(
+          /cmplwi\s+r3,7\n(\s+[0-9a-f]+:\tstwu?\s+r[01],-?\d+\(r1\)\n)+\s+[0-9a-f]+:\tbgt/,
+        );
       },
       BUDGET,
     );
-    test.runIf(gated)('a bgtlr bound', () => expect(run(FALL)).toMatch(/\tbgtlr/), BUDGET);
+    test.runIf(gated)('a bgtlr bound', () => expect(run(FALL).asm).toMatch(/\tbgtlr/), BUDGET);
+    test.runIf(gated)(
+      'a bgtlr default returning an argument it never touches',
+      () => {
+        // mwcc compiles a bare `return;` there to the same bytes, so the score alone cannot tell
+        const { asm, source } = run(RETA);
+        expect(asm).toMatch(/\tbgtlr/);
+        expect(source).toMatch(/default:\s*\n\s*return a0;/);
+      },
+      BUDGET,
+    );
     for (const [what, s] of [
       ['two loop switches', TWO],
       ['a call in the loop', DCALL],
@@ -122,7 +142,7 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
       test.runIf(gated)(
         `${what}, the table bases hoisted by 2.3.3 alone`,
         () => {
-          const block = dispatchBlock(run(s), /\tbgt/, /\tbctr/);
+          const block = dispatchBlock(run(s).asm, /\tbgt/, /\tbctr/);
           expect(/\tlis\s/.test(block), block).toBe(id !== 'mwcc_233_163n');
         },
         BUDGET,
@@ -131,7 +151,7 @@ describe.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as MwccToolchainI
     test.runIf(gated)(
       'a switch in a loop, its table base hoisted by 2.3.3 alone',
       () => {
-        const block = dispatchBlock(run(LOOP), /\tbgt/, /\tbctr/);
+        const block = dispatchBlock(run(LOOP).asm, /\tbgt/, /\tbctr/);
         expect(/\tlis\s/.test(block), block).toBe(id !== 'mwcc_233_163n');
       },
       BUDGET,

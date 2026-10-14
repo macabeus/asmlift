@@ -1248,6 +1248,18 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void sw_jtfalldesc(int,int*);',
     proto: { sw_jtfalldesc: { returnsVoid: true } },
   },
+  // …AND ONE WHOSE `bgtlr` DEFAULT RETURNS AN ARGUMENT IT NEVER TOUCHES. mwcc bounds the table with a
+  // conditional return when the out-of-range path returns `a`, which arrived in r3: that path neither
+  // reads nor writes r3, so the return block has no definition of it, and the lift must still return
+  // the first argument there (frontend/ppc.ts `returnUntouchedArg`) — a bare `return;` in an `int`
+  // function recompiles to the same bytes on mwcc and loses `a`.
+  {
+    sym: 'sw_jtretarg',
+    src: 'int sw_jtretarg(int a,unsigned x,int *p){ switch(x){case 0:p[0]=1;return 3;case 1:p[1]=5;return 4;case 2:p[2]=6;return 7;case 3:p[3]=7;return 1;case 4:p[4]=3;return 9;case 5:p[5]=2;return 2;case 6:p[6]=9;return 0;case 7:p[7]=4;return 8;} return a; }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'int sw_jtretarg(int,unsigned,int*);',
+  },
   {
     sym: 'sw_sparse',
     src: 'int sw_sparse(int x){ switch(x){case 1:return 1;case 10:return 2;case 100:return 3;case 1000:return 4;default:return 0;} }',
