@@ -1968,7 +1968,7 @@ function liftOnce(
             : -1;
           if (frame !== null && byValue >= 0) {
             fail(
-              `cannot lift '${name}': '${sym}', called at 0x${ins.addr.toString(16)}, takes its parameter ` +
+              `cannot lift '${name}': address-taken stack local — '${sym}', called at 0x${ins.addr.toString(16)}, takes its parameter ` +
                 `${byValue + 1} as '${(own!.params as string[])[byValue]}' by value, which this compiler passes as the ` +
                 `address of a copy in the caller's local area — not modelled`,
             );
