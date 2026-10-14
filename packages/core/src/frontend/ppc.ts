@@ -59,7 +59,7 @@ import { assertInputFormat } from './format';
 import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } from './fpu';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
-import { type HoistedDispatch, type TableKey, agreedTable, entersDispatch, makeTableBases } from './jump-table';
+import { type HoistedDispatch, type TableKey, agreedTable, entersBetween, makeTableBases } from './jump-table';
 import { makeLocalStatics, readObjectLocalObject } from './local-object';
 import { opaqueDest } from './opaque';
 import { classifyRelocSymbol, unspellableReason } from './reloc-symbol';
@@ -202,6 +202,8 @@ interface PpcBlock {
 //   ; lwzx rV,rB,rIdx ; mtctr rV ; bctr                           (dispatch — table in .data)
 interface PpcJT {
   scrutReg: string;
+  /** The bounds compare's address: nothing may enter after it, up to the `bctr`. */
+  cmpAddr: number;
   caseAddrs: number[];
   /** The default arm's address, or null for a `bgtlr` bound: out-of-range values return. */
   defaultAddr: number | null;
@@ -240,17 +242,21 @@ const mayWriteGpr = (ins: Instr, r: string): boolean => {
   return !/^(st|cmp|fcmp|tw|mt|dc|ic|sync|isync|eieio)/.test(m) && ins.ops[0] === r;
 };
 
-/** The case count a jump table's bounds compare states, or null: the `cmplwi rS,N-1` the bounds
- *  branch at `j` reads. Scanned back inside the branch's block, past instructions that write neither
- *  a CR field nor `rS` — mwcc schedules the default's value or the LR save between the two — and
- *  it must set the CR field the branch tests. The first CR writer met decides: any other one, or a
- *  write of `rS` after the compare, declines. */
-function boundsCompare(instrs: Instr[], j: number, scrutReg: string): number | null {
+/** The bounds compare of a jump table, or null: the `cmplwi rS,N-1` the bounds branch at `j` reads,
+ *  with its address and the case count `n` it states. Scanned back inside the branch's block, past
+ *  instructions that write neither a CR field nor `rS` — mwcc schedules the default's value or the
+ *  LR save between the two — and it must set the CR field the branch tests. The first CR writer met
+ *  decides: any other one, or a write of `rS` after the compare, declines. So does a branch landing
+ *  after the compare, up to the bounds branch itself: that path brings a CR field of its own, and the
+ *  `switch_br` would bound it by a compare it never ran (`entersBetween`). */
+function boundsCompare(instrs: Instr[], j: number, scrutReg: string): { addr: number; n: number } | null {
   const crField = crFieldOf(instrs[j]);
   for (let k = j - 1; k >= 0 && !isXfer(instrs[k]); k--) {
     const c = instrs[k];
     if (c.mnemonic === 'cmplwi' && c.ops[c.ops.length - 2] === scrutReg && crFieldOf(c) === crField) {
-      return parseImm(c.ops[c.ops.length - 1]) + 1;
+      return entersBetween(instrs, c.addr, instrs[j].addr)
+        ? null
+        : { addr: c.addr, n: parseImm(c.ops[c.ops.length - 1]) + 1 };
     }
     if (mayWriteCr(c) || mayWriteGpr(c, scrutReg)) {
       return null;
@@ -359,25 +365,35 @@ function recoverPpcJumpTables(instrs: Instr[], ad: AsmData): Map<number, PpcJT> 
     if (
       instrs.slice(j + 1, i).some((_, o) => !idiom.has(j + 1 + o)) ||
       instrs.slice(j + 1, si).some((x) => mayWriteGpr(x, scrutReg)) ||
-      entersDispatch(instrs, bgt.addr, instrs[i].addr)
+      entersBetween(instrs, bgt.addr, instrs[i].addr)
     ) {
       continue;
     }
-    const n = boundsCompare(instrs, j, scrutReg);
-    if (n === null || n < 2) {
+    const bound = boundsCompare(instrs, j, scrutReg);
+    if (bound === null || bound.n < 2) {
       continue;
     }
-    const caseAddrs = readJumpTable(ad, table.sym, table.addend, n);
+    const caseAddrs = readJumpTable(ad, table.sym, table.addend, bound.n);
     if (!caseAddrs) {
       continue;
     }
     out.set(bgt.addr, {
       scrutReg,
+      cmpAddr: bound.addr,
       caseAddrs,
       defaultAddr: bgt.target ?? null,
       bctrAddr: instrs[i].addr,
       hoisted: hoisted === null ? null : { reg: rB, table: hoisted },
     });
+  }
+  // A table's case is a branch target too, which `entersBetween` cannot see before the tables are
+  // read: one landing between a table's bounds compare and its indirect jump — its own table's or
+  // another's — enters that window as a branch would, and that table declines.
+  const cases = [...out.values()].flatMap((jt) => jt.caseAddrs);
+  for (const [at, jt] of out) {
+    if (cases.some((a) => a > jt.cmpAddr && a <= jt.bctrAddr)) {
+      out.delete(at);
+    }
   }
   return out;
 }

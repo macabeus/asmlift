@@ -42,7 +42,7 @@ import { fpPrecision, fpuArgSlots, refuseBothPrecisions, writesFloatReturn } fro
 import { FRAME_OBJECT_AUDIT, type FrameObjectRelift, type FrameRange, liftWithRelift } from './frame-objects';
 import type { Frontend } from './frontend';
 import { makeHighHalves } from './high-half';
-import { type HoistedDispatch, type TableKey, agreedTable, entersDispatch, makeTableBases } from './jump-table';
+import { type HoistedDispatch, type TableKey, agreedTable, entersBetween, makeTableBases } from './jump-table';
 import { opaqueDest } from './opaque';
 import { MIPS_FP_REG, isSplatMips, mipsEvenFpKey, parseSplatMips } from './splat';
 import { type ArgSlots, abiSortEntryParams, mintArgSlotHoles, stackArgKey, stackArgSlots, stackSlotKey } from './ssa';
@@ -523,7 +523,7 @@ function recoverMipsJumpTables(instrs: Instr[], ad: AsmData, likely: ReadonlySet
     const idiom = new Set([ldIdx, aIdx, gpIdx, sllIdx, baseIdx]);
     if (
       instrs[i + 1]?.mnemonic !== 'nop' ||
-      entersDispatch(instrs, instrs[k].addr, instrs[i + 1].addr) ||
+      entersBetween(instrs, instrs[k].addr, instrs[i + 1].addr) ||
       instrs.slice(k + 2, i).some((_, o) => !idiom.has(k + 2 + o)) ||
       instrs.slice(k + 1, sllIdx).some((x) => writtenReg(x) === scrutReg)
     ) {

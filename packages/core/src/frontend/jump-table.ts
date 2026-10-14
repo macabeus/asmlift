@@ -6,7 +6,10 @@
 // here so a fix to one reaches both:
 //
 // - THE DISPATCH BLOCK HAS ONE ENTRY. A branch landing inside it skips the bounds check, and the
-//   block it enters is the one pruned (`entersDispatch`).
+//   block it enters is the one pruned (`entersBetween`). Nor may one land between the bounds
+//   compare and the branch that reads it: that path brings its own compare, and the `switch_br`
+//   would bound it by one it never ran (PowerPC's `boundsCompare`; MIPS's `mipsBounds` reads each
+//   edge into the block instead, because IDO puts the `sltiu` in their delay slots).
 // - A TABLE BASE FORMED OUTSIDE THAT BLOCK IS NOT PRUNED WITH IT. KMC and gcc 2.7.2 hoist the
 //   `lui ; addiu` pair into a loop's preheader, mwcc 2.3.3 hoists `lis ; addi` to the entry, and a
 //   register allocator puts the base wherever it likes — a temporary in a leaf, a callee-saved
@@ -25,14 +28,15 @@ import type { Block, Value } from '../ir/core';
 import type { FrontendRefusal } from './errors';
 import type { SsaBuilder } from './ssa';
 
-/** Whether any branch lands in a dispatch block — after its bounds branch at `boundsAddr`, up to its
- *  last word at `lastAddr`. Such a path skips the bounds check, and the block it enters is the one a
- *  recovered table prunes. */
-export const entersDispatch = (
+/** Whether any branch lands after the word at `afterAddr`, up to and including the word at
+ *  `lastAddr`. Asked of a dispatch block (after its bounds branch, up to its indirect jump), where
+ *  such a path skips the bounds check and enters the block a recovered table prunes, and of the
+ *  words between a bounds compare and its branch, where it brings a compare of its own. */
+export const entersBetween = (
   instrs: ReadonlyArray<{ target?: number }>,
-  boundsAddr: number,
+  afterAddr: number,
   lastAddr: number,
-): boolean => instrs.some((x) => x.target !== undefined && x.target > boundsAddr && x.target <= lastAddr);
+): boolean => instrs.some((x) => x.target !== undefined && x.target > afterAddr && x.target <= lastAddr);
 
 /** Where a jump table is: the symbol a base's relocations name, and the byte offset into it. */
 export interface TableKey {

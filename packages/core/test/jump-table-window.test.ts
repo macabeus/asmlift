@@ -55,10 +55,12 @@ const ppcTable = (cases: number[]): AsmData => ({
 });
 
 /** mwcc's 4-arm dispatch, `between` scheduled between the bounds compare and its branch. */
-const ppcSwitch = (between: string[], dispatch?: string[]) =>
+const ppcSwitch = (between: string[], dispatch?: string[]) => ppcBoundsWindow(['cmplwi  r3,3', ...between], dispatch);
+
+/** The same dispatch with `bounds` written out whole before the bounds branch. */
+const ppcBoundsWindow = (bounds: string[], dispatch?: string[]) =>
   listing([
-    'cmplwi  r3,3',
-    ...between,
+    ...bounds,
     'bgt-    @DEF',
     ...(dispatch ?? [
       'lis     r4,0 #HA tbl',
@@ -114,6 +116,25 @@ test('…but not past a CR write, a scrutinee write, or a compare on another fie
   // the bound is in cr1 and the branch reads cr0
   const cr1 = ppcSwitch([]);
   expect(() => liftPpc({ ...cr1, asm: cr1.asm.replace('cmplwi  r3,3', 'cmplwi  cr1,r3,3') })).toThrow(bctr);
+});
+
+test('…nor past a branch that lands after the compare, which brings a compare of its own', () => {
+  const bctr = /unmodelled control transfer 'bctr'/;
+  // `cmplwi r3,1 ; bge- L` reaches the bounds branch with cr0 from a compare against 1: f(2) and
+  // f(3) take the default there, so the switch bounded by `cmplwi r3,3` would be wrong C.
+  for (const window of [
+    ['cmplwi  r3,1', 'bge-    @L', 'cmplwi  r3,3', 'L:'],
+    ['cmplwi  r3,1', 'bge-    @L', 'cmplwi  r3,3', 'li      r6,0', 'L:'],
+    ['cmplwi  r3,1', 'bge-    @L', 'cmplwi  r3,3', 'L:', 'li      r6,0'],
+  ]) {
+    const { asm, at } = ppcBoundsWindow(window);
+    expect(() => liftPpc({ asm, at })).toThrow(bctr);
+  }
+  // a table's case landing there is a branch target too
+  const { asm, at } = ppcBoundsWindow(['cmplwi  r3,3', 'L:', 'li      r6,0']);
+  expect(() =>
+    decompile('f', asm, PPC_MWCC, { asmData: ppcTable([at.get('L')!, at.get('C1')!, at.get('C2')!, at.get('C3')!]) }),
+  ).toThrow(bctr);
 });
 
 test('the PPC dispatch block holds the idiom and nothing else', () => {
