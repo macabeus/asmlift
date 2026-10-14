@@ -378,6 +378,42 @@ describe('a word stored and never read back', () => {
   });
 });
 
+describe('a word stored below the captured object and reaching a call unread', () => {
+  // `homecall` at Mario Party 4's -O0,p: `q` homed at r1+8, the array the callee is handed at 12
+  const HOMECALL = [
+    'stwu    r1,-32(r1)',
+    'mflr    r0',
+    'stw     r0,36(r1)',
+    'stw     r3,8(r1)',
+    'addi    r3,r1,12',
+    'bl fill',
+    'lwz     r3,12(r1)',
+    'lwz     r0,8(r1)',
+    'add     r3,r3,r0',
+    'lwz     r0,36(r1)',
+    'mtlr    r0',
+    'addi    r1,r1,32',
+    'blr',
+  ];
+
+  test("is a local's when it is reloaded after the call: mwcc never reads an outgoing word back", () => {
+    expect(lift('homecall', HOMECALL)).toBe(
+      's32 homecall(s32 a0) {\n    u8 sp8[24];\n    *(s32 *)sp8 = a0;\n    fill((s32 *)((u32)sp8 + 4));\n' +
+        '    return ((s32 *)sp8)[1] + *(s32 *)sp8;\n}\n',
+    );
+  });
+
+  test('may be the stack argument on a target that does not state the universal', () => {
+    const unstated = {
+      ...PPC_MWCC,
+      compilerBehaviors: { ...PPC_MWCC.compilerBehaviors, localsAboveOutgoingArea: undefined },
+    };
+    expect(() => decompile('homecall', fn('homecall', HOMECALL), unstated, { prototypes: PROTOS })).toThrow(
+      /the 4-byte store at \[sp,#8\) through a captured address reaches the call to `fill` unread/,
+    );
+  });
+});
+
 describe('an incoming stack argument is a parameter', () => {
   test('a leaf reads its ninth argument at entry r1 + 8 and its tenth at + 12', () => {
     expect(lift('in10', ['lwz     r3,8(r1)', 'lwz     r0,12(r1)', 'subf    r3,r0,r3', 'blr'])).toBe(

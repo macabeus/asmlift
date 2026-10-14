@@ -523,8 +523,10 @@ export interface TargetDescription {
     // every call, with every local and spill above it, and the caller never reads a word of it
     // back after a call — the callee may assign to its stack parameters, so the caller re-stages
     // an argument before every call. A compiler can stage in its frame
-    // (`stagesOutgoingArgsInFrame`) and still break this: mwcc may put a local in the words its
-    // outgoing parameters use (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY ARGUMENT REGISTER").
+    // (`stagesOutgoingArgsInFrame`) and still break this. mwcc does not, though it puts a local in
+    // the words a call COULD take as stack arguments where no call takes any — which is why a
+    // guess that cannot say whether one does refuses (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY
+    // ARGUMENT REGISTER") — and not where one does: the area starts past them.
     //
     // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
     // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
@@ -540,8 +542,12 @@ export interface TargetDescription {
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
     // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
     // re-staging and the callee's write. Set on the three MIPS toolchains off their own probe
-    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. NOT set
-    // on mwcc, for the reason above.
+    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. Set on
+    // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
+    // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`
+    // stores its ninth argument again before its second call. The frame-object audit is the only
+    // reader there too, and the PPC frontend lowers no call that takes a stack word, so the
+    // contrapositive only ever proves an area word a local.
     localsAboveOutgoingArea?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
@@ -1383,6 +1389,10 @@ export const PPC_MWCC: TargetDescription = {
     narrowParamWitness: 'prologue-extension',
     // MEASURED on all three builds: the note at the field.
     linkageLocalArea: 'above-outgoing-area',
+    // MEASURED off the same probes, on all three builds and at -O0,p (`twice9`, and every outgoing
+    // word below the area unread): Mario Party 4's -O0,p homes a parameter in the area and reloads
+    // it after a call, which proves the word a local's (`ee`, `synthetic:homecall:mwcc_242_81`).
+    localsAboveOutgoingArea: true,
     // NOT MEASURED, and `'unknown'` is therefore the only honest value here rather than a withheld
     // one, as it is at MIPS_IDO and MIPS_GCC. No mwcc row lifts with two or more spilled user
     // locals, and the compiler does not spill the committed declaration-rank probe either: at
