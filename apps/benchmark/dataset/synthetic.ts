@@ -1319,10 +1319,10 @@ export const SYNTHETIC: SynthSpec[] = [
   },
   // A DENSE TABLE INSIDE A LOOP, whose base KMC forms ONCE, in the loop's preheader
   // (`lui t6,%hi ; addiu t6,t6,%lo`), and adds to the scaled index inside the loop — so the
-  // dispatch's own block holds no `lui`. The MIPS recognizer accepts that pair only where nothing
-  // but the dispatch reads it and every path to the dispatch runs it (frontend/mips.ts
-  // `hoistedBase`). mwcc 2.4.2 forms the base inside the loop; mwcc 2.3.3, which hoists it too, has
-  // no synthetic tier, and packages/cli/test/matching/jump-table-window.test.ts pins it there.
+  // dispatch's own block holds no `lui`. The lift decodes that pair into a table base, which nothing
+  // may read as a value, and proves it reaches the dispatch on every path (frontend/jump-table.ts).
+  // mwcc 2.4.2 forms the base inside the loop; mwcc 2.3.3, which hoists it too, has no synthetic
+  // tier, and packages/cli/test/matching/jump-table-window.test.ts pins it there.
   {
     sym: 'sw_jtloop',
     src: 'void sw_jtloop(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){case 0:p[i]=1;break;case 1:p[i]=5;break;case 2:p[i]=6;break;case 3:p[i]=7;break;case 4:p[i]=3;break;case 5:p[i]=2;break;case 6:p[i]=9;break;case 7:p[i]=4;break;} } }',
@@ -1330,6 +1330,41 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'void sw_jtloop(int,int*);',
     proto: { sw_jtloop: { returnsVoid: true } },
+  },
+  // IDO ROTATES A `while` LOOP AROUND ITS SWITCH, so the bounds `sltiu` is in no block of its own:
+  // it sits in the delay slot of the loop-entry `beqz` (run on the fall-through) and in the LIKELY
+  // slot of the latch `bnezl` (run on the taken edge alone), and the bounds `beqz` heads the loop.
+  // frontend/mips.ts `mipsBounds` reads the bound off every edge into that block. KMC hoists the
+  // table base into the preheader here too.
+  {
+    sym: 'sw_jtwhile',
+    src: 'int sw_jtwhile(int *p){ int s=0; while(*p){ switch(*p++){case 0:s+=1;break;case 1:s+=5;break;case 2:s^=6;break;case 3:s+=7;break;case 4:s-=3;break;case 5:s+=2;break;case 6:s|=9;break;case 7:s+=4;break;} } return s; }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'int sw_jtwhile(int*);',
+  },
+  // TWO LOOP SWITCHES AND A CALL AFTER THEM. KMC hoists each table base into its loop's preheader,
+  // the second at `.rodata+32`, and the call makes the function non-leaf: the lift asks only that
+  // each base reach its dispatch on every path (frontend/jump-table.ts), not where the allocator put
+  // it. The two tables store different values, so a dispatch read through the other one's base would
+  // not recompile.
+  {
+    sym: 'sw_jtloop2',
+    src: 'void jh(int);\nvoid sw_jtloop2(int n,int *p,int *q){ int k=n; do { switch(*p){case 0:*p=11;break;case 1:*p=15;break;case 2:*p=16;break;case 3:*p=17;break;case 4:*p=13;break;case 5:*p=12;break;case 6:*p=19;break;case 7:*p=14;break;} p++; } while(--k); k=n; do { switch(*q){case 0:*q=21;break;case 1:*q=25;break;case 2:*q=26;break;case 3:*q=27;break;case 4:*q=23;break;case 5:*q=22;break;case 6:*q=29;break;case 7:*q=24;break;} q++; } while(--k); jh(n); }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'void jh(int); void sw_jtloop2(int,int*,int*);',
+    proto: { jh: { params: 1, returnsVoid: true }, sw_jtloop2: { returnsVoid: true } },
+  },
+  // A CALL INSIDE THE LOOP: KMC keeps the hoisted base in a callee-saved register (`lui s5 ; addiu
+  // s5,s5`), which its prologue saves and its epilogue restores around the loop.
+  {
+    sym: 'sw_jtloopcall',
+    src: 'void jh(int);\nvoid sw_jtloopcall(int n,int *p){ int i; for(i=0;i<n;i++){ switch(p[i]){case 0:p[i]=11;break;case 1:p[i]=15;break;case 2:p[i]=16;break;case 3:p[i]=17;break;case 4:p[i]=13;break;case 5:p[i]=12;break;case 6:p[i]=19;break;case 7:p[i]=14;break;} jh(i); } }',
+    features: ['dense'],
+    toolchains: ALL,
+    ctx: 'void jh(int); void sw_jtloopcall(int,int*);',
+    proto: { jh: { params: 1, returnsVoid: true }, sw_jtloopcall: { returnsVoid: true } },
   },
 
   // ── merged value chains (several values decided by several arms, joined at one point) ───────
