@@ -362,15 +362,36 @@ describe('a struct passed by value on O32', () => {
     );
   });
 
-  // A variadic declaration states no parameters, and its call is placed by the arity guess, which
-  // lifted `takeV(*(s32 *)&gW, 5)` against `void takeV(struct W, ...)`: a type error on every
-  // compiler. A struct among its fixed parameters refuses the call instead.
-  test('a struct among the fixed parameters of a variadic declaration refuses the call', () => {
-    const ctx = 'typedef unsigned int u32; struct W { u32 x; }; void takeW(struct W w, ...);\n';
-    expect(prototypesFromContext(ctx, 'c').takeW).toEqual({ returnsVoid: true, variadicByValue: 0 });
-    expect(() => lift('bvwg', KMC_BVWG, MIPS_GCC, prototypesFromContext(ctx, 'c'))).toThrow(
-      /`takeW` takes a struct or union by value as its parameter 1, and its declaration is variadic/,
-    );
+  // A variadic declaration's call is placed by the arity guess, which lifted
+  // `takeV(*(s32 *)&gW, 5)` against `void takeV(struct W, ...)`, and `takeL0(*p0, p0[1])` against
+  // `void takeL0(long long, ...)`: each compiles, and is wrong. A fixed parameter that is not one
+  // word refuses the call instead; one that is lets the guess stand.
+  describe('a variadic declaration', () => {
+    const ctx = (fixed: string) =>
+      prototypesFromContext(
+        `typedef unsigned int u32; typedef int s32; struct W { u32 x; }; typedef struct W W_t; void takeW(${fixed}, ...);\n`,
+        'c',
+      );
+    test('keeps its fixed parameters, and lays out no struct among them', () => {
+      expect(ctx('struct W w').takeW).toEqual({ returnsVoid: true, variadicParams: ['struct W'], byValueParams: [0] });
+      expect(ctx('s32 k, W_t w').takeW).toEqual({
+        returnsVoid: true,
+        variadicParams: ['s32', 'struct W'],
+        byValueParams: [1],
+      });
+    });
+    test.each([
+      ['struct W w', /`takeW` takes 'struct W' by value as its parameter 1, and its declaration is variadic/],
+      ['s32 k, W_t w', /`takeW` takes 'struct W' by value as its parameter 2, and its declaration is variadic/],
+      ['long long x', /`takeW` takes 'long long' as its parameter 1, and its declaration is variadic/],
+      ['double d', /`takeW` takes 'double' as its parameter 1, and its declaration is variadic/],
+      ['float f', /`takeW` takes 'float' as its parameter 1, and its declaration is variadic/],
+    ])('a fixed `%s` refuses the call', (fixed, why) => {
+      expect(() => lift('bvwg', KMC_BVWG, MIPS_GCC, ctx(fixed))).toThrow(why);
+    });
+    test('fixed parameters that are each one word leave the call to the guess', () => {
+      expect(lift('bvwg', KMC_BVWG, MIPS_GCC, ctx('u32 x'))).toContain('takeW(');
+    });
   });
 
   test('an 8-aligned struct at word 0 is passed whole, and one after an s32 skips a1 and declines', () => {

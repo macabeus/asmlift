@@ -360,3 +360,26 @@ describe('a struct passed by value in argument registers', () => {
     );
   });
 });
+
+// A variadic declaration's call is placed by the arity guess, which read a fixed 64-bit parameter
+// as two arguments: `takeLv(1, *p0, p0[1])` and `takeDv(1, 1074003968, 0)`, each compiling against
+// the header. A fixed parameter that is not one word refuses the call.
+describe('a variadic declaration with a fixed parameter wider than a word', () => {
+  // `void takeLv(s32 k, long long x, ...); void ul(void) { takeLv(1, gL); }`
+  const UL =
+    'ul:\n\tpush\t{lr}\n\tldr\tr0, .L3\n\tldr\tr1, [r0]\n\tldr\tr2, [r0, #0x4]\n\tmov\tr0, #0x1\n' +
+    '\tbl\ttakeLv\n\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgL\n';
+  // `void takeDv(s32 k, double d, ...); void ud(void) { takeDv(1, 2.5); }`
+  const UD =
+    'ud:\n\tpush\t{lr}\n\tldr\tr2, .L6+0x4\n\tldr\tr1, .L6\n\tmov\tr0, #0x1\n\tbl\ttakeDv\n' +
+    '\tpop\t{r0}\n\tbx\tr0\n.L7:\n\t.align\t2, 0\n.L6:\n\t.long 0x40040000, 0x0\n';
+  test.each([
+    ['ul', UL, 'takeLv', 'long long'],
+    ['ud', UD, 'takeDv', 'double'],
+  ])('%s declines', (name, asm, callee, type) => {
+    const prototypes = { [callee]: { returnsVoid: true, variadicParams: ['s32', type] } };
+    expect(() => decompile(name, asm, ARMV4T_AGBCC, { prototypes })).toThrow(
+      new RegExp(`\`${callee}\` takes '${type}' as its parameter 2, and its declaration is variadic`),
+    );
+  });
+});

@@ -51,24 +51,27 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
       'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ' +
-        '"byValueParams", "byValueLayouts" or "variadicByValue")',
+        '"byValueParams", "byValueLayouts" or "variadicParams")',
     ]);
   });
 
-  test('a variadic by-value index beside a typed list, which a variadic declaration does not state', () => {
-    const bad = ['f: "variadicByValue" must be a parameter index, beside no typed "params" list'];
-    expect(validatePrototypes({ f: { params: ['s32'], variadicByValue: 0 } })).toEqual(bad);
-    expect(validatePrototypes({ f: { variadicByValue: -1 } })).toEqual(bad);
-    expect(validatePrototypes({ f: { variadicByValue: 0, returnsVoid: true } })).toEqual([]);
+  test("a variadic declaration's fixed parameters, which stand beside no typed list", () => {
+    const bad = ['f: "variadicParams" must be a list of parameter types, beside no "params"'];
+    expect(validatePrototypes({ f: { params: ['s32'], variadicParams: ['s32'] } })).toEqual(bad);
+    expect(validatePrototypes({ f: { variadicParams: [0] } })).toEqual(bad);
+    expect(validatePrototypes({ f: { variadicParams: ['Q_t'], byValueParams: [0], returnsVoid: true } })).toEqual([]);
+    expect(validatePrototypes({ f: { variadicParams: ['Q_t'], byValueParams: [1] } })).toEqual([
+      'f: "byValueParams" must list indices into a typed "params" or "variadicParams" list',
+    ]);
   });
 
   test('word parameters that index no typed parameter list', () => {
-    const bad = ['f: "wordParams" must list indices into a typed "params" list'];
+    const bad = ['f: "wordParams" must list indices into a typed "params" or "variadicParams" list'];
     expect(validatePrototypes({ f: { params: 2, wordParams: [0] } })).toEqual(bad);
     expect(validatePrototypes({ f: { params: ['GXTexFmt'], wordParams: [1] } })).toEqual(bad);
     expect(validatePrototypes({ f: { params: ['GXTexFmt'], wordParams: [0] } })).toEqual([]);
     expect(validatePrototypes({ f: { params: 1, byValueParams: [0] } })).toEqual([
-      'f: "byValueParams" must list indices into a typed "params" list',
+      'f: "byValueParams" must list indices into a typed "params" or "variadicParams" list',
     ]);
     expect(validatePrototypes({ f: { params: ['B_t'], byValueParams: [0] } })).toEqual([]);
   });

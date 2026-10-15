@@ -732,8 +732,10 @@ counter (`sQ.3`) only its definition spells. "That struct" is the struct each si
 to through the context's typedefs (`structNamed`), never a spelling: `typedef struct Q {…} Q;`
 passes `Q` off an `extern struct Q`. Where no rule places a declared by-value
 parameter at all (no layout, a union, a target with no word rule, an 8-aligned struct at an odd
-word, a struct among a variadic declaration's fixed parameters), the call refuses on every target (`refuseUnplacedByValue`) rather than take the arity
-guess, which would drop the struct or split it into separate arguments. The call names the operand it passes by value (`byValue`), the audit judges a frame one as
+word), the call refuses on every target (`refuseUnplacedByValue`) rather than take the arity
+guess, which would drop the struct or split it into separate arguments. A variadic declaration's
+call is placed by that guess alone, so it refuses where any of its fixed parameters
+(`variadicParams`) is not one word: a struct, a 64-bit value or a floating type (`variadicRefusal`). The call names the operand it passes by value (`byValue`), the audit judges a frame one as
 the struct and counts the call as a read of it (`byValueReads`), and the one-object answer is
 withheld, since a call handed the one object would pass a pointer. Structure spells the operand
 bare, `take2(sp0)` or `sub_0803D4AC(a0, gUnk_03003620)`, and the declarations block defines the

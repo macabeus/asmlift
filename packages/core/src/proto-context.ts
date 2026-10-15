@@ -977,7 +977,7 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
     wordParams: _words,
     byValueParams: _copies,
     byValueLayouts: _layouts,
-    variadicByValue: _variadic,
+    variadicParams: _fixed,
     ...rest
   }: FnProto): FnProto => rest;
   for (const d of ctx.declarations) {
@@ -1090,17 +1090,6 @@ function readSignature(
     proto.params = [];
     return proto;
   }
-  if (fn.variadic) {
-    // its arity is the call's, so it states no list; a struct among its fixed parameters is still
-    // passed by value, and the call refuses rather than guess over it (`FnProto.variadicByValue`)
-    const copy = params.findIndex(
-      (p) => passing(asParameter(declaredType(p.specifiers, p.declarator.derivations))) === 'by-value',
-    );
-    if (copy >= 0) {
-      proto.variadicByValue = copy;
-    }
-    return proto;
-  }
   // Each parameter's type, its name taken off: an array or a function nearest the name is a
   // pointer, and the typedef names it is built on resolve as a return's do. A spelling that sizes to
   // nothing and is no floating type is read through those names for what it positively is: a type
@@ -1109,9 +1098,17 @@ function readSignature(
   // `FnProto.wordParams`; or a struct, union or class passed BY VALUE, which mwcc passes as the
   // address of a copy in the caller's frame — listed in `FnProto.byValueParams`. A name the context
   // never resolves is in neither, and every reader leaves it unsized.
+  //
+  // A VARIADIC declaration's are read alike and kept as its fixed parameters (`variadicParams`): its
+  // arity is the call's, so they are no `params`, and no layout is read for a struct among them,
+  // whose call refuses (`variadicRefusal`).
   const types = params.map((p) => asParameter(declaredType(p.specifiers, p.declarator.derivations)));
   const spelled = types.map((t) => spellType(resolve(t, typedefs, tokens), tokens));
-  proto.params = spelled;
+  if (fn.variadic) {
+    proto.variadicParams = spelled;
+  } else {
+    proto.params = spelled;
+  }
   const unsized = (k: number) => declaredWidth(spelled[k]) === undefined && !isFloatingSpelling(spelled[k]);
   const listed = (as: Passing) => types.flatMap((t, k) => (unsized(k) && passing(t) === as ? [k] : []));
   const words = listed('word');
@@ -1121,6 +1118,8 @@ function readSignature(
   }
   if (copies.length > 0) {
     proto.byValueParams = copies;
+  }
+  if (copies.length > 0 && !fn.variadic) {
     // …and the members of each one the context defines, which size it (`FnProto.byValueLayouts`)
     const layouts = Object.fromEntries(
       copies.flatMap((k) => {

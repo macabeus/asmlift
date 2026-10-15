@@ -37,6 +37,7 @@ import {
   isFloatingSpelling,
   paramClassOf,
   spellableProto,
+  variadicRefusal,
   wordsOf,
 } from '../proto';
 import { type ContextGlobals, structNamed } from '../proto-context';
@@ -364,15 +365,27 @@ export function callDeclarations(
   // `takeQ();`, and gcc2.7.2kmc `takeW(gW)`, where no rule placed it, `takeW(*(s32 *)&gW)`. This is
   // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
   // word: a parameter the declaration names a struct or union is known not to be.
+  //
+  // A VARIADIC DECLARATION REFUSES THE SAME GUESS over a fixed parameter that is not one word: its
+  // call is placed by the guess alone (`FnProto.variadicParams`), which splits a struct, a 64-bit
+  // value or a `double` into words. Its parameters are the project's fact, read off its own entry,
+  // which `declarationOf` reads past because it states no `params`.
   const refuseUnplacedByValue = (callee: string): void => {
-    // a variadic declaration states no parameters, so `declarationOf` reads past it; a struct among
-    // its fixed ones is still the project's fact (`FnProto.variadicByValue`)
     const own = known(prototypes, callee);
-    const p = own?.variadicByValue !== undefined ? own : declarationOf(callee);
+    const fixed = variadicRefusal(own);
+    if (fixed !== undefined) {
+      const spelling = own!.variadicParams![fixed.param];
+      const byValue = paramClassOf(own!, own!.variadicParams!, fixed.param) === 'by-value';
+      fail(
+        `cannot lift '${name}': \`${callee}\` takes '${spelling}'${byValue ? ' by value' : ''} as its parameter ` +
+          `${fixed.param + 1}, and ${fixed.refused} — a variadic call is lifted only where each fixed parameter is one argument word`,
+      );
+    }
+    const p = declarationOf(callee);
     const why = byValueRefusal(p, target);
     if (why !== undefined) {
       fail(
-        `cannot lift '${name}': \`${callee}\` takes ${Array.isArray(p!.params) ? `'${p!.params[why.param]}'` : 'a struct or union'} by value as its ` +
+        `cannot lift '${name}': \`${callee}\` takes '${(p!.params as readonly string[])[why.param]}' by value as its ` +
           `parameter ${why.param + 1}, and ${why.refused} — a struct passed by value is lifted only where its argument words are known`,
       );
     }

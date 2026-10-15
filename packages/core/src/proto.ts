@@ -56,13 +56,16 @@ export interface FnProto {
    *  `returnLayout`. A by-value parameter with no layout here is unsized, and a call to it refuses
    *  (`aggregate.ts` `byValueRefusal`) rather than take the argument-register guess. */
   byValueLayouts?: Readonly<Record<number, AggregateLayout>>;
-  /** For a VARIADIC declaration, which states no `params` (its arity is the call's), the index of
-   *  the first of its fixed parameters that is a struct, union or class passed by value. A context
-   *  states it (`prototypesFromContext`). Read only to refuse the call (`aggregate.ts`
-   *  `byValueRefusal`): the arity guess would otherwise read that struct's words as scalar
-   *  arguments — measured, `void takeV(struct W, ...)` lifted `takeV(*(s32 *)&gW, 5)` on every
-   *  MIPS compiler and agbcc, which the header rejects. */
-  variadicByValue?: number;
+  /** The FIXED parameters of a VARIADIC declaration, spelled as a typed `params` list spells them.
+   *  Such a declaration states no `params`, because its arity is the call's and a list would read
+   *  as the whole of it; `wordParams` and `byValueParams` index into this list instead. A context
+   *  states it (`prototypesFromContext`). Read only to refuse a call (`variadicRefusal`): the call
+   *  is placed by the arity guess, which reads argument words one by one, so a fixed parameter that
+   *  is not one word is split or dropped. Measured: `void takeV(struct W, ...)` lifted
+   *  `takeV(*(s32 *)&gW, 5)` on every MIPS compiler and agbcc, `void takeL0(long long, ...)`
+   *  lifted `takeL0(*p0, p0[1])` on every MIPS compiler, and agbcc `takeDv(s32, double, ...)`
+   *  lifted `takeDv(1, 1074003968, 0)` — each compiles against the header. */
+  variadicParams?: ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
    *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
@@ -276,6 +279,33 @@ export function paramClassOf(p: FnProto, params: readonly ParamType[], k: number
         : p.byValueParams?.includes(k) || BY_VALUE_SPELLING.test(spelling.replace(/\b(?:const|volatile)\b/g, ' '))
           ? 'by-value'
           : 'unsized';
+}
+
+/** Why a call to the VARIADIC declaration `p` cannot be placed by the arity guess: its first fixed
+ *  parameter (`FnProto.variadicParams`, an index into it) that is not one argument word, and the
+ *  reason. Undefined where `p` is no variadic declaration, or where every fixed parameter is a word
+ *  or UNSIZED — a spelling nothing here resolved, which may be one word, and on which every reader
+ *  abstains (`declaredCallArgs`) rather than refuse. */
+export function variadicRefusal(p: FnProto | undefined): { refused: string; param: number } | undefined {
+  const fixed = p?.variadicParams;
+  if (fixed === undefined || p?.params !== undefined) {
+    return undefined;
+  }
+  const reasons: Partial<Record<ParamClass, string>> = {
+    'by-value': 'reads a struct or union passed by value as that many separate words',
+    wide: 'reads a value wider than a word as two separate arguments',
+    float: 'reads a floating-point value as integer words, or misses it in the FPU registers',
+  };
+  for (const k of fixed.keys()) {
+    const why = reasons[paramClassOf(p!, fixed, k)];
+    if (why !== undefined) {
+      return {
+        refused: `its declaration is variadic: the call's arguments are placed by the arity guess, which ${why}`,
+        param: k,
+      };
+    }
+  }
+  return undefined;
 }
 
 /** Whether a declared type is `double`, qualifiers aside. */
@@ -713,15 +743,15 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'wordParams' &&
         key !== 'byValueParams' &&
         key !== 'byValueLayouts' &&
-        key !== 'variadicByValue'
+        key !== 'variadicParams'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams", "byValueLayouts" or "variadicByValue")',
+            '"byValueParams", "byValueLayouts" or "variadicParams")',
         );
       }
     }
-    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicByValue } =
+    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicParams } =
       proto as {
         params?: unknown;
         returnsVoid?: unknown;
@@ -730,21 +760,16 @@ export function validatePrototypes(value: unknown): string[] {
         wordParams?: unknown;
         byValueParams?: unknown;
         byValueLayouts?: unknown;
-        variadicByValue?: unknown;
+        variadicParams?: unknown;
       };
-    // a variadic declaration states no typed list: the index is into the fixed parameters it does
-    // not state
+    // a variadic declaration's fixed parameters, which it states beside no typed list
     if (
-      variadicByValue !== undefined &&
-      !(
-        typeof variadicByValue === 'number' &&
-        Number.isInteger(variadicByValue) &&
-        variadicByValue >= 0 &&
-        !Array.isArray(params)
-      )
+      variadicParams !== undefined &&
+      !(Array.isArray(variadicParams) && variadicParams.every((t) => typeof t === 'string') && params === undefined)
     ) {
-      problems.push(`${sym}: "variadicByValue" must be a parameter index, beside no typed "params" list`);
+      problems.push(`${sym}: "variadicParams" must be a list of parameter types, beside no "params"`);
     }
+    const listed = Array.isArray(params) ? params : Array.isArray(variadicParams) ? variadicParams : undefined;
     for (const [key, list] of [
       ['wordParams', wordParams],
       ['byValueParams', byValueParams],
@@ -752,12 +777,12 @@ export function validatePrototypes(value: unknown): string[] {
       if (
         list !== undefined &&
         !(
-          Array.isArray(params) &&
+          listed !== undefined &&
           Array.isArray(list) &&
-          list.every((k) => Number.isInteger(k) && k >= 0 && k < params.length)
+          list.every((k) => Number.isInteger(k) && k >= 0 && k < listed.length)
         )
       ) {
-        problems.push(`${sym}: "${key}" must list indices into a typed "params" list`);
+        problems.push(`${sym}: "${key}" must list indices into a typed "params" or "variadicParams" list`);
       }
     }
     // Two answers to one question — whether the parameter travels in a register or as a copy.

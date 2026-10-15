@@ -205,7 +205,7 @@ describe('prototypes from a declaration context', () => {
     expect(p.d).toEqual({ returns: 'double', params: [] });
   });
 
-  test('skips members, namespaces, templates, operators and variadics; drops an overloaded name', () => {
+  test('skips members, namespaces, templates and operators, keeps only the fixed parameters of a variadic; drops an overloaded name', () => {
     const p = prototypesFromContext(
       `class Card { public: int probe(int chan); };
        namespace zen { int helper(int); }
@@ -219,7 +219,7 @@ describe('prototypes from a declaration context', () => {
       'c++',
     );
     expect(Object.keys(p).sort()).toEqual(['after', 'last', 'printf', 'same']);
-    expect(p.printf).toEqual({ returns: 'int' });
+    expect(p.printf).toEqual({ returns: 'int', variadicParams: ['const char *'] });
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
   });
 
@@ -839,7 +839,7 @@ describe('a context register return under a mapped signature', () => {
       'enum Mode { M0, M1 }; int pr(char *buf, const char *fmt, ...); int kr(); int two(enum Mode m, int n);',
       'c',
     );
-    expect(odd.pr).toEqual({ returns: 'int' });
+    expect(odd.pr).toEqual({ returns: 'int', variadicParams: ['char *', 'const char *'] });
     expect(odd.kr).toEqual({ returns: 'int' });
     const ptr = { size: 4, signed: null, pointer: true };
     const sigs = new Map([
