@@ -19,6 +19,7 @@ import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import { tallying, without } from '../src/l3/gates';
 import { decompile } from '../src/pipeline';
+import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, type TargetDescription } from '../src/target';
 
 const fixture = (f: string) => readFileSync(join(import.meta.dirname, 'corpus', f), 'utf8');
@@ -57,6 +58,16 @@ test('a qualified read of a hoisted base reads through the local the hoist named
   // `[r4, #0x8]` off the base it already held (l3/basecse.ts `rewrite`).
   expect(lift('dmaburst', fixture('agbcc-deadread.s'), ARMV4T_AGBCC)).toMatch(/^\s*\(\(volatile s32 \*\)p0\)\[2\];$/m);
   expect(lift('dmaburst', fixture('ido71-deadread.txt'), MIPS_IDO)).toMatch(/^\s*\(\(volatile s32 \*\)p0\)\[2\];$/m);
+});
+
+test('a symbol read nothing uses is declared volatile where no map declares it', () => {
+  // The structurer spells the read by the bare name, whose declaration owns its qualifiers, so the
+  // synthesized declaration is what keeps it: `gR;` under a plain `extern u32 gR;` compiles to no
+  // read at all.
+  const [c] = enumerateCandidates('sym', fixture('agbcc-deadread.s'), ARMV4T_AGBCC, {
+    prototypes: { sym: { returnsVoid: true } },
+  });
+  expect(c.symbolRefs?.find((r) => r.name === 'gR')?.info.volatile).toBe(true);
 });
 
 /** One block reading `width` bytes at `base` into a value nothing uses, then returning. */

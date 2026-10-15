@@ -9,6 +9,8 @@
 // asks each emitted tree for its references. A SIBLING MODULE, never a `rank/` directory — see the
 // same note on rank-variations.ts.
 import { type Fn, type Value, defOpMap } from './ir/core';
+import { qualifiedBy } from './ir/discipline';
+import { MEM_BASE_OPS } from './ir/opcodes';
 import type { SFn } from './l3/ast';
 import { type SymbolRef, collectSymbolRefs } from './l3/symbol-refs';
 import type { Prototypes } from './proto';
@@ -210,10 +212,26 @@ export type RefusedDeclarationReason =
  *  module note. */
 export function bareGlobalSymbols(fn: Fn): Map<string, SymbolInfo> {
   const out = new Map<string, SymbolInfo>();
+  const defs = defOpMap(fn);
+  // A name the lift accessed at its own address through a `volatile` cast placement
+  // (ir/discipline.ts `qualifiedBy`) is declared `volatile`: the structurer spells that access by
+  // the bare name, whose declaration owns its qualifiers (l3/volstore.ts `qualifiedMemoryAccess`),
+  // so a plain declaration would drop the qualifier the access carries — `gR;` under
+  // `extern u32 gR;` compiles to no read at all.
+  const qualifiedNames = new Set<string>();
+  for (const b of fn.blocks) {
+    for (const op of b.ops) {
+      const d = MEM_BASE_OPS.has(op.opcode) ? defs.get(op.operands[0]) : undefined;
+      if (d?.opcode === 'gaddr' && op.attrs.off === 0 && qualifiedBy(op) === 'cast') {
+        qualifiedNames.add(d.attrs.sym as string);
+      }
+    }
+  }
   for (const b of fn.blocks) {
     for (const op of b.ops) {
       if (op.opcode === 'gaddr' && typeof op.attrs.sym === 'string') {
-        out.set(op.attrs.sym, { name: op.attrs.sym, kind: 'data' });
+        const sym = op.attrs.sym;
+        out.set(sym, { name: sym, kind: 'data', ...(qualifiedNames.has(sym) ? { volatile: true } : {}) });
       }
     }
   }

@@ -3998,6 +3998,33 @@ export function structure(
     if (by === null || (by === 'declaration' && !castOffDeclaration(access, printedCType) && !throughLocal(access))) {
       return access;
     }
+    // A bare global's declaration owns its qualifiers. Where the project declares the name — the map
+    // knows it, or a declaration context is in play — a declaration that qualified it would have
+    // placed the access `declared`, so one the lift qualified by a CAST (`device`:
+    // frontend/dead-reads.ts, frontend/device-pins.ts) is declared plain there, and `gR;` compiles
+    // to no read at all: the cast goes on the object's address. A name nothing declares gets the
+    // synthesized declaration, which carries the qualifier (rank-declare.ts `bareGlobalSymbols`),
+    // and keeps the bare spelling — on gcc 2.7.2 the cast compiles to another address sequence.
+    if (
+      by === 'cast' &&
+      access.k === 'var' &&
+      (mapSymbols?.has(access.name) === true || contextGlobals !== undefined)
+    ) {
+      const width = op.attrs.width as number;
+      const signed = op.attrs.signed === true;
+      return {
+        k: 'index',
+        base: {
+          k: 'cast',
+          to: T.ptr(scalarTypeForAccess(width, signed)),
+          volatile: true,
+          e: { k: 'addr', name: access.name },
+        },
+        idx: { k: 'const', value: 0 },
+        width,
+        signed,
+      };
+    }
     const q = qualifiedMemoryAccess(access, printedCType);
     if (q === null) {
       throw new StructureError(
