@@ -1551,9 +1551,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`mullw r11,r4,r5; mullw r12,r7,r8` on one arm, `subf r4,r12,r11` after the join). Without the
   // target's scratch registers in the PPC live-in model, each def-less read lifts as one more
   // PARAMETER — a third for a two-parameter source, and a ninth and tenth past the eight argument
-  // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and both
-  // MIPS frontends claim no register partition. mwcc_233_163n is pinned by
-  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and the
+  // O32 half is `uninit_join` and `uninit_sw` on both gcc 2.7.2 lanes (v0 and v1, MIPS_GCC
+  // `scratchRegs`). mwcc_233_163n is pinned by packages/cli/test/matching/ppc-save-routines.test.ts.
   {
     sym: 'uninit_r0',
     src: 'int uninit_r0(int s,int a){ int x; if (s) x = a*3; return x + a; }',

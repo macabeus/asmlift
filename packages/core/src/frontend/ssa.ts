@@ -225,7 +225,8 @@ export interface LiveInModel {
    *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
    *  nothing before it named (`prologueSavedRegs`), because mwcc interleaves its saves with the
    *  body (`stw r31; mr r31,r3; stw r30`); "nothing named it first" is the condition Thumb's
-   *  leading run meets by construction. A frontend that cannot measure it passes nothing here and
+   *  leading run meets by construction; MIPS reads its entry block the same way
+   *  (frontend/mips.ts `prologueSavedRegs`). A frontend that cannot measure it passes nothing here and
    *  keeps the parameter it would have got anyway.
    *
    *  The one register class exempt from the save is the ABI's scratch set (`target.scratchRegs`):

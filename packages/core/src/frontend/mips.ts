@@ -69,7 +69,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder } from './ssa';
+import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1113,9 +1113,20 @@ function liftOnce(
   // which is in neither range. A function that takes a frame address gets a local area as well
   // (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory through an
   // `laddr` the shared frame-object audit proves, as on Thumb.
+  //
+  // THE REGISTER HALF of the live-in model IS claimed: a def-less read of a register O32 passes no
+  // argument in, and that is scratch or the prologue saved (`prologueSavedRegs`), is an
+  // uninitialised local (`registerLiveIns`, frontend/ssa.ts, as on Thumb and PPC). The saves are
+  // measured HERE, before any block is lowered, because the builder evaluates the model once, at
+  // its first use, while `saveSlots` below fills progressively.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
-    isFpKey(k) ? (fpType ?? T.f32()) : undefined,
+  const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
+  const ssa = makeSsaBuilder(
+    name,
+    blocks.length,
+    preds,
+    () => registerLiveIns(target, savedRegs),
+    (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
@@ -2327,6 +2338,40 @@ function takesFrameAddress(ins: Instr): boolean {
   return (
     (ins.mnemonic === 'addu' || ins.mnemonic === 'add') && t !== undefined && isStackPtr(s ?? '') !== isStackPtr(t)
   );
+}
+
+/** THE REGISTERS THE PROLOGUE SAVES: a word store to `sp` of a register O32 makes a callee
+ *  preserve, in the entry block (its delay slot included — the slot of a branch-likely is its own
+ *  block, so never this one) before any instruction NAMES that register, read or written. What it
+ *  stores is then what the caller left there, which is the half of `LiveInModel.uninitRegs` the
+ *  frontend owes: a compiler homes a local in a callee-saved register only after saving it, so a
+ *  def-less read of a saved one is that local, uninitialised, and of an unsaved one stays the
+ *  parameter it would have been. "Nothing named it first" is PPC's condition
+ *  (`prologueSavedRegs` there): a read before the store would be a use of the caller's value. A
+ *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all. */
+function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
+  const saved = new Set<string>();
+  const named = new Set<string>();
+  const calleeSaved = (r: string) => isMipsReg(r) && !r.startsWith('$') && !target.callerSaved.includes(r);
+  for (const ins of entry) {
+    const [src, mem] = ins.ops;
+    if (ins.mnemonic === 'sw' && src !== undefined && mem !== undefined && isStackPtr(parseMem(mem).base)) {
+      if (calleeSaved(src) && !named.has(src)) {
+        saved.add(src);
+      }
+    }
+    for (const op of ins.ops) {
+      const reg = op.includes('(') ? parseMem(op).base : op;
+      if (isMipsReg(reg)) {
+        named.add(reg);
+      }
+    }
+    const w = writtenReg(ins);
+    if (w !== null) {
+      named.add(w);
+    }
+  }
+  return saved;
 }
 
 /** The local area of a function that takes a frame address (`o32LocalArea`), and the depth every
