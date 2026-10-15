@@ -248,15 +248,35 @@ function collect(stmts: Stmt[], c: Collected, loop: boolean): void {
   }
 }
 
-/** Rewrite every `index`-of-hoistable-base whose key is hoisted so its base becomes the hoist local. */
-function rewrite(e: Expr, localFor: Map<string, string>): Expr {
+/** Rewrite every `index`-of-hoistable-base whose key is hoisted so its base becomes the hoist local.
+ *
+ *  A `volatile` cast over a hoisted LEAF keeps its cast and takes the local under it:
+ *  `((volatile s32 *)0x40000D4)[2]` beside a hoisted `p0 = (s32 *)0x40000D4` becomes
+ *  `((volatile s32 *)p0)[2]`. The cast is never hoisted itself (`isHoistableBase`), since the local
+ *  would drop its qualifier; under it the local is the same address, so the access keeps its
+ *  qualifier and its cell, and reads the register the compiler already holds the base in. Inline, a
+ *  qualified access at a nonzero offset makes agbcc materialize a second literal with the offset
+ *  folded in (`.word 0x40000dc` + `ldr r0, [r0]`) where the source read `[r4, #0x8]` off the base
+ *  it had loaded — the `dmaRegs[2];` that ends a DMA macro. `leafLocal` maps a hoisted leaf to its
+ *  local, whichever key hoisted it. */
+function rewrite(e: Expr, localFor: Map<string, string>, leafLocal: ReadonlyMap<string, string>): Expr {
   if (e.k === 'index' && isHoistableBase(e.base)) {
     const nm = localFor.get(keyOf(e.base, e.width, e.signed));
     if (nm) {
-      return { ...e, base: { k: 'var', name: nm }, idx: rewrite(e.idx, localFor) };
+      return { ...e, base: { k: 'var', name: nm }, idx: rewrite(e.idx, localFor, leafLocal) };
     }
   }
-  return mapExprChildren(e, (c) => rewrite(c, localFor));
+  if (e.k === 'index' && e.base.k === 'cast' && e.base.volatile === true && isHoistableLeaf(e.base.e)) {
+    const nm = leafLocal.get(leafId(e.base.e));
+    if (nm) {
+      return {
+        ...e,
+        base: { ...e.base, e: { k: 'var', name: nm } },
+        idx: rewrite(e.idx, localFor, leafLocal),
+      };
+    }
+  }
+  return mapExprChildren(e, (c) => rewrite(c, localFor, leafLocal));
 }
 
 /** One base under consideration, keyed as `(base, width, signedness)`. */
@@ -784,7 +804,15 @@ export function hoistBaseLocals(
     });
   }
 
-  const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor)));
+  const leafLocal = new Map<string, string>();
+  for (const k of hoisted) {
+    const b = meta.get(k)!.base;
+    const leaf = leafId(b.k === 'cast' ? b.e : b);
+    if (!leafLocal.has(leaf)) {
+      leafLocal.set(leaf, localFor.get(k)!);
+    }
+  }
+  const rewritten = sfn.body.map((s) => mapStmtExprs(s, (e) => rewrite(e, localFor, leafLocal)));
   // The new inits join the tree's LEADING run of base inits rather than being prepended above it:
   // when rank's /livebase re-runs this pass the head already carries the default run's, and
   // blindly prepending would spell the new base's pool load above locals the compiler loads first.

@@ -21,11 +21,13 @@
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T, typeToString } from '../ir/types';
-import { type Prototypes, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, wordsOf } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
+import { pinDeadReads, unreadPairHalf } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
@@ -2444,8 +2446,11 @@ export function lift(
   prototypes: Prototypes = {},
   asmData?: AsmData,
   symbols?: SymbolMap,
+  context?: ContextGlobals,
 ): Fn {
-  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, symbols, oneObject));
+  return liftWithRelift(name, (oneObject) =>
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject),
+  );
 }
 
 /** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: every stage before the fill (`thumbFillOf`: the
@@ -2464,6 +2469,7 @@ function liftOnce(
   prototypes: Prototypes,
   _asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
+  context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject);
@@ -2515,6 +2521,14 @@ function liftOnce(
     pinDeviceAccesses(irBlocks, verdict, target, symbols);
   }
   refuseSretOutsideFrame(name, irBlocks);
+  pinDeadReads(irBlocks, target, {
+    own: prototypes[name],
+    atWordReturn: pairs.unreadHigh,
+    atUndeclaredCall: fill.calls.heldAtUndeclaredCall,
+    compared: fill.flags.compared,
+    spilled: ssa.frameWrites,
+    declarations: { symbols, context },
+  });
 
   abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);
   fn.localObjects = statics.finish();
@@ -4331,21 +4345,28 @@ interface PairHalf {
 interface ThumbPairs {
   readonly halfOf: ReadonlyMap<Value, PairHalf>;
   readonly wordReturns: { bi: number; lo: Value; widerEpilogue: boolean }[];
+  /** what r1 may hold at each word return, where no declaration pins the width (dead-reads.ts
+   *  `unreadPairHalf`) */
+  readonly unreadHigh: Set<Value>;
   projectHalf(irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value;
   fuseHalves(irb: Block, lo: Value, hi: Value): Value;
   wideReturn(lo: Value, bi: number): Value | null;
+  /** record a return of one word in block `bi`, for `refuseWordReturns` and the dead-read pin */
+  noteWordReturn(bi: number, lo: Value, widerEpilogue: boolean): void;
   refuseWordReturns(): void;
 }
 
 function thumbPairs({
   name,
   target,
+  own,
   ssa,
   asmBlocks,
   callClobbers,
 }: {
   name: string;
   target: TargetDescription;
+  own: FnProto | undefined;
   ssa: SsaBuilder;
   asmBlocks: readonly AsmBlock[];
   callClobbers: readonly string[];
@@ -4409,6 +4430,7 @@ function thumbPairs({
   // epilogue says the return type is 5 to 8 bytes — judged by `refuseWordReturns` once every block
   // is filled.
   const wordReturns: ThumbPairs['wordReturns'] = [];
+  const unreadHigh = new Set<Value>();
   /** THE WORD RETURNS THAT WOULD DROP A HIGH HALF, refused. Run after every block is filled and
    *  before `ssa.finish()`: a join's phi operands are wired by then, and not yet folded away.
    *
@@ -4449,7 +4471,11 @@ function thumbPairs({
       }
     }
   };
-  return { halfOf, wordReturns, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
+  const noteWordReturn = (bi: number, lo: Value, widerEpilogue: boolean): void => {
+    wordReturns.push({ bi, lo, widerEpilogue });
+    unreadPairHalf(ssa, own, target.argRegs[1], bi, unreadHigh);
+  };
+  return { halfOf, wordReturns, unreadHigh, noteWordReturn, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
 }
 
 /** Whether, from instruction `from` of block `bi` to its end, nothing puts into the pair's high
@@ -4524,6 +4550,10 @@ function highRegisterHeld(ab: AsmBlock, from: number, hi: string, callClobbers: 
 interface ThumbFlagCarry {
   readonly exitCmp: Map<number, PendingCmp | string>;
   inheritedCmp(bi: number): PendingCmp | string;
+  /** every value a `cmp` compared, whether or not a branch reads the flags it set: a compare
+   *  nothing reads leaves no op, so this is the only record that the value was consumed (the
+   *  dead-read pin's `compared`, frontend/dead-reads.ts) */
+  readonly compared: Set<Value>;
 }
 
 function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmBlock, JumpTable>): ThumbFlagCarry {
@@ -4559,7 +4589,7 @@ function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmB
         return plast !== undefined && classifyXfer(plast) === 'cond';
       },
     });
-  return { exitCmp, inheritedCmp };
+  return { exitCmp, inheritedCmp, compared: new Set<Value>() };
 }
 
 /** The two frame facts the fill accumulates and the frame-object audit reads: every offset the
@@ -4636,7 +4666,14 @@ function thumbFillOf(
     statics,
     slotsOffReason: frame.slotsOffReason,
   });
-  const pairs = thumbPairs({ name, target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
+  const pairs = thumbPairs({
+    name,
+    target,
+    own: prototypes[name],
+    ssa,
+    asmBlocks: cfg.asmBlocks,
+    callClobbers: calls.callClobbers,
+  });
   const flags = thumbFlagCarry(cfg, text.tables);
   return {
     name,
@@ -4849,6 +4886,7 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
         }
         const rhs = b.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
         cur.pendingCmp = { lhs: readData(reg(a), bi), rhs };
+        fill.flags.compared.add(cur.pendingCmp.lhs).add(rhs);
         break;
       }
       case 'ldr':
@@ -5693,7 +5731,7 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
           last.ops[0] === scratch &&
           prev?.mnemonic === 'pop' &&
           regListOf(prev.ops)?.join() === scratch;
-        pairs.wordReturns.push({ bi, lo, widerEpilogue });
+        pairs.noteWordReturn(bi, lo, widerEpilogue);
       }
       irb.ops.push(mkOp('ret', { operands: [whole ?? lo] }));
     }

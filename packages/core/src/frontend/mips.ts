@@ -22,10 +22,12 @@ import { type Block, Fn, Op, Successor, Value, mkOp, mkValue } from '../ir/core'
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { type Prototypes, declaresVoidReturn, ownReturnWidth, wordsOf } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
 import { callDeclarations } from './call-plan';
+import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -954,8 +956,11 @@ export function lift(
   prototypes: Prototypes = {},
   asmData?: AsmData,
   symbols?: SymbolMap,
+  context?: ContextGlobals,
 ): Fn {
-  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, symbols, oneObject));
+  return liftWithRelift(name, (oneObject) =>
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject),
+  );
 }
 
 function liftOnce(
@@ -965,6 +970,7 @@ function liftOnce(
   prototypes: Prototypes,
   asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
+  context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
   // Two input dialects reach this frontend: `objdump -d` text (IDO/KMC — no compiler-emitted asm),
@@ -2269,6 +2275,12 @@ function liftOnce(
       pinDeviceAccesses(irBlocks, verdict, target, symbols);
     }
   }
+  pinDeadReads(irBlocks, target, {
+    own: prototypes[name],
+    atUndeclaredCall: calls.heldAtUndeclaredCall,
+    spilled: ssa.frameWrites,
+    declarations: { symbols, context },
+  });
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;

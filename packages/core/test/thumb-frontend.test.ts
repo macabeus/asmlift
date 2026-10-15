@@ -501,7 +501,9 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     const redef = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tldr\tr0, [r1]\n\tbge\t.Ltrue\n${TAIL}`;
     const src = dc('redef', redef).source;
     expect(src).toContain(FOLDED);
-    expect(src).not.toContain('*'); // the loaded word is not in the condition, so nothing reads it
+    // The loaded word is not in the condition. Nothing uses it, so it stands alone as the read the
+    // machine made (frontend/dead-reads.ts) and appears nowhere else.
+    expect(src.replace('    *(volatile s32 *)a1;\n', '')).not.toContain('*');
   });
 });
 
@@ -3552,7 +3554,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000b0\n' +
       '\t.word\t0x40000b4\n\t.word\t0x40000b8\n';
     const src = decompile('fillWord', wordIndexed, ARMV4T_AGBCC).source;
-    expect(src).not.toContain('(volatile s32 *)');
+    // no store is pinned; the control read-back nothing uses is kept as a read (frontend/dead-reads.ts)
+    expect(src.match(/\(volatile s32 \*\)/g)).toHaveLength(1);
+    expect(src).toContain('    ((volatile s32 *)67109048)[a0];\n}');
   });
 
   // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
@@ -3732,11 +3736,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const src = decompile('d3i', twoFills, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u16 sp0;');
     expect(src).toContain('    *(volatile u16 *)67109384 = 0;\n');
+    // pinned through the channel's base local, qualified at each access (l3/basecse.ts `rewrite`)
     expect(src).toContain(
-      '    *(volatile s32 *)67109076 = &sp0;\n    ((volatile s32 *)67109076)[1] = a0;\n' +
-        '    ((volatile s32 *)67109076)[2] = -2130706400;\n',
+      '    *(volatile s32 *)p0 = &sp0;\n    ((volatile s32 *)p0)[1] = a0;\n' +
+        '    ((volatile s32 *)p0)[2] = -2130706400;\n',
     );
-    expect(src).toContain('    p0[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n    *(u16 *)67109384 = 1;\n');
+    expect(src).toContain('    p0[2] = -2130706400;\n    ((volatile s32 *)p0)[2];\n    *(u16 *)67109384 = 1;\n');
   });
 
   // …and a read of the channel between the two fills does not stand for the first: agbcc forwards
@@ -3756,7 +3761,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t0x1111\n\t.word\t0x40000d4\n\t.word\t-0x7effffe0\n\t.word\tgY\n\t.word\t0x40000dc\n' +
       '\t.word\t0x2222\n';
     expect(decompile('e2', readBetween, ARMV4T_AGBCC).source).toContain(
-      '    ((volatile s32 *)67109076)[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n' +
+      '    ((volatile s32 *)p0)[2] = -2130706400;\n    ((volatile s32 *)p0)[2];\n' +
         '    gY = *(volatile s32 *)67109084;\n',
     );
   });
@@ -3780,7 +3785,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\tgDst2\n\t.word\t-0x7affffe0\n\t.word\t0x4000006\n';
     const src = decompile('d1', pollAfterFills, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u16 sp0;');
-    expect(src.match(/^ {4}\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(2);
+    expect(src.match(/^ {4}\(\(volatile s32 \*\)p0\)\[2\];$/gm)).toHaveLength(2);
     expect(src).toContain('    do {\n        v0 = *(volatile u16 *)67108870;\n    } while (v0 != 160);\n');
   });
 

@@ -65,6 +65,11 @@ export interface SsaBuilder {
   readGuessedArg(reg: string, b: number): Value;
   /** Record that `reg` now holds `v` within block `b`. */
   writeVar(reg: string, b: number, v: Value): void;
+  /** Every value written to a frame-slot key ({@link stackSlotKey}) or an incoming stack-argument key
+   *  ({@link stackArgKey}): a word the machine STORED to its stack. The slot is a variable here, so a
+   *  store nothing reloads leaves no op behind, and the value it stored looks unused — the dead-read
+   *  pin asks this (frontend/dead-reads.ts `spilled`). */
+  readonly frameWrites: ReadonlySet<Value>;
   /** Mark block `b` fully emitted (terminator pushed); seals any now-ready successors. */
   markFilled(b: number): void;
   /** Live-in parameter value → the key it arrived on (for calling-convention order). Usually an
@@ -584,7 +589,11 @@ export function makeSsaBuilder(
     }
   };
 
+  const frameWrites = new Set<Value>();
   const writeVar = (reg: string, b: number, v: Value) => {
+    if (slotKeyOffset(reg) !== null || reg.startsWith(STACK_ARG_PREFIX)) {
+      frameWrites.add(v);
+    }
     noteSlotHome(reg, v);
     noteSlotTraffic(reg, v);
     if (b === 0 && !firstEntryWrite.has(reg)) {
@@ -958,6 +967,7 @@ export function makeSsaBuilder(
     readVar,
     readGuessedArg: readAny, // see the interface: the trim is this read's answer, not a refusal
     writeVar,
+    frameWrites,
     paramReg,
     ensureParam,
     hasReachingDef,
@@ -1793,7 +1803,8 @@ export const slotKeyOffset = (key: string): number | null =>
  *  through the ordinary Braun live-in path, which turns a read with no reaching def into a function
  *  parameter — so it needs NO new representation, opcode or pass. The `@` cannot appear in a real
  *  register token, so the key cannot collide with one. */
-export const stackArgKey = (index: number): string => `@sarg${index}`;
+const STACK_ARG_PREFIX = '@sarg';
+export const stackArgKey = (index: number): string => `${STACK_ARG_PREFIX}${index}`;
 /** The {@link stackArgKey} of the incoming word at `entryOff` bytes above the caller's stack pointer,
  *  on an ABI whose caller's parameter area starts `paramAreaAt` bytes above it and whose first
  *  `regArgs` argument words travel in registers: word k past them is at `paramAreaAt + 4k`

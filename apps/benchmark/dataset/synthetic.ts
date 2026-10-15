@@ -6804,6 +6804,28 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void dmanest(s32 lo, s32 bg, s32 n);',
     proto: { dmanest: { params: ['s32', 's32', 's32'], returnsVoid: true } },
   },
+  // A READ NOBODY USES SURVIVES ONLY QUALIFIED: every compiler here deletes a plain read whose
+  // value nothing consumes, so a read still in the object was `volatile` in the source, and the lift
+  // stamps it so (frontend/dead-reads.ts). Each read's register is overwritten by the next
+  // statement's load — IDO reads into `$zero` instead — which is what `dmareadback`'s void return
+  // does not cover. The address plays no part, so one row reads a literal and one a pointer
+  // parameter, on every toolchain.
+  {
+    sym: 'deadreadback',
+    src: 'void deadreadback(s32 b, s16 *x){ *(volatile s32 *)0x040000d8 = b; *(volatile s32 *)0x040000d8; x[0] = x[1] + 3; }',
+    features: ['device-access', 'store'],
+    toolchains: ALL,
+    ctx: 'void deadreadback(s32 b, s16 *x);',
+    proto: { deadreadback: { params: ['s32', 's16 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'deadreadparam',
+    src: 'void deadreadparam(volatile s32 *p, s16 *x){ *p; x[0] = x[1] + 3; }',
+    features: ['pointer', 'store'],
+    toolchains: ALL,
+    ctx: 'void deadreadparam(volatile s32 *p, s16 *x);',
+    proto: { deadreadparam: { params: ['volatile s32 *', 's16 *'], returnsVoid: true } },
+  },
 
   // ── THE MAP-ASKING VARIATIONS, and the synthetic rows that carry a map ─────────────────────
   //

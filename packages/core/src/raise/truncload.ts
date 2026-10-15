@@ -161,9 +161,10 @@ export const TRUNC_LOAD_GATES: readonly Gate<TruncatedLoad>[] = [
     // spellings a source has for one land here: the bare cast of a number (`*(vu16 *)0x4000004`)
     // through `constAddressOf`, and the named register (`REG_DISPSTAT`) through `globalCellOf`,
     // whose `volatile` is a declaration in the project's headers that no raise pass can read.
-    // The two helpers are ir/alias.ts's, and `constAddressOf` is the address structure.ts's
-    // `volatileQualifiable` asks about — so a load this rule and `qualified-access` admit is one that
-    // predicate answers no to, by construction rather than by measurement.
+    // The two helpers are ir/alias.ts's. A dead read this rule and `qualified-access` admit is one
+    // nobody spells: a read the raw lift never used is stamped by the dead-read pin
+    // (frontend/dead-reads.ts) before this pass runs, `qualified-access` refuses it, and
+    // structure.ts `volatileQualifiable` spells only a qualified read.
     //
     // NOT `capabilities.deviceRegisters`. That window is documented as a question about SPELLING
     // and may be approximate (target.ts), so a soundness rule may not rest on it; asking whether

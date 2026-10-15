@@ -45,10 +45,13 @@ import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
 import { type FnProto, type Prototypes, declaredWidth, declaresVoidReturn, isFloatingSpelling } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import { registerSaveRoutineOf } from '../runtime-helpers';
+import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
+import { type Declarations, pinDeadReads, unreadPairHalf } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -1051,8 +1054,12 @@ export function lift(
   target: TargetDescription,
   prototypes: Prototypes = {},
   asmData?: AsmData,
+  symbols?: SymbolMap,
+  context?: ContextGlobals,
 ): Fn {
-  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, oneObject));
+  return liftWithRelift(name, (oneObject) =>
+    liftOnce(name, asm, target, prototypes, asmData, { symbols, context }, oneObject),
+  );
 }
 
 function liftOnce(
@@ -1061,6 +1068,7 @@ function liftOnce(
   target: TargetDescription,
   prototypes: Prototypes,
   asmData: AsmData | undefined,
+  declarations: Declarations,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
@@ -1441,6 +1449,13 @@ function liftOnce(
   // declared `void f(void)` (the candidate does not compile) and a C++ `__Fv` mangling.
   const bareReturns: Array<{ op: Op; bi: number }> = [];
   const wordReturns: number[] = [];
+  // What r4, the second register of an r3:r4 return, may hold at each word return where no
+  // declaration pins the width (frontend/dead-reads.ts `unreadPairHalf`).
+  const unreadHigh = new Set<Value>();
+  // Every value a compare consumed, whether or not a branch reads the field it set: a compare
+  // nothing reads leaves no op, so this is the only record that the value was used
+  // (frontend/dead-reads.ts `compared`).
+  const compared = new Set<Value>();
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -1451,6 +1466,7 @@ function liftOnce(
     if (op.operands.length > 0) {
       wordReturn = true;
       wordReturns.push(bi);
+      unreadPairHalf(ssa, prototypes[name], ARG_REGS[1], bi, unreadHigh);
     } else {
       bareReturns.push({ op, bi });
     }
@@ -2004,6 +2020,7 @@ function liftOnce(
     };
     const recordCmp = (cr: string, lhs: Value, rhs: Value, signed: boolean) => {
       cmpDef.set(cr, { lhs, rhs, signed });
+      compared.add(lhs).add(rhs);
     };
 
     const decode = (ins: Instr) => {
@@ -2605,6 +2622,7 @@ function liftOnce(
       // next branch reading cr0 fuses (`andi. r0,r3,1; beq …` → `if ((a0 & 1) == 0)`).
       if (rc && lastDef) {
         cmpDef.set('cr0', { lhs: lastDef, rhs: constVal(0), signed: true });
+        compared.add(lastDef);
       } else if (rc) {
         cmpDef.set(
           'cr0',
@@ -2793,6 +2811,14 @@ function liftOnce(
       pinDeviceAccesses(irBlocks, verdict, target, undefined);
     }
   }
+  pinDeadReads(irBlocks, target, {
+    own: prototypes[name],
+    atWordReturn: unreadHigh,
+    atUndeclaredCall: calls.heldAtUndeclaredCall,
+    compared,
+    spilled: ssa.frameWrites,
+    declarations,
+  });
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();

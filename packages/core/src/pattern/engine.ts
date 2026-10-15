@@ -6,7 +6,7 @@
 // Crucially, rewrites go through replaceAllUsesWith + DCE — never in-place opcode
 // mutation of a live value.
 import { Block, Fn, Op, Value, defOpMap, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { deletableWhenDead, effectful, orderSensitive } from '../ir/discipline';
+import { deadOps, effectful, orderSensitive } from '../ir/discipline';
 import { NEGATED_ICMP, type Opcode } from '../ir/opcodes';
 import type { IrType } from '../ir/types';
 import { T } from '../ir/types';
@@ -793,34 +793,15 @@ export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget)
   return count;
 }
 
-/** Remove effect-free ops whose single result is unused, to a fixed point. Deletability is
- *  ir/discipline.ts `deletableWhenDead`, which keeps a read the lift pinned `volatile`: the machine
- *  made it, so the recompile has to. */
+/** Remove effect-free ops whose single result is unused, to a fixed point: ir/discipline.ts
+ *  `deadOps`, which keeps a read the lift pinned `volatile` (the machine made it, so the recompile
+ *  has to) and is the same set the dead-read pin (frontend/dead-reads.ts) calls dead. */
 export function dce(fn: Fn): void {
-  let changed = true;
-  while (changed) {
-    changed = false;
-    const used = new Set<Value>();
-    for (const b of fn.blocks) {
-      for (const op of b.ops) {
-        for (const o of op.operands) {
-          used.add(o);
-        }
-        for (const s of op.successors) {
-          for (const a of s.args) {
-            used.add(a);
-          }
-        }
-      }
-    }
-    for (const b of fn.blocks) {
-      const kept = b.ops.filter(
-        (op) => !(deletableWhenDead(op) && op.results.length === 1 && !used.has(op.results[0])),
-      );
-      if (kept.length !== b.ops.length) {
-        b.ops = kept;
-        changed = true;
-      }
-    }
+  const dead = deadOps(fn.blocks);
+  if (dead.size === 0) {
+    return;
+  }
+  for (const b of fn.blocks) {
+    b.ops = b.ops.filter((op) => !dead.has(op));
   }
 }

@@ -257,7 +257,7 @@ export function liftStamped(
   symbols: SymbolMap | undefined,
   contextGlobals: ContextGlobals | undefined,
 ): Fn {
-  const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols);
+  const fn = frontendFor(target).lift(name, asm, target, prototypes, asmData, symbols, contextGlobals);
   verify(fn);
   refuseNarrowReturnsOfWideDeclaration(fn, name, prototypes[name]);
   stampDeclaredVolatileUnder(fn, symbols, stampBehaviorsFor(target, contextGlobals));

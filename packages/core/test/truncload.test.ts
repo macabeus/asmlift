@@ -458,9 +458,10 @@ describe('truncated-load recovery — a dead read keeps the width the machine us
   // which is not spelled when dead, and mints a fresh load, which is — so a widened dead read would carry
   // the witness at the wrong width.
   //
-  // `fixed-cell` is what stops it, and by construction rather than by luck: `structure.ts`'s
-  // `volatileQualifiable` answers yes only through `globalCellOf` or `constAddressOf`, which are
-  // the two predicates that rule asks, so a load the fold admits is one no qualifier can reach.
+  // `fixed-cell` is what stops it at a constant cell, and `qualified-access` for a read the
+  // dead-read pin (frontend/dead-reads.ts) stamped before the fold ran: `structure.ts`'s
+  // `volatileQualifiable` spells only a qualified read, so a load the fold admits is one no
+  // statement stands for.
   test('a dead narrow read at a named cell is not widened', () => {
     const fn = parse(`fn t {
 ^bb0():

@@ -117,6 +117,7 @@ describe.each(BUILDS)('a context-declared volatile aggregate — $name', ({ have
         aggregates: CTX.aggregates,
         volatiles: new Set(),
         pointeeVolatiles: new Set(),
+        declared: new Set(),
       });
       expect(source).not.toContain('volatile');
       expect(loads(cand.asm, load), source).toBeLessThan(loads(t.asm, load));

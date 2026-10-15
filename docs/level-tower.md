@@ -159,7 +159,15 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   structurer's default, which is some other compiler's behavior; so an unprobed profile inherits,
   and the differ referees an inherited value the way it referees any default. A probe pair that
   refutes a declaration WITH A CONSTANT at a named profile is what earns a per-profile value, and
-  none has yet. A pair that comes out one way at one site and the other way at another, on the same
+  `keepsUnusedReads` is the first: compiled, mwcc at `-O0` and IDO at `-O0` and `-O1` keep the read
+  of `x = p[5]; x = 0;` that every other level deletes, so `targetFor` sets it from the level
+  (target.ts `keepsUnusedReadsAt`). Inheriting is NOT the rule for a value nothing referees. The
+  dead-read pin (frontend/dead-reads.ts) reads that field in every candidate alike, with no dual
+  for the differ to weigh, so a profile whose level no flag names, or a word the flag table cannot
+  read may set (mwcc `-opt off`), is judged at the value that withholds the stamp — the read
+  dropped as plain — rather than the one that publishes a `volatile` the source may not have written. Every
+  family's unflagged compile was measured keeping, so the refusal is also the measured answer.
+  A pair that comes out one way at one site and the other way at another, on the same
   compiler and the same flags, refutes the field as a declared default rather than its value:
   flipping the constant trades one site for the other, and the field has to be decided from the
   assembly at each site.
@@ -937,9 +945,19 @@ as often as, the asm ran it is a fact about the OP, and
 [`ir/discipline.ts`](../packages/core/src/ir/discipline.ts) owns it as a _placement_, stamped by
 the one pass that knew it: `call` is its own opcode; `helper` is the stamp
 [`runtime-helpers.ts`](../packages/core/src/runtime-helpers.ts) `helperOp` puts on a value the asm
-computed by calling a runtime routine; `device` is the `volatile` the frontend's device pin
-([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
-access; `declared` is the stamp
+computed by calling a runtime routine; `device` is the `volatile` a frontend puts on a memory
+access, decided by two pins: the device pin
+([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)), for an access of a
+device register, and the dead-read pin
+([`frontend/dead-reads.ts`](../packages/core/src/frontend/dead-reads.ts)), for a read at any
+address — a RAM global, a pointer parameter, a literal — whose value the lifted function never
+uses, since a compiler deletes every plain read nobody uses. That pin is the ONE decider of the
+claim: it does not count the `ret` operand of a function declared void as a use, so the read-back a
+void function ends on is stamped there too, its refusals are a reported gate table (`DEAD_READ_GATES`:
+a level that keeps unused reads, a declaration that says plain, a value the lift lost the consumer
+of — a compare, a spill, an undeclared call's argument, a pair half a guessed return width left —
+and more), and the structurer spells an unused read only where it is
+qualified; `declared` is the stamp
 [`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
 an object the symbol map or the declaration context declares volatile as the lift is made, from the
 map, the context's globals and the compiler the function is lifted and structured under, before any
@@ -952,7 +970,10 @@ through the same joins and loop steps by the same reader, so the object and poin
 reach different shapes. An access
 that does not reach its object through the object's own name carries the qualifier on a cast. A read the
 compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
-by this stamp and by the device pin alike, through the one predicate both ask. Every
+by this stamp and by both pins alike, through the one predicate all three ask. An access can carry
+both `declared` and `device` — a dead read of an object the map declares volatile — and the
+declaration places it first, as the spelling the source used; an L2 rebuilder carries both stamps,
+so a later stamp that no longer finds the declaration leaves the lift's `volatile` in place. Every
 pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,
 `spelledWhenDead`, `speculationUnsafe`, `orderSensitive`, `reevalUnsafe`, `counted` — rather than
 testing an opcode set, an L2 rebuilder carries the stamps through `carryDiscipline`, the contract

@@ -4,8 +4,10 @@
 // Two kinds of fact meet here. The registry's flags (ir/opcodes.ts `OpSig`: `effects`, `reads`,
 // `traps`) are facts about an OPCODE. A PLACEMENT is a fact about one OP, decided once by the pass
 // that knew it: `call` is its own opcode; `helper` is the stamp `runtime-helpers.ts` `helperOp` puts
-// on a value op the asm computed by calling a runtime routine; `device` is the `volatile` the
-// frontend's device-pin pass (frontend/device-pins.ts) puts on a memory access; `declared` is the
+// on a value op the asm computed by calling a runtime routine; `device` is the `volatile` a frontend
+// puts on a memory access, decided by two pins — the device pin (frontend/device-pins.ts), for an
+// access of a device register, and the dead-read pin (frontend/dead-reads.ts), for a read at ANY
+// address whose value the lifted function never uses; `declared` is the
 // stamp raise/declared-volatile.ts puts on an access of an object the symbol map declares volatile —
 // a read only where the compiler could have made it of a `volatile` — as the lift is made and again
 // when structuring starts. Every question below takes the op, so a pass
@@ -50,7 +52,7 @@
 //     a read the stamp cannot place by byte — a runtime index, an `aload` — of an object the map
 //       qualifies only some members of, which may reach a plain member (symbols.ts
 //       `declaresVolatile`).
-import type { Op } from './core';
+import type { Block, Op, Value } from './core';
 import { MEM_BASE_OPS, type OpSig, opSig } from './opcodes';
 
 /** Why an op must run where the asm ran it. */
@@ -107,23 +109,37 @@ const PLACEMENT_ANSWERS: Readonly<Record<Placement, PlacementAnswers>> = {
   },
 };
 
-/** The placement an op carries, or null for an op that may render wherever its value is used. */
-export function placedAt(op: Op): Placement | null {
+/** Every placement stamp an op carries, the one that places it first. An op can carry two: a read
+ *  of an object the map declares volatile is `declared` and, kept by the lift's own pin (frontend/
+ *  dead-reads.ts, frontend/device-pins.ts), `device` too.
+ *
+ *  A declaration that qualifies the object places the access before a lift's own stamp does: both
+ *  say the access is `volatile`, and the declaration is the spelling the source used, so the
+ *  access counts and spells as the object's (raise/declared-volatile.ts re-derives it per map, and
+ *  under a map that declares nothing the lift's stamp places it again — which is why a rebuild
+ *  carries both, `carryDiscipline`). */
+function stampsOf(op: Op): Placement[] {
   if (op.opcode === 'call') {
-    return 'call';
+    return ['call'];
+  }
+  const stamps: Placement[] = [];
+  if (MEM_BASE_OPS.has(op.opcode) && op.attrs[DECLARED_VOLATILE] === true) {
+    stamps.push('declared');
   }
   if (MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true) {
-    return 'device';
-  }
-  if (MEM_BASE_OPS.has(op.opcode) && op.attrs[DECLARED_VOLATILE] === true) {
-    return 'declared';
+    stamps.push('device');
   }
   // An `opaque` carries `helper` too, naming the call nothing could fold (`refuseUnmodelledHelpers`);
   // it is no value op, and its `effects` flag already places it.
   if (op.opcode !== 'opaque' && typeof op.attrs.helper === 'string') {
-    return 'helper';
+    stamps.push('helper');
   }
-  return null;
+  return stamps;
+}
+
+/** The placement an op carries, or null for an op that may render wherever its value is used. */
+export function placedAt(op: Op): Placement | null {
+  return stampsOf(op)[0] ?? null;
 }
 
 const answered = (op: Op, q: 'keptWhenDead' | 'speculationUnsafe' | 'counted'): boolean => {
@@ -161,10 +177,57 @@ export function effectful(op: Op): boolean {
 }
 
 /** May a dead result be deleted? Registered, no effect, not control flow, and not an op whose
- *  placement keeps it. */
+ *  placement keeps it. A memory read whose value the RAW lift never uses is never asked: the
+ *  frontend stamps it `volatile` first (frontend/dead-reads.ts), because a compiler deletes every
+ *  plain read nobody uses, so one still in the target was qualified. What reaches this question
+ *  plain is a read only asmlift's own rewrites orphaned, or one that pass's gates refused. */
 export function deletableWhenDead(op: Op): boolean {
   const sig = sigOf(op);
   return !!sig && !sig.effects && !sig.terminator && !answered(op, 'keptWhenDead');
+}
+
+/** THE DEAD OPS of these blocks: each op `deletableWhenDead` answers yes for whose single result no
+ *  op outside the set reads, as an operand or as a successor's argument, to a fixed point. The ONE
+ *  definition of dead: pattern/engine.ts `dce` deletes exactly this set, and the dead-read pin
+ *  (frontend/dead-reads.ts) asks it of the raw lift before anything is deleted, so the pin's "dead"
+ *  cannot drift from what the pass would delete.
+ *
+ *  `usesOperands` says whether an op's operands are uses at all. Every op's are, for `dce`; the pin
+ *  passes the one exception a declaration makes: the `ret` of a function its own prototype declares
+ *  void, whose operand the structurer suppresses (structure/analysis.ts `indexUses`). */
+export function deadOps(blocks: readonly Block[], usesOperands: (op: Op) => boolean = () => true): Set<Op> {
+  const dead = new Set<Op>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const used = new Set<Value>();
+    for (const b of blocks) {
+      for (const op of b.ops) {
+        if (dead.has(op)) {
+          continue;
+        }
+        if (usesOperands(op)) {
+          for (const o of op.operands) {
+            used.add(o);
+          }
+        }
+        for (const s of op.successors) {
+          for (const a of s.args) {
+            used.add(a);
+          }
+        }
+      }
+    }
+    for (const b of blocks) {
+      for (const op of b.ops) {
+        if (!dead.has(op) && deletableWhenDead(op) && op.results.length === 1 && !used.has(op.results[0])) {
+          dead.add(op);
+          changed = true;
+        }
+      }
+    }
+  }
+  return dead;
 }
 
 /** Must the structurer still SPELL this op when nothing consumes its result — an effect, or a
@@ -174,8 +237,9 @@ export function deletableWhenDead(op: Op): boolean {
  *  the C claim: nothing observes a load nobody reads. This one is the COMPILER claim: an optimizing
  *  compiler deletes every dead read it is allowed to delete, so one still in the target is evidence
  *  the source's access was `volatile`. A yes here only says the op may not be dropped silently;
- *  whether a `volatile` can reach the access is an ADDRESS-level question the caller asks
- *  (structure.ts `volatileQualifiable`), and a read it answers no to is dropped.
+ *  whether the read was `volatile` is decided once, by the dead-read pin (frontend/dead-reads.ts),
+ *  and the caller spells a read only where it is `qualified` (structure.ts `volatileQualifiable`),
+ *  dropping one the pin left plain.
  *
  *  Its own function and not `orderSensitive`, though the two agree on every registered opcode: they
  *  ask different questions, and a registry change that splits them is a decision to make at each. */
@@ -238,11 +302,12 @@ export function forgetHelperPlacement(op: Op): Op {
   return op;
 }
 
-/** `attrs`, plus the placement of `from`, for an op a pass builds to stand for `from`: a memory
- *  access keeps its `volatile` or its `declared` stamp, a value op its `helper`. Every op rebuilder
- *  carries the stamps through here, so a placement decided once is not lost to a rebuild that
- *  forgot to copy it. */
+/** `attrs`, plus every placement stamp of `from`, for an op a pass builds to stand for `from`: a
+ *  memory access keeps its `volatile` and its `declared` stamp, a value op its `helper`. Every op
+ *  rebuilder carries the stamps through here, so a placement decided once is not lost to a rebuild
+ *  that forgot to copy it. EVERY stamp, not only the one that places the op: a read carrying both
+ *  `declared` and `device` that kept only `declared` would be left plain — and deleted as dead — by
+ *  a later stamp that no longer finds the declaration. */
 export function carryDiscipline(from: Op, attrs: Op['attrs']): Op['attrs'] {
-  const p = placedAt(from);
-  return p === null ? attrs : { ...attrs, ...PLACEMENT_ANSWERS[p].carried(from) };
+  return stampsOf(from).reduce((acc, p) => ({ ...acc, ...PLACEMENT_ANSWERS[p].carried(from) }), attrs);
 }

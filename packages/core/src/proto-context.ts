@@ -96,6 +96,11 @@ export interface ContextGlobals {
    *  structurer puts the qualifier on the cast it is spelled through (`*(volatile u16 *)gP`).
    *  Without it, `while (*gP == 0);` lifts as a plain read the compiler hoists out of the loop. */
   pointeeVolatiles: ReadonlySet<string>;
+  /** Every object the context declares, volatile or not; a function is no object. Read beside
+   *  `volatiles`: an object here and not there is declared with no volatile byte, which is what the
+   *  dead-read pin's `declared-plain` gate reads (frontend/dead-reads.ts) — the source spelled a
+   *  read of it plain, so a read the target keeps that nothing uses is not the source's `volatile`. */
+  declared: ReadonlySet<string>;
 }
 
 /** The globals a preprocessed declaration context declares, read for {@link ContextGlobals}. */
@@ -106,6 +111,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   const aggregates = new Set<string>();
   const volatiles = new Set<string>();
   const pointeeVolatiles = new Set<string>();
+  const declared = new Set<string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
@@ -115,6 +121,9 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
         continue;
       }
       const t = declaredType(d.specifiers, x.derivations);
+      if (t.derivations[0]?.kind !== 'function') {
+        declared.add(x.name);
+      }
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
       }
@@ -130,7 +139,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       }
     }
   }
-  return { aggregates, volatiles, pointeeVolatiles };
+  return { aggregates, volatiles, pointeeVolatiles, declared };
 }
 
 /** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare

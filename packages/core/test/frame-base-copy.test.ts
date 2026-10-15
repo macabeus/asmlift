@@ -71,6 +71,9 @@ describe('a `mov rD, sp` addressed through is a frame base, not a capture', () =
     // `u16` and not `s16`: `ldrh` zero-extends, so that IS the type the machine used. No
     // `volatile` — the address never leaves the function, so nothing outside can observe a store
     // and the object must not pay volatile's codegen.
+    // The `ldr r3, [r0, #0x4]` nothing uses is still in r3 at `bl g`, whose arity is guessed, so it
+    // may be an argument the guess left out and is no evidence of `volatile`
+    // (frontend/dead-reads.ts `held-at-undeclared-call`); it is no access of the frame object.
     expect(lift(SPILL).source).toBe('s32 f(u16 *a0) {\n    u16 sp4;\n    sp4 = *a0;\n    g(a0);\n    return sp4;\n}\n');
   });
 

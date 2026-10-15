@@ -4,29 +4,22 @@
 // return value — `analysis.ts` drops the `ret` operand from the use registry, so the suppressed
 // value reaches the walk as a result nobody reads. When it is a memory READ, dropping it deletes an
 // instruction the machine executed: a compiler deletes every dead read it is allowed to delete, so
-// one that survives says the source's access was `volatile`. Spelling it is what puts the access
-// where l3/volatileptr.ts's `/volatile` can qualify it.
+// one that survives says the source's access was `volatile`.
 //
-// THE REFUSALS ARE HALF THE RULE and each has its own test here:
+// ONE DECIDER. That claim is the dead-read pin's (frontend/dead-reads.ts), asked of the raw lift at
+// any address, and the pin does not count the `ret` operand of a function its own declaration says
+// is void as a use. So the read is stamped `volatile` there and the walk spells what was stamped —
+// at a device register, in RAM or ROM, at a runtime index or through a caller's pointer alike —
+// and a read the pin refused is plain, and dropped. The refusals tested here are the walk's own:
 //
 //   • an arithmetic leftover in r0 really is phantom — nothing ran that a statement stands for;
 //   • a read something else consumes is already spelled at that consumer;
-//   • NO EVIDENCE THE ACCESS WAS `volatile`. That claim is about correctness, not spelling, so it
-//     comes from DATA: the target's declared device-register window (`capabilities.deviceRegisters`)
-//     or a symbol map that declares the named global `volatile`. Ordinary RAM, a ROM table and a
-//     caller's pointer all refuse here;
-//   • NO SPELLING FOR A QUALIFIER TO LAND ON, which is a SEPARATE question and not implied by the
-//     one above — `/volatile` mints `volatile s32 *p0 = (s32 *)33554688;` for an EWRAM address
-//     quite happily, so a reachability argument would admit ordinary RAM and only the evidence
-//     question refuses it. Two populations refuse on THIS question and each has its own test: a
-//     device read that is the base's ONLY access, so basecse mints no local for `/volatile` to
-//     qualify; and a RUNTIME-INDEXED read, whose address neither query can answer for. A read of an
-//     object the map declares volatile always has one: the declaration, or a `volatile` cast where
-//     the spelling reaches the object through a cast.
+//   • with no declared void return, the read IS the return value;
+//   • a read the pin's gates refuse (a sign-extending narrow read on agbcc) stays plain and dropped.
 //
-// The rule's population is narrow: of the 22 kleod benchmark rows that declare `returnsVoid`,
-// `DmaSpriteToObjVram` is the only one whose suppressed value is a memory read. The synthetic row
-// `dmareadback` is the zero point that fails loudly if the rule stops firing.
+// A read of an object the map declares follows the declaration: spelled by name where it qualifies
+// the cell the name reaches, through a `volatile` cast on the object's address where only a member
+// or a cast reaches the qualified cell, and left plain, so dropped, where it declares the cell plain.
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -68,8 +61,8 @@ const body = (src: string): string[] =>
     .map((l) => l.trim())
     .filter((l) => l.length > 0 && !l.startsWith('void ') && l !== '}' && !l.startsWith('struct '));
 
-test('a void function’s trailing read at a DEVICE register is spelled as a statement, not dropped', () => {
-  expect(body(lift(DEVICE, true))).toEqual(['*(s32 *)67109076 = 1;', '*(s32 *)67109076;']);
+test('a void function’s trailing read at a DEVICE register is spelled as a qualified statement, not dropped', () => {
+  expect(body(lift(DEVICE, true))).toEqual(['*(s32 *)67109076 = 1;', '*(volatile s32 *)67109076;']);
 });
 
 test('an ARITHMETIC leftover in r0 really is phantom, and stays dropped', () => {
@@ -110,43 +103,27 @@ test('with a return VALUE to consume it, the read stays in the return', () => {
   expect(src).not.toMatch(/^\s*\*\(s32 \*\)\d+;$/m);
 });
 
-test('ORDINARY RAM refuses on EVIDENCE — a variation CAN qualify it, which is why that is not the test', () => {
-  // 0x02000100 is EWRAM — outside `capabilities.deviceRegisters` [0x04000000, 0x04000400).
-  expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;']);
-  // 0x08117BCC is ROM. This is the population the refusal actually protects: a WRONG `returnsVoid`
-  // in a dataset turns a function's RETURN VALUE into a dead read, and without the gate the
-  // truncated body is replaced by confident-looking C that computes a table index and discards it.
-  expect(body(lift(deadRead('0x08117BCC'), true))).toEqual(['*(s32 *)135363532 = 1;']);
-  // …and the reason stated is the one that HOLDS. Widen the same EWRAM address to the three-store
-  // shape and `/volatile` mints `volatile s32 *p0;` over it — at EWRAM, exactly as at a device
-  // register. So a REACHABILITY argument would admit ordinary RAM; only the EVIDENCE question
-  // refuses it.
+test('ORDINARY RAM and ROM are kept the same way: the declared void return is the evidence, not the address', () => {
+  // 0x02000100 is EWRAM and 0x08117BCC ROM — both outside `capabilities.deviceRegisters`. A read the
+  // compiler kept in a function declared void was `volatile` wherever it points; the remaining
+  // preimage is a WRONG `returnsVoid`, trusted here as the pair gate trusts a declared width.
+  expect(body(lift(deadRead('0x02000100'), true))).toEqual(['*(s32 *)33554688 = 1;', '*(volatile s32 *)33554688;']);
+  expect(body(lift(deadRead('0x08117BCC'), true))).toEqual(['*(s32 *)135363532 = 1;', '*(volatile s32 *)135363532;']);
+  // …and through a base local the read keeps its own qualifier
   const wide =
     'f:\n\tldr\tr3, _pool\t@ =0x02000100\n\tmovs\tr0, #0x1\n\tstr\tr0, [r3, #0x0]\n' +
     '\tstr\tr0, [r3, #0x4]\n\tstr\tr0, [r3, #0x8]\n\tldr\tr0, [r3, #0x8]\n\tbx\tlr\n' +
     pool('0x02000100');
-  const vol = enumerateCandidates('f', wide, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).filter((c) =>
-    /volatile s32 \*p0;/.test(c.source),
-  );
-  expect(vol.length).toBeGreaterThan(0);
-  expect(body(lift(wide, true)).some((l) => /^p0\[2\];$/.test(l))).toBe(false);
+  expect(body(lift(wide, true)).at(-1)).toBe('((volatile s32 *)p0)[2];');
 });
 
-test('a SINGLE-ACCESS device read refuses: no second use, so basecse mints no local to qualify', () => {
-  // The `REG_IF`/`REG_VCOUNT` acknowledge idiom, and also what a WRONG `returnsVoid` on a register
-  // accessor (`u16 GetKeys(void) { return REG_KEYINPUT; }`) produces. The address passes the
-  // evidence question outright — 0x04000200 is REG_IE, inside the window — so this test pins the
-  // SECOND question on its own. With one access there is no pointer local anywhere in the fan.
+test('a SINGLE-ACCESS device read is kept qualified — no base local is needed for the qualifier', () => {
+  // The `REG_IF`/`REG_VCOUNT` acknowledge idiom: the qualifier rides the access's own cast.
   const single = 'f:\n\tldr\tr3, _pool\t@ =0x04000200\n\tldr\tr0, [r3, #0x0]\n\tbx\tlr\n' + pool('0x04000200');
-  expect(body(lift(single, true))).toEqual(['return;']);
-  const cands = enumerateCandidates('f', single, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } });
-  expect(cands.every((c) => !/volatile/.test(c.source))).toBe(true);
+  expect(body(lift(single, true))).toEqual(['*(volatile s32 *)67109376;']);
 });
 
-test('a RUNTIME-INDEXED read refuses — neither address query can answer for the cell it touches', () => {
-  // `aload` keeps its index in operands[1] and carries no `off`, so both queries see the bare base.
-  // Admitting on that alone mints `volatile s32 *p0 = (s32 *)67108864; p0[a0];` — a qualified
-  // access at an unbounded address, which is the hazard the window exists to prevent.
+test('a RUNTIME-INDEXED read is kept qualified at the cell it touches', () => {
   const indexed =
     'f:\n\tldr\tr3, _pool\t@ =0x04000000\n\tmovs\tr2, #0x1\n\tstr\tr2, [r3, #0x0]\n' +
     '\tlsls\tr1, r0, #0x2\n\tldr\tr0, [r3, r1]\n\tbx\tlr\n' +
@@ -154,15 +131,26 @@ test('a RUNTIME-INDEXED read refuses — neither address query can answer for th
   const src = decompile('f', indexed, ARMV4T_AGBCC, {
     prototypes: { f: { params: ['s32'], returnsVoid: true } },
   }).source;
-  expect(body(src)).toEqual(['*(s32 *)67108864 = 1;']);
+  expect(body(src)).toEqual(['*(s32 *)67108864 = 1;', '((volatile s32 *)67108864)[a0];']);
 });
 
-test('a CALLER’S POINTER refuses — volatileptr admits a local, never a parameter', () => {
+test('a CALLER’S POINTER is kept qualified', () => {
   const src = lift('g:\n\tmovs\tr2, #0x5\n\tstr\tr2, [r0, #0x4]\n\tldr\tr0, [r0, #0x0]\n\tbx\tlr\n', true).replace(
     /void g/,
     'void f',
   );
-  expect(body(src)).toEqual(['a0[1] = 5;']);
+  expect(body(src)).toEqual(['a0[1] = 5;', '*(volatile s32 *)a0;']);
+});
+
+test('a read the pin refuses stays plain, and the walk drops it', () => {
+  // agbcc reads a qualified `s16` with `ldrh` and extends in a register, so an `ldrsh` was a plain
+  // read in the source (frontend/dead-reads.ts `not-a-volatile-read`).
+  const src = lift(
+    'f:\n\tldr\tr3, _pool\t@ =0x04000004\n\tmovs\tr1, #0x0\n\tldrsh\tr0, [r3, r1]\n\tbx\tlr\n' + pool('0x04000004'),
+    true,
+  );
+  expect(src).not.toMatch(/volatile/);
+  expect(src).not.toMatch(/67108868/);
 });
 
 // ── the symbol-map admission ─────────────────────────────────────────────────────────────────
@@ -185,8 +173,14 @@ test('a map-declared VOLATILE global admits the read even outside the device win
   expect(lift(NAMED, true, new Map([[0x03000100, [gInfo(true)]]]))).toMatch(/^\s*gStatus;$/m);
 });
 
-test('the SAME global without the map’s `volatile` refuses — the map owns the qualifier', () => {
-  expect(lift(NAMED, true, new Map([[0x03000100, [gInfo(false)]]]))).not.toMatch(/^\s*gStatus;$/m);
+test('the SAME global without the map’s `volatile` is no dead read: the declaration says the source read it plain', () => {
+  // `gStatus;` under the map's plain declaration compiles to no read at all, and the dead-read pin
+  // takes the declaration's word over its own inference (frontend/dead-reads.ts `declared-plain`):
+  // agbcc keeps a plain read it merged two identical arms over, so a surviving read of an object
+  // declared plain is not evidence of a `volatile` the source wrote
+  const src = lift(NAMED, true, new Map([[0x03000100, [gInfo(false)]]]));
+  expect(src).not.toMatch(/gStatus;/);
+  expect(src).not.toMatch(/volatile/);
 });
 
 test('a map-declared VOLATILE register reached through a CAST is written and read through a `volatile` cast', () => {
@@ -251,6 +245,8 @@ test('a volatile CONTAINER admits its named member; a `vu16` MEMBER is accessed 
     '((volatile s32 *)&gState)[2] = 1;',
     '((volatile s32 *)&gState)[2];',
   ]);
+  // …and a plain container with a plain member is declared plain where it is read, so the dead-read
+  // pin leaves the read plain (`declared-plain`) and it is deleted with the value nobody uses
   expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;']);
 });
 
@@ -275,6 +271,6 @@ test('the `/volatile` candidate carries the read through a qualified pointer loc
   expect(vol.length).toBeGreaterThan(0);
   for (const c of vol) {
     expect(c.source).toMatch(/volatile s32 \*p0;/);
-    expect(c.source).toMatch(/^\s*p0\[2\];$/m);
+    expect(c.source).toMatch(/^\s*\(\(volatile s32 \*\)p0\)\[2\];$/m);
   }
 });
