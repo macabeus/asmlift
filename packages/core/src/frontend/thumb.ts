@@ -2506,6 +2506,7 @@ function liftOnce(
     irBlocks,
     ...frame.partition,
     usedSlotOffsets: fill.frameUses.usedSlotOffsets,
+    slotLoads: fill.frameUses.slotLoads,
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
     escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
@@ -3538,7 +3539,7 @@ function measureThumbFrame({
       localArea,
       argRegs: target.argRegs.length,
       capturedWholeFrame: capturedObjectIsTheWholeFrame,
-      localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
+      outgoingAreaNeverLoaded: target.compilerBehaviors.outgoingAreaNeverLoaded === true,
     });
   const outgoingArgs = outgoingArgsOver(eventBlocks);
   // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
@@ -4602,6 +4603,10 @@ interface ThumbFrameUses {
   /** the blocks other than the entry that read an incoming stack argument
    *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `withholdsSetupArgs` reads */
   readonly offEntryArgReads: Set<number>;
+  /** per block, the own-frame words the body reads as SSA slots rather than memory — loads the
+   *  frame-object audit cannot see in the IR, which bound its pending stores
+   *  (`FrameObjectAudit.slotLoads`) */
+  readonly slotLoads: Map<number, Set<number>>;
 }
 
 /** WHAT THE FILL OF A BLOCK READS: the records of the stages before it, the SSA builder it writes
@@ -4688,7 +4693,12 @@ function thumbFillOf(
     pairs,
     flags,
     statics,
-    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set(), offEntryArgReads: new Set() },
+    frameUses: {
+      usedSlotOffsets: new Set(),
+      movedCaptures: new Set(),
+      offEntryArgReads: new Set(),
+      slotLoads: new Map(),
+    },
   };
 }
 
@@ -5517,15 +5527,27 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   }
   // A word reload from this function's own frame — the dual of the spill in the str arm.
   //
-  // The reaching-def test is the whole soundness of it, and it mirrors the MIPS guard
-  // exactly: a slot that was never STORED holds nothing this function put there, so
-  // `readVar` would mint a phantom entry parameter for it and hand back a value the machine
-  // never had. Above the frame that reading is right and is the incoming-argument path
-  // above; INSIDE the frame it is an uninitialised local (or one whose address escaped
-  // through a path the model missed), and the honest answer is the decline this falls
-  // through to.
-  if (frame.isOwnFrameWordSlot(base, off, regOff, width) && ssa.hasReachingDef(stackSlotKey(off), bi)) {
+  // Which reloads it takes is the whole soundness of it. One a store reaches on some path reads
+  // that store, and a path that brings none reads an uninitialised local: the frame is
+  // `ownedLocals`, so `readVar` answers that path with `undef`, never with a parameter
+  // (frontend/ssa.ts `LiveInModel`).
+  //
+  // A slot NO store reaches, on any path, is the same local read before any store — `if (k > 5)
+  // use(v0); … v0 = p[0];`, or a local the source never initialises. Only two kinds of callee
+  // could have written it instead. One that assigned the word as its own stack parameter ran
+  // before the load, so the load is after a call, which the after-call layout claim
+  // (`localsAboveOutgoingArea`) says no word of the outgoing area is; with no call reaching the
+  // load there is no such callee. Without the claim it may be one, and falls through to the
+  // decline. The stronger `outgoingAreaNeverLoaded` adds nothing here: a load BEFORE a call reads
+  // a staged word, and a staged word has a reaching store. The other is a callee holding an
+  // address of the frame, which the frame-object audit refuses: an `undef` slot an escaped writer
+  // reaches (`writer-over-undef`), or one a captured object overlaps.
+  if (
+    frame.isOwnFrameWordSlot(base, off, regOff, width) &&
+    (ssa.hasReachingDef(stackSlotKey(off), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)
+  ) {
     usedSlotOffsets.add(off);
+    fill.frameUses.slotLoads.set(bi, (fill.frameUses.slotLoads.get(bi) ?? new Set()).add(off));
     writeData(reg(a), bi, readVar(stackSlotKey(off), bi));
     return;
   }

@@ -925,14 +925,41 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     expect(src).toContain('do {');
   });
 
-  test('a reload from a slot that was never stored still declines', () => {
-    // The guard that keeps the model from fabricating: an unstored slot holds nothing this function
-    // put there, so routing it through readVar would mint a phantom parameter and hand back a value
-    // the machine never had. Above the frame that read IS an argument (the path above); inside the
-    // frame it is an uninitialised local, and the decline is the honest answer.
+  test('a reload from a slot that was never stored is an uninitialised local only under the layout claim', () => {
+    // The guard that keeps the model from fabricating: `readVar` must answer a slot nothing stored
+    // with `undef`, never a phantom parameter. A callee that assigned the word as its stack parameter
+    // ran before the load, so the load is after a call; under the after-call layout claim
+    // (`localsAboveOutgoingArea`) no such word is loaded, so it is a local, and with no call reaching
+    // the load there is no such callee at all. Without the claim the decline is the honest answer.
     const unstored =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    // …and the shape the claim exists for: a call reaches the load, and nothing stored the word
+    const afterCall =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tbl\tg\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const g = { prototypes: { g: { params: 0, returnsVoid: true } } };
+    // the after-call form alone carries it: agbcc's stronger never-loaded claim is not read here
+    const weakOnly = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+    };
+    for (const t of [ARMV4T_AGBCC, weakOnly]) {
+      expect(decompile('f', unstored, t).source).toBe(
+        's32 f(void) {\n    s32 uninit_sp0;\n    return uninit_sp0;\n}\n',
+      );
+      expect(decompile('f', afterCall, t, g).source).toBe(
+        's32 f(void) {\n    s32 uninit_sp0;\n    g();\n    return uninit_sp0;\n}\n',
+      );
+    }
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: {
+        ...ARMV4T_AGBCC.compilerBehaviors,
+        localsAboveOutgoingArea: false,
+        outgoingAreaNeverLoaded: false,
+      },
+    };
+    expect(() => decompile('f', unstored, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', afterCall, unclaimed, g)).toThrow(/stack pointer used as data/);
   });
 
   test('a sub-word access anywhere disables the model for the whole function', () => {
@@ -980,14 +1007,146 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
-    // …and the refusal that survives, NOT YET rather than by design. A slot no store reaches
-    // ANYWHERE is the same C as the diamond above; the reasons one reaches for — frame arithmetic,
-    // an address-taken object — are both caught elsewhere (`stack pointer used as data`, and the
-    // `laddr` audit). What decides it is that the gate sits at the LOAD, before the slot is keyed
-    // at all. Closing it means moving that gate, not finding a new argument.
-    const unstored =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  // synthetic:uninitfirst:agbcc — `if (k > 5) gOut = v0 + …; switch (k) { case 0: v0 = p[0]; … }`:
+  // the local is read BEFORE any store, so no store reaches the read on any path. A callee that
+  // assigned the word as its stack parameter would have run before the read, and agbcc loads no
+  // word of its outgoing area after a call, so a read nothing reaches is that local uninitialised —
+  // unless a callee holding the frame's address may have written it, which the frame-object audit
+  // answers.
+  describe('a slot read before every store to it is an uninitialised local', () => {
+    const readFirst = (tail: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #5\n\tble\t.L2\n' +
+      '\tldr\tr1, [sp]\n\tldr\tr2, .L9\n\tstr\tr1, [r2]\n.L2:\n\tstr\tr0, [sp]\n' +
+      tail +
+      '\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgOut\n';
+    const g = { prototypes: { g: { params: 0, returnsVoid: true } } };
+
+    test('read on one path, stored after it, with or without a call between', () => {
+      expect(decompile('f', readFirst('\tbl\tg\n'), ARMV4T_AGBCC, g).source).toBe(
+        's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 > 5) gOut = uninit_sp0;\n    g();\n    return a0;\n}\n',
+      );
+      expect(decompile('f', readFirst(''), ARMV4T_AGBCC).source).toBe(
+        's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 > 5) gOut = uninit_sp0;\n    return a0;\n}\n',
+      );
+    });
+
+    test('…and without the compiler’s layout claim the word may be one a callee left, so it declines', () => {
+      // the after-call form is the claim read here; the stronger never-loaded form is not needed
+      const weakOnly = {
+        ...ARMV4T_AGBCC,
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      };
+      expect(decompile('f', readFirst(''), weakOnly).source).toContain('s32 uninit_sp0;');
+      const unclaimed = {
+        ...weakOnly,
+        compilerBehaviors: { ...weakOnly.compilerBehaviors, localsAboveOutgoingArea: false },
+      };
+      expect(() => decompile('f', readFirst(''), unclaimed)).toThrow(/stack pointer used as data/);
+    });
+
+    test('a read of a word a declared call takes as its stack argument still refuses', () => {
+      const licensed =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr1, [sp]\n\tldr\tr2, .L9\n\tstr\tr1, [r2]\n' +
+        '\tstr\tr0, [sp]\n\tbl\tfive\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgOut\n';
+      expect(() => decompile('f', licensed, ARMV4T_AGBCC, { prototypes: { five: { params: 5 } } })).toThrow(
+        /\[sp,#0\] is an outgoing stack-argument slot .* but this function also LOADS it/,
+      );
+    });
+
+    // A read before the store of a word a CALLEE may write through an address of the frame is not
+    // uninitialised. The load arm keys it as a slot all the same; the audit then sees the captured
+    // object and its writer, and either keeps the bytes as one object in memory or refuses.
+    // Compiled agbcc, canonical flags: `int a[2]; get(&a[1]); k += use(a[0]); a[0] = k; …` (`get`
+    // may write `p[-1]`), the same with no store to a[0] at all, and the address published to a global.
+    const escaped = (body: string, pool = '') =>
+      `f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n${body}\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n${pool}`;
+    const getUse = {
+      prototypes: { get: { params: 1, returnsVoid: true }, use: { params: 1 }, g: { params: 0, returnsVoid: true } },
+    };
+
+    test('…read through the one object an escaped writer may reach, never as `undef`', () => {
+      const storedLater = escaped(
+        '\tadd\tr4, r0, #0\n\tadd\tr0, sp, #0x4\n\tbl\tget\n\tldr\tr0, [sp]\n\tbl\tuse\n\tadd\tr4, r4, r0\n' +
+          '\tstr\tr4, [sp]\n\tadd\tr0, r4, #0\n\tbl\tuse\n\tldr\tr0, [sp, #0x4]\n',
+      );
+      const neverStored = escaped('\tadd\tr0, sp, #0x4\n\tbl\tget\n\tldr\tr0, [sp]\n\tbl\tuse\n');
+      for (const asm of [storedLater, neverStored]) {
+        const src = decompile('f', asm, ARMV4T_AGBCC, getUse).source;
+        expect(src).toContain('u8 sp0[8];');
+        expect(src).toContain('use(*(s32 *)sp0)');
+        expect(src).not.toContain('uninit');
+      }
+    });
+
+    test('…and refused where the writer is not one the object can hold', () => {
+      const published = escaped(
+        '\tadd\tr4, r0, #0\n\tldr\tr1, .L3\n\tadd\tr0, sp, #0x4\n\tstr\tr0, [r1]\n\tbl\tg\n\tldr\tr0, [sp]\n' +
+          '\tbl\tuse\n\tstr\tr4, [sp]\n\tadd\tr0, r4, #0\n\tbl\tuse\n\tldr\tr0, [sp, #0x4]\n',
+        '.L3:\n\t.word\tgp\n',
+      );
+      expect(() => decompile('f', published, ARMV4T_AGBCC, getUse)).toThrow(
+        /an unstored slot is not provably uninitialised/,
+      );
+    });
+  });
+
+  // A captured store's bytes that a `[sp,#k]` SLOT load reads are a local's, under agbcc's claim
+  // that it loads no word of its outgoing area (`outgoingAreaNeverLoaded`). The slot load is the
+  // slot model's and not in the IR the frame-object audit reads, so the frontend hands it over
+  // (`slotLoads`); without it `storedNeverRead` would refuse these as a possible stack argument.
+  describe('a slot load of a captured store proves it no call’s stack argument', () => {
+    // Compiled agbcc, canonical flags: `struct S { u16 lo, hi; u32 x, y; } s; s.lo = a; s.hi = b;
+    // s.x = c; s.y = c + 1; r = sink(s.y); return *(u32 *)&s + r + s.x;` — the load after the call.
+    const after =
+      'u4:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0xc\n\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n\tmov\tr3, sp\n' +
+      '\tstrh\tr0, [r3]\n\tmov\tr0, sp\n\tstrh\tr1, [r0, #0x2]\n\tstr\tr2, [sp, #0x4]\n\tadd\tr2, r2, #0x1\n' +
+      '\tstr\tr2, [sp, #0x8]\n\tadd\tr0, r2, #0\n\tbl\tsink\n\tadd\tr1, r0, #0\n\tldr\tr0, [sp]\n\tadd\tr0, r0, r1\n' +
+      '\tldr\tr1, [sp, #0x4]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0xc\n\tpop\t{r1}\n\tbx\tr1\n';
+    // …and the klonoa shape (code_3 `GameplayMainLoop`), the word loaded BEFORE the call: only
+    // the strong form clears it, since the after-call liveness sees no load across a call.
+    const before =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr3, sp\n\tstrh\tr0, [r3]\n\tstrh\tr1, [r3, #0x2]\n' +
+      '\tldr\tr4, [sp]\n\tbl\tg\n\tadd\tr0, r4, #0\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const protos = { prototypes: { sink: { params: 1 }, g: { params: 0, returnsVoid: true } } };
+
+    test('lifts through the one object, the call taking no stack word', () => {
+      const a = decompile('u4', after, ARMV4T_AGBCC, protos).source;
+      expect(a).toContain('union { s32 word[3]; u16 half[6]; } sp0;');
+      expect(a).toContain('return sp0.word[0] + sink(a2 + 1) + sp0.word[1];');
+      const b = decompile('f', before, ARMV4T_AGBCC, protos).source;
+      expect(b).toContain('g();');
+      expect(b).not.toContain('uninit');
+    });
+
+    test('…and a captured store beneath every load still refuses, naming the bound it was judged by', () => {
+      // Compiled agbcc, canonical flags: `struct S16 s = gS; use(k); return s.c + s.d;` — the
+      // block copy's `stmia` stores [sp,#0], [sp,#4], [sp,#8] and its `str` [sp,#12]. The decline
+      // names [sp,#0], the copy's first word: the lowest of the two stores beneath the lowest load,
+      // at [sp,#8].
+      const copy =
+        'v2:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr2, sp\n\tldr\tr1, .L3\n\tldmia\tr1!, {r3, r4, r5}\n' +
+        '\tstmia\tr2!, {r3, r4, r5}\n\tldr\tr1, [r1]\n\tstr\tr1, [r2]\n\tbl\tuse\n\tldr\tr0, [sp, #0x8]\n' +
+        '\tldr\tr1, [sp, #0xc]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L3:\n\t.word\tgS\n';
+      const use = { prototypes: { use: { params: 1 } } };
+      expect(() => decompile('v2', copy, ARMV4T_AGBCC, use)).toThrow(/no load at or beneath it proves it a local's/);
+      const weakOnly = {
+        ...ARMV4T_AGBCC,
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      };
+      expect(() => decompile('v2', copy, weakOnly, use)).toThrow(/no load after a call proves it a local's/);
+    });
+
+    test('…and without the claim neither lifts', () => {
+      const unclaimed = {
+        ...ARMV4T_AGBCC,
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      };
+      expect(() => decompile('u4', after, unclaimed, protos)).toThrow();
+      expect(() => decompile('f', before, unclaimed, protos)).toThrow();
+    });
   });
 
   test('two unstored slots are two DISTINCT uninitialised locals, never merged', () => {
@@ -1626,7 +1785,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // The store reaches `bl g` through one arm; the other arm's reload must not excuse it. Scanning
     // per block let a LABEL decide the verdict; scanning the flat listing let BLOCK ORDER decide,
     // because the reload in the first-listed arm cleared a store that reaches the call through the
-    // second. Same CFG and same semantics either way, so both spellings must agree.
+    // second. Same CFG and same semantics either way, so both spellings must agree. They are judged
+    // without agbcc's never-loaded claim: under it the reload in either arm proves [sp,#0] a local
+    // (`loadedWordBound`), and both spellings lift alike.
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+    };
     const loadArmFirst =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbne\t.L3\n' +
       '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
@@ -1635,8 +1800,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
       '.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', loadArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-    expect(() => decompile('f', callArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', loadArmFirst, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', callArmFirst, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(decompile('f', loadArmFirst, ARMV4T_AGBCC).source).toContain('return g(a0);');
+    expect(decompile('f', callArmFirst, ARMV4T_AGBCC).source).toContain('return g(a0);');
   });
 
   test('with no arity to prove it, a slot store may not reach a call unread', () => {
@@ -1644,15 +1811,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // deliberately conservative: a store reaching a call unread refuses whether or not a label
     // happens to sit in between. Making the scan block-local instead admitted the cross-block case,
     // where the accept/refuse boundary was a LABEL rather than anything semantic. The reload comes
-    // after a RE-STORE, so the word read back is not the one that reached the call.
+    // after a RE-STORE, so the word read back is not the one that reached the call — which matters
+    // only without agbcc's never-loaded claim: under it, any reload proves the word a local.
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+    };
     const sameBlock =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     const crossBlock =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n.L2:\n\tbl\tg\n' +
       '\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', sameBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-    expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', sameBlock, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', crossBlock, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(decompile('f', sameBlock, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return g(a0) + 1;\n}\n');
+    expect(decompile('f', crossBlock, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return g(a0) + 1;\n}\n');
     // …and a store never read back at all is the plainest signature of an argument
     const neverRead =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L2\n.L2:\n\tbl\tg\n' +
@@ -1672,11 +1846,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', survives, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    g(a0);\n    return a0 + 1;\n}\n');
-    // a compiler that stages its arguments in its frame but does not claim that layout (mwcc's
-    // parameter-area words may hold a local) keeps the refusal
+    // a compiler that stages its arguments in its frame but claims only the after-call form, as
+    // MIPS and mwcc do, keeps the refusal: the outgoing-area bound reads the never-loaded claim
     const unclaimed = {
       ...ARMV4T_AGBCC,
-      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, localsAboveOutgoingArea: false },
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
     };
     expect(unclaimed.compilerBehaviors.stagesOutgoingArgsInFrame).toBe(true);
     expect(() => decompile('f', survives, unclaimed)).toThrow(/it may be that call's outgoing stack argument/);
@@ -2017,8 +2191,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       /address-taken stack local — a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
     );
     const outgoing =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
-      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/outgoing stack argument/);
     const arity =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
@@ -2636,7 +2810,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       const structReturn =
         'f:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x14\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk\n' +
         '\tldr\tr0, [sp]\n\tbl\tuse2\n\tadd\tsp, sp, #0x14\n\tpop\t{r0}\n\tbx\tr0\n';
-      expect(() => decompile('f', structReturn, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      expect(() => decompile('f', structReturn, ARMV4T_AGBCC)).toThrow(
+        /a struct returned through a hidden pointer is handed this same frame/,
+      );
       // the ONE-WORD spelling of the same source — verbatim agbcc for `struct S4 { char a,b,c,d; };
       // void f(int x){ struct S4 s = mk(x); use2(s.a); }`. Lifting it emitted `mk(&sp0, a0)`: a
       // three-line function rendered as a call the real prototype rejects outright.
@@ -3235,7 +3411,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
         '\tpop\t{r0}\n' +
         '\tbx\tr0\n' +
         '.L4:\n\t.align\t2, 0\n.L3:\n\t.word\tgK\n';
-      expect(() => decompile('big3f', blockCopy, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+      expect(() => decompile('big3f', blockCopy, ARMV4T_AGBCC)).toThrow(
+        /a struct returned through a hidden pointer is handed this same frame/,
+      );
     });
 
     // …AND THE SHAPE NO GATE ABOVE EVER ASKS ABOUT: an array. `void arrf(s32 x){ u8 buf[12];

@@ -232,9 +232,11 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   the compiler NEVER emits, for any source, may be applied to an observed output without the three
   conditions above: an output that has the shape denies the universal's antecedent, and that
   contrapositive is exactly as sound as the universal. What reads the map backwards is the CONVERSE,
-  from "this output lacks the shape" to a claim about what produced it. `localsAboveOutgoingArea`
-  (`target.ts`) is the worked case: agbcc never reads a word of its outgoing area back after a call,
-  so a word read back after one is a local (`frontend/stackargs.ts` `survivorBound`). The converse,
+  from "this output lacks the shape" to a claim about what produced it. `outgoingAreaNeverLoaded`
+  (`target.ts`) is the worked case: agbcc never reads a word of its outgoing area, so a word
+  it reads is a local (`frontend/stackargs.ts` `loadedWordBound`). Its weaker sibling
+  `localsAboveOutgoingArea` states only the after-call form, which is all the MIPS and mwcc probes
+  measured, and the strong form is never read off it. The converse,
   that a word never read back is an argument, is false, because a dead local is never read back
   either, and the stack-argument licence declines on it rather than infer it. The contrapositive still
   owes what every compiler behavior owes: the universal grounded in the compiler's source and

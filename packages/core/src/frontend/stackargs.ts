@@ -40,7 +40,7 @@ export interface StackArgsEscape {
  *  `[0, 4*(n - argRegs))` as an ascending offset list, or null when nothing declares this call —
  *  an indirect call, a callee with no prototype, or one whose arity fits in registers. The code
  *  alone cannot say where a null declaration's block ENDS, so such a call is never handed a stack
- *  word; it lifts only when `survivorBound` clears every word that could open one. */
+ *  word; it lifts only when `loadedWordBound` clears every word that could open one. */
 export interface StackArgsCall<C> {
   readonly kind: 'call';
   /** The frontend's own handle for this call — the key of `OutgoingArgs.blocks`. */
@@ -74,9 +74,10 @@ export interface StackArgsInput<C> {
   /** The frontend's verdict that the whole frame is one addressable object handed to a callee. */
   readonly capturedWholeFrame: boolean;
   /** The compiler keeps ONE outgoing area at the bottom of the frame, sized for its widest call and
-   *  below every local, and never reads a word of it back after a call. Only then does a word
-   *  loaded after a call prove itself a local — see `survivorBound`. */
-  readonly localsAboveOutgoingArea: boolean;
+   *  below every local, and never loads a word of it, before a call or after — `target.ts`
+   *  `outgoingAreaNeverLoaded`, the strong form of `localsAboveOutgoingArea`, stated on agbcc. Only
+   *  then does a word it loads prove itself a local — see `loadedWordBound`. */
+  readonly outgoingAreaNeverLoaded: boolean;
 }
 
 /** What this function's calls do with the BOTTOM of its frame — the outgoing stack-argument area
@@ -97,46 +98,23 @@ export interface OutgoingArgs<C> {
 const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kind === 'call';
 const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
 
-/** THE LOWEST FRAME WORD THAT SURVIVES A CALL, or `Infinity` when none does. A word LOADED on some
- *  path out of a live call before anything re-stores it held a value across that call. Under
- *  `localsAboveOutgoingArea` the caller never reads its outgoing area back after a call, so that
- *  word is a local; and since the area is one region at the frame bottom that every call shares,
- *  every word at or above the bound is proven not to be an argument.
+/** THE LOWEST FRAME WORD THIS FUNCTION LOADS, or `Infinity` when it loads none. Under
+ *  `outgoingAreaNeverLoaded` the caller never reads a word of its outgoing area — not after a call,
+ *  where the callee may have assigned to it, and not before one either: the area holds only what
+ *  the caller staged for a callee, every argument that contains a call is computed before any word
+ *  is staged, and nothing is saved there around a nested call (agbcc-restage.s pins all three). So a
+ *  word it loads is a local; and since the area is one region at the frame bottom that every call
+ *  shares, every word at or above the bound is proven not to be an argument.
  *
- *  A backward liveness over the live blocks: a load makes its offset live, a store kills it, and a
- *  call is transparent — a word read after two calls survived both. Dead blocks contribute nothing:
- *  a load that cannot run proves nothing, and a call that cannot run is not a call it survived.
- *  An ESCAPE is transparent too: its receiver MAY read the words, and a bound is a proof, which a
- *  read that may not happen cannot supply. */
-function survivorBound<C>(
-  blocks: readonly StackArgsBlock<C>[],
-  succs: readonly (readonly number[])[],
-  live: ReadonlySet<number>,
-): number {
-  const liveIn = blocks.map(() => new Set<number>());
-  const liveOut = (b: number): Set<number> => new Set(succs[b].flatMap((s) => [...liveIn[s]]));
+ *  Only a load in a live block counts: a load that cannot run proves nothing. An ESCAPE does not
+ *  count: its receiver MAY read the words, and a bound is a proof, which a read that may not happen
+ *  cannot supply. */
+function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: ReadonlySet<number>): number {
   let bound = Infinity;
-  for (let changed = true; changed;) {
-    changed = false;
-    for (let b = blocks.length - 1; b >= 0; b--) {
-      if (!live.has(b)) {
-        continue;
-      }
-      const cur = liveOut(b);
-      for (const ev of [...blocks[b].events].reverse()) {
-        if (isCallEvent(ev)) {
-          for (const o of cur) {
-            bound = Math.min(bound, o);
-          }
-        } else if (ev.kind === 'load') {
-          cur.add(ev.off);
-        } else if (ev.kind === 'store') {
-          cur.delete(ev.off);
-        }
-      }
-      if ([...cur].some((o) => !liveIn[b].has(o))) {
-        liveIn[b] = cur;
-        changed = true;
+  for (const b of live) {
+    for (const ev of blocks[b].events) {
+      if (ev.kind === 'load') {
+        bound = Math.min(bound, ev.off);
       }
     }
   }
@@ -180,14 +158,14 @@ function survivorBound<C>(
 // and (b) below, kept for every call no declaration covers).
 //
 // A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
-// keeps one outgoing area below every local and never reads it back after a call
-// (`localsAboveOutgoingArea`), a word LOADED after a call before any re-store is a local, and so
-// is every word above it (`survivorBound`). Every refusal that reads the code — NOTHING EXTRA,
-// (a) and (b) — then weighs only the words beneath the bound, so an undeclared call lifts once no
-// word there could open an argument block, and takes no stack word. Hand-written asm that reads
-// its own outgoing argument back after a call defeats it, and lifts with that argument dropped — a
-// producer assumption of the same kind as CONTIGUITY below, which is why the premise is declared
-// per compiler (`target.ts` `localsAboveOutgoingArea`) and never inferred.
+// keeps one outgoing area below every local and never loads a word of it
+// (`outgoingAreaNeverLoaded`), a word this function LOADS is a local, and so is every word above it
+// (`loadedWordBound`). Every refusal that reads the code — NOTHING EXTRA, (a) and (b) — then
+// weighs only the words beneath the bound, so an undeclared call lifts once no word there could
+// open an argument block, and takes no stack word. Hand-written asm that reads its own outgoing
+// argument defeats it, and lifts with that argument dropped — a producer assumption of the same
+// kind as CONTIGUITY below, which is why the premise is declared per compiler (`target.ts`
+// `outgoingAreaNeverLoaded`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -199,12 +177,12 @@ function survivorBound<C>(
 //     must never render as a plausible value.
 //
 // A SPILL LIVE ACROSS A LICENSED CALL sits in the may set and is not in the declared block — agbcc's
-// commonest frame with an outgoing area. The declaration cannot excuse it; `survivorBound` can: a
-// word loaded after a call before any re-store is a local, so NOTHING EXTRA counts only the pending
-// words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
-// check of its own: the block is contiguous words from zero, so it holds the bound's word, which
-// this function loads — "this function also LOADS it" below refuses it if nothing earlier does.
-// A spill with no survivor at or beneath it still refuses, and its decline names a STORE ("[sp,#k]
+// commonest frame with an outgoing area. The declaration cannot excuse it; `loadedWordBound` can: a
+// word this function loads is a local, so NOTHING EXTRA counts only the pending words beneath the
+// bound. A declared block that reaches the bound contradicts it, and needs no check of its own:
+// the block is contiguous words from zero, so it holds the bound's word, which this function loads
+// — "this function also LOADS it" below refuses it if nothing earlier does.
+// A spill with no load at or beneath it still refuses, and its decline names a STORE ("[sp,#k]
 // also reaches the call unread") rather than the capability, so a gap histogram groups it under
 // that message.
 // The must set is an intersection over predecessors, which is exactly what a TAIL-MERGED call
@@ -229,7 +207,7 @@ export function analyzeOutgoingArgs<C>({
   localArea,
   argRegs,
   capturedWholeFrame,
-  localsAboveOutgoingArea,
+  outgoingAreaNeverLoaded,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
@@ -291,7 +269,7 @@ export function analyzeOutgoingArgs<C>({
   // code-reading refusals below — the licence's NOTHING EXTRA, (a) and (b) — each hunt for a word
   // that could be one, so the words they weigh are cut to those beneath the bound once, where
   // they are collected (`mayAt`, `storedAnywhere`), and none of them repeats the test.
-  const bound = localsAboveOutgoingArea ? survivorBound(asmBlocks, succs, live) : Infinity;
+  const bound = outgoingAreaNeverLoaded ? loadedWordBound(asmBlocks, live) : Infinity;
   const belowBound = (s: Iterable<number>): Set<number> => new Set([...s].filter((o) => o < bound));
 
   const everySlot: number[] = [];

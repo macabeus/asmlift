@@ -3565,7 +3565,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // supplied — the outgoing-argument shape, and here a false alarm. What tells them apart is that
   // every slot is RELOADED after `bl callee` before anything re-stores it: agbcc's outgoing area
   // belongs to the callee across a call and sits below every local, so a word that outlives a call
-  // is a local and bounds the area of every call (`frontend/stackargs.ts`, `survivorBound`). The
+  // is a local and bounds the area of every call (`frontend/stackargs.ts`, `loadedWordBound`). The
   // declared arity cannot decide it — `callee` takes one argument, and a declared list is a lower
   // bound on the words a call is handed. The refusal this row guards against — `stack pointer used
   // as data — the store to [sp,#0] reaches \`bl callee\` unread with its lower slots supplied` — was
@@ -3725,7 +3725,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // v0)` stages argument 5 at [sp,#0] before every call and agbcc moves the spills above it, to
   // [sp,#4]..[sp,#0x20]. Several reach `bl five` unread, so the declaration (`five` takes one stack
   // word) and the staged words disagree until the words reloaded after the call are read as the
-  // locals they are — the licence's NOTHING EXTRA, bounded by `survivorBound`. It is the row that
+  // locals they are — the licence's NOTHING EXTRA, bounded by `loadedWordBound`. It is the row that
   // bound protects: without it the row declines on `[sp,#12], … also reaches the call unread`, and
   // the winner must keep `five(…, v0)`'s fifth argument. m2c noncompiles it (`request for member
   // \`unk0' in something not a structure or union`).
@@ -9774,10 +9774,12 @@ export const SYNTHETIC: SynthSpec[] = [
   //      own empty edge block, so the loop has two exit targets and none is a return. agbcc only:
   //      ido7.1 and gcc2.7.2kmc decline first on a `%hi` half read as a value, and mwcc_242_81 on
   //      `lbzu`, so the row would measure those links there instead.
-  //   4. spilldead (2). A spilled loop local whose last store reaches `bl done` unread reads as
+  //   4. spilldead (2). A spilled loop local whose last store reaches `bl done` unread read as
   //      that call's outgoing stack argument, although `done` is declared with one parameter and
-  //      the slot is reloaded inside the loop. gcc2.7.2kmc and mwcc_242_81 lift it (controls);
-  //      ido7.1 is off because it declines first on a pre-update loop variable.
+  //      the slot is reloaded inside the loop. agbcc lifts it since a word the function loads
+  //      anywhere bounds the area (`frontend/stackargs.ts` `loadedWordBound`). gcc2.7.2kmc and
+  //      mwcc_242_81 lift it (controls); ido7.1 is off because it declines first on a pre-update
+  //      loop variable.
   //   5. break_code (1, plus one that pairs it with a `goto`). The break arm runs code, so it is
   //      outside the natural loop and becomes a second live exit. Declines the same way on ido7.1
   //      and mwcc_242_81; gcc2.7.2kmc is off (the `%hi` link again).
@@ -9793,8 +9795,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      block, which the holes also make an arm, so the retry must not refuse it as a case arm.
   //      agbcc and ido7.1 reach the retry; gcc2.7.2kmc and mwcc_242_81 do not (controls).
   //   9. uninitfirst: uninit_spill's local read BEFORE any store, so no store reaches the slot on
-  //      any path. agbcc refuses the load as `sp` data; ido7.1 as a never-stored slot; mwcc_242_81
-  //      as r1 used as data (not instrumented there, so that attribution is a prediction).
+  //      any path. agbcc lifts it, reading the word as the uninitialised local (`frontend/thumb.ts`'s
+  //      own-frame load arm); ido7.1 declines on a never-stored slot, and mwcc_242_81 on r1 used
+  //      as data (not instrumented there, so that attribution is a prediction).
   //      gcc2.7.2kmc lifts it to a nonmatch.
   //  10. byvalregs: a by-value struct argument built in the frame and passed in registers.
   //      Declines on all four: agbcc reads the frame words as `sp` data, the MIPS frontends refuse

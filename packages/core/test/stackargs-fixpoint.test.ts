@@ -28,7 +28,7 @@ const run = (
   preds: number[][],
   localArea: number,
   capturedWholeFrame = false,
-  localsAboveOutgoingArea = true,
+  outgoingAreaNeverLoaded = true,
 ) =>
   analyzeOutgoingArgs<string>({
     blocks,
@@ -37,7 +37,7 @@ const run = (
     localArea,
     argRegs: 4,
     capturedWholeFrame,
-    localsAboveOutgoingArea,
+    outgoingAreaNeverLoaded,
   });
 /** A straight line of blocks, each falling through to the next; the last one ends the function. */
 const line = (...events: Ev[][]) => events.map(blk);
@@ -138,8 +138,10 @@ describe('an undeclared call is never handed a word', () => {
   test('a pending store reaching an indirect call refuses rather than guessing its arity', () => {
     // The earlier load is what keeps the whole-function condition (a) quiet, so this reaches the
     // PATH condition: the word is staged when the indirect call executes, and nothing here can
-    // size a block for a callee with no declaration.
-    const r = run(line([ld(0), st(0), call('r3', 0)]), chain(1), 4);
+    // size a block for a callee with no declaration. Without the compiler's layout claim, because
+    // with it that load proves the word a local (`loadedWordBound`), and (b) is then reached only
+    // past an escape (below).
+    const r = run(line([ld(0), st(0), call('r3', 0)]), chain(1), 4, false, false);
     expect(r.blocker).toMatch(/reaches `bl r3` unread with its lower slots supplied/);
   });
 
@@ -155,7 +157,7 @@ describe('an undeclared call is never handed a word', () => {
   });
 });
 
-describe('a word LOADED after a call before any re-store is a local, and bounds every call’s area', () => {
+describe('a word this function LOADS is a local, and bounds every call’s area', () => {
   test('spill10’s shape: spills stored before a loop and reloaded after its call are no argument', () => {
     // compiled agbcc: ten live values around `callee(i)`, six of them spilled at [sp,#0] upward
     const r = run(
@@ -171,28 +173,40 @@ describe('a word LOADED after a call before any re-store is a local, and bounds 
     expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl callee` unread/);
   });
 
-  test('a store re-made after the call is not a word that survived it', () => {
+  test('a word loaded only after it is re-stored past the call is a local all the same', () => {
+    // no word of the area is ever loaded, so the load says [sp,#0] is no argument of `g`'s
     const r = run(line([st(0), call('g', 0), st(0), ld(0)]), chain(1), 4);
-    expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl g` unread/);
+    expect(r).toEqual({ blocker: null, blocks: new Map(), area: 0 });
   });
 
   test('a reload in DEAD code proves nothing', () => {
-    // the live load BEFORE the store keeps condition (a) quiet, so this reaches (b)
     const r = analyzeOutgoingArgs<string>({
-      blocks: [blk([ld(0), st(0), call('g', 0)]), blk([ld(0)])],
+      blocks: [blk([st(0), call('g', 0)]), blk([ld(0)])],
       preds: [[], [0]],
       live: new Set([0]),
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      localsAboveOutgoingArea: true,
+      outgoingAreaNeverLoaded: true,
     });
-    expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl g` unread/);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded and its lower slots are supplied/);
   });
 
-  test('a load on a path that avoids the call proves nothing about the call', () => {
-    const r = run([blk([st(0)]), blk([call('g', 0)]), blk([ld(0)]), blk([])], [[], [0], [0], [1, 2]], 4);
-    expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl g` unread/);
+  // synthetic:spilldead:agbcc: two spills stored before a loop and loaded only inside it, on a path
+  // that the guard can skip straight to an undeclared `bl done` — so on that path both reach the
+  // call unread. Loaded anywhere, they are locals, and `done` takes no stack word.
+  test('spilldead’s shape: spills loaded only on a path that avoids the call are no argument', () => {
+    const r = run(
+      [blk([st(0), st(4)]), blk([ld(4), st(4)]), blk([ld(0), ld(4)]), blk([call('done', 0)])],
+      [[], [0], [1, 2], [0, 2]],
+      8,
+    );
+    expect(r).toEqual({ blocker: null, blocks: new Map(), area: 0 });
+  });
+
+  test('…and a store that nothing loads anywhere still refuses', () => {
+    const r = run([blk([st(0), st(4)]), blk([ld(4)]), blk([call('done', 0)])], [[], [0], [0, 1]], 8);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded/);
   });
 
   test('ONE path from the call to the load is enough — the re-store on the other does not hide it', () => {
@@ -201,10 +215,20 @@ describe('a word LOADED after a call before any re-store is a local, and bounds 
   });
 
   test('the bound excuses only the words at or above it', () => {
-    // [sp,#4] survives, so the area ends at or below 4 — and [sp,#0] beneath it is still a
+    // [sp,#4] is loaded, so the area ends at or below 4 — and [sp,#0] beneath it is still a
     // plausible argument 5
-    const r = run(line([ld(0), st(0), st(4), call('g', 0), ld(4)]), chain(1), 8);
-    expect(r.blocker).toMatch(/the store to \[sp,#0\] reaches `bl g` unread/);
+    const r = run(line([st(0), st(4), call('g', 0), ld(4)]), chain(1), 8);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded/);
+  });
+
+  test('…a load BEFORE the call bounds as well as one after it', () => {
+    const r = run(line([st(4), ld(4), st(0), st(4), call('g', 0)]), chain(1), 8);
+    expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded/);
+    expect(run(line([st(4), ld(4), st(4), call('g', 0)]), chain(1), 8)).toEqual({
+      blocker: null,
+      blocks: new Map(),
+      area: 0,
+    });
   });
 
   test('the area is one region every call shares, so a survivor of one call clears another', () => {
@@ -229,6 +253,11 @@ describe('the licence’s NOTHING EXTRA reads the same bound', () => {
   test('a declared block that reaches the bound contradicts it, and refuses', () => {
     // [sp,#4] outlives the call, yet the declaration says the call takes it
     const r = run(line([st(0), st(4), call('six', 2), ld(4)]), chain(1), 8);
+    expect(r.blocker).toMatch(/\[sp,#4\] is an outgoing stack-argument slot .* but this function also LOADS it/);
+  });
+
+  test('…and so does one whose word is loaded before the call stages it', () => {
+    const r = run(line([st(4), ld(4), st(0), st(4), call('six', 2)]), chain(1), 8);
     expect(r.blocker).toMatch(/\[sp,#4\] is an outgoing stack-argument slot .* but this function also LOADS it/);
   });
 });
@@ -317,8 +346,8 @@ describe('an escaped frame address is read by its receiver, from that address up
     expect(r.blocks.get('h5')).toEqual([0]);
   });
 
-  // The receiver MAY read the words; a survivor bound is a proof that a word held a value across a
-  // call, and a may-read cannot supply one. Counted as a load, this escape would put the bound at 0
+  // The receiver MAY read the words; the bound is a proof that this function reads a word, and a
+  // may-read cannot supply one. Counted as a load, this escape would put the bound at 0
   // and excuse the word staged for `five`.
   test('an escape proves no word survived a call', () => {
     const r = run(line([st(0), call('five', 0), esc(0), call('use', 0)]), chain(1), 8);
@@ -333,7 +362,7 @@ describe('an escaped frame address is read by its receiver, from that address up
       localArea: 8,
       argRegs: 4,
       capturedWholeFrame: false,
-      localsAboveOutgoingArea: true,
+      outgoingAreaNeverLoaded: true,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
   });
@@ -358,7 +387,7 @@ describe('the fixpoint terminates and does not depend on block order', () => {
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      localsAboveOutgoingArea: true,
+      outgoingAreaNeverLoaded: true,
     });
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });

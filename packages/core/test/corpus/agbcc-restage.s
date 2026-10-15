@@ -53,3 +53,179 @@ owns:
 	bx	r1
 .Lfe2:
 	.size	 owns,.Lfe2-owns
+	.align	2, 0
+	.globl	libcalls
+	.type	 libcalls,function
+	.thumb_func
+libcalls:
+	push	{r4, r5, lr}
+	add	sp, sp, #-0x8
+	add	r4, r0, #0
+	add	r5, r1, #0
+	bl	__divsi3
+	str	r0, [sp]
+	add	r0, r4, #0
+	add	r1, r5, #0
+	bl	__modsi3
+	str	r0, [sp, #0x4]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	six
+	add	sp, sp, #0x8
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.Lfe3:
+	.size	 libcalls,.Lfe3-libcalls
+	.align	2, 0
+	.globl	nested
+	.type	 nested,function
+	.thumb_func
+nested:
+	push	{r4, r5, lr}
+	add	sp, sp, #-0x8
+	add	r4, r0, #0
+	add	r5, r1, #0
+	mov	r0, r4
+	mul	r0, r0, r5
+	str	r0, [sp]
+	add	r0, r5, #0
+	add	r1, r4, #0
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	five
+	str	r0, [sp]
+	sub	r0, r4, r5
+	str	r0, [sp, #0x4]
+	add	r0, r4, #0
+	add	r1, r5, #0
+	mov	r2, #0x3
+	mov	r3, #0x4
+	bl	six
+	add	sp, sp, #0x8
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.Lfe4:
+	.size	 nested,.Lfe4-nested
+	.align	2, 0
+	.globl	cond
+	.type	 cond,function
+	.thumb_func
+cond:
+	push	{r4, r5, lr}
+	add	sp, sp, #-0x8
+	add	r4, r1, #0
+	add	r5, r2, #0
+	cmp	r0, #0
+	beq	.L7	@cond_branch
+	add	r0, r4, #0
+	bl	pick
+	b	.L8
+.L7:
+	add	r0, r4, #0
+.L8:
+	str	r0, [sp]
+	add	r0, r4, #0
+	add	r1, r5, #0
+	bl	__divsi3
+	str	r0, [sp, #0x4]
+	mov	r0, #0x1
+	mov	r1, #0x2
+	mov	r2, #0x3
+	add	r3, r5, #0
+	bl	six
+	add	sp, sp, #0x8
+	pop	{r4, r5}
+	pop	{r1}
+	bx	r1
+.Lfe5:
+	.size	 cond,.Lfe5-cond
+	.align	2, 0
+	.globl	spills
+	.type	 spills,function
+	.thumb_func
+spills:
+	push	{r4, r5, r6, r7, lr}
+	mov	r7, sl
+	mov	r6, r9
+	mov	r5, r8
+	push	{r5, r6, r7}
+	add	sp, sp, #-0x1c
+	add	r5, r1, #0
+	ldr	r7, [r0]
+	ldr	r1, [r0, #0x4]
+	mov	r8, r1
+	ldr	r1, [r0, #0x8]
+	mov	r9, r1
+	ldr	r1, [r0, #0xc]
+	mov	sl, r1
+	ldr	r1, [r0, #0x10]
+	str	r1, [sp, #0x8]
+	ldr	r1, [r0, #0x14]
+	str	r1, [sp, #0xc]
+	ldr	r1, [r0, #0x18]
+	str	r1, [sp, #0x10]
+	ldr	r1, [r0, #0x1c]
+	str	r1, [sp, #0x14]
+	ldr	r0, [r0, #0x20]
+	str	r0, [sp, #0x18]
+	mov	r6, #0x0
+	b	.L14
+.L12:
+	ldr	r1, [sp, #0x8]
+	mov	r0, r1
+	mul	r0, r0, r6
+	str	r0, [sp]
+	ldr	r0, [sp, #0xc]
+	str	r0, [sp, #0x4]
+	add	r0, r7, #0
+	mov	r1, r8
+	mov	r2, r9
+	mov	r3, sl
+	bl	six
+	add	r4, r0, #0
+	mov	r1, sl
+	mov	r0, r9
+	mul	r0, r0, r1
+	str	r0, [sp]
+	str	r6, [sp, #0x4]
+	ldr	r0, [sp, #0x10]
+	ldr	r1, [sp, #0x14]
+	ldr	r2, [sp, #0x18]
+	mov	r3, r8
+	mul	r3, r3, r7
+	bl	six
+	add	r4, r4, r0
+	add	r6, r6, r4
+.L14:
+	add	r0, r5, #0
+	sub	r5, r5, #0x1
+	cmp	r0, #0
+	bgt	.L12	@cond_branch
+	add	r0, r6, r7
+	add	r0, r0, r8
+	add	r0, r0, r9
+	add	r0, r0, sl
+	ldr	r1, [sp, #0x8]
+	add	r0, r0, r1
+	ldr	r1, [sp, #0xc]
+	add	r0, r0, r1
+	ldr	r1, [sp, #0x10]
+	add	r0, r0, r1
+	ldr	r1, [sp, #0x14]
+	add	r0, r0, r1
+	ldr	r1, [sp, #0x18]
+	add	r0, r0, r1
+	add	sp, sp, #0x1c
+	pop	{r3, r4, r5}
+	mov	r8, r3
+	mov	r9, r4
+	mov	sl, r5
+	pop	{r4, r5, r6, r7}
+	pop	{r1}
+	bx	r1
+.Lfe6:
+	.size	 spills,.Lfe6-spills

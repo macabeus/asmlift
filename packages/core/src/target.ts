@@ -527,27 +527,59 @@ export interface TargetDescription {
     // guess that cannot say whether one does refuses (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY
     // ARGUMENT REGISTER") — and not where one does: the area starts past them.
     //
-    // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
-    // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
-    // call before any re-store is not in the area, so it is a local, and so is every word above it,
-    // which lets a spill live across a call lift, and a call NO declaration covers
-    // (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A BACKWARDS READING). It is
+    // It is a UNIVERSAL — for every source, the compiler emits no such read — and its readers apply
+    // the contrapositive (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
+    // BACKWARDS READING): a word loaded after a call is not in the area, so it is a local, and so is
+    // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). An own-frame word no store
+    // reaches on any path is a local too, but only the Thumb frontend acts on that
+    // (`frontend/thumb.ts`'s own-frame load arm, which reads it as uninitialised), and it was probed
+    // on agbcc alone; a MIPS or PPC reader needs its own probe first. A callee that assigned the
+    // word as its stack parameter ran before the load, so the load is after a call, and with no
+    // call reaching the load there is no such callee. It is
     // exactly as sound as the universal, so its residue is every producer the universal does not
-    // cover: hand-written asm that reads its outgoing argument back after a call loses that
-    // argument silently. The premise is this compiler's, not the ISA's.
+    // cover: hand-written asm that reads its outgoing argument back after a call loses that argument
+    // silently. The premise is this compiler's, not the ISA's.
     // Absent ⇒ every staged word stays a candidate argument.
+    //
+    // It promises the AFTER-CALL form and no more: a compiler may still load a staged word BEFORE a
+    // call — o32 gcc defines REG_PARM_STACK_SPACE, so calls.c's save_fixed_argument_area loads
+    // staged reg-parm words around a nested call. The stronger form, no load of the area at all,
+    // is its own field (`outgoingAreaNeverLoaded`), stated per compiler and never read off this.
     //
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
     // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
-    // re-staging and the callee's write. Set on the three MIPS toolchains off their own probe
-    // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. Set on
+    // re-staging, the callee's write, and no load of the area around calls inside arguments. Set
+    // on the three MIPS toolchains off their own probe (`test/corpus/probe-o32-frame.c`), where
+    // the frame-object audit is the only reader. Set on
     // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
     // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`
     // stores its ninth argument again before its second call. The frame-object audit is the only
     // reader there too, and on mwcc it is LOAD-BEARING: it is what refuses an undeclared call whose
     // ninth argument the arity guess cannot see (frontend/ppc.ts `measurePpcFrame`).
     localsAboveOutgoingArea?: boolean;
+    // The STRONG form of `localsAboveOutgoingArea`, which it requires: the caller never loads a word
+    // of its outgoing area at all — not after a call, and not before one either. The area holds only
+    // what the caller staged for a callee; every argument that contains a call is computed before
+    // any word is staged, and nothing is saved there around a nested call. So ANY word this function
+    // loads is a local, and so is every word above it, since the area is one region at the frame
+    // bottom. Its readers apply that contrapositive, at exactly the soundness of the universal:
+    // `frontend/stackargs.ts` `loadedWordBound` bounds the area at the lowest word the function
+    // loads, and `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores at the
+    // lowest frame word loaded through a slot or an object. A word no store reaches on any path
+    // needs only the after-call form (see `localsAboveOutgoingArea`).
+    // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
+    //
+    // Set on agbcc alone, off its source: thumb.h defines no REG_PARM_STACK_SPACE, so calls.c:642's
+    // save_fixed_argument_area — which loads staged words around a nested call — is not compiled;
+    // calls.c:1599-1610 precomputes every argument containing a call; and store_one_arg
+    // (calls.c:3420-3470) saves an argument word only when a nested call overlaps it, which the
+    // precompute rules out. Compiled, `test/corpus/agbcc-restage.s` loads no word of the area around
+    // calls in stack arguments. NOT set on the MIPS targets — o32 gcc defines REG_PARM_STACK_SPACE,
+    // the mechanism of a counterexample — nor on mwcc, whose probes measured the after-call form
+    // only. Like `stagesOutgoingArgsInFrame`, a second armv4t compiler must state this premise
+    // rather than inherit it.
+    outgoingAreaNeverLoaded?: boolean;
     // A frame of EXACTLY ONE reserved word whose base escapes this function holds that object and
     // nothing else. It is the layout premise the Thumb frontend's address-taken-local capability
     // rests on (`frontend/thumb.ts`, `capturedObjectIsTheWholeFrame`): a bare `mov rD, sp` names
@@ -1109,6 +1141,8 @@ export const ARMV4T_AGBCC: TargetDescription = {
     // …one area for every call, below the locals (thumb.h:573/600-622/628, calls.c:1675), which
     // agbcc re-stages before each call and never reads back after one (agbcc-restage.s).
     localsAboveOutgoingArea: true,
+    // …nor loads at all, before a call or after: no REG_PARM_STACK_SPACE (see the field).
+    outgoingAreaNeverLoaded: true,
     // the two producer tables behind this are compiled, at agbcc 2.9-arm-000512 and the rows' own
     // flags, and they are written out where the predicate reads it (`frontend/thumb.ts`)
     oneWordFrameIsTheCapturedObject: true,
