@@ -350,6 +350,10 @@ interface StaleRead {
   fromOp: number;
   /** a call in this very block destroyed it, so the predecessors have nothing to add. */
   local: boolean;
+  /** The OTHER keys this block wrote the read's value into after it — a `move` or a slot store of
+   *  the destroyed register, which carries the callee's leftover out of the block under a name no
+   *  call destroyed. */
+  carriedBy: Set<string>;
 }
 
 /** The registers a call leaves holding nothing the CALLER can name — what {@link SsaBuilder.noteCall}
@@ -453,6 +457,7 @@ export function makeSsaBuilder(
   const clobberedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const decidedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const staleCandidates: StaleRead[] = [];
+  const staleByValue = new Map<Value, StaleRead[]>();
   /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
   const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
@@ -597,6 +602,11 @@ export function makeSsaBuilder(
     }
     noteSlotHome(reg, v);
     noteSlotTraffic(reg, v);
+    for (const c of staleByValue.get(v) ?? []) {
+      if (c.block === b && c.reg !== reg) {
+        c.carriedBy.add(reg);
+      }
+    }
     if (b === 0 && !firstEntryWrite.has(reg)) {
       firstEntryWrite.set(reg, v);
     }
@@ -632,7 +642,9 @@ export function makeSsaBuilder(
       return;
     }
     staleSeen[b].set(key, v);
-    staleCandidates.push({ reg, value: v, block: b, fromOp: irBlocks[b].ops.length, local });
+    const c: StaleRead = { reg, value: v, block: b, fromOp: irBlocks[b].ops.length, local, carriedBy: new Set() };
+    staleCandidates.push(c);
+    staleByValue.set(v, [...(staleByValue.get(v) ?? []), c]);
   };
 
   const newPhi = (reg: string, b: number): Value => {
@@ -934,6 +946,35 @@ export function makeSsaBuilder(
     }
     return destroyedIn;
   };
+  /** A destroyed value a copy carries OUT of its block (`StaleRead.carriedBy`) is used where any
+   *  block the read's block reaches uses it — an edge argument included, which is how a slot the
+   *  copy stored reaches its reload at a join. The destroyed register itself needs none of this:
+   *  every block it reaches marks it destroyed on entry (`destroyedOnEntry`) and judges its own
+   *  reads. Every later use of the value counts, under whatever name, which can only refuse more. */
+  const carriedOut = (c: StaleRead): boolean => {
+    if (![...c.carriedBy].some((k) => defs[c.block].get(k) === c.value)) {
+      return false;
+    }
+    const index = new Map(irBlocks.map((blk, i) => [blk, i]));
+    const usesIt = (op: Op) => op.operands.includes(c.value) || op.successors.some((s) => s.args.includes(c.value));
+    const seen = new Set<number>();
+    const work = irBlocks[c.block].ops.slice(c.fromOp).flatMap((op) => op.successors.map((s) => s.block));
+    if (irBlocks[c.block].ops.slice(c.fromOp).some(usesIt)) {
+      return true;
+    }
+    for (let blk = work.pop(); blk !== undefined; blk = work.pop()) {
+      const b = index.get(blk);
+      if (b === undefined || seen.has(b)) {
+        continue;
+      }
+      seen.add(b);
+      if (blk.ops.some(usesIt) || usesOutsideOps.some((u) => u.value === c.value && u.block === b)) {
+        return true;
+      }
+      work.push(...blk.ops.flatMap((op) => op.successors.map((s) => s.block)));
+    }
+    return false;
+  };
   const refuseStaleCallerSavedReads = () => {
     if (staleCandidates.length === 0) {
       return;
@@ -946,7 +987,8 @@ export function makeSsaBuilder(
       const ops = irBlocks[c.block].ops;
       if (
         ops.slice(c.fromOp).some((op) => op.operands.includes(c.value)) ||
-        usesOutsideOps.some((u) => u.value === c.value && u.block === c.block && u.atOp >= c.fromOp)
+        usesOutsideOps.some((u) => u.value === c.value && u.block === c.block && u.atOp >= c.fromOp) ||
+        carriedOut(c)
       ) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${c.reg} is read on a path where a call has destroyed it, so what ` +

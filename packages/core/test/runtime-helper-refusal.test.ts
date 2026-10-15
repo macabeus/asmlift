@@ -70,8 +70,11 @@ describe('a trimmed argument list is not a register pair', () => {
     '24:\tmr      r30,r3\n28:\tmr      r31,r4\n2c:\tcmpwi   r3,0\n30:\tbne     18 <f+0x18>\n' +
     '34:\tlwz     r0,20(r1)\n38:\tmtlr    r0\n3c:\taddi    r1,r1,16\n40:\tblr\n';
 
+  // It declines before the recognizer sees it: this frontend reads `__shr2u`'s return as r3 alone,
+  // so the r4 the loop carries into the next call is one the call destroyed (frontend/ssa.ts
+  // `refuseStaleCallerSavedReads`). Word operands never folding is pinned on the IR below.
   test('a helper call whose surviving operands merely COUNT right declines', () => {
-    expect(() => dis('f', loop)).toThrow(/no model for the runtime helper '__shr2u'/);
+    expect(() => dis('f', loop)).toThrow(/r4 is read on a path where a call has destroyed it/);
   });
 });
 

@@ -274,6 +274,31 @@ describe('the frame half: words of the frame the function pushed', () => {
     ).toThrow(/sp@12 is read on a path that never stores it, and lies outside this function's frame partition/);
   });
 
+  // `int g(int); int cv(int a,int c){ int r; if (c) r = g(a); return r + 1; }` at ido7.1 -O2, with g
+  // mis-declared void: what the arm stores in 28(sp) is the callee's v0, and it reaches the reload
+  // only as the argument of the join's phi. Declared as returning, it lifts.
+  const CV = [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tbeqz\ta1,18 <f+0x18>',
+    '8:\tsw\tra,20(sp)',
+    'c:\tjal\t0 <f>',
+    '10:\tnop',
+    '14:\tsw\tv0,28(sp)',
+    '18:\tlw\tra,20(sp)',
+    '1c:\tlw\tv0,28(sp)',
+    '20:\taddiu\tsp,sp,32',
+    '24:\tjr\tra',
+    '28:\taddiu\tv0,v0,1',
+  ];
+  test("a call's destroyed v0 stored to an owned word refuses where the join reads it back", () => {
+    expect(lift(CV, MIPS_IDO, callsTo('g', [0xc]), { g: { params: 1, returnsVoid: true } })).toThrow(
+      /v0 is read on a path where a call has destroyed it/,
+    );
+    expect(src(CV, MIPS_IDO, callsTo('g', [0xc]), { g: { params: 1 } })).toBe(
+      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    if (a1 != 0) v0 = g(a0);\n    return v0 + 1;\n}\n',
+    );
+  });
+
   // The key is the raw offset, so a word reached at the entry depth names other storage under the
   // same spelling: one such access and the frame claims nothing.
   test('an sp access at another depth than the frame withdraws the claim', () => {
