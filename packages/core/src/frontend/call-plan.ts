@@ -45,6 +45,7 @@ import { type SymbolMap, symbolsByName } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import type { HighHalves } from './high-half';
+import { unspellableReason } from './reloc-symbol';
 import { type SsaBuilder, clobberedByCall, fallbackArgc } from './ssa';
 
 /** What the frontend's own call lowering can carry out. */
@@ -861,10 +862,11 @@ function structReturnOf(
  *    from the symbol's own address (`gaddr`, one or one per word of the same symbol), loaded off it
  *    or stored there as the very values passed. The operand becomes the symbol's address, spelled
  *    bare (`take(gS)`), which compiles only where the declarations type the global as the struct.
- *    So a symbol C cannot name (a section symbol, `.bss`) refuses, and so does one the declaration
- *    context or the symbol map types as anything else: the struct at offset 0 of `gQs[4]` or of
- *    `struct O2 { struct Q q; … } gO2` sits at the symbol's own address too, and `take(gQs)` is a
- *    type error against the header that declares it (`bareStructRefusal`).
+ *    So a symbol C cannot name (a section symbol, `.bss`; a function-scope static's `sQ.3`)
+ *    refuses, and so does one the declaration context or the symbol map types as anything else:
+ *    the struct at offset 0 of `gQs[4]` or of `struct O2 { struct Q q; … } gO2` sits at the
+ *    symbol's own address too, and `take(gQs)` is a type error against the header that declares
+ *    it (`bareStructRefusal`).
  *
  *  Either way every access is unqualified and in the call's own block, and no store or call lies
  *  between the earliest of them and the call but those accesses themselves, so the object holds at
@@ -1028,8 +1030,12 @@ function bareStructRefusal(
   type: IrType,
   { symbols, context }: { symbols: SymbolMap | undefined; context: ContextGlobals | undefined },
 ): string | undefined {
-  if (!/^[A-Za-z_$][\w$]*$/.test(sym)) {
-    return "that is no name C can spell (a section symbol: the object is a static at its section's start)";
+  // the linker's name for the object, where it is one no C source spells: a static at its
+  // section's start relocated against the section (`.bss`), or a function-scope static's name and
+  // counter (`sQ.3`), which only the static's definition spells (frontend/reloc-symbol.ts)
+  const unspellable = unspellableReason(sym);
+  if (unspellable !== null) {
+    return `that is no name C can spell: it ${unspellable}`;
   }
   // ONE STRUCT, MANY SPELLINGS: `typedef struct Q {…} Q_t;` spells it `Q_t` and `struct Q`, and a
   // header passes one and declares the other. Each side is resolved to the struct it names through

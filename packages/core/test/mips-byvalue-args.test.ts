@@ -498,7 +498,17 @@ describe('a struct passed by value on O32', () => {
 
     // `static struct Q sA;` at the start of `.bss` is relocated against the section symbol
     test('a section symbol declines', () => {
-      expect(() => lift('bvqg', named('.bss'), MIPS_GCC)).toThrow(/off '\.bss', and that is no name C can spell/);
+      expect(() => lift('bvqg', named('.bss'), MIPS_GCC)).toThrow(
+        /off '\.bss', and that is no name C can spell: it names a section-relative label/,
+      );
+    });
+
+    // gcc names a function-scope static by its name and a counter (agbcc: `static struct Q sQ` is
+    // `sQ.3`), which is no section symbol, and the refusal says which it is
+    test('a function-scope static declines as one', () => {
+      expect(() => lift('bvqg', named('sQ.3'), MIPS_GCC)).toThrow(
+        /off 'sQ\.3', and that is no name C can spell: it names a function-scope static \('sQ\.3'\)/,
+      );
     });
   });
 });

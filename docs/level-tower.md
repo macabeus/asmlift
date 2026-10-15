@@ -727,7 +727,8 @@ sub-word members in registers (`sll`/`or`), an insert over a register nothing se
 `lwl`/`swl` copy, and a struct read through a pointer, which leaves no object to name. A global is
 spelled bare only where C can name it and its declarations type it as that struct: the struct at
 offset 0 of an array or of an enclosing struct shares the symbol's address, and a static at its
-section's start is relocated against the section. "That struct" is the struct each side resolves
+section's start is relocated against the section, and a function-scope static by a name and
+counter (`sQ.3`) only its definition spells. "That struct" is the struct each side resolves
 to through the context's typedefs (`structNamed`), never a spelling: `typedef struct Q {…} Q;`
 passes `Q` off an `extern struct Q`. Where no rule places a declared by-value
 parameter at all (no layout, a union, a target with no word rule, an 8-aligned struct at an odd
