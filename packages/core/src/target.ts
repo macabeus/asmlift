@@ -530,7 +530,10 @@ export interface TargetDescription {
     // It is a UNIVERSAL — for every source, the compiler emits no such read — and its readers apply
     // the contrapositive (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
     // BACKWARDS READING): a word loaded after a call is not in the area, so it is a local, and so is
-    // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). It is exactly as sound as
+    // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). An own-frame word no store
+    // reaches on any path is a local too (`frontend/thumb.ts`'s own-frame load arm, which reads it as
+    // uninitialised): a callee that assigned it as its stack parameter ran before the load, so the
+    // load is after a call, and with no call reaching the load there is no such callee. It is exactly as sound as
     // the universal, so its residue is every producer the universal does not cover: hand-written
     // asm that reads its outgoing argument back after a call loses that argument silently. The
     // premise is this compiler's, not the ISA's.
@@ -560,9 +563,9 @@ export interface TargetDescription {
     // loads is a local, and so is every word above it, since the area is one region at the frame
     // bottom. Its readers apply that contrapositive, at exactly the soundness of the universal:
     // `frontend/stackargs.ts` `loadedWordBound` bounds the area at the lowest word the function
-    // loads, `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores at the lowest
-    // frame word loaded through a slot or an object, and `frontend/thumb.ts`'s own-frame load arm
-    // reads a word no store reaches as an uninitialised local, not one a callee wrote.
+    // loads, and `frontend/frame-objects.ts` `storedNeverRead` bounds its pending stores at the
+    // lowest frame word loaded through a slot or an object. A word no store reaches on any path
+    // needs only the after-call form (see `localsAboveOutgoingArea`).
     // Absent ⇒ only the after-call form is claimed (when `localsAboveOutgoingArea` is set).
     //
     // Set on agbcc alone, off its source: thumb.h defines no REG_PARM_STACK_SPACE, so calls.c:642's

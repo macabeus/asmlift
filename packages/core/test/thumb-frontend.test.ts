@@ -927,19 +927,39 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
   test('a reload from a slot that was never stored is an uninitialised local only under the layout claim', () => {
     // The guard that keeps the model from fabricating: `readVar` must answer a slot nothing stored
-    // with `undef`, never a phantom parameter. Under agbcc's layout claim the word is a local; without
-    // it the word may be one a callee assigned as its stack parameter, and the decline is the
-    // honest answer.
+    // with `undef`, never a phantom parameter. A callee that assigned the word as its stack parameter
+    // ran before the load, so the load is after a call; under the after-call layout claim
+    // (`localsAboveOutgoingArea`) no such word is loaded, so it is a local, and with no call reaching
+    // the load there is no such callee at all. Without the claim the decline is the honest answer.
     const unstored =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(decompile('f', unstored, ARMV4T_AGBCC).source).toBe(
-      's32 f(void) {\n    s32 uninit_sp0;\n    return uninit_sp0;\n}\n',
-    );
-    const unclaimed = {
+    // …and the shape the claim exists for: a call reaches the load, and nothing stored the word
+    const afterCall =
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tbl\tg\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+    const g = { prototypes: { g: { params: 0, returnsVoid: true } } };
+    // the after-call form alone carries it: agbcc's stronger never-loaded claim is not read here
+    const weakOnly = {
       ...ARMV4T_AGBCC,
       compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
     };
+    for (const t of [ARMV4T_AGBCC, weakOnly]) {
+      expect(decompile('f', unstored, t).source).toBe(
+        's32 f(void) {\n    s32 uninit_sp0;\n    return uninit_sp0;\n}\n',
+      );
+      expect(decompile('f', afterCall, t, g).source).toBe(
+        's32 f(void) {\n    s32 uninit_sp0;\n    g();\n    return uninit_sp0;\n}\n',
+      );
+    }
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: {
+        ...ARMV4T_AGBCC.compilerBehaviors,
+        localsAboveOutgoingArea: false,
+        outgoingAreaNeverLoaded: false,
+      },
+    };
     expect(() => decompile('f', unstored, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', afterCall, unclaimed, g)).toThrow(/stack pointer used as data/);
   });
 
   test('a sub-word access anywhere disables the model for the whole function', () => {
@@ -990,10 +1010,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   // synthetic:uninitfirst:agbcc — `if (k > 5) gOut = v0 + …; switch (k) { case 0: v0 = p[0]; … }`:
-  // the local is read BEFORE any store, so no store reaches the read on any path. agbcc never loads
-  // a word of its outgoing area, so a word it loads is a local, and a read nothing reaches is that
-  // local uninitialised — unless a callee holding the frame's address may have written it, which
-  // the frame-object audit answers.
+  // the local is read BEFORE any store, so no store reaches the read on any path. A callee that
+  // assigned the word as its stack parameter would have run before the read, and agbcc loads no
+  // word of its outgoing area after a call, so a read nothing reaches is that local uninitialised —
+  // unless a callee holding the frame's address may have written it, which the frame-object audit
+  // answers.
   describe('a slot read before every store to it is an uninitialised local', () => {
     const readFirst = (tail: string) =>
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #5\n\tble\t.L2\n' +
@@ -1012,9 +1033,15 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     test('…and without the compiler’s layout claim the word may be one a callee left, so it declines', () => {
-      const unclaimed = {
+      // the after-call form is the claim read here; the stronger never-loaded form is not needed
+      const weakOnly = {
         ...ARMV4T_AGBCC,
         compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      };
+      expect(decompile('f', readFirst(''), weakOnly).source).toContain('s32 uninit_sp0;');
+      const unclaimed = {
+        ...weakOnly,
+        compilerBehaviors: { ...weakOnly.compilerBehaviors, localsAboveOutgoingArea: false },
       };
       expect(() => decompile('f', readFirst(''), unclaimed)).toThrow(/stack pointer used as data/);
     });
