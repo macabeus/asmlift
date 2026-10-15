@@ -75,10 +75,10 @@
  *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
  *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
  *  RESIDUE, untabled: a value an inline `asm("" :: "r"(x))` consumes. agbcc leaves the statement as a
- *  bare `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead and is stamped —
- *  sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character` that way. The stamp keeps an
- *  access the machine made of ordinary RAM, which changes no value; the spelling then misses the
- *  extraction the asm consumed. And agbcc splits a DImode move into two word loads AFTER flow has
+ *  bare `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead. Where the asm
+ *  took an extraction of it — sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character`
+ *  with `lsl`/`lsr` before the asm — `computed` leaves it plain; a bare read the asm took whole is
+ *  stamped, which keeps an access the machine made of ordinary RAM and changes no value. And agbcc splits a DImode move into two word loads AFTER flow has
  *  deleted dead insns (`thumb_load_double_from_address`), so the half nothing uses survives as a
  *  plain read: `int f(long long *p) { long long v = *p; return (int)v; }` keeps `ldr r1, [r0, #4]`.
  *  Under a declaration that pins a one-word return the pair gate does not fire, and that read is
