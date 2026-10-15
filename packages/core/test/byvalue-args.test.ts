@@ -185,10 +185,10 @@ describe('a struct passed by value in argument registers', () => {
       /the call to `take2` passes struct A by value, and its words are not one frame object or one global, read whole just before the call/,
     );
     // hand-edited: the last word comes off [sp,#4] again, so no frame range is the struct's and the
-    // words are read as the frame's own
+    // words are read as the frame's own slots, which no by-value fold takes
     const twice = BYVALREGS.replace('\tldr\tr2, [sp, #0x8]\n', '\tldr\tr2, [sp, #0x4]\n');
     expect(() => decompile('byvalregs', twice, ARMV4T_AGBCC, { prototypes: { take2 } })).toThrow(
-      /stack pointer used as data/,
+      /the call to `take2` passes struct A by value, and its words are not one frame object or one global/,
     );
   });
 
