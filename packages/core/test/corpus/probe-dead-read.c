@@ -2,7 +2,8 @@
  * scripts/regen-dead-read-probes.ts. Every compiler measured deletes a plain read whose value
  * nothing uses, so each read here is `volatile`, and its result is never consumed: overwritten by
  * the next statement's load, or never read at all. The address plays no part, so the same reads
- * go through a literal, an extern symbol and a pointer parameter. */
+ * go through a literal, an extern symbol and a pointer parameter. `pairhi` is the exception, a
+ * read that is NOT volatile and that the lift alone leaves unused. */
 typedef volatile unsigned int vu32;
 extern volatile int gR;
 
@@ -34,4 +35,10 @@ void sym(short *x) {
 void param(volatile int *p, short *x) {
     *p;
     x[0] = x[1] + 3;
+}
+
+/* Not volatile: the second word of a 64-bit return, which a lift that guesses a one-word return
+ * leaves unused (frontend/dead-reads.ts `held-at-word-return`). */
+long long pairhi(long long *p) {
+    return *p;
 }

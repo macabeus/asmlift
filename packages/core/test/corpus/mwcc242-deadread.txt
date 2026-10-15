@@ -53,3 +53,9 @@ Disassembly of section .text:
   78:	addi    r0,r5,3
   7c:	sth     r0,0(r4)
   80:	blr
+
+00000084 <pairhi>:
+  84:	mr      r4,r3
+  88:	lwz     r3,0(r3)
+  8c:	lwz     r4,4(r4)
+  90:	blr

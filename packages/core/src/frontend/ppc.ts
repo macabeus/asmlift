@@ -49,7 +49,7 @@ import { registerSaveRoutineOf } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
-import { pinDeadReads } from './dead-reads';
+import { pinDeadReads, unreadPairHalf } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -1442,6 +1442,9 @@ function liftOnce(
   // declared `void f(void)` (the candidate does not compile) and a C++ `__Fv` mangling.
   const bareReturns: Array<{ op: Op; bi: number }> = [];
   const wordReturns: number[] = [];
+  // What r4, the second register of an r3:r4 return, may hold at each word return where no
+  // declaration pins the width (frontend/dead-reads.ts `unreadPairHalf`).
+  const unreadHigh = new Set<Value>();
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -1452,6 +1455,7 @@ function liftOnce(
     if (op.operands.length > 0) {
       wordReturn = true;
       wordReturns.push(bi);
+      unreadPairHalf(ssa, prototypes[name], ARG_REGS[1], bi, unreadHigh);
     } else {
       bareReturns.push({ op, bi });
     }
@@ -2794,7 +2798,7 @@ function liftOnce(
       pinDeviceAccesses(irBlocks, verdict, target, undefined);
     }
   }
-  pinDeadReads(irBlocks, target);
+  pinDeadReads(irBlocks, target, unreadHigh);
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();

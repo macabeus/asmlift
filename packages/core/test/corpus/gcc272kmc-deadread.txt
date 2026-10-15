@@ -60,4 +60,8 @@ Disassembly of section .text:
   98:	addiu	v0,v0,3
   9c:	jr	ra
   a0:	sh	v0,0(a1)
-	...
+
+000000a4 <pairhi>:
+  a4:	lw	v0,0(a0)
+  a8:	jr	ra
+  ac:	lw	v1,4(a0)

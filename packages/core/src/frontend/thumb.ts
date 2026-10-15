@@ -21,12 +21,12 @@
 import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/core';
 import type { Opcode } from '../ir/opcodes';
 import { T, typeToString } from '../ir/types';
-import { type Prototypes, wordsOf } from '../proto';
+import { type FnProto, type Prototypes, wordsOf } from '../proto';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
-import { pinDeadReads } from './dead-reads';
+import { pinDeadReads, unreadPairHalf } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
@@ -2516,7 +2516,7 @@ function liftOnce(
     pinDeviceAccesses(irBlocks, verdict, target, symbols);
   }
   refuseSretOutsideFrame(name, irBlocks);
-  pinDeadReads(irBlocks, target);
+  pinDeadReads(irBlocks, target, pairs.unreadHigh);
 
   abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);
   fn.localObjects = statics.finish();
@@ -4333,21 +4333,28 @@ interface PairHalf {
 interface ThumbPairs {
   readonly halfOf: ReadonlyMap<Value, PairHalf>;
   readonly wordReturns: { bi: number; lo: Value; widerEpilogue: boolean }[];
+  /** what r1 may hold at each word return, where no declaration pins the width (dead-reads.ts
+   *  `unreadPairHalf`) */
+  readonly unreadHigh: Set<Value>;
   projectHalf(irb: Block, whole: Value, half: 'lo' | 'hi', at: Instr): Value;
   fuseHalves(irb: Block, lo: Value, hi: Value): Value;
   wideReturn(lo: Value, bi: number): Value | null;
+  /** record a return of one word in block `bi`, for `refuseWordReturns` and the dead-read pin */
+  noteWordReturn(bi: number, lo: Value, widerEpilogue: boolean): void;
   refuseWordReturns(): void;
 }
 
 function thumbPairs({
   name,
   target,
+  own,
   ssa,
   asmBlocks,
   callClobbers,
 }: {
   name: string;
   target: TargetDescription;
+  own: FnProto | undefined;
   ssa: SsaBuilder;
   asmBlocks: readonly AsmBlock[];
   callClobbers: readonly string[];
@@ -4411,6 +4418,7 @@ function thumbPairs({
   // epilogue says the return type is 5 to 8 bytes — judged by `refuseWordReturns` once every block
   // is filled.
   const wordReturns: ThumbPairs['wordReturns'] = [];
+  const unreadHigh = new Set<Value>();
   /** THE WORD RETURNS THAT WOULD DROP A HIGH HALF, refused. Run after every block is filled and
    *  before `ssa.finish()`: a join's phi operands are wired by then, and not yet folded away.
    *
@@ -4451,7 +4459,11 @@ function thumbPairs({
       }
     }
   };
-  return { halfOf, wordReturns, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
+  const noteWordReturn = (bi: number, lo: Value, widerEpilogue: boolean): void => {
+    wordReturns.push({ bi, lo, widerEpilogue });
+    unreadPairHalf(ssa, own, target.argRegs[1], bi, unreadHigh);
+  };
+  return { halfOf, wordReturns, unreadHigh, noteWordReturn, projectHalf, fuseHalves, wideReturn, refuseWordReturns };
 }
 
 /** Whether, from instruction `from` of block `bi` to its end, nothing puts into the pair's high
@@ -4638,7 +4650,14 @@ function thumbFillOf(
     statics,
     slotsOffReason: frame.slotsOffReason,
   });
-  const pairs = thumbPairs({ name, target, ssa, asmBlocks: cfg.asmBlocks, callClobbers: calls.callClobbers });
+  const pairs = thumbPairs({
+    name,
+    target,
+    own: prototypes[name],
+    ssa,
+    asmBlocks: cfg.asmBlocks,
+    callClobbers: calls.callClobbers,
+  });
   const flags = thumbFlagCarry(cfg, text.tables);
   return {
     name,
@@ -5695,7 +5714,7 @@ function lowerTerminator(fill: ThumbFill, cur: BlockCursor): void {
           last.ops[0] === scratch &&
           prev?.mnemonic === 'pop' &&
           regListOf(prev.ops)?.join() === scratch;
-        pairs.wordReturns.push({ bi, lo, widerEpilogue });
+        pairs.noteWordReturn(bi, lo, widerEpilogue);
       }
       irb.ops.push(mkOp('ret', { operands: [whole ?? lo] }));
     }

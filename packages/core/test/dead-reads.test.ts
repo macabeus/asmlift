@@ -8,7 +8,7 @@
 // stamp every one of these reads is gone from every candidate. The address plays no part: a
 // literal, a pointer parameter and an extern symbol are all the same read.
 //
-// The gate table's two refusals each have a test that ablates the gate and watches the read get
+// The gate table's refusals each have a test that ablates the gate and watches the read get
 // stamped, so neither is a comment that nothing exercises.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,6 +49,26 @@ const lift = (name: string, asm: string, target: TargetDescription) =>
 describe.each(TOOLCHAINS)('$fixture', ({ fixture: f, target, fns }) => {
   test.each(fns)('%s keeps the read nothing uses, qualified', (name) => {
     expect(lift(name, fixture(f), target)).toMatch(READ[name]);
+  });
+});
+
+// `long long pairhi(long long *p) { return *p; }`, lifted with no declaration: the second word of
+// the return pair is unused only because the lift guessed a one-word return, so it is no
+// `volatile` read of RAM. agbcc and mwcc lift the one word their ABI returns first; O32 refuses the
+// v0:v1 pair outright, before this rule is asked.
+describe("pairhi: the return pair's second word is no dead read", () => {
+  const unproto = (f: string, target: TargetDescription) => () => decompile('pairhi', fixture(f), target).source;
+  test.each([
+    ['agbcc-deadread.s', ARMV4T_AGBCC],
+    ['mwcc242-deadread.txt', PPC_MWCC],
+  ] as const)('%s', (f, target) => {
+    expect(unproto(f, target)()).not.toMatch(/volatile/);
+  });
+  test.each([
+    ['ido71-deadread.txt', MIPS_IDO],
+    ['gcc272kmc-deadread.txt', MIPS_GCC],
+  ] as const)('%s declines', (f, target) => {
+    expect(unproto(f, target)).toThrow(/v0:v1/);
   });
 });
 
@@ -117,21 +137,21 @@ describe('the gates', () => {
     pinDeadReads(kept.blocks, ARMV4T_AGBCC);
     expect(kept.load.attrs.volatile).toBeUndefined();
     const ablated = deadLoad(object(), { off: 0, width: 4, signed: false });
-    pinDeadReads(ablated.blocks, ARMV4T_AGBCC, without(DEAD_READ_GATES, 'frame-object'));
+    pinDeadReads(ablated.blocks, ARMV4T_AGBCC, undefined, without(DEAD_READ_GATES, 'frame-object'));
     expect(ablated.load.attrs.volatile).toBe(true);
   });
 
   test('unmodelled-instruction: a read an unmodelled instruction may consume stays plain', () => {
     // mwcc's bit insert: `lbz r0, 76(r3)` + `rlwimi r0, r4, 7, 24, 24` + `stb r0, 76(r3)`. The
     // `rlwimi` reads the byte it inserts into, and the opaque that stands for it does not say so.
-    const withOpaque = (gates?: Parameters<typeof pinDeadReads>[2]) => {
+    const withOpaque = (gates?: Parameters<typeof pinDeadReads>[3]) => {
       const { blocks, load } = deadLoad(constAt(0x02000100), { off: 76, width: 1, signed: false });
       const insert = mkOp('opaque', {
         results: [mkValue(T.unk(32))],
         attrs: { reason: "unmodelled instruction 'rlwimi'" },
       });
       blocks[0].ops.splice(2, 0, insert);
-      pinDeadReads(blocks, PPC_MWCC, gates);
+      pinDeadReads(blocks, PPC_MWCC, undefined, gates);
       return load;
     };
     expect(withOpaque().attrs.volatile).toBeUndefined();
@@ -145,12 +165,38 @@ describe('the gates', () => {
     pinDeadReads(kept.blocks, ARMV4T_AGBCC);
     expect(kept.load.attrs.volatile).toBeUndefined();
     const ablated = deadLoad(constAt(0x04000004), { off: 0, width: 2, signed: true });
-    pinDeadReads(ablated.blocks, ARMV4T_AGBCC, without(DEAD_READ_GATES, 'not-a-volatile-read'));
+    pinDeadReads(ablated.blocks, ARMV4T_AGBCC, undefined, without(DEAD_READ_GATES, 'not-a-volatile-read'));
     expect(ablated.load.attrs.volatile).toBe(true);
     // …where a compiler that extends in the load itself was given no such rule
     const ido = deadLoad(constAt(0x04000004), { off: 0, width: 2, signed: true });
     pinDeadReads(ido.blocks, MIPS_IDO);
     expect(ido.load.attrs.volatile).toBe(true);
+  });
+
+  test('held-at-word-return: a leaf 64-bit return from memory keeps no volatile high word', () => {
+    // The value in the return pair's second register at a return the lift guessed one word wide.
+    const held = deadLoad(constAt(0x02000100), { off: 4, width: 4, signed: false });
+    pinDeadReads(held.blocks, ARMV4T_AGBCC, new Set(held.load.results));
+    expect(held.load.attrs.volatile).toBeUndefined();
+    const ablated = deadLoad(constAt(0x02000100), { off: 4, width: 4, signed: false });
+    pinDeadReads(
+      ablated.blocks,
+      ARMV4T_AGBCC,
+      new Set(ablated.load.results),
+      without(DEAD_READ_GATES, 'held-at-word-return'),
+    );
+    expect(ablated.load.attrs.volatile).toBe(true);
+    // …and an extension of the read the pair holds is the read held
+    const base = constAt(0x02000100);
+    const raw = mkValue(T.unk(32));
+    const load = mkOp('load', {
+      operands: [base.results[0]],
+      results: [raw],
+      attrs: { off: 4, width: 2, signed: false },
+    });
+    const ext = mkOp('zext', { operands: [raw], results: [mkValue(T.unk(32))], attrs: { width: 16 } });
+    pinDeadReads([{ params: [], ops: [base, load, ext, mkOp('ret')] }], ARMV4T_AGBCC, new Set(ext.results));
+    expect(load.attrs.volatile).toBeUndefined();
   });
 
   test('the refusals are REPORTED: a tallied table counts each one by its gate', () => {
@@ -159,8 +205,13 @@ describe('the gates', () => {
       results: [mkValue(T.unk(32))],
       attrs: { off: 0, width: 4, signed: false, count: 1 },
     });
-    pinDeadReads(deadLoad(frame, { off: 0, width: 4, signed: false }).blocks, ARMV4T_AGBCC, t.gates);
-    pinDeadReads(deadLoad(constAt(0x04000004), { off: 0, width: 2, signed: true }).blocks, ARMV4T_AGBCC, t.gates);
+    pinDeadReads(deadLoad(frame, { off: 0, width: 4, signed: false }).blocks, ARMV4T_AGBCC, undefined, t.gates);
+    pinDeadReads(
+      deadLoad(constAt(0x04000004), { off: 0, width: 2, signed: true }).blocks,
+      ARMV4T_AGBCC,
+      undefined,
+      t.gates,
+    );
     expect(t.refusals()).toEqual([
       ['frame-object', 1],
       ['not-a-volatile-read', 1],

@@ -30,15 +30,31 @@
  *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
  *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
  *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
+ *   • a read still held, at a return whose width the lift guessed, in the register that carries
+ *     the second word of a two-word return (`unreadPairHalf`): asmlift returns one word where no
+ *     declaration pins the width, so a value in the pair's second register is unused by the LIFT,
+ *     not by the source — agbcc's leaf `long long k(long long *p) { return *p; }` is
+ *     `ldr r1, [r0, #4]; ldr r0, [r0]; bx lr`, and stamping the r1 load would publish a one-word
+ *     return that drops the high half beside an invented volatile read of RAM, byte-exact. A void
+ *     function's return operand is the same question one register down, and is not asked here: the
+ *     lift's `ret` reads the return register, so its read is used.
  *  RESIDUE, untabled: a value an inline `asm("" :: "r"(x))` consumes. agbcc leaves the statement as a
  *  bare `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead and is stamped —
  *  sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character` that way. The stamp keeps an
  *  access the machine made of ordinary RAM, which changes no value; the spelling then misses the
- *  extraction the asm consumed. */
+ *  extraction the asm consumed. And agbcc splits a DImode move into two word loads AFTER flow has
+ *  deleted dead insns (`thumb_load_double_from_address`), so the half nothing uses survives as a
+ *  plain read: `int f(long long *p) { long long v = *p; return (int)v; }` keeps `ldr r1, [r0, #4]`.
+ *  Under a declaration that pins a one-word return the gate above does not fire, and that read is
+ *  stamped: the C recompiles byte-exact and computes the same values, but says `volatile` where the
+ *  source did not. Without such a declaration the pair gate refuses it, as it refuses any read the
+ *  lift leaves in the return pair's second register. */
 import type { Block, Op, Value } from '../ir/core';
 import { deletableWhenDead } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
+import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
+import type { SsaBuilder } from './ssa';
 
 /** What a dead-read gate judges: the read, and the facts about it the gates read. */
 export interface DeadRead {
@@ -47,6 +63,9 @@ export interface DeadRead {
   readonly fromFrame: boolean;
   /** the function holds an instruction the lift could not model (an `opaque`) */
   readonly unmodelled: boolean;
+  /** its value, or a value only it feeds, is still in the return pair's second register at a return
+   *  whose width the lift guessed (`unreadPairHalf`) */
+  readonly heldAtWordReturn: boolean;
   readonly target: TargetDescription;
 }
 
@@ -66,6 +85,13 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => c.unmodelled,
   },
   {
+    id: 'held-at-word-return',
+    why: 'the value may be the second word of a two-word return the lift lowered as one word',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: held-at-word-return: a leaf 64-bit return from memory keeps no volatile high word',
+    rejects: (c) => c.heldAtWordReturn,
+  },
+  {
     id: 'not-a-volatile-read',
     why: 'a read that extends in a way the compiler never extends a volatile one was plain in the source',
     sound: false,
@@ -73,6 +99,31 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => !readCouldBeVolatile(c.target.compilerBehaviors, c.op),
   },
 ];
+
+/** THE RETURN PAIR'S SECOND REGISTER AT A WORD RETURN, gathered by a frontend as it emits a `ret`
+ *  of one word (`held-at-word-return`): every value `pairReg` may hold at the end of block `bi`,
+ *  added to `into` — asked through `holdsValue`, which reads no register (a read of one some path
+ *  leaves undefined would mint a parameter) and ends a path where a call destroyed it.
+ *
+ *  Nothing is gathered where the function's own declaration pins the return: a void one, or a
+ *  scalar whose width it states. A declared one-word return leaves the pair's second register
+ *  unused by the source too, and a declared wider one is refused after the lift (pipeline.ts
+ *  `refuseNarrowReturnsOfWideDeclaration`). */
+export function unreadPairHalf(
+  ssa: Pick<SsaBuilder, 'holdsValue'>,
+  own: FnProto | undefined,
+  pairReg: string,
+  bi: number,
+  into: Set<Value>,
+): void {
+  if (declaresVoidReturn(own) || ownReturnWidth(own) !== undefined) {
+    return;
+  }
+  ssa.holdsValue(pairReg, bi, (v) => {
+    into.add(v);
+    return false; // keep walking: every path's value, not the first
+  });
+}
 
 /** The ops pattern/engine.ts `dce` would delete from these blocks, without deleting them: an op it
  *  may delete whose single result no op it keeps reads, to a fixed point. */
@@ -109,10 +160,17 @@ function deadOps(irBlocks: readonly Block[]): Set<Op> {
   return dead;
 }
 
-/** Stamp `volatile` on every read these blocks never use that no gate refuses. */
+/** Stamp `volatile` on every read these blocks never use that no gate refuses. `atWordReturn` is
+ *  what the frontend gathered with `unreadPairHalf`.
+ *
+ *  CALLED BY EACH FRONTEND, at the end of its lift, and not once in pipeline.ts `liftStamped`: the
+ *  pair gate needs what a return leaves in a register the lifted `ret` does not read, which only the
+ *  frontend's SSA builder answers, and only while it is filling the blocks. The IR it hands back
+ *  has no register left to ask. */
 export function pinDeadReads(
   irBlocks: readonly Block[],
   target: TargetDescription,
+  atWordReturn: ReadonlySet<Value> = new Set(),
   gates: readonly Gate<DeadRead>[] = DEAD_READ_GATES,
 ): void {
   const defOf = new Map<Value, Op>();
@@ -135,11 +193,24 @@ export function pinDeadReads(
     return (d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => fromFrame(o, depth + 1));
   };
   const unmodelled = irBlocks.some((b) => b.ops.some((op) => op.opcode === 'opaque'));
-  for (const op of deadOps(irBlocks)) {
+  const dead = deadOps(irBlocks);
+  // The dead ops whose value reaches the pair's second register, through the dead ops it feeds: an
+  // extension of the read the return pair holds is the read held.
+  const held = new Set<Op>();
+  const hold = (v: Value): void => {
+    const d = defOf.get(v);
+    if (d !== undefined && dead.has(d) && !held.has(d)) {
+      held.add(d);
+      d.operands.forEach(hold);
+    }
+  };
+  atWordReturn.forEach(hold);
+  for (const op of dead) {
     if (op.opcode !== 'load' && op.opcode !== 'aload') {
       continue;
     }
-    if (firstRejection(gates, { op, fromFrame: fromFrame(op.operands[0]), unmodelled, target }) === null) {
+    const facts = { op, fromFrame: fromFrame(op.operands[0]), unmodelled, heldAtWordReturn: held.has(op), target };
+    if (firstRejection(gates, facts) === null) {
       op.attrs = { ...op.attrs, volatile: true };
     }
   }

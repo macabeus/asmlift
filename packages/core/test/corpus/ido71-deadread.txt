@@ -57,4 +57,9 @@ Disassembly of section .text:
   8c:	addiu	t7,t6,3
   90:	jr	ra
   94:	sh	t7,0(a1)
+
+00000098 <pairhi>:
+  98:	lw	v0,0(a0)
+  9c:	jr	ra
+  a0:	lw	v1,4(a0)
 	...

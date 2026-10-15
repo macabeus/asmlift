@@ -97,3 +97,13 @@ param:
 	bx	lr
 .Lfe5:
 	.size	 param,.Lfe5-param
+	.align	2, 0
+	.globl	pairhi
+	.type	 pairhi,function
+	.thumb_func
+pairhi:
+	ldr	r1, [r0, #0x4]		@ created by thumb_load_double_from_address
+	ldr	r0, [r0]		@ created by thumb_load_double_from_address
+	bx	lr
+.Lfe6:
+	.size	 pairhi,.Lfe6-pairhi
