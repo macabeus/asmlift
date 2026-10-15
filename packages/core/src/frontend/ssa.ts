@@ -1269,11 +1269,11 @@ export function makeSsaBuilder(
               .find((r) => r !== undefined);
             if (reg !== undefined) {
               throw new FrontendUnsupportedError(
-                `cannot lift '${name}': ${reg} is read before anything writes it, and no join meets ` +
-                  `it with a definition of its own — an input handed over outside the C convention (a ` +
-                  `save routine's frame address, a member-function pointer, a register hand-written ` +
-                  `asm passes a value in, a count it carries round a loop), not modelled as an ` +
-                  `uninitialised local`,
+                `cannot lift '${name}': ${reg} is read before anything writes it, and ` +
+                  `no join meets it with a definition of its own — an input handed over outside the ` +
+                  `C convention (a save routine's frame address, a member-function pointer, a register ` +
+                  `hand-written asm passes a value in, a count it carries round a loop), not modelled ` +
+                  `as an uninitialised local`,
               );
             }
           }

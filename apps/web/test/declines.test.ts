@@ -1189,6 +1189,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['byvalue-arg', ' by value as its parameter ', 'packages/core/src/frontend/call-plan.ts'],
     ['byvalue-arg', 'by value, and its words are not one frame object', 'packages/core/src/frontend/call-plan.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
+    ['hidden-input', 'no join meets it with a definition of its own', 'packages/core/src/frontend/ssa.ts'],
     ['return-address', 'copies out is used as a value', 'packages/core/src/frontend/ppc.ts'],
     ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
     ['far-jump', 'does not target a code label of this function', 'packages/core/src/frontend/thumb.ts'],
@@ -1265,7 +1266,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/call-plan.ts', 5],
-    ['frontend/ssa.ts', 3],
+    ['frontend/ssa.ts', 2],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];

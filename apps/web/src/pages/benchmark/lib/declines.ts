@@ -93,10 +93,9 @@
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
-//   frontend/ssa.ts          3  a register read round a cycle through the entry block with no join,
-//                               a struct one call hands back in the return register passed on as
-//                               the next guessed call's first argument, and a register a runtime
-//                               hands a hidden input in, read with no path's definition joining it
+//   frontend/ssa.ts          2  a register read round a cycle through the entry block with no join,
+//                               and a struct one call hands back in the return register passed on
+//                               as the next guessed call's first argument
 //   frontend/format.ts       1  the input/frontend mismatch — an input error
 //   pipeline.ts              1  the attribution wrapper, which carries whichever reason it wraps
 //
@@ -634,6 +633,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'clobbered-value',
     label: 'A value a call destroyed (caller-saved register read back)',
     pattern: /is read on a path where a call has destroyed it/,
+  },
+  {
+    // `frontend/ssa.ts` reads a def-less register of the target's `hiddenInputRegs` (an O32 scratch
+    // register, CodeWarrior's r11/r12) as an uninitialised local only when a join meets its entry
+    // value with a definition the entry value does not feed; otherwise it may be an input
+    // hand-written asm passes there, and the lift refuses rather than drop it. The rows that reach
+    // it, `synthetic:uninit_both` on both gcc 2.7.2 lanes, are the other side of that bargain: a
+    // compiled `int x, y; if (c) x = y;` whose two locals sit in v0 and v1, a join no path defines.
+    key: 'hidden-input',
+    label:
+      'A register read before any write that no definition meets (a hand-written input, or a local no path assigns)',
+    pattern: /no join meets it with a definition of its own/,
   },
   {
     // `frontend/ppc.ts` defines what `mflr` copies out as a return address rather than a value, and
