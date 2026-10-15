@@ -172,7 +172,7 @@ export type LocalObjects = ReadonlyMap<string, LocalObject>;
  *
  *  It asks NO FRAME PARTITION, and that is the difference from {@link SlotHomes}. A slot home is a
  *  DECLARATION RANK, so `sp@40` had to be classified as this function's local before it could be
- *  stamped, and MIPS declares no partition and so stamps none. "Stored here and never read back"
+ *  stamped, and MIPS declares no `declaredLocals` and so stamps none. "Stored here and never read back"
  *  needs no such classification: it is a statement about the store, true at any offset.
  *
  *  `selfRedefined` — THE REGISTER IDENTITY DOES NOT REACH THE IR EITHER. SSA renames, so nothing
@@ -208,7 +208,7 @@ export type ParamEvidence = ReadonlyMap<Value, ParamObservation>;
  *  A KEY IS NOT A FRAME COORDINATE, and the frontends differ on exactly that. `sp@40` is a local
  *  on one ABI and the caller's fifth argument on another, so the shared stamp asks the frontend's
  *  own `LiveInModel.declaredLocals` and refuses an offset outside it — Thumb declares a range,
- *  MIPS and PPC declare no partition and so stamp nothing. An entry here therefore means "storage
+ *  MIPS and PPC declare none and so stamp nothing. An entry here therefore means "storage
  *  this function DECLARES, homed at k", not "some sp-relative key".
  *
  *  DECLARES, NOT OWNS, AND THE DIFFERENCE IS AN AGBCC FACT WITH A LIVE DEPENDENCY: `ownedLocals`,

@@ -205,8 +205,8 @@ export interface LiveInModel {
    *  eight more). None reaches the ordering today, for an unrelated reason (`l3/slotorder.ts`'s
    *  REACH note), so nothing downstream is guarding this.
    *
-   *  ABSENT ⇒ NO STAMP. MIPS and PPC declare no frame partition at all, so they stamp nothing,
-   *  which is the refusing direction. */
+   *  ABSENT ⇒ NO STAMP. MIPS and PPC declare none (MIPS claims `ownedLocals` alone), so they stamp
+   *  nothing, which is the refusing direction. */
   declaredLocals?: { from: number; to: number };
   /** Storage the CALLER wrote — incoming stack arguments ⇒ a def-less read is a parameter.
    *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
@@ -244,10 +244,11 @@ export interface LiveInModel {
    *
    *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
   uninitRegs?: readonly string[];
-  /** Of `uninitRegs`, the ones a runtime hands a hidden input in (`target.hiddenInputRegs`). The
-   *  entry value of one may reach the body only THROUGH A JOIN, beside some path's definition —
-   *  the shape of a local the compiler assigned on one arm. Used directly, it is the input, and
-   *  `finish` refuses rather than spell it `uninit_<reg>`. */
+  /** Of `uninitRegs`, the ones something outside the C convention hands an input in
+   *  (`target.hiddenInputRegs`). The entry value of one must reach A JOIN, beside some path's
+   *  definition — the shape of a local the compiler assigned on one arm, which may also be read
+   *  before that assignment. Reaching none, it is the input, and `finish` refuses rather than
+   *  spell it `uninit_<reg>`. */
   hiddenInputRegs?: readonly string[];
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
@@ -422,7 +423,7 @@ export function makeSsaBuilder(
   // invisible to the escape check below. Braun's construction gives no other way to tell.
   const phiKey = new Map<Value, string>();
   // The entry value of a register a runtime hands a hidden input in (`LiveInModel.hiddenInputRegs`),
-  // minted as an uninitialised local, for `finish` to check it reached nothing but joins.
+  // minted as an uninitialised local, for `finish` to check that a join takes it.
   const hiddenEntryValues = new Map<Value, string>();
   const paramReg = new Map<Value, string>();
   // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
@@ -1106,19 +1107,26 @@ export function makeSsaBuilder(
       simplifyTrivialPhis(fn, dropPhiRecord);
       pruneDeadParams(fn, dropPhiRecord);
       // A HIDDEN INPUT IS NO UNINITIALISED LOCAL (`LiveInModel.hiddenInputRegs`). After the
-      // trivial-phi pass, so a join every path of which arrives undefined counts as the direct use
-      // it now is. An edge arg is the one use allowed: the compiler's local, assigned on another
-      // path, meets its entry value there.
+      // trivial-phi pass, so a join every path of which arrives undefined is no join. The
+      // compiler's local is assigned on SOME path, and its entry value meets that definition as a
+      // join's edge argument; once it does, a direct use is the same local read before that
+      // assignment (`uninitfirst`). An entry value no join takes is the input.
       if (hiddenEntryValues.size > 0) {
+        const joined = new Set(
+          irBlocks.flatMap((blk) => blk.ops.flatMap((op) => op.successors.flatMap((s) => s.args))),
+        );
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
-            const reg = op.operands.map((v) => hiddenEntryValues.get(v)).find((r) => r !== undefined);
+            const reg = op.operands
+              .filter((v) => !joined.has(v))
+              .map((v) => hiddenEntryValues.get(v))
+              .find((r) => r !== undefined);
             if (reg !== undefined) {
               throw new FrontendUnsupportedError(
                 `cannot lift '${name}': ${reg} is read before anything writes it, and no path's ` +
-                  `definition joins it — a hidden input this compiler's runtime passes there ` +
-                  `(a save routine's frame address, a member-function pointer, a static chain, a PIC function's own ` +
-                  `address), not an uninitialised local`,
+                  `definition joins it — an input handed over outside the C convention (a save ` +
+                  `routine's frame address, a member-function pointer, a register hand-written asm ` +
+                  `passes a value in), not an uninitialised local`,
               );
             }
           }

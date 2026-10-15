@@ -239,19 +239,19 @@ export interface TargetDescription {
    *  is classified with no evidence at all, which is the defect the save half exists to close. Every
    *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
-  /** Of `scratchRegs`, the ones this compiler's RUNTIME hands a hidden input in, outside the C
-   *  calling convention. mwcc's register save routines take their frame address in r11
+  /** Of `scratchRegs`, the ones something outside the C calling convention hands an input in. On
+   *  PPC that is mwcc's RUNTIME: its register save routines take their frame address in r11
    *  (`addi r11,r1,N; bl _savegpr_NN`, and `_savegpr_31` is `stw r31,-4(r11); blr`), and
-   *  `__ptmf_scall` takes its member-function pointer in r12 (`lwz r0,0(r12)`). Hand-written asm
-   *  that reads one of these first is being handed a value, not reading an uninitialised local.
+   *  `__ptmf_scall` takes its member-function pointer in r12 (`lwz r0,0(r12)`). On O32 it is
+   *  hand-written asm, and every scratch register (`O32_SCRATCH_REGS`). Asm that reads one of these
+   *  first is being handed a value, not reading an uninitialised local.
    *
    *  What separates the two is MEASURED on 2.4.2 and 2.3.3: the uninitialised local the compiler
    *  homes in r11 or r12 is assigned on SOME path (`uninit_r12`: `if (s) { x = a*b; ... }`), so its
-   *  entry value reaches the body only through a join. A def-less read of one of these registers
-   *  that is USED DIRECTLY — the entry value with no path's definition beside it — refuses
-   *  (frontend/ssa.ts `LiveInModel.hiddenInputRegs`). r0 is not listed: the same compilers read a
-   *  never-assigned local straight out of r0 (`int x; return x + a;` is `add r3,r0,r3`), and the
-   *  runtime passes nothing there.
+   *  entry value meets that definition at a join. A def-less read of one of these registers whose
+   *  entry value NO JOIN TAKES refuses (frontend/ssa.ts `LiveInModel.hiddenInputRegs`). r0 is not
+   *  listed: the same compilers read a never-assigned local straight out of r0 (`int x; return x +
+   *  a;` is `add r3,r0,r3`), and the runtime passes nothing there.
    *
    *  Every entry must appear in `scratchRegs`; the frontend refuses a target where one does not. */
   hiddenInputRegs?: readonly string[];
@@ -1199,7 +1199,19 @@ const O32_NON_ARG_REGS = [
 /** Of those, the ones O32 lets a callee use with no save — `at`, `v0`/`v1` and `t0`..`t9`, the
  *  caller-saved registers that pass no argument. MEASURED on GCC_KMC_TOOLCHAIN and the stock gcc
  *  2.7.2 toolchain at their synthetic flags: a leaf homes an uninitialised local in v0
- *  (`uninit_join`: `bgtzl a0,…; sll v0,a0,1; jr ra; ori v0,v0,1`) and in v1 (`uninit_sw`). */
+ *  (`uninit_join`: `bgtzl a0,…; sll v0,a0,1; jr ra; ori v0,v0,1`) and in v1 (`uninit_sw`).
+ *
+ *  Every one of them is also a `hiddenInputRegs` entry, because O32's hand-written asm hands values
+ *  over in them: af's famicom_emu routines are handed a value in t0 or v1 (`sw t0,6348(s8)` is
+ *  its first instruction), and a label inside a function starts with its registers live.
+ *  MEASURED over every function and label symbol of the vendored snowboardkids2 (KMC),
+ *  marioparty3 (gcc 2.7.2) and af (IDO) objects, 29,399 in all, the refusal below fires on 17 —
+ *  twelve labels, three hand-written routines (two of famicom_emu's and libkmc's `div64_64_1`) and
+ *  two data symbols disassembled as code — and on no compiled function. A
+ *  compiled local is assigned on some path, so its entry value meets that assignment at a join;
+ *  `uninitfirst` also reads one before the switch that assigns it, which a join allows. The cost is
+ *  a local NO path assigns (`int r; return r + a;` is `jr ra; addu v0,v0,a0` on gcc), which
+ *  refuses: none of the 29,399 is one. */
 const O32_SCRATCH_REGS = ['at', 'v0', 'v1', ...Array.from({ length: 10 }, (_, i) => `t${i}`)] as const;
 
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,
@@ -1240,10 +1252,8 @@ export const MIPS_IDO: TargetDescription = {
   // callee-saved registers its prologue saves (frontend/mips.ts `prologueSavedRegs`).
   nonArgRegs: O32_NON_ARG_REGS,
   scratchRegs: O32_SCRATCH_REGS,
-  // `t9` carries the callee's own address under `-KPIC`/`-mabicalls` (`addu gp,gp,t9`), a runtime
-  // input outside the C convention; neither N64 toolchain compiles that way, and a read of it no
-  // path's definition joins refuses rather than minting `uninit_t9`.
-  hiddenInputRegs: ['t9'],
+  // Every scratch register, for the measurement at `O32_SCRATCH_REGS`.
+  hiddenInputRegs: O32_SCRATCH_REGS,
   runtimeHelpers: IDO_RUNTIME_HELPERS,
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
   // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
@@ -1327,13 +1337,10 @@ export const MIPS_GCC: TargetDescription = {
     't9',
     'ra',
   ],
-  // O32's partition, as at MIPS_IDO. gcc adds a second hidden input: `v0` is its MIPS static
-  // chain (STATIC_CHAIN_REGNUM, GP_REG_FIRST + 2), which a NESTED function is handed. A read of it
-  // that no path's definition joins refuses; the uninitialised local the compiler homes there is
-  // assigned on some path (`uninit_join`), so it reaches the body through a join.
+  // O32's partition, as at MIPS_IDO.
   nonArgRegs: O32_NON_ARG_REGS,
   scratchRegs: O32_SCRATCH_REGS,
-  hiddenInputRegs: ['v0', 't9'],
+  hiddenInputRegs: O32_SCRATCH_REGS,
   runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,

@@ -1413,7 +1413,7 @@ behind the `unaff_<reg>` this section already cited, and it is one list per targ
 def-less read a LOCAL is that the compiler was free to home one there, which it is only after
 saving the register. So the classification is an intersection — the target's list against a save set
 the frontend measures (`frontend/ssa.ts`'s `LiveInModel.uninitRegs`, fed by Thumb's `savedRegs` and
-PPC's `prologueSavedRegs`; `registerLiveIns` composes it for both, with the target's
+the `prologueSavedRegs` of PPC and MIPS; `registerLiveIns` composes it for all three, with the target's
 `scratchRegs`, which need no save, less the `hiddenInputRegs` a runtime passes a value in, whose
 entry value may reach the body only through a join) —
 and it is not the elision the sentence feared, only a read of the prologue that was already
@@ -1459,7 +1459,7 @@ follows no such rule.
 
 The second clause was not there when the register half landed, and the population that needed it is
 small enough to name. Sweeping every Thumb function in the three vendored agbcc projects — klonoa,
-sa3 and pokeemerald, **2962** functions; `af` is N64/MIPS and declares no register partition at all
+sa3 and pokeemerald, **2962** functions; `af` is N64/MIPS, swept on its own below
 — the ABI list on its own renders a register undef in 9 functions (13 (function, register) pairs),
 and **3** of them are outside the model: the MP2K engine's hand-written `ChnVolSetAsm`, vendored
 identically in all three, which receives two pointers in `r4`/`r5` with **no prologue at all** and
@@ -1487,6 +1487,18 @@ The gap this leaves is one direction only. A register in the ABI list that the p
 falls back to being a parameter — the treatment a target declaring no partition gets — so what the
 model cannot describe costs an invented argument, never an invented local.
 
+O32 needs the same clause for the opposite reason. Its scratch set is thirteen registers (`at`,
+`v0`/`v1`, `t0`-`t9`) where Thumb's is `ip` alone, so the save is no evidence there, and hand-written
+MIPS asm is handed live values in them: af's famicom_emu routines store a `t0` or `v1` they never
+wrote, and lifted with the scratch exemption alone they came out storing `uninit_t0`. The evidence
+O32 has is a JOIN. A local the compiler homed in a scratch register is assigned on some path, so its
+entry value meets that definition as a join's edge argument, and an entry value no join takes is
+an input (`hiddenInputRegs`, the rule mwcc's r11/r12 already follow). Sweeping every function and
+label symbol in the vendored snowboardkids2, marioparty3 and af objects, **29,399**, that refusal
+fires on 17 and on no compiled function: twelve labels, three hand-written routines and two data
+symbols disassembled as code. What it cannot describe is a local no path assigns at all, which
+declines; none of the 29,399 is one.
+
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
 
@@ -1513,8 +1525,11 @@ an offset against them, refusing anything that falls in neither. The register co
 as a second declarative member (`uninitRegs`, a LIST rather than a range, because the complement of
 the argument registers also holds the frontends' virtual keys) under the same generic rule. The dependency became an argument
 instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the prologue walk cannot
-measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
-partition, so a def-less `sp@` read there still refuses; what reaches the model instead is an
+measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims only
+the words of the one frame it pushed that nothing else can write (`ownedFrame` in
+`frontend/mips.ts`: a leaf's whole frame, or what lies past the widest declared call's outgoing
+area, and nothing once a frame address is taken), so any other def-less `sp@` read there still
+refuses; what reaches the model instead is an
 incoming stack word under its own key, `@sarg<k>`, which the frontend places by the frame depth
 (`frameDepths`) as Thumb keys its incoming words, for its stores as well as its loads, so nothing
 incoming reaches a `sp@` key on MIPS either where the depth is measured (and where it is not, a read

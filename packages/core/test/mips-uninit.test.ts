@@ -142,16 +142,18 @@ describe('the register half: scratch and saved registers', () => {
     expect(src(['0:\tjr\tra', '4:\taddu\tv0,a1,a0'], MIPS_GCC)).toMatch(/^s32 f\(s32 a0, s32 a1\) \{/);
   });
 
-  // gcc hands a nested function its static chain in v0, and -mabicalls code its own address in t9:
-  // used directly, with no path's definition beside it, each refuses rather than becoming a local.
-  test('a hidden input read directly refuses: gcc v0, and t9 on both', () => {
-    const HIDDEN = /is read before anything writes it, and no path's definition joins it/;
-    expect(lift(['0:\tjr\tra', '4:\taddu\tv0,v0,a0'], MIPS_GCC)).toThrow(HIDDEN);
-    expect(lift(['0:\tjr\tra', '4:\taddu\tv0,t9,a0'], MIPS_GCC)).toThrow(HIDDEN);
-    expect(lift(['0:\tjr\tra', '4:\taddu\tv0,t9,a0'], MIPS_IDO)).toThrow(HIDDEN);
-    expect(src(['0:\tjr\tra', '4:\taddu\tv0,v0,a0'], MIPS_IDO)).toBe(
-      's32 f(s32 a0) {\n    s32 uninit_v0;\n    return uninit_v0 + a0;\n}\n',
-    );
+  // Hand-written O32 asm hands values over in scratch registers (af's famicom_emu stores the t0 it
+  // is handed, `sw t0,6348(s8)`), while a local the compiler homed in one is assigned on some path,
+  // so its entry value meets that assignment at a join. An entry value no join takes refuses.
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])("a scratch register's entry value no join takes refuses (%s)", (_c, target) => {
+    for (const r of ['at', 'v0', 'v1', 't0', 't9']) {
+      expect(lift(['0:\tjr\tra', `4:\taddu\tv0,${r},a0`], target)).toThrow(
+        new RegExp(`${r} is read before anything writes it, and no path's definition joins it`),
+      );
+    }
   });
 });
 
