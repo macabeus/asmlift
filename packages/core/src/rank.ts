@@ -281,7 +281,8 @@ export interface Candidate {
    *  `matchOnly` and names the fact it owes. Set for whichever variation got it there: emission
    *  under `/signed-cmp`, or a respell that substituted into a compare emission had pinned. It is
    *  the only place this obligation is decided: a pass that rebuilds a compare spreads the node to
-   *  keep its `unsignedCmp` evidence (l3/regspell.ts), or drops it only where its own gate proved
+   *  keep its `unsignedCmp` evidence (l3/regspell.ts), a merge that keeps one of two equal nodes
+   *  keeps the evidence of both (l3/ast.ts `unionEvidence`), or drops it only where its own gate proved
    *  the new spelling compares the same values (l3/initfirst.ts `swapSide`, l3/reindex.ts). */
   signedUnsignedCompare?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through

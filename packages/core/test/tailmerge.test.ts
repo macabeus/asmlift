@@ -12,6 +12,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { eliminateDeadStores } from '../src/l3/dce';
 import { mergeCommonTails } from '../src/l3/tailmerge';
+import { signedOverUnsignedCompare } from '../src/l3/typing';
 import { decompile } from '../src/pipeline';
 import { ARMV4T_AGBCC } from '../src/target';
 
@@ -229,5 +230,47 @@ describe('the pass is WIRED', () => {
         .filter((l) => /^\s*v1 = /.test(l))
         .map(depth),
     ).toEqual([8, 8]);
+  });
+});
+
+// A signed `a < b` in one arm and an unsigned one in the other print alike under `/signed-cmp`
+// (both operands s32, no cast), so they merge. The moved node stands for BOTH paths, so it must
+// keep the unsigned one's evidence: `signedOverUnsignedCompare` judges the finished tree, and a
+// merge that kept the then-arm's bare node published `x = a < b` as signed on the path that
+// compared unsigned (gcc2.7.2kmc/gcc2.7.2: slt in one arm, sltu in the other, joined at the store).
+describe('the merged node keeps both arms’ compare evidence', () => {
+  const lt = (unsigned: boolean): Stmt => ({
+    k: 'assign',
+    name: 'x',
+    value: {
+      k: 'bin',
+      op: '<',
+      l: { k: 'var', name: 'a' },
+      r: { k: 'var', name: 'b' },
+      ...(unsigned ? { unsignedCmp: true as const } : {}),
+    },
+  });
+  const sfn = (then: Stmt[], els: Stmt[]): SFn => ({
+    name: 'f',
+    params: [
+      { name: 'a', type: T.s(32) },
+      { name: 'b', type: T.s(32) },
+    ],
+    locals: [{ name: 'x', type: T.s(32) }],
+    retType: T.void(),
+    body: [iff(then, els)],
+  });
+  test.each([
+    ['signed THEN, unsigned ELSE', false, true],
+    ['unsigned THEN, signed ELSE', true, false],
+  ])('%s', (_, t, e) => {
+    const out = mergeCommonTails(sfn([call('p'), lt(t)], [call('q'), lt(e)]));
+    expect(kinds(out.body)).toEqual(['if', 'assign:x']);
+    expect(signedOverUnsignedCompare(out)).toBe(true);
+  });
+  test('two signed compares merge with no evidence invented', () => {
+    const out = mergeCommonTails(sfn([call('p'), lt(false)], [call('q'), lt(false)]));
+    expect(kinds(out.body)).toEqual(['if', 'assign:x']);
+    expect(signedOverUnsignedCompare(out)).toBe(false);
   });
 });

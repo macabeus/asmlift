@@ -19,7 +19,7 @@
 // where the forms genuinely differ (the body runs at least once vs at least zero times), which
 // is why it never wraps. Declines (null) when no empty do-while exists.
 import type { Expr, SFn, Stmt } from './ast';
-import { exprChildren, exprEquals, mapExprChildren, mapStmtLists, stmtChildren, stmtExprs } from './ast';
+import { exprChildren, exprEquals, mapExprChildren, mapStmtLists, stmtChildren, stmtExprs, unionEvidence } from './ast';
 
 export function pollGuards(sfn: SFn): SFn | null {
   let changed = false;
@@ -140,7 +140,13 @@ export function pollReads(sfn: SFn): SFn | null {
         condFoldable(w.cond, volatileLocals) &&
         ownsEveryOccurrence(sfn.body, a.name)
       ) {
-        out.push({ k: 'while', cond: subst(w.cond, a.name, a.value), body: [] });
+        // The loop's re-read and the first read print alike; the folded read stands for both
+        // (ast.ts `unionEvidence`).
+        out.push({
+          k: 'while',
+          cond: subst(w.cond, a.name, unionEvidence(a.value, (w.body[0] as typeof a).value)),
+          body: [],
+        });
         dropped.add(a.name);
         i++;
         continue;

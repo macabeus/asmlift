@@ -89,6 +89,7 @@ import {
   stmtChildren,
   stmtExprs,
   stmtsEqual,
+  unionStmtsEvidence,
   walkExprs,
 } from '../l3/ast';
 import { constantImageRefusal } from '../l3/constinit';
@@ -6290,7 +6291,7 @@ export function structure(
       stmtsEqual(thenS, elseS) &&
       testRereadsOnly(term, b, { defs, useSitesOf, dom, ipdom, loops: forest.byHeader.values() })
     ) {
-      out.push(...thenS);
+      out.push(...unionStmtsEvidence(thenS, elseS));
     } else {
       out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));
     }
