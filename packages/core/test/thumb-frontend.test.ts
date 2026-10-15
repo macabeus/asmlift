@@ -1095,7 +1095,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   // A captured store's bytes that a `[sp,#k]` SLOT load reads are a local's, under agbcc's claim
   // that it loads no word of its outgoing area (`outgoingAreaNeverLoaded`). The slot load is the
   // slot model's and not in the IR the frame-object audit reads, so the frontend hands it over
-  // (`slotLoads`); without it `storedNeverRead` refused these as a possible stack argument.
+  // (`slotLoads`); without it `storedNeverRead` would refuse these as a possible stack argument.
   describe('a slot load of a captured store proves it no call’s stack argument', () => {
     // Compiled agbcc, canonical flags: `struct S { u16 lo, hi; u32 x, y; } s; s.lo = a; s.hi = b;
     // s.x = c; s.y = c + 1; r = sink(s.y); return *(u32 *)&s + r + s.x;` — the load after the call.
@@ -1784,7 +1784,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // per block let a LABEL decide the verdict; scanning the flat listing let BLOCK ORDER decide,
     // because the reload in the first-listed arm cleared a store that reaches the call through the
     // second. Same CFG and same semantics either way, so both spellings must agree. They are judged
-    // without the compiler's layout claim: under it the reload in either arm proves [sp,#0] a local
+    // without agbcc's never-loaded claim: under it the reload in either arm proves [sp,#0] a local
     // (`loadedWordBound`), and both spellings lift alike.
     const unclaimed = {
       ...ARMV4T_AGBCC,
@@ -1810,7 +1810,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // happens to sit in between. Making the scan block-local instead admitted the cross-block case,
     // where the accept/refuse boundary was a LABEL rather than anything semantic. The reload comes
     // after a RE-STORE, so the word read back is not the one that reached the call — which matters
-    // only without the compiler's layout claim: under it, any reload proves the word a local.
+    // only without agbcc's never-loaded claim: under it, any reload proves the word a local.
     const unclaimed = {
       ...ARMV4T_AGBCC,
       compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
@@ -1844,8 +1844,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', survives, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    g(a0);\n    return a0 + 1;\n}\n');
-    // a compiler that stages its arguments in its frame but does not claim that layout (mwcc's
-    // parameter-area words may hold a local) keeps the refusal
+    // a compiler that stages its arguments in its frame but claims only the after-call form, as
+    // MIPS and mwcc do, keeps the refusal: the outgoing-area bound reads the never-loaded claim
     const unclaimed = {
       ...ARMV4T_AGBCC,
       compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },

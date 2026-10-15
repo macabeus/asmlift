@@ -158,14 +158,14 @@ function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: Readonly
 // and (b) below, kept for every call no declaration covers).
 //
 // A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
-// keeps one outgoing area below every local and never reads it back
-// (`outgoingAreaNeverLoaded`), a word this function LOADS is a local, and so is every word above
-// it (`loadedWordBound`). Every refusal that reads the code — NOTHING EXTRA,
-// (a) and (b) — then weighs only the words beneath the bound, so an undeclared call lifts once no
-// word there could open an argument block, and takes no stack word. Hand-written asm that reads
-// its own outgoing argument back defeats it, and lifts with that argument dropped — a
-// producer assumption of the same kind as CONTIGUITY below, which is why the premise is declared
-// per compiler (`target.ts` `outgoingAreaNeverLoaded`) and never inferred.
+// keeps one outgoing area below every local and never loads a word of it
+// (`outgoingAreaNeverLoaded`), a word this function LOADS is a local, and so is every word above it
+// (`loadedWordBound`). Every refusal that reads the code — NOTHING EXTRA, (a) and (b) — then
+// weighs only the words beneath the bound, so an undeclared call lifts once no word there could
+// open an argument block, and takes no stack word. Hand-written asm that reads its own outgoing
+// argument defeats it, and lifts with that argument dropped — a producer assumption of the same
+// kind as CONTIGUITY below, which is why the premise is declared per compiler (`target.ts`
+// `outgoingAreaNeverLoaded`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -178,10 +178,10 @@ function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: Readonly
 //
 // A SPILL LIVE ACROSS A LICENSED CALL sits in the may set and is not in the declared block — agbcc's
 // commonest frame with an outgoing area. The declaration cannot excuse it; `loadedWordBound` can: a
-// word this function loads is a local, so NOTHING EXTRA counts only the pending
-// words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
-// check of its own: the block is contiguous words from zero, so it holds the bound's word, which
-// this function loads — "this function also LOADS it" below refuses it if nothing earlier does.
+// word this function loads is a local, so NOTHING EXTRA counts only the pending words beneath the
+// bound. A declared block that reaches the bound contradicts it, and needs no check of its own:
+// the block is contiguous words from zero, so it holds the bound's word, which this function loads
+// — "this function also LOADS it" below refuses it if nothing earlier does.
 // A spill with no load at or beneath it still refuses, and its decline names a STORE ("[sp,#k]
 // also reaches the call unread") rather than the capability, so a gap histogram groups it under
 // that message.

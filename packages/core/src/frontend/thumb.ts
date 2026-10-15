@@ -5533,16 +5533,15 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   // (frontend/ssa.ts `LiveInModel`).
   //
   // A slot NO store reaches, on any path, is the same local read before any store — `if (k > 5)
-  // use(v0); … v0 = p[0];`, or a local the source never initialises. Its only writers that are
-  // not this function are two kinds of callee. One assigned the word as its own stack parameter
-  // ran before the load, so a call reaches the load; with no store anywhere the word is then
-  // loaded after a call, which the after-call layout claim (`localsAboveOutgoingArea`) says no
-  // word of the outgoing area is; and with no call reaching the load there is no such callee at
-  // all. Without the claim it may be one, and falls through to the decline. The stronger claim
-  // (`outgoingAreaNeverLoaded`) is not needed: what it adds is a load BEFORE a call, which reads a
-  // staged word, and a staged word has a reaching store. The other writer is a callee holding an
-  // address of the frame, and that is the frame-object audit's to refuse: an `undef` slot an
-  // escaped writer reaches (`writer-over-undef`), or one a captured object overlaps.
+  // use(v0); … v0 = p[0];`, or a local the source never initialises. Only two kinds of callee
+  // could have written it instead. One that assigned the word as its own stack parameter ran
+  // before the load, so the load is after a call, which the after-call layout claim
+  // (`localsAboveOutgoingArea`) says no word of the outgoing area is; with no call reaching the
+  // load there is no such callee. Without the claim it may be one, and falls through to the
+  // decline. The stronger `outgoingAreaNeverLoaded` adds nothing here: a load BEFORE a call reads
+  // a staged word, and a staged word has a reaching store. The other is a callee holding an
+  // address of the frame, which the frame-object audit refuses: an `undef` slot an escaped writer
+  // reaches (`writer-over-undef`), or one a captured object overlaps.
   if (
     frame.isOwnFrameWordSlot(base, off, regOff, width) &&
     (ssa.hasReachingDef(stackSlotKey(off), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)

@@ -533,10 +533,10 @@ export interface TargetDescription {
     // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). An own-frame word no store
     // reaches on any path is a local too (`frontend/thumb.ts`'s own-frame load arm, which reads it as
     // uninitialised): a callee that assigned it as its stack parameter ran before the load, so the
-    // load is after a call, and with no call reaching the load there is no such callee. It is exactly as sound as
-    // the universal, so its residue is every producer the universal does not cover: hand-written
-    // asm that reads its outgoing argument back after a call loses that argument silently. The
-    // premise is this compiler's, not the ISA's.
+    // load is after a call, and with no call reaching the load there is no such callee. It is
+    // exactly as sound as the universal, so its residue is every producer the universal does not
+    // cover: hand-written asm that reads its outgoing argument back after a call loses that argument
+    // silently. The premise is this compiler's, not the ISA's.
     // Absent ⇒ every staged word stays a candidate argument.
     //
     // It promises the AFTER-CALL form and no more: a compiler may still load a staged word BEFORE a

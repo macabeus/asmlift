@@ -1582,20 +1582,20 @@ function chooseFrameModel({
  *  outgoing block alone can own. Nor is a store a runtime index or an escaped address reaches from
  *  an object at or below it: whoever that hands the bytes to may read them.
  *
- *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND. Under `localsAboveOutgoingArea` a compiler keeps one
- *  outgoing area at the frame bottom, below every local, and never reads it back after a call; so
- *  a frame byte loaded after a call before anything re-stores it held a value across that call,
+ *  AND ONLY A STORE BENEATH THE LOADED-WORD BOUND. Under `localsAboveOutgoingArea` a compiler keeps
+ *  one outgoing area at the frame bottom, below every local, and never reads it back after a call;
+ *  so a frame byte loaded after a call before anything re-stores it held a value across that call,
  *  its word is a local's, and so is every word above it. Under the strong form,
- *  `outgoingAreaNeverLoaded` (agbcc), any load at all bounds it, the same bound stackargs'
- *  `loadedWordBound` takes; the after-call form is all MIPS and mwcc state (`target.ts` says why). Every compiled outgoing-argument shape sits beneath any such
- *  bound, and a local the source reads after a call does not: `g(); b[0] = x; b[1] = y;
- *  return b[0];` reaches no call, `b[0] = x; g(); return b[0];` is above the bound. What this still
- *  refuses that is honest is a local the source stores, never reads back, and calls past — a dead
- *  local and an outgoing argument are the same machine code, and the lift cannot tell which.
- *  The after-call liveness weighs this audit's fixed accesses alone, so it sits at or above the
- *  bound the frontend's slot loads would give, which only asks more; the strong form adds those
- *  slot loads (`slotLoads`). Without the premise the bound proves nothing, and every pending store
- *  is asked. */
+ *  `outgoingAreaNeverLoaded` (agbcc), any load at all bounds it, the bound stackargs'
+ *  `loadedWordBound` takes; MIPS and mwcc state only the after-call form (`target.ts` says why).
+ *  Every compiled outgoing-argument shape sits beneath any such bound, and a local the source reads
+ *  after a call does not: `g(); b[0] = x; b[1] = y; return b[0];` reaches no call, `b[0] = x; g();
+ *  return b[0];` is above the bound. What this still refuses that is honest is a local the source
+ *  stores, never reads back, and calls past — a dead local and an outgoing argument are the same
+ *  machine code, and the lift cannot tell which. The after-call liveness weighs this audit's fixed
+ *  accesses alone, so it sits at or above the bound the frontend's slot loads would give, which
+ *  only asks more; the strong form adds those slot loads (`slotLoads`). Without either premise the
+ *  bound proves nothing, and every pending store is asked. */
 function storedNeverRead(
   irBlocks: readonly Block[],
   uses: FrameUses,
