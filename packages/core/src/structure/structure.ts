@@ -23,8 +23,8 @@
 //     parallel block-argument update, sequentialised so an assignment never clobbers a
 //     value a later one still needs.
 //
-// Module layout: loop DISCOVERY is loops.ts; the pure ANALYSIS phase (use registry, liveness,
-// materialization) is analysis.ts; comparison-tree switch recovery is switch-recover.ts
+// Module layout: loop DISCOVERY is ../ir/loops.ts (raise/ reads it too); the pure ANALYSIS phase
+// (use registry, liveness, materialization) is analysis.ts; comparison-tree switch recovery is switch-recover.ts
 // (explicit-deps factory). THIS file keeps the mutually-entangled remainder: SSA-destruction
 // coalescing (canTakeName + seeding) and emission (structureBlock + the loop emitters) — they
 // share varName/backArgName mutation and the activeSub/loopCtx dynamic state.
@@ -59,6 +59,7 @@ import {
   successorsOf,
 } from '../ir/core';
 import { effectful, placedAt, qualified, qualifiedBy, spelledWhenDead } from '../ir/discipline';
+import { type NaturalLoop, analyzeLoops } from '../ir/loops';
 import { CAST_WIDTHS, opSig } from '../ir/opcodes';
 import {
   type IrType,
@@ -143,7 +144,6 @@ import {
   updateWriteSet,
 } from './hazards';
 import { type StaticLayout, localStaticShapes, nameLocalStatics } from './local-statics';
-import { type NaturalLoop, analyzeLoops } from './loops';
 import { type NameMerge, coalesceNames } from './namecoalesce';
 import { type ArithCompilerFacts, declaresBytePointer, makePointerSpelling } from './pointer-spelling';
 import { testRereadsOnly } from './redundant-test';
@@ -1113,16 +1113,27 @@ interface LoopArm {
   owned: Set<Block>;
 }
 
+// A `break` whose arm RUNS CODE first: `if (t[i] == 7) { gHit = 1; break; }`. The arm's blocks never
+// reach the latch, so they sit outside the natural loop as a second exit target; `codeBreakArm`
+// says when they are one exit with code on the way.
+interface BreakArm {
+  from: Block;
+  to: Block;
+  region: Set<Block>;
+}
+
 // A loop with no test of its own, `while (1)`: its latches are conditional continues, and it leaves
-// by a `break` to `exit` or an early `return`.
+// by a `break` to `exit` or an early `return`. `exit` is null for a loop no edge leaves at all — the
+// main loop that never returns — which has no break, no arm, and nothing after it.
 interface ForeverLoopInfo {
   header: Block;
   latches: Block[];
   forwardPreds: Block[];
-  exit: Block;
+  exit: Block | null;
   body: Set<Block>;
   arms: LoopArm[];
-  breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`
+  breaks: Set<Block>; // the body blocks whose edge to `exit` is a `break`, or whose edge enters a `breakArms` arm
+  breakArms: BreakArm[];
 }
 
 // A test-at-top multi-block `while`. The header is a pure test whose cond_br enters `bodyEntry`
@@ -2155,7 +2166,7 @@ function leftOutOf(b: Block, reachFrom: (x: Block) => ReadonlySet<Block>, anchor
  *  the fn as raised and again of the sunk fn; a superset, since it asks `sharedRetsOf` and none of
  *  the follow's three later refusals. An `if`, specifically: see the restriction at the `some`. */
 export function hasDivergentSharedRet(fn: Fn): boolean {
-  const ipdom = postDominators(fn);
+  const ipdom = functionPostDominators(fn);
   const reach = new Map<Block, Set<Block>>();
   const reachFrom = (b: Block): Set<Block> => {
     let out = reach.get(b);
@@ -2195,6 +2206,41 @@ function reachesAvoiding(from: Block, to: Block, avoid: Block): boolean {
     }
   }
   return false;
+}
+/** The arm `from -> to` breaks to `exit` after running code: `to` is entered by that edge alone, and
+ *  the region it heads holds no `ret`, re-enters no `body` block, admits no edge from outside itself,
+ *  and leaves only for `exit`. Returns that region, or null. Each region block is then written once,
+ *  inside the loop, ahead of the `break`. */
+function codeBreakArm(
+  preds: ReadonlyMap<Block, Block[]>,
+  from: Block,
+  to: Block,
+  body: ReadonlySet<Block>,
+  exit: Block,
+): Set<Block> | null {
+  if (to === exit || body.has(to)) {
+    return null;
+  }
+  const region = new Set<Block>();
+  let leaves = false;
+  for (const stack = [to]; stack.length > 0;) {
+    const x = stack.pop()!;
+    if (x === exit) {
+      leaves = true;
+      continue;
+    }
+    if (region.has(x)) {
+      continue;
+    }
+    const t = x.ops[x.ops.length - 1];
+    if (body.has(x) || (t.opcode !== 'br' && t.opcode !== 'cond_br')) {
+      return null; // re-enters the loop, returns, or dispatches
+    }
+    region.add(x);
+    stack.push(...successorsOf(x));
+  }
+  const entered = (x: Block) => (preds.get(x) ?? []).every((p) => region.has(p) || (x === to && p === from));
+  return leaves && [...region].every(entered) ? region : null;
 }
 // An early `return` out of the loop: forward-walking from `to` WITHOUT re-entering the loop `body`,
 // every path terminates in a `ret`. agbcc/gcc merge every `return` into ONE epilogue block and each
@@ -2414,8 +2460,10 @@ export function structure(
   }
   const defs = defOpMap(fn);
   const preds = predecessorBlocks(fn);
-  const ipdom = postDominators(fn);
   const dom = dominators(fn);
+  // --- loop discovery (ir/loops.ts): natural loops via dominator back-edges + the nesting forest ---
+  const forest = analyzeLoops(fn, dom);
+  const ipdom = functionPostDominators(fn, forest);
 
   /** The byte step `raise/const.ts` recorded on the literal that feeds this access's address, or
    *  `undefined` where the address was not reached by advancing a register. Read at the two
@@ -2712,9 +2760,6 @@ export function structure(
       }
     : undefined;
 
-  // --- loop discovery (loops.ts): natural loops via dominator back-edges + the nesting forest ---
-  const forest = analyzeLoops(fn, dom);
-
   // GUARDED self-loop headers (a block that is its own successor, entered through a guard-shaped
   // cond_br) — recovered by the guard-fusion + emitWhile un-rotation path below (the gcc "guard +
   // do-while" → `while` shape; countdown/shifts). UNGUARDED self-loops register as single-block
@@ -2842,7 +2887,25 @@ export function structure(
       exit: Block,
       kind: 'while' | 'dowhile',
       bodyEntry: Block | null = null;
-    if (!nl.selfLoop && hTerm.opcode === 'cond_br' && hInBody.length === 1 && hOut.length === 1 && headerPure) {
+    // The header's way out is not the loop's exit when it enters an arm that runs code and then
+    // joins another exit edge (`codeBreakArm`) whose tail has an effect: that arm is a `break`, and
+    // the loop a `while (1)`. Where the tail only returns, the `while` reading copies it into the
+    // other edge as an early `return`, and keeps that spelling.
+    const runsEffect = (x: Block) => [x, ...reachFrom(x)].some((y) => !nl.body.has(y) && y.ops.some(effectful));
+    const hOutIsBreakArm =
+      hOut.length === 1 &&
+      nl.exitEdges.some(
+        (e) =>
+          e.to !== hOut[0].block && runsEffect(e.to) && codeBreakArm(preds, h, hOut[0].block, nl.body, e.to) !== null,
+      );
+    if (
+      !nl.selfLoop &&
+      hTerm.opcode === 'cond_br' &&
+      hInBody.length === 1 &&
+      hOut.length === 1 &&
+      headerPure &&
+      !hOutIsBreakArm
+    ) {
       kind = 'while';
       exitFrom = h;
       exit = hOut[0].block;
@@ -2919,12 +2982,28 @@ export function structure(
   // that `return` for the break and the code after the loop for an early return.
   const foreverLoops = new Map<Block, ForeverLoopInfo>();
   const foreverShape = (nl: NaturalLoop): ForeverLoopInfo | null => {
+    // NO EDGE LEAVES: the loop never ends, and C spells that `while (1)` with no `break` and nothing
+    // after it. A block laid out past the loop is reached from elsewhere or not at all, and the
+    // region holding the loop ends at the loop either way (`emitForever`).
+    if (nl.exitEdges.length === 0) {
+      return {
+        header: nl.header,
+        latches: nl.latches,
+        forwardPreds: nl.forwardPreds,
+        exit: null,
+        body: nl.body,
+        arms: [],
+        breaks: new Set(),
+        breakArms: [],
+      };
+    }
     const last = Math.max(...[...nl.body].map((b) => fn.blocks.indexOf(b)));
     const rank = (x: Block) => fn.blocks.indexOf(x) + (fn.blocks.indexOf(x) > last ? 0 : fn.blocks.length);
     const targets = [...new Set(nl.exitEdges.map((e) => e.to))].sort((x, y) => rank(x) - rank(y));
     for (const exit of targets) {
       const arms: LoopArm[] = [];
       const breaks = new Set<Block>();
+      const breakArms: BreakArm[] = [];
       const fits = nl.exitEdges.every((e) => {
         if (e.to === exit) {
           breaks.add(e.from);
@@ -2933,6 +3012,12 @@ export function structure(
         const owned = earlyReturnArm({ dom, reachFrom }, e.from, e.to, nl.body, exit);
         if (owned) {
           arms.push({ from: e.from, to: e.to, owned });
+        }
+        const region = owned === null ? codeBreakArm(preds, e.from, e.to, nl.body, exit) : null;
+        if (region !== null) {
+          breaks.add(e.from);
+          breakArms.push({ from: e.from, to: e.to, region });
+          return !innerBodyHas(nl, e.from);
         }
         // a `ret` target the edge does not own is copied into the body where the edge leaves, so it
         // must hold nothing a second copy would run twice in the source
@@ -2947,6 +3032,7 @@ export function structure(
           body: nl.body,
           arms,
           breaks,
+          breakArms,
         };
       }
     }
@@ -3831,7 +3917,7 @@ export function structure(
     // entry consts anchored at their own def sites would still order correctly, and this refuses
     // the shape rather than reasoning about it. The other half of "entered only through its
     // header" needs no test — `analyzeLoops` builds the body as the backward closure from the
-    // latches with the header already in it (loops.ts), so a body block's predecessors are all in
+    // latches with the header already in it (ir/loops.ts), so a body block's predecessors are all in
     // the body by construction.
     const singleEntry = (nl: NaturalLoop): boolean => nl.forwardPreds.length === 1;
     for (const M of fn.blocks) {
@@ -5167,7 +5253,14 @@ export function structure(
   // to `header` is a conditional continue; its other edge, when it leaves the loop, is an early exit
   // (a `break` to `exit`, or an early `return` through a trampoline). Null outside any loop body —
   // the early-exit branch in structureBlock is inert there.
-  type LoopFrame = { header: Block; exit: Block; body: Set<Block>; arms: LoopArm[]; breaks: ReadonlySet<Block> };
+  type LoopFrame = {
+    header: Block;
+    exit: Block | null;
+    body: Set<Block>;
+    arms: LoopArm[];
+    breaks: ReadonlySet<Block>;
+    breakArms?: readonly BreakArm[];
+  };
   let loopCtx: LoopFrame | null = null;
   const withLoop = <R>(frame: LoopFrame, run: () => R): R => {
     const prev = loopCtx;
@@ -5208,12 +5301,16 @@ export function structure(
   // that render: an exit parameter that takes its argument's own name renders no copy, yet the exit
   // still reads that name, and a latch update that wrote it hands the exit the updated value.
   const breakRule = (frame: LoopFrame, from: Block, writes: Set<string>): { refusal: string } | { bare: boolean } => {
+    const exit = frame.exit;
+    if (exit === null) {
+      return { refusal: 'leaves a loop that has no exit' }; // DEFENSIVE: no edge leaves such a loop
+    }
     // A `while (1)` has no copies of its own after the loop, so a break carries its own, computed
     // where it leaves; what is left is the exit region's re-derivations. An inner loop's value the
     // region reads under its name (`emitForever`) is no re-derivation.
     const fl = foreverLoops.get(frame.header);
     if (fl !== undefined) {
-      const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
+      const exitRegion = new Set([exit, ...reachFrom(exit)].filter((x) => !frame.body.has(x)));
       const { sub } = latchInnerSub(fl.header, fl.body, [...fl.breaks], exitRegion);
       return loopEscapeHazard(frame.body, sub, writes, exitRegion)
         ? { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' }
@@ -5222,11 +5319,11 @@ export function structure(
     if (!whileLoops.has(frame.header)) {
       return { refusal: 'leaves a do-while' };
     }
-    const headerCopies = argAssigns(frame.header, frame.exit);
+    const headerCopies = argAssigns(frame.header, exit);
     let bare = false;
     if (headerCopies.length !== 0) {
-      const headerArgs = successorTo(frame.header, frame.exit)!.args;
-      const breakArgs = successorTo(from, frame.exit)!.args;
+      const headerArgs = successorTo(frame.header, exit)!.args;
+      const breakArgs = successorTo(from, exit)!.args;
       const reads = new Set<string>();
       for (const s of headerCopies) {
         stmtExprs(s).forEach((e) => exprVars(e, reads));
@@ -5239,7 +5336,7 @@ export function structure(
         return { refusal: 'would run the copies the loop header hands its exit' };
       }
     }
-    const exitRegion = new Set([frame.exit, ...reachFrom(frame.exit)].filter((x) => !frame.body.has(x)));
+    const exitRegion = new Set([exit, ...reachFrom(exit)].filter((x) => !frame.body.has(x)));
     if (loopEscapeHazard(frame.body, new Map(), writes, exitRegion)) {
       return { refusal: 'reaches an exit region that reads a loop value under a name this iteration already rewrote' };
     }
@@ -5749,12 +5846,14 @@ export function structure(
         // re-test, so an unproven fuse would lose the `if` outright and run a loop the source
         // skipped. Structural equality is a sufficient proof, never a necessary one: `str[0]` and
         // `str[i]` at `i = 0`, or a signed `e <= 0` beside an unsigned `e != 0`, are the same test
-        // spelled differently, and normalising those needs a canonical form this pass does not
-        // have. An unproven guard therefore KEEPS its `if`, with the loop as a `do-while` inside it
-        // — every test the asm performs is emitted as itself. The proof still gates the SINK below:
-        // a sunk copy runs once per iteration, and only the proof (fused form) or the kept `if`
-        // makes the zero-trip path skip it. The kept `if` would widen the sink's key to unproven
-        // guards too; no row needs that yet, so it stays keyed on the proof.
+        // spelled differently. The first is one of the identities `sameAtEntry` (ir/entry.ts) reads
+        // under `normalize`, which the raise re-roll turns on; this caller keeps it off, since it
+        // re-spells rows (agbcc `while (s[i]) i++` fuses into a `for`). The second has no reading.
+        // An unproven guard KEEPS its `if`, with the loop as a `do-while` inside it — every test
+        // the asm performs is emitted as itself. The proof still gates the SINK below: a sunk copy
+        // runs once per iteration, and only the proof (fused form) or the kept `if` makes the
+        // zero-trip path skip it. The kept `if` would widen the sink's key to unproven guards too;
+        // no row needs that yet, so it stays keyed on the proof.
         const enterIsTaken = takenB === h;
         const contIsTaken = hterm.successors[0].block === li.header;
         const guardProven = sameAtEntry(hterm.operands[0], term.operands[0], entryVals, enterIsTaken !== contIsTaken);
@@ -6047,7 +6146,7 @@ export function structure(
         } // continue is `taken` → leave when NOT it
         const exitArm =
           rule && 'bare' in rule
-            ? [...(rule.bare ? [] : argAssigns(b, loopCtx.exit, sub)), { k: 'break' } as Stmt] // break to the loop exit
+            ? [...(rule.bare ? [] : argAssigns(b, exitB, sub)), { k: 'break' } as Stmt] // break to the loop exit
             : withSub(sub, () => [...argAssigns(b, exitB, sub), ...structureRegion(exitB, stop)]); // early return
         out.push(mkIf(leaveCond, exitArm, []));
         return out;
@@ -6076,7 +6175,10 @@ export function structure(
     // and both switch regimes refuse an arm that reaches such a block (`analyzeArmExit`).
     if (loopCtx && loopCtx.breaks.has(b)) {
       const frame = loopCtx;
-      const breakIsTaken = takenB === frame.exit;
+      // An arm that runs code before it breaks (`codeBreakArm`) is rendered inside the `if`, ahead of
+      // the `break`, and its last block's copies into the exit are the break's.
+      const arm = frame.breakArms?.find((a) => a.from === b && (a.to === takenB || a.to === fallB));
+      const breakIsTaken = takenB === (arm?.to ?? frame.exit);
       const stayB = breakIsTaken ? fallB : takenB;
       const continueRefused = stayB === frame.header && !continueFallsToBottom(frame, stop);
       const rule = continueRefused
@@ -6090,11 +6192,21 @@ export function structure(
           leaveCond = negateCond(leaveCond);
         }
         const [breakEdge, stayEdge] = breakIsTaken ? term.successors : [term.successors[1], term.successors[0]];
-        out.push(mkIf(leaveCond, [...(rule.bare ? [] : argAssignsFor(b, breakEdge)), { k: 'break' }], []));
+        out.push(
+          mkIf(
+            leaveCond,
+            [
+              ...(rule.bare ? [] : argAssignsFor(b, breakEdge)),
+              ...(arm !== undefined ? structureRegion(arm.to, frame.exit) : []),
+              { k: 'break' },
+            ],
+            [],
+          ),
+        );
         out.push(...argAssignsFor(b, stayEdge), ...structureRegion(stayB, stop));
         return out;
       }
-      if (continueRefused || (!isArm(frame.exit) && !isRet(frame.exit))) {
+      if (continueRefused || frame.exit === null || (!isArm(frame.exit) && !isRet(frame.exit))) {
         throw new StructureError(
           `cannot structure '${fn.name}': a break out of block #${fn.blocks.indexOf(b)} ${rule.refusal}`,
         );
@@ -6127,10 +6239,9 @@ export function structure(
     // `stop` stands in for the real join, so it has to BE the real join: one side must already end
     // this region — an admitted arm (its `return` terminates that path) or `stop` itself. Two sides
     // meeting somewhere further down instead would each re-emit everything from there to the bottom,
-    // doubling per nesting level; those keep the CFG join and the old loud decline. Lifting that
-    // needs a post-dominator computed over the body alone with the arms DELETED — treating them as
-    // exits does not work, since post-dominance cannot express "where the paths that did not
-    // return meet".
+    // doubling per nesting level; those take the post-dominator computed over the body alone with
+    // the back edges and the arms DELETED (`loopJoin`, below) — treating the arms as exits does
+    // not work, since post-dominance cannot express "where the paths that did not return meet".
     const clampToLoop =
       loopCtx !== null &&
       ipd !== null &&
@@ -6138,11 +6249,39 @@ export function structure(
       term.successors.some((sc) => isArm(sc.block) || sc.block === stop) &&
       term.successors.every((sc) => loopCtx!.body.has(sc.block) || isArm(sc.block));
     // In a `while (1)` body the join is the body's own, which the CFG's post-dominance cannot see
-    // (`foreverJoin`): a branch whose one arm continues is post-dominated, in the CFG, by wherever
+    // (`loopJoin`): a branch whose one arm continues is post-dominated, in the CFG, by wherever
     // the other arm leaves the loop from.
     const inForever = loopCtx === null ? undefined : foreverLoops.get(loopCtx.header);
-    const bodyJoin = inForever === undefined ? undefined : foreverJoin(inForever, b);
-    const merge = bodyJoin !== undefined ? (bodyJoin ?? stop) : clampToLoop ? stop : (ipd ?? stop);
+    // A break arm's own blocks join as any code outside the loop does: they are not the body's.
+    const inArm = loopCtx?.breakArms?.some((a) => a.region.has(b)) === true;
+    const bodyJoin = inForever === undefined || inArm ? undefined : loopJoin(inForever, b, true);
+    // THE SAME QUESTION IN A TESTED LOOP. A branch whose one way leads out of the body by a `break` —
+    // the `else break;` of an if/else-if chain — has the loop's exit as its CFG join, and its in-body
+    // arm walked from there through the latch back into the header (`onStack`). Its join is where its
+    // paths that stay in the body meet: the post-dominator over the body with the back edges and the
+    // exits deleted (`loopJoin`). Asked only where the CFG join leaves the body, no clamp applies,
+    // one successor stays in the body, and every way out of the body from here is one the loop
+    // renders in place (`leavesByOwnedEdges`).
+    const tested =
+      loopCtx !== null &&
+      inForever === undefined &&
+      !inArm &&
+      ipd !== null &&
+      !loopCtx.body.has(ipd) &&
+      !clampToLoop &&
+      loopCtx.body.has(b) &&
+      term.successors.some((sc) => loopCtx!.body.has(sc.block) && sc.block !== loopCtx!.header) &&
+      leavesByOwnedEdges(loopCtx, b)
+        ? loopJoin(loopCtx, b, false)
+        : undefined;
+    const merge =
+      bodyJoin !== undefined
+        ? (bodyJoin ?? stop)
+        : tested !== undefined
+          ? (tested ?? stop)
+          : clampToLoop
+            ? stop
+            : (ipd ?? stop);
     // Per-successor records, NOT successorTo(b, block): a cond_br whose two edges reach the SAME
     // block with different args would otherwise give both arms the first edge's copies.
     const thenS = [...argAssignsFor(b, term.successors[0]), ...structureRegion(takenB, merge)];
@@ -6406,29 +6545,83 @@ export function structure(
     return out;
   };
 
-  // THE JOIN OF A BRANCH IN A `while (1)` BODY, over the body with its back edges and exits deleted.
-  // A block that only jumps back to the header or out of the loop, rendering nothing but that edge's
-  // copies, ENDS its path — a `continue`, a `break` — so it constrains no join; the join of `b` is
-  // where the paths that go on meet: its nearest post-dominator over the rest. Null when none goes
-  // on, and the region's own `stop` ends it. Without the deletion, a branch whose one arm continues
-  // joins at the loop bottom, and whatever the other arm runs before its own continue is copied into
-  // both arms. A block that ends every path but TESTS first is still where its predecessors meet,
-  // and so is a latch two body paths reach: the foot of `for (…) { if (c) {…} }`, where deleting it
-  // moves the `if`'s join into one arm, which then copies the latch and adds a `continue` the
-  // source never wrote. A break block two paths share stays an end, each path its own `break`.
-  const foreverJoins = new Map<Block, Map<Block, Block | null>>();
-  const foreverJoin = (fl: ForeverLoopInfo, b: Block): Block | null => {
-    let ipdom = foreverJoins.get(fl.header);
+  // MAY A BRANCH IN A TESTED LOOP JOIN INSIDE THE BODY? Only where every way out of the body from `b`
+  // is one the loop's own spelling renders in place: a `break` (an edge of `breaks`, or the edge the
+  // loop tests at its header or latch) or an early-`return` arm the loop owns. Any other edge out
+  // leaves for code that is copied wherever it is reached, and a join inside the body would write
+  // that tail into the arm as well.
+  const leavesByOwnedEdges = (frame: LoopFrame, b: Block): boolean => {
+    const exitFrom = whileLoops.get(frame.header)?.header ?? doWhileLoops.get(frame.header)?.latch;
+    const seen = new Set<Block>();
+    for (const stack = [b]; stack.length > 0;) {
+      const x = stack.pop()!;
+      if (x === frame.header || seen.has(x)) {
+        continue;
+      }
+      seen.add(x);
+      for (const sx of successorsOf(x)) {
+        if (frame.body.has(sx)) {
+          stack.push(sx);
+        } else if (
+          !frame.arms.some((a) => a.from === x && a.to === sx) &&
+          !(sx === frame.exit && (frame.breaks.has(x) || x === exitFrom))
+        ) {
+          return false;
+        }
+      }
+    }
+    return true;
+  };
+  // THE JOIN OF A BRANCH IN A LOOP BODY, over the body with its back edges and exits deleted: where
+  // the paths from `b` that stay in the body meet, its nearest post-dominator over the rest. Null
+  // when none goes on, and the region's own `stop` ends it. Without the deletion, a branch whose one
+  // arm continues joins at the loop bottom, and whatever the other arm runs before its own continue
+  // is copied into both arms; in a tested loop, the `else break;` of an if/else-if chain joins at
+  // the loop's exit.
+  //
+  // `endsCut` is the `while (1)` rule, and only `emitForever`'s frames take it: a block that only
+  // jumps back to the header or out of the loop, rendering nothing but that edge's copies, ENDS its
+  // path — a `continue`, a `break` — so it constrains no join either. A block that ends every path
+  // but TESTS first is still where its predecessors meet, and so is a latch two body paths reach: the
+  // foot of `for (…) { if (c) {…} }`, where deleting it moves the `if`'s join into one arm, which then
+  // copies the latch and adds a `continue` the source never wrote. A break block two paths share
+  // stays an end, each path its own `break`. A tested loop's latch is where its test renders, so
+  // there it constrains the join like any block.
+  /** per header, one cache for each value of `endsCut` */
+  const loopJoins = [new Map<Block, Map<Block, Block | null>>(), new Map<Block, Map<Block, Block | null>>()];
+  const loopJoin = (loop: { header: Block; body: Set<Block> }, b: Block, endsCut: boolean): Block | null => {
+    const cache = loopJoins[endsCut ? 1 : 0];
+    let ipdom = cache.get(loop.header);
     if (ipdom === undefined) {
       const inBody = (n: Block): Block[] =>
-        [...new Set(successorsOf(n))].filter((x) => fl.body.has(x) && x !== fl.header);
+        [...new Set(successorsOf(n))].filter((x) => loop.body.has(x) && x !== loop.header);
       const ends = (n: Block): boolean =>
+        endsCut &&
         inBody(n).length === 0 &&
         n.ops[n.ops.length - 1].opcode === 'br' &&
         n.ops.every((op) => !effectful(op) && !materialize.has(op)) &&
-        !(successorsOf(n)[0] === fl.header && new Set(preds.get(n)?.filter((q) => fl.body.has(q))).size > 1);
-      ipdom = postDominators(fn, fl.body, (n) => inBody(n).filter((x) => !ends(x)));
-      foreverJoins.set(fl.header, ipdom);
+        !(successorsOf(n)[0] === loop.header && new Set(preds.get(n)?.filter((q) => loop.body.has(q))).size > 1);
+      const onward = (n: Block): Block[] => inBody(n).filter((x) => !ends(x));
+      // A CYCLE NO PATH LEAVES. An inner loop at the foot of the body — the vblank wait closing a
+      // `while (1)` main loop, `while (q() == 3);` — keeps only its own back edge once the edges
+      // to the header and to the ends are deleted, so its paths never end and post-dominance
+      // over it is undefined: no branch above it would find a join, and each would re-emit the rest
+      // of the body, doubling per `if`. Such a block ends its path at the edge it leaves the cycle
+      // by. A block that reaches an end keeps its edges as they are, so no defined join moves.
+      const reachesEnd = new Set<Block>();
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const n of loop.body) {
+          if (!reachesEnd.has(n) && (onward(n).length === 0 || onward(n).some((x) => reachesEnd.has(x)))) {
+            reachesEnd.add(n);
+            grew = true;
+          }
+        }
+      }
+      ipdom = postDominators(fn, loop.body, (n) =>
+        reachesEnd.has(n) || successorsOf(n).every((x) => onward(n).includes(x)) ? onward(n) : [...onward(n), null],
+      );
+      cache.set(loop.header, ipdom);
     }
     return ipdom.get(b) ?? null;
   };
@@ -6483,15 +6676,22 @@ export function structure(
   // neither reading is the value, decline LOUD, as the do-while latch does.
   const emitForever = (fl: ForeverLoopInfo, stop: Block | null): Stmt[] => {
     dwActive.add(fl.header);
-    const body = withLoop({ header: fl.header, exit: fl.exit, body: fl.body, arms: fl.arms, breaks: fl.breaks }, () =>
-      structureBlock(fl.header, fl.header),
-    );
+    const frame = {
+      header: fl.header,
+      exit: fl.exit,
+      body: fl.body,
+      arms: fl.arms,
+      breaks: fl.breaks,
+      breakArms: fl.breakArms,
+    };
+    const body = withLoop(frame, () => structureBlock(fl.header, fl.header));
     dwActive.delete(fl.header);
     const loop: Stmt = { k: 'while', cond: { k: 'const', value: 1 }, body };
-    if (!breaksOut(body)) {
+    const exit = fl.exit;
+    if (exit === null || !breaksOut(body)) {
       return [loop];
     }
-    const region = exitRegion(fl.exit, fl.body, stop);
+    const region = exitRegion(exit, fl.body, stop);
     const { sub: innerSub, unreadable } = latchInnerSub(fl.header, fl.body, [...fl.breaks], region);
     if (unreadable.size > 0 && rootsOf(region).some((r) => rendersThrough(r, innerSub, unreadable))) {
       throw new StructureError(
@@ -6501,7 +6701,7 @@ export function structure(
     }
     return [
       loop,
-      ...(innerSub.size > 0 ? withSub(innerSub, () => structureRegion(fl.exit, stop)) : structureRegion(fl.exit, stop)),
+      ...(innerSub.size > 0 ? withSub(innerSub, () => structureRegion(exit, stop)) : structureRegion(exit, stop)),
     ];
   };
 
@@ -7444,11 +7644,31 @@ function* inEdgeRecords(preds: Map<Block, Block[]>, b: Block): Generator<{ pred:
   }
 }
 
-// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it. Over the
-// subgraph `keep` induces when given, every member of which must still reach a `ret` inside it — or,
-// with `onward`, over only the edges it names between members of `keep`: a block it names no edge
+/** THE function-level immediate post-dominators, the one definition `structure()` and its
+ *  enumeration gate `hasDivergentSharedRet` both read, so the gate's join for an `if` is the join
+ *  the follow sees. A loop no edge leaves reaches no `ret`, so plain post-dominance would hand
+ *  every block before it every block as a post-dominator, and an `if` ahead of it an arbitrary
+ *  join. Its header ENDS paths as a `ret` does: the region holding the loop ends there
+ *  (`emitForever`). `forest` is the caller's, when it already has one. */
+export function functionPostDominators(
+  fn: Fn,
+  forest: { byHeader: ReadonlyMap<Block, NaturalLoop> } = analyzeLoops(fn, dominators(fn)),
+): Map<Block, Block | null> {
+  const exitless = [...forest.byHeader.values()].filter((nl) => nl.exitEdges.length === 0).map((nl) => nl.header);
+  return postDominators(fn, undefined, undefined, new Set(exitless));
+}
+
+// Immediate post-dominators. EXIT is represented as `null`; ret-blocks post-lead to it, and so do
+// the blocks of `ends` besides their own successors. Over the subgraph `keep` induces when given,
+// every member of which must still reach a `ret` inside it — or, with `onward`, over only the edges
+// it names between members of `keep` (and to EXIT, where it names `null`): a block it names no edge
 // from ends its paths, post-dominated by nothing but itself.
-function postDominators(fn: Fn, keep?: ReadonlySet<Block>, onward?: (b: Block) => Block[]): Map<Block, Block | null> {
+function postDominators(
+  fn: Fn,
+  keep?: ReadonlySet<Block>,
+  onward?: (b: Block) => (Block | null)[],
+  ends?: ReadonlySet<Block>,
+): Map<Block, Block | null> {
   const blocks = keep ? fn.blocks.filter((b) => keep.has(b)) : fn.blocks;
   const nodes: (Block | null)[] = [null, ...blocks];
   const succ = (b: Block): (Block | null)[] => {
@@ -7456,7 +7676,11 @@ function postDominators(fn: Fn, keep?: ReadonlySet<Block>, onward?: (b: Block) =
       return onward(b);
     }
     const term = b.ops[b.ops.length - 1];
-    return term.opcode === 'ret' ? [null] : successorsOf(b).filter((s) => keep === undefined || keep.has(s));
+    if (term.opcode === 'ret') {
+      return [null];
+    }
+    const onwards = successorsOf(b).filter((s) => keep === undefined || keep.has(s));
+    return ends?.has(b) === true ? [...onwards, null] : onwards;
   };
   const pdom = new Map<Block | null, Set<Block | null>>();
   pdom.set(null, new Set([null]));

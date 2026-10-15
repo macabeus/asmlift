@@ -72,18 +72,23 @@ test('a body `if` whose arm returns joins at the loop, not at the merged epilogu
   );
 });
 
-// REFUSAL — the epilogue carries a store, so it is not an early-`return` arm: the loop reaches it
-// from inside AND the post-loop path reaches it too, and both would emit it. Admission still takes
-// the loop (the target is ret-terminated), so this is the case the clamp's own guard must catch.
+// The epilogue carries a store, so it is not an early-`return` arm: the loop reaches it from inside
+// AND the post-loop path reaches it too, and copying it into the arm would emit it twice. The header's
+// own way out (^bb4) is then an arm that runs code and joins it (`codeBreakArm`), so the loop is a
+// `while (1)` whose two edges out both `break`, and the epilogue renders once, after it.
 const SHARED_EPILOGUE_STORE = STRCMP_EARLY_RETURN.replace(
   '^bb5(%15: s32):\n  ret %15',
   '^bb5(%15: s32):\n  store %0, %15 {off=0, width=4}\n  ret %15',
 );
 
-test('an epilogue that stores is not an arm — the join stands and the loop declines', () => {
+test('an epilogue that stores is not an arm — both ways out break to it, and it is written once', () => {
   expect(SHARED_EPILOGUE_STORE).not.toBe(STRCMP_EARLY_RETURN);
-  expect(() => emit(STRCMP_EARLY_RETURN)).not.toThrow();
-  expect(() => emit(SHARED_EPILOGUE_STORE)).toThrow(StructureError);
+  expect(emit(SHARED_EPILOGUE_STORE)).toBe(
+    's32 strcmpearly(u8 *a0, u8 *a1) {\n    u8 *v0;\n    u8 *v1;\n    s32 v2;\n    v0 = a0;\n    v1 = a1;\n' +
+      '    while (1) {\n        if (*v0 != *v1) {\n            v2 = *v0 - *v1;\n            break;\n        }\n' +
+      '        if (*v0 == 0) {\n            v2 = 0;\n            break;\n        }\n        v0 = v0 + 1;\n' +
+      '        v1 = v1 + 1;\n    }\n    *(s32 *)a0 = v2;\n    return v2;\n}\n',
+  );
 });
 
 // A do-while scan whose arm reads a value the loop COMPUTED (`table[i]`) — the arm renders inside
@@ -152,17 +157,20 @@ test('an arm the edge exclusively reaches may carry a store', () => {
   );
 });
 
-// REFUSAL — the same store in the epilogue instead. Both the arm and the post-loop path reach it,
-// so structuring it on the arm's edge writes the effect twice into source no compiler wrote.
+// The same store in the epilogue instead. Both the arm and the post-loop path reach it, so
+// structuring it on the arm's edge would write the effect twice into source no compiler wrote. The
+// arm instead runs its code and breaks (`codeBreakArm`), and the epilogue renders once.
 const SHARED_EPILOGUE_EFFECT = SCAN_RETURN_HIT.replace(
   '^bb5(%19: s32):\n  ret %19',
   '^bb5(%19: s32):\n  store %0, %19 {off=0, width=4}\n  ret %19',
 );
 
-test('a store in the shared epilogue is not an arm the loop may own — declines', () => {
+test('a store in the shared epilogue is not an arm the loop may own — the arm breaks to it', () => {
   expect(SHARED_EPILOGUE_EFFECT).not.toBe(SCAN_RETURN_HIT);
-  expect(() => emit(SCAN_STORE_HIT)).not.toThrow();
-  expect(() => emit(SHARED_EPILOGUE_EFFECT)).toThrow(StructureError);
+  const src = emit(SHARED_EPILOGUE_EFFECT);
+  expect(src).toContain('    while (1) {\n');
+  expect(src.match(/\*a0 = /g)).toHaveLength(1);
+  expect(src).toContain('    }\n    *a0 = v1;\n    return v1;\n}\n');
 });
 
 // The OTHER arm site: a conditional latch, where one edge of the cond_br IS the back-edge. That
@@ -216,10 +224,11 @@ test('a conditional-latch arm stores the value the IR read, not the updated one'
   );
 });
 
-// REFUSAL — two in-body sides that meet somewhere OTHER than the loop bottom. `stop` is not their
-// join, and using it anyway makes each side re-emit everything from the meeting point down: with the
+// Two in-body sides that meet somewhere OTHER than the loop bottom. `stop` is not their join, and
+// using it anyway makes each side re-emit everything from the meeting point down: with the clamp's
 // guard dropped this emits `*a0 = 200` twice, correct but doubled, and doubled again per nesting
-// level. ^bb6 is where they meet; ^bb5 is the arm that pushes the CFG join out of the loop.
+// level. ^bb6 is where they meet; ^bb5 is the arm that pushes the CFG join out of the loop. The join
+// over the body with that arm deleted (`loopJoin`) is ^bb6, written once.
 const INNER_JOIN = `fn innerjoin {
 ^bb0(%0: s32*):
   %1: s32 = const {value=0}
@@ -256,9 +265,14 @@ const INNER_JOIN = `fn innerjoin {
 }
 `;
 
-test('two in-body sides meeting below the loop bottom keep the CFG join — and decline', () => {
+test('two in-body sides meeting below the loop bottom join where they meet, written once', () => {
   expect(() => emit(SCAN_RETURN_HIT)).not.toThrow();
-  expect(() => emit(INNER_JOIN)).toThrow(StructureError);
+  const src = emit(INNER_JOIN);
+  expect(src.match(/\*a0 = 200;/g)).toHaveLength(1);
+  expect(src).toContain(
+    '        if (gF == 0) {\n            if (gG != 0) {\n                v1 = 7;\n                return v1;\n' +
+      '            }\n        } else {\n            *a0 = 100;\n        }\n        *a0 = 200;\n',
+  );
 });
 
 // REFUSAL — the arm lands straight on the POST-LOOP join. `^bb5` dominates itself and `^bb2`

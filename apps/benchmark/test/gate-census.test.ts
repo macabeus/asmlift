@@ -15,6 +15,7 @@ import { tallying } from '@asmlift/core/l3/gates';
 import { decompile } from '@asmlift/core/pipeline';
 import { emptyScaleRecord } from '@asmlift/core/raise/extscale';
 import { PRE_RECOVERY_PASSES } from '@asmlift/core/raise/pre-recovery';
+import { PRE_STRUCTURE_FOLDS } from '@asmlift/core/raise/pre-structure';
 import { PRE_RESPELL_VARIATIONS } from '@asmlift/core/rank-variations';
 import { ARMV4T_AGBCC, PPC_MWCC, type TargetDescription } from '@asmlift/core/target';
 import { describe, expect, it } from 'vitest';
@@ -51,6 +52,9 @@ describe('the gate census seam', () => {
       'truncload',
       'paramwidth',
       'offsetnames',
+      'latchfold',
+      'trampoline',
+      'reroll',
       'frame-objects',
     ]);
   });
@@ -109,6 +113,33 @@ describe('the gate census seam', () => {
     expect(entry().run).toBe(before);
     run(ARMV4T_AGBCC);
     expect(wrapped[0].refusals()).toEqual([['read-behind-effect', 1]]);
+  });
+
+  it('routes the peeled-test re-roll through the WRAPPED table, and the undo restores the entry', () => {
+    // A loop whose entry tests t[0] and whose latch tests t[i] — and also bumps a counter, which the
+    // entry ran too: `latch-runs-more`.
+    const site = () =>
+      parse(
+        'fn f {\n^bb0(%0: u8*, %1: s32, %2: s32*):\n  %3: s32 = const {value=0}\n' +
+          '  %4: s32 = load %0 {off=0, signed=false, width=1}\n  %5: s32 = const {value=7}\n' +
+          '  store %2, %3 {off=0, width=4}\n  %6: u32 = icmp_eq %4, %5\n  cond_br %6, ^bb3(), ^bb1(%3)\n' +
+          '^bb1(%7: s32):\n  %8: s32 = const {value=1}\n  %9: s32 = add %7, %8\n  %10: u32 = icmp_slt %9, %1\n' +
+          '  cond_br %10, ^bb2(), ^bb3()\n^bb2():\n  store %2, %9 {off=0, width=4}\n  %11: u8* = add %9, %0\n' +
+          '  %12: s32 = load %11 {off=0, signed=false, width=1}\n  %13: u32 = icmp_eq %12, %5\n' +
+          '  cond_br %13, ^bb3(), ^bb1(%9)\n^bb3():\n  ret\n}\n',
+      );
+    const entry = () => PRE_STRUCTURE_FOLDS.find((f) => f.id === 'reroll')!;
+    const pass = PASSES.reroll;
+    const wrapped = pass.tables.map(([, t]) => tallying(t));
+    const before = entry().run;
+    const uninstall = pass.install(wrapped.map((w) => w.gates));
+    expect(entry().run).not.toBe(before);
+    expect(entry().run(site())).toBe(0);
+    expect(wrapped[0].refusals()).toEqual([['latch-runs-more', 1]]);
+    uninstall();
+    expect(entry().run).toBe(before);
+    entry().run(site());
+    expect(wrapped[0].refusals()).toEqual([['latch-runs-more', 1]]);
   });
 
   it('routes the parameter-width pass through the WRAPPED table, and the undo restores the entry', () => {

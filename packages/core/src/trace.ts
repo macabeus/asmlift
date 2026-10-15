@@ -306,10 +306,10 @@ function traceTower(
           irDump: irDump(fn),
           verified: true,
         }),
-      afterLatchFold: () =>
+      afterFold: (fold) =>
         trace.push({
-          id: 'stage:latchfold',
-          title: 'Empty-latch folding (splice out an SSA-emptied back-edge block)',
+          id: `stage:${fold.id}`,
+          title: fold.title,
           irDump: irDump(fn),
           verified: true,
         }),

@@ -1114,12 +1114,15 @@ defect — and a fourth entry says what tabling has to INCLUDE either way:
 
   **What makes a pass censusable is a fact about its CALLER.** Many passes in `packages/core/src`
   take their table as a parameter (`git grep -lE "gates\??: readonly Gate<" packages/core/src`);
-  SIX of them can be censused, because three files hold their callers in mutable records —
-  `/unmerge` in `rank-variations.ts`'s `PRE_RESPELL_VARIATIONS`; the branch short-circuit fold,
-  `member-arrays`, `narrowlocal` and `paramwidth` in `raise/pre-recovery.ts`'s
-  `PRE_RECOVERY_PASSES`; and `nameOffsetAddresses` in its own `OFFSET_NAME_PASS`, a record with no
-  list around it because its seat in the tower is fixed rather than a position — and three are
-  registered (`--pass unmerge`, `--pass arm-reread`, `--pass offsetnames`). A pass
+  ELEVEN have a caller held in a mutable record — `/unmerge` in `rank-variations.ts`'s
+  `PRE_RESPELL_VARIATIONS`; the branch short-circuit fold, `truncload`, `member-arrays`,
+  `narrowlocal` and `paramwidth` in `raise/pre-recovery.ts`'s `PRE_RECOVERY_PASSES`; the three loop
+  folds `latchfold`, `trampoline` and `reroll` in `raise/pre-structure.ts`'s
+  `PRE_STRUCTURE_FOLDS`; and `nameOffsetAddresses` and the frame-object audit in their own
+  `OFFSET_NAME_PASS` and `FRAME_OBJECT_AUDIT`, records with no list around them because each seat
+  in the tower is fixed rather than a position. Which of them are registered is the registry's to
+  say, not this paragraph's (`CENSUSABLE_PASSES` in `apps/benchmark/src/run/gate-census.ts`;
+  `pnpm bench gates --pass <id>`); its header carries the same list. A pass
   reached only through a static import has no seam — the binding is read-only
   (`retsink.sinkReturns = …` → _"Cannot assign to read only property"_) — and `raise/retsink.ts` is
   one: the seam is the record, not the directory. So for any other pass the cost of an entry in that

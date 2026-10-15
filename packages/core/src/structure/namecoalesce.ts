@@ -133,7 +133,7 @@ export interface NameCoalesceDeps {
   varName: ReadonlyMap<Value, string>;
   /** name → the type it is declared with */
   varType: ReadonlyMap<string, IrType>;
-  /** every natural loop, as its header and the blocks its body contains (structure/loops.ts) */
+  /** every natural loop, as its header and the blocks its body contains (ir/loops.ts) */
   loops: readonly { header: Block; body: ReadonlySet<Block> }[];
 }
 

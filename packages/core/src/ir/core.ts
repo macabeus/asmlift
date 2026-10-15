@@ -444,7 +444,7 @@ export function predecessors(fn: Fn): Map<Block, Block[]> {
 /** Forward dominators (iterative data-flow). dom(b) = {b} ∪ ⋂ dom(preds).
  *
  *  A CFG fact, so it lives beside `predecessors` it is built on rather than with either consumer:
- *  `verify` needs it to check def-dominates-use, `structure/loops.ts` to tell a back-edge from a
+ *  `verify` needs it to check def-dominates-use, `ir/loops.ts` to tell a back-edge from a
  *  forward one, and `raise/latch.ts` to tell a latch from a preheader. */
 
 export function dominators(fn: Fn): Map<Block, Set<Block>> {

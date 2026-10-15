@@ -1,0 +1,44 @@
+// asmlift — the CFG folds that run last before structuring, after return-sinking: each rewrites a
+// loop's edges into a shape a loop spelling owns, and each is its own stage in the trace, so a
+// re-spelled function names the fold that moved its CFG.
+//
+// A MUTABLE RECORD, not a sum of three calls, for the reason `PRE_RECOVERY_PASSES` is one: it is the
+// caller-side seam a process outside core swaps to census a fold's gate table (`pnpm bench gates`,
+// apps/benchmark/src/run/gate-census.ts). A static import binding cannot be swapped.
+import { Fn } from '../ir/core';
+import { foldEmptyLatches, foldExitTrampolines } from './latch';
+import { rerollPeeledTests } from './reroll';
+
+export interface PreStructureFold {
+  /** stable; the trace stage is `stage:<id>` */
+  readonly id: string;
+  /** the trace stage's title */
+  readonly title: string;
+  /** how many rewrites the fold made; 0 leaves the function as it was */
+  run: (fn: Fn) => number;
+}
+
+/** THE ORDER CARRIES LOAD, and each fold runs ONCE: there is no fixpoint across folds, so a fold
+ *  that exposes another's shape must run before it. The re-roll needs the latch's way out and the
+ *  entry's to reach ONE block, and on `synthetic:break_value:agbcc` they reach it only after the
+ *  trampoline fold has spliced out the empty block the break leaves through; ahead of it, the re-roll
+ *  declines and the loop with it ('unrecovered back-edge'). `reroll.test.ts` pins it by lifting that
+ *  row's pre-fold IR through this record. The latch fold comes first for the same reason in kind:
+ *  the other two read the back edge it leaves. */
+export const PRE_STRUCTURE_FOLDS: PreStructureFold[] = [
+  {
+    id: 'latchfold',
+    title: 'Empty-latch folding (a latch that only jumps back becomes its back edge)',
+    run: (fn) => foldEmptyLatches(fn),
+  },
+  {
+    id: 'trampoline',
+    title: 'Exit-trampoline folding (an empty block on a loop exit becomes that edge)',
+    run: (fn) => foldExitTrampolines(fn),
+  },
+  {
+    id: 'reroll',
+    title: 'Peeled-test re-rolling (a loop test peeled into the entry becomes the first iteration)',
+    run: (fn) => rerollPeeledTests(fn),
+  },
+];
