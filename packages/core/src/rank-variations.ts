@@ -227,23 +227,15 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   },
   // `/signed-cmp` — spell an unsigned compare SIGNED (structure.ts unsignedCompareSpelling OFF): no
   // `(u32)` cast at an icmp_u* and no u32 reconciliation of a mixed-claimant declaration. The
-  // default spells it unsigned, the one spelling that is value-faithful without a proof. This one
-  // is a real source too: a compiler emits the unsigned branch from a signed compare where it
-  // PROVED both sides non-negative, and emission's provable set is smaller than the compiler's.
-  // Where that proof does not hold it compiles to a different compare, so a source whose finished
-  // tree spells one is `Candidate.matchOnly`: offered, scored, and published only byte-exact. This
-  // setting carries no flag of its own for that. Each lowered `icmp_u*` ordering carries
-  // `unsignedCmp` evidence, and rank.ts asks `signedOverUnsignedCompare` of every tree a source is
-  // emitted from, whichever setting or respell (`/unmerge`, `/regcopy`) spelled it signed.
-  // A tie or a better nonmatch score is no evidence for it (`synthetic:selloop:gcc2.7.2kmc`:
-  // `return 0 < v1;` over an s32 `v1` against `sltu v0,zero,v1`). A tree whose compares render
-  // unsigned (an unsigned operand, a pointer) needs no proof, and differs from the default only in
-  // a declaration.
-  // KNOWN GAP, in the safe direction: the judgment reads the tree's declarations. A compare that
-  // renders unsigned only in the PRINTED C — a global the backend's pointer-cell legalization and
-  // the symbol declarations make `void *` (ptrcell.test.ts KR1, `g >= gLimit`) — still owes the
-  // proof, and is withheld on a nonmatch. Neither of those is in the tree: globals are absent from
-  // `declaredTypes`.
+  // default is the one spelling value-faithful without a proof; this one is a real source where the
+  // compiler PROVED both sides non-negative (only then does it emit the unsigned branch from a
+  // signed compare), which emission cannot always repeat. Where the proof does not hold it is a
+  // different program, so rank.ts judges every emitted tree (`signedOverUnsignedCompare`) and makes
+  // a signed rendering `Candidate.matchOnly`, whichever setting or respell spelled it. A tie or a
+  // better nonmatch score is no evidence for it (`synthetic:selloop:gcc2.7.2kmc`).
+  // KNOWN GAP, in the safe direction: the judgment reads the tree's declarations, and globals are
+  // not among them, so a compare that renders unsigned only through a `void *` global the backend
+  // declares (ptrcell.test.ts KR1, `g >= gLimit`) is still withheld on a nonmatch.
   // Gated on the function having an unsigned compare at all.
   {
     flag: 'signedCmp',
