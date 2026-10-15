@@ -926,10 +926,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
   });
 
   test('a reload from a slot that was never stored still declines', () => {
-    // The guard that keeps the model from fabricating: an unstored slot holds nothing this function
-    // put there, so routing it through readVar would mint a phantom parameter and hand back a value
-    // the machine never had. Above the frame that read IS an argument (the path above); inside the
-    // frame it is an uninitialised local, and the decline is the honest answer.
+    // The guard that keeps the model from fabricating: a slot this function never stores holds
+    // nothing it put there. Inside the frame that read is most likely an uninitialised local, but an
+    // address escaping through a path the model missed reads the same, and the decline is the
+    // honest answer. (A slot stored somewhere and read before it is the next describe's.)
     const unstored =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
@@ -980,14 +980,49 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n\tstr\tr0, [sp]\n' +
       '.L2:\n\tldr\tr1, [sp]\n\tadd\tr0, r1, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('f', both, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return a0 + 1;\n}\n');
-    // …and the refusal that survives, NOT YET rather than by design. A slot no store reaches
-    // ANYWHERE is the same C as the diamond above; the reasons one reaches for — frame arithmetic,
-    // an address-taken object — are both caught elsewhere (`stack pointer used as data`, and the
-    // `laddr` audit). What decides it is that the gate sits at the LOAD, before the slot is keyed
-    // at all. Closing it means moving that gate, not finding a new argument.
+    // …and the refusal that survives: a slot this function never stores anywhere.
     const unstored =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', unstored, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+  });
+
+  // synthetic:uninitfirst:agbcc — `if (k > 5) gOut = v0 + …; switch (k) { case 0: v0 = p[0]; … }`:
+  // the local is read BEFORE any store, so no store reaches the read on any path, but the function
+  // does store the word, later. agbcc never loads a word of its outgoing area, so a word it stores
+  // and reads is a local, and a read nothing reaches is that local uninitialised.
+  describe('a slot read before every store to it is an uninitialised local', () => {
+    const readFirst = (tail: string) =>
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tcmp\tr0, #5\n\tble\t.L2\n' +
+      '\tldr\tr1, [sp]\n\tldr\tr2, .L9\n\tstr\tr1, [r2]\n.L2:\n\tstr\tr0, [sp]\n' +
+      tail +
+      '\tldr\tr0, [sp]\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgOut\n';
+    const g = { prototypes: { g: { params: 0, returnsVoid: true } } };
+
+    test('read on one path, stored after it, with or without a call between', () => {
+      expect(decompile('f', readFirst('\tbl\tg\n'), ARMV4T_AGBCC, g).source).toBe(
+        's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 > 5) gOut = uninit_sp0;\n    g();\n    return a0;\n}\n',
+      );
+      expect(decompile('f', readFirst(''), ARMV4T_AGBCC).source).toBe(
+        's32 f(s32 a0) {\n    s32 uninit_sp0;\n    if (a0 > 5) gOut = uninit_sp0;\n    return a0;\n}\n',
+      );
+    });
+
+    test('…and without the compiler’s layout claim the word may be one a callee left, so it declines', () => {
+      const unclaimed = {
+        ...ARMV4T_AGBCC,
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, localsAboveOutgoingArea: false },
+      };
+      expect(() => decompile('f', readFirst(''), unclaimed)).toThrow(/stack pointer used as data/);
+    });
+
+    test('a read of a word a declared call takes as its stack argument still refuses', () => {
+      const licensed =
+        'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tldr\tr1, [sp]\n\tldr\tr2, .L9\n\tstr\tr1, [r2]\n' +
+        '\tstr\tr0, [sp]\n\tbl\tfive\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L9:\n\t.word\tgOut\n';
+      expect(() => decompile('f', licensed, ARMV4T_AGBCC, { prototypes: { five: { params: 5 } } })).toThrow(
+        /\[sp,#0\] is an outgoing stack-argument slot .* but this function also LOADS it/,
+      );
+    });
   });
 
   test('two unstored slots are two DISTINCT uninitialised locals, never merged', () => {

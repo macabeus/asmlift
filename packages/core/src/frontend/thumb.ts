@@ -3097,6 +3097,10 @@ interface ThumbFrame {
   readonly partition: Readonly<Pick<FrameObjectAudit, 'ownedLocals' | 'declaredLocals'>>;
   isFrameObjectAccess(base: string, off: number, regOff: string | undefined, width: number): boolean;
   isOwnFrameWordSlot(base: string, off: number, regOff: string | undefined, width: number): boolean;
+  /** the whole-word slot offsets some entry-reachable `str` writes, under `localsAboveOutgoingArea`
+   *  only — what lets a load of one that no store reaches read as an uninitialised local
+   *  (`lowerLoad`) */
+  readonly storedSlots: ReadonlySet<number>;
 }
 
 /** The frame offset of each word of a declared call's outgoing block, or null where it stages none.
@@ -3541,6 +3545,15 @@ function measureThumbFrame({
       localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
     });
   const outgoingArgs = outgoingArgsOver(eventBlocks);
+  // Empty without the layout premise: there a word nothing reaches may be one a callee wrote.
+  const storedSlots = new Set(
+    [...(target.compilerBehaviors.localsAboveOutgoingArea === true ? entryReachable : [])].flatMap((b) =>
+      asmBlocks[b].instrs.flatMap((ins) => {
+        const off = ins.mnemonic === 'str' ? slotAcc(ins) : null;
+        return off === null ? [] : [off];
+      }),
+    ),
+  );
   // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
   // `escapesReliedOn`). The `escape` event is read off what a REGISTER holds at a `bl` or a `str`,
   // and it switches refusals OFF; the lift then decides what the call is really handed, and an
@@ -3690,6 +3703,7 @@ function measureThumbFrame({
     partition,
     isFrameObjectAccess,
     isOwnFrameWordSlot,
+    storedSlots,
   };
 }
 
@@ -5517,14 +5531,24 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   }
   // A word reload from this function's own frame — the dual of the spill in the str arm.
   //
-  // The reaching-def test is the whole soundness of it, and it mirrors the MIPS guard
-  // exactly: a slot that was never STORED holds nothing this function put there, so
-  // `readVar` would mint a phantom entry parameter for it and hand back a value the machine
-  // never had. Above the frame that reading is right and is the incoming-argument path
-  // above; INSIDE the frame it is an uninitialised local (or one whose address escaped
-  // through a path the model missed), and the honest answer is the decline this falls
-  // through to.
-  if (frame.isOwnFrameWordSlot(base, off, regOff, width) && ssa.hasReachingDef(stackSlotKey(off), bi)) {
+  // Which reloads it takes is the whole soundness of it. One a store reaches on some path reads
+  // that store, and a path that brings none reads an uninitialised local: the frame is
+  // `ownedLocals`, so `readVar` answers that path with `undef`, never with a parameter
+  // (frontend/ssa.ts `LiveInModel`).
+  //
+  // A slot NO store reaches, on any path, is the same local read before its first store, when
+  // this function stores it somewhere: the source's `if (k > 5) use(v0); … v0 = p[0];`, which
+  // agbcc homes in a word it reads first and writes later. It cannot be an outgoing argument the
+  // callee left behind, since agbcc never loads a word of that area (`localsAboveOutgoingArea`,
+  // and a load of a licensed word refuses in `analyzeOutgoingArgs`), nor an address-taken object's
+  // word, which `isFrameObjectAccess` took above. A word this function never stores at all is
+  // nothing it put there: an uninitialised local with no other use is its likeliest reading, but
+  // an address escaping through a path the model missed reads the same, so that one still falls
+  // through to the decline.
+  if (
+    frame.isOwnFrameWordSlot(base, off, regOff, width) &&
+    (ssa.hasReachingDef(stackSlotKey(off), bi) || frame.storedSlots.has(off))
+  ) {
     usedSlotOffsets.add(off);
     writeData(reg(a), bi, readVar(stackSlotKey(off), bi));
     return;
