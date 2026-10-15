@@ -1,8 +1,9 @@
 // UNINITIALISED LOCALS ON MIPS (frontend/mips.ts): the O32 live-in model. A def-less read of a
 // register O32 passes no argument in, that is scratch or the prologue saved, is an uninitialised
-// local (`registerLiveIns`, MIPS_IDO/MIPS_GCC `nonArgRegs`/`scratchRegs`). Everything else keeps
-// the parameter or the refusal it had. The compiled fixtures are the synthetic tier's rows, built
-// at each toolchain's canonical flags.
+// local (`registerLiveIns`, MIPS_IDO/MIPS_GCC `nonArgRegs`/`scratchRegs`); so is a def-less read of
+// a word of the one frame the function pushed, where nothing but the function could have written
+// it (`ownedFrame`). Everything else keeps the parameter or the refusal it had. The compiled
+// fixtures are the synthetic tier's rows, built at each toolchain's canonical flags.
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -151,5 +152,143 @@ describe('the register half: scratch and saved registers', () => {
     expect(src(['0:\tjr\tra', '4:\taddu\tv0,v0,a0'], MIPS_IDO)).toBe(
       's32 f(s32 a0) {\n    s32 uninit_v0;\n    return uninit_v0 + a0;\n}\n',
     );
+  });
+});
+
+describe('the frame half: words of the frame the function pushed', () => {
+  // `uninit_join` at ido7.1 -O2: r lives in 4(sp) of an 8-byte leaf frame, pushed in the first
+  // branch's delay slot.
+  test('a word stored on one path only is the local the other path leaves unset', () => {
+    expect(
+      src(
+        [
+          '0:\tblez\ta0,10 <f+0x10>',
+          '4:\taddiu\tsp,sp,-8',
+          '8:\tsll\tt6,a0,0x1',
+          'c:\tsw\tt6,4(sp)',
+          '10:\tlw\tv0,4(sp)',
+          '14:\taddiu\tsp,sp,8',
+          '18:\tjr\tra',
+          '1c:\taddiu\tv0,v0,1',
+        ],
+        MIPS_IDO,
+      ),
+    ).toBe('s32 f(s32 a0) {\n    s32 v0;\n    if (a0 > 0) v0 = a0 << 1;\n    return v0 + 1;\n}\n');
+  });
+
+  // `uninit_spill` at ido7.1 reads 36(sp) and 0(sp), which no instruction stores: a local the
+  // source never assigns on that path. In a leaf nothing else can write the frame.
+  test('a word of a leaf frame no store reaches is uninitialised', () => {
+    expect(src(['0:\taddiu\tsp,sp,-24', '4:\tlw\tv0,8(sp)', '8:\tjr\tra', 'c:\taddiu\tsp,sp,24'], MIPS_IDO)).toBe(
+      's32 f(void) {\n    s32 uninit_sp8;\n    return uninit_sp8;\n}\n',
+    );
+  });
+
+  // `uninit_saved` at ido7.1 -O2: x lives in 28(sp), above the 16-byte outgoing area of calls to a
+  // one-argument k, and the path that skips the first call reads it unstored.
+  test('past the outgoing area of a function that calls, the same holds', () => {
+    expect(
+      src(
+        [
+          '0:\taddiu\tsp,sp,-32',
+          '4:\tsw\tra,20(sp)',
+          '8:\tsw\ta2,40(sp)',
+          'c:\tbeqz\ta0,20 <f+0x20>',
+          '10:\tsw\ta3,44(sp)',
+          '14:\tjal\t0 <f>',
+          '18:\tmove\ta0,a1',
+          '1c:\tsw\tv0,28(sp)',
+          '20:\tjal\t0 <f>',
+          '24:\tlw\ta0,40(sp)',
+          '28:\tlw\tt6,44(sp)',
+          '2c:\tjal\t0 <f>',
+          '30:\taddu\ta0,v0,t6',
+          '34:\tlw\tt7,48(sp)',
+          '38:\tjal\t0 <f>',
+          '3c:\taddu\ta0,v0,t7',
+          '40:\tlw\tt8,52(sp)',
+          '44:\tjal\t0 <f>',
+          '48:\taddu\ta0,v0,t8',
+          '4c:\tlw\tra,20(sp)',
+          '50:\tlw\tt9,28(sp)',
+          '54:\taddiu\tsp,sp,32',
+          '58:\tjr\tra',
+          '5c:\taddu\tv0,v0,t9',
+        ],
+        MIPS_IDO,
+        callsTo('k', [0x14, 0x20, 0x2c, 0x38, 0x44]),
+        { k: { params: 1 } },
+      ),
+    ).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5) {\n' +
+        '    s32 v0;\n' +
+        '    if (a0 != 0) v0 = k(a1);\n' +
+        '    return k(k(k(k(a2) + a3) + a4) + a5) + v0;\n' +
+        '}\n',
+    );
+  });
+
+  const NEVER = /that was never stored/;
+  const CALL = ['0:\taddiu\tsp,sp,-32', '4:\tsw\tra,20(sp)', '8:\tjal\t0 <f>', 'c:\tnop'];
+  const READ = (off: number) => [
+    `10:\tlw\tt6,${off}(sp)`,
+    '14:\taddu\tv0,v0,t6',
+    '18:\tlw\tra,20(sp)',
+    '1c:\tjr\tra',
+    '20:\taddiu\tsp,sp,32',
+  ];
+  const G = callsTo('g', [8]);
+
+  // A callee stores its a0..a3 into the caller's [0,16) and assigns a stack parameter in place, so
+  // below the outgoing area's end a word a call reaches may hold what the callee left there.
+  test('a word in the outgoing area of a function that calls keeps its refusal', () => {
+    expect(lift([...CALL, ...READ(4)], MIPS_IDO, G, { g: { params: 0 } })).toThrow(NEVER);
+    expect(src([...CALL, ...READ(28)], MIPS_IDO, G, { g: { params: 0 } })).toBe(
+      's32 f(void) {\n    s32 uninit_sp28;\n    return g() + uninit_sp28;\n}\n',
+    );
+  });
+
+  test('a callee no declaration sizes leaves the outgoing area unknown, so nothing is claimed', () => {
+    expect(lift([...CALL, ...READ(28)], MIPS_IDO, G)).toThrow(NEVER);
+  });
+
+  test("the caller's home of a0..a3, above the frame, is in no range", () => {
+    expect(lift(['0:\taddiu\tsp,sp,-8', '4:\tlw\tv0,12(sp)', '8:\tjr\tra', 'c:\taddiu\tsp,sp,8'], MIPS_IDO)).toThrow(
+      NEVER,
+    );
+    expect(
+      lift(
+        [
+          '0:\taddiu\tsp,sp,-8',
+          '4:\tbeqz\ta0,14 <f+0x14>',
+          '8:\tnop',
+          'c:\tsw\ta0,12(sp)',
+          '10:\tnop',
+          '14:\tlw\tv0,12(sp)',
+          '18:\taddiu\tv0,v0,1',
+          '1c:\tjr\tra',
+          '20:\taddiu\tsp,sp,8',
+        ],
+        MIPS_IDO,
+      ),
+    ).toThrow(/sp@12 is read on a path that never stores it, and lies outside this function's frame partition/);
+  });
+
+  // The key is the raw offset, so a word reached at the entry depth names other storage under the
+  // same spelling: one such access and the frame claims nothing.
+  test('an sp access at another depth than the frame withdraws the claim', () => {
+    expect(
+      lift(
+        [
+          '0:\tlw\tv0,4(sp)',
+          '4:\taddiu\tsp,sp,-8',
+          '8:\tlw\tv1,4(sp)',
+          'c:\taddu\tv0,v0,v1',
+          '10:\tjr\tra',
+          '14:\taddiu\tsp,sp,8',
+        ],
+        MIPS_IDO,
+      ),
+    ).toThrow(NEVER);
   });
 });

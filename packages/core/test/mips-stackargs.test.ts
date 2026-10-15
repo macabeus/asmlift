@@ -91,8 +91,12 @@ describe('every other never-stored read keeps its refusal', () => {
     expect(lift(['0:\tlw\tv0,4(sp)', '4:\tjr\tra', '8:\tnop'])).toThrow(NEVER);
   });
 
-  test('a word below the pushed size is an uninitialised local', () => {
-    expect(lift(['0:\taddiu\tsp,sp,-24', '4:\tlw\tv0,8(sp)', '8:\tjr\tra', 'c:\taddiu\tsp,sp,24'])).toThrow(NEVER);
+  // A word BELOW the pushed size is no longer here: it is a word of the frame this leaf owns, and
+  // reads as an uninitialised local (mips-uninit.test.ts, `ownedFrame` in frontend/mips.ts).
+  test('a word below the pushed size is an uninitialised local, not an argument', () => {
+    expect(src(['0:\taddiu\tsp,sp,-24', '4:\tlw\tv0,8(sp)', '8:\tjr\tra', 'c:\taddiu\tsp,sp,24'])).toBe(
+      's32 f(void) {\n    s32 uninit_sp8;\n    return uninit_sp8;\n}\n',
+    );
   });
 
   test('a second push leaves the depth unproven', () => {

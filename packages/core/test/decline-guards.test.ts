@@ -254,13 +254,12 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // `a1` standing in for uninitialised stack. Both frontends assert the symptom at the same
   // boundary (frontend/ssa.ts `finish`), which is total where a per-read test cannot be.
   //
-  // THUMB NOW RECOVERS THIS SHAPE as an uninitialised local (`undef`) and MIPS DELIBERATELY DOES
-  // NOT, which is the interesting part. The recovery needs "nothing incoming can reach this key",
-  // and only Thumb has proved it: it bounds a slot by `off < localArea` and keys incoming stack
-  // arguments separately. MIPS applies no frame bound, so `sp@40` here could equally be O32's
-  // caller-owned home slot for a FIFTH ARGUMENT — recovering it would emit a signature with three
-  // parameters missing and the caller's argument replaced by an uninitialised local. Compilable,
-  // plausible, wrong. Until the O32 home-area rule exists, the decline is the honest answer.
+  // BOTH FRONTENDS NOW RECOVER THIS SHAPE as an uninitialised local (`undef`). The recovery needs
+  // "nothing incoming can reach this key", and each proves it its own way: Thumb bounds a slot by
+  // `off < localArea`; MIPS claims `[0, frameSize)` of a leaf's one push, at the frame's depth,
+  // with no frame address taken (frontend/mips.ts `ownedFrame`), and keys incoming stack words
+  // `@sarg<k>` separately — so `sp@16` of this 24-byte leaf frame is its own word, while the
+  // caller's home slot above the frame (the next case) is not.
   const diamond = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',
@@ -274,7 +273,9 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
     '  20:\taddiu\tsp,sp,24',
     '',
   ].join('\n');
-  expect(() => decompile('f', diamond, MIPS_IDO)).toThrow(/sp@16 is read on a path that never stores it/);
+  expect(decompile('f', diamond, MIPS_IDO).source).toBe(
+    's32 f(s32 a0) {\n    s32 uninit_sp16;\n    if (a0 == 0) a0 = uninit_sp16;\n    return a0 + 1;\n}\n',
+  );
   // the ARGUMENT-HOME case: with a 24-byte frame, `40(sp)` is ABOVE it — the caller's area, where a
   // def-less read is argument 5. MIPS keys that word `@sarg4` for its store as well as its load
   // (frontend/mips.ts `incomingStackKey`), so the read is argument 5 on the path that does not store
@@ -306,7 +307,7 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // only the postcondition sees it. An implementation seam, not a semantic one. Closing it means
   // replacing that entry phi with an undef and stripping the paired arg from every predecessor
   // edge, which `simplifyTrivialPhis` already does; it would also need a frame partition, which
-  // this fixture's MIPS does not have.
+  // MIPS does not claim here: a re-entered entry leaves the frame depth unproven.
   const entryLoop = [
     '00000000 <f>:',
     '   0:\taddiu\tsp,sp,-24',

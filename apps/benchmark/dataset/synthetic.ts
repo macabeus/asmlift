@@ -1459,8 +1459,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // and Braun's construction resolves a def-less read to a live-in, which at the entry block is a
   // PARAMETER. WHERE the local lands decides which way that goes, and the two differ sharply:
   //   • a stack slot ⇒ loud. Two guards split it — stored on SOME path (frontend/ssa.ts `finish`)
-  //     vs stored on NO path reaching the read (frontend/mips.ts, which still conflates the
-  //     second with a 5th+ stack argument). uninit_join and uninit_sw hit one each, on ido7.1.
+  //     vs stored on NO path reaching the read (frontend/mips.ts `emitLoad`). uninit_join and
+  //     uninit_sw hit one each, on ido7.1, until O32 claimed the words of its own frame (below).
   //   • an ARGUMENT register ⇒ silent: nothing guards it and the read becomes a fabricated extra
   //     parameter. MEASURED: both agbcc rows byte-MATCH anyway, because the invented parameter
   //     lands in the register the local was allocated to — `uninit_sw(s32 a0, s32 a1, s32 a2)` for
@@ -1495,9 +1495,19 @@ export const SYNTHETIC: SynthSpec[] = [
   // register half, like uninit_sw:agbcc, reached through CodeWarrior's switch dispatch), and three
   // lift to nonmatches nothing here attributes (uninit_join, uninit_sw and uninit_spill on
   // gcc2.7.2kmc).
-  // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
-  // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
-  // and uninit_sw:agbcc is the register half, which `undef` does not touch.
+  // Of those five, uninit_spill:agbcc was the first recovered, and uninit_sw:agbcc is the register
+  // half, which `undef` does not touch.
+  // THE O32 HALVES (frontend/mips.ts), which closed the rest. The three gcc2.7.2kmc nonmatches
+  // were the REGISTER half: KMC homes the local in a scratch register (v0 in uninit_join, v1 in
+  // uninit_sw), and with no O32 partition each def-less read was a fabricated parameter —
+  // `uninit_join(s32 a0, s32 a1)`. MIPS_GCC/MIPS_IDO `scratchRegs` and the prologue's saves make it
+  // an `undef`. The ido7.1 rows were the FRAME half: IDO homes the same locals in words of its own
+  // frame, and O32 now owns `[0, frameSize)` of a leaf's one push (past the outgoing area where it
+  // calls) when no frame address is taken (`ownedFrame`), so a def-less read there is an `undef`
+  // whether or not anything stores the word — uninit_spill:ido7.1 reads 36(sp) and 0(sp), which
+  // nothing does. uninit_spill and uninitfirst on gcc2.7.2kmc keep a2 (and a3) as parameters: KMC
+  // homes a local in an argument register past the declared arity, which only an own-arity rule
+  // can tell from an argument.
   // uninit_join and uninit_sw also run on stock gcc2.7.2 — the tier's first rows on that compiler —
   // because it homes the local exactly where KMC does, so the register half is pinned on both.
   // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its

@@ -138,13 +138,14 @@ test('a slot outside the declared local area is NOT stamped', () => {
 });
 
 // MIPS reaches the SAME shared stamp — and gets nothing, which is the correct answer and not a
-// gap in the plumbing. frontend/mips.ts claims no frame partition at all (`addiu sp,sp,±N` is
-// transparent there), so its `sp@k` keys span O32's CALLER-owned register-parameter home area
+// gap in the plumbing. frontend/mips.ts claims no DECLARATION partition (`declaredLocals`; the
+// words it owns, `ownedLocals`, answer only whether a def-less read is uninitialised), and this
+// fixture pushes no frame, so its `sp@k` keys span O32's CALLER-owned register-parameter home area
 // `[0,16)` and the incoming stack arguments above it. This fixture's `sw a0,0(sp) / sw a1,4(sp)`
 // is squarely inside that home area: those offsets are the caller's, not this function's
 // declaration ranks. Stamping them would have made a per-compiler ordering read the wrong storage
 // the moment `MIPS_IDO.compilerBehaviors.spillSlotOrder` stopped being `'unknown'`.
-test('MIPS reaches the same shared stamp and is refused: it claims no frame partition', () => {
+test('MIPS reaches the same shared stamp and is refused: it claims no declaration partition', () => {
   const fn = frontendFor(MIPS_IDO).lift('spillslot', read('mips-spillslot.asm'), MIPS_IDO, {}, undefined, undefined);
   expect(fn.slotHomes!.size).toBe(0);
 });
