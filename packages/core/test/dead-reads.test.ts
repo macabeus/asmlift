@@ -441,6 +441,16 @@ describe('the gates', () => {
     expect(run(layout(true), 0)).toBeUndefined();
     expect(run(layout(true), 4)).toBe(true);
     expect(run(layout(false), 4)).toBeUndefined();
+    // an array's map entry carries its element chain's qualifiers and no element layout: only a
+    // base-type element (`elemSigned` stated) makes that qualifier the whole answer — klonoa's
+    // `gEntityAnimationInfo[]` is an array of structs whose `frame` member is `volatile u8`
+    const array = (elem: { elemSigned?: boolean }): Declarations => ({
+      symbols: new Map([
+        [0x03000000, [{ name: 'gS', kind: 'data', declared: true, shape: 'array', elemSize: 4, ...elem }]],
+      ]),
+    });
+    expect(run(array({ elemSigned: false }), 2)).toBeUndefined();
+    expect(run(array({}), 2)).toBe(true);
   });
 
   test('a read that computes another dead read’s address is decided after it, and is then live', () => {

@@ -230,7 +230,13 @@ export interface Declarations {
  *  access that names no byte, which is plain only where no byte of the object is qualified. The map
  *  answers before the context where it lays the object out, as raise/declared-volatile.ts reads them;
  *  a struct the map names with no layout, and an object neither declares, answer no — nothing is in
- *  evidence. */
+ *  evidence. So does an array whose element the map does not name a base type (no `elemSigned`):
+ *  the map carries the qualifiers of the array's element chain and no element layout, so klonoa's
+ *  `struct EntityAnimationInfo gEntityAnimationInfo[]`, whose `frame` member is `volatile u8`,
+ *  reads as an array with no volatile byte. A struct member that nests a struct holding a volatile
+ *  field is still judged by the member's own qualifier: the map's member facts do not tell it from
+ *  an enum, and calling every enum member unknown would stamp the merged-arm reads this gate
+ *  refuses. */
 export function declaredPlain(
   sym: string,
   byte: number | null,
@@ -247,6 +253,9 @@ export function declaredPlain(
     return false;
   }
   if (info?.declared === true && info.shape !== undefined && info.shape !== 'struct') {
+    if (info.shape === 'array' && typeof info.elemSigned !== 'boolean') {
+      return info.volatile !== true && context?.declared.has(sym) === true;
+    }
     return info.volatile !== true;
   }
   return context?.declared.has(sym) === true;
