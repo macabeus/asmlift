@@ -1223,44 +1223,80 @@ export function makeSsaBuilder(
       // MEETING A JOIN IS NOT MEETING A DEFINITION. A register that carries an input round a loop
       // (`addiu t0,t0,-1; bnez t0,top` on a hand-written count) sends its entry value into the
       // loop header's join too, and the back edge's argument is that input's own next value. So
-      // the join must also take an INDEPENDENT definition (`independentOf`): a value no chain of
-      // operands or join arguments derives from the entry value, other than through a join one of
-      // whose other arguments is itself independent. A conditional assignment inside a loop
-      // (`for (…) if (c) x = i;`) meets that through the inner join; a counter that only advances
-      // the entry value, and two undefined values joined (`phi(t0, v1)`), do not, and refuse.
+      // the join must also take an INDEPENDENT definition (`independentOfEntry`): a value no chain
+      // of operands or join arguments derives from the entry value, other than through a join one
+      // of whose other arguments is itself independent. A conditional assignment inside a loop
+      // (`for (…) if (c) x = i;`) meets that through the inner join, and so does one the loop then
+      // transforms before its back edge — a bit reader's `if (!bits) code = *src++; … code <<= 1;`,
+      // whose shift reaches the entry value only through the join the load also feeds. A counter
+      // that only advances the entry value, and two undefined values joined (`phi(t0, v1)`), do
+      // not, and refuse.
       if (hiddenEntryValues.size > 0) {
         const incoming = joinArgs();
         const defOf = defOpMap(fn);
-        const derivesFrom = (v: Value, u: Value): boolean => {
-          const seen = new Set<Value>();
-          const work = [v];
-          for (let w = work.pop(); w !== undefined; w = work.pop()) {
-            if (w === u) {
-              return true;
+        // Read forwards: who reads each value, as an operand or as a join's edge argument.
+        const readers = new Map<Value, Value[]>();
+        const addReader = (v: Value, r: Value) => (readers.get(v) ?? readers.set(v, []).get(v)!).push(r);
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            for (const v of op.operands) {
+              for (const r of op.results) {
+                addReader(v, r);
+              }
             }
-            if (seen.has(w)) {
-              continue;
+          }
+        }
+        for (const [p, args] of incoming) {
+          for (const a of args) {
+            addReader(a, p);
+          }
+        }
+        const isJoin = (v: Value) => incoming.has(v) && !irBlocks[0].params.includes(v);
+        /** The values independent of `u`, as a least fixpoint. A join is independent once one of
+         *  its arguments is; any other value once no chain of operands or join arguments reaches
+         *  `u` without passing through an independent join. Grown from nothing, so no join is
+         *  independent on the strength of its own back edge (`addiu t0,t0,-1` round a loop). */
+        const independentOfEntry = (u: Value): ((v: Value) => boolean) => {
+          const absorbing = new Set<Value>();
+          for (;;) {
+            const derived = new Set<Value>([u]);
+            const work = [u];
+            for (let w = work.pop(); w !== undefined; w = work.pop()) {
+              for (const r of readers.get(w) ?? []) {
+                if (!derived.has(r) && !absorbing.has(r)) {
+                  derived.add(r);
+                  work.push(r);
+                }
+              }
             }
-            seen.add(w);
-            work.push(...(defOf.get(w)?.operands ?? []), ...(incoming.get(w) ?? []));
+            const indep = (v: Value) =>
+              v !== u && defOf.get(v)?.opcode !== 'undef' && (absorbing.has(v) || (!isJoin(v) && !derived.has(v)));
+            let grew = false;
+            for (let changed = true; changed;) {
+              changed = false;
+              for (const [p, args] of incoming) {
+                if (isJoin(p) && !absorbing.has(p) && args.some(indep)) {
+                  absorbing.add(p);
+                  changed = grew = true;
+                }
+              }
+            }
+            if (!grew) {
+              return indep;
+            }
           }
-          return false;
         };
-        const independentOf = (v: Value, u: Value, visiting: Set<Value>): boolean => {
-          if (v === u || defOf.get(v)?.opcode === 'undef' || visiting.has(v)) {
-            return false;
+        const metMemo = new Map<Value, boolean>();
+        const met = (u: Value): boolean => {
+          let m = metMemo.get(u);
+          if (m === undefined) {
+            const joins = [...incoming.entries()].filter(([p, args]) => isJoin(p) && args.includes(u));
+            const indep = joins.length === 0 ? undefined : independentOfEntry(u);
+            m = indep !== undefined && joins.some(([, args]) => args.some(indep));
+            metMemo.set(u, m);
           }
-          const args = incoming.get(v);
-          if (args === undefined || irBlocks[0].params.includes(v)) {
-            return !derivesFrom(v, u);
-          }
-          visiting.add(v);
-          return args.some((a) => independentOf(a, u, visiting));
+          return m;
         };
-        const met = (u: Value): boolean =>
-          [...incoming.values()].some(
-            (args) => args.includes(u) && args.some((a) => a !== u && independentOf(a, u, new Set())),
-          );
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
             const reg = [...op.operands, ...op.successors.flatMap((s) => s.args)]

@@ -234,6 +234,43 @@ describe('what a join must meet before an entry value is a local', () => {
     ).not.toMatch(/f\(s32 \*a0, s32 a1, /);
   });
 
+  // A bit reader (`if (bits == 0) { code = *src++; bits = 8; } … code <<= 1;`) at gcc2.7.2kmc -O2,
+  // code in t0: the shift on the back edge reaches t0's entry value only through the inner join,
+  // and that join also takes the load, which nothing derives from t0. So the shift is a
+  // definition of its own, and the header's join meets one.
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('a local the loop transforms after a conditional assignment meets its definition (%s)', (_c, target) => {
+    expect(
+      src(
+        [
+          '0:	blez	a2,48 <f+0x48>',
+          '4:	move	v1,zero',
+          '8:	bnez	v1,20 <f+0x20>',
+          'c:	andi	v0,t0,0x80',
+          '10:	lbu	t0,0(a0)',
+          '14:	addiu	a0,a0,1',
+          '18:	li	v1,8',
+          '1c:	andi	v0,t0,0x80',
+          '20:	beqzl	v0,34 <f+0x34>',
+          '24:	sb	a3,0(a1)',
+          '28:	lbu	v0,0(a0)',
+          '2c:	sb	v0,0(a1)',
+          '30:	addiu	a0,a0,1',
+          '34:	addiu	a1,a1,1',
+          '38:	sll	t0,t0,0x1',
+          '3c:	addiu	a2,a2,-1',
+          '40:	bgtz	a2,8 <f+0x8>',
+          '44:	addiu	v1,v1,-1',
+          '48:	jr	ra',
+          '4c:	nop',
+        ],
+        target,
+      ),
+    ).toMatch(/\w+ = \w+ << 1;/);
+  });
+
   // The same source at ido7.1 -O2 keeps x and y in frame words: a join of two undefined words is
   // one uninitialised local, not a local whose every assignment the structurer drops (which its
   // own postcondition reported as read but never assigned).
