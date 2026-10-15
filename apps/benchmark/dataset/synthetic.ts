@@ -9803,6 +9803,16 @@ export const SYNTHETIC: SynthSpec[] = [
   //      Declines on all four: agbcc reads the frame words as `sp` data, the MIPS frontends refuse
   //      the frame, and mwcc_242_81 refuses the by-value parameter itself (it passes a copy's
   //      address, `tbval`).
+  //  11. bvwg, bvqg, bvtg, bvqp, bvcg: a struct passed by value straight from a global (one, two and
+  //      three words), through a pointer, and a `u8[4]` struct. O32 passes the words in argument
+  //      registers (kmc through one `lui`/`lw` pair per word, IDO storing each into its home slot),
+  //      which the call plan folds into the global passed whole; through a pointer, and the `u8[4]`
+  //      struct (IDO copies it with `lwl`/`swl`, gcc packs its bytes into a register), decline on
+  //      every toolchain. mwcc_242_81 passes a copy's address and declines; agbcc is the control.
+  //      Before the call plan refused an unplaced by-value parameter, the MIPS rows lifted wrong C
+  //      through the arity guess (`takeW(*(s32 *)&gW)`, `takeT(*p0, p0[1], p0[2])`). One statement
+  //      per line: IDO schedules by source line. gcc2.7.2 is pinned in
+  //      packages/cli/test/matching/mips-calls.test.ts.
   // Set aside, each one kleod function: a `goto` into a shared tail (sound under the no-goto
   // rule), a jump-threaded break, a struct return inside a loop, a table case aliasing `default`,
   // a cross-jumped case `break`, `ldrsb` through a zero offset register, two indexed local tables,
@@ -10009,6 +10019,261 @@ export const SYNTHETIC: SynthSpec[] = [
         returnsVoid: true,
       },
       byvalregs: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'bvwg',
+    src:
+      'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\n' +
+      'void takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\n' +
+      'extern struct W gW;\nextern struct Q gQ;\nextern struct T gT;\nextern struct C gC;\n' +
+      'void bvwg(void)\n{\n    takeW(gW);\n}',
+    features: ['global'],
+    toolchains: ALL,
+    ctx: 'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\nvoid takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\nvoid bvwg(void);',
+    proto: {
+      takeW: {
+        params: ['struct W'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeT: {
+        params: ['struct T'],
+        byValueLayouts: {
+          0: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+              { name: 'c', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeC: {
+        params: ['struct C'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'b', type: 'u8', dims: [4] }] } },
+        returnsVoid: true,
+      },
+      bvwg: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'bvqg',
+    src:
+      'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\n' +
+      'void takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\n' +
+      'extern struct W gW;\nextern struct Q gQ;\nextern struct T gT;\nextern struct C gC;\n' +
+      'void bvqg(s32 k)\n{\n    takeQ(k, gQ);\n}',
+    features: ['global', 'multi-arg'],
+    toolchains: ALL,
+    ctx: 'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\nvoid takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\nvoid bvqg(s32 k);',
+    proto: {
+      takeW: {
+        params: ['struct W'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeT: {
+        params: ['struct T'],
+        byValueLayouts: {
+          0: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+              { name: 'c', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeC: {
+        params: ['struct C'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'b', type: 'u8', dims: [4] }] } },
+        returnsVoid: true,
+      },
+      bvqg: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'bvtg',
+    src:
+      'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\n' +
+      'void takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\n' +
+      'extern struct W gW;\nextern struct Q gQ;\nextern struct T gT;\nextern struct C gC;\n' +
+      'void bvtg(void)\n{\n    takeT(gT);\n}',
+    features: ['global'],
+    toolchains: ALL,
+    ctx: 'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\nvoid takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\nvoid bvtg(void);',
+    proto: {
+      takeW: {
+        params: ['struct W'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeT: {
+        params: ['struct T'],
+        byValueLayouts: {
+          0: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+              { name: 'c', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeC: {
+        params: ['struct C'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'b', type: 'u8', dims: [4] }] } },
+        returnsVoid: true,
+      },
+      bvtg: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'bvqp',
+    src:
+      'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\n' +
+      'void takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\n' +
+      'extern struct W gW;\nextern struct Q gQ;\nextern struct T gT;\nextern struct C gC;\n' +
+      'void bvqp(s32 k, struct Q *p)\n{\n    takeQ(k, *p);\n}',
+    features: ['pointer', 'multi-arg'],
+    toolchains: ALL,
+    ctx: 'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\nvoid takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\nvoid bvqp(s32 k, struct Q *p);',
+    proto: {
+      takeW: {
+        params: ['struct W'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeT: {
+        params: ['struct T'],
+        byValueLayouts: {
+          0: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+              { name: 'c', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeC: {
+        params: ['struct C'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'b', type: 'u8', dims: [4] }] } },
+        returnsVoid: true,
+      },
+      bvqp: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'bvcg',
+    src:
+      'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\n' +
+      'void takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\n' +
+      'extern struct W gW;\nextern struct Q gQ;\nextern struct T gT;\nextern struct C gC;\n' +
+      'void bvcg(void)\n{\n    takeC(gC);\n}',
+    features: ['global'],
+    toolchains: ALL,
+    ctx: 'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\nstruct C { u8 b[4]; };\nvoid takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\nvoid takeC(struct C c);\nvoid bvcg(void);',
+    proto: {
+      takeW: {
+        params: ['struct W'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'x', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+      takeQ: {
+        params: ['s32', 'struct Q'],
+        byValueLayouts: {
+          1: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeT: {
+        params: ['struct T'],
+        byValueLayouts: {
+          0: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u32' },
+              { name: 'b', type: 'u32' },
+              { name: 'c', type: 'u32' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      takeC: {
+        params: ['struct C'],
+        byValueLayouts: { 0: { kind: 'struct', members: [{ name: 'b', type: 'u8', dims: [4] }] } },
+        returnsVoid: true,
+      },
+      bvcg: { returnsVoid: true },
     },
   },
 ];
