@@ -148,9 +148,11 @@ describe('a read nothing uses', () => {
     );
   });
 
-  test('of an ordinary object is deleted', () => {
+  test('of an object the map declares plain is still kept', () => {
+    // A compiler deletes a plain read nobody uses, so the target's `ldrh` was a volatile access
+    // whatever the map says of the object (frontend/dead-reads.ts).
     const src = decompile('f', asm, ARMV4T_AGBCC, { symbols: mapOf(false), prototypes }).source;
-    expect(src).not.toContain('gVolReg;');
+    expect(src).toMatch(/\n\s*(gVolReg|\*\(volatile u16 \*\)&gVolReg);\n/);
   });
 });
 

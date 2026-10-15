@@ -33,8 +33,9 @@
  *
  *  A FUNCTION ACCEPTED OBJECT BY OBJECT pins every device read, and of its device stores only those
  *  of the first kind (`overwritten`). A read is pinned because a plain one is lost either way:
- *  nothing uses the `dmaRegs[2];` that ends a DMA macro, so the lift drops it outright, and a poll
- *  is hoisted as above. Its other device stores stay plain, their qualified spelling left to
+ *  nothing uses the `dmaRegs[2];` that ends a DMA macro, so the lift would drop it outright — which
+ *  frontend/dead-reads.ts now prevents in EVERY function, pinned or not, sink or no sink — and a
+ *  poll is hoisted as above, which only this pin prevents. Its other device stores stay plain, their qualified spelling left to
  *  `/vol-store`'s candidate (l3/volstore.ts): pinned in the structured tree they are pinned in every
  *  variation, and the ones that home the base or un-reduce a loop refuse a qualified base, which
  *  costs `synthetic:dmastride` and `synthetic:dmaptrsrc` their matches. That is also why the two

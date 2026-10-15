@@ -26,6 +26,7 @@ import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
 import { type CallDeclarations, type CallLowering, callDeclarations, foldByValueArgs } from './call-plan';
+import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import { pushSwitchBr } from './emit';
 import { FrontendUnsupportedError } from './errors';
@@ -2515,6 +2516,7 @@ function liftOnce(
     pinDeviceAccesses(irBlocks, verdict, target, symbols);
   }
   refuseSretOutsideFrame(name, irBlocks);
+  pinDeadReads(irBlocks, target);
 
   abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);
   fn.localObjects = statics.finish();

@@ -26,6 +26,7 @@ import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
 import { callDeclarations } from './call-plan';
+import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -2269,6 +2270,7 @@ function liftOnce(
       pinDeviceAccesses(irBlocks, verdict, target, symbols);
     }
   }
+  pinDeadReads(irBlocks, target);
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;

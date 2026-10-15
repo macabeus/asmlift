@@ -112,11 +112,15 @@ export function placedAt(op: Op): Placement | null {
   if (op.opcode === 'call') {
     return 'call';
   }
-  if (MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true) {
-    return 'device';
-  }
+  // A declaration that qualifies the object places the access before a lift's own stamp does: both
+  // say the access is `volatile`, and the declaration is the spelling the source used, so the
+  // access counts and spells as the object's (raise/declared-volatile.ts re-derives it per map, and
+  // under a map that declares nothing the lift's stamp places it again).
   if (MEM_BASE_OPS.has(op.opcode) && op.attrs[DECLARED_VOLATILE] === true) {
     return 'declared';
+  }
+  if (MEM_BASE_OPS.has(op.opcode) && op.attrs.volatile === true) {
+    return 'device';
   }
   // An `opaque` carries `helper` too, naming the call nothing could fold (`refuseUnmodelledHelpers`);
   // it is no value op, and its `effects` flag already places it.
@@ -161,7 +165,10 @@ export function effectful(op: Op): boolean {
 }
 
 /** May a dead result be deleted? Registered, no effect, not control flow, and not an op whose
- *  placement keeps it. */
+ *  placement keeps it. A memory read whose value the RAW lift never uses is never asked: the
+ *  frontend stamps it `volatile` first (frontend/dead-reads.ts), because a compiler deletes every
+ *  plain read nobody uses, so one still in the target was qualified. What reaches this question
+ *  plain is a read only asmlift's own rewrites orphaned, or one that pass's gates refused. */
 export function deletableWhenDead(op: Op): boolean {
   const sig = sigOf(op);
   return !!sig && !sig.effects && !sig.terminator && !answered(op, 'keptWhenDead');

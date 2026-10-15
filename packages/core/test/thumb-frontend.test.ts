@@ -501,7 +501,9 @@ describe('the condition flags reach across a straight-line edge, and across a ru
     const redef = `\tcmp\tr0, r1\n\tb\t.L2\n.L2:\n\tldr\tr0, [r1]\n\tbge\t.Ltrue\n${TAIL}`;
     const src = dc('redef', redef).source;
     expect(src).toContain(FOLDED);
-    expect(src).not.toContain('*'); // the loaded word is not in the condition, so nothing reads it
+    // The loaded word is not in the condition. Nothing uses it, so it stands alone as the read the
+    // machine made (frontend/dead-reads.ts) and appears nowhere else.
+    expect(src.replace('    *(volatile s32 *)a1;\n', '')).not.toContain('*');
   });
 });
 
@@ -3552,7 +3554,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\tpop\t{r0}\n\tbx\tr0\n.L4:\n\t.align\t2, 0\n.L3:\n\t.word\t0x40000b0\n' +
       '\t.word\t0x40000b4\n\t.word\t0x40000b8\n';
     const src = decompile('fillWord', wordIndexed, ARMV4T_AGBCC).source;
-    expect(src).not.toContain('(volatile s32 *)');
+    // no store is pinned; the control read-back nothing uses is kept as a read (frontend/dead-reads.ts)
+    expect(src.match(/\(volatile s32 \*\)/g)).toHaveLength(1);
+    expect(src).toContain('    ((volatile s32 *)67109048)[a0];\n}');
   });
 
   // …and a channel chosen by a branch, a phi of two device registers: `d = c ? (vu32 *)0x40000C8 :
