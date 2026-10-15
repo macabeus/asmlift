@@ -189,16 +189,21 @@ function condOtherMentions(cond: Expr, E: Expr, v: string): boolean {
   };
   return other ? mentions(other) : false;
 }
-/** cond compares E against a pure operand → same comparison reading the named var. */
+/** cond compares E against a pure operand → same comparison reading the named var.
+ *  Both rebuilds below SPREAD the compare, so its `unsignedCmp` evidence (l3/ast.ts) rides along:
+ *  the copy is declared at E's type, which keeps the compare's C meaning but not its asm meaning,
+ *  and rank.ts's judgment of the finished tree (typing.ts `signedOverUnsignedCompare`) is what
+ *  says whether `w0 >= a1` still compares the way the machine did. The negation keeps it too: the
+ *  complement of an unsigned ordering is unsigned. */
 function rewriteCond(cond: Expr, E: Expr, name: string): Expr | null {
   if (cond.k !== 'bin' || !(cond.op in FLIP)) {
     return null;
   }
   if (exprEq(cond.l, E) && isPure(cond.r)) {
-    return { k: 'bin', op: cond.op, l: { k: 'var', name }, r: cond.r };
+    return { ...cond, l: { k: 'var', name } };
   }
   if (exprEq(cond.r, E) && isPure(cond.l)) {
-    return { k: 'bin', op: cond.op, l: cond.l, r: { k: 'var', name } };
+    return { ...cond, r: { k: 'var', name } };
   }
   return null;
 }
@@ -207,7 +212,7 @@ function flipCmp(cond: Expr): Expr | null {
     return null;
   }
   const op = FLIP[cond.op];
-  return op ? { k: 'bin', op: op as Extract<Expr, { k: 'bin' }>['op'], l: cond.l, r: cond.r } : null;
+  return op ? { ...cond, op: op as Extract<Expr, { k: 'bin' }>['op'] } : null;
 }
 /** in `upd`, the occurrence of subtree E replaced by var `name` (E was just assigned to it). */
 function renameSubexpr(e: Expr, E: Expr, name: string): Expr {

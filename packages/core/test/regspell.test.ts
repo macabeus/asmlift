@@ -7,6 +7,7 @@ import { cBackend } from '../src/backend/c';
 import { T } from '../src/ir/types';
 import type { Expr, SFn } from '../src/l3/ast';
 import { registerishSpellings } from '../src/l3/regspell';
+import { signedOverUnsignedCompare } from '../src/l3/typing';
 import { c, v } from './helpers';
 
 /** the MultiplyQ8 shape: `if (E >= 0) v0 = E; else v0 = E + 255; return v0 << 8 >> 16;` */
@@ -83,6 +84,50 @@ describe('R1 — diamond → copy + in-place update', () => {
     const before = JSON.stringify(sfn);
     registerishSpellings(sfn);
     expect(JSON.stringify(sfn)).toBe(before);
+  });
+});
+
+describe("R1 keeps the compare's unsigned evidence", () => {
+  // agbcc of `int f(int x,int n){int v; if((u32)x<(u32)n) v=x; else v=x+200; return v;}` spelled
+  // `/signed-cmp`: `cmp r0,r1; bcs` read as `a0 < a1` over s32 params. R1 moves the compare onto
+  // the copy and flips it; the result `w0 >= a1` is still the signed rendering of an unsigned
+  // compare, and the finished-tree judgment can only say so if the evidence survives the rebuild.
+  const signedOverUnsigned = (pT: ReturnType<typeof T.s>): SFn => ({
+    name: 'f',
+    retType: T.s(32),
+    params: [
+      { name: 'a0', type: pT },
+      { name: 'a1', type: pT },
+    ],
+    locals: [{ name: 'v0', type: T.s(32) }],
+    body: [
+      {
+        k: 'if',
+        cond: { k: 'bin', op: '<', l: v('a0'), r: v('a1'), unsignedCmp: true },
+        then: [{ k: 'assign', name: 'v0', value: v('a0') }],
+        else: [{ k: 'assign', name: 'v0', value: { k: 'bin', op: '+', l: v('a0'), r: c(200) } }],
+      },
+      { k: 'return', value: v('v0') },
+    ],
+  });
+
+  test('the copy and its flipped guard are still judged a signed unsigned compare', () => {
+    const sfn = signedOverUnsigned(T.s(32));
+    expect(signedOverUnsignedCompare(sfn)).toBe(true);
+    const out = registerishSpellings(sfn);
+    expect(out.length).toBeGreaterThan(0);
+    for (const r of out) {
+      expect(cBackend.emit(r.sfn)).toContain('if (w0 >= a1)');
+      expect(signedOverUnsignedCompare(r.sfn)).toBe(true);
+    }
+  });
+
+  test('over unsigned params the same rebuild owes nothing', () => {
+    const out = registerishSpellings(signedOverUnsigned(T.u(32)));
+    expect(out.length).toBeGreaterThan(0);
+    for (const r of out) {
+      expect(signedOverUnsignedCompare(r.sfn)).toBe(false);
+    }
   });
 });
 
