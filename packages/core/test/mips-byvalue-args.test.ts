@@ -274,6 +274,55 @@ const GCC_BVD0: Fixture = {
     [0x14, 'R_MIPS_26', 'takeD0'],
   ],
 };
+// gcc2.7.2kmc addresses each word through a `lui`/`lw` pair of its own
+const KMC_BVQG: Fixture = {
+  lines: [
+    '0:\tlui\ta1,0x0',
+    '4:\tlw\ta1,0(a1)',
+    '8:\tlui\ta2,0x0',
+    'c:\tlw\ta2,4(a2)',
+    '10:\taddiu\tsp,sp,-24',
+    '14:\tsw\tra,16(sp)',
+    '18:\tjal\t0 <bvqg>',
+    '1c:\tnop',
+    '20:\tlw\tra,16(sp)',
+    '24:\tjr\tra',
+    '28:\taddiu\tsp,sp,24',
+  ],
+  rs: [
+    [0, 'R_MIPS_HI16', 'gQ'],
+    [4, 'R_MIPS_LO16', 'gQ'],
+    [8, 'R_MIPS_HI16', 'gQ'],
+    [0xc, 'R_MIPS_LO16', 'gQ'],
+    [0x18, 'R_MIPS_26', 'takeQ'],
+  ],
+};
+const KMC_BVTG: Fixture = {
+  lines: [
+    '0:\tlui\ta0,0x0',
+    '4:\tlw\ta0,0(a0)',
+    '8:\tlui\ta1,0x0',
+    'c:\tlw\ta1,4(a1)',
+    '10:\tlui\ta2,0x0',
+    '14:\tlw\ta2,8(a2)',
+    '18:\taddiu\tsp,sp,-24',
+    '1c:\tsw\tra,16(sp)',
+    '20:\tjal\t0 <bvtg>',
+    '24:\tnop',
+    '28:\tlw\tra,16(sp)',
+    '2c:\tjr\tra',
+    '30:\taddiu\tsp,sp,24',
+  ],
+  rs: [
+    [0, 'R_MIPS_HI16', 'gT'],
+    [4, 'R_MIPS_LO16', 'gT'],
+    [8, 'R_MIPS_HI16', 'gT'],
+    [0xc, 'R_MIPS_LO16', 'gT'],
+    [0x10, 'R_MIPS_HI16', 'gT'],
+    [0x14, 'R_MIPS_LO16', 'gT'],
+    [0x20, 'R_MIPS_26', 'takeT'],
+  ],
+};
 const D = { kind: 'struct' as const, members: [{ name: 'd', type: 'double' }] };
 
 describe('a struct passed by value on O32', () => {
@@ -286,6 +335,8 @@ describe('a struct passed by value on O32', () => {
     ['bvtg', GCC_BVTG, MIPS_GCC, '    takeT(gT);\n'],
     ['bvqg', IDO_BVQG, MIPS_IDO, '    takeQ(a0, gQ);\n'],
     ['bvtg', IDO_BVTG, MIPS_IDO, '    takeT(gT);\n'],
+    ['bvqg', KMC_BVQG, MIPS_GCC, '    takeQ(a0, gQ);\n'],
+    ['bvtg', KMC_BVTG, MIPS_GCC, '    takeT(gT);\n'],
   ] as const)('%s passes the global whole', (name, f, target, call) => {
     expect(lift(name, f, target)).toContain(call);
   });
@@ -318,5 +369,19 @@ describe('a struct passed by value on O32', () => {
     expect(() => lift('bvd', GCC_BVD, MIPS_GCC, protos)).toThrow(
       /`takeD` takes 'struct D' by value as its parameter 2, and it is aligned to 8 and would start at an odd argument word/,
     );
+  });
+
+  test('one lui/lw pair per word is one global only where every pair names the same symbol, at its word', () => {
+    // hand-edited: the second word's pair names another global
+    const two: Fixture = {
+      ...KMC_BVQG,
+      rs: KMC_BVQG.rs.map(([o, t, sym]) => [o, t, o >= 8 && o <= 0xc ? 'gR' : sym] as [number, string, string]),
+    };
+    expect(() => lift('bvqg', two, MIPS_GCC)).toThrow(
+      /the call to `takeQ` passes struct Q by value, and its words are not one frame object or one global/,
+    );
+    // hand-edited: the second word is read off the symbol's start again
+    const again: Fixture = { ...KMC_BVQG, lines: KMC_BVQG.lines.map((l) => l.replace('lw\ta2,4(a2)', 'lw\ta2,0(a2)')) };
+    expect(() => lift('bvqg', again, MIPS_GCC)).toThrow(/its words are not one frame object or one global/);
   });
 });

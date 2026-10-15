@@ -853,8 +853,8 @@ function structReturnOf(
  *    offset. The operand becomes that offset's address, and the frame-object audit judges the
  *    object as the struct (frame-objects.ts `objectShapes`).
  *  - A GLOBAL the words are loaded off, or were just stored to — word accesses at consecutive words
- *    from the symbol's own address (`gaddr`), loaded off it or stored there as the very values
- *    passed. The operand becomes the symbol's address, spelled bare (`take(gS)`), which compiles
+ *    from the symbol's own address (`gaddr`, one or one per word of the same symbol), loaded off it
+ *    or stored there as the very values passed. The operand becomes the symbol's address, spelled bare (`take(gS)`), which compiles
  *    only where the declarations type the global as the struct.
  *
  *  Either way every access is unqualified and in the call's own block, and no store or call lies
@@ -933,14 +933,15 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
             const d = v === undefined ? undefined : defs.get(v)?.op;
             return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : undefined;
           };
+          // ONE SYMBOL, NOT ONE VALUE: kmc addresses each word through a `lui`/`lw` pair of its own,
+          // so the words come off several `gaddr`s of the same symbol rather than one base. Each
+          // access is still at its word's offset from the symbol's own address.
+          const ofSymbol = (op: Op | undefined, i: number, sym0: string): op is Op =>
+            op !== undefined && symbol(op.operands[0]) === sym0 && wordAt(op, i, op.operands[0]);
+          const sym0 = symbol(base0);
           let sym: string | undefined;
-          if (
-            loaded &&
-            symbol(base0) !== undefined &&
-            loads.every((d, i) => wordAt(d, i, base0)) &&
-            settled(loads as Op[])
-          ) {
-            sym = symbol(base0);
+          if (loaded && sym0 !== undefined && loads.every((d, i) => ofSymbol(d, i, sym0)) && settled(loads as Op[])) {
+            sym = sym0;
           } else {
             // the words stored to a global just before the call: the last store of each, in order
             const stores = passed.map((v) =>
@@ -949,9 +950,9 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
                 .filter((op) => op.opcode === 'store' && op.operands[1] === v)
                 .at(-1),
             );
-            const sink = stores[0]?.operands[0];
-            if (symbol(sink) !== undefined && stores.every((st, i) => wordAt(st, i, sink)) && settled(stores as Op[])) {
-              sym = symbol(sink);
+            const sink = symbol(stores[0]?.operands[0]);
+            if (sink !== undefined && stores.every((st, i) => ofSymbol(st, i, sink)) && settled(stores as Op[])) {
+              sym = sink;
             }
           }
           if (sym !== undefined) {
