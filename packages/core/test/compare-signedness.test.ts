@@ -96,6 +96,30 @@ test('a byte-range compare keeps the signed spelling (both sides non-negative)',
   expect(emit(BYTECMP)).not.toContain('(u32)(u8)');
 });
 
+// A masked value against a constant: `x & 65535` is in [0, 65535] whatever `x` is, so the compare
+// means the same signed or unsigned and needs no cast (kmc's `unsigned short c = g() + 1; c >= 24`).
+const MASKCMP = `fn maskcmp {
+^bb0(%0: s32):
+  %1: s32 = const {value=65535}
+  %2: s32 = and %0, %1
+  %3: s32 = const {value=24}
+  %4: u32 = icmp_uge %2, %3
+  cond_br %4, ^bb1(), ^bb2()
+^bb1():
+  %5: s32 = const {value=1}
+  ret %5
+^bb2():
+  %6: s32 = const {value=0}
+  ret %6
+}
+`;
+
+test('a masked operand keeps the signed spelling (the mask makes it non-negative)', () => {
+  const src = emit(MASKCMP);
+  expect(src).toMatch(/\(a0 & 65535\) (<|>=) 24/);
+  expect(src).not.toContain('(u32)');
+});
+
 // Sign-agnostic compares never cast.
 const EQCMP = `fn eqcmp {
 ^bb0(%0: s32, %1: s32):

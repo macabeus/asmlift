@@ -313,7 +313,8 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
 /** Is the rendered expression provably in [0, 2^31) — the range where a signed and an unsigned
  *  compare agree on every input (and where gcc itself emits the unsigned branch for the signed
  *  spelling)? Narrow unsigned values are the everyday case: a `(u8)x` cast or a `u8`/`u16`
- *  deref promotes to a non-negative `int`. Conservative false elsewhere. */
+ *  deref promotes to a non-negative `int`, and so is a mask, `x & 0xFFFF`, whose result has no bit
+ *  its non-negative side lacks. Conservative false elsewhere. */
 export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
   switch (e.k) {
     case 'const':
@@ -321,6 +322,9 @@ export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
     case 'un':
       return e.op === '!';
     case 'bin':
+      if (e.op === '&') {
+        return provablyNonNegative(e.l, varType) || provablyNonNegative(e.r, varType);
+      }
       return ['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op);
     case 'cast':
       return e.to.kind === 'int' && e.to.width < 32 && !e.to.signed;
