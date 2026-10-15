@@ -1359,7 +1359,7 @@ describe('the classifier is measured against the messages core can throw, not on
   // THE OVERLAP TABLE ABOVE IS ALSO BOUNDED BY THE CORPUS, and its blind spot is stated wrongly in
   // `declines.ts` today: `switch-shapes` and `block-boundary` DO overlap — "jump-table target is
   // not a block boundary" is a strict superstring of "not a block boundary" — and the artifact
-  // cannot see it, because its one `switch-shapes` row declines on a different spelling. This is
+  // cannot see it, because every `switch-shapes` row declines on a different spelling. This is
   // the same table taken over core's messages instead, so an ordering dependency exists here
   // whether or not a row has ever printed it. Read `a > b` as "a is listed above b, and a wins".
   const TEMPLATE_OVERLAPS: string[] = [
@@ -1373,7 +1373,7 @@ describe('the classifier is measured against the messages core can throw, not on
     // The one no published marker can show. `jump-table target is not a block boundary` is a
     // strict superstring of `not a block boundary`, so ppc.ts's recovered-dispatch refusal matches
     // both, and `switch-shapes` wins only because it is listed first. The artifact cannot show it:
-    // its single `switch-shapes` row declines on `the jump table's case arms do not linearize`.
+    // every `switch-shapes` row in it declines on `the jump table's case arms do not linearize`.
     'switch-shapes > block-boundary',
     // thumb.ts's refusals of a function-scope static read from a literal pool open with the pool
     // reader's own prefix, which `pool-word-shape` is keyed on; the static is the answer.
