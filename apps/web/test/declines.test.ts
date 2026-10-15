@@ -950,6 +950,13 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // lr is not provably dead, or whose target is not a code label of this function — and no row
   // reaches either.
   //
+  // `unstored-slot` joins on the population reading: its last inhabitants were the four ido7.1
+  // uninitialised-local rows (uninit_join, uninit_sw, uninit_spill, uninitfirst), whose frame words
+  // frontend/mips.ts now reads as uninitialised locals of the frame the function owns
+  // (`ownedFrame`). The refusals keyed on its text still fire on a word outside that range — the
+  // caller's home area, an outgoing-area word of a function that calls, a frame that takes its own
+  // address — and no benchmark row reaches any of them.
+  //
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
@@ -965,6 +972,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'structs',
     'tu-scoped-name',
     'unread-data-directive',
+    'unstored-slot',
   ];
 
   test(`every other class is inhabited, and exactly these ${NO_ROWS.length} are not`, () => {
