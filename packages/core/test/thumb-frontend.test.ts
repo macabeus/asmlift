@@ -1120,6 +1120,23 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       expect(b).not.toContain('uninit');
     });
 
+    test('…and a captured store beneath every load still refuses, naming the bound it was judged by', () => {
+      // Compiled agbcc, canonical flags: `struct S16 s = gS; use(k); return s.c + s.d;` — the
+      // block copy's last word lands at [sp,#0], beneath the lowest load at [sp,#8].
+      const copy =
+        'v2:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr2, sp\n\tldr\tr1, .L3\n\tldmia\tr1!, {r3, r4, r5}\n' +
+        '\tstmia\tr2!, {r3, r4, r5}\n\tldr\tr1, [r1]\n\tstr\tr1, [r2]\n\tbl\tuse\n\tldr\tr0, [sp, #0x8]\n' +
+        '\tldr\tr1, [sp, #0xc]\n\tadd\tr0, r0, r1\n\tadd\tsp, sp, #0x10\n\tpop\t{r4, r5}\n\tpop\t{r1}\n\tbx\tr1\n' +
+        '.L3:\n\t.word\tgS\n';
+      const use = { prototypes: { use: { params: 1 } } };
+      expect(() => decompile('v2', copy, ARMV4T_AGBCC, use)).toThrow(/no load at or beneath it proves it a local's/);
+      const weakOnly = {
+        ...ARMV4T_AGBCC,
+        compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, outgoingAreaNeverLoaded: false },
+      };
+      expect(() => decompile('v2', copy, weakOnly, use)).toThrow(/no load after a call proves it a local's/);
+    });
+
     test('…and without the claim neither lifts', () => {
       const unclaimed = {
         ...ARMV4T_AGBCC,

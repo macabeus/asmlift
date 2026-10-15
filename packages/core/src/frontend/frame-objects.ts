@@ -320,8 +320,9 @@ export const FRAME_ESCAPE_GATES: readonly Gate<FrameEscape>[] = [
  *     width (`indexedWidth`), and two widths at one byte are the views of one union
  *     (`unionViews`), or refuse where no view names them (`unionRefusal`).
  *  In either model, a store through a capture that reaches a call unread on every path, beneath
- *  every word a load after a call proves a local's, declines: it may be that call's stack argument
- *  (`storedNeverRead`).
+ *  every word a load proves a local's, declines: it may be that call's stack argument
+ *  (`storedNeverRead`). Which load proves it is the compiler's premise: one after a call under
+ *  `localsAboveOutgoingArea`, and any load at all under `outgoingAreaNeverLoaded` (agbcc).
  *  Any use the audit cannot vouch for declines the whole function loudly. Nothing here guesses: a
  *  scalar's declared type is exactly the access type the machine used, and an object NO access
  *  reaches is sized by the frame reservation and left untyped.
@@ -1663,7 +1664,8 @@ function storedNeverRead(
   // audit sees at a fixed offset, and one the frontend read as a slot, which the IR does not show
   // (`slotLoads`). Without the slot loads, `mov r3, sp; strh r0, [r3]; … bl sink; ldr r0, [sp]`
   // refuses the `strh` on a word the code itself proves a local's.
-  if (target.compilerBehaviors.outgoingAreaNeverLoaded === true) {
+  const neverLoaded = target.compilerBehaviors.outgoingAreaNeverLoaded === true;
+  if (neverLoaded) {
     for (const b of live) {
       for (const op of irBlocks[b].ops) {
         const a = byOp.get(op);
@@ -1765,8 +1767,9 @@ function storedNeverRead(
           const callee = calleeName(op);
           fail(
             `the ${store.width}-byte store at [sp,#${store.at}) through a captured address reaches the call to ` +
-              `${callee === undefined ? 'an indirect callee' : `\`${callee}\``} unread on every path, and no load ` +
-              "after a call proves it a local's — it may be that call's stack argument, which the lift would drop",
+              `${callee === undefined ? 'an indirect callee' : `\`${callee}\``} unread on every path, and no ` +
+              `${neverLoaded ? 'load at or beneath it' : 'load after a call'} proves it a local's — it may be ` +
+              "that call's stack argument, which the lift would drop",
           );
         }
       }
