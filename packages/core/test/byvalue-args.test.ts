@@ -313,8 +313,8 @@ describe('a struct passed by value in argument registers', () => {
     });
   });
 
-  // `void byvalQ(s32 k) { takeQ(k, gQ); }` — before the refusal, the arity guess lifted it `takeQ();`
-  // wherever the declaration did not lay `struct Q` out, which compiles against no header
+  // `void byvalQ(s32 k) { takeQ(k, gQ); }` — where the declaration does not lay `struct Q` out, the
+  // arity guess would lift it `takeQ();`, which compiles against no header
   test.each([
     [
       'a struct the declaration does not lay out',
@@ -361,9 +361,9 @@ describe('a struct passed by value in argument registers', () => {
   });
 });
 
-// A variadic declaration's call is placed by the arity guess, which read a fixed 64-bit parameter
-// as two arguments: `takeLv(1, *p0, p0[1])` and `takeDv(1, 1074003968, 0)`, each compiling against
-// the header. A fixed parameter that is not one word refuses the call.
+// A variadic declaration's call is placed by the arity guess, which would read a fixed 64-bit
+// parameter as two arguments: `takeLv(1, *p0, p0[1])` and `takeDv(1, 1074003968, 0)`, each
+// compiling against the header. A fixed parameter that is not one word refuses the call.
 describe('a variadic declaration with a fixed parameter wider than a word', () => {
   // `void takeLv(s32 k, long long x, ...); void ul(void) { takeLv(1, gL); }`
   const UL =

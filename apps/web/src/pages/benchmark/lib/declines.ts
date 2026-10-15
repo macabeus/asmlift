@@ -607,11 +607,11 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // lay it out, it is a union, another parameter is unsized, or the declaration is variadic), it
     // runs past the argument registers, its words are not one frame object or one global read
     // whole at the call, or they are one global C cannot spell bare as the struct (a section
-    // symbol, or a symbol the declarations type as an array, an enclosing struct or another type).
-    // Before the first of them the call fell to the arity guess, which dropped the struct or read
-    // its words as separate arguments — C that compiles — so what this counts was wrong C once.
+    // symbol, a function-scope static, or a symbol the declarations type as an array, an enclosing
+    // struct or another type).
     //
-    // ITS FIRST INHABITANT IS `byvalregs` ON ido7.1, which reached the call before its frame.
+    // ITS INHABITANTS ARE `bvqp` ON agbcc AND BOTH MIPS TOOLCHAINS, AND `bvcg` ON gcc2.7.2kmc: words
+    // read through a pointer, and a `u8[4]` struct whose bytes gcc packs into a register.
     key: 'byvalue-arg',
     label: 'Struct arguments passed by value that a call plan cannot place or fold',
     pattern: / by value as its parameter [^,]+, and |by value, and its words are not one | by value off '/,

@@ -360,9 +360,9 @@ export function callDeclarations(
   // A STRUCT OR UNION PASSED BY VALUE THAT NO RULE PLACES REFUSES; IT IS NOT GUESSED. The arity
   // guess counts argument registers, and a struct is not one: it takes as many words as its size
   // (agbcc, O32), starts at an even word when it is 8-aligned (O32), or travels as the address of
-  // a copy (mwcc). A guess over it drops the struct or reads its words as separate arguments, and
-  // either is C that compiles. Measured: agbcc `takeQ(k, gQ)` with no layout for `struct Q` lifted
-  // `takeQ();`, and gcc2.7.2kmc `takeW(gW)`, where no rule placed it, `takeW(*(s32 *)&gW)`. This is
+  // a copy (mwcc). A guess over it drops the struct (agbcc `takeQ(k, gQ)` with no layout for
+  // `struct Q` guesses `takeQ();`) or reads its words as separate arguments (O32 `takeW(gW)` as
+  // `takeW(*(s32 *)&gW)`), and either is C that compiles. This is
   // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
   // word: a parameter the declaration names a struct or union is known not to be.
   //

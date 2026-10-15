@@ -61,10 +61,8 @@ export interface FnProto {
    *  as the whole of it; `wordParams` and `byValueParams` index into this list instead. A context
    *  states it (`prototypesFromContext`). Read only to refuse a call (`variadicRefusal`): the call
    *  is placed by the arity guess, which reads argument words one by one, so a fixed parameter that
-   *  is not one word is split or dropped. Measured: `void takeV(struct W, ...)` lifted
-   *  `takeV(*(s32 *)&gW, 5)` on every MIPS compiler and agbcc, `void takeL0(long long, ...)`
-   *  lifted `takeL0(*p0, p0[1])` on every MIPS compiler, and agbcc `takeDv(s32, double, ...)`
-   *  lifted `takeDv(1, 1074003968, 0)` — each compiles against the header. */
+   *  is not one word is split or dropped: `void takeV(struct W, ...)` would lift
+   *  `takeV(*(s32 *)&gW, 5)`, which compiles against the header. */
   variadicParams?: ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
@@ -185,9 +183,10 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits); and a list holding a
  *  spelling neither `declaredWidth` reads nor the declaration sizes — a project typedef
  *  (`bool8`, `Direction`, `TaskFunc`) that `wordParams` does not list, a by-value struct, a
- *  floating type. The by-value struct is answered elsewhere, below. The first two are not a reading of the list at all. The third is a list read to
- *  the end that cannot be CONVERTED: a parameter of unknown width occupies one argument register
- *  or two, and the choice moves every later argument's home. Where the declaration does settle it
+ *  floating type (a by-value struct is the exception below). The first two are not a reading of the
+ *  list at all. The third is a list read to the end that cannot be CONVERTED: a parameter of
+ *  unknown width occupies one argument register or two, and the choice moves every later argument's
+ *  home. Where the declaration does settle it
  *  — a typedef'd enum, an array or a function type the context resolved to one word, which
  *  `wordParams` lists (`paramClassOf`) — the parameter is 32 bits and the list converts.
  *

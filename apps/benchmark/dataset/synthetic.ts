@@ -9806,13 +9806,11 @@ export const SYNTHETIC: SynthSpec[] = [
   //  11. bvwg, bvqg, bvtg, bvqp, bvcg: a struct passed by value straight from a global (one, two and
   //      three words), through a pointer, and a `u8[4]` struct. O32 passes the words in argument
   //      registers (kmc through one `lui`/`lw` pair per word, IDO storing each into its home slot),
-  //      which the call plan folds into the global passed whole; through a pointer, and the `u8[4]`
-  //      struct (IDO copies it with `lwl`/`swl`, gcc packs its bytes into a register), decline on
-  //      every toolchain. mwcc_242_81 passes a copy's address and declines; agbcc is the control.
-  //      Before the call plan refused an unplaced by-value parameter, the MIPS rows lifted wrong C
-  //      through the arity guess (`takeW(*(s32 *)&gW)`, `takeT(*p0, p0[1], p0[2])`). One statement
-  //      per line: IDO schedules by source line. gcc2.7.2 is pinned in
-  //      packages/cli/test/matching/mips-calls.test.ts.
+  //      which the call plan folds into the global passed whole. Through a pointer declines on every
+  //      toolchain, and the `u8[4]` struct on both MIPS ones (IDO copies it with `lwl`/`swl`, gcc
+  //      packs its bytes into a register). mwcc_242_81 passes a copy's address and declines; agbcc
+  //      is the control. One statement per line: IDO schedules by source line. gcc2.7.2 is pinned
+  //      in packages/cli/test/matching/mips-calls.test.ts.
   // Set aside, each one kleod function: a `goto` into a shared tail (sound under the no-goto
   // rule), a jump-threaded break, a struct return inside a loop, a table case aliasing `default`,
   // a cross-jumped case `break`, `ldrsb` through a zero offset register, two indexed local tables,

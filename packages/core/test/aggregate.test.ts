@@ -184,11 +184,7 @@ describe('a struct passed by value in argument words', () => {
   });
 
   describe('on O32, which starts an 8-aligned aggregate at an even word', () => {
-    // the rule's own target, with words switched on whether or not the frontend lowers them yet
-    const O32 = {
-      ...MIPS_GCC,
-      compilerBehaviors: { ...MIPS_GCC.compilerBehaviors, byValueAggregateArgWords: true },
-    };
+    const O32 = MIPS_GCC;
     const L = { kind: 'struct' as const, members: [{ name: 'v', type: 's64' }] };
     const Q = { kind: 'struct' as const, members: ['a', 'b'].map((name) => ({ name, type: 'u32' })) };
 

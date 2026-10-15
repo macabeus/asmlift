@@ -328,8 +328,8 @@ const KMC_BVTG: Fixture = {
 const D = { kind: 'struct' as const, members: [{ name: 'd', type: 'double' }] };
 
 describe('a struct passed by value on O32', () => {
-  // Before any rule placed one, the arity guess lifted each of these to C that compiles and passes
-  // the wrong thing: `takeW(*(s32 *)&gW)`, `takeT(*p0, p0[1], p0[2])` and `takeQ(a0, *p0, p0[1])`.
+  // The arity guess would lift each of these to C that compiles and passes the wrong thing:
+  // `takeW(*(s32 *)&gW)`, `takeT(*p0, p0[1], p0[2])` and `takeQ(a0, *p0, p0[1])`.
   test.each([
     ['bvwg', KMC_BVWG, MIPS_GCC, '    takeW(gW);\n'],
     ['bvwg', IDO_BVWG, MIPS_IDO, '    takeW(gW);\n'],
@@ -348,8 +348,9 @@ describe('a struct passed by value on O32', () => {
     expect(lift('bvtg', IDO_BVTG, MIPS_IDO)).toBe('void bvtg(void) {\n    takeT(gT);\n}\n');
   });
 
-  // Before, `takeW(*a0)`, `takeW()` and `takeP(*p0 << 16 | p0[1])`: words off a pointer, an incoming
-  // register passed on untouched, and two halfwords packed in registers are not one object here.
+  // Words off a pointer, an incoming register passed on untouched, and two halfwords packed in
+  // registers are not one object here; the guess would lift `takeW(*a0)`, `takeW()` and
+  // `takeP(*p0 << 16 | p0[1])`.
   test.each([
     ['bvwp', KMC_BVWP, 'takeW', 'struct W'],
     ['byvalW', KMC_BYVALW, 'takeW', 'struct W'],
@@ -362,10 +363,10 @@ describe('a struct passed by value on O32', () => {
     );
   });
 
-  // A variadic declaration's call is placed by the arity guess, which lifted
+  // A variadic declaration's call is placed by the arity guess, which would lift
   // `takeV(*(s32 *)&gW, 5)` against `void takeV(struct W, ...)`, and `takeL0(*p0, p0[1])` against
   // `void takeL0(long long, ...)`: each compiles, and is wrong. A fixed parameter that is not one
-  // word refuses the call instead; one that is lets the guess stand.
+  // word refuses the call; one that is lets the guess stand.
   describe('a variadic declaration', () => {
     const ctx = (fixed: string) =>
       prototypesFromContext(
@@ -468,9 +469,8 @@ describe('a struct passed by value on O32', () => {
     });
 
     // One struct has many spellings: `typedef struct Q {…} Q;` names it `Q` and `struct Q`, and a
-    // header passes one and declares the other. Compared as strings, `takeQ(k, gQa)` over
-    // `void takeQ(s32, Q); extern struct Q gQa;` declined, and so did a symbol map's `struct Q`
-    // against a parameter spelled through a typedef. Both sides are resolved to the struct now.
+    // header passes one and declares the other, as `void takeQ(s32, Q); extern struct Q gQa;` does.
+    // Both sides are resolved to the struct they name, a symbol map's `struct Q` included.
     describe('through typedefs, the struct is compared, not its spelling', () => {
       const TYPEDEFS =
         'typedef int s32; typedef unsigned int u32;\n' +

@@ -154,7 +154,7 @@ describe('a struct passed by value from a global recompiles byte-exact', () => {
     60_000,
   );
 
-  // words read through a pointer are no object the fold names: before, `takeQ(a0, *a1, a1[1])`
+  // words read through a pointer are no object the fold names, and the arity guess would split them
   test.runIf(gcc272Available())(
     'gcc2.7.2: through a pointer it declines',
     () => {
