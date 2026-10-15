@@ -1123,12 +1123,15 @@ function liftOnce(
   // its first use, while `saveSlots` below fills progressively.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
   const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
+  // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
+  // builder asks for before that claims no frame, which only refuses more.
+  let ownedFrameOf: (() => { from: number; to: number } | undefined) | undefined;
   const ssa = makeSsaBuilder(
     name,
     blocks.length,
     preds,
     () => {
-      const owned = ownedFrame();
+      const owned = ownedFrameOf?.();
       return { ...registerLiveIns(target, savedRegs), ...(owned === undefined ? {} : { ownedLocals: owned }) };
     },
     (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
@@ -1346,27 +1349,22 @@ function liftOnce(
       }
       return undefined;
     }
-    const callSites = code.filter(isCallInstr);
-    if (callSites.length === 0) {
-      return { from: 0, to: frameSize };
-    }
     // A declaration the call lowering cannot carry out refuses THERE, in its own words; measured
     // here first, it claims nothing rather than pre-empting that refusal with another.
-    let words: (number | null)[];
+    let outgoing: ReturnType<typeof o32OutgoingArea>;
     try {
-      words = callSites.map((ins) => (ins.mnemonic === 'jal' ? stackWordsOf(jalCallee(ins, splat)) : null));
+      outgoing = o32OutgoingArea(code, stackWordsOf, splat);
     } catch (e) {
       if (e instanceof FrontendUnsupportedError) {
         return undefined;
       }
       throw e;
     }
-    if (words.some((w) => w === null)) {
-      return undefined;
-    }
-    const from = STACK_ARGS_AT + 4 * Math.max(0, ...(words as number[]));
-    return from < frameSize ? { from, to: frameSize } : undefined;
+    return outgoing.unsized === undefined && outgoing.end < frameSize
+      ? { from: outgoing.end, to: frameSize }
+      : undefined;
   };
+  ownedFrameOf = ownedFrame;
 
   // Hardware divide state (capabilities.hwDivide). MIPS `div`/`divu rs,rt` set the hi/lo pair
   // implicitly; a later `mflo`/`mfhi` reads the quotient/remainder. FUNCTION-scoped: GCC schedules
@@ -2467,6 +2465,25 @@ function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): 
  *  the outgoing area lies below whatever its extent, so there the undeclared call costs nothing.
  *  The saves are the prologue's: a store of `ra` or a callee-saved register in the entry block
  *  before anything writes it. */
+/** THE OUTGOING ARGUMENT AREA OF AN O32 FRAME, the part of it a callee may write: the a0..a3 home
+ *  words `[0,16)` and the widest call's stack words past them, by each callee's declaration. `end`
+ *  is where it stops, 0 in a leaf. `unsized` is the first call no declaration sizes (a `jal` nothing
+ *  declares, or a call through a register), counted in `end` as taking no stack words: what that
+ *  costs is each caller's to decide — `measureO32Frame` refuses where it could move the local area,
+ *  and `ownedFrame` claims no frame at all. */
+function o32OutgoingArea(
+  code: readonly Instr[],
+  stackWordsOf: (callee: string | undefined) => number | null,
+  splat: boolean,
+): { end: number; unsized: Instr | undefined } {
+  const calls = code.filter(isCallInstr);
+  const words = calls.map((ins) => (ins.mnemonic === 'jal' ? stackWordsOf(jalCallee(ins, splat)) : null));
+  return {
+    end: calls.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0)),
+    unsized: calls.find((_, k) => words[k] === null),
+  };
+}
+
 export function measureO32Frame({
   name,
   code,
@@ -2514,14 +2531,11 @@ export function measureO32Frame({
       written.add(writtenReg(ins)!);
     }
   }
-  const jals = code.filter((ins) => ins.mnemonic === 'jal');
-  const words = jals.map((ins) => stackWordsOf(jalCallee(ins, splat)));
-  const outgoingEnd = jals.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0));
+  const { end: outgoingEnd, unsized: undeclared } = o32OutgoingArea(code, stackWordsOf, splat);
   const area = o32LocalArea(rule, { frameSize, outgoingEnd, saves });
   if (area === null) {
     return null;
   }
-  const undeclared = jals.find((_, k) => words[k] === null);
   if (undeclared !== undefined) {
     const widest = o32LocalArea(rule, {
       frameSize,
