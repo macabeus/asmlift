@@ -57,3 +57,81 @@ test('the switch scrutinee is the index the bounds check tested, not the delay s
   expect(elsewhere).toContain('switch (a0)');
   expect(elsewhere).not.toContain('<< 2');
 });
+
+// THE TABLE'S HOLES NAME THE DEFAULT BLOCK ON MIPS TOO. IDO 7.1 `-O2` for the C that
+// `thumb-switch.test.ts`'s `HOLES_WITH_IFS` is compiled from (`synthetic:sw_jtholeif:ido7.1`):
+// cases 0, 2, 5, 6, 7 and no `default`, cases 5 and 7 an `if` that leaves the switch. Every arm
+// returns on its own (`jr ra`), so only the default-anchored retry gives the table an end, and the
+// end it derives is the out-of-range `jr ra` at 0x8c — which slots 1, 3 and 4 also hold. The rule
+// that lets the retry end there is not Thumb's: it reads the table, not the ISA.
+const holedTable: AsmData = {
+  sections: new Map([
+    ['.rodata', new Uint8Array([0x20, 0x8c, 0x2c, 0x8c, 0x8c, 0x38, 0x5c, 0x68].flatMap((w) => [0, 0, 0, w]))],
+  ]),
+  relocs: [
+    { section: '.text', offset: 0xc, type: 'R_MIPS_HI16', sym: 'jt', addend: 0 },
+    { section: '.text', offset: 0x14, type: 'R_MIPS_LO16', sym: 'jt', addend: 0 },
+    ...[0, 4, 8, 12, 16, 20, 24, 28].map((offset) => ({
+      section: '.rodata',
+      offset,
+      type: 'R_MIPS_32',
+      sym: '.text',
+      addend: 0,
+    })),
+  ],
+  symbols: new Map([
+    ['jt', { section: '.rodata', value: 0, size: 32, index: 1 }],
+    ['.text', { section: '.text', value: 0, size: 0, index: 2 }],
+  ]),
+  symbolCount: 2,
+  bigEndian: true,
+};
+
+test('a table whose holes name the default block ends the switch there, on IDO as on agbcc', () => {
+  const asm = obj(
+    ' 0:\tsltiu\tat,a0,8',
+    ' 4:\tbeqz\tat,8c <f+0x8c>',
+    ' 8:\tsll\tt6,a0,0x2',
+    ' c:\tlui\tat,0x0',
+    '10:\taddu\tat,at,t6',
+    '14:\tlw\tt6,0(at)',
+    '18:\tjr\tt6',
+    '1c:\tnop',
+    '20:\tli\tt7,1',
+    '24:\tjr\tra',
+    '28:\tsw\tt7,0(a1)',
+    '2c:\tli\tt8,2',
+    '30:\tjr\tra',
+    '34:\tsw\tt8,4(a1)',
+    '38:\tlw\tt9,12(a1)',
+    '3c:\tli\tt2,7',
+    '40:\taddiu\tt0,t9,2',
+    '44:\tslti\tat,t0,10',
+    '48:\tbnez\tat,8c <f+0x8c>',
+    '4c:\tsw\tt0,12(a1)',
+    '50:\tsw\tt2,16(a1)',
+    '54:\tjr\tra',
+    '58:\tsw\tzero,20(a1)',
+    '5c:\tli\tt3,4',
+    '60:\tjr\tra',
+    '64:\tsw\tt3,24(a1)',
+    '68:\tlw\tt4,12(a1)',
+    '6c:\tli\tt7,3',
+    '70:\tli\tt8,1',
+    '74:\taddiu\tt5,t4,-2',
+    '78:\tslti\tat,t5,9',
+    '7c:\tbnez\tat,8c <f+0x8c>',
+    '80:\tsw\tt5,12(a1)',
+    '84:\tsw\tt7,16(a1)',
+    '88:\tsw\tt8,20(a1)',
+    '8c:\tjr\tra',
+    '90:\tnop',
+  );
+  const out = decompile('f', asm, MIPS_IDO, { asmData: holedTable, prototypes: { f: { returnsVoid: true } } }).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (a0)');
+  expect(out).toMatch(/case 1:\s*case 3:\s*case 4:\s*break;/);
+  expect(out).not.toContain('default:');
+  expect(out).toMatch(/case 5:[^]*\[4\] = 7;[^]*case 6:/);
+  expect(out).toMatch(/case 7:[^]*\[4\] = 3;/);
+});

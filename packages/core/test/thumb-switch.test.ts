@@ -578,3 +578,52 @@ test('a table with no shared `ret` at all still falls back to the enclosing stop
   expect(count(out, 'sideA();')).toBe(1);
   expect(count(out, 'sideC();')).toBe(1);
 });
+
+// THE DEFAULT BLOCK IS ALSO THE ARM OF THE TABLE'S HOLES. agbcc `-O2` for
+// `void f(s32 x, s32 *p){ switch(x){case 0: p[0]=1; break; case 2: p[1]=2; break;
+//   case 5: p[3]+=2; if(p[3]>9){p[4]=7;p[5]=0;} break; case 6: p[6]=4; break;
+//   case 7: p[3]-=2; if(p[3]>8){p[4]=3;p[5]=1;} break;} }` (`synthetic:sw_jtholeif:agbcc`). Values
+// 1, 3 and 4 have no `case`, so their table slots hold `.L3`, the default edge's target — which makes
+// that block an arm. The retry derives `.L3` as the end and must not refuse it for being an arm: a
+// hole runs exactly what an unmatched value runs, so ending the switch there spells the holes
+// `case 1: case 3: case 4: break;`.
+const HOLES_WITH_IFS =
+  'f:\n\tadd\tr2, r1, #0\n\tcmp\tr0, #0x7\n\tbhi\t.L3\t@cond_branch\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .L14\n' +
+  '\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n\tmov\tpc, r0\n.L15:\n\t.align\t2, 0\n.L14:\n\t.word\t.L11\n\t.align\t2, 0\n' +
+  '\t.align\t2, 0\n.L11:\n\t.word\t.L4\n\t.word\t.L3\n\t.word\t.L5\n\t.word\t.L3\n\t.word\t.L3\n\t.word\t.L6\n' +
+  '\t.word\t.L8\n\t.word\t.L9\n' +
+  '.L4:\n\tmov\tr0, #0x1\n\tstr\tr0, [r2]\n\tb\t.L3\n.L5:\n\tmov\tr0, #0x2\n\tstr\tr0, [r2, #0x4]\n\tb\t.L3\n' +
+  '.L6:\n\tldr\tr0, [r2, #0xc]\n\tadd\tr0, r0, #0x2\n\tstr\tr0, [r2, #0xc]\n\tcmp\tr0, #0x9\n\tble\t.L3\t@cond_branch\n' +
+  '\tmov\tr0, #0x7\n\tstr\tr0, [r2, #0x10]\n\tmov\tr0, #0x0\n\tb\t.L13\n' +
+  '.L8:\n\tmov\tr0, #0x4\n\tstr\tr0, [r2, #0x18]\n\tb\t.L3\n' +
+  '.L9:\n\tldr\tr0, [r2, #0xc]\n\tsub\tr0, r0, #0x2\n\tstr\tr0, [r2, #0xc]\n\tcmp\tr0, #0x8\n\tble\t.L3\t@cond_branch\n' +
+  '\tmov\tr0, #0x3\n\tstr\tr0, [r2, #0x10]\n\tmov\tr0, #0x1\n' +
+  '.L13:\n\tstr\tr0, [r2, #0x14]\n.L3:\n\tbx\tlr\n';
+
+test('a table whose holes name the default block still ends the switch there', () => {
+  const out = decompile('f', HOLES_WITH_IFS, ARMV4T_AGBCC, { prototypes: { f: { returnsVoid: true } } }).source;
+  expect(out).not.toContain('ASMLIFT_ERROR');
+  expect(out).toContain('switch (');
+  // the holes are one empty arm that ends the switch, not a body moved after it
+  expect(out).toMatch(/case 1:\s*case 3:\s*case 4:\s*break;/);
+  expect(out).not.toContain('default:');
+  // each `if` arm keeps its own stores inside its case, once
+  expect(out).toMatch(/case 5:[^]*\[4\] = 7;[^]*case 6:/);
+  expect(out).toMatch(/case 7:[^]*\[4\] = 3;/);
+  expect(count(out, '[6] = 4;')).toBe(1);
+});
+
+test('the retry still refuses to end the switch at a case arm the default edge only runs into', () => {
+  // `switch(x){case 0: a(); goto c1; case 2: return 2; case 3: return 3; default: d(); case 1: b();}
+  // return 0;` in block form: case 0 and the default arm both reach case 1, and cases 2 and 3 return
+  // on their own. The end the anchored reading derives is case 1's ENTRY, an arm that is not the
+  // default edge's target. Ending the switch there lifts, but as `case 1: break;` with case 1's body
+  // moved after the switch (measured with the guard removed) — the spelling the retry refuses. The
+  // holes rule above does not reach it, so the stop reading's decline stands.
+  const asm =
+    'f:\n\tcmp\tr0, #0x3\n\tbhi\t.Ldef\n\tlsl\tr0, r0, #0x2\n\tldr\tr1, .Lp\n\tadd\tr0, r0, r1\n\tldr\tr0, [r0]\n' +
+    '\tmov\tpc, r0\n.Lp:\n\t.word\t.Ltab\n.Ltab:\n\t.word\t.Lc0\n\t.word\t.Lc1\n\t.word\t.Lc2\n\t.word\t.Lc3\n' +
+    '.Lc0:\n\tbl\ta\n\tb\t.Lc1\n.Lc2:\n\tmov\tr0, #0x2\n\tbx\tlr\n.Lc3:\n\tmov\tr0, #0x3\n\tbx\tlr\n' +
+    '.Ldef:\n\tbl\td\n.Lc1:\n\tbl\tb\n\tmov\tr0, #0x0\n\tbx\tlr\n';
+  expect(() => decompile('f', asm, ARMV4T_AGBCC)).toThrow(/case arms do not linearize/);
+});
