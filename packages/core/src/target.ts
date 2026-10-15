@@ -221,8 +221,8 @@ export interface TargetDescription {
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
    *  frontend/ssa.ts (LiveInModel.uninitRegs). Thumb and PPC state it and measure the save half
-   *  from their prologues (Thumb `savedRegs`, PPC `prologueSavedRegs`). ABSENT ⇒ no register partition
-   *  is claimed, which is what both MIPS targets take today.
+   *  from their prologues (Thumb `savedRegs`, PPC and MIPS `prologueSavedRegs`). ABSENT ⇒ no register
+   *  partition is claimed.
    *
    *  It must be DISJOINT from `argRegs`, and the frontend hands both to the builder so that is
    *  checked rather than trusted (`checkedLiveInModel`): a spelling that lands in both lists used
@@ -1182,6 +1182,26 @@ export const ARMV4T_AGBCC: TargetDescription = {
  *  halves (`$f13`, `$f15`) carry the other word of a DOUBLE argument, which no frontend lifts. */
 const O32_FPU: TargetDescription['fpu'] = { argRegs: ['$f12', '$f14'], returnReg: '$f0', slots: 'leading' };
 
+/** O32's register partition, shared by every compiler that targets it (`nonArgRegs` and
+ *  `scratchRegs`). Every general register but the four argument registers and the ones that are
+ *  never a local's home (`zero`, `k0`/`k1`, `gp`, `sp`, `ra`). `s8` and `fp` are the two spellings
+ *  of $30, listed both as `ARMV4T_AGBCC` lists `r12` and `ip`: objdump prints `s8`, and a spelling
+ *  nobody listed keeps its existing treatment. */
+const O32_NON_ARG_REGS = [
+  'at',
+  'v0',
+  'v1',
+  ...Array.from({ length: 10 }, (_, i) => `t${i}`),
+  ...Array.from({ length: 8 }, (_, i) => `s${i}`),
+  's8',
+  'fp',
+] as const;
+/** Of those, the ones O32 lets a callee use with no save — `at`, `v0`/`v1` and `t0`..`t9`, the
+ *  caller-saved registers that pass no argument. MEASURED on GCC_KMC_TOOLCHAIN and the stock gcc
+ *  2.7.2 toolchain at their synthetic flags: a leaf homes an uninitialised local in v0
+ *  (`uninit_join`: `bgtzl a0,…; sll v0,a0,1; jr ra; ori v0,v0,1`) and in v1 (`uninit_sw`). */
+const O32_SCRATCH_REGS = ['at', 'v0', 'v1', ...Array.from({ length: 10 }, (_, i) => `t${i}`)] as const;
+
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,
  *  statically recompiled to run natively (ido-static-recomp). Unlike agbcc
  *  it emits no textual asm, so asmlift's input is the DISASSEMBLED object (`mips-linux-gnu-
@@ -1216,6 +1236,14 @@ export const MIPS_IDO: TargetDescription = {
     't9',
     'ra',
   ],
+  // O32's partition (`O32_NON_ARG_REGS`). The frontend narrows it to the scratch half and the
+  // callee-saved registers its prologue saves (frontend/mips.ts `prologueSavedRegs`).
+  nonArgRegs: O32_NON_ARG_REGS,
+  scratchRegs: O32_SCRATCH_REGS,
+  // `t9` carries the callee's own address under `-KPIC`/`-mabicalls` (`addu gp,gp,t9`), a runtime
+  // input outside the C convention; neither N64 toolchain compiles that way, and a read of it no
+  // path's definition joins refuses rather than minting `uninit_t9`.
+  hiddenInputRegs: ['t9'],
   runtimeHelpers: IDO_RUNTIME_HELPERS,
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
   // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
@@ -1299,6 +1327,13 @@ export const MIPS_GCC: TargetDescription = {
     't9',
     'ra',
   ],
+  // O32's partition, as at MIPS_IDO. gcc adds a second hidden input: `v0` is its MIPS static
+  // chain (STATIC_CHAIN_REGNUM, GP_REG_FIRST + 2), which a NESTED function is handed. A read of it
+  // that no path's definition joins refuses; the uninitialised local the compiler homes there is
+  // assigned on some path (`uninit_join`), so it reaches the body through a join.
+  nonArgRegs: O32_NON_ARG_REGS,
+  scratchRegs: O32_SCRATCH_REGS,
+  hiddenInputRegs: ['v0', 't9'],
   runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,

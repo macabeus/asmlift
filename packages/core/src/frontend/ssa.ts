@@ -1074,7 +1074,8 @@ export function makeSsaBuilder(
               throw new FrontendUnsupportedError(
                 `cannot lift '${name}': ${reg} is read before anything writes it, and no path's ` +
                   `definition joins it — a hidden input this compiler's runtime passes there ` +
-                  `(a save routine's frame address, a member-function pointer), not an uninitialised local`,
+                  `(a save routine's frame address, a member-function pointer, a static chain, a PIC function's own ` +
+                  `address), not an uninitialised local`,
               );
             }
           }
