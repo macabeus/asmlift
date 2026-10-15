@@ -9789,8 +9789,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      post-dominator the loop exit, so the if joins outside the body. Declines on agbcc,
   //      ido7.1 and gcc2.7.2kmc; mwcc_242_81 lifts it (a control).
   //   8. sw_jtholeif: a jump table with holes and no `default`, two of whose arms hold an if
-  //      that leaves the switch. The early-end retry finds the default block, which is also the
-  //      holes' arm, and refuses. Declines on agbcc and ido7.1; gcc2.7.2kmc and mwcc_242_81 MATCH.
+  //      that leaves the switch. Only the early-end retry gives that switch an end, at the default
+  //      block, which the holes also make an arm, so the retry must not refuse it as a case arm.
+  //      agbcc and ido7.1 reach the retry; gcc2.7.2kmc and mwcc_242_81 do not (controls).
   //   9. uninitfirst: uninit_spill's local read BEFORE any store, so no store reaches the slot on
   //      any path. agbcc refuses the load as `sp` data; ido7.1 as a never-stored slot; mwcc_242_81
   //      as r1 used as data (not instrumented there, so that attribution is a prediction).
