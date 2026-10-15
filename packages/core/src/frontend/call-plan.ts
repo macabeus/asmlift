@@ -1045,7 +1045,7 @@ function bareStructRefusal(
   const passed = structNamed(spelling, context);
   const isPassed = (other: string): boolean =>
     other === spelling || (passed !== undefined && structNamed(other, context) === passed);
-  if (context?.declared.has(sym) && !(context.objectTypes.get(sym)?.some(isPassed) ?? false)) {
+  if (context?.declared.has(sym) && !isPassed(context.objectTypes.get(sym) ?? '')) {
     return `the declaration context does not declare it as ${spelling} (an array, an enclosing struct, another type)`;
   }
   const info = symbols === undefined ? undefined : symbolsByName(symbols, new Set([sym])).get(sym);

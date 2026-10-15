@@ -101,13 +101,13 @@ export interface ContextGlobals {
    *  dead-read pin's `declared-plain` gate reads (frontend/dead-reads.ts) — the source spelled a
    *  read of it plain, so a read the target keeps that nothing uses is not the source's `volatile`. */
   declared: ReadonlySet<string>;
-  /** The type each object of `declared` that is no array, pointer or function is declared as, with
-   *  no qualifier: its spelling as written, then what each typedef in its chain stands for
-   *  (`Q_t`, then `struct Q`). An object passed bare as a struct by value must be declared as that
-   *  struct (frontend/call-plan.ts `foldByValueArgs`): `gQs` over `extern struct Q gQs[4];` or
+  /** The type each object of `declared` that is no array, pointer or function is declared as, as
+   *  written (`Q_t`, `struct Q`). An object passed bare as a struct by value must be declared as
+   *  that struct (frontend/call-plan.ts `foldByValueArgs`): `gQs` over `extern struct Q gQs[4];` or
    *  `gO2` over `extern struct O2 gO2;` names the right address and is a type error as an argument
-   *  of `struct Q`. Compared by the struct it names (`structNamed`), not by spelling. */
-  objectTypes: ReadonlyMap<string, readonly string[]>;
+   *  of `struct Q`. Compared by the struct it names (`structNamed`, which follows the typedefs),
+   *  not by spelling. */
+  objectTypes: ReadonlyMap<string, string>;
   /** The struct or union each typedef name stands for, as far as its chain goes with no
    *  derivation: by its tag (`struct Q`), or, for an untagged body, by the typedef name that binds
    *  it. Read through `structNamed`, which is how two spellings of one struct are told to be one:
@@ -139,7 +139,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   const volatiles = new Set<string>();
   const pointeeVolatiles = new Set<string>();
   const declared = new Set<string>();
-  const objectTypes = new Map<string, readonly string[]>();
+  const objectTypes = new Map<string, string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
@@ -153,7 +153,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
         declared.add(x.name);
       }
       if (t.derivations.length === 0) {
-        objectTypes.set(x.name, typeChain(t, scope.typedefs));
+        objectTypes.set(x.name, t.spelling);
       }
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
@@ -201,22 +201,6 @@ function structOfTypedef(name: string, typedefs: ReadonlyMap<string, DeclaredTyp
     at = typedefs.get(binder);
   }
   return undefined;
-}
-
-/** `t`'s spelling, then the spelling of what each typedef it names stands for, as far as one with no
- *  derivation goes (`ContextGlobals.objectTypes`). */
-function typeChain(t: DeclaredType, typedefs: ReadonlyMap<string, DeclaredType>): string[] {
-  const out = [t.spelling];
-  let at = t;
-  while (at.type.kind === 'words' && at.type.words.length === 1 && at.unknownWords.length === 0) {
-    const next = typedefs.get(at.type.words[0]);
-    if (next === undefined || next.derivations.length > 0 || out.includes(next.spelling)) {
-      break;
-    }
-    out.push(next.spelling);
-    at = next;
-  }
-  return out;
 }
 
 /** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare
