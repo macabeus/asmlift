@@ -185,21 +185,138 @@ const KMC_BYVALG: Fixture = {
   ],
 };
 
+// `void bvqg(s32 k) { takeQ(k, gQ); }` — IDO also stores each word into its home slot
+const IDO_BVQG: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tlui\tt6,0x0',
+    '8:\tsw\tra,20(sp)',
+    'c:\taddiu\tt6,t6,0',
+    '10:\tlw\ta1,0(t6)',
+    '14:\tsw\ta1,4(sp)',
+    '18:\tlw\ta2,4(t6)',
+    '1c:\tjal\t0 <bvqg>',
+    '20:\tsw\ta2,8(sp)',
+    '24:\tlw\tra,20(sp)',
+    '28:\taddiu\tsp,sp,24',
+    '2c:\tjr\tra',
+    '30:\tnop',
+  ],
+  rs: [
+    [4, 'R_MIPS_HI16', 'gQ'],
+    [0xc, 'R_MIPS_LO16', 'gQ'],
+    [0x1c, 'R_MIPS_26', 'takeQ'],
+  ],
+};
+// `void bvtg(void) { takeT(gT); }` — and reads its first word back out of the home slot into a0
+const IDO_BVTG: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tlui\tt6,0x0',
+    '8:\tsw\tra,20(sp)',
+    'c:\taddiu\tt6,t6,0',
+    '10:\tlw\tt8,0(t6)',
+    '14:\tsw\tt8,0(sp)',
+    '18:\tlw\ta1,4(t6)',
+    '1c:\tlw\ta0,0(sp)',
+    '20:\tsw\ta1,4(sp)',
+    '24:\tlw\ta2,8(t6)',
+    '28:\tjal\t0 <bvtg>',
+    '2c:\tsw\ta2,8(sp)',
+    '30:\tlw\tra,20(sp)',
+    '34:\taddiu\tsp,sp,24',
+    '38:\tjr\tra',
+    '3c:\tnop',
+  ],
+  rs: [
+    [4, 'R_MIPS_HI16', 'gT'],
+    [0xc, 'R_MIPS_LO16', 'gT'],
+    [0x28, 'R_MIPS_26', 'takeT'],
+  ],
+};
+// gcc2.7.2: `struct D { double d; }; void takeD(s32 k, struct D d); void bvd(s32 k) { takeD(k, gD); }`
+//  passes the struct in a2:a3 and leaves a1 unset; `void takeD0(struct D d)` is passed a0:a1
+const GCC_BVD: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,16(sp)',
+    '8:\tlui\tv0,0x0',
+    'c:\taddiu\tv0,v0,0',
+    '10:\tlw\ta2,0(v0)',
+    '14:\tjal\t0 <bvd>',
+    '18:\tlw\ta3,4(v0)',
+    '1c:\tlw\tra,16(sp)',
+    '20:\tjr\tra',
+    '24:\taddiu\tsp,sp,24',
+  ],
+  rs: [
+    [8, 'R_MIPS_HI16', 'gD'],
+    [0xc, 'R_MIPS_LO16', 'gD'],
+    [0x14, 'R_MIPS_26', 'takeD'],
+  ],
+};
+const GCC_BVD0: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-24',
+    '4:\tsw\tra,16(sp)',
+    '8:\tlui\tv0,0x0',
+    'c:\taddiu\tv0,v0,0',
+    '10:\tlw\ta0,0(v0)',
+    '14:\tjal\t0 <bvd0>',
+    '18:\tlw\ta1,4(v0)',
+    '1c:\tlw\tra,16(sp)',
+    '20:\tjr\tra',
+    '24:\taddiu\tsp,sp,24',
+  ],
+  rs: [
+    [8, 'R_MIPS_HI16', 'gD'],
+    [0xc, 'R_MIPS_LO16', 'gD'],
+    [0x14, 'R_MIPS_26', 'takeD0'],
+  ],
+};
+const D = { kind: 'struct' as const, members: [{ name: 'd', type: 'double' }] };
+
 describe('a struct passed by value on O32', () => {
   // Before any rule placed one, the arity guess lifted each of these to C that compiles and passes
-  // the wrong thing: `takeW(*(s32 *)&gW)`, `takeT(*p0, p0[1], p0[2])`, `takeW(*a0)`, `takeW()` and
-  // `takeP(*p0 << 16 | p0[1])`.
+  // the wrong thing: `takeW(*(s32 *)&gW)`, `takeT(*p0, p0[1], p0[2])` and `takeQ(a0, *p0, p0[1])`.
   test.each([
-    ['bvwg', KMC_BVWG, MIPS_GCC, 'struct W'],
-    ['bvwg', IDO_BVWG, MIPS_IDO, 'struct W'],
-    ['bvwg', GCC_BVWG, MIPS_GCC, 'struct W'],
-    ['bvtg', GCC_BVTG, MIPS_GCC, 'struct T'],
-    ['bvwp', KMC_BVWP, MIPS_GCC, 'struct W'],
-    ['byvalW', KMC_BYVALW, MIPS_GCC, 'struct W'],
-    ['byvalG', KMC_BYVALG, MIPS_GCC, 'struct P'],
-  ] as const)('%s declines where no rule places it, and is not guessed', (name, f, target, spelling) => {
-    expect(() => lift(name, f, target)).toThrow(
-      new RegExp(`takes '${spelling}' by value as its parameter 1, and this target states no rule`),
+    ['bvwg', KMC_BVWG, MIPS_GCC, '    takeW(gW);\n'],
+    ['bvwg', IDO_BVWG, MIPS_IDO, '    takeW(gW);\n'],
+    ['bvwg', GCC_BVWG, MIPS_GCC, '    takeW(gW);\n'],
+    ['bvtg', GCC_BVTG, MIPS_GCC, '    takeT(gT);\n'],
+    ['bvqg', IDO_BVQG, MIPS_IDO, '    takeQ(a0, gQ);\n'],
+    ['bvtg', IDO_BVTG, MIPS_IDO, '    takeT(gT);\n'],
+  ] as const)('%s passes the global whole', (name, f, target, call) => {
+    expect(lift(name, f, target)).toContain(call);
+  });
+
+  test("IDO's stores into the home slots are the call's, not locals of this function", () => {
+    expect(lift('bvqg', IDO_BVQG, MIPS_IDO)).toBe('void bvqg(s32 a0) {\n    takeQ(a0, gQ);\n}\n');
+    expect(lift('bvtg', IDO_BVTG, MIPS_IDO)).toBe('void bvtg(void) {\n    takeT(gT);\n}\n');
+  });
+
+  // Before, `takeW(*a0)`, `takeW()` and `takeP(*p0 << 16 | p0[1])`: words off a pointer, an incoming
+  // register passed on untouched, and two halfwords packed in registers are not one object here.
+  test.each([
+    ['bvwp', KMC_BVWP, 'takeW', 'struct W'],
+    ['byvalW', KMC_BYVALW, 'takeW', 'struct W'],
+    ['byvalG', KMC_BYVALG, 'takeP', 'struct P'],
+  ] as const)('%s declines, and is not guessed', (name, f, callee, spelling) => {
+    expect(() => lift(name, f, MIPS_GCC)).toThrow(
+      new RegExp(
+        `the call to \`${callee}\` passes ${spelling} by value, and its words are not one frame object or one global`,
+      ),
+    );
+  });
+
+  test('an 8-aligned struct at word 0 is passed whole, and one after an s32 skips a1 and declines', () => {
+    const protos: Prototypes = {
+      takeD: { params: ['s32', 'struct D'], byValueLayouts: { 1: D }, returnsVoid: true },
+      takeD0: { params: ['struct D'], byValueLayouts: { 0: D }, returnsVoid: true },
+    };
+    expect(lift('bvd0', GCC_BVD0, MIPS_GCC, protos)).toContain('    takeD0(gD);\n');
+    expect(() => lift('bvd', GCC_BVD, MIPS_GCC, protos)).toThrow(
+      /`takeD` takes 'struct D' by value as its parameter 2, and it is aligned to 8 and would start at an odd argument word/,
     );
   });
 });

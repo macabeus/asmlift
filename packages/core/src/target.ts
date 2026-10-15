@@ -924,9 +924,12 @@ export interface TargetDescription {
     // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
     // BLKmode argument across r3 and the stack, FUNCTION_ARG_ADVANCE rounds its size to a word, and
     // no FUNCTION_ARG_PASS_BY_REFERENCE is defined); compiled, `struct A {u16 a,b,c,d; s8 e,f;}`
-    // is `ldr r0..r2` off the frame copy ahead of `bl take2`. ABSENT ⇒ the target passes one some
-    // other way or states nothing: mwcc passes the address of a copy, and O32 places one in words
-    // only after copying it into the argument home area, which the MIPS frontend does not read.
+    // is `ldr r0..r2` off the frame copy ahead of `bl take2`. O32 too, compiled on ido7.1,
+    // gcc2.7.2kmc and gcc2.7.2: `takeQ(s32 k, struct Q {u32 a, b;})` is passed `a1:a2` and a
+    // three-word struct `a0..a2` (an 8-aligned one starts at an even word:
+    // `alignedAggregateArgsStartEven`); IDO also stores each word into its home slot, which the
+    // call owns. ABSENT ⇒ the target passes one some other way or states nothing: mwcc passes the
+    // address of a copy (frontend/ppc.ts refuses it).
     byValueAggregateArgWords?: boolean;
     // AN AGGREGATE ALIGNED TO 8 STARTS AT AN EVEN ARGUMENT WORD, and the word it skips is left
     // empty (`aggregate.ts` `byValueCallArgs`, which places one at an even word and refuses one that
@@ -1235,6 +1238,7 @@ export const MIPS_IDO: TargetDescription = {
     largestAlignment: 8,
     // MEASURED on all three, the probe at the field.
     alignedAggregateArgsStartEven: true,
+    byValueAggregateArgWords: true,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
     // is both homed dead AND widened in its own argument register. raise/paramwidth.ts's header has
@@ -1366,6 +1370,7 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves, and on ido7.1: the probe at MIPS_IDO's.
     largestAlignment: 8,
     alignedAggregateArgsStartEven: true,
+    byValueAggregateArgWords: true,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and
     // gcc2.7.2 at -O1 alike — so the object carries no witness at all and the pass refuses.
