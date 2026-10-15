@@ -2,8 +2,8 @@
  * scripts/regen-dead-read-probes.ts. Every compiler measured deletes a plain read whose value
  * nothing uses, so each read here is `volatile`, and its result is never consumed: overwritten by
  * the next statement's load, or never read at all. The address plays no part, so the same reads
- * go through a literal, an extern symbol and a pointer parameter. `pairhi` is the exception, a
- * read that is NOT volatile and that the lift alone leaves unused. */
+ * go through a literal, an extern symbol and a pointer parameter. `pairhi` and the reads after it
+ * are the exceptions: reads that are NOT volatile, which a gate must leave plain. */
 typedef volatile unsigned int vu32;
 extern volatile int gR;
 

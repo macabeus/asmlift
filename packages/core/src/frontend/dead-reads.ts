@@ -66,32 +66,32 @@
  *     each frontend keeps a stack slot as a variable and drops a store nothing reloads, so a read
  *     only that store consumed looks dead because the lift dropped its consumer — KMC's `struct S
  *     s = *p; return s.a;` stores both words to the frame, IDO a `long long` it truncates;
- *   • a read the machine computed with (`computed`): an op the lift kept that consumes the value, or
- *     an extension of it, other than an extension — the compiler did not judge the value unused
- *     where it emitted that op. KMC splits a `long long` sum after flow, and keeps the high word's
- *     `addu` of `v += 3; return (int)v;`. A read that is the address of a read the pin left plain is
- *     that read's use, on the same ground;
+ *   • a read the machine computed with (`computed`): an op other than an extension consumes the
+ *     value, or an extension of it — an op dead in the lift too, but one the compiler emitted, so it
+ *     did not judge the value unused there. KMC splits a `long long` sum after flow, and keeps the
+ *     high word's `addu` of `v += 3; return (int)v;`. A read that is the address of a read the pin
+ *     left plain is that read's use, on the same ground;
  *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
  *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
  *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
- *  RESIDUE, untabled: a value an inline `asm("" :: "r"(x))` consumes. agbcc leaves the statement as a
- *  bare `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead. Where the asm
- *  took an extraction of it — sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character`
- *  with `lsl`/`lsr` before the asm — `computed` leaves it plain; a bare read the asm took whole is
- *  stamped, which keeps an access the machine made of ordinary RAM and changes no value. And agbcc splits a DImode move into two word loads AFTER flow has
- *  deleted dead insns (`thumb_load_double_from_address`), so the half nothing uses survives as a
- *  plain read: `int f(long long *p) { long long v = *p; return (int)v; }` keeps `ldr r1, [r0, #4]`.
- *  Under a declaration that pins a one-word return the pair gate does not fire, and that read is
- *  stamped: the C recompiles byte-exact and computes the same values, but says `volatile` where the
- *  source did not. Without such a declaration the pair gate refuses it on Thumb and PowerPC, as it
- *  refuses any read the lift leaves in the return pair's second register; O32 declines the v0:v1
- *  pair before the pin is asked. The merged arms `declared-plain` refuses are the same instructions
- *  as `gR;` where nothing declares the object, and as `*p;` through a pointer parameter, which no
- *  declaration here describes: those are stamped, byte-exact and value-preserving, with a
- *  `volatile` the source did not write. A declared void return is trusted the same way: a getter
- *  declared void has its returned read stamped. And hand-written assembly is outside the compiler
- *  claim altogether: klonoa's m4a `sub_0804FE6C` returns a byte in r3, which no ABI the lift models
- *  reads, so that byte's read is stamped where the lift's own return model has already lost it. */
+ *  RESIDUE, untabled: reads stamped with a `volatile` the source did not write. The first three
+ *  recompile byte-exact and compute the same values; the last two inherit a wrong input.
+ *   • a bare read an inline `asm("" :: "r"(x))` took whole. agbcc leaves the statement as a bare
+ *     `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead; where the asm took
+ *     an extraction (sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character` with
+ *     `lsl`/`lsr` first), `computed` leaves it plain;
+ *   • the unused half of a DImode move under a declaration that pins a one-word return. agbcc splits
+ *     the move into two word loads AFTER flow has deleted dead insns
+ *     (`thumb_load_double_from_address`), so `int f(long long *p) { long long v = *p; return
+ *     (int)v; }` keeps `ldr r1, [r0, #4]`. With no such declaration the pair gate refuses it on Thumb
+ *     and PowerPC; O32 declines the v0:v1 pair before the pin is asked;
+ *   • merged identical arms where no declaration is in evidence: the same instructions as `gR;` on an
+ *     object nothing declares, and as `*p;` through a pointer parameter;
+ *   • a read returned by a getter wrongly declared void: the declaration is trusted, as the pair
+ *     gate trusts a declared width;
+ *   • hand-written assembly, which is outside the compiler claim: klonoa's m4a `sub_0804FE6C` returns
+ *     a byte in r3, which no ABI the lift models reads, so the lift's return model has already lost
+ *     that byte and its read is stamped. */
 import { globalBaseOf, globalCellOf } from '../ir/alias';
 import type { Block, Op, Value } from '../ir/core';
 import { deadOps } from '../ir/discipline';
@@ -120,8 +120,8 @@ export interface DeadRead {
   /** its value, or a value only it feeds, was stored to the function's own stack
    *  (`DeadReadFacts.spilled`) */
   readonly spilled: boolean;
-  /** its value, or an extension of it, is an operand of an op the lift kept that is no extension
-   *  (`computedWith`): arithmetic, or the address of a read the pin left plain */
+  /** its value, or an extension of it, is an operand of an op that is no extension (`computedWith`):
+   *  arithmetic the machine emitted, or the address of a read the pin left plain */
   readonly computed: boolean;
   /** its address reaches one global, declared with no volatile byte where it reads (`declaredPlain`) */
   readonly declaredPlain: boolean;

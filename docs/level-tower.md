@@ -164,8 +164,8 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   (target.ts `keepsUnusedReadsAt`). Inheriting is NOT the rule for a value nothing referees. The
   dead-read pin (frontend/dead-reads.ts) reads that field in every candidate alike, with no dual
   for the differ to weigh, so a profile whose level no flag names, or a word the flag table cannot
-  read may set (mwcc `-opt off`), is judged at the value that withholds the stamp — the lift main
-  made — rather than the one that publishes a `volatile` the source may not have written. Every
+  read may set (mwcc `-opt off`), is judged at the value that withholds the stamp — the read
+  dropped as plain — rather than the one that publishes a `volatile` the source may not have written. Every
   family's unflagged compile was measured keeping, so the refusal is also the measured answer.
   A pair that comes out one way at one site and the other way at another, on the same
   compiler and the same flags, refutes the field as a declared default rather than its value:
@@ -953,9 +953,10 @@ device register, and the dead-read pin
 address — a RAM global, a pointer parameter, a literal — whose value the lifted function never
 uses, since a compiler deletes every plain read nobody uses. That pin is the ONE decider of the
 claim: it does not count the `ret` operand of a function declared void as a use, so the read-back a
-void function ends on is stamped there too, its refusals are a reported gate table (a level that
-keeps unused reads, a value a compare or an undeclared call's argument register consumed, a pair
-half a guessed return width left), and the structurer spells an unused read only where it is
+void function ends on is stamped there too, its refusals are a reported gate table (`DEAD_READ_GATES`:
+a level that keeps unused reads, a declaration that says plain, a value the lift lost the consumer
+of — a compare, a spill, an undeclared call's argument, a pair half a guessed return width left —
+and more), and the structurer spells an unused read only where it is
 qualified; `declared` is the stamp
 [`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
 an object the symbol map or the declaration context declares volatile as the lift is made, from the

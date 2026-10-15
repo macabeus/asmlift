@@ -1583,7 +1583,7 @@ export interface ResolvedTarget {
  *  never reach here unnamed), KMC gcc 2.7.2 with no `-O` emits `-O0`'s object byte for byte, and
  *  mwcc 2.4.2 with no level, with `-opt off` or with `-opt level=0` keeps `x = p[5]; x = 0;`'s
  *  `lwz r31, 20(r3)` as at `-O0`. And the cost runs one way: answering "keeps" where the compiler
- *  deletes withholds a `volatile` (main's lift, the read dropped), where answering "deletes" where it
+ *  deletes withholds a `volatile` (the read is dropped as plain), while answering "deletes" where it
  *  keeps publishes one the source never wrote — a value this stamp alone decides, with no candidate
  *  to referee it (docs/level-tower.md, A PROFILE OF A COMPILER INHERITS). */
 export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined): boolean {

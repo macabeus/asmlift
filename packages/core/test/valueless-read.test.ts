@@ -17,8 +17,9 @@
 //   • with no declared void return, the read IS the return value;
 //   • a read the pin's gates refuse (a sign-extending narrow read on agbcc) stays plain and dropped.
 //
-// A read of an object the map declares is spelled through the declaration where it qualifies the
-// object, and through a `volatile` cast on the object's address where it does not.
+// A read of an object the map declares follows the declaration: spelled by name where it qualifies
+// the cell the name reaches, through a `volatile` cast on the object's address where only a member
+// or a cast reaches the qualified cell, and left plain, so dropped, where it declares the cell plain.
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
