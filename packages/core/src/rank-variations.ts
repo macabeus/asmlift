@@ -234,16 +234,19 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // `(u32)` cast at an icmp_u* and no u32 reconciliation of a mixed-claimant declaration. The
   // default spells it unsigned, the one spelling that is value-faithful without a proof. This one
   // is a real source too: a compiler emits the unsigned branch from a signed compare where it
-  // PROVED both sides non-negative, and emission's provable set is smaller than the compiler's —
-  // before this default flipped, 15 match winners spelled it (results.json at d6e5299: agbcc 5,
-  // gcc2.7.2kmc 8, ido7.1 2). But
-  // where that proof does not hold, it compiles to a different compare, so a tree that spells one
+  // PROVED both sides non-negative, and emission's provable set is smaller than the compiler's.
+  // Where that proof does not hold it compiles to a different compare, so a tree that spells one
   // (`SFn.signedUnsignedCompare`) is `needsProof`: offered, scored, and published only byte-exact.
-  // A tree whose compares render unsigned anyway (an unsigned operand, a pointer) needs no proof,
-  // and differs from the default only in a declaration. A tie or a better nonmatch score is no
-  // evidence for it — `synthetic:selloop:gcc2.7.2kmc` once published `return 0 < v1;` over an
-  // s32 `v1` against `sltu v0,zero,v1` that way. Gated on the function having an unsigned compare
-  // at all.
+  // A tie or a better nonmatch score is no evidence for it (`synthetic:selloop:gcc2.7.2kmc`:
+  // `return 0 < v1;` over an s32 `v1` against `sltu v0,zero,v1`). A tree whose compares render
+  // unsigned at emission (an unsigned operand, a pointer) needs no proof, and differs from the
+  // default only in a declaration.
+  // KNOWN GAP, in the safe direction: the flag is set at emission, over the operand types lowerDef
+  // sees. A compare that renders unsigned only in the PRINTED C — a global the backend's pointer-cell
+  // legalization and the symbol declarations make `void *` (ptrcell.test.ts KR1, `g >= gLimit`) —
+  // still owes the proof, and is withheld on a nonmatch. Neither of those is in the tree: globals
+  // are absent from `declaredTypes`, so judging the finished tree instead would not release it.
+  // Gated on the function having an unsigned compare at all.
   {
     flag: 'signedCmp',
     name: 'signed-cmp',

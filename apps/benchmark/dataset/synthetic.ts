@@ -3079,8 +3079,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // `bcs`/`bcc` where an s32 home gives `bge`/`blt` — and the s32-home spelling of the same
   // hoist REGRESSES the real function, so a home variation without the width/sign decision cannot
   // close it). `ucmp` isolates the compare polarity alone, home-less: a u32 counter and a cast
-  // bound flip four branches and ripple two register picks — the /uns-cmp variation spells the
-  // compares from the lifted icmp facts, and `ucmp:agbcc` matches on it today;
+  // bound flip four branches and ripple two register picks — the default spells the compares
+  // unsigned from the lifted icmp facts (structure.ts unsignedCompareSpelling), and `ucmp:agbcc`
+  // matches on it today;
   // `ucmp:gcc2.7.2kmc` still stands at 15, unattributed. `entrypair` — one COMPUTED address
   // (`(a0 << 2) + (a1 << 1) + table`) held in a pointer local with its two bytes read at
   // `[r,#1]`/`[r,#0]`: the per-site spelling recomputes the chain and anchors a pool literal per
@@ -3096,11 +3097,11 @@ export const SYNTHETIC: SynthSpec[] = [
   // declines on the MIPS `jal` call link exactly as `call1:gcc2.7.2kmc` does. Those lanes
   // measure their links; the family's signal lanes are agbcc (all three), `ucmp:gcc2.7.2kmc`,
   // and `entrypair:mwcc_242_81`. `sizebound:agbcc` still stands at `nonmatch:8`, all of it
-  // argMismatch, on the `signed/expr-home/uns-cmp/livebase-block/volatile/initfirst/pollread`
+  // argMismatch, on the `signed/expr-home/livebase-block/volatile/initfirst/pollread`
   // winner — whose two sequential inner loops still count with two separate locals, and which
   // reads the u16 bound inline rather than through a pointer local. Neither spelling needs a new
   // row. `ucmp:agbcc` carries the shared-counter shape standalone and MATCHES today on
-  // `unsigned/uns-cmp/coalesce-v0-v1`, its two counters merged into one; whether that merged
+  // `unsigned/coalesce-v0-v1`, its two counters merged into one; whether that merged
   // spelling is absent from `sizebound`'s own fan or merely scores worse there is UNMEASURED.
   // The mwcc lane's residual is NOT the shared-base home the agbcc
   // lane closed (`/addr-home`): struct-arrays recovery consumes the full element address into
@@ -4647,7 +4648,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // shipped `single-cell` gate treats it exactly as the address threshold does: that base is
   // reached at one fixed offset only, so `-block` leaves `*(u16 *)0x03001048` inline and binds
   // 0x040000d4 alone. The row does not pay for that, because the gate never SUBTRACTS a
-  // candidate — sizebound stands at 8 on `signed/expr-home/uns-cmp/livebase-block/volatile/
+  // candidate — sizebound stands at 8 on `signed/expr-home/livebase-block/volatile/
   // initfirst/pollread`, the `-block` spelling itself — and that coexistence is the whole reason
   // a per-base predicate is allowed to be wrong. One that PRUNES has to be right.
   //
@@ -4768,18 +4769,18 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   // The re-spelling has a precondition the rest of the pipeline can take away from it: the guarded
   // arm's FIRST statement must be the init `v = X`, and the guard's other side must be X ITSELF.
-  // `unsguard` is the row where a sibling variation contends for that side. Its counter is unsigned,
-  // so the match needs `/uns-cmp` (structure.ts unsignedCompareSpelling) to spell the loop compares
-  // unsigned, and that variation renders the guard's constant side as `(u32)0` — not the init's `0` to
+  // `unsguard` is the row where the compare's own spelling contends for that side. Its counter is unsigned,
+  // so the match needs the loop compares spelled unsigned (structure.ts unsignedCompareSpelling, the
+  // default), and that spelling renders the guard's constant side as `(u32)0` — not the init's `0` to
   // a structural match. So this row is what pins the side match's CAST TOLERANCE (l3/initfirst.ts):
   // the match lives in the ONE candidate carrying both spellings, and each alone falls short —
-  //     unsigned/uns-cmp/livebase/volatile/initfirst ................  0  ← MATCH
-  //     unsigned/livebase/volatile/initfirst ........................  2
-  //     unsigned/uns-cmp/livebase/volatile ..........................  5
-  // What stands between them is the cast alone, not a hoist — `/uns-cmp` moves no statement — and
-  // the tolerance stops at WIDTH 32, since a narrowing cast is not the value `v = X` stores. This
-  // is the only row in the synthetic tier that tolerance moves, `sizebound` included,
-  // which carries both variations.
+  //     unsigned/livebase/volatile/initfirst ........................  0  ← MATCH
+  //     unsigned/signed-cmp/livebase/volatile/initfirst .............  2  (withheld)
+  //     unsigned/livebase/volatile ..................................  5
+  // What stands between them is the cast alone, not a hoist — the compare spelling moves no
+  // statement — and the tolerance stops at WIDTH 32, since a narrowing cast is not the value
+  // `v = X` stores. This is the only row in the synthetic tier that tolerance moves, `sizebound`
+  // included, which carries both spellings.
   //
   // `signguard` is the control, and it differs by ONE token: `s32 i` for `u32 i`. Nothing else in
   // the C changes, the halving keeps its `(u32)` cast so it stays an `lsr` on both, and asmlift
@@ -9062,43 +9063,43 @@ export const SYNTHETIC: SynthSpec[] = [
   //
   //   gcsetail   A loop on one side, one `store; return;` arm on the other, and the default store
   //              once after the join. Was 15/44 with 0 of its 36 candidates sharing the tail;
-  //              CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`, fan 36 → 52 (16 twin).
+  //              CLOSED: **MATCH** on `unsigned/shared-tail`, fan 36 → 52 (16 twin).
   //              m2c 13/41: it shares the default BLOCK through a `goto` into the else and stores
   //              a merged `void (*)()` local.
   //   gcsedup    CONTROL: `gcsetail` written the way asmlift writes it. MATCH on
-  //              `unsigned/uns-cmp/unmerge`, fan 64 and no twin — neither twin's gate fires, since
+  //              `unsigned/unmerge`, fan 64 and no twin — neither twin's gate fires, since
   //              no `ret` is reached from both sides of its outer `if`. It guards against a rewrite
   //              keyed on the lifted C: the shared tail costs 18/44 here, grafted. m2c 14/45.
   //   gcsepre    The loop BEFORE the `if`, one arm on each side. Was 5/45 with 0 of its 40
-  //              candidates sharing the tail; CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`,
+  //              candidates sharing the tail; CLOSED: **MATCH** on `unsigned/shared-tail`,
   //              fan 40 → 60 (20 twin). m2c 12/47.
   //   gcsepredup CONTROL: `gcsepre` with the default duplicated. MATCH on
-  //              `unsigned/uns-cmp/unmerge`, with the same IR and the same C as `gcsepre`. The
+  //              `unsigned/unmerge`, with the same IR and the same C as `gcsepre`. The
   //              sunk twin IS in its fan — 20 of 60 — and loses on score; as a DEFAULT it would
   //              take the row to 5/45. That pair is why the sink is ranked. m2c 16/47.
   //   gcsearms   Three arms, two of them after the loop, and one join kept. Was 18/63 with 0 of
   //              its 36 candidates sharing the tail; CLOSED: **MATCH** on
-  //              `unsigned/shared-tail/uns-cmp`, fan 36 → 68 (32 twin). m2c 8/59.
+  //              `unsigned/shared-tail`, fan 36 → 68 (32 twin). m2c 8/59.
   //   gcseinner  THE FOLLOW ALONE: `gcsetail` with an inner `if`/`else` in the arm. agbcc does NOT
   //              cross-jump it, so the arm keeps its own `ret` and the sink has nothing to copy.
   //              Was 21/55 with 0 of its 76 candidates sharing the tail; CLOSED: **MATCH** on
-  //              `unsigned/shared-ret/uns-cmp/unmerge`, fan 76 → 114 (38 `/shared-ret`, 0
+  //              `unsigned/shared-ret/unmerge`, fan 76 → 114 (38 `/shared-ret`, 0
   //              `/shared-tail`). m2c 13/51.
   //   gcseinnerdup CONTROL: `gcseinner` with the default duplicated. MATCH on
-  //              `unsigned/uns-cmp/unmerge`, fan 76 and no twin, and the shared tail grafted onto
+  //              `unsigned/unmerge`, fan 76 and no twin, and the shared tail grafted onto
   //              its winner costs 23/55. Its IR IS cross-jumped (instrumented), which is why a
   //              sink run as a DEFAULT takes it to 16/57. m2c 14/52.
   //   gcseflat   BOTH TERMS: two arms in the else-ladder, storing `fnA` and `fnC`. One is
   //              cross-jumped into the tail and the other keeps its own `ret`, so its tail is both
   //              a follow and a sink target. Was 19/53 with 0 of its 32 candidates sharing the
-  //              tail; CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`, fan 32 → 96, the one
+  //              tail; CLOSED: **MATCH** on `unsigned/shared-tail`, fan 32 → 96, the one
   //              row besides `gcsearms6` carrying both twins (32 each). m2c 13/51 with
   //              `PROBE_SLOTFNC_MAP`.
   //   gcsefwd    THE FORWARDER: four `u8` accumulators live across the loop, two arms on each
   //              side. The target reaches the tail store through a base reload (`mov r1, ip`) that
   //              the loop-side arms branch to and the else-side arms skip, and it lifts as a
   //              forwarder. Was 30/96 with 0 of its 108 candidates sharing the tail; CLOSED:
-  //              **MATCH** on `unsigned/shared-tail/reread-globals/uns-cmp`, fan 108 → 204 (96
+  //              **MATCH** on `unsigned/shared-tail/reread-globals`, fan 108 → 204 (96
   //              twin), with no threading step — the sink's source walk sees through the
   //              forwarder. m2c is `noncompile(1)` on its own output, which indexes `gP` as
   //              `*(gP + (i + 5))` against the `struct Slots` the ctx declares ("invalid operands
@@ -9106,7 +9107,7 @@ export const SYNTHETIC: SynthSpec[] = [
   //   gcsearms6  BOTH TERMS, and TWO sunk tails: three arms on each side, the closest synthetic to
   //              the real function's seven. agbcc cross-jumps two of the loop-free arms into a
   //              second tail of their own. Was 29/89 with 0 of its 44 candidates sharing the tail;
-  //              CLOSED: **MATCH** on `unsigned/shared-tail/uns-cmp`, fan 44 → 120 (32
+  //              CLOSED: **MATCH** on `unsigned/shared-tail`, fan 44 → 120 (32
   //              `/shared-tail`, 44 `/shared-ret`). m2c 23/86.
   //   gcsejoin   THE FOLLOW THE SINK DELETES, loop-free. The store after the join writes a
   //              PARAMETER (`p[20] = a`), so the tail block is stores-only and the sink sees a tail

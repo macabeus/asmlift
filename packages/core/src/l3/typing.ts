@@ -240,8 +240,8 @@ export function arithConversionSignedness(l: Expr, r: Expr, varType: VarTypes): 
  * instruction-for-instruction the same where `f` really returns `int`); a missing one is a
  * miscompile — with `u32 f(void);` in scope `f() / a` calls `__udivsi3` where the machine called
  * `__divsi3`, and `if (f() >= 0)` compiles to `bl f; mov r0, #0`, comparison and both arms gone.
- * The one consumer that reads `undefined` the other way is the unsigned-compare spelling's own gate, which is
- * asking whether an operand is ALREADY unsigned.
+ * The one consumer that reads `undefined` the other way is the unsigned-compare spelling's own
+ * gate, which is asking whether an operand is ALREADY unsigned.
  *
  * Anything narrower than 32 bits promotes to `int` and is therefore SIGNED, whatever it was
  * declared. Pointers, calls and markers are `undefined`.

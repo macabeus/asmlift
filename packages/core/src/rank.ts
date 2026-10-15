@@ -263,15 +263,15 @@ export interface Candidate {
    *   • `l3/intcell.ts` spells a global as the integer a project may have declared it, where a
    *     pointer declaration scales the offset it adds, and no declaration is in the asm.
    *
-   *
-   *  A STRUCTURE variation can carry the same obligation (`StructureVariation.needsProof`), and one does:
+   *  A STRUCTURE variation can carry the same obligation (`StructureVariation.needsProof`), and one
+   *  does:
    *
    *   • `/signed-cmp` spells an unsigned compare over signed-rendering operands, which compiles to a
    *     signed compare unless the operands are non-negative, and the compiler's proof of that is not
    *     in the asm.
    *
-   *  What settles all three instead is the object: a candidate that assembles to the target's own bytes
-   *  IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
+   *  What settles all three instead is the object: a candidate that assembles to the target's own
+   *  bytes IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
    *  either wins on proof or is WITHHELD — never shown as a best-effort answer. Both ranking drivers
    *  ask `withheldReason`, so neither can publish what the other would not. */
   matchOnly?: true;
