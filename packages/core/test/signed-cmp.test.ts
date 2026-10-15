@@ -47,6 +47,10 @@ describe('/signed-cmp', () => {
     const c = named('unsigned/signed-cmp');
     expect(c.source).toMatch(/void f\(u32 a0\)[\s\S]*s32 v0;[\s\S]*while \(v0 < a0 - 1\)/);
     expect(c.matchOnly).toBeUndefined();
+    // withheld for another variation's fact, it is not said to owe the compare's
+    const other = { ...c, variations: [...c.variations, 'int-cell' as const], matchOnly: true as const };
+    expect(withheldReason(other, { score: 3 })).toContain('declaring the global an integer');
+    expect(withheldReason(other, { score: 3 })).not.toContain('operands non-negative');
   });
 
   test('a better-scoring signed nonmatch is withheld, and a signed match wins', () => {

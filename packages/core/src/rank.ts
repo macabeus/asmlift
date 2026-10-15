@@ -385,7 +385,7 @@ export interface RankedResult<S> {
   candidates: Scored<S>[]; // sorted best (lowest) first
   /** candidates whose scoreFn threw — empty when every spelling built */
   dropped: DroppedCandidate[];
-  /** candidates withheld for want of a byte-exact proof — empty unless a `matchOnly` variation fired */
+  /** candidates withheld for want of a byte-exact proof — empty unless a `matchOnly` candidate scored a nonmatch */
   withheld: WithheldCandidate[];
 }
 
@@ -400,9 +400,8 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
     return null;
   }
   const facts = c.variations.flatMap((v) => PROOF_OBLIGATIONS.get(v) ?? []);
-  const cmpFact = PROOF_OBLIGATIONS.get('signed-cmp')!;
-  if (c.signedUnsignedCompare === true && !facts.includes(cmpFact)) {
-    facts.push(cmpFact);
+  if (c.signedUnsignedCompare === true) {
+    facts.push(SIGNED_COMPARE_OBLIGATION);
   }
   const fact = facts.length > 0 ? facts.join(' and on ') : 'a fact no gate over the C can settle';
   return `this spelling rests on ${fact}; only a byte-exact score proves it`;
@@ -412,8 +411,12 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
 const PROOF_OBLIGATIONS: ReadonlyMap<string, string> = new Map<VariationName, string>([
   ['unreduce', 'a device-behaviour fact no gate over the C can settle'],
   ['int-cell', 'the project declaring the global an integer, which the assembly does not show'],
-  ['signed-cmp', "the compiler having proved every unsigned compare's operands non-negative"],
 ]);
+
+/** The fact `Candidate.signedUnsignedCompare` rests on. Keyed by the flag, not by `/signed-cmp`:
+ *  that name is on candidates that owe nothing (a compare over a `u32` operand) and missing from
+ *  respells that do. */
+const SIGNED_COMPARE_OBLIGATION = "the compiler having proved every unsigned compare's operands non-negative";
 
 /** What a respell variation hands `respell`: its tree, or — when the variation cannot establish the
  *  candidate's semantics from inside the pass — the tree paired with that fact. `undefined`/`null`
@@ -1008,12 +1011,12 @@ export function enumerateCandidates(
   // of `/volatile` — a candidate that did not fail and is still in the fan. The order
   // is the candidates' own (`[pf.name, ...sp.variations]`), so a reported name and an enumerated
   // candidate's variations name the same candidate the same way.
+  //
   // THE COMPARE-SIGNEDNESS PROOF, asked of every tree a source is emitted from rather than of the
   // passes that build them. Emission pins each unsigned compare it lowers (structure.ts), but a
   // respell that substitutes into a compare — `/unmerge` putting an arm's `s16` global where the
-  // pinned `u32` local stood, against an `s32` parameter — re-renders it signed, and no pass-local
-  // gate could have seen it coming from a sibling it never runs beside. So the finished tree is
-  // judged once, here, and a signed rendering of an `icmp_u*` is `matchOnly` whoever produced it.
+  // pinned `u32` local stood, against an `s32` parameter — re-renders it signed. So the finished
+  // tree is judged here, and a signed rendering of an `icmp_u*` is `matchOnly` whoever produced it.
   const cmpProof = (tree: SFn): { matchOnly?: true; signedUnsignedCompare?: true } =>
     signedOverUnsignedCompare(tree) ? { matchOnly: true, signedUnsignedCompare: true } : {};
   const respellTree = (sfn: SFn, preRespellVariations: readonly Variation[] = []): TreeSources => {
