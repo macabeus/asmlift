@@ -2496,7 +2496,7 @@ function liftOnce(
 
   // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
   // before the audit judges the frame objects, that one among them.
-  foldByValueArgs(name, irBlocks, fill.calls);
+  foldByValueArgs(name, irBlocks, fill.calls, { symbols, context });
 
   // Prove every `laddr` this function emitted really does name storage of this function's own, at
   // a shape the machine states, or decline (auditFrameObjects); an accepted function then gets the

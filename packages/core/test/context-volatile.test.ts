@@ -21,6 +21,7 @@ const AGGREGATES_ONLY: ContextGlobals = {
   volatiles: new Set(),
   pointeeVolatiles: new Set(),
   declared: new Set(),
+  objectTypes: new Map(),
 };
 
 /** agbcc -O2 of `void vpoll(void){ while (gV.a == 0); }` */

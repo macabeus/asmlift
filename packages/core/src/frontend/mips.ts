@@ -2253,7 +2253,7 @@ function liftOnce(
 
   // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
   // before the audit judges the frame objects, as on Thumb.
-  foldByValueArgs(name, irBlocks, calls);
+  foldByValueArgs(name, irBlocks, calls, { symbols, context });
 
   if (frame !== null) {
     refuseEscapedFrameSums(name, irBlocks, frameSums);

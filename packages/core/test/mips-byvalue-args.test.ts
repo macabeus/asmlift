@@ -9,6 +9,8 @@ import { describe, expect, test } from 'vitest';
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
+import { globalsFromContext } from '../src/proto-context';
+import type { SymbolMap } from '../src/symbols';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
 
 /** Wrap objdump-shaped body lines (`addr:\tmnemonic\tops`) in a one-function listing. */
@@ -383,5 +385,59 @@ describe('a struct passed by value on O32', () => {
     // hand-edited: the second word is read off the symbol's start again
     const again: Fixture = { ...KMC_BVQG, lines: KMC_BVQG.lines.map((l) => l.replace('lw\ta2,4(a2)', 'lw\ta2,0(a2)')) };
     expect(() => lift('bvqg', again, MIPS_GCC)).toThrow(/its words are not one frame object or one global/);
+  });
+
+  // The struct at offset 0 of an array or of an enclosing struct sits at the symbol's own address,
+  // so the words alone cannot tell `takeQ(k, gQs[0])` from `takeQ(k, gQs)`; only the declaration can.
+  describe('the global is spelled bare only where its declaration is the struct passed', () => {
+    const named = (sym: string): Fixture => ({
+      ...KMC_BVQG,
+      rs: KMC_BVQG.rs.map(([o, t, s]) => [o, t, s === 'gQ' ? sym : s] as [number, string, string]),
+    });
+    const STRUCTS =
+      'typedef int s32; typedef unsigned int u32; struct Q { u32 a, b; }; struct O2 { struct Q q; u32 x; };\n';
+    const withContext = (sym: string, decl: string) =>
+      decompile('bvqg', obj('bvqg', named(sym).lines), MIPS_GCC, {
+        asmData: relocs(named(sym).rs),
+        prototypes: PROTOS,
+        contextGlobals: globalsFromContext(STRUCTS + decl, 'c'),
+      }).source;
+
+    test.each([
+      ['gQs', 'extern struct Q gQs[4];'],
+      ['gO2', 'extern struct O2 gO2;'],
+      ['gArr', 'extern u32 gArr[2];'],
+    ])('%s, declared `%s`, declines', (sym, decl) => {
+      expect(() => withContext(sym, decl)).toThrow(
+        new RegExp(
+          `passes struct Q by value off '${sym}', and the declaration context does not declare it as struct Q`,
+        ),
+      );
+    });
+
+    test.each([
+      ['gQ1', 'extern struct Q gQ1;'],
+      ['gQ2', 'typedef struct Q Q_t; extern const Q_t gQ2;'],
+    ])('%s, declared `%s`, is passed whole', (sym, decl) => {
+      expect(withContext(sym, decl)).toContain(`    takeQ(a0, ${sym});\n`);
+    });
+
+    test('a symbol the map types as an array declines', () => {
+      const symbols: SymbolMap = new Map([
+        [0x80100000, [{ name: 'gQs', kind: 'data', shape: 'array', size: 32, elemSize: 8 }]],
+      ]);
+      expect(() =>
+        decompile('bvqg', obj('bvqg', named('gQs').lines), MIPS_GCC, {
+          asmData: relocs(named('gQs').rs),
+          prototypes: PROTOS,
+          symbols,
+        }),
+      ).toThrow(/off 'gQs', and the symbol map types it as an array/);
+    });
+
+    // `static struct Q sA;` at the start of `.bss` is relocated against the section symbol
+    test('a section symbol declines', () => {
+      expect(() => lift('bvqg', named('.bss'), MIPS_GCC)).toThrow(/off '\.bss', and that is no name C can spell/);
+    });
   });
 });

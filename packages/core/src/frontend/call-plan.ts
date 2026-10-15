@@ -39,7 +39,9 @@ import {
   spellableProto,
   wordsOf,
 } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { type SymbolMap, symbolsByName } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import type { HighHalves } from './high-half';
@@ -854,8 +856,12 @@ function structReturnOf(
  *    object as the struct (frame-objects.ts `objectShapes`).
  *  - A GLOBAL the words are loaded off, or were just stored to — word accesses at consecutive words
  *    from the symbol's own address (`gaddr`, one or one per word of the same symbol), loaded off it
- *    or stored there as the very values passed. The operand becomes the symbol's address, spelled bare (`take(gS)`), which compiles
- *    only where the declarations type the global as the struct.
+ *    or stored there as the very values passed. The operand becomes the symbol's address, spelled
+ *    bare (`take(gS)`), which compiles only where the declarations type the global as the struct.
+ *    So a symbol C cannot name (a section symbol, `.bss`) refuses, and so does one the declaration
+ *    context or the symbol map types as anything else: the struct at offset 0 of `gQs[4]` or of
+ *    `struct O2 { struct Q q; … } gO2` sits at the symbol's own address too, and `take(gQs)` is a
+ *    type error against the header that declares it (`bareStructRefusal`).
  *
  *  Either way every access is unqualified and in the call's own block, and no store or call lies
  *  between the earliest of them and the call but those accesses themselves, so the object holds at
@@ -866,7 +872,12 @@ function structReturnOf(
  *  names the struct too (`passedAs`), so value numbering never merges it with a plain address of
  *  the symbol. The call then names which operands it passes by value (`byValue`, pairs of operand
  *  and declared parameter, read by ir/core.ts `byValueOperands`). */
-export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<CallDeclarations, 'declaredCall'>): void {
+export function foldByValueArgs(
+  name: string,
+  irBlocks: Block[],
+  calls: Pick<CallDeclarations, 'declaredCall'>,
+  declarations: { symbols: SymbolMap | undefined; context: ContextGlobals | undefined },
+): void {
   const defs = new Map<Value, { op: Op; blk: Block }>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
@@ -955,6 +966,13 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
               sym = sink;
             }
           }
+          const misnamed = sym === undefined ? undefined : bareStructRefusal(sym, type, declarations);
+          if (misnamed !== undefined) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': the call to \`${callee ?? 'a function pointer'}\` passes ${structSpelling(type)} ` +
+                `by value off '${sym}', and ${misnamed} — the struct would be spelled as that symbol bare`,
+            );
+          }
           if (sym !== undefined) {
             object = mkOp('gaddr', {
               results: [mkValue(T.ptr(type))],
@@ -996,6 +1014,29 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
       };
     }
   }
+}
+
+/** Why the global `sym` cannot be spelled bare as the struct `type` a call passes by value, or
+ *  undefined where it can: a C name, declared as exactly that struct where a declaration context or
+ *  a symbol map types it at all. A symbol neither types is declared from the call (declare.ts
+ *  `passedAs`). */
+function bareStructRefusal(
+  sym: string,
+  type: IrType,
+  { symbols, context }: { symbols: SymbolMap | undefined; context: ContextGlobals | undefined },
+): string | undefined {
+  if (!/^[A-Za-z_$][\w$]*$/.test(sym)) {
+    return "that is no name C can spell (a section symbol: the object is a static at its section's start)";
+  }
+  const spelling = structSpelling(type);
+  if (context?.declared.has(sym) && !(context.objectTypes.get(sym)?.includes(spelling) ?? false)) {
+    return `the declaration context does not declare it as ${spelling} (an array, an enclosing struct, another type)`;
+  }
+  const info = symbols === undefined ? undefined : symbolsByName(symbols, new Set([sym])).get(sym);
+  if (info?.shape !== undefined && !(info.shape === 'struct' && `struct ${info.structName}` === spelling)) {
+    return `the symbol map types it as ${info.shape === 'struct' ? `struct ${info.structName ?? '(untagged)'}` : `${info.shape === 'array' ? 'an' : 'a'} ${info.shape}`}`;
+  }
+  return undefined;
 }
 
 /** Removes `op` where nothing reads its result. */
