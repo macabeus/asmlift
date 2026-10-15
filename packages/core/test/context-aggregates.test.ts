@@ -266,6 +266,7 @@ const INFO: ContextGlobals = {
   pointeeVolatiles: new Set(),
   declared: new Set(['gInfo']),
   objectTypes: new Map(),
+  structTypes: new Map(),
 };
 
 describe('a context-declared aggregate the map does not describe', () => {

@@ -9,7 +9,7 @@ import { describe, expect, test } from 'vitest';
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
-import { globalsFromContext } from '../src/proto-context';
+import { globalsFromContext, prototypesFromContext } from '../src/proto-context';
 import type { SymbolMap } from '../src/symbols';
 import { MIPS_GCC, MIPS_IDO, type TargetDescription } from '../src/target';
 
@@ -433,6 +433,56 @@ describe('a struct passed by value on O32', () => {
           symbols,
         }),
       ).toThrow(/off 'gQs', and the symbol map types it as an array/);
+    });
+
+    // One struct has many spellings: `typedef struct Q {…} Q;` names it `Q` and `struct Q`, and a
+    // header passes one and declares the other. Compared as strings, `takeQ(k, gQa)` over
+    // `void takeQ(s32, Q); extern struct Q gQa;` declined, and so did a symbol map's `struct Q`
+    // against a parameter spelled through a typedef. Both sides are resolved to the struct now.
+    describe('through typedefs, the struct is compared, not its spelling', () => {
+      const TYPEDEFS =
+        'typedef int s32; typedef unsigned int u32;\n' +
+        'typedef struct Q { u32 a, b; } Q;\ntypedef struct Q Q_t;\ntypedef struct R { u32 a, b; } R;\n' +
+        'typedef struct { u32 a, b; } A1;\ntypedef struct { u32 a, b; } A2;\ntypedef A1 A1b;\n' +
+        'typedef struct S { u32 a, b; } S_t;\n';
+      const viaContext = (sym: string, takes: string, decl: string, symbols?: SymbolMap) => {
+        const ctx = `${TYPEDEFS}void takeQ(s32 k, ${takes} q);\n${decl}`;
+        return decompile('bvqg', obj('bvqg', named(sym).lines), MIPS_GCC, {
+          asmData: relocs(named(sym).rs),
+          prototypes: prototypesFromContext(ctx, 'c'),
+          contextGlobals: globalsFromContext(ctx, 'c'),
+          ...(symbols === undefined ? {} : { symbols }),
+        }).source;
+      };
+
+      test.each([
+        ['Q', 'extern struct Q gX;'],
+        ['struct Q', 'extern Q gX;'],
+        ['Q_t', 'extern struct Q gX;'],
+        ['Q', 'extern const Q_t gX;'],
+        ['A1', 'extern A1b gX;'],
+        ['S_t', 'extern struct S gX;'],
+      ])('a parameter spelled `%s`, off `%s`, is passed whole', (takes, decl) => {
+        expect(viaContext('gX', takes, decl)).toContain('    takeQ(a0, gX);\n');
+      });
+
+      test.each([
+        ['Q', 'extern R gX;'],
+        ['Q_t', 'extern struct R gX;'],
+        ['A1', 'extern A2 gX;'],
+      ])('a parameter spelled `%s`, off `%s`, another struct of the same members, declines', (takes, decl) => {
+        expect(() => viaContext('gX', takes, decl)).toThrow(/and the declaration context does not declare it as/);
+      });
+
+      const mapped = (structName: string): SymbolMap =>
+        new Map([[0x80100000, [{ name: 'gX', kind: 'data', shape: 'struct', structName, size: 8 }]]]);
+      test('a symbol the map types as the struct a typedef names is passed whole, and another struct declines', () => {
+        expect(viaContext('gX', 'Q', '', mapped('Q'))).toContain('    takeQ(a0, gX);\n');
+        expect(viaContext('gX', 'S_t', '', mapped('S'))).toContain('    takeQ(a0, gX);\n');
+        expect(() => viaContext('gX', 'Q', '', mapped('R'))).toThrow(
+          /off 'gX', and the symbol map types it as struct R/,
+        );
+      });
     });
 
     // `static struct Q sA;` at the start of `.bss` is relocated against the section symbol

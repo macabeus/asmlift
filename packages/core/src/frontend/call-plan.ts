@@ -39,7 +39,7 @@ import {
   spellableProto,
   wordsOf,
 } from '../proto';
-import type { ContextGlobals } from '../proto-context';
+import { type ContextGlobals, structNamed } from '../proto-context';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import { type SymbolMap, symbolsByName } from '../symbols';
 import type { TargetDescription } from '../target';
@@ -1028,12 +1028,25 @@ function bareStructRefusal(
   if (!/^[A-Za-z_$][\w$]*$/.test(sym)) {
     return "that is no name C can spell (a section symbol: the object is a static at its section's start)";
   }
+  // ONE STRUCT, MANY SPELLINGS: `typedef struct Q {…} Q_t;` spells it `Q_t` and `struct Q`, and a
+  // header passes one and declares the other. Each side is resolved to the struct it names through
+  // the context's typedefs (`structNamed`), and a spelling that resolves to none matches only as
+  // written.
   const spelling = structSpelling(type);
-  if (context?.declared.has(sym) && !(context.objectTypes.get(sym)?.includes(spelling) ?? false)) {
+  const passed = structNamed(spelling, context);
+  const isPassed = (other: string): boolean =>
+    other === spelling || (passed !== undefined && structNamed(other, context) === passed);
+  if (context?.declared.has(sym) && !(context.objectTypes.get(sym)?.some(isPassed) ?? false)) {
     return `the declaration context does not declare it as ${spelling} (an array, an enclosing struct, another type)`;
   }
   const info = symbols === undefined ? undefined : symbolsByName(symbols, new Set([sym])).get(sym);
-  if (info?.shape !== undefined && !(info.shape === 'struct' && `struct ${info.structName}` === spelling)) {
+  // the map names a struct by its tag, or by the typedef name that binds an untagged one
+  // (symbols.ts `structName`)
+  const mapped = info?.structName;
+  if (
+    info?.shape !== undefined &&
+    !(info.shape === 'struct' && mapped !== undefined && (isPassed(`struct ${mapped}`) || passed === mapped))
+  ) {
     return `the symbol map types it as ${info.shape === 'struct' ? `struct ${info.structName ?? '(untagged)'}` : `${info.shape === 'array' ? 'an' : 'a'} ${info.shape}`}`;
   }
   return undefined;

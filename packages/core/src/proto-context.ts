@@ -106,8 +106,28 @@ export interface ContextGlobals {
    *  (`Q_t`, then `struct Q`). An object passed bare as a struct by value must be declared as that
    *  struct (frontend/call-plan.ts `foldByValueArgs`): `gQs` over `extern struct Q gQs[4];` or
    *  `gO2` over `extern struct O2 gO2;` names the right address and is a type error as an argument
-   *  of `struct Q`. */
+   *  of `struct Q`. Compared by the struct it names (`structNamed`), not by spelling. */
   objectTypes: ReadonlyMap<string, readonly string[]>;
+  /** The struct or union each typedef name stands for, as far as its chain goes with no
+   *  derivation: by its tag (`struct Q`), or, for an untagged body, by the typedef name that binds
+   *  it. Read through `structNamed`, which is how two spellings of one struct are told to be one:
+   *  `typedef struct Q {…} Q;` spells the struct `Q`, `struct Q` and every other alias of it. */
+  structTypes: ReadonlyMap<string, string>;
+}
+
+/** The struct or union `spelling` names, qualifiers aside, by the identity `structTypes` keys it
+ *  under: `struct Tag` as written, or what a typedef name stands for. Undefined for any other
+ *  spelling, and for a name the context does not resolve to one — which then names no struct this
+ *  can compare, and the spellings are compared as written. */
+export function structNamed(
+  spelling: string,
+  context: Pick<ContextGlobals, 'structTypes'> | undefined,
+): string | undefined {
+  const s = spelling
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return /^(?:struct|union) [A-Za-z_$][\w$]*$/.test(s) ? s : context?.structTypes.get(s);
 }
 
 /** The globals a preprocessed declaration context declares, read for {@link ContextGlobals}. */
@@ -150,7 +170,37 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       }
     }
   }
-  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes };
+  const structTypes = new Map<string, string>();
+  for (const name of scope.typedefs.keys()) {
+    const named = structOfTypedef(name, scope.typedefs);
+    if (named !== undefined) {
+      structTypes.set(name, named);
+    }
+  }
+  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes };
+}
+
+/** The struct or union the typedef `name` stands for (`ContextGlobals.structTypes`): its tag where
+ *  the chain ends at one, else the last name in the chain, which binds the untagged body. */
+function structOfTypedef(name: string, typedefs: ReadonlyMap<string, DeclaredType>): string | undefined {
+  let binder = name;
+  let at = typedefs.get(name);
+  for (let hops = 0; hops < 16 && at !== undefined && at.derivations.length === 0; hops++) {
+    const t = at.type;
+    if (t.kind === 'tag') {
+      return t.keyword === 'struct' || t.keyword === 'union'
+        ? t.tag === undefined
+          ? binder
+          : `${t.keyword} ${t.tag}`
+        : undefined;
+    }
+    if (t.words.length !== 1 || at.unknownWords.length > 0) {
+      return undefined;
+    }
+    binder = t.words[0];
+    at = typedefs.get(binder);
+  }
+  return undefined;
 }
 
 /** `t`'s spelling, then the spelling of what each typedef it names stands for, as far as one with no
