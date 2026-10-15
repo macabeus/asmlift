@@ -937,9 +937,13 @@ as often as, the asm ran it is a fact about the OP, and
 [`ir/discipline.ts`](../packages/core/src/ir/discipline.ts) owns it as a _placement_, stamped by
 the one pass that knew it: `call` is its own opcode; `helper` is the stamp
 [`runtime-helpers.ts`](../packages/core/src/runtime-helpers.ts) `helperOp` puts on a value the asm
-computed by calling a runtime routine; `device` is the `volatile` the frontend's device pin
-([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)) puts on a memory
-access; `declared` is the stamp
+computed by calling a runtime routine; `device` is the `volatile` a frontend puts on a memory
+access, decided by two pins: the device pin
+([`frontend/device-pins.ts`](../packages/core/src/frontend/device-pins.ts)), for an access of a
+device register, and the dead-read pin
+([`frontend/dead-reads.ts`](../packages/core/src/frontend/dead-reads.ts)), for a read at any
+address — a RAM global, a pointer parameter, a literal — whose value the lifted function never
+uses, since a compiler deletes every plain read nobody uses; `declared` is the stamp
 [`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
 an object the symbol map or the declaration context declares volatile as the lift is made, from the
 map, the context's globals and the compiler the function is lifted and structured under, before any
@@ -952,7 +956,10 @@ through the same joins and loop steps by the same reader, so the object and poin
 reach different shapes. An access
 that does not reach its object through the object's own name carries the qualifier on a cast. A read the
 compiler could not have made of a `volatile` — agbcc's sign-extending narrow load — is left plain
-by this stamp and by the device pin alike, through the one predicate both ask. Every
+by this stamp and by both pins alike, through the one predicate all three ask. An access can carry
+both `declared` and `device` — a dead read of an object the map declares volatile — and the
+declaration places it first, as the spelling the source used; an L2 rebuilder carries both stamps,
+so a later stamp that no longer finds the declaration leaves the lift's `volatile` in place. Every
 pass then asks the module's questions of the op — `effectful`, `deletableWhenDead`,
 `spelledWhenDead`, `speculationUnsafe`, `orderSensitive`, `reevalUnsafe`, `counted` — rather than
 testing an opcode set, an L2 rebuilder carries the stamps through `carryDiscipline`, the contract
