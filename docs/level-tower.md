@@ -1497,18 +1497,26 @@ is an input (`hiddenInputRegs`, the rule mwcc's r11/r12 follow too). Meeting a j
 itself meeting a definition: a hand-written routine that carries a count round a loop in `t0` sends
 the entry value into the loop header's join, whose back-edge argument is only that count's next
 value. So the join must also take a definition the entry value does not feed — directly, or
-through an inner join one of whose arguments is one (`for (…) if (c) x = i;`). Sweeping every
+through an inner join one of whose arguments is one (`for (…) if (c) x = i;`, and a bit reader's
+`if (!bits) code = *src++; … code <<= 1;`, whose shift reaches the entry value only through that
+inner join). Independence is a least fixpoint grown from nothing, so no join counts as independent on
+the strength of its own back edge. Sweeping every
 function and label symbol in the vendored snowboardkids2, marioparty3 and af objects, **29,399**,
 that refusal fires on 18 and on no compiled function: twelve labels, four hand-written routines
 (one of them famicom_emu's loop-carried `t0`) and two data symbols disassembled as code. What it
 cannot describe is a local no path assigns at all, which declines; none of the 29,399 is one.
 
-A join every argument of which is undefined (`int x, y; if (c) x = y;`) is one uninitialised value,
-and the frontend collapses it into one before the structurer sees it: left standing, the
-structurer drops each edge copy of an undefined value and so every assignment to the join's local,
-and its own postcondition reports that local read but never assigned. In frame words (ido7.1) or
-saved registers (agbcc) that lifts; in two O32 scratch registers the hidden-input rule above refuses
-first, since neither entry value meets a definition.
+`int x, y; if (c) x = y;` joins two undefined values, and the structurer drops an undefined edge
+copy — right for the join's OWN storage, which that path left unassigned, and wrong for another's,
+where the machine ran a move. In frame words (ido7.1 copies 0(sp) into 4(sp)) two words are two
+locals, so the frontend gives such an edge its own undefined value marked `copied`, which the
+structurer spells as `x = uninit_sp0`. Registers carry no such identity — agbcc moves one local from
+r8 to a low register, and a spill writes a register's local to a word — so a join whose every
+argument is undefined there is collapsed into one uninitialised value before the structurer sees it
+(left standing it would lose every assignment to its local, which the structurer's postcondition
+reports as read but never assigned). In saved registers (agbcc) that lifts, with the move lost; in
+two O32 scratch registers the hidden-input rule above refuses first, since neither entry value meets
+a definition.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.

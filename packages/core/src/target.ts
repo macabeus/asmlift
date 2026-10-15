@@ -1214,7 +1214,13 @@ const O32_NON_ARG_REGS = [
  *  (`addiu t0,t0,-1; bnez t0,top`) meets only its own next value at the loop header — the fourth
  *  routine, famicom_emu's `func_8082E4E0_jp`, is that shape. The cost is a local NO path assigns
  *  (`int r; return r + a;` is `jr ra; addu v0,v0,a0` on gcc, and `int x, y; if (c) x = y;` joins
- *  v0 with v1), which refuses: none of the 29,399 is one. */
+ *  v0 with v1), which refuses: none of the 29,399 is one.
+ *
+ *  THE RULE'S BLIND SIDE is a count a hand-written routine is handed and RELOADS on an outer arm
+ *  (`… addiu t0,t0,-1; bnez t0,inner; …; bnezl a1,inner; li t0,8`): the outer arm's constant is a
+ *  definition of its own at the inner loop's header, so the entry value counts as met and the first
+ *  pass reads an undeclared local — the input is dropped. Nothing tells it from compiled
+ *  `int t; do { do { … } while (--t); t = 8; } while (--n);`, and none of the 29,399 is either. */
 const O32_SCRATCH_REGS = ['at', 'v0', 'v1', ...Array.from({ length: 10 }, (_, i) => `t${i}`)] as const;
 
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,
