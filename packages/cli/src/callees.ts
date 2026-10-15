@@ -9,6 +9,7 @@
 // So the CLI says which names it had to guess for. Purely textual: the asm the run was given, the
 // `--proto` table it parsed, and the project ELF's callee signatures — no pipeline stage involved,
 // and nothing here can change what is emitted.
+import { byValueCallArgs } from '@asmlift/core/aggregate';
 import { type Prototypes, declaredCallArgs } from '@asmlift/core/proto';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
@@ -68,17 +69,23 @@ export function calleeNames(asm: string, self?: string): string[] {
  *  The frontend's TIER decision asks a different question with a different reader
  *  (`declaresParams`): whether the project re-declared the callee at all, which decides if a
  *  runtime-helper or C-standard signature may answer for it. A list too vague to lay out is still
- *  a re-declaration. */
+ *  a re-declaration.
+ *
+ *  A list with a struct passed by value is laid out by `byValueCallArgs` instead, where the
+ *  declaration lays the struct out and the target passes it in argument words. */
 export function guessedArityCallees(
   asm: string,
   self: string,
-  target: Pick<TargetDescription, 'doubleArgWords'>,
+  target: TargetDescription,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
 ): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
   return calleeNames(asm, self).filter(
-    (n) => declaredCallArgs(prototypes?.[n], target) === undefined && declared?.get(n)?.signature === undefined,
+    (n) =>
+      declaredCallArgs(prototypes?.[n], target) === undefined &&
+      byValueCallArgs(prototypes?.[n], target) === undefined &&
+      declared?.get(n)?.signature === undefined,
   );
 }
 
@@ -86,7 +93,7 @@ export function guessedArityCallees(
 export function guessedArityNote(
   asm: string,
   self: string,
-  target: Pick<TargetDescription, 'doubleArgWords'>,
+  target: TargetDescription,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
 ): string {

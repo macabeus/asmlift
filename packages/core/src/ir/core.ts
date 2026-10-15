@@ -344,6 +344,15 @@ export function calleeName(op: Op): string | undefined {
   return op.opcode === 'call' && typeof op.attrs.target === 'string' ? op.attrs.target : undefined;
 }
 
+/** The operands a call passes a struct BY VALUE (frontend/call-plan.ts `foldByValueArgs`): each
+ *  one's place in the operands and the declared parameter it is. The two differ by more than a
+ *  hidden return pointer wherever a parameter before it takes two operands, so the parameter is
+ *  carried rather than re-derived. */
+export function byValueOperands(op: Op): { at: number; param: number }[] {
+  const pairs = op.opcode === 'call' ? ((op.attrs.byValue as number[] | undefined) ?? []) : [];
+  return Array.from({ length: pairs.length / 2 }, (_, i) => ({ at: pairs[2 * i], param: pairs[2 * i + 1] }));
+}
+
 /** A call's arguments, the callee value of an indirect call aside. */
 export function callArgs(op: Op): Value[] {
   return calleeValue(op) === undefined ? op.operands : op.operands.slice(0, -1);

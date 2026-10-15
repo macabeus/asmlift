@@ -4,9 +4,10 @@
 // and mwcc at the synthetic tier's.
 import { describe, expect, test } from 'vitest';
 
-import { aggregateSize, aggregateType, returnsInMemory } from '../src/aggregate';
+import { aggregateSize, aggregateType, byValueCallArgs, returnsInMemory } from '../src/aggregate';
 import { T } from '../src/ir/types';
-import type { AggregateLayout, AggregateMember } from '../src/proto';
+import { type AggregateLayout, type AggregateMember, spellableProto } from '../src/proto';
+import { prototypesFromContext } from '../src/proto-context';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
 const struct = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'struct', members });
@@ -141,4 +142,61 @@ test('a declared struct lays out as an IR struct, or not at all', () => {
   for (const layout of [union(m('a', 'u32')), struct(m('a', 'u8', { bits: 0 })), { kind: 'struct' as const }]) {
     expect(aggregateType('S', 'struct S', layout, ARMV4T_AGBCC)).toBeUndefined();
   }
+});
+
+// `struct A { u16 a, b, c, d; s8 e, f; };` — ten bytes, a word-rounded twelve on agbcc
+const PASSED_A = {
+  kind: 'struct' as const,
+  members: [
+    ...['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u16' })),
+    { name: 'e', type: 's8' },
+    { name: 'f', type: 's8' },
+  ],
+};
+
+describe('a struct passed by value in argument words', () => {
+  test('takes its size in words, after the parameters before it', () => {
+    const laid = byValueCallArgs({ params: ['s32', 'struct A'], byValueLayouts: { 1: PASSED_A } }, ARMV4T_AGBCC);
+    expect(laid?.widths).toEqual([32, 32, 32, 32]);
+    expect(laid?.byValue.map(({ param, word, words }) => ({ param, word, words }))).toEqual([
+      { param: 1, word: 1, words: 3 },
+    ]);
+    expect(laid?.byValue[0].type).toMatchObject({ kind: 'struct', name: 'A', size: 12, declared: 'struct A' });
+  });
+
+  test('a typedef name it is listed under is its tag', () => {
+    const laid = byValueCallArgs(
+      { params: ['A_t'], byValueParams: [0], byValueLayouts: { 0: PASSED_A } },
+      ARMV4T_AGBCC,
+    );
+    expect(laid?.byValue[0].type).toMatchObject({ name: 'A_t', declared: 'A_t' });
+  });
+
+  test('a target that passes one no other way, a union, or a struct it cannot size states nothing', () => {
+    const p = { params: ['struct A'], byValueLayouts: { 0: PASSED_A } };
+    expect(byValueCallArgs(p, PPC_MWCC)).toBeUndefined();
+    expect(
+      byValueCallArgs({ ...p, byValueLayouts: { 0: { ...PASSED_A, kind: 'union' as const } } }, ARMV4T_AGBCC),
+    ).toBeUndefined();
+    expect(byValueCallArgs({ ...p, byValueLayouts: { 0: { kind: 'struct' as const } } }, ARMV4T_AGBCC)).toBeUndefined();
+    // …and a declaration with no struct passed by value is `declaredCallArgs`'s alone
+    expect(byValueCallArgs({ params: ['s32'], byValueLayouts: {} }, ARMV4T_AGBCC)).toBeUndefined();
+  });
+
+  test('the callee prints only where the lift passed the struct, and its `void` with it', () => {
+    const p = { params: ['struct A'], byValueLayouts: { 0: PASSED_A }, returnsVoid: true };
+    expect(spellableProto(p, ARMV4T_AGBCC)).toBeUndefined();
+    expect(spellableProto(p, ARMV4T_AGBCC, undefined, new Set([0]))).toEqual({ params: ['struct A'], returns: 'void' });
+    expect(spellableProto({ ...p, byValueLayouts: {} }, ARMV4T_AGBCC, undefined, new Set([0]))).toBeUndefined();
+  });
+
+  test("a context's struct definition is the layout", () => {
+    const p = prototypesFromContext(
+      'struct A { unsigned short a, b, c, d; signed char e, f; }; typedef struct A A_t; void take2(struct A a); void t(int x, A_t y);',
+      'c',
+    );
+    expect(p.take2?.byValueLayouts?.[0]?.members?.map((m) => m.name)).toEqual(['a', 'b', 'c', 'd', 'e', 'f']);
+    expect(p.t?.byValueParams).toEqual([1]);
+    expect(Object.keys(p.t?.byValueLayouts ?? {})).toEqual(['1']);
+  });
 });

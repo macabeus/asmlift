@@ -700,8 +700,22 @@ read member by member through `mov rD, sp`, at two widths or two signednesses, o
 at a time; `chooseFrameModel` offers it before any shape is judged). In either model a store
 through a capture that reaches a call unread on every path, beneath the lowest word a load after a
 call proves a local's, refuses (`storedNeverRead`): agbcc builds a by-value struct or compound-literal
-stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and no
-prototype bounds it — a stated list is a lower bound, a variadic callee's a prefix. Where two widths
+stack argument in place through `mov rD, sp`, which the stack-argument analysis never sees, and a
+stated list bounds it only where it lays the struct out (`FnProto.byValueLayouts`) — otherwise it
+is a lower bound, a variadic callee's a prefix. A struct a declaration passes by value in argument
+REGISTERS (agbcc, `compilerBehaviors.byValueAggregateArgWords`) is not a store reaching the call: the
+call lowering hands its words over one operand each (`byValueWords`), and `foldByValueArgs`
+(frontend/call-plan.ts) folds them, before the audit, into the one object they hold at the call — a
+frame object they are loaded off, or a global they are loaded off or were just stored to — or
+refuses. It refuses a struct agbcc never puts in memory: an SImode struct of four bytes or less,
+built in a register by an `and`/`orr` insert chain over the register's stale bits, and an all-word
+eight-byte struct passed straight from the registers holding its members. Its words are values, not
+one object's, and spelling them would mean a local struct the lift invents, with member stores
+that cover every byte the chain leaves stale. The call names the operand it passes by value (`byValue`), the audit judges a frame one as
+the struct and counts the call as a read of it (`byValueReads`), and the one-object answer is
+withheld, since a call handed the one object would pass a pointer. Structure spells the operand
+bare, `take2(sp0)` or `sub_0803D4AC(a0, gUnk_03003620)`, and the declarations block defines the
+struct beside the callee's prototype. Where two widths
 meet at one byte of it, the L1 audit stamps the `laddr`
 with the views its accesses use (`views`, frontend/frame-objects.ts `unionViews`), and structure
 declares the storage as that union — every view an array tiling it — and spells each access through
@@ -847,12 +861,22 @@ inside the project's headers drops that block.
 | frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
 | frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
 | frontend    | PowerPC and MIPS: a memory return                                                                                     | only the register return is lowered there                            |
-| frame audit | a read, a write or any other use of the return temp                                                                   | a member of a returned struct is not modelled                        |
+| frame audit | a write, an index or any other use of the return temp but a read inside it                                            | only a read of a returned struct is modelled                         |
 | frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
 
-**What is NOT built.** Member reads of a returned struct: most of them decline in the Thumb slot
-model (`stack pointer used as data`) before the frame audit is asked, so building them in
-frame-objects.ts alone reaches few of the shapes. A struct returned straight into a global. MIPS,
+**Member reads of a returned struct.** A declared struct's range (`declaredStructs`: a return temp,
+or a struct passed by value) is an object boundary. The audit rebases onto its base both a
+capture's access inside it and an `laddr` strictly inside it that is only accessed — a
+`str r1, [sp,#4]` into a by-value struct is a member store, not a second object — and accepts reads
+of a return temp; structure spells an access that names one
+declared member exactly as that member (`sp0.a`), and an L1 pass, `raise/aggmembers.ts` in
+`PRE_RECOVERY_PASSES` after `structs`, splits a whole-word read of the temp — agbcc's only
+sp-relative load — into the member reads its uses take.
+
+**What is NOT built.** A member read of a returned struct at any word but the temp's first: the
+Thumb slot model keys `[sp,#k]` as a slot (`stack pointer used as data`); the audit would rebase it
+onto the temp, but the frontend does not route a word there to an `laddr` as it does inside a
+by-value block. A struct returned straight into a global. MIPS,
 which returns every struct through a hidden pointer and refuses the call: the pointer is an address
 in its frame (`addiu a0,sp,N`), and while MIPS now lifts such an address as a frame object through
 the same audit (`measureO32Frame` draws the O32 local area), its call lowering builds no memory

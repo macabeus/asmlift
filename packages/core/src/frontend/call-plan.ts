@@ -12,9 +12,17 @@
 // lowers to is built here too (`CallDeclarations.lower`), and asks the frontend (`CallSite`) only
 // what its ISA alone knows: how it reads and writes a register, where an argument word past the
 // registers lives, and how it builds a pair.
-import { aggregateType, returnedAggregate, returnsInMemory, returnsWithoutHiddenPointer } from '../aggregate';
-import { type Value, mkOp, mkValue } from '../ir/core';
-import { type IrType, T, typeToString } from '../ir/types';
+import {
+  type ByValueArg,
+  aggregateType,
+  byValueCallArgs,
+  returnedAggregate,
+  returnsInMemory,
+  returnsWithoutHiddenPointer,
+} from '../aggregate';
+import { type Block, type Op, type Value, calleeName, mkOp, mkValue } from '../ir/core';
+import { qualified } from '../ir/discipline';
+import { type IrType, T, structSpelling, typeToString } from '../ir/types';
 import {
   type FnProto,
   type ParamClass,
@@ -32,7 +40,7 @@ import {
 } from '../proto';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
 import type { TargetDescription } from '../target';
-import type { FrontendRefusal } from './errors';
+import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import type { HighHalves } from './high-half';
 import { type SsaBuilder, clobberedByCall, fallbackArgc } from './ssa';
 
@@ -70,6 +78,8 @@ export interface DeclaredCall {
   /** the declared parameter count, a hidden pointer aside */
   readonly params: number;
   readonly returned?: StructReturn | 'register';
+  /** each struct passed by value, by its first word in `widths` (a hidden pointer counted) */
+  readonly byValue?: readonly ByValueArg[];
 }
 
 /** WHAT A DECLARED PARAMETER IS, as far as where the caller places it goes (`paramClassOf`,
@@ -89,6 +99,8 @@ export interface CallPlan {
   readonly widths: readonly number[] | null;
   /** the indices into `widths` its declaration types `double` */
   readonly doubles: ReadonlySet<number>;
+  /** the structs its declaration passes by value, by their words in `widths` */
+  readonly byValue?: readonly ByValueArg[];
   readonly returns:
     | { readonly kind: 'word' }
     | { readonly kind: 'void' }
@@ -349,7 +361,9 @@ export function callDeclarations(
     // read a `Function` off `Object.prototype` as its prototype entry.
     const own = known(prototypes, callee);
     const returned = declaresAggregateReturn(own) ? structReturnOf(name, target, callee, own!, fail) : undefined;
-    const declared = declaredCallArgs(declarationOf(callee), target);
+    const declared:
+      { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
+      declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target);
     const params = declared?.widths;
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
@@ -366,7 +380,12 @@ export function callDeclarations(
     // (`double *`, `size_t`, or a bare parameter count, which states no type) lifts to a candidate
     // that does not compile. Asked of the printer's own predicate, so the two cannot disagree; a
     // headers world, which would declare the callee itself, loses the lift with it.
-    if (returned !== undefined && returned !== 'register' && spellableProto(own, target, returned.type) === undefined) {
+    const byValueParams = new Set((declared?.byValue ?? []).map((b) => b.param));
+    if (
+      returned !== undefined &&
+      returned !== 'register' &&
+      spellableProto(own, target, returned.type, byValueParams) === undefined
+    ) {
       const via = `\`${callee}\` returns ${returned.type.kind === 'struct' ? returned.type.declared : typeToString(returned.type)} through a hidden pointer in ${target.argRegs[0]}`;
       if (typeof own!.params === 'number') {
         fail(
@@ -380,11 +399,25 @@ export function callDeclarations(
     const hidden = returned === undefined || returned === 'register' ? 0 : 1;
     const widths = hidden === 0 ? params : [32, ...params];
     const doubles = new Set([...declared!.doubles].map((i) => i + hidden));
+    const byValue = (declared!.byValue ?? []).map((b) => ({
+      ...b,
+      word: b.word + hidden,
+    }));
+    // a struct partly in the registers and partly on the stack (FUNCTION_ARG_PARTIAL_NREGS) is
+    // one value read from two places, which no lowering here builds
+    const past = byValue.find((b) => wordsOf(widths.slice(0, b.word)) + b.words > target.argRegs.length);
+    if (past !== undefined) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` takes ${structSpelling(past.type)} by value as its parameter ${past.param + 1}, ` +
+          'and it does not fit in the argument registers — a struct passed on the stack is not modelled',
+      );
+    }
     return {
       widths,
       doubles,
-      params: params.length,
+      params: declared!.widths.length - byValue.reduce((n, b) => n + b.words - 1, 0),
       ...(returned === undefined ? {} : { returned }),
+      ...(byValue.length === 0 ? {} : { byValue }),
     };
   };
   // ONE CALL, IN THE ORDER ITS QUESTIONS REFUSE: a struct the lowering cannot receive and a float,
@@ -473,6 +506,7 @@ export function callDeclarations(
     return {
       widths: wide?.params ?? declared?.widths ?? null,
       doubles: declared?.doubles ?? new Set(),
+      ...(declared?.byValue === undefined ? {} : { byValue: declared.byValue }),
       returns: voided
         ? { kind: 'void' }
         : pair
@@ -642,6 +676,10 @@ export function callDeclarations(
     // spells a different number — `g(1.5)` as `g(1073217536, 0)`. The call names the operands
     // that are doubles, and `raise/floathelpers.ts` retypes each or refuses it.
     const doubles = p.doubles.size ? [...p.doubles] : undefined;
+    // A STRUCT PASSED BY VALUE IS ITS WORDS HERE, one operand each, and the call names them as
+    // (first operand, words) pairs: `foldByValueArgs` folds them into the one object passed whole
+    // once the function is lifted, or refuses.
+    const byValue = p.byValue?.flatMap((b) => [b.word, b.words]);
     const call = mkOp('call', {
       operands: indirect === undefined ? args : [...args, indirect.address],
       results: [res],
@@ -649,6 +687,7 @@ export function callDeclarations(
         ...(callee !== undefined ? { target: callee } : { indirect: true }),
         ...(sret === undefined ? {} : { sret: true }),
         ...(doubles === undefined ? {} : { doubles }),
+        ...(byValue === undefined ? {} : { byValueWords: byValue }),
       },
     });
     ssa.irBlocks[bi].ops.push(call);
@@ -763,4 +802,170 @@ function structReturnOf(
     );
   }
   return { type: type! };
+}
+
+/** A STRUCT PASSED BY VALUE IS THE ONE OBJECT ITS ARGUMENT WORDS HOLD AT THE CALL. The lowering
+ *  hands its words over one operand each (`byValueWords`, pairs of first operand and word count);
+ *  C passes the struct, so the words must be one object's, whole, and that object is what the call
+ *  is handed. Two objects are:
+ *
+ *  - A FRAME OBJECT the words are loaded off — word loads at consecutive words from one `laddr`
+ *    offset. The operand becomes that offset's address, and the frame-object audit judges the
+ *    object as the struct (frame-objects.ts `objectShapes`).
+ *  - A GLOBAL the words are loaded off, or were just stored to — word accesses at consecutive words
+ *    from the symbol's own address (`gaddr`), loaded off it or stored there as the very values
+ *    passed. The operand becomes the symbol's address, spelled bare (`take(gS)`), which compiles
+ *    only where the declarations type the global as the struct.
+ *
+ *  Either way every access is unqualified and in the call's own block, and no store or call lies
+ *  between the earliest of them and the call but those accesses themselves, so the object holds at
+ *  the call what the words carry. Every other source — registers computed in place, words off two
+ *  objects, off a pointer or into a global's interior, a store the call may not see last — refuses.
+ *
+ *  The operand's value is typed a pointer to the struct, and a global's `gaddr` is a fresh one that
+ *  names the struct too (`passedAs`), so value numbering never merges it with a plain address of
+ *  the symbol. The call then names which operands it passes by value (`byValue`, pairs of operand
+ *  and declared parameter, read by ir/core.ts `byValueOperands`). */
+export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<CallDeclarations, 'declaredCall'>): void {
+  const defs = new Map<Value, { op: Op; blk: Block }>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      op.results.forEach((r) => defs.set(r, { op, blk }));
+    }
+  }
+  for (const blk of irBlocks) {
+    for (const call of [...blk.ops]) {
+      const words = call.attrs.byValueWords as number[] | undefined;
+      if (call.opcode !== 'call' || words === undefined) {
+        continue;
+      }
+      const callee = calleeName(call);
+      const declared = callee === undefined ? undefined : calls.declaredCall(callee)?.byValue;
+      const pairs = Array.from({ length: words.length / 2 }, (_, i) => {
+        const arg = declared?.find((b) => b.word === words[2 * i]);
+        const type = arg?.type;
+        if (type?.kind !== 'struct' || type.size === undefined) {
+          throw new Error(`internal: a by-value operand of a call to '${callee}' has no declared struct`);
+        }
+        return { first: words[2 * i], n: words[2 * i + 1], type, param: arg!.param };
+      });
+      // highest first, so folding one leaves the operand places of those below it as they were
+      for (const { first, n, type } of [...pairs].sort((x, y) => y.first - x.first)) {
+        const at = blk.ops.indexOf(call);
+        const passed = call.operands.slice(first, first + n);
+        // the earliest of `accesses` and every op after it up to the call writes nothing else
+        const settled = (accesses: readonly Op[]): boolean => {
+          const earliest = Math.min(...accesses.map((a) => blk.ops.indexOf(a)));
+          return blk.ops
+            .slice(earliest, at)
+            .every((op) => (op.opcode !== 'store' && op.opcode !== 'call') || accesses.includes(op));
+        };
+        // a word access at byte `start + 4 * i` from one base, unqualified, in the call's block
+        // before the call
+        const wordAt = (op: Op | undefined, i: number, base: Value | undefined, start = 0): op is Op =>
+          op !== undefined &&
+          blk.ops.indexOf(op) >= 0 &&
+          blk.ops.indexOf(op) < at &&
+          (op.attrs.width as number) === 4 &&
+          !qualified(op) &&
+          op.operands[0] === base &&
+          (op.attrs.off as number) === start + 4 * i;
+        const loads = passed.map((v) => defs.get(v)?.op);
+        const loaded = loads.every((d) => d?.opcode === 'load');
+        const base0 = loaded ? loads[0]!.operands[0] : undefined;
+        const baseDef = base0 === undefined ? undefined : defs.get(base0)?.op;
+        let object: Op | undefined;
+        if (baseDef?.opcode === 'laddr') {
+          // off the frame, through one `laddr` or several of the same offset (the slot model mints
+          // one per access): the displacement is past the `laddr`'s own offset
+          const frameAt = loads.map((d) => {
+            const b = defs.get(d!.operands[0])?.op;
+            return b?.opcode === 'laddr' && wordAt(d, 0, d!.operands[0], d!.attrs.off as number)
+              ? (b.attrs.off as number) + (d!.attrs.off as number)
+              : undefined;
+          });
+          const from = frameAt[0];
+          if (from !== undefined && frameAt.every((o, i) => o === from + 4 * i) && settled(loads as Op[])) {
+            object = mkOp('laddr', { results: [mkValue(T.ptr(type))], attrs: { off: from } });
+          }
+        } else {
+          const symbol = (v: Value | undefined): string | undefined => {
+            const d = v === undefined ? undefined : defs.get(v)?.op;
+            return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : undefined;
+          };
+          let sym: string | undefined;
+          if (
+            loaded &&
+            symbol(base0) !== undefined &&
+            loads.every((d, i) => wordAt(d, i, base0)) &&
+            settled(loads as Op[])
+          ) {
+            sym = symbol(base0);
+          } else {
+            // the words stored to a global just before the call: the last store of each, in order
+            const stores = passed.map((v) =>
+              blk.ops
+                .slice(0, at)
+                .filter((op) => op.opcode === 'store' && op.operands[1] === v)
+                .at(-1),
+            );
+            const sink = stores[0]?.operands[0];
+            if (symbol(sink) !== undefined && stores.every((st, i) => wordAt(st, i, sink)) && settled(stores as Op[])) {
+              sym = symbol(sink);
+            }
+          }
+          if (sym !== undefined) {
+            object = mkOp('gaddr', {
+              results: [mkValue(T.ptr(type))],
+              attrs: { sym, passedAs: structSpelling(type) },
+            });
+          }
+        }
+        if (object === undefined) {
+          throw new FrontendUnsupportedError(
+            `cannot lift '${name}': the call to \`${callee ?? 'a function pointer'}\` passes ${structSpelling(type)} ` +
+              'by value, and its words are not one frame object or one global, read whole just before the call — ' +
+              'a struct passed from anywhere else is not modelled',
+          );
+        }
+        blk.ops.splice(at, 0, object);
+        call.operands.splice(first, n, object.results[0]);
+        // the word loads, and a frame address only they read, are dead now, and would otherwise be
+        // judged as accesses of their own
+        for (const d of loads) {
+          if (d?.opcode === 'load') {
+            dropIfUnread(irBlocks, d);
+            const b = defs.get(d.operands[0])?.op;
+            if (b?.opcode === 'laddr') {
+              dropIfUnread(irBlocks, b);
+            }
+          }
+        }
+      }
+      // each folded struct is one operand now: its place is its first word less the words folded
+      // below it
+      const sorted = [...pairs].sort((x, y) => x.first - y.first);
+      const { byValueWords: _, ...attrs } = call.attrs;
+      call.attrs = {
+        ...attrs,
+        byValue: sorted.flatMap(({ first, param }) => [
+          first - pairs.filter((q) => q.first < first).reduce((m, q) => m + q.n - 1, 0),
+          param,
+        ]),
+      };
+    }
+  }
+}
+
+/** Removes `op` where nothing reads its result. */
+function dropIfUnread(irBlocks: Block[], op: Op): void {
+  const r = op.results[0];
+  const read = irBlocks.some((b) =>
+    b.ops.some((x) => x.operands.includes(r) || x.successors.some((sc) => sc.args.includes(r))),
+  );
+  if (!read) {
+    for (const b of irBlocks) {
+      b.ops = b.ops.filter((x) => x !== op);
+    }
+  }
 }

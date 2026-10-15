@@ -63,6 +63,12 @@ export interface SymbolRef {
    *  by its tag (`name`), from the members the declaration lists (`layout`, which the lift laid out
    *  to type the call). */
   returned?: { readonly name: string; readonly declared: string; readonly layout: AggregateLayout };
+  /** The structs a call target is passed BY VALUE (`byValue` on the call), defined the same way
+   *  from the declaration's `byValueLayouts`. */
+  passed?: readonly { readonly name: string; readonly declared: string; readonly layout: AggregateLayout }[];
+  /** A global the body passes BARE as a struct by value (`take(gS)`), as `struct <tag>`: a
+   *  name-only declaration of it is that struct, which the call needs and an integer cell rejects. */
+  passedAs?: string;
   /** The bare name holds a pointer (l3/ptrcell.ts): the body stores one into it, or it meets such a
    *  cell bare and nothing reads it as an integer (`pointerPartners`). A name-only declaration of it
    *  is a pointer, which the store needs and an integer cell rejects on CodeWarrior. */
@@ -108,6 +114,10 @@ export function collectSymbolRefs(
   const called = new Set<string>();
   // the struct a callee returns through memory, as the lift typed it
   const returned = new Map<string, Extract<IrType, { kind: 'struct' }>>();
+  // …and the structs it is passed by value, by declared parameter index
+  const passedTo = new Map<string, Map<number, Extract<IrType, { kind: 'struct' }>>>();
+  // …and the globals passed bare as one, by its spelling
+  const passedAs = new Map<string, string>();
   const valueRefs = new Set<string>();
   const visitExpr = (e: Expr): void => {
     const named = mentionedName(e);
@@ -115,6 +125,17 @@ export function collectSymbolRefs(
       called.add(e.fn);
       if (e.sret?.kind === 'struct') {
         returned.set(e.fn, e.sret);
+      }
+      for (const b of e.byValue ?? []) {
+        if (b.type.kind === 'struct') {
+          const params = passedTo.get(e.fn) ?? passedTo.set(e.fn, new Map()).get(e.fn)!;
+          params.set(b.param, b.type);
+          const arg = e.args[b.at];
+          if (arg?.k === 'var' && symbols.has(arg.name)) {
+            // by its tag, which declares even ahead of the definition and of a typedef of it
+            passedAs.set(arg.name, `struct ${b.type.name}`);
+          }
+        }
       }
     } else if (named !== undefined && symbols.has(named)) {
       valueRefs.add(named);
@@ -154,7 +175,9 @@ export function collectSymbolRefs(
     // function, and `proto.ts` `prototypesFromSymbols` has already taken the `returns` off such an
     // entry, so what arrives here states no printable prototype and the frontend read the call the
     // same way. Testing it a second time at this reader is what let the two answer differently.
-    const p = Object.hasOwn(prototypes, n) ? spellableProto(prototypes[n], target, returned.get(n)) : undefined;
+    const p = Object.hasOwn(prototypes, n)
+      ? spellableProto(prototypes[n], target, returned.get(n), new Set(passedTo.get(n)?.keys()))
+      : undefined;
     if (p !== undefined) {
       proto.set(n, p);
     }
@@ -185,11 +208,21 @@ export function collectSymbolRefs(
       const r = p ? returned.get(n) : undefined;
       const layout = r?.declared !== undefined ? prototypes[n].returnLayout : undefined;
       const definition = layout?.members !== undefined ? { name: r!.name, declared: r!.declared!, layout } : undefined;
+      const passed = p
+        ? [...(passedTo.get(n) ?? [])].flatMap(([k, t]) => {
+            const l = prototypes[n].byValueLayouts?.[k];
+            return l?.members !== undefined && t.declared !== undefined
+              ? [{ name: t.name, declared: t.declared, layout: l }]
+              : [];
+          })
+        : [];
       return {
         name: n,
         info,
         ...(p ? { proto: p } : {}),
         ...(definition ? { returned: definition } : {}),
+        ...(passed.length > 0 ? { passed } : {}),
+        ...(passedAs.has(n) ? { passedAs: passedAs.get(n)! } : {}),
         ...(holdsPointer.has(n) ? { holdsPointer: true as const } : {}),
         ...(called.has(n) && !p ? { implicitCall: true as const } : {}),
       };

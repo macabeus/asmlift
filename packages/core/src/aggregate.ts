@@ -9,9 +9,11 @@ import {
   type FnProto,
   type Prototypes,
   STANDARD_SIGNATURES,
+  declaredCallArgs,
   declaredWidth,
   declaresAggregateReturn,
   declaresVoidReturn,
+  paramClassOf,
 } from './proto';
 import type { TargetDescription } from './target';
 
@@ -245,4 +247,66 @@ export function returnsWithoutHiddenPointer(
     return travelsInRegisters(own.returns);
   }
   return Object.hasOwn(STANDARD_SIGNATURES, callee) && travelsInRegisters(STANDARD_SIGNATURES[callee].returns);
+}
+
+/** One struct a call passes by value in argument words (`byValueCallArgs`). */
+export interface ByValueArg {
+  /** the parameter's index in the declared list */
+  readonly param: number;
+  /** its first argument word, among the call's widths */
+  readonly word: number;
+  /** how many argument words it fills */
+  readonly words: number;
+  /** the struct as the IR types it (`aggregateType`) */
+  readonly type: IrType;
+}
+
+/** THE ARGUMENT WORDS OF A DECLARATION WITH A STRUCT PASSED BY VALUE, where the target passes one
+ *  in consecutive argument words (`compilerBehaviors.byValueAggregateArgWords`) and the declaration
+ *  lays it out (`FnProto.byValueLayouts`): each such parameter is its size in words, rounded up, of
+ *  32 bits each, and every other parameter is what `declaredCallArgs` makes of it. Undefined where
+ *  any parameter is unsized that way — a union, a layout this target does not size, a spelling that
+ *  names no tag — and where the declaration passes no struct by value at all, which
+ *  `declaredCallArgs` answers alone. */
+export function byValueCallArgs(
+  p: FnProto | undefined,
+  target: TargetDescription,
+): { widths: readonly number[]; doubles: ReadonlySet<number>; byValue: readonly ByValueArg[] } | undefined {
+  if (
+    !Array.isArray(p?.params) ||
+    p.byValueLayouts === undefined ||
+    !target.compilerBehaviors.byValueAggregateArgWords
+  ) {
+    return undefined;
+  }
+  const widths: number[] = [];
+  const doubles = new Set<number>();
+  const byValue: ByValueArg[] = [];
+  for (const [i, t] of p.params.entries()) {
+    const layout = Object.hasOwn(p.byValueLayouts, i) ? p.byValueLayouts[i] : undefined;
+    if (layout !== undefined && paramClassOf(p, p.params, i) === 'by-value') {
+      const spelling = t
+        .replace(/\b(?:const|volatile)\b/g, ' ')
+        .trim()
+        .replace(/\s+/g, ' ');
+      const tag = /^(?:struct\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
+      const type = tag === undefined ? undefined : aggregateType(tag, spelling, layout, target);
+      if (type?.kind !== 'struct' || type.size === undefined) {
+        return undefined;
+      }
+      const words = Math.ceil(type.size / 4);
+      byValue.push({ param: i, word: widths.length, words, type });
+      widths.push(...Array.from({ length: words }, () => 32));
+      continue;
+    }
+    const one = declaredCallArgs({ params: [t], wordParams: p.wordParams?.includes(i) ? [0] : [] }, target);
+    if (one === undefined) {
+      return undefined;
+    }
+    if (one.doubles.size > 0) {
+      doubles.add(widths.length);
+    }
+    widths.push(...one.widths);
+  }
+  return byValue.length === 0 ? undefined : { widths, doubles, byValue };
 }

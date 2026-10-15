@@ -28,6 +28,24 @@ const Q1 =
   'q1:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk4\n' +
   '\tldr\tr0, [sp]\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tadd\tsp, sp, #0x4\n\tpop\t{r1}\n\tbx\tr1\n';
 // `struct S4 …; void u3(s32 x, s32 y){ mk4(x); mk4(y); }` — two temps, one per call
+// `struct S4 { u16 a; u8 b; u8 pad; }; struct S4 mk(u16, u16, u8); void sret4two(u16 x){ struct S4 s;
+//  s = mk(x, 0, 0x10); if (s.a != 0xFFFF) { gOut = s.a; gOut2 = s.b; } s = mk(x + 4, 0, 0x10); …same… }`
+//  — two temps, at [sp,#0] and [sp,#4], each read back whole (the synthetic row `sret4two`)
+const SRET4TWO =
+  'sret4two:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x8\n\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n' +
+  '\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tadd\tr1, r4, #0\n\tmov\tr2, #0x0\n\tmov\tr3, #0x10\n\tbl\tmk\n' +
+  '\tldr\tr2, [sp]\n\tlsl\tr0, r2, #0x10\n\tlsr\tr0, r0, #0x10\n\tldr\tr5, .L5\n\tcmp\tr0, r5\n\tbeq\t.L3\n' +
+  '\tldr\tr0, .L5+0x4\n\tstrh\tr2, [r0]\n\tldr\tr1, .L5+0x8\n\tlsr\tr0, r2, #0x10\n\tlsl\tr0, r0, #0x18\n' +
+  '\tlsr\tr0, r0, #0x18\n\tstrh\tr0, [r1]\n.L3:\n\tadd\tr1, r4, #0x4\n\tlsl\tr1, r1, #0x10\n\tlsr\tr1, r1, #0x10\n' +
+  '\tadd\tr0, sp, #0x4\n\tmov\tr2, #0x0\n\tmov\tr3, #0x10\n\tbl\tmk\n\tldr\tr2, [sp, #0x4]\n\tlsl\tr0, r2, #0x10\n' +
+  '\tlsr\tr0, r0, #0x10\n\tcmp\tr0, r5\n\tbeq\t.L4\n\tldr\tr0, .L5+0x4\n\tstrh\tr2, [r0]\n\tldr\tr1, .L5+0x8\n' +
+  '\tlsr\tr0, r2, #0x10\n\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n\tstrh\tr0, [r1]\n.L4:\n\tadd\tsp, sp, #0x8\n' +
+  '\tpop\t{r4, r5}\n\tpop\t{r0}\n\tbx\tr0\n.L6:\n\t.align\t2, 0\n.L5:\n\t.word\t0xffff\n\t.word\tgOut\n\t.word\tgOut2\n';
+// hand-written: [sp,#0] handed to `fill`, then staged as `five`'s fifth argument
+const FILL_THEN_FIVE =
+  'c2:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr4, r0, #0\n\tmov\tr0, sp\n\tbl\tfill\n' +
+  '\tldr\tr1, [sp]\n\tstr\tr1, [sp, #0x4]\n\tstr\tr4, [sp]\n\tmov\tr0, #0x1\n\tmov\tr1, #0x2\n\tmov\tr2, #0x3\n' +
+  '\tmov\tr3, #0x4\n\tbl\tfive\n\tadd\tsp, sp, #0x8\n\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
 const U3 =
   'u3:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr2, r0, #0\n\tadd\tr4, r1, #0\n\tmov\tr0, sp\n' +
   '\tadd\tr1, r2, #0\n\tbl\tmk4\n\tadd\tr0, sp, #0x4\n\tadd\tr1, r4, #0\n\tbl\tmk4\n\tadd\tsp, sp, #0x8\n' +
@@ -81,6 +99,15 @@ const BLOB64 = { kind: 'struct' as const, members: [{ name: 'w', type: 'u32', di
 const S4 = { kind: 'struct' as const, members: ['a', 'b', 'c', 'd'].map((name) => ({ name, type: 'u8' })) };
 const makeblob = { params: ['const void *'], returns: 'struct Blob64', returnLayout: BLOB64 };
 const mk4 = { params: ['s32'], returns: 'struct S4', returnLayout: S4 };
+const S4AB = {
+  kind: 'struct' as const,
+  members: [
+    { name: 'a', type: 'u16' },
+    { name: 'b', type: 'u8' },
+    { name: 'pad', type: 'u8' },
+  ],
+};
+const mkab = { params: ['u16', 'u16', 'u8'], returns: 'struct S4', returnLayout: S4AB };
 const mk8 = {
   params: ['u32'],
   returns: 'struct B8',
@@ -224,9 +251,80 @@ describe('a callee declared to return a struct through memory', () => {
     expect(source).toContain('sp4 = mk4(a1);');
   });
 
-  test('a read of the returned struct declines', () => {
-    expect(() => decompile('q1', Q1, ARMV4T_AGBCC, { prototypes: { mk4 } })).toThrow(
-      /the object at \[sp,#0\) is where `mk4` returns struct S4, and this function also reads or writes it/,
+  // no call takes a stack word, so [sp,#0] is the first temp's, not an outgoing argument; each
+  // member is read where the source used it, the word load being agbcc's CSE of those reads
+  test('a temp at the frame base of a wider frame is an object', () => {
+    const { source } = decompile('sret4two', SRET4TWO, ARMV4T_AGBCC, { prototypes: { mk: mkab } });
+    expect(source).toContain('    struct S4 sp0;\n    struct S4 sp4;\n    sp0 = mk(a0, 0, 16);');
+    expect(source).toMatch(/if \(sp0\.a != v0\) \{\n {8}gOut = sp0\.a;\n {8}gOut2 = sp0\.b;\n {4}\}/);
+    expect(source).toMatch(/if \(sp4\.a != v0\) \{\n {8}gOut = sp4\.a;\n {8}gOut2 = sp4\.b;\n {4}\}/);
+  });
+
+  test('a frame base staged as a fifth argument is not an object', () => {
+    const prototypes = {
+      fill: { params: ['u32 *'], returnsVoid: true as const },
+      five: { params: ['s32', 's32', 's32', 's32', 's32'], returnsVoid: true as const },
+    };
+    expect(() => decompile('c2', FILL_THEN_FIVE, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /\[sp,#0\] escapes this function, so the words from there up are an object's/,
+    );
+  });
+
+  test('a read of the returned struct reads its member', () => {
+    expect(decompile('q1', Q1, ARMV4T_AGBCC, { prototypes: { mk4 } }).source).toContain(
+      '    sp0 = mk4(a0);\n    return sp0.a;',
+    );
+  });
+
+  // `mov r0, sp / bl mk4` then one use of the word read back: the low byte, the top byte, a middle
+  // byte, two bytes that are no one member, the word whole
+  test('each use of the word names the member whose bits it keeps, or the word stays one read', () => {
+    const q = (use: string) =>
+      decompile(
+        'q',
+        Q1.replace('q1:', 'q:').replace('\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n', use),
+        ARMV4T_AGBCC,
+        {
+          prototypes: { mk4 },
+        },
+      ).source;
+    expect(q('\tlsl\tr0, r0, #0x18\n\tlsr\tr0, r0, #0x18\n')).toContain('return sp0.a;');
+    expect(q('\tlsr\tr0, r0, #0x18\n')).toContain('return sp0.d;');
+    expect(q('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x18\n')).toContain('return sp0.b;');
+    expect(q('\tlsl\tr0, r0, #0x10\n\tlsr\tr0, r0, #0x10\n')).toContain('return (u16)*(s32 *)&sp0;');
+    expect(q('')).toContain('return *(s32 *)&sp0;');
+  });
+
+  // the word read before a second call fills the same temp, its member used in a later block: read
+  // where the word was, since the call between rewrites it; with no call between, read at the use
+  test('a member is read at its use only where nothing rewrites the struct in between', () => {
+    const twice =
+      'q:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x4\n\tadd\tr5, r1, #0\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n' +
+      '\tbl\tmk4\n\tldr\tr4, [sp]\n\tmov\tr0, sp\n\tmov\tr1, #0x1\n\tbl\tmk4\n\tmov\tr0, #0x0\n\tcmp\tr5, #0x0\n' +
+      '\tbeq\t.L2\n\tlsl\tr0, r4, #0x18\n\tlsr\tr0, r0, #0x18\n.L2:\n\tadd\tsp, sp, #0x4\n\tpop\t{r4, r5}\n\tpop\t{r1}\n' +
+      '\tbx\tr1\n';
+    expect(decompile('q', twice, ARMV4T_AGBCC, { prototypes: { mk4 } }).source).toContain(
+      '    v0 = sp0.a;\n    sp0 = mk4(1);\n    if (a1 == 0) v0 = 0;',
+    );
+    const once = twice.replace('\tmov\tr0, sp\n\tmov\tr1, #0x1\n\tbl\tmk4\n', '');
+    expect(decompile('q', once, ARMV4T_AGBCC, { prototypes: { mk4 } }).source).toContain(
+      '    if (a1 != 0) {\n        v0 = sp0.a;\n',
+    );
+  });
+
+  test('a write into the returned struct declines', () => {
+    const w = Q1.replace('\tldr\tr0, [sp]\n', '\tmov\tr1, #0x5\n\tmov\tr0, sp\n\tstrb\tr1, [r0]\n\tldr\tr0, [sp]\n');
+    expect(() => decompile('q1', w, ARMV4T_AGBCC, { prototypes: { mk4 } })).toThrow(
+      /the object at \[sp,#0\) is where `mk4` returns struct S4, and this function also writes it/,
+    );
+  });
+
+  test('a read past the returned struct declines', () => {
+    const past =
+      'q:\n\tpush\t{lr}\n\tadd\tsp, sp, #-0x8\n\tadd\tr1, r0, #0\n\tmov\tr0, sp\n\tbl\tmk4\n\tmov\tr1, sp\n' +
+      '\tldr\tr0, [r1, #0x4]\n\tadd\tsp, sp, #0x8\n\tpop\t{r1}\n\tbx\tr1\n';
+    expect(() => decompile('q', past, ARMV4T_AGBCC, { prototypes: { mk4 } })).toThrow(
+      /returns struct S4, and this function reads \[sp,#4\) of width 4, past the struct/,
     );
   });
 

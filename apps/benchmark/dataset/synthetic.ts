@@ -9961,7 +9961,28 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['struct', 'field'],
     toolchains: ALL,
     ctx: 'struct A { u16 a, b, c, d; s8 e, f; };\nvoid take2(struct A a);\nvoid byvalregs(u16 x, u16 y);',
-    proto: { take2: { params: ['struct A'], returnsVoid: true }, byvalregs: { returnsVoid: true } },
+    // the members of `struct A` as the ctx defines them, which is what sizes the argument, the way
+    // the sret rows state `returnLayout`
+    proto: {
+      take2: {
+        params: ['struct A'],
+        byValueLayouts: {
+          0: {
+            kind: 'struct',
+            members: [
+              { name: 'a', type: 'u16' },
+              { name: 'b', type: 'u16' },
+              { name: 'c', type: 'u16' },
+              { name: 'd', type: 'u16' },
+              { name: 'e', type: 's8' },
+              { name: 'f', type: 's8' },
+            ],
+          },
+        },
+        returnsVoid: true,
+      },
+      byvalregs: { returnsVoid: true },
+    },
   },
 ];
 

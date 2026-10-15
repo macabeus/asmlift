@@ -17,8 +17,8 @@
  *  measured against; IDO, gcc 2.7.2 and mwcc reload past every store of another type (strict
  *  aliasing does not reorder there), so the cast and union refusals below are only more cautious on
  *  MIPS and PPC. */
-import { type Block, type Op, type Value, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
-import { type IrType, T, typeEquals, typeToString, unionViewSigns } from '../ir/types';
+import { type Block, type Op, type Value, byValueOperands, calleeName, mkOp, mkValue, successorsOf } from '../ir/core';
+import { type IrType, T, structSpelling, typeEquals, typeToString, unionViewSigns } from '../ir/types';
 import type { Gate } from '../l3/gates';
 import type { SymbolMap } from '../symbols';
 import { type TargetDescription, blockTransferRead, sourceControlRead, sourceReach } from '../target';
@@ -363,10 +363,19 @@ export function auditFrameObjects({
     recheckEscapesReliedOn(escapesReliedOn, undefined, fail);
   }
   const facts = frameAddressFacts(irBlocks, symbols, target);
-  const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere);
+  const { laddrs, splitRefusal } = splitAddressingCopies(irBlocks, captures, foldedHere, declaredStructs(irBlocks));
   const objects = frameObjects(laddrs, owned, fail);
   const flow = addressFlow(irBlocks, objects, facts, fail);
-  const uses = classifyFrameUses({ irBlocks, objects, flow, facts, splitRefusal, oneObject, target, fail });
+  const uses = classifyFrameUses({
+    irBlocks,
+    objects,
+    flow,
+    facts,
+    splitRefusal,
+    oneObject,
+    target,
+    fail,
+  });
   const windows = escapeWindows(irBlocks, uses, flow, facts, target);
   const model = chooseFrameModel({ oneObject, uses, windows, returnsWithoutHiddenPointer, fail });
   if (capturedObjectIsTheWholeFrame) {
@@ -430,6 +439,42 @@ function frameRefusal(name: string): Refuse {
   return (why) => {
     throw new FrontendUnsupportedError(`cannot lift '${name}': address-taken stack local — ${why}`);
   };
+}
+
+/** THE FRAME BYTES A DECLARATION TYPES AS ONE STRUCT: a call's return storage (`sret`) and a
+ *  struct passed by value (`byValue`, call-plan.ts `foldByValueArgs`), where the operand is an
+ *  `laddr`. */
+function declaredStructs(irBlocks: readonly Block[]): FrameRange[] {
+  const laddrOff = new Map<Value, number>();
+  for (const b of irBlocks) {
+    for (const op of b.ops) {
+      if (op.opcode === 'laddr') {
+        laddrOff.set(op.results[0], op.attrs.off as number);
+      }
+    }
+  }
+  const out: FrameRange[] = [];
+  for (const b of irBlocks) {
+    for (const op of b.ops) {
+      if (op.opcode !== 'call') {
+        continue;
+      }
+      const t = op.results[0]?.type;
+      const from = laddrOff.get(op.operands[0]);
+      if (op.attrs.sret === true && from !== undefined && t?.kind === 'struct' && t.size !== undefined) {
+        out.push({ from, to: from + t.size });
+      }
+      for (const { at } of byValueOperands(op)) {
+        const v = op.operands[at];
+        const off = laddrOff.get(v);
+        const t = v?.type.kind === 'ptr' ? v.type.to : undefined;
+        if (off !== undefined && t?.kind === 'struct' && t.size !== undefined) {
+          out.push({ from: off, to: off + t.size });
+        }
+      }
+    }
+  }
+  return out;
 }
 
 /** A CAPTURE MOVED BY A CONSTANT IS THE CAPTURE AT THE SUM, and here the constant is exact: an
@@ -627,6 +672,7 @@ function splitAddressingCopies(
   irBlocks: Block[],
   laddrs: Op[],
   foldedHere: Set<Op>,
+  structs: readonly FrameRange[] = [],
 ): { laddrs: Op[]; splitRefusal: Map<Value, string> } {
   const splitRefusal = new Map<Value, string>();
   const uses = new Map<Value, { op: Op; idx: number; blk: Block }[]>();
@@ -664,13 +710,42 @@ function splitAddressingCopies(
     if (at.length === 0 || accesses.length !== at.length) {
       continue;
     }
+    // AN ADDRESS STRICTLY INSIDE A DECLARED STRUCT, ONLY ACCESSED, IS A MEMBER ACCESS OF THAT
+    // STRUCT. A word store into a struct passed by value goes straight to `[sp,#k]` — `x.c = w` is
+    // `str r1, [sp, #0x4]` over `struct F {u16 a,b; u32 c; s8 e,f;}` at [sp,#0) — and the frontend
+    // mints that access its own `laddr` at k. The declaration says those bytes are the struct's,
+    // so the address is re-rooted on the struct's base with the displacement on the access, and
+    // the audit judges one object rather than two that overlap. Any use that is not an access —
+    // `&x.c` handed on — is an interior pointer, which is not this shape and is left to refuse.
+    const off = capture.attrs.off as number;
+    const holders = structs.filter((r) => r.from < off && off < r.to);
+    const holder = holders[0];
+    const inHolder = (u: { op: Op }): boolean =>
+      off + (u.op.attrs.off as number) >= holder!.from &&
+      off + (u.op.attrs.off as number) + (u.op.attrs.width as number) <= holder!.to;
+    if (
+      holder !== undefined &&
+      holders.every((r) => r.from === holder.from && r.to === holder.to) &&
+      accesses.every(inHolder)
+    ) {
+      for (const u of accesses) {
+        u.op.attrs = { ...u.op.attrs, off: off - holder.from + (u.op.attrs.off as number) };
+      }
+      capture.attrs = { ...capture.attrs, off: holder.from };
+      continue;
+    }
     if (!subWord) {
       splitRefusal.set(capture.results[0], 'a WORD access through the copy, and `ldr`/`str` have an `[sp,#imm]` form');
       continue;
     }
     // Nothing to split when the capture already names ONE object: every access at offset 0 is
-    // the frame base itself, which is what the DMA-fill idiom captures.
-    if (accesses.every((u) => u.op.attrs.off === 0)) {
+    // the frame base itself, which is what the DMA-fill idiom captures — or every access lands in
+    // the declared struct the capture is the start of (`declaredStructs`), whose members they are.
+    const base = capture.attrs.off as number;
+    const into = (r: FrameRange): boolean =>
+      base === r.from &&
+      accesses.every((u) => base + (u.op.attrs.off as number) + (u.op.attrs.width as number) <= r.to);
+    if (accesses.every((u) => u.op.attrs.off === 0) || structs.some(into)) {
       continue;
     }
     for (const u of accesses) {
@@ -865,6 +940,8 @@ interface FrameUses {
   readonly publishedToWriter: ReadonlySet<number>;
   readonly arg0Callees: ReadonlyMap<number, ReadonlySet<string | null>>;
   readonly returnTemps: ReadonlyMap<number, readonly Op[]>;
+  /** the calls each object is passed to BY VALUE (`foldByValueArgs`), with the struct each passes */
+  readonly byValueReads: ReadonlyMap<number, readonly { readonly op: Op; readonly type: IrType }[]>;
   readonly useCount: ReadonlyMap<number, number>;
   readonly indexed: ReadonlyMap<number, readonly { readonly width: number; readonly signed: boolean }[]>;
   readonly members: readonly { readonly at: number; readonly width: number }[];
@@ -971,6 +1048,9 @@ function classifyFrameUses({
   // is the callee's return storage, a local of the declared type. `useCount` counts every use of
   // each object, so a return temp this function does anything else with is told apart.
   const returnTemps = new Map<number, Op[]>();
+  // …and a call's operand its lowering passes BY VALUE (`foldByValueArgs`) is no escape: the
+  // callee receives a copy of the whole struct, so it is a read of the object's bytes at the call
+  const byValueReads = new Map<number, { op: Op; type: IrType }[]>();
   const useCount = new Map<number, number>();
   // The accesses through a runtime-indexed address, per object — kept apart from `accesses`,
   // which types the object at its own offset: `a[i]` says what one ELEMENT is, not what sits at
@@ -983,8 +1063,9 @@ function classifyFrameUses({
   // access at [+k] through a capture is a member of the one object rather than a second object
   const members: { at: number; width: number }[] = [];
   // …and without it, the first such access, which the per-object model refuses once the model is
-  // chosen (`chooseFrameModel`)
-  let memberRefusal: string | undefined;
+  // chosen (`chooseFrameModel`) — save one of a call's return storage or of a struct passed by
+  // value, whose members are the struct's declared ones (`objectShapes`)
+  const memberRefusals: [number, string][] = [];
   // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
   // touches, whether it reads them, and whether its address is this frame's on every path — what
   // `storedNeverRead` asks of a frame that makes a call
@@ -1002,9 +1083,11 @@ function classifyFrameUses({
       return;
     }
     if ((op.attrs.off as number) !== 0) {
-      memberRefusal ??=
+      memberRefusals.push([
+        off,
         `a ${kind} at [+${op.attrs.off}] through the captured address — ` +
-        (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled');
+          (splitRefusal.get(v) ?? 'only a scalar at the captured address is modelled'),
+      ]);
     }
   };
   for (const blk of irBlocks) {
@@ -1029,6 +1112,16 @@ function classifyFrameUses({
           scalar('store', op, off, v);
           accessOps.set(op, { off, through: v });
           accesses.get(off)!.push({ width: op.attrs.width as number, signed: false, isLoad: false });
+          continue;
+        }
+        if (byValueOperands(op).some((b) => b.at === idx)) {
+          // the fold types the operand a pointer to the struct passed (call-plan.ts `foldByValueArgs`)
+          const type = v.type.kind === 'ptr' ? v.type.to : undefined;
+          if (type?.kind !== 'struct' || type.size === undefined) {
+            throw new Error(`internal: a by-value operand of a call to '${calleeName(op)}' has no declared struct`);
+          }
+          (byValueReads.get(off) ?? byValueReads.set(off, []).get(off)!).push({ op, type });
+          fixed.push({ op, at: off, width: type.size, isLoad: true, frameOnly: frameOnEveryPath.has(v) });
           continue;
         }
         if ((op.opcode === 'store' && idx === 1) || op.opcode === 'call') {
@@ -1119,10 +1212,11 @@ function classifyFrameUses({
     publishedToWriter,
     arg0Callees,
     returnTemps,
+    byValueReads,
     useCount,
     indexed,
     members,
-    memberRefusal,
+    memberRefusal: memberRefusals.find(([off]) => !returnTemps.has(off) && !byValueReads.has(off))?.[1],
     fixed,
   };
 }
@@ -1289,9 +1383,11 @@ function readWindow(
     target: TargetDescription;
   },
 ): ReadWindow {
-  // a callee handed only its own return storage writes the struct it returns and nothing else
+  // a callee handed only its own return storage writes the struct it returns and nothing else —
+  // and this function's own reads of it hand the address to nobody
   const temps = uses.returnTemps.get(off);
-  if (temps !== undefined && uses.useCount.get(off) === temps.length) {
+  const reads = uses.accesses.get(off)?.filter((a) => a.isLoad).length ?? 0;
+  if (temps !== undefined && uses.useCount.get(off) === temps.length + reads) {
     return { lo: 0, hi: returnedSize(temps[0]), why: 'that returns its struct into it' };
   }
   const control = target.capabilities.readSourceControl;
@@ -1439,7 +1535,9 @@ function chooseFrameModel({
     oneObject === undefined && [...windows.values()].some((w) => w.lo === -Infinity && w.hi === Infinity);
   const writer = unbounded ? writerNotKept(uses, returnsWithoutHiddenPointer) : null;
   const escapeFree = oneObject === undefined && uses.escaped.size === 0;
-  const onOffer = (unbounded && writer === null) || escapeFree;
+  // A struct passed by value is ONE object of its declared type, which the call names whole; the
+  // one object is bytes, and a call handed them would pass a pointer.
+  const onOffer = uses.byValueReads.size === 0 && ((unbounded && writer === null) || escapeFree);
   const model: ModelChoice = {
     onOffer,
     refused: false,
@@ -1626,6 +1724,10 @@ function storedNeverRead(irBlocks: readonly Block[], uses: FrameUses, target: Ta
     }
     const cur: Pending = { may: new Set(at.may), must: new Set(at.must) };
     for (const op of irBlocks[b].ops) {
+      // a struct a call is passed by value is read by that call (`byValueReads`), not handed over
+      if (op.opcode === 'call' && byOp.has(op)) {
+        step(op, cur);
+      }
       if (op.opcode === 'call') {
         const store = [...cur.may].filter((p) => bytes(p).some((o) => cur.must.has(o))).sort((x, y) => x.at - y.at)[0];
         if (store !== undefined) {
@@ -2128,30 +2230,63 @@ function objectShapes({
   for (const [off, acc] of uses.accesses) {
     const byIndex = uses.indexed.get(off) ?? [];
     const temps = uses.returnTemps.get(off);
+    const passed = uses.byValueReads.get(off);
+    if (passed !== undefined) {
+      // A struct passed BY VALUE (`foldByValueArgs`): this function writes and reads its members,
+      // and the call reads it whole. A struct-return temp passed on, an index, or any other use of
+      // the address is not modelled.
+      const type = passed[0].type;
+      const at = `the object at [sp,#${off}) is passed by value as ${structSpelling(type)}`;
+      if (temps !== undefined) {
+        fail(`${at}, and is also the storage a call returns a struct into — not modelled`);
+      }
+      if (passed.some((p) => !typeEquals(p.type, type))) {
+        fail(`${at} to calls declared to take different types`);
+      }
+      if (byIndex.length > 0) {
+        fail(`${at}, and this function also indexes it — only its members' accesses are modelled`);
+      }
+      if (uses.useCount.get(off) !== acc.length + passed.length) {
+        fail(`${at}, and its address is also used another way — only its members' accesses are modelled`);
+      }
+      const size = type.kind === 'struct' ? type.size! : 0;
+      const past = uses.fixed.find(
+        (f) => uses.accessOps.get(f.op)?.off === off && (f.at < off || f.at + f.width > off + size),
+      );
+      if (past !== undefined) {
+        fail(`${at}, and this function accesses [sp,#${past.at}) of width ${past.width}, past the struct`);
+      }
+      extent.set(off, { width: 1, count: size });
+      aggregateAt.set(off, type);
+      continue;
+    }
     if (temps !== undefined) {
-      // The callee writes the whole struct and this function names it once, as the call's
-      // destination. A read of a member, or any other use of the address, is not modelled —
-      // and most such reads never arrive here: the Thumb slot model refuses a word of the temp
-      // read at a constant offset first ("stack pointer used as data"), a copy of the whole
-      // struct into a global (`gS8 = mk8(x)`, which agbcc stages through the temp) included. So
-      // modelling member reads starts with the slot model handing this audit a read return temp.
+      // The callee writes the whole struct and this function names it as the call's destination,
+      // and READS it: each load is of bytes inside the struct, which the struct's declaration
+      // types (raise/aggmembers.ts reads a word's members, structure.ts spells a member access).
+      // A write, an index, or any other use of the address is not modelled.
       const callee = temps[0].attrs.target as string;
       const type = temps[0].results[0].type;
       const spelling = type.kind === 'struct' ? (type.declared ?? `struct ${type.name}`) : typeToString(type);
+      const at = `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}`;
       if (temps.some((t) => !typeEquals(t.results[0].type, type))) {
         fail(`the object at [sp,#${off}) is the struct-return storage of calls declared to return different types`);
       }
-      if (acc.length > 0 || byIndex.length > 0) {
+      if (acc.some((a) => !a.isLoad) || byIndex.length > 0) {
         fail(
-          `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}, and this function also reads or ` +
-            'writes it — a member of a returned struct is not modelled',
+          `${at}, and this function also ${byIndex.length > 0 ? 'indexes' : 'writes'} it — only a read of a ` +
+            'returned struct is modelled',
         );
       }
-      if (uses.useCount.get(off) !== temps.length) {
-        fail(
-          `the object at [sp,#${off}) is where \`${callee}\` returns ${spelling}, and its address is also used ` +
-            'another way — only the call it is returned by is modelled',
-        );
+      if (uses.useCount.get(off) !== temps.length + acc.length) {
+        fail(`${at}, and its address is also used another way — only the call it is returned by is modelled`);
+      }
+      const size = returnedSize(temps[0]);
+      const past = uses.fixed.find(
+        (f) => uses.accessOps.get(f.op)?.off === off && (f.at < off || f.at + f.width > off + size),
+      );
+      if (past !== undefined) {
+        fail(`${at}, and this function reads [sp,#${past.at}) of width ${past.width}, past the struct`);
       }
       extent.set(off, { width: 1, count: returnedSize(temps[0]) });
       aggregateAt.set(off, type);
@@ -2511,8 +2646,9 @@ function stampObjects(
 ): void {
   for (const [off, ops] of objects) {
     const { width, count } = extent.get(off)!;
-    const signed = uses.accesses.get(off)!.some((a) => a.signed);
     const aggregate = aggregateAt.get(off);
+    // a declared struct's storage is bytes, whatever signedness its members are read at
+    const signed = aggregate === undefined && uses.accesses.get(off)!.some((a) => a.signed);
     for (const op of ops) {
       const qualified = uses.published.has(off) || uses.filledFrom.has(off);
       op.attrs = {
