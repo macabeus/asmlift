@@ -147,7 +147,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // it, spelling "address-taken local / frame arithmetic". So does the fallback `why` in
     // thumb.ts's own sp-as-data throw, which adds a third disjunct ("above the local area") the
     // label does not name. One phrase, three frontends, one class — and that
-    // disjunction is 4 of the 8 rows, so a pattern requiring the decided spelling claims 4 of
+    // disjunction is 4 of the 13 rows, so a pattern requiring the decided spelling claims 9 of
     // them and leaves the rest to a class whose label reads "other sp uses".
     // BOTH FIGURES MOVE whenever a Thumb row is lifted or a PPC/MIPS one arrives, and a count in
     // prose is checked by nothing — so they are recomputed from the committed artifact by

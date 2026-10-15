@@ -956,15 +956,12 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
-    // until the artifact is regenerated: `byvalregs:ido7.1` then declines here
-    'byvalue-arg',
     'cross-block-flags',
     'ctr-transfer',
     'far-jump',
     'no-prototype-args',
     'pool-word-shape',
     'stack-frames',
-    'store-class',
     'structs',
     'tu-scoped-name',
     'unread-data-directive',
