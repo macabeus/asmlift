@@ -155,6 +155,30 @@ describe('the register half: scratch and saved registers', () => {
       );
     }
   });
+
+  // Once a join takes it, a direct use is the same local read before its assignment
+  // (`uninitfirst`), and the structurer spells both reads with the join's one name.
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])("read before the assignment a join meets, it is that join's local (%s)", (_c, target) => {
+    expect(
+      src(
+        [
+          '0:\tsw\tt0,0(a1)',
+          '4:\tbeqz\ta0,10 <f+0x10>',
+          '8:\tnop',
+          'c:\tsll\tt0,a0,0x1',
+          '10:\taddu\tv0,t0,a0',
+          '14:\tjr\tra',
+          '18:\tnop',
+        ],
+        target,
+      ),
+    ).toBe(
+      's32 f(s32 a0, s32 *a1) {\n    s32 v0;\n    *a1 = v0;\n    if (a0 != 0) v0 = a0 << 1;\n    return v0 + a0;\n}\n',
+    );
+  });
 });
 
 describe('the frame half: words of the frame the function pushed', () => {

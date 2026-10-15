@@ -4787,6 +4787,67 @@ export function structure(
     }
     return !(anchoredHome.get(name) ?? []).some(writesBefore);
   };
+  // AN UNDEF ONE JOIN TAKES IS THAT JOIN'S LOCAL, READ BEFORE ITS ASSIGNMENT. `int t; if (k > 5)
+  // g = t; switch (k) { case 0: t = …; } … t …` reads one source variable on both sides of the
+  // switch, and the asm reads one register: the entry value directly, and again through the join
+  // the arms assign. Named from its key it would be two declarations, `uninit_t7` beside the join's
+  // `v9`, which the compiler allocates as two. So the undef takes the join's name when that name is
+  // never written where any of its reads happen: every edge copy into the join is one
+  // `undefCarriesNothing` drops, and every block that reads it — through the ops rendered inline
+  // over it — passes the same test, so each read sees the name before anything assigned it.
+  // A merge that adopted a parameter's name is never one (`v<n>` only). The reads are recorded with
+  // the dropped copies, for the sunk-copy postcondition below to check them the same way.
+  const coalescedUndefs = new Set<Op>();
+  for (const op of fn.blocks.flatMap((b) => b.ops)) {
+    if (op.opcode !== 'undef') {
+      continue;
+    }
+    const u = op.results[0];
+    const joins = new Set<string>();
+    const intoJoin: Block[] = [];
+    const readIn = new Set<Block>();
+    let unnamed = false;
+    for (const site of useSitesOf.get(u) ?? []) {
+      for (const s of site.op.successors) {
+        s.args.forEach((a, i) => {
+          if (a === u) {
+            const n = varName.get(s.block.params[i]);
+            if (n === undefined) {
+              unnamed = true;
+            } else {
+              joins.add(n);
+            }
+            intoJoin.push(site.blk);
+          }
+        });
+      }
+      if (site.op.operands.includes(u)) {
+        const work = [site];
+        for (let w = work.pop(); w !== undefined; w = work.pop()) {
+          readIn.add(w.blk);
+          if (!materialize.has(w.op)) {
+            work.push(...w.op.results.flatMap((r) => useSitesOf.get(r) ?? []));
+          }
+        }
+      }
+    }
+    const [name] = joins;
+    if (
+      unnamed ||
+      joins.size !== 1 ||
+      readIn.size === 0 ||
+      !/^v\d+$/.test(name) ||
+      globalNames.has(name) ||
+      ![...intoJoin, ...readIn].every((b) => undefCarriesNothing(u, name, b))
+    ) {
+      continue;
+    }
+    undefName.set(op, name);
+    coalescedUndefs.add(op);
+    for (const b of readIn) {
+      droppedUndefCopies.push({ name, pred: b });
+    }
+  }
   const tempCounter = { n: 0 }; // per-function swap-cycle temp names (sequentialize)
   /** One record per parameter slot an edge ACTUALLY carries, in the order the copies are to be
    *  laid out — everything `argAssignsFor` does except `sequentialize`. Split out because Regime-A
@@ -7338,7 +7399,7 @@ export function structure(
       // halves, so a change to either fails there.
       ...fn.blocks
         .flatMap((b) => b.ops)
-        .filter((op) => op.opcode === 'undef')
+        .filter((op) => op.opcode === 'undef' && !coalescedUndefs.has(op))
         .map((op) => ({
           name: undefName.get(op)!,
           type: varType.get(undefName.get(op)!) ?? op.results[0].type,
