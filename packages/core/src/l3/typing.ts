@@ -311,11 +311,29 @@ export function renderedIntSignedness(e: Expr, varType: VarTypes): boolean | und
 }
 
 /** Is the rendered expression provably in [0, 2^31) — the range where a signed and an unsigned
- *  compare agree on every input (and where gcc itself emits the unsigned branch for the signed
- *  spelling)? Narrow unsigned values are the everyday case: a `(u8)x` cast or a `u8`/`u16`
- *  deref promotes to a non-negative `int`, and so is a mask, `x & 0xFFFF`, whose result has no bit
- *  its non-negative side lacks. Conservative false elsewhere. */
+ *  compare agree on every input? Narrow unsigned values are the everyday case: a `(u8)x` cast or a
+ *  `u8`/`u16` deref promotes to a non-negative `int`, and so is a mask, `x & 0xFFFF`, whose result
+ *  has no bit its non-negative side lacks; `|` and `^` set a bit only where a side has it, so they
+ *  are non-negative when both sides are. Conservative false elsewhere. A VALUE fact: it says the
+ *  two compares mean the same, not that they compile the same (`spelledNonNegative`). */
 export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
+  return nonNegative(e, varType, true);
+}
+
+/** The subset of `provablyNonNegative` over which the DEFAULT leaves an unsigned compare uncast
+ *  (structure.ts): everything but an `|`/`^`. Those are non-negative too, so their uncast
+ *  spelling owes no proof, but the pin stays in the default because it is codegen-visible where
+ *  the compiler does not track the bits: mwcc_242_81 compiles
+ *  `if ((unsigned)((a & 0xf0) | (b & 3)) < 0x31u)` beside a `!= 0` test to `cmplwi`, and the lift
+ *  scores 9/15 cast against 13/16 uncast over `s32` parameters (10/15 for the `u32` twin). Without
+ *  the pin in the default that spelling is in no candidate at all, since `/signed-cmp` is the
+ *  uncast one. A mask alone (gcc's own pick of the unsigned branch, kmc `selconst`) keeps the
+ *  uncast default. */
+export function spelledNonNegative(e: Expr, varType: VarTypes): boolean {
+  return nonNegative(e, varType, false);
+}
+
+function nonNegative(e: Expr, varType: VarTypes, orXor: boolean): boolean {
   switch (e.k) {
     case 'const':
       return e.value >= 0 && e.value < 0x80000000;
@@ -323,7 +341,10 @@ export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
       return e.op === '!';
     case 'bin':
       if (e.op === '&') {
-        return provablyNonNegative(e.l, varType) || provablyNonNegative(e.r, varType);
+        return nonNegative(e.l, varType, orXor) || nonNegative(e.r, varType, orXor);
+      }
+      if (orXor && (e.op === '|' || e.op === '^')) {
+        return nonNegative(e.l, varType, orXor) && nonNegative(e.r, varType, orXor);
       }
       return ['<', '<=', '>', '>=', '==', '!=', '&&', '||'].includes(e.op);
     case 'cast':
@@ -337,10 +358,16 @@ export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
 
 /** Would C evaluate `l OP r` SIGNED, for an ordering compare the machine did unsigned? Both sides
  *  render as signed-promoting C (or as a type this env cannot see, which may be), neither is a
- *  pointer (C compares an address unsigned), and they are not both provably in [0, 2^31), where
- *  the two compares agree. THE one predicate: structure.ts asks it at emission to place the
- *  `(u32)` pin, and `signedOverUnsignedCompare` asks it again of the finished tree. */
-export function rendersSignedOverUnsigned(l: Expr, r: Expr, varType: VarTypes): boolean {
+ *  pointer (C compares an address unsigned), and they are not both `nonNeg`. With the default,
+ *  `provablyNonNegative`, a true answer means the C compares DIFFERENT values from the machine:
+ *  the proof obligation, which emission records and `signedOverUnsignedCompare` asks again of the
+ *  finished tree. structure.ts also asks it with `spelledNonNegative` to place the `(u32)` pin. */
+export function rendersSignedOverUnsigned(
+  l: Expr,
+  r: Expr,
+  varType: VarTypes,
+  nonNeg: (e: Expr, varType: VarTypes) => boolean = provablyNonNegative,
+): boolean {
   const ptrSide = (x: Expr): boolean => {
     const t = exprCType(x, varType);
     return t?.kind === 'ptr' || t?.kind === 'array';
@@ -350,7 +377,7 @@ export function rendersSignedOverUnsigned(l: Expr, r: Expr, varType: VarTypes): 
     !ptrSide(r) &&
     renderedIntSignedness(l, varType) !== false &&
     renderedIntSignedness(r, varType) !== false &&
-    !(provablyNonNegative(l, varType) && provablyNonNegative(r, varType))
+    !(nonNeg(l, varType) && nonNeg(r, varType))
   );
 }
 

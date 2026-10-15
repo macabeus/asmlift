@@ -93,7 +93,13 @@ import {
 } from '../l3/ast';
 import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
-import { exprCType, exprIntWidth, renderedIntSignedness, rendersSignedOverUnsigned } from '../l3/typing';
+import {
+  exprCType,
+  exprIntWidth,
+  renderedIntSignedness,
+  rendersSignedOverUnsigned,
+  spelledNonNegative,
+} from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import type { ContextGlobals } from '../proto-context';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
@@ -4116,13 +4122,17 @@ export function structure(
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';
       };
+      // Two answers to one question (l3/typing.ts): `pinned` places the cast, `owesProof` says the
+      // uncast spelling compares different values. They differ on an `|`/`^` of non-negative
+      // sides, which stays pinned (the pin is codegen-visible) and owes no proof uncast.
       const unsignedOrdering = /^icmp_u(lt|le|gt|ge)$/.test(d.opcode);
-      const signedOverUnsigned = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv);
-      if (signedOverUnsigned && !unsignedCompareSpelling) {
+      const pinned = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv, spelledNonNegative);
+      const owesProof = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv);
+      if (owesProof && !unsignedCompareSpelling) {
         // left signed: the `/signed-cmp` spelling, which `SFn.signedUnsignedCompare` reports
         signedUnsignedCompare = true;
       }
-      if (signedOverUnsigned && unsignedCompareSpelling) {
+      if (pinned && unsignedCompareSpelling) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
         // AT THE OPERAND'S OWN RANK: `(u32)a` over a 64-bit `a` pins nothing, it truncates the
         // compare to its low half. `exprIntWidth` is total and answers 64 only where it proves it.

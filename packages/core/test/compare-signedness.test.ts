@@ -18,6 +18,7 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { signedOverUnsignedCompare } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
@@ -118,6 +119,72 @@ test('a masked operand keeps the signed spelling (the mask makes it non-negative
   const src = emit(MASKCMP);
   expect(src).toMatch(/\(a0 & 65535\) (<|>=) 24/);
   expect(src).not.toContain('(u32)');
+});
+
+// `|` and `^` of two masked values set no bit either side lacks, so the result is non-negative too:
+// `(a & 240 | b & 3 ^ 192) > 48` means the same signed or unsigned. The default still pins it,
+// because the pin is codegen-visible (mwcc `cmplwi` against `cmpwi`, typing.ts
+// spelledNonNegative), and the uncast spelling owes no proof.
+const ORXORCMP = `fn orxorcmp {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=240}
+  %3: s32 = and %0, %2
+  %4: s32 = const {value=3}
+  %5: s32 = and %1, %4
+  %6: s32 = or %3, %5
+  %7: s32 = const {value=192}
+  %8: s32 = xor %6, %7
+  %9: s32 = const {value=48}
+  %10: u32 = icmp_ugt %8, %9
+  cond_br %10, ^bb1(), ^bb2()
+^bb1():
+  %11: s32 = const {value=1}
+  ret %11
+^bb2():
+  %12: s32 = const {value=0}
+  ret %12
+}
+`;
+
+const structured = (ir: string, on: boolean) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  return structure(fn, { unsignedCompareSpelling: on });
+};
+
+test('an or/xor of masked operands keeps the pin, and its uncast spelling owes no proof', () => {
+  expect(emit(ORXORCMP)).toContain('(u32)');
+  const uncast = structured(ORXORCMP, false);
+  expect(cBackend.emit(uncast)).not.toContain('(u32)');
+  expect(uncast.signedUnsignedCompare).toBeUndefined();
+  expect(signedOverUnsignedCompare(uncast)).toBe(false);
+});
+
+// One side that may be negative makes the whole `|` possibly negative: the uncast spelling owes it.
+const ORNEGCMP = `fn ornegcmp {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=240}
+  %3: s32 = and %0, %2
+  %4: s32 = or %3, %1
+  %5: s32 = const {value=48}
+  %6: u32 = icmp_ugt %4, %5
+  cond_br %6, ^bb1(), ^bb2()
+^bb1():
+  %7: s32 = const {value=1}
+  ret %7
+^bb2():
+  %8: s32 = const {value=0}
+  ret %8
+}
+`;
+
+test('an or with a possibly-negative side owes the proof uncast', () => {
+  expect(emit(ORNEGCMP)).toContain('(u32)');
+  const uncast = structured(ORNEGCMP, false);
+  expect(uncast.signedUnsignedCompare).toBe(true);
+  expect(signedOverUnsignedCompare(uncast)).toBe(true);
+  expect(signedOverUnsignedCompare(structured(ORNEGCMP, true))).toBe(false);
 });
 
 // Sign-agnostic compares never cast.
