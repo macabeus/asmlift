@@ -1576,8 +1576,8 @@ function chooseFrameModel({
  *  outgoing block alone can own. Nor is a store a runtime index or an escaped address reaches from
  *  an object at or below it: whoever that hands the bytes to may read them.
  *
- *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND, the outgoing-argument theorem stackargs' own
- *  `survivorBound` states. Under `localsAboveOutgoingArea` a compiler keeps one outgoing area at the
+ *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND, a weaker form of the outgoing-argument theorem
+ *  stackargs' own `survivorBound` states. Under `localsAboveOutgoingArea` a compiler keeps one outgoing area at the
  *  frame bottom, below every local, and never reads it back after a call; so a frame byte loaded
  *  after a call before anything re-stores it held a value across that call, its word is a local's,
  *  and so is every word above it. Every compiled outgoing-argument shape sits beneath any such

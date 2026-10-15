@@ -520,27 +520,27 @@ export interface TargetDescription {
     stagesOutgoingArgsInFrame?: boolean;
     // The outgoing area is ONE region at the frame bottom, sized for the widest call and shared by
     // every call, with every local and spill above it, and the caller never reads a word of it
-    // back after a call — the callee may assign to its stack parameters, so the caller re-stages
-    // an argument before every call. A compiler can stage in its frame
+    // back — the callee may assign to its stack parameters, so the caller re-stages an argument
+    // before every call, and nothing else is kept there. A compiler can stage in its frame
     // (`stagesOutgoingArgsInFrame`) and still break this. mwcc does not, though it puts a local in
     // the words a call COULD take as stack arguments where no call takes any — which is why a
     // guess that cannot say whether one does refuses (`frontend/ppc.ts`, "A GUESS THAT FILLS EVERY
     // ARGUMENT REGISTER") — and not where one does: the area starts past them.
     //
     // It is a UNIVERSAL — for every source, the compiler emits no such read — and its one reader
-    // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word loaded after a
-    // call before any re-store is not in the area, so it is a local, and so is every word above it,
-    // which lets a spill live across a call lift, and a call NO declaration covers
+    // applies the contrapositive (`frontend/stackargs.ts` `survivorBound`): a word the function
+    // loads is not in the area, so it is a local, and so is every word above it, which lets a
+    // spill reaching a call lift, and a call NO declaration covers
     // (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A BACKWARDS READING). It is
     // exactly as sound as the universal, so its residue is every producer the universal does not
-    // cover: hand-written asm that reads its outgoing argument back after a call loses that
-    // argument silently. The premise is this compiler's, not the ISA's.
+    // cover: hand-written asm that reads its outgoing argument back loses that argument silently.
+    // The premise is this compiler's, not the ISA's.
     // Absent ⇒ every staged word stays a candidate argument.
     //
     // Set on agbcc: thumb.h puts the locals at sp + outgoing_args_size (ACCUMULATE_OUTGOING_ARGS)
     // and `calls.c` sizes the area as the maximum over all calls; compiled, `spill10` and
     // `spillarg` keep their spills above the area, and `test/corpus/agbcc-restage.s` holds the
-    // re-staging and the callee's write. Set on the three MIPS toolchains off their own probe
+    // re-staging, the callee's write, and no load of the area around calls inside arguments. Set on the three MIPS toolchains off their own probe
     // (`test/corpus/probe-o32-frame.c`), where the frame-object audit is the only reader. Set on
     // mwcc off `test/corpus/probe-mwcc-frame.c` on all three builds (`mwcc-frame-probes.test.ts`):
     // nothing but outgoing words lies below the local area, no word there is loaded, and `twice9`

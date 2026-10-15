@@ -1626,7 +1626,13 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // The store reaches `bl g` through one arm; the other arm's reload must not excuse it. Scanning
     // per block let a LABEL decide the verdict; scanning the flat listing let BLOCK ORDER decide,
     // because the reload in the first-listed arm cleared a store that reaches the call through the
-    // second. Same CFG and same semantics either way, so both spellings must agree.
+    // second. Same CFG and same semantics either way, so both spellings must agree. They are judged
+    // without the compiler's layout claim: under it the reload in either arm proves [sp,#0] a local
+    // (`survivorBound`), and both spellings lift alike.
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, localsAboveOutgoingArea: false },
+    };
     const loadArmFirst =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbne\t.L3\n' +
       '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
@@ -1635,8 +1641,10 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n' +
       '.L3:\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L2:\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', loadArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-    expect(() => decompile('f', callArmFirst, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', loadArmFirst, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', callArmFirst, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(decompile('f', loadArmFirst, ARMV4T_AGBCC).source).toContain('return g(a0);');
+    expect(decompile('f', callArmFirst, ARMV4T_AGBCC).source).toContain('return g(a0);');
   });
 
   test('with no arity to prove it, a slot store may not reach a call unread', () => {
@@ -1644,15 +1652,22 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // deliberately conservative: a store reaching a call unread refuses whether or not a label
     // happens to sit in between. Making the scan block-local instead admitted the cross-block case,
     // where the accept/refuse boundary was a LABEL rather than anything semantic. The reload comes
-    // after a RE-STORE, so the word read back is not the one that reached the call.
+    // after a RE-STORE, so the word read back is not the one that reached the call — which matters
+    // only without the compiler's layout claim: under it, any reload proves the word a local.
+    const unclaimed = {
+      ...ARMV4T_AGBCC,
+      compilerBehaviors: { ...ARMV4T_AGBCC.compilerBehaviors, localsAboveOutgoingArea: false },
+    };
     const sameBlock =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
       '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     const crossBlock =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tcmp\tr0, #0\n\tbeq\t.L2\n.L2:\n\tbl\tg\n' +
       '\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
-    expect(() => decompile('f', sameBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
-    expect(() => decompile('f', crossBlock, ARMV4T_AGBCC)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', sameBlock, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(() => decompile('f', crossBlock, unclaimed)).toThrow(/stack pointer used as data/);
+    expect(decompile('f', sameBlock, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return g(a0) + 1;\n}\n');
+    expect(decompile('f', crossBlock, ARMV4T_AGBCC).source).toBe('s32 f(s32 a0) {\n    return g(a0) + 1;\n}\n');
     // …and a store never read back at all is the plainest signature of an argument
     const neverRead =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tb\t.L2\n.L2:\n\tbl\tg\n' +
@@ -2017,8 +2032,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       /address-taken stack local — a runtime index into the bytes \[sp,#0\) to \[sp,#8\) kept as one object accesses 2 and 4 bytes wide/,
     );
     const outgoing =
-      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n' +
-      '\tadd\tr0, r4, #1\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
+      'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tbl\tg\n' +
+      '\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(() => decompile('f', outgoing, ARMV4T_AGBCC)).toThrow(/outgoing stack argument/);
     const arity =
       'f:\n\tpush\t{r4, lr}\n\tadd\tsp, sp, #-0x4\n\tstr\tr0, [sp]\n\tldr\tr4, [sp]\n\tbl\tg\n\tadd\tsp, sp, #0x4\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n';
