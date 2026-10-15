@@ -13,7 +13,7 @@
 // agbcc emits TEXT, so its fixture is the compiler's own `.s`; the others are objdump text, with
 // a provenance header naming the compiler as an `ASMLIFT_*` env name (never a machine path).
 import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 import { TOOLCHAIN_TARGETS } from '../packages/core/src/target';
 import {
@@ -49,7 +49,7 @@ const OBJECTS = [
     toolchain: 'MIPS_IDO (ido7.1), binary from $ASMLIFT_IDO_CC',
     harness: IDO_TOOLCHAIN.harnessFlags,
     cflags: TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags,
-    objdump: `${IDO_TOOLCHAIN.objdump} ${IDO_TOOLCHAIN.objdumpFlags.join(' ')}`,
+    objdump: `${basename(IDO_TOOLCHAIN.objdump)} ${IDO_TOOLCHAIN.objdumpFlags.join(' ')}`,
     compile: () => compileMipsTarget(source, 'readback', TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags),
   },
   {
@@ -57,7 +57,7 @@ const OBJECTS = [
     toolchain: 'MIPS_GCC (gcc2.7.2kmc), binary from $ASMLIFT_KMC_DIR',
     harness: GCC_KMC_TOOLCHAIN.harnessFlags,
     cflags: TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags,
-    objdump: `${GCC_KMC_TOOLCHAIN.objdump} ${GCC_KMC_TOOLCHAIN.objdumpFlags.join(' ')}`,
+    objdump: `${basename(GCC_KMC_TOOLCHAIN.objdump)} ${GCC_KMC_TOOLCHAIN.objdumpFlags.join(' ')}`,
     compile: () => compileMipsGccTarget(source, 'readback', TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags),
   },
   {
@@ -65,7 +65,7 @@ const OBJECTS = [
     toolchain: 'PPC_MWCC (mwcc_242_81), binary under $ASMLIFT_MWCC_ROOT',
     harness: MWCC_PPC_TOOLCHAIN.harnessFlags,
     cflags: TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags,
-    objdump: `${MWCC_PPC_TOOLCHAIN.objdump} ${MWCC_PPC_TOOLCHAIN.objdumpFlags.join(' ')}`,
+    objdump: `${basename(MWCC_PPC_TOOLCHAIN.objdump)} ${MWCC_PPC_TOOLCHAIN.objdumpFlags.join(' ')}`,
     compile: () => compilePpcTarget('mwcc_242_81', source, 'readback', TOOLCHAIN_TARGETS.mwcc_242_81.canonicalFlags),
   },
 ] as const;

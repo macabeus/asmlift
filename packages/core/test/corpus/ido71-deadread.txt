@@ -2,7 +2,7 @@
 # source    : packages/core/test/corpus/probe-dead-read.c
 # toolchain : MIPS_IDO (ido7.1), binary from $ASMLIFT_IDO_CC
 # cc flags  : -c -Xcpluscomm -mips2 -O2 -32 -non_shared -G 0
-# objdump   : /home/macabeus/.local/bin/mips-linux-gnu-objdump -d --no-show-raw-insn
+# objdump   : mips-linux-gnu-objdump -d --no-show-raw-insn
 # read by   : packages/core/test/dead-reads.test.ts
 
 probe.o:     file format elf32-tradbigmips

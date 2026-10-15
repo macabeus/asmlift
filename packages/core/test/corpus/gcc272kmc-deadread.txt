@@ -2,7 +2,7 @@
 # source    : packages/core/test/corpus/probe-dead-read.c
 # toolchain : MIPS_GCC (gcc2.7.2kmc), binary from $ASMLIFT_KMC_DIR
 # cc flags  : -nostdinc -w -mabi=32 -mgp32 -mfp32 -mno-abicalls -fno-PIC -G 0 -funsigned-char -mips3 -EB -O2 -fno-builtin -fno-asm
-# objdump   : /home/macabeus/.local/bin/mips-linux-gnu-objdump -d --no-show-raw-insn
+# objdump   : mips-linux-gnu-objdump -d --no-show-raw-insn
 # read by   : packages/core/test/dead-reads.test.ts
 
 probe.o:     file format elf32-tradbigmips
