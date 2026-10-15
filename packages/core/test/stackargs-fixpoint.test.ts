@@ -139,7 +139,7 @@ describe('an undeclared call is never handed a word', () => {
     // The earlier load is what keeps the whole-function condition (a) quiet, so this reaches the
     // PATH condition: the word is staged when the indirect call executes, and nothing here can
     // size a block for a callee with no declaration. Without the compiler's layout claim, because
-    // with it that load proves the word a local (`survivorBound`), and (b) is then reached only
+    // with it that load proves the word a local (`loadedWordBound`), and (b) is then reached only
     // past an escape (below).
     const r = run(line([ld(0), st(0), call('r3', 0)]), chain(1), 4, false, false);
     expect(r.blocker).toMatch(/reaches `bl r3` unread with its lower slots supplied/);

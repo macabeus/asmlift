@@ -234,7 +234,7 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   contrapositive is exactly as sound as the universal. What reads the map backwards is the CONVERSE,
   from "this output lacks the shape" to a claim about what produced it. `localsAboveOutgoingArea`
   (`target.ts`) is the worked case: agbcc never reads a word of its outgoing area back, so a word
-  it reads is a local (`frontend/stackargs.ts` `survivorBound`). The converse,
+  it reads is a local (`frontend/stackargs.ts` `loadedWordBound`). The converse,
   that a word never read back is an argument, is false, because a dead local is never read back
   either, and the stack-argument licence declines on it rather than infer it. The contrapositive still
   owes what every compiler behavior owes: the universal grounded in the compiler's source and

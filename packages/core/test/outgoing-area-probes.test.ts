@@ -1,4 +1,4 @@
-// `survivorBound` (frontend/stackargs.ts) applies the contrapositive of a universal agbcc fact: the
+// `loadedWordBound` (frontend/stackargs.ts) applies the contrapositive of a universal agbcc fact: the
 // caller never reads a word of its outgoing area back, so a word it loads is a local. The committed probe (`scripts/regen-outgoing-area-probes.ts`) is what that universal rests
 // on — the callee may assign to the word, and the caller re-stages an argument before every call
 // rather than trust it to survive.

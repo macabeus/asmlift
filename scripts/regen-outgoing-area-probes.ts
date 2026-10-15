@@ -5,7 +5,7 @@
 // call. So it owes the compiled objects it rests on, re-measurable and not only re-readable
 // (`docs/level-tower.md`, RE-READABLE IS NOT RE-MEASURABLE).
 //
-//   agbcc-restage.s — `survivorBound` (frontend/stackargs.ts) applies the contrapositive of "agbcc
+//   agbcc-restage.s — `loadedWordBound` (frontend/stackargs.ts) applies the contrapositive of "agbcc
 //     never reads a word of its outgoing area back" (`target.ts` `localsAboveOutgoingArea`).
 //     `twice` re-stages an unchanged argument before its second call, `owns` assigns to its own
 //     incoming stack parameter, which is its caller's outgoing word, and `libcalls`/`nested`/

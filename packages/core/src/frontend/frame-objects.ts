@@ -1576,9 +1576,10 @@ function chooseFrameModel({
  *  outgoing block alone can own. Nor is a store a runtime index or an escaped address reaches from
  *  an object at or below it: whoever that hands the bytes to may read them.
  *
- *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND, a weaker form of the outgoing-argument theorem
- *  stackargs' own `survivorBound` states. Under `localsAboveOutgoingArea` a compiler keeps one outgoing area at the
- *  frame bottom, below every local, and never reads it back after a call; so a frame byte loaded
+ *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND. Under `localsAboveOutgoingArea` a compiler keeps one
+ *  outgoing area at the frame bottom, below every local, and never reads it back after a call — the
+ *  form of the premise every compiler that sets it holds, where stackargs' `loadedWordBound` takes
+ *  agbcc's stronger one (`target.ts` says why it is not carried here); so a frame byte loaded
  *  after a call before anything re-stores it held a value across that call, its word is a local's,
  *  and so is every word above it. Every compiled outgoing-argument shape sits beneath any such
  *  bound, and a local the source reads after a call does not: `g(); b[0] = x; b[1] = y;
@@ -1611,7 +1612,7 @@ function storedNeverRead(irBlocks: readonly Block[], uses: FrameUses, target: Ta
   // offsets through an address that is the frame's on every path. A load makes its bytes live, a
   // store that writes them kills them, and a call is transparent but marks every byte live across
   // it. A load whose address may be elsewhere proves nothing and a store that may write elsewhere
-  // kills nothing; nor does a block the entry cannot reach, as in `survivorBound`.
+  // kills nothing; nor does a block the entry cannot reach.
   let bound = Infinity;
   if (target.compilerBehaviors.localsAboveOutgoingArea === true) {
     const liveIn = irBlocks.map(() => new Set<number>());

@@ -40,7 +40,7 @@ export interface StackArgsEscape {
  *  `[0, 4*(n - argRegs))` as an ascending offset list, or null when nothing declares this call —
  *  an indirect call, a callee with no prototype, or one whose arity fits in registers. The code
  *  alone cannot say where a null declaration's block ENDS, so such a call is never handed a stack
- *  word; it lifts only when `survivorBound` clears every word that could open one. */
+ *  word; it lifts only when `loadedWordBound` clears every word that could open one. */
 export interface StackArgsCall<C> {
   readonly kind: 'call';
   /** The frontend's own handle for this call — the key of `OutgoingArgs.blocks`. */
@@ -74,8 +74,9 @@ export interface StackArgsInput<C> {
   /** The frontend's verdict that the whole frame is one addressable object handed to a callee. */
   readonly capturedWholeFrame: boolean;
   /** The compiler keeps ONE outgoing area at the bottom of the frame, sized for its widest call and
-   *  below every local, and never reads a word of it back. Only then does a word it loads prove
-   *  itself a local — see `survivorBound`. */
+   *  below every local, and never loads a word of it, before a call or after — the stronger reading
+   *  of `target.ts` `localsAboveOutgoingArea`, grounded on agbcc, the one compiler whose frontend
+   *  calls this. Only then does a word it loads prove itself a local — see `loadedWordBound`. */
   readonly localsAboveOutgoingArea: boolean;
 }
 
@@ -108,7 +109,7 @@ const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind =
  *  Only a load in a live block counts: a load that cannot run proves nothing. An ESCAPE does not
  *  count: its receiver MAY read the words, and a bound is a proof, which a read that may not happen
  *  cannot supply. */
-function survivorBound<C>(blocks: readonly StackArgsBlock<C>[], live: ReadonlySet<number>): number {
+function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: ReadonlySet<number>): number {
   let bound = Infinity;
   for (const b of live) {
     for (const ev of blocks[b].events) {
@@ -159,7 +160,7 @@ function survivorBound<C>(blocks: readonly StackArgsBlock<C>[], live: ReadonlySe
 // A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
 // keeps one outgoing area below every local and never reads it back
 // (`localsAboveOutgoingArea`), a word this function LOADS is a local, and so is every word above
-// it (`survivorBound`). Every refusal that reads the code — NOTHING EXTRA,
+// it (`loadedWordBound`). Every refusal that reads the code — NOTHING EXTRA,
 // (a) and (b) — then weighs only the words beneath the bound, so an undeclared call lifts once no
 // word there could open an argument block, and takes no stack word. Hand-written asm that reads
 // its own outgoing argument back defeats it, and lifts with that argument dropped — a
@@ -176,7 +177,7 @@ function survivorBound<C>(blocks: readonly StackArgsBlock<C>[], live: ReadonlySe
 //     must never render as a plausible value.
 //
 // A SPILL LIVE ACROSS A LICENSED CALL sits in the may set and is not in the declared block — agbcc's
-// commonest frame with an outgoing area. The declaration cannot excuse it; `survivorBound` can: a
+// commonest frame with an outgoing area. The declaration cannot excuse it; `loadedWordBound` can: a
 // word this function loads is a local, so NOTHING EXTRA counts only the pending
 // words beneath the bound. A declared block that reaches the bound contradicts it, and needs no
 // check of its own: the block is contiguous words from zero, so it holds the bound's word, which
@@ -268,7 +269,7 @@ export function analyzeOutgoingArgs<C>({
   // code-reading refusals below — the licence's NOTHING EXTRA, (a) and (b) — each hunt for a word
   // that could be one, so the words they weigh are cut to those beneath the bound once, where
   // they are collected (`mayAt`, `storedAnywhere`), and none of them repeats the test.
-  const bound = localsAboveOutgoingArea ? survivorBound(asmBlocks, live) : Infinity;
+  const bound = localsAboveOutgoingArea ? loadedWordBound(asmBlocks, live) : Infinity;
   const belowBound = (s: Iterable<number>): Set<number> => new Set([...s].filter((o) => o < bound));
 
   const everySlot: number[] = [];
