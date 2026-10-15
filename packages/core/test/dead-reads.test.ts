@@ -21,6 +21,7 @@ import { T } from '../src/ir/types';
 import { tallying, without } from '../src/l3/gates';
 import { dce } from '../src/pattern/engine';
 import { decompile } from '../src/pipeline';
+import { globalsFromContext } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import {
   ARMV4T_AGBCC,
@@ -97,6 +98,17 @@ test('a symbol read nothing uses is declared volatile where no map declares it',
   const [c] = enumerateCandidates('sym', fixture('agbcc-deadread.s'), ARMV4T_AGBCC, {
     prototypes: { sym: { returnsVoid: true } },
   });
+  expect(c.symbolRefs?.find((r) => r.name === 'gR')?.info.volatile).toBe(true);
+});
+
+test('…and where the declaration context qualifies it, the declaration synthesized beside it says so too', () => {
+  // The context places the read `declared`, not by a cast; a plain synthesized `extern u32 gR;`
+  // would still make `gR;` compile to no read (rank-declare.ts `bareGlobalSymbols`).
+  const [c] = enumerateCandidates('sym', fixture('agbcc-deadread.s'), ARMV4T_AGBCC, {
+    prototypes: { sym: { returnsVoid: true } },
+    contextGlobals: globalsFromContext('extern volatile int gR;', 'c'),
+  });
+  expect(c.source).toMatch(/^\s*gR;$/m);
   expect(c.symbolRefs?.find((r) => r.name === 'gR')?.info.volatile).toBe(true);
 });
 
