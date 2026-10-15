@@ -2,7 +2,7 @@
 // caller builds it in its frame — through copies of sp, Thumb having no sp-relative halfword or byte
 // store — and loads its words into the registers the declaration places it in. Every fixture is
 // agbcc's own output at the corpus flags (`-mthumb-interwork -O2 -fhex-asm -fprologue-bugfix`), save
-// the one marked hand-edited.
+// the two marked hand-edited.
 import { describe, expect, test } from 'vitest';
 
 import { renderDeclarations } from '../src/declare';

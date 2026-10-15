@@ -4021,11 +4021,11 @@ export function structure(
       ? cell
       : ({ k: 'index', base: cell, idx: { k: 'const', value: index }, width, signed, subscript: true } as const);
   };
-  // A FRAME OBJECT DECLARED AS A STRUCT (a call's return storage, `laddrType`) is read and written
-  // through the member an access names exactly — its offset, its width, and the type the cast it
-  // replaces would spell (`spellsAccessType`, a load's alone: a store truncates to the member's
-  // bytes whatever their type); any other access keeps the cast. Unqualified only: a qualified
-  // access keeps the cast its qualifier goes on.
+  // A FRAME OBJECT DECLARED AS A STRUCT (a call's return storage or a struct passed by value,
+  // `laddrType`) is read and written through the member an access names exactly — its offset, its
+  // width, and the type the cast it replaces would spell (`spellsAccessType`, a load's alone: a
+  // store truncates to the member's bytes whatever their type); any other access keeps the cast.
+  // Unqualified only: a qualified access keeps the cast its qualifier goes on.
   const frameStructMember = (op: Op, off: number, width: number, signed: boolean | null): Expr | null => {
     const d = defs.get(op.operands[0]);
     const t = d?.results[0].type;

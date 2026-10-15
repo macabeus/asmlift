@@ -1063,8 +1063,8 @@ function classifyFrameUses({
   // access at [+k] through a capture is a member of the one object rather than a second object
   const members: { at: number; width: number }[] = [];
   // …and without it, the first such access, which the per-object model refuses once the model is
-  // chosen (`chooseFrameModel`) — save one of a call's return storage, whose members are the
-  // struct's declared ones (`objectShapes`)
+  // chosen (`chooseFrameModel`) — save one of a call's return storage or of a struct passed by
+  // value, whose members are the struct's declared ones (`objectShapes`)
   const memberRefusals: [number, string][] = [];
   // …and in either model, every fixed-offset access as the op that makes it, the frame bytes it
   // touches, whether it reads them, and whether its address is this frame's on every path — what
