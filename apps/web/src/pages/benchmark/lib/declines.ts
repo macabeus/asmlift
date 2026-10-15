@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 229 distinct decline messages (the texts reached by
+// `packages/core/src` throws 230 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -87,7 +87,7 @@
 //                               type it has no spelling for, or a bare parameter count that states
 //                               none), and one declared to return both a struct and a 64-bit value
 //                               (its two refusals of the struct return itself are `struct-return`'s,
-//                               its three of a struct passed by value `byvalue-arg`'s, and its two
+//                               its four of a struct passed by value `byvalue-arg`'s, and its two
 //                               64-bit refusals are NOT here either — both carry
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
@@ -601,17 +601,19 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.
-    // Three throws in `frontend/call-plan.ts` spell it, each straight after the callee: no rule
+    // Four throws in `frontend/call-plan.ts` spell it, each straight after the callee: no rule
     // places the aggregate in argument words (the target states none, the declaration does not
     // lay it out, it is a union, or another parameter is unsized), it runs past the argument
-    // registers, or its words are not one frame object or one global read whole at the call.
+    // registers, its words are not one frame object or one global read whole at the call, or they
+    // are one global C cannot spell bare as the struct (a section symbol, or a symbol the
+    // declarations type as an array, an enclosing struct or another type).
     // Before the first of them the call fell to the arity guess, which dropped the struct or read
     // its words as separate arguments — C that compiles — so what this counts was wrong C once.
     //
     // ITS FIRST INHABITANT IS `byvalregs` ON ido7.1, which reached the call before its frame.
     key: 'byvalue-arg',
     label: 'Struct arguments passed by value that a call plan cannot place or fold',
-    pattern: / by value as its parameter [^,]+, and |by value, and its words are not one /,
+    pattern: / by value as its parameter [^,]+, and |by value, and its words are not one | by value off '/,
   },
   {
     // The ABI destroyed the value, and nothing about the register file says so: the read has a
