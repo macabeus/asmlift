@@ -4,11 +4,11 @@
 // and mwcc at the synthetic tier's.
 import { describe, expect, test } from 'vitest';
 
-import { aggregateSize, aggregateType, byValueCallArgs, returnsInMemory } from '../src/aggregate';
+import { aggregateSize, aggregateType, byValueCallArgs, byValueRefusal, returnsInMemory } from '../src/aggregate';
 import { T } from '../src/ir/types';
 import { type AggregateLayout, type AggregateMember, spellableProto } from '../src/proto';
 import { prototypesFromContext } from '../src/proto-context';
-import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC } from '../src/target';
 
 const struct = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'struct', members });
 const union = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'union', members });
@@ -181,6 +181,60 @@ describe('a struct passed by value in argument words', () => {
     expect(byValueCallArgs({ ...p, byValueLayouts: { 0: { kind: 'struct' as const } } }, ARMV4T_AGBCC)).toBeUndefined();
     // …and a declaration with no struct passed by value is `declaredCallArgs`'s alone
     expect(byValueCallArgs({ params: ['s32'], byValueLayouts: {} }, ARMV4T_AGBCC)).toBeUndefined();
+  });
+
+  describe('on O32, which starts an 8-aligned aggregate at an even word', () => {
+    // the rule's own target, with words switched on whether or not the frontend lowers them yet
+    const O32 = {
+      ...MIPS_GCC,
+      compilerBehaviors: { ...MIPS_GCC.compilerBehaviors, byValueAggregateArgWords: true },
+    };
+    const L = { kind: 'struct' as const, members: [{ name: 'v', type: 's64' }] };
+    const Q = { kind: 'struct' as const, members: ['a', 'b'].map((name) => ({ name, type: 'u32' })) };
+
+    test('a `long long` member aligns the struct to 8', () => {
+      expect(aggregateSize(L, O32)).toEqual({ size: 8, align: 8 });
+      const CL = { kind: 'struct' as const, members: [{ name: 'c', type: 'u8' }, ...L.members] };
+      expect(aggregateSize(CL, O32)).toEqual({ size: 16, align: 8 });
+    });
+
+    test('at an even word it is placed where it starts', () => {
+      expect(byValueCallArgs({ params: ['struct L'], byValueLayouts: { 0: L } }, O32)?.widths).toEqual([32, 32]);
+      const two = byValueCallArgs({ params: ['s32', 's32', 'struct L'], byValueLayouts: { 2: L } }, O32);
+      expect(two?.byValue.map(({ word, words }) => ({ word, words }))).toEqual([{ word: 2, words: 2 }]);
+    });
+
+    test('at an odd word it would skip one, and refuses', () => {
+      const p = { params: ['s32', 'struct L'], byValueLayouts: { 1: L } };
+      expect(byValueCallArgs(p, O32)).toBeUndefined();
+      expect(byValueRefusal(p, O32)).toEqual({
+        param: 1,
+        refused: expect.stringMatching(/aligned to 8 and would start at an odd argument word/),
+      });
+      // a word-aligned struct at the same place is consecutive words, as agbcc places every one
+      expect(byValueCallArgs({ params: ['s32', 'struct Q'], byValueLayouts: { 1: Q } }, O32)?.widths).toEqual([
+        32, 32, 32,
+      ]);
+      expect(byValueCallArgs(p, ARMV4T_AGBCC)?.widths).toEqual([32, 32, 32]);
+    });
+  });
+
+  test('says why it places none', () => {
+    const p = { params: ['struct A'], byValueLayouts: { 0: PASSED_A } };
+    expect(byValueRefusal(p, PPC_MWCC)?.refused).toMatch(/this target states no rule/);
+    expect(byValueRefusal({ params: ['s32', 'struct A'] }, ARMV4T_AGBCC)).toEqual({
+      param: 1,
+      refused: expect.stringMatching(/does not lay it out/),
+    });
+    expect(
+      byValueRefusal({ ...p, byValueLayouts: { 0: { ...PASSED_A, kind: 'union' as const } } }, ARMV4T_AGBCC)?.refused,
+    ).toMatch(/is a union/);
+    expect(
+      byValueRefusal({ params: ['struct A', 'Opaque'], byValueLayouts: { 0: PASSED_A } }, ARMV4T_AGBCC)?.refused,
+    ).toMatch(/its parameter 2 'Opaque' is not sized/);
+    // …and none where it places them, or where no struct is passed by value
+    expect(byValueRefusal(p, ARMV4T_AGBCC)).toBeUndefined();
+    expect(byValueRefusal({ params: ['s32'] }, ARMV4T_AGBCC)).toBeUndefined();
   });
 
   test('the callee prints only where the lift passed the struct, and its `void` with it', () => {

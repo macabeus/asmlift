@@ -16,6 +16,7 @@ import {
   type ByValueArg,
   aggregateType,
   byValueCallArgs,
+  byValueRefusal,
   returnedAggregate,
   returnsInMemory,
   returnsWithoutHiddenPointer,
@@ -362,26 +363,13 @@ export function callDeclarations(
   // word: a parameter the declaration names a struct or union is known not to be.
   const refuseUnplacedByValue = (callee: string): void => {
     const p = declarationOf(callee);
-    if (p === undefined || !Array.isArray(p.params)) {
-      return;
+    const why = byValueRefusal(p, target);
+    if (why !== undefined) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` takes '${(p!.params as readonly string[])[why.param]}' by value as its ` +
+          `parameter ${why.param + 1}, and ${why.refused} — a struct passed by value is lifted only where its argument words are known`,
+      );
     }
-    const params = p.params;
-    const k = params.findIndex((_, i) => paramClassOf(p, params, i) === 'by-value');
-    if (k < 0) {
-      return;
-    }
-    const unsized = params.findIndex((_, i) => paramClassOf(p, params, i) === 'unsized');
-    const why = !target.compilerBehaviors.byValueAggregateArgWords
-      ? 'this target states no rule for which argument words carry one'
-      : p.byValueLayouts === undefined || !Object.hasOwn(p.byValueLayouts, k)
-        ? 'the declaration does not lay it out (a context does, by defining the struct)'
-        : unsized >= 0
-          ? `its parameter ${unsized + 1} '${params[unsized]}' is not sized, so where the struct starts is not known`
-          : 'it, or another aggregate it takes by value, is a union or has a member this target does not size';
-    fail(
-      `cannot lift '${name}': \`${callee}\` takes '${params[k]}' by value as its parameter ${k + 1}, and ${why} — ` +
-        'a struct passed by value is lifted only where its argument words are known',
-    );
   };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,

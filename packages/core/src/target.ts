@@ -42,8 +42,9 @@
 //     Others are read off the target directly by a consumer that is not the structurer — among
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
-//     `aggregateReturn`, `largestAlignment`, `enumBytes` and `bitfieldPacking` (aggregate.ts, for
-//     frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
+//     `aggregateReturn`, `largestAlignment`, `enumBytes`, `bitfieldPacking`,
+//     `byValueAggregateArgWords` and `alignedAggregateArgsStartEven` (aggregate.ts, for
+//     frontend/call-plan.ts, frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
@@ -927,6 +928,14 @@ export interface TargetDescription {
     // other way or states nothing: mwcc passes the address of a copy, and O32 places one in words
     // only after copying it into the argument home area, which the MIPS frontend does not read.
     byValueAggregateArgWords?: boolean;
+    // AN AGGREGATE ALIGNED TO 8 STARTS AT AN EVEN ARGUMENT WORD, and the word it skips is left
+    // empty (`aggregate.ts` `byValueCallArgs`, which places one at an even word and refuses one that
+    // would start at an odd one). O32, compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2:
+    // `void takeL(s32 k, struct L { long long v; } l)` is passed `a0` and `a2:a3` with `a1` unset,
+    // and `takeD(s32 k, struct D { double d; } d)` the same; at word 0 both are `a0:a1`. ABSENT ⇒
+    // the target places every aggregate at the next free word: agbcc rounds nothing (thumb.h
+    // FUNCTION_ARG counts words), which is the note at `proto.ts` `wordsOf`.
+    alignedAggregateArgsStartEven?: boolean;
     // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
     // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
     // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
@@ -1220,6 +1229,12 @@ export const MIPS_IDO: TargetDescription = {
     // MEASURED: the probe at the field.
     narrowStoreConstantTakesLvalueType: true,
     aggregateBoundary: 1,
+    // MEASURED on all three O32 toolchains (ido7.1, gcc2.7.2kmc, gcc2.7.2): `struct {char c; double d;}`
+    // and its `long long` twin put the member at 8 and size 16 (`sizeof` and the member's offset
+    // compiled into `.data`).
+    largestAlignment: 8,
+    // MEASURED on all three, the probe at the field.
+    alignedAggregateArgsStartEven: true,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
     // is both homed dead AND widened in its own argument register. raise/paramwidth.ts's header has
@@ -1348,6 +1363,9 @@ export const MIPS_GCC: TargetDescription = {
     // MEASURED on BOTH toolchains this description serves, the pairs at the field.
     keepsPointerSumAddend: true,
     aggregateBoundary: 1,
+    // MEASURED on BOTH toolchains this description serves, and on ido7.1: the probe at MIPS_IDO's.
+    largestAlignment: 8,
+    alignedAggregateArgsStartEven: true,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and
     // gcc2.7.2 at -O1 alike — so the object carries no witness at all and the pass refuses.

@@ -331,7 +331,7 @@ describe('a struct passed by value in argument registers', () => {
         returnsVoid: true,
       },
       'union V',
-      /it, or another aggregate it takes by value, is a union or has a member this target does not size/,
+      /it is a union, or has a member this target does not size/,
     ],
   ])('%s declines, and is not guessed', (_, takeQ, spelling, why) => {
     expect(() => decompile('byvalQ', BYVALQ, ARMV4T_AGBCC, { prototypes: { takeQ } })).toThrow(

@@ -14,6 +14,7 @@ import {
   declaresAggregateReturn,
   declaresVoidReturn,
   paramClassOf,
+  wordsOf,
 } from './proto';
 import type { TargetDescription } from './target';
 
@@ -261,30 +262,59 @@ export interface ByValueArg {
   readonly type: IrType;
 }
 
+/** Where a declaration's by-value structs travel (`byValueCallArgs`), or why that is not known. */
+type ByValueLayout =
+  | { widths: readonly number[]; doubles: ReadonlySet<number>; byValue: readonly ByValueArg[] }
+  | { refused: string; param: number };
+
 /** THE ARGUMENT WORDS OF A DECLARATION WITH A STRUCT PASSED BY VALUE, where the target passes one
  *  in consecutive argument words (`compilerBehaviors.byValueAggregateArgWords`) and the declaration
  *  lays it out (`FnProto.byValueLayouts`): each such parameter is its size in words, rounded up, of
  *  32 bits each, and every other parameter is what `declaredCallArgs` makes of it. Undefined where
  *  any parameter is unsized that way — a union, a layout this target does not size, a spelling that
- *  names no tag — and where the declaration passes no struct by value at all, which
- *  `declaredCallArgs` answers alone. */
+ *  names no tag — or placed where no rule here follows it (`byValueRefusal` names which), and where
+ *  the declaration passes no struct by value at all, which `declaredCallArgs` answers alone. */
 export function byValueCallArgs(
   p: FnProto | undefined,
   target: TargetDescription,
 ): { widths: readonly number[]; doubles: ReadonlySet<number>; byValue: readonly ByValueArg[] } | undefined {
-  if (
-    !Array.isArray(p?.params) ||
-    p.byValueLayouts === undefined ||
-    !target.compilerBehaviors.byValueAggregateArgWords
-  ) {
+  const laid = layOutByValue(p, target);
+  return laid === undefined || 'refused' in laid ? undefined : laid;
+}
+
+/** Why `byValueCallArgs` places none of a declaration that does pass a struct or union by value:
+ *  the parameter it stops at (an index into `params`) and the reason. Undefined where it places
+ *  them, or where the declaration passes none. */
+export function byValueRefusal(
+  p: FnProto | undefined,
+  target: TargetDescription,
+): { refused: string; param: number } | undefined {
+  const laid = layOutByValue(p, target);
+  return laid !== undefined && 'refused' in laid ? laid : undefined;
+}
+
+function layOutByValue(p: FnProto | undefined, target: TargetDescription): ByValueLayout | undefined {
+  if (!Array.isArray(p?.params)) {
     return undefined;
+  }
+  const params = p.params;
+  const first = params.findIndex((_, i) => paramClassOf(p, params, i) === 'by-value');
+  if (first < 0) {
+    return undefined;
+  }
+  if (!target.compilerBehaviors.byValueAggregateArgWords) {
+    return { refused: 'this target states no rule for which argument words carry one', param: first };
   }
   const widths: number[] = [];
   const doubles = new Set<number>();
   const byValue: ByValueArg[] = [];
-  for (const [i, t] of p.params.entries()) {
-    const layout = Object.hasOwn(p.byValueLayouts, i) ? p.byValueLayouts[i] : undefined;
-    if (layout !== undefined && paramClassOf(p, p.params, i) === 'by-value') {
+  for (const [i, t] of params.entries()) {
+    if (paramClassOf(p, params, i) === 'by-value') {
+      const layout =
+        p.byValueLayouts !== undefined && Object.hasOwn(p.byValueLayouts, i) ? p.byValueLayouts[i] : undefined;
+      if (layout === undefined) {
+        return { refused: 'the declaration does not lay it out (a context does, by defining the struct)', param: i };
+      }
       const spelling = t
         .replace(/\b(?:const|volatile)\b/g, ' ')
         .trim()
@@ -292,7 +322,21 @@ export function byValueCallArgs(
       const tag = /^(?:struct\s+)?([A-Za-z_]\w*)$/.exec(spelling)?.[1];
       const type = tag === undefined ? undefined : aggregateType(tag, spelling, layout, target);
       if (type?.kind !== 'struct' || type.size === undefined) {
-        return undefined;
+        return { refused: 'it is a union, or has a member this target does not size', param: i };
+      }
+      // O32 starts an 8-aligned aggregate at an even argument word and leaves the one it skips
+      // empty. Placed at an even word that changes nothing; placed at an odd one, the skipped word
+      // would be an argument operand nothing passes, so that one refuses.
+      if (
+        target.compilerBehaviors.alignedAggregateArgsStartEven &&
+        (aggregateSize(layout, target)?.align ?? 0) >= 8 &&
+        wordsOf(widths) % 2 === 1
+      ) {
+        return {
+          refused:
+            'it is aligned to 8 and would start at an odd argument word, which this target skips — an argument word left empty is not modelled',
+          param: i,
+        };
       }
       const words = Math.ceil(type.size / 4);
       byValue.push({ param: i, word: widths.length, words, type });
@@ -301,12 +345,15 @@ export function byValueCallArgs(
     }
     const one = declaredCallArgs({ params: [t], wordParams: p.wordParams?.includes(i) ? [0] : [] }, target);
     if (one === undefined) {
-      return undefined;
+      return {
+        refused: `its parameter ${i + 1} '${t}' is not sized, so where the struct starts is not known`,
+        param: first,
+      };
     }
     if (one.doubles.size > 0) {
       doubles.add(widths.length);
     }
     widths.push(...one.widths);
   }
-  return byValue.length === 0 ? undefined : { widths, doubles, byValue };
+  return { widths, doubles, byValue };
 }
