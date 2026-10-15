@@ -151,7 +151,7 @@ describe('the register half: scratch and saved registers', () => {
   ])("a scratch register's entry value no join takes refuses (%s)", (_c, target) => {
     for (const r of ['at', 'v0', 'v1', 't0', 't9']) {
       expect(lift(['0:\tjr\tra', `4:\taddu\tv0,${r},a0`], target)).toThrow(
-        new RegExp(`${r} is read before anything writes it, and no path's definition joins it`),
+        new RegExp(`${r} is read before anything writes it, and no join meets it with a definition of its own`),
       );
     }
   });
@@ -178,6 +178,81 @@ describe('the register half: scratch and saved registers', () => {
     ).toBe(
       's32 f(s32 a0, s32 *a1) {\n    s32 v0;\n    *a1 = v0;\n    if (a0 != 0) v0 = a0 << 1;\n    return v0 + a0;\n}\n',
     );
+  });
+});
+
+describe('what a join must meet before an entry value is a local', () => {
+  // A hand-written routine handed a loop count in t0: the entry value enters the loop header's join,
+  // but the back edge only carries the count's own next value, so no definition meets it there.
+  const COUNT = [
+    '0:\tsb\tzero,0(a0)',
+    '4:\taddiu\tt0,t0,-1',
+    '8:\tbnez\tt0,0 <f>',
+    'c:\taddiu\ta0,a0,1',
+    '10:\tjr\tra',
+    '14:\tnop',
+  ];
+  // Two scratch entry values joined (`beqz a0; move t0,v1`): neither side is a definition.
+  const TWO_INPUTS = ['0:\tbeqz\ta0,c <f+0xc>', '4:\tnop', '8:\tmove\tt0,v1', 'c:\tjr\tra', '10:\taddu\tv0,t0,a1'];
+  // `int x, y; if (c) x = y; return x + c;` at gcc2.7.2kmc -O2: x in v0, y in v1, so the one join
+  // takes two undefined values and no definition at all.
+  const ALL_UNDEF_KMC = ['0:\tbnezl\ta0,8 <f+0x8>', '4:\tmove\tv0,v1', '8:\tjr\tra', 'c:\taddu\tv0,v0,a0'];
+
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('a loop-carried input, two joined inputs and a join no path defines all refuse (%s)', (_c, target) => {
+    const REFUSE = /is read before anything writes it, and no join meets it with a definition of its own/;
+    expect(lift(COUNT, target)).toThrow(REFUSE);
+    expect(lift(TWO_INPUTS, target)).toThrow(REFUSE);
+    expect(lift(ALL_UNDEF_KMC, target)).toThrow(REFUSE);
+  });
+
+  // `do { if (*p) r = i; i++; p++; } while (i != n); return r;`: r's entry value enters the loop
+  // header's join, whose back-edge argument is the inner join — and that one meets `i`, which
+  // nothing derives from r. A definition through the inner join is still a definition.
+  test.each([
+    ['gcc', MIPS_GCC],
+    ['ido', MIPS_IDO],
+  ])('a local assigned conditionally inside a loop meets its definition through the inner join (%s)', (_c, target) => {
+    expect(
+      src(
+        [
+          '0:\tmove\tv1,zero',
+          '4:\tlw\tt1,0(a0)',
+          '8:\tbeqz\tt1,14 <f+0x14>',
+          'c:\tnop',
+          '10:\tmove\tt0,v1',
+          '14:\taddiu\tv1,v1,1',
+          '18:\tbne\tv1,a1,4 <f+0x4>',
+          '1c:\taddiu\ta0,a0,4',
+          '20:\tjr\tra',
+          '24:\tmove\tv0,t0',
+        ],
+        target,
+      ),
+    ).not.toMatch(/f\(s32 \*a0, s32 a1, /);
+  });
+
+  // The same source at ido7.1 -O2 keeps x and y in frame words: a join of two undefined words is
+  // one uninitialised local, not a local whose every assignment the structurer drops (which its
+  // own postcondition reported as read but never assigned).
+  test('a join of two uninitialised frame words is one uninitialised local', () => {
+    expect(
+      src(
+        [
+          '0:\tbeqz\ta0,10 <f+0x10>',
+          '4:\taddiu\tsp,sp,-8',
+          '8:\tlw\tt6,0(sp)',
+          'c:\tsw\tt6,4(sp)',
+          '10:\tlw\tt7,4(sp)',
+          '14:\taddiu\tsp,sp,8',
+          '18:\tjr\tra',
+          '1c:\taddu\tv0,t7,a0',
+        ],
+        MIPS_IDO,
+      ),
+    ).toBe('s32 f(s32 a0) {\n    s32 uninit_sp4;\n    return uninit_sp4 + a0;\n}\n');
   });
 });
 

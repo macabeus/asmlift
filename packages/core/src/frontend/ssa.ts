@@ -27,6 +27,7 @@ import {
   defOpMap,
   mkOp,
   mkValue,
+  replaceAllUsesWith,
   terminator,
   truncateCallArgs,
 } from '../ir/core';
@@ -245,10 +246,11 @@ export interface LiveInModel {
    *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
   uninitRegs?: readonly string[];
   /** Of `uninitRegs`, the ones something outside the C convention hands an input in
-   *  (`target.hiddenInputRegs`). The entry value of one must reach A JOIN, beside some path's
-   *  definition — the shape of a local the compiler assigned on one arm, which may also be read
-   *  before that assignment. Reaching none, it is the input, and `finish` refuses rather than
-   *  spell it `uninit_<reg>`. */
+   *  (`target.hiddenInputRegs`). The entry value of one must reach A JOIN that also takes a
+   *  definition the entry value does not feed — the shape of a local the compiler assigned on one
+   *  arm, which may also be read before that assignment. A join alone is not enough: an input
+   *  carried round a loop meets its own next value at the loop header. Meeting no such join, it is
+   *  the input, and `finish` refuses rather than spell it `uninit_<reg>`. */
   hiddenInputRegs?: readonly string[];
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
@@ -999,6 +1001,112 @@ export function makeSsaBuilder(
     }
   };
 
+  /** Each non-entry block param → the argument every in-edge passes it, in edge order. */
+  const joinArgs = (): Map<Value, Value[]> => {
+    const m = new Map<Value, Value[]>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        for (const s of op.successors) {
+          if (s.block === irBlocks[0]) {
+            continue;
+          }
+          s.block.params.forEach((p, i) => {
+            (m.get(p) ?? m.set(p, []).get(p)!).push(s.args[i]);
+          });
+        }
+      }
+    }
+    return m;
+  };
+
+  /** A JOIN NO PATH DEFINES IS ONE UNINITIALISED VALUE. `int x, y; if (c) x = y; return x + c;`
+   *  joins two undefined values, and the structurer drops every edge copy of an undefined value
+   *  (structure.ts `undefCarriesNothing`) — so a join whose every argument is undefined would keep
+   *  its local and lose every assignment to it, which its own postcondition then reports as a local
+   *  read but never assigned. Such a join is replaced by one fresh undefined value at the entry,
+   *  keyed as the join was, which dominates every use the join had. The greatest such set, so a
+   *  loop that only carries an undefined value round (`phi(undef, phi(…))`) collapses with it.
+   *  Run after the hidden-input check, which refuses the joins whose undefined arguments are a
+   *  hand-written routine's inputs. */
+  const collapseUndefinedJoins = () => {
+    const incoming = joinArgs();
+    const undefs = new Set<Value>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        if (op.opcode === 'undef') {
+          undefs.add(op.results[0]);
+        }
+      }
+    }
+    if (undefs.size === 0) {
+      return;
+    }
+    const doomed = new Set([...incoming.keys()].filter((p) => incoming.get(p)!.length > 0));
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const p of doomed) {
+        if (incoming.get(p)!.some((a) => a !== p && !undefs.has(a) && !doomed.has(a))) {
+          doomed.delete(p);
+          changed = true;
+        }
+      }
+    }
+    // ...and reaches an undefined value at all: a param only its own back edge feeds is a cycle no
+    // entry reaches (`readRecursive`'s unreachable walk), which carries no value to collapse into.
+    const grounded = new Set<Value>();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const p of doomed) {
+        if (!grounded.has(p) && incoming.get(p)!.some((a) => undefs.has(a) || grounded.has(a))) {
+          grounded.add(p);
+          changed = true;
+        }
+      }
+    }
+    for (const p of [...doomed]) {
+      if (!grounded.has(p)) {
+        doomed.delete(p);
+      }
+    }
+    if (doomed.size === 0) {
+      return;
+    }
+    const orphans = new Set([...doomed].flatMap((p) => incoming.get(p)!.filter((a) => undefs.has(a))));
+    for (const p of doomed) {
+      const firstUndef = incoming.get(p)!.find((a) => undefs.has(a));
+      const key = phiKey.get(p) ?? (firstUndef && defOpMap(fn).get(firstUndef)?.attrs.key) ?? '';
+      const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key } });
+      irBlocks[0].ops.unshift(op);
+      replaceAllUsesWith(fn, p, op.results[0]);
+    }
+    for (const blk of irBlocks) {
+      for (let i = blk.params.length - 1; i >= 0; i--) {
+        const p = blk.params[i];
+        if (!doomed.has(p)) {
+          continue;
+        }
+        dropPhiRecord(p);
+        blk.params.splice(i, 1);
+        for (const b2 of irBlocks) {
+          for (const o of b2.ops) {
+            for (const s of o.successors) {
+              if (s.block === blk) {
+                s.args.splice(i, 1);
+              }
+            }
+          }
+        }
+      }
+    }
+    // The undefined arguments the collapsed joins took and nothing else reads.
+    const used = new Set(
+      irBlocks.flatMap((b) => b.ops.flatMap((o) => [...o.operands, ...o.successors.flatMap((s) => s.args)])),
+    );
+    for (const blk of irBlocks) {
+      blk.ops = blk.ops.filter((o) => !orphans.has(o.results[0]) || used.has(o.results[0]));
+    }
+  };
+
   const dropPhiRecord = (p: Value) => {
     phiBlock.delete(p);
     phiKey.delete(p);
@@ -1110,28 +1218,69 @@ export function makeSsaBuilder(
       // trivial-phi pass, so a join every path of which arrives undefined is no join. The
       // compiler's local is assigned on SOME path, and its entry value meets that definition as a
       // join's edge argument; once it does, a direct use is the same local read before that
-      // assignment (`uninitfirst`). An entry value no join takes is the input.
+      // assignment (`uninitfirst`). An entry value that meets no such definition is the input.
+      //
+      // MEETING A JOIN IS NOT MEETING A DEFINITION. A register that carries an input round a loop
+      // (`addiu t0,t0,-1; bnez t0,top` on a hand-written count) sends its entry value into the
+      // loop header's join too, and the back edge's argument is that input's own next value. So
+      // the join must also take an INDEPENDENT definition (`independentOf`): a value no chain of
+      // operands or join arguments derives from the entry value, other than through a join one of
+      // whose other arguments is itself independent. A conditional assignment inside a loop
+      // (`for (…) if (c) x = i;`) meets that through the inner join; a counter that only advances
+      // the entry value, and two undefined values joined (`phi(t0, v1)`), do not, and refuse.
       if (hiddenEntryValues.size > 0) {
-        const joined = new Set(
-          irBlocks.flatMap((blk) => blk.ops.flatMap((op) => op.successors.flatMap((s) => s.args))),
-        );
+        const incoming = joinArgs();
+        const defOf = defOpMap(fn);
+        const derivesFrom = (v: Value, u: Value): boolean => {
+          const seen = new Set<Value>();
+          const work = [v];
+          for (let w = work.pop(); w !== undefined; w = work.pop()) {
+            if (w === u) {
+              return true;
+            }
+            if (seen.has(w)) {
+              continue;
+            }
+            seen.add(w);
+            work.push(...(defOf.get(w)?.operands ?? []), ...(incoming.get(w) ?? []));
+          }
+          return false;
+        };
+        const independentOf = (v: Value, u: Value, visiting: Set<Value>): boolean => {
+          if (v === u || defOf.get(v)?.opcode === 'undef' || visiting.has(v)) {
+            return false;
+          }
+          const args = incoming.get(v);
+          if (args === undefined || irBlocks[0].params.includes(v)) {
+            return !derivesFrom(v, u);
+          }
+          visiting.add(v);
+          return args.some((a) => independentOf(a, u, visiting));
+        };
+        const met = (u: Value): boolean =>
+          [...incoming.values()].some(
+            (args) => args.includes(u) && args.some((a) => a !== u && independentOf(a, u, new Set())),
+          );
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
-            const reg = op.operands
-              .filter((v) => !joined.has(v))
+            const reg = [...op.operands, ...op.successors.flatMap((s) => s.args)]
+              .filter((v) => hiddenEntryValues.has(v) && !met(v))
               .map((v) => hiddenEntryValues.get(v))
               .find((r) => r !== undefined);
             if (reg !== undefined) {
               throw new FrontendUnsupportedError(
-                `cannot lift '${name}': ${reg} is read before anything writes it, and no path's ` +
-                  `definition joins it — an input handed over outside the C convention (a save ` +
-                  `routine's frame address, a member-function pointer, a register hand-written asm ` +
-                  `passes a value in), not an uninitialised local`,
+                `cannot lift '${name}': ${reg} is read before anything writes it, and no join meets ` +
+                  `it with a definition of its own — an input handed over outside the C convention (a ` +
+                  `save routine's frame address, a member-function pointer, a register hand-written ` +
+                  `asm passes a value in, a count it carries round a loop), not modelled as an ` +
+                  `uninitialised local`,
               );
             }
           }
         }
       }
+      collapseUndefinedJoins();
+      simplifyTrivialPhis(fn, dropPhiRecord);
       // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the
       // write, because `pruneDeadParams` above is the last thing that can retire an entry
       // parameter, and an observation about a value no longer in the signature is one the reader

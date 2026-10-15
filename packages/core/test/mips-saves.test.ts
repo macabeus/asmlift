@@ -135,5 +135,5 @@ test('a caller-saved t-register stored with nothing in it is no save, so reloadi
   // `hiddenInputRegs`).
   expect(
     lift('0:\taddiu\tsp,sp,-8', '4:\tsw\tt0,4(sp)', '8:\tlw\tv0,4(sp)', 'c:\tjr\tra', '10:\taddiu\tsp,sp,8'),
-  ).toThrow(/t0 is read before anything writes it, and no path's definition joins it/);
+  ).toThrow(/t0 is read before anything writes it, and no join meets it with a definition of its own/);
 });

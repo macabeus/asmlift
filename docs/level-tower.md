@@ -1492,12 +1492,23 @@ O32 needs the same clause for the opposite reason. Its scratch set is thirteen r
 MIPS asm is handed live values in them: af's famicom_emu routines store a `t0` or `v1` they never
 wrote, and lifted with the scratch exemption alone they came out storing `uninit_t0`. The evidence
 O32 has is a JOIN. A local the compiler homed in a scratch register is assigned on some path, so its
-entry value meets that definition as a join's edge argument, and an entry value no join takes is
-an input (`hiddenInputRegs`, the rule mwcc's r11/r12 already follow). Sweeping every function and
-label symbol in the vendored snowboardkids2, marioparty3 and af objects, **29,399**, that refusal
-fires on 17 and on no compiled function: twelve labels, three hand-written routines and two data
-symbols disassembled as code. What it cannot describe is a local no path assigns at all, which
-declines; none of the 29,399 is one.
+entry value meets that definition as a join's edge argument, and an entry value no such join takes
+is an input (`hiddenInputRegs`, the rule mwcc's r11/r12 follow too). Meeting a join is not by
+itself meeting a definition: a hand-written routine that carries a count round a loop in `t0` sends
+the entry value into the loop header's join, whose back-edge argument is only that count's next
+value. So the join must also take a definition the entry value does not feed — directly, or
+through an inner join one of whose arguments is one (`for (…) if (c) x = i;`). Sweeping every
+function and label symbol in the vendored snowboardkids2, marioparty3 and af objects, **29,399**,
+that refusal fires on 18 and on no compiled function: twelve labels, four hand-written routines
+(one of them famicom_emu's loop-carried `t0`) and two data symbols disassembled as code. What it
+cannot describe is a local no path assigns at all, which declines; none of the 29,399 is one.
+
+A join every argument of which is undefined (`int x, y; if (c) x = y;`) is one uninitialised value,
+and the frontend collapses it into one before the structurer sees it: left standing, the
+structurer drops each edge copy of an undefined value and so every assignment to the join's local,
+and its own postcondition reports that local read but never assigned. In frame words (ido7.1) or
+saved registers (agbcc) that lifts; in two O32 scratch registers the hidden-input rule above refuses
+first, since neither entry value meets a definition.
 
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
