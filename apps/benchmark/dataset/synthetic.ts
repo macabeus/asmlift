@@ -1498,19 +1498,21 @@ export const SYNTHETIC: SynthSpec[] = [
   // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
   // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
   // and uninit_sw:agbcc is the register half, which `undef` does not touch.
+  // uninit_join and uninit_sw also run on stock gcc2.7.2 — the tier's first rows on that compiler —
+  // because it homes the local exactly where KMC does, so the register half is pinned on both.
   // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its
   // stack-argument path and would decline for a reason that has nothing to do with initialisation.
   {
     sym: 'uninit_join',
     src: 'int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }',
     features: ['uninit-local', 'branch'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
   },
   {
     sym: 'uninit_sw',
     src: 'int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }',
     features: ['uninit-local'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
   },
   {
     sym: 'uninit_spill',
@@ -1527,16 +1529,18 @@ export const SYNTHETIC: SynthSpec[] = [
   // and the path that skips the assignment reads what the caller left there. Without the
   // prologue's save set as the PPC frontend's live-in model, that read is a seventh PARAMETER for a
   // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the row MATCHes with
-  // `s32 v0;` declared and never initialised. mwcc_242_81 only, by measurement: agbcc already lifts
-  // the shape as `s32 v0;` through Thumb's own live-in model (the rule that closed `loopfall`,
-  // below), and ido7.1 and both gcc 2.7.2 lanes decline on a `jal` with no callee symbol, so on those
-  // lanes the row would pin another capability or another blocker. The other two CodeWarrior builds
-  // are pinned by packages/cli/test/matching/ppc-save-routines.test.ts.
+  // `s32 v0;` declared and never initialised. agbcc is left out: it already lifts the shape as
+  // `s32 v0;` through Thumb's own live-in model (the rule that closed `loopfall`, below). On MIPS
+  // the row pins BOTH O32 homes of the same local: gcc 2.7.2 (KMC and stock) keeps `x` in the
+  // callee-saved s2 its prologue stored — the register half, a phantom seventh parameter without a
+  // MIPS live-in model — and ido7.1 keeps it in a frame word (sp@28) read after the calls, above
+  // the 16-byte outgoing area — the frame half. The other two CodeWarrior builds are pinned by
+  // packages/cli/test/matching/ppc-save-routines.test.ts.
   {
     sym: 'uninit_saved',
     src: 'int k(int);\nint uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a); return k(k(k(k(b)+c)+d)+e) + x; }',
     features: ['uninit-local', 'branch'],
-    toolchains: ['mwcc_242_81'],
+    toolchains: ['mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'int k(int);',
     proto: { k: { params: 1 } },
   },
