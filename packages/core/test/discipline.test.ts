@@ -233,6 +233,17 @@ describe('carryDiscipline', () => {
     expect(carryDiscipline(call, {})).toEqual({});
   });
 
+  test('carries every stamp of a read placed twice, so dropping the declaration leaves it pinned', () => {
+    const { pinnedLoad } = kinds();
+    const both: Op = { ...pinnedLoad, attrs: { ...pinnedLoad.attrs, declaredVolatile: true } };
+    expect(placedAt(both)).toBe('declared');
+    const rebuilt = carryDiscipline(both, { elemSize: 4 });
+    expect(rebuilt).toEqual({ elemSize: 4, volatile: true, declaredVolatile: true });
+    // a later stamp under a map that no longer declares the object clears only its own attr
+    const { declaredVolatile: _, ...undeclared } = rebuilt;
+    expect(placedAt({ ...both, attrs: undeclared })).toBe('device');
+  });
+
   // One op of every placement, keyed by it, so a new placement does not compile here without one.
   const ONE_OF: Record<Placement, string> = {
     call: 'call',
