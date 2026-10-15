@@ -707,7 +707,11 @@ REGISTERS (agbcc, `compilerBehaviors.byValueAggregateArgWords`) is not a store r
 call lowering hands its words over one operand each (`byValueWords`), and `foldByValueArgs`
 (frontend/call-plan.ts) folds them, before the audit, into the one object they hold at the call — a
 frame object they are loaded off, or a global they are loaded off or were just stored to — or
-refuses. The call names the operand it passes by value (`byValue`), the audit judges a frame one as
+refuses. It refuses a struct agbcc never puts in memory: an SImode struct of four bytes or less,
+built in a register by an `and`/`orr` insert chain over the register's stale bits, and an all-word
+eight-byte struct passed straight from the registers holding its members. Its words are values, not
+one object's, and spelling them would mean a local struct the lift invents, with member stores
+that cover every byte the chain leaves stale. The call names the operand it passes by value (`byValue`), the audit judges a frame one as
 the struct and counts the call as a read of it (`byValueReads`), and the one-object answer is
 withheld, since a call handed the one object would pass a pointer. Structure spells the operand
 bare, `take2(sp0)` or `sub_0803D4AC(a0, gUnk_03003620)`, and the declarations block defines the
