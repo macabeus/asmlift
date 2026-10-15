@@ -4,8 +4,9 @@
 // it is offered, scored, and published only byte-exact.
 import { describe, expect, test } from 'vitest';
 
+import type { AsmData } from '../src/frontend/asmdata';
 import { enumerateCandidates, rankBy, withheldReason } from '../src/rank';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_IDO } from '../src/target';
 import { hasVariation } from '../src/variation-tokens';
 
 // agbcc -O2 of `void g(unsigned);
@@ -60,5 +61,59 @@ describe('/signed-cmp', () => {
   test('a tie goes to the unsigned spelling', () => {
     const tie = rankBy(cands, 'f', () => ({ score: 4 }));
     expect(hasVariation(tie.winner.variations, 'signed-cmp')).toBe(false);
+  });
+});
+
+// A respell that substitutes into a compare emission already pinned. IDO 7.1 -mips2 -O2 of
+//   int gx; short gs; int gb; void h(void); void h2(void);
+//   int f(int c, int n) { unsigned v; if (c) { h(); v = gs; } else { h2(); v = gb + 9; }
+//                         gx = v < (unsigned)n; return 5; }
+// The join is `sltu t7,v1,t6`. The default reads it through a `u32 v0` and compares unsigned;
+// `/unmerge` puts each arm's value back into the join, so over `s32 a1` the copy `gs < a1` is a
+// signed compare (gs = -1, n = 5: the machine stores 0, that C stores 1). No structure setting is
+// `/signed-cmp` here, so only the finished tree can say so.
+const UNMERGE_IDO =
+  '00000000 <f>:\n   0:\taddiu\tsp,sp,-24\n   4:\tsw\tra,20(sp)\n   8:\tbeqz\ta0,24 <f+0x24>\n' +
+  '   c:\tsw\ta1,28(sp)\n  10:\tjal\t0 <f>\n  14:\tnop\n  18:\tlui\tv1,0x0\n  1c:\tb\t38 <f+0x38>\n' +
+  '  20:\tlh\tv1,0(v1)\n  24:\tjal\t0 <f>\n  28:\tnop\n  2c:\tlui\tv1,0x0\n  30:\tlw\tv1,0(v1)\n' +
+  '  34:\taddiu\tv1,v1,9\n  38:\tlw\tt6,28(sp)\n  3c:\tlw\tra,20(sp)\n  40:\tlui\tat,0x0\n' +
+  '  44:\tsltu\tt7,v1,t6\n  48:\tsw\tt7,0(at)\n  4c:\taddiu\tsp,sp,24\n  50:\tjr\tra\n  54:\tli\tv0,5\n';
+const reloc = (offset: number, type: string, sym: string) => ({ section: '.text', offset, type, sym, addend: 0 });
+const UNMERGE_IDO_DATA: AsmData = {
+  sections: new Map(),
+  relocs: [
+    reloc(16, 'R_MIPS_26', 'h'),
+    reloc(24, 'R_MIPS_HI16', 'gs'),
+    reloc(32, 'R_MIPS_LO16', 'gs'),
+    reloc(36, 'R_MIPS_26', 'h2'),
+    reloc(44, 'R_MIPS_HI16', 'gb'),
+    reloc(48, 'R_MIPS_LO16', 'gb'),
+    reloc(64, 'R_MIPS_HI16', 'gx'),
+    reloc(72, 'R_MIPS_LO16', 'gx'),
+  ],
+  symbols: new Map(),
+  symbolCount: 8,
+  bigEndian: true,
+};
+
+describe('a respelled compare is judged on the finished tree', () => {
+  const cands = enumerateCandidates('f', UNMERGE_IDO, MIPS_IDO, { asmData: UNMERGE_IDO_DATA });
+  const named = (n: string) => cands.find((c) => c.variations.join('/') === n)!;
+
+  test('the unmerged copy over a signed parameter compares signed, so it is proof-carrying', () => {
+    const wrong = named('signed/unmerge');
+    expect(wrong.source).toMatch(/s32 f\(s32 a0, s32 a1\)[\s\S]*gx = gs < a1;/);
+    expect(wrong.matchOnly).toBe(true);
+    expect(withheldReason(wrong, { score: 3 })).toContain('operands non-negative');
+    expect(withheldReason(wrong, { score: 0 })).toBeNull();
+  });
+
+  test('the same copy over an unsigned parameter, and the default, need no proof', () => {
+    const right = named('unsigned/unmerge');
+    expect(right.source).toMatch(/s32 f\(u32 a0, u32 a1\)[\s\S]*gx = gs < a1;/);
+    expect(right.matchOnly).toBeUndefined();
+    const dflt = named('signed');
+    expect(dflt.source).toMatch(/u32 v0;[\s\S]*gx = v0 < a1;/);
+    expect(dflt.matchOnly).toBeUndefined();
   });
 });

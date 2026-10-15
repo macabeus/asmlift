@@ -55,6 +55,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import type { SymbolRef } from './l3/symbol-refs';
+import { signedOverUnsignedCompare } from './l3/typing';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -275,6 +276,11 @@ export interface Candidate {
    *  either wins on proof or is WITHHELD — never shown as a best-effort answer. Both ranking drivers
    *  ask `withheldReason`, so neither can publish what the other would not. */
   matchOnly?: true;
+  /** The tree this source was emitted from spells some unsigned compare so that C evaluates it
+   *  signed (l3/typing.ts `signedOverUnsignedCompare`, judged on the finished tree), which makes it
+   *  `matchOnly` and names the fact it owes. Set for whichever variation got it there: emission
+   *  under `/signed-cmp`, or a respell that substituted into a compare emission had pinned. */
+  signedUnsignedCompare?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
    *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
    *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
@@ -391,6 +397,10 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
     return null;
   }
   const facts = c.variations.flatMap((v) => PROOF_OBLIGATIONS.get(v) ?? []);
+  const cmpFact = PROOF_OBLIGATIONS.get('signed-cmp')!;
+  if (c.signedUnsignedCompare === true && !facts.includes(cmpFact)) {
+    facts.push(cmpFact);
+  }
   const fact = facts.length > 0 ? facts.join(' and on ') : 'a fact no gate over the C can settle';
   return `this spelling rests on ${fact}; only a byte-exact score proves it`;
 }
@@ -465,6 +475,8 @@ interface TreeSource {
   deviceVolatile?: number;
   /** see `Candidate.matchOnly` — set by a variation that cannot establish its own semantics */
   matchOnly?: true;
+  /** see `Candidate.signedUnsignedCompare` */
+  signedUnsignedCompare?: true;
 }
 
 /** Emit the DISTINCT type/branch-sense candidates for `name` — PURE, no scoring.
@@ -993,6 +1005,14 @@ export function enumerateCandidates(
   // of `/volatile` — a candidate that did not fail and is still in the fan. The order
   // is the candidates' own (`[pf.name, ...sp.variations]`), so a reported name and an enumerated
   // candidate's variations name the same candidate the same way.
+  // THE COMPARE-SIGNEDNESS PROOF, asked of every tree a source is emitted from rather than of the
+  // passes that build them. Emission pins each unsigned compare it lowers (structure.ts), but a
+  // respell that substitutes into a compare — `/unmerge` putting an arm's `s16` global where the
+  // pinned `u32` local stood, against an `s32` parameter — re-renders it signed, and no pass-local
+  // gate could have seen it coming from a sibling it never runs beside. So the finished tree is
+  // judged once, here, and a signed rendering of an `icmp_u*` is `matchOnly` whoever produced it.
+  const cmpProof = (tree: SFn): { matchOnly?: true; signedUnsignedCompare?: true } =>
+    signedOverUnsignedCompare(tree) ? { matchOnly: true, signedUnsignedCompare: true } : {};
   const respellTree = (sfn: SFn, preRespellVariations: readonly Variation[] = []): TreeSources => {
     // The walk→index respell variation (l3/reindex.ts) is a THIRD variation on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
@@ -1010,7 +1030,7 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn), ...cmpProof(sfn) });
     } catch (e) {
       reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
@@ -1110,7 +1130,14 @@ export function enumerateCandidates(
         assertNoOrphanedLocals(sfn, alt);
         assertLocalStorageStaysInteger(sfn, alt);
         assertFrameUnionsViewed(alt);
-        sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
+        sources.push({
+          variations,
+          source: backend.emit(alt),
+          ...refsOf(alt),
+          ...volOf(alt),
+          ...proof,
+          ...cmpProof(alt),
+        });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape or declaration-width fact
         // orthogonal to the respell variations outside the table; subsets compose in the fixed
@@ -1163,6 +1190,7 @@ export function enumerateCandidates(
                   ...volOf(shaped.out),
                   // a shape derived from a proof-gated spelling inherits the requirement
                   ...proof,
+                  ...cmpProof(shaped.out),
                 });
               }
             } catch (e) {
@@ -2371,6 +2399,7 @@ export function enumerateCandidates(
                 // whichever route the enumeration happened to walk first.
                 if (sp.matchOnly === undefined && !settingNeedsProof) {
                   delete dup.matchOnly;
+                  delete dup.signedUnsignedCompare;
                 }
                 if (!discardsPassedResult) {
                   delete dup.discardsPassedResult;
@@ -2400,6 +2429,7 @@ export function enumerateCandidates(
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
                 ...(sp.matchOnly || settingNeedsProof ? { matchOnly: true as const } : {}),
+                ...(sp.signedUnsignedCompare ? { signedUnsignedCompare: true as const } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
               };
@@ -2582,8 +2612,9 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
  *  would make each preference an accident of two unrelated decisions.
  *
- *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. It needs none: the default
- *  spells every unsigned compare unsigned, and `/signed-cmp`, the one spelling that does not, is
+ *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. It needs none: every tree a
+ *  source is emitted from is judged for an unsigned compare that renders signed
+ *  (`Candidate.signedUnsignedCompare`), whichever variation spelled it so, and such a source is
  *  `matchOnly` — on a nonmatch it is withheld before this comparator sees it, whatever it scores,
  *  and on a match both spellings are the program. */
 export function compareScored<S extends { score: number }>(

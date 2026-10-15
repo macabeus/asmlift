@@ -9,7 +9,13 @@ export type Expr =
   // A `double` literal, carried as its IEEE bit pattern (ir/float-bits.ts) — a kind apart from the
   // integer `const`, so no integer fold, range test or signedness reading ever takes it for one.
   | { k: 'fconst'; bits: string }
-  | { k: 'bin'; op: BinOp; l: Expr; r: Expr }
+  // `unsignedCmp` is EVIDENCE, not spelling: an ordering compare (`<` `<=` `>` `>=`) lowered from an
+  // `icmp_u*`, which C spells with the same token as the signed one and decides from the operand
+  // types. The printer never reads it; `signedOverUnsignedCompare` (l3/typing.ts) does, over the
+  // FINISHED tree, so a pass that substitutes into a compare cannot re-spell it signed unseen.
+  // `exprEquals` ignores it, as it ignores `index.operandOff`: two nodes that print alike are
+  // alike to a CSE.
+  | { k: 'bin'; op: BinOp; l: Expr; r: Expr; unsignedCmp?: true }
   | { k: 'un'; op: '-' | '~' | '!' | 'f-'; e: Expr }
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
   // held BEFORE the update, with the update as a side effect. The only expression form here that
@@ -485,7 +491,9 @@ export interface SFn {
    *  `StructureOptions.unsignedCompareSpelling` OFF leaves one, and never printed: rank.ts's
    *  `/signed-cmp` reads it, so a tree whose compares all render unsigned at emission needs no
    *  proof. Set at emission, over the types lowerDef sees, so a later pass that drops the compare
-   *  or re-declares an operand unsigned or a pointer leaves it set, which only withholds more. */
+   *  or re-declares an operand unsigned or a pointer leaves it set, which only withholds more.
+   *  A later pass that SUBSTITUTES into the compare is the other direction, and this flag cannot
+   *  see it: rank.ts judges every emitted tree again (`signedOverUnsignedCompare`). */
   signedUnsignedCompare?: true;
 }
 

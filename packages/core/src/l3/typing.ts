@@ -18,7 +18,7 @@
 // provably a pointer" (adds a cast — valid C either way); the deref contract treats `undefined`
 // as "not provably wrong" (no error).
 import { IrType, T, memberOf, scalarTypeForAccess } from '../ir/types';
-import { type BinOp, type Expr, type SFn, exprChildren } from './ast';
+import { type BinOp, type Expr, type SFn, exprChildren, walkExprs } from './ast';
 
 /** The declared type of a printed variable — the env `exprCType` judges rendered C against.
  *  THE one copy of the SFn→env derivation — printers, contracts and L3 respell variations alike: each
@@ -333,6 +333,41 @@ export function provablyNonNegative(e: Expr, varType: VarTypes): boolean {
       return t?.kind === 'int' && t.width < 32 && !t.signed;
     }
   }
+}
+
+/** Would C evaluate `l OP r` SIGNED, for an ordering compare the machine did unsigned? Both sides
+ *  render as signed-promoting C (or as a type this env cannot see, which may be), neither is a
+ *  pointer (C compares an address unsigned), and they are not both provably in [0, 2^31), where
+ *  the two compares agree. THE one predicate: structure.ts asks it at emission to place the
+ *  `(u32)` pin, and `signedOverUnsignedCompare` asks it again of the finished tree. */
+export function rendersSignedOverUnsigned(l: Expr, r: Expr, varType: VarTypes): boolean {
+  const ptrSide = (x: Expr): boolean => {
+    const t = exprCType(x, varType);
+    return t?.kind === 'ptr' || t?.kind === 'array';
+  };
+  return (
+    !ptrSide(l) &&
+    !ptrSide(r) &&
+    renderedIntSignedness(l, varType) !== false &&
+    renderedIntSignedness(r, varType) !== false &&
+    !(provablyNonNegative(l, varType) && provablyNonNegative(r, varType))
+  );
+}
+
+/** Does the finished tree spell some unsigned compare (`Expr.unsignedCmp`) so that C evaluates it
+ *  signed? Judged over the tree's own declarations, AFTER every pass that rewrites it: emission
+ *  pins each compare it lowers, but a respell that substitutes an arm's value into an emitted
+ *  compare (l3/unmerge.ts puts an `s16` global where a `u32` local stood) re-renders it without
+ *  asking. A name the declarations do not hold — a global the symbol declarations type outside
+ *  the tree — is not provably unsigned, so it counts: this errs toward withholding. */
+export function signedOverUnsignedCompare(sfn: SFn): boolean {
+  const env = declaredTypes(sfn);
+  for (const e of walkExprs(sfn.body)) {
+    if (e.k === 'bin' && e.unsignedCmp === true && rendersSignedOverUnsigned(e.l, e.r, env)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Does this write put a value that renders as a DEFINITELY-NON-POINTER C expression into a

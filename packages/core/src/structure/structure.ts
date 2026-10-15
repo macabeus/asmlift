@@ -93,7 +93,7 @@ import {
 } from '../l3/ast';
 import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
-import { exprCType, exprIntWidth, provablyNonNegative, renderedIntSignedness } from '../l3/typing';
+import { exprCType, exprIntWidth, renderedIntSignedness, rendersSignedOverUnsigned } from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import type { ContextGlobals } from '../proto-context';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
@@ -4116,13 +4116,8 @@ export function structure(
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';
       };
-      const signedOverUnsigned =
-        /^icmp_u/.test(d.opcode) &&
-        !ptrSide(l) &&
-        !ptrSide(r) &&
-        renderedIntSignedness(l, vtEnv) !== false &&
-        renderedIntSignedness(r, vtEnv) !== false &&
-        !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv));
+      const unsignedOrdering = /^icmp_u(lt|le|gt|ge)$/.test(d.opcode);
+      const signedOverUnsigned = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv);
       if (signedOverUnsigned && !unsignedCompareSpelling) {
         // left signed: the `/signed-cmp` spelling, which `SFn.signedUnsignedCompare` reports
         signedUnsignedCompare = true;
@@ -4175,7 +4170,7 @@ export function structure(
           r = { k: 'cast', to: T.u(32), e: r };
         }
       }
-      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
+      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r, ...(unsignedOrdering ? { unsignedCmp: true as const } : {}) };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       const l = e(d.operands[0]);

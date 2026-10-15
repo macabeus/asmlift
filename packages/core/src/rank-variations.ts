@@ -241,11 +241,14 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // `return 0 < v1;` over an s32 `v1` against `sltu v0,zero,v1`). A tree whose compares render
   // unsigned at emission (an unsigned operand, a pointer) needs no proof, and differs from the
   // default only in a declaration.
-  // KNOWN GAP, in the safe direction: the flag is set at emission, over the operand types lowerDef
-  // sees. A compare that renders unsigned only in the PRINTED C — a global the backend's pointer-cell
-  // legalization and the symbol declarations make `void *` (ptrcell.test.ts KR1, `g >= gLimit`) —
-  // still owes the proof, and is withheld on a nonmatch. Neither of those is in the tree: globals
-  // are absent from `declaredTypes`, so judging the finished tree instead would not release it.
+  // The same obligation reaches a tree no structure setting spelled signed: a respell that
+  // substitutes into a pinned compare (`/unmerge`) can re-render it signed, so rank.ts judges every
+  // emitted tree again (`signedOverUnsignedCompare`) and marks that source too.
+  // KNOWN GAP, in the safe direction: both judgments read the tree's declarations. A compare that
+  // renders unsigned only in the PRINTED C — a global the backend's pointer-cell legalization and
+  // the symbol declarations make `void *` (ptrcell.test.ts KR1, `g >= gLimit`) — still owes the
+  // proof, and is withheld on a nonmatch. Neither of those is in the tree: globals are absent from
+  // `declaredTypes`.
   // Gated on the function having an unsigned compare at all.
   {
     flag: 'signedCmp',
