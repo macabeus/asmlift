@@ -2506,6 +2506,7 @@ function liftOnce(
     irBlocks,
     ...frame.partition,
     usedSlotOffsets: fill.frameUses.usedSlotOffsets,
+    slotLoads: fill.frameUses.slotLoads,
     capturedObjectIsTheWholeFrame: frame.capturedObjectIsTheWholeFrame,
     escapesReliedOn: frame.escapesReliedOn,
     movedCaptures: fill.frameUses.movedCaptures,
@@ -3538,7 +3539,7 @@ function measureThumbFrame({
       localArea,
       argRegs: target.argRegs.length,
       capturedWholeFrame: capturedObjectIsTheWholeFrame,
-      localsAboveOutgoingArea: target.compilerBehaviors.localsAboveOutgoingArea === true,
+      outgoingAreaNeverLoaded: target.compilerBehaviors.outgoingAreaNeverLoaded === true,
     });
   const outgoingArgs = outgoingArgsOver(eventBlocks);
   // THE ESCAPES THE VERDICT LEANS ON, re-asked of the lifted IR (`auditFrameObjects`'
@@ -4602,6 +4603,10 @@ interface ThumbFrameUses {
   /** the blocks other than the entry that read an incoming stack argument
    *  (`ThumbFrame.settledDepth`), which `lowerCall`'s `withholdsSetupArgs` reads */
   readonly offEntryArgReads: Set<number>;
+  /** per block, the own-frame words the body reads as SSA slots rather than memory — loads the
+   *  frame-object audit cannot see in the IR, which bound its pending stores
+   *  (`FrameObjectAudit.slotLoads`) */
+  readonly slotLoads: Map<number, Set<number>>;
 }
 
 /** WHAT THE FILL OF A BLOCK READS: the records of the stages before it, the SSA builder it writes
@@ -4688,7 +4693,12 @@ function thumbFillOf(
     pairs,
     flags,
     statics,
-    frameUses: { usedSlotOffsets: new Set(), movedCaptures: new Set(), offEntryArgReads: new Set() },
+    frameUses: {
+      usedSlotOffsets: new Set(),
+      movedCaptures: new Set(),
+      offEntryArgReads: new Set(),
+      slotLoads: new Map(),
+    },
   };
 }
 
@@ -5524,16 +5534,17 @@ function lowerLoad(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
   //
   // A slot NO store reaches, on any path, is the same local read before any store — `if (k > 5)
   // use(v0); … v0 = p[0];`, or a local the source never initialises — under the compiler's layout
-  // claim (`localsAboveOutgoingArea`): a word it loads is not one of its outgoing area, so not one
+  // claim (`outgoingAreaNeverLoaded`): a word it loads is not one of its outgoing area, so not one
   // a callee assigned as its stack parameter. Without the claim it may be, and falls through to
   // the decline. The other writer it may have is a callee holding an address of the frame, and
   // that is the frame-object audit's to refuse: an `undef` slot an escaped writer reaches
   // (`writer-over-undef`), or one a captured object overlaps.
   if (
     frame.isOwnFrameWordSlot(base, off, regOff, width) &&
-    (ssa.hasReachingDef(stackSlotKey(off), bi) || fill.target.compilerBehaviors.localsAboveOutgoingArea === true)
+    (ssa.hasReachingDef(stackSlotKey(off), bi) || fill.target.compilerBehaviors.outgoingAreaNeverLoaded === true)
   ) {
     usedSlotOffsets.add(off);
+    fill.frameUses.slotLoads.set(bi, (fill.frameUses.slotLoads.get(bi) ?? new Set()).add(off));
     writeData(reg(a), bi, readVar(stackSlotKey(off), bi));
     return;
   }

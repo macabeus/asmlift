@@ -37,6 +37,10 @@ export interface FrameObjectAudit {
    *  stack-argument block staged at its bottom, which is where an untyped object claims to start */
   declaredLocals: NonNullable<LiveInModel['declaredLocals']>;
   usedSlotOffsets: ReadonlySet<number>;
+  /** per IR block index, the frame offsets the frontend read as SSA slots, not as memory — loads
+   *  the IR does not show this audit. Read only under `outgoingAreaNeverLoaded`, where any load
+   *  proves a word a local's (`storedNeverRead`). Absent where the frontend records none. */
+  slotLoads?: ReadonlyMap<number, ReadonlySet<number>>;
   capturedObjectIsTheWholeFrame: boolean;
   /** the frame offsets whose escape the frontend's outgoing-argument verdict leans on — each one
    *  re-proven here (`recheckEscapesReliedOn`). Absent or empty where it leans on none. */
@@ -343,6 +347,7 @@ export function auditFrameObjects({
   ownedLocals: owned,
   declaredLocals: declared,
   usedSlotOffsets,
+  slotLoads,
   capturedObjectIsTheWholeFrame,
   escapesReliedOn = new Set(),
   movedCaptures,
@@ -382,7 +387,7 @@ export function auditFrameObjects({
     recheckWholeFramePremise({ uses, returnsWithoutHiddenPointer, fail });
   }
   recheckEscapesReliedOn(escapesReliedOn, uses, fail);
-  storedNeverRead(irBlocks, uses, target, fail);
+  storedNeverRead(irBlocks, uses, slotLoads, target, fail);
   // The device pin's trigger: the `readOnlyAddressSinks` registers a frame address was stored to.
   const sinks = [...new Set([...uses.sourceStores.values()].flat().map((s) => s.sink))];
   if (oneObject !== undefined) {
@@ -1577,19 +1582,26 @@ function chooseFrameModel({
  *  an object at or below it: whoever that hands the bytes to may read them.
  *
  *  AND ONLY A STORE BENEATH THE SURVIVOR BOUND. Under `localsAboveOutgoingArea` a compiler keeps one
- *  outgoing area at the frame bottom, below every local, and never reads it back after a call — the
- *  form of the premise every compiler that sets it holds, where stackargs' `loadedWordBound` takes
- *  agbcc's stronger one (`target.ts` says why it is not carried here); so a frame byte loaded
- *  after a call before anything re-stores it held a value across that call, its word is a local's,
- *  and so is every word above it. Every compiled outgoing-argument shape sits beneath any such
+ *  outgoing area at the frame bottom, below every local, and never reads it back after a call; so
+ *  a frame byte loaded after a call before anything re-stores it held a value across that call,
+ *  its word is a local's, and so is every word above it. Under the strong form,
+ *  `outgoingAreaNeverLoaded` (agbcc), any load at all bounds it, the same bound stackargs'
+ *  `loadedWordBound` takes; the after-call form is all MIPS and mwcc state (`target.ts` says why). Every compiled outgoing-argument shape sits beneath any such
  *  bound, and a local the source reads after a call does not: `g(); b[0] = x; b[1] = y;
  *  return b[0];` reaches no call, `b[0] = x; g(); return b[0];` is above the bound. What this still
  *  refuses that is honest is a local the source stores, never reads back, and calls past — a dead
  *  local and an outgoing argument are the same machine code, and the lift cannot tell which.
- *  The loads weighed are this audit's fixed accesses alone — a `[sp,#k]` slot load is the slot
- *  model's and not seen here — so the bound sits at or above stackargs' own, which only asks more.
- *  Without the premise the bound proves nothing, and every pending store is asked. */
-function storedNeverRead(irBlocks: readonly Block[], uses: FrameUses, target: TargetDescription, fail: Refuse): void {
+ *  The after-call liveness weighs this audit's fixed accesses alone, so it sits at or above the
+ *  bound the frontend's slot loads would give, which only asks more; the strong form adds those
+ *  slot loads (`slotLoads`). Without the premise the bound proves nothing, and every pending store
+ *  is asked. */
+function storedNeverRead(
+  irBlocks: readonly Block[],
+  uses: FrameUses,
+  slotLoads: FrameObjectAudit['slotLoads'],
+  target: TargetDescription,
+  fail: Refuse,
+): void {
   const calls = irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'call'));
   if (calls.length === 0) {
     return;
@@ -1643,6 +1655,24 @@ function storedNeverRead(irBlocks: readonly Block[], uses: FrameUses, target: Ta
           liveIn[b] = cur;
           changed = true;
         }
+      }
+    }
+  }
+  // …and under the STRONG form (`outgoingAreaNeverLoaded`) the caller loads no word of the area
+  // before a call either, so ANY frame byte loaded in a block the entry reaches bounds it: one this
+  // audit sees at a fixed offset, and one the frontend read as a slot, which the IR does not show
+  // (`slotLoads`). Without the slot loads, `mov r3, sp; strh r0, [r3]; … bl sink; ldr r0, [sp]`
+  // refuses the `strh` on a word the code itself proves a local's.
+  if (target.compilerBehaviors.outgoingAreaNeverLoaded === true) {
+    for (const b of live) {
+      for (const op of irBlocks[b].ops) {
+        const a = byOp.get(op);
+        if (a?.isLoad && a.frameOnly) {
+          bound = Math.min(bound, a.at - (a.at % 4));
+        }
+      }
+      for (const off of slotLoads?.get(b) ?? []) {
+        bound = Math.min(bound, off - (off % 4));
       }
     }
   }

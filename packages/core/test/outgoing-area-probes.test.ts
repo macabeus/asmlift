@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-restage.s'), 'utf8');
 
@@ -87,4 +87,15 @@ test('no function loads a word of its outgoing area, whatever its arguments call
     loadsAbove[fn] = loads;
   }
   expect(loadsAbove.spills.length).toBeGreaterThan(0);
+});
+
+// The universal above is agbcc's alone, and it is stated in its own field, not read off the
+// after-call form every frame-bottom compiler shares (`localsAboveOutgoingArea`): o32 gcc defines
+// REG_PARM_STACK_SPACE, the mechanism by which a staged word is loaded before a nested call.
+test('only agbcc claims it never loads its outgoing area, and every claimant states the after-call form', () => {
+  const claims = Object.entries(TOOLCHAIN_TARGETS).flatMap(([tc, t]) =>
+    t.description.compilerBehaviors.outgoingAreaNeverLoaded === true ? [tc] : [],
+  );
+  expect(claims).toEqual(['agbcc']);
+  expect(ARMV4T_AGBCC.compilerBehaviors.localsAboveOutgoingArea).toBe(true);
 });

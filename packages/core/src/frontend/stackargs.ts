@@ -74,10 +74,10 @@ export interface StackArgsInput<C> {
   /** The frontend's verdict that the whole frame is one addressable object handed to a callee. */
   readonly capturedWholeFrame: boolean;
   /** The compiler keeps ONE outgoing area at the bottom of the frame, sized for its widest call and
-   *  below every local, and never loads a word of it, before a call or after — the stronger reading
-   *  of `target.ts` `localsAboveOutgoingArea`, grounded on agbcc, the one compiler whose frontend
-   *  calls this. Only then does a word it loads prove itself a local — see `loadedWordBound`. */
-  readonly localsAboveOutgoingArea: boolean;
+   *  below every local, and never loads a word of it, before a call or after — `target.ts`
+   *  `outgoingAreaNeverLoaded`, the strong form of `localsAboveOutgoingArea`, stated on agbcc. Only
+   *  then does a word it loads prove itself a local — see `loadedWordBound`. */
+  readonly outgoingAreaNeverLoaded: boolean;
 }
 
 /** What this function's calls do with the BOTTOM of its frame — the outgoing stack-argument area
@@ -99,7 +99,7 @@ const isCallEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsCall<C> => ev.kin
 const isSlotEvent = <C>(ev: StackArgsEvent<C>): ev is StackArgsSlot => ev.kind === 'store' || ev.kind === 'load';
 
 /** THE LOWEST FRAME WORD THIS FUNCTION LOADS, or `Infinity` when it loads none. Under
- *  `localsAboveOutgoingArea` the caller never reads a word of its outgoing area — not after a call,
+ *  `outgoingAreaNeverLoaded` the caller never reads a word of its outgoing area — not after a call,
  *  where the callee may have assigned to it, and not before one either: the area holds only what
  *  the caller staged for a callee, every argument that contains a call is computed before any word
  *  is staged, and nothing is saved there around a nested call (agbcc-restage.s pins all three). So a
@@ -159,13 +159,13 @@ function loadedWordBound<C>(blocks: readonly StackArgsBlock<C>[], live: Readonly
 //
 // A THIRD WITNESS SAYS WHERE THE AREA ENDS, and it only ever clears words. Under a compiler that
 // keeps one outgoing area below every local and never reads it back
-// (`localsAboveOutgoingArea`), a word this function LOADS is a local, and so is every word above
+// (`outgoingAreaNeverLoaded`), a word this function LOADS is a local, and so is every word above
 // it (`loadedWordBound`). Every refusal that reads the code — NOTHING EXTRA,
 // (a) and (b) — then weighs only the words beneath the bound, so an undeclared call lifts once no
 // word there could open an argument block, and takes no stack word. Hand-written asm that reads
 // its own outgoing argument back defeats it, and lifts with that argument dropped — a
 // producer assumption of the same kind as CONTIGUITY below, which is why the premise is declared
-// per compiler (`target.ts` `localsAboveOutgoingArea`) and never inferred.
+// per compiler (`target.ts` `outgoingAreaNeverLoaded`) and never inferred.
 //
 // THE TWO SIDES ARE CHECKED AGAINST DIFFERENT SETS, and the asymmetry is the point.
 //   * NOTHING EXTRA is checked against the MAY set (stored and unreloaded on SOME path): the
@@ -207,7 +207,7 @@ export function analyzeOutgoingArgs<C>({
   localArea,
   argRegs,
   capturedWholeFrame,
-  localsAboveOutgoingArea,
+  outgoingAreaNeverLoaded,
 }: StackArgsInput<C>): OutgoingArgs<C> {
   const refuse = (blocker: string): OutgoingArgs<C> => ({ blocker, blocks: new Map(), area: 0 });
   // EVERY block, not the entry-reachable ones: a call in dead code stages nothing, so the
@@ -269,7 +269,7 @@ export function analyzeOutgoingArgs<C>({
   // code-reading refusals below — the licence's NOTHING EXTRA, (a) and (b) — each hunt for a word
   // that could be one, so the words they weigh are cut to those beneath the bound once, where
   // they are collected (`mayAt`, `storedAnywhere`), and none of them repeats the test.
-  const bound = localsAboveOutgoingArea ? loadedWordBound(asmBlocks, live) : Infinity;
+  const bound = outgoingAreaNeverLoaded ? loadedWordBound(asmBlocks, live) : Infinity;
   const belowBound = (s: Iterable<number>): Set<number> => new Set([...s].filter((o) => o < bound));
 
   const everySlot: number[] = [];

@@ -28,7 +28,7 @@ const run = (
   preds: number[][],
   localArea: number,
   capturedWholeFrame = false,
-  localsAboveOutgoingArea = true,
+  outgoingAreaNeverLoaded = true,
 ) =>
   analyzeOutgoingArgs<string>({
     blocks,
@@ -37,7 +37,7 @@ const run = (
     localArea,
     argRegs: 4,
     capturedWholeFrame,
-    localsAboveOutgoingArea,
+    outgoingAreaNeverLoaded,
   });
 /** A straight line of blocks, each falling through to the next; the last one ends the function. */
 const line = (...events: Ev[][]) => events.map(blk);
@@ -187,7 +187,7 @@ describe('a word this function LOADS is a local, and bounds every call’s area'
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      localsAboveOutgoingArea: true,
+      outgoingAreaNeverLoaded: true,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\] is never reloaded and its lower slots are supplied/);
   });
@@ -362,7 +362,7 @@ describe('an escaped frame address is read by its receiver, from that address up
       localArea: 8,
       argRegs: 4,
       capturedWholeFrame: false,
-      localsAboveOutgoingArea: true,
+      outgoingAreaNeverLoaded: true,
     });
     expect(r.blocker).toMatch(/the store to \[sp,#0\]/);
   });
@@ -387,7 +387,7 @@ describe('the fixpoint terminates and does not depend on block order', () => {
       localArea: 4,
       argRegs: 4,
       capturedWholeFrame: false,
-      localsAboveOutgoingArea: true,
+      outgoingAreaNeverLoaded: true,
     });
     expect(r.blocker).toMatch(/\[sp,#0\] is not stored on every path to the call/);
   });
