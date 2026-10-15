@@ -603,10 +603,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.
     // Four throws in `frontend/call-plan.ts` spell it, each straight after the callee: no rule
     // places the aggregate in argument words (the target states none, the declaration does not
-    // lay it out, it is a union, or another parameter is unsized), it runs past the argument
-    // registers, its words are not one frame object or one global read whole at the call, or they
-    // are one global C cannot spell bare as the struct (a section symbol, or a symbol the
-    // declarations type as an array, an enclosing struct or another type).
+    // lay it out, it is a union, another parameter is unsized, or the declaration is variadic), it
+    // runs past the argument registers, its words are not one frame object or one global read
+    // whole at the call, or they are one global C cannot spell bare as the struct (a section
+    // symbol, or a symbol the declarations type as an array, an enclosing struct or another type).
     // Before the first of them the call fell to the arity guess, which dropped the struct or read
     // its words as separate arguments — C that compiles — so what this counts was wrong C once.
     //

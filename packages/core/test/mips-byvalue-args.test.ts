@@ -362,6 +362,17 @@ describe('a struct passed by value on O32', () => {
     );
   });
 
+  // A variadic declaration states no parameters, and its call is placed by the arity guess, which
+  // lifted `takeV(*(s32 *)&gW, 5)` against `void takeV(struct W, ...)`: a type error on every
+  // compiler. A struct among its fixed parameters refuses the call instead.
+  test('a struct among the fixed parameters of a variadic declaration refuses the call', () => {
+    const ctx = 'typedef unsigned int u32; struct W { u32 x; }; void takeW(struct W w, ...);\n';
+    expect(prototypesFromContext(ctx, 'c').takeW).toEqual({ returnsVoid: true, variadicByValue: 0 });
+    expect(() => lift('bvwg', KMC_BVWG, MIPS_GCC, prototypesFromContext(ctx, 'c'))).toThrow(
+      /`takeW` takes a struct or union by value as its parameter 1, and its declaration is variadic/,
+    );
+  });
+
   test('an 8-aligned struct at word 0 is passed whole, and one after an s32 skips a1 and declines', () => {
     const protos: Prototypes = {
       takeD: { params: ['s32', 'struct D'], byValueLayouts: { 1: D }, returnsVoid: true },

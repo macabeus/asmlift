@@ -993,6 +993,7 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
     wordParams: _words,
     byValueParams: _copies,
     byValueLayouts: _layouts,
+    variadicByValue: _variadic,
     ...rest
   }: FnProto): FnProto => rest;
   for (const d of ctx.declarations) {
@@ -1106,6 +1107,14 @@ function readSignature(
     return proto;
   }
   if (fn.variadic) {
+    // its arity is the call's, so it states no list; a struct among its fixed parameters is still
+    // passed by value, and the call refuses rather than guess over it (`FnProto.variadicByValue`)
+    const copy = params.findIndex(
+      (p) => passing(asParameter(declaredType(p.specifiers, p.declarator.derivations))) === 'by-value',
+    );
+    if (copy >= 0) {
+      proto.variadicByValue = copy;
+    }
     return proto;
   }
   // Each parameter's type, its name taken off: an array or a function nearest the name is a

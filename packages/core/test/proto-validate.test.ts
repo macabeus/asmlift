@@ -51,8 +51,15 @@ describe('refuses what would otherwise decompile at a guessed arity', () => {
   test('a misspelled key, which would simply do nothing', () => {
     expect(validatePrototypes({ f: { returnVoid: true } })).toEqual([
       'f: unknown key "returnVoid" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ' +
-        '"byValueParams" or "byValueLayouts")',
+        '"byValueParams", "byValueLayouts" or "variadicByValue")',
     ]);
+  });
+
+  test('a variadic by-value index beside a typed list, which a variadic declaration does not state', () => {
+    const bad = ['f: "variadicByValue" must be a parameter index, beside no typed "params" list'];
+    expect(validatePrototypes({ f: { params: ['s32'], variadicByValue: 0 } })).toEqual(bad);
+    expect(validatePrototypes({ f: { variadicByValue: -1 } })).toEqual(bad);
+    expect(validatePrototypes({ f: { variadicByValue: 0, returnsVoid: true } })).toEqual([]);
   });
 
   test('word parameters that index no typed parameter list', () => {

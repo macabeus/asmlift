@@ -56,6 +56,13 @@ export interface FnProto {
    *  `returnLayout`. A by-value parameter with no layout here is unsized, and a call to it refuses
    *  (`aggregate.ts` `byValueRefusal`) rather than take the argument-register guess. */
   byValueLayouts?: Readonly<Record<number, AggregateLayout>>;
+  /** For a VARIADIC declaration, which states no `params` (its arity is the call's), the index of
+   *  the first of its fixed parameters that is a struct, union or class passed by value. A context
+   *  states it (`prototypesFromContext`). Read only to refuse the call (`aggregate.ts`
+   *  `byValueRefusal`): the arity guess would otherwise read that struct's words as scalar
+   *  arguments — measured, `void takeV(struct W, ...)` lifted `takeV(*(s32 *)&gW, 5)` on every
+   *  MIPS compiler and agbcc, which the header rejects. */
+  variadicByValue?: number;
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
    *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
@@ -705,23 +712,39 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'returnLayout' &&
         key !== 'wordParams' &&
         key !== 'byValueParams' &&
-        key !== 'byValueLayouts'
+        key !== 'byValueLayouts' &&
+        key !== 'variadicByValue'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams" or "byValueLayouts")',
+            '"byValueParams", "byValueLayouts" or "variadicByValue")',
         );
       }
     }
-    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts } = proto as {
-      params?: unknown;
-      returnsVoid?: unknown;
-      returns?: unknown;
-      returnLayout?: unknown;
-      wordParams?: unknown;
-      byValueParams?: unknown;
-      byValueLayouts?: unknown;
-    };
+    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicByValue } =
+      proto as {
+        params?: unknown;
+        returnsVoid?: unknown;
+        returns?: unknown;
+        returnLayout?: unknown;
+        wordParams?: unknown;
+        byValueParams?: unknown;
+        byValueLayouts?: unknown;
+        variadicByValue?: unknown;
+      };
+    // a variadic declaration states no typed list: the index is into the fixed parameters it does
+    // not state
+    if (
+      variadicByValue !== undefined &&
+      !(
+        typeof variadicByValue === 'number' &&
+        Number.isInteger(variadicByValue) &&
+        variadicByValue >= 0 &&
+        !Array.isArray(params)
+      )
+    ) {
+      problems.push(`${sym}: "variadicByValue" must be a parameter index, beside no typed "params" list`);
+    }
     for (const [key, list] of [
       ['wordParams', wordParams],
       ['byValueParams', byValueParams],

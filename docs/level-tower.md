@@ -731,7 +731,7 @@ section's start is relocated against the section. "That struct" is the struct ea
 to through the context's typedefs (`structNamed`), never a spelling: `typedef struct Q {…} Q;`
 passes `Q` off an `extern struct Q`. Where no rule places a declared by-value
 parameter at all (no layout, a union, a target with no word rule, an 8-aligned struct at an odd
-word), the call refuses on every target (`refuseUnplacedByValue`) rather than take the arity
+word, a struct among a variadic declaration's fixed parameters), the call refuses on every target (`refuseUnplacedByValue`) rather than take the arity
 guess, which would drop the struct or split it into separate arguments. The call names the operand it passes by value (`byValue`), the audit judges a frame one as
 the struct and counts the call as a read of it (`byValueReads`), and the one-object answer is
 withheld, since a call handed the one object would pass a pointer. Structure spells the operand

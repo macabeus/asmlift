@@ -364,11 +364,14 @@ export function callDeclarations(
   // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
   // word: a parameter the declaration names a struct or union is known not to be.
   const refuseUnplacedByValue = (callee: string): void => {
-    const p = declarationOf(callee);
+    // a variadic declaration states no parameters, so `declarationOf` reads past it; a struct among
+    // its fixed ones is still the project's fact (`FnProto.variadicByValue`)
+    const own = known(prototypes, callee);
+    const p = own?.variadicByValue !== undefined ? own : declarationOf(callee);
     const why = byValueRefusal(p, target);
     if (why !== undefined) {
       fail(
-        `cannot lift '${name}': \`${callee}\` takes '${(p!.params as readonly string[])[why.param]}' by value as its ` +
+        `cannot lift '${name}': \`${callee}\` takes ${Array.isArray(p!.params) ? `'${p!.params[why.param]}'` : 'a struct or union'} by value as its ` +
           `parameter ${why.param + 1}, and ${why.refused} — a struct passed by value is lifted only where its argument words are known`,
       );
     }

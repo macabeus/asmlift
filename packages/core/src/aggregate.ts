@@ -295,7 +295,13 @@ export function byValueRefusal(
 
 function layOutByValue(p: FnProto | undefined, target: TargetDescription): ByValueLayout | undefined {
   if (!Array.isArray(p?.params)) {
-    return undefined;
+    return p?.variadicByValue === undefined
+      ? undefined
+      : {
+          refused:
+            'its declaration is variadic: its arguments are placed from the call alone, which reads the struct as words',
+          param: p.variadicByValue,
+        };
   }
   const params = p.params;
   const first = params.findIndex((_, i) => paramClassOf(p, params, i) === 'by-value');
