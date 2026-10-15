@@ -943,7 +943,12 @@ access, decided by two pins: the device pin
 device register, and the dead-read pin
 ([`frontend/dead-reads.ts`](../packages/core/src/frontend/dead-reads.ts)), for a read at any
 address — a RAM global, a pointer parameter, a literal — whose value the lifted function never
-uses, since a compiler deletes every plain read nobody uses; `declared` is the stamp
+uses, since a compiler deletes every plain read nobody uses. That pin is the ONE decider of the
+claim: it does not count the `ret` operand of a function declared void as a use, so the read-back a
+void function ends on is stamped there too, its refusals are a reported gate table (a level that
+keeps unused reads, a value a compare or an undeclared call's argument register consumed, a pair
+half a guessed return width left), and the structurer spells an unused read only where it is
+qualified; `declared` is the stamp
 [`raise/declared-volatile.ts`](../packages/core/src/raise/declared-volatile.ts) puts on an access of
 an object the symbol map or the declaration context declares volatile as the lift is made, from the
 map, the context's globals and the compiler the function is lifted and structured under, before any

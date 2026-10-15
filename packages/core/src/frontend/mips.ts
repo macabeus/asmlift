@@ -2270,7 +2270,7 @@ function liftOnce(
       pinDeviceAccesses(irBlocks, verdict, target, symbols);
     }
   }
-  pinDeadReads(irBlocks, target);
+  pinDeadReads(irBlocks, target, { own: prototypes[name], atUndeclaredCall: calls.heldAtUndeclaredCall });
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   return ssa.fn;

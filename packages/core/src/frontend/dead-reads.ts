@@ -12,32 +12,50 @@
  *  `dmaRegs[2];` that ends a DMA macro, a `REG_KEYINPUT;` acknowledge, an `extern volatile` poll
  *  read once for its side effect — whatever the address, symbol or literal or a pointer parameter.
  *  Left plain, the lift's own dead-code pass (pattern/engine.ts `dce`) drops it, and the recompile
- *  loses an access the machine made.
+ *  loses an access the machine made. This pin is the ONE place that claim is decided: the structurer
+ *  spells a read nothing uses only when it is qualified (structure.ts `volatileQualifiable`).
  *
- *  DEAD means what that pass would delete: a `load`/`aload` whose result reaches no op the pass
- *  keeps, through any chain of ops it would delete with it — an extension of the read nothing reads
- *  is as dead as the read. It is decided on the RAW lift, after the frontend's SSA is final and
- *  before any raise rewrite, so a read only asmlift's own folds orphan is never counted.
+ *  DEAD means what that pass would delete (ir/discipline.ts `deadOps`, the one definition): a
+ *  `load`/`aload` whose result reaches no op the pass keeps, through any chain of ops it would delete
+ *  with it — an extension of the read nothing reads is as dead as the read. It is decided on the RAW
+ *  lift, after the frontend's SSA is final and before any raise rewrite, so a read only asmlift's
+ *  own folds orphan is never counted. One use the pass counts is not one here: the operand of the
+ *  `ret` of a function its OWN declaration says is void, which the structurer suppresses — the
+ *  read-back that ends `void f(int b) { REG = b; REG; }` is in the return register at `bx lr`.
  *
- *  Three reads the rule must not claim are tabled (`DEAD_READ_GATES`) and REPORTED: a caller may hand
+ *  THE READS ARE DECIDED OUTERMOST FIRST. A dead read whose value, through dead ops, is the address
+ *  of another dead read waits until that one is decided: kept, it is a use, and the inner read is
+ *  live — `*(volatile int *)*pp;` qualifies the read of `*pp`'s target, not the read of `pp`.
+ *
+ *  The reads the rule must not claim are tabled (`DEAD_READ_GATES`) and REPORTED: a caller may hand
  *  its own table (`tallying`, l3/gates.ts) to census the refusals.
+ *   • any read of a function built at a level where the compiler keeps a plain read nothing uses
+ *     (target.ts `keepsUnusedReadsAt`): mwcc at `-O0` keeps `x = p[5]; x = 0;`'s load in r31, so an
+ *     unused read there says nothing about `volatile`;
  *   • a read of the function's own frame object (`laddr`): a local nothing outside the function
  *     observes, whose dead read is a reload, not an access to keep;
  *   • any read of a function that holds an unmodelled instruction (`opaque`, frontend/opaque.ts):
  *     the lift does not know what that instruction reads, so it cannot call a value unused —
  *     mwcc's `lbz r0, 76(r3)` + `rlwimi r0, r4, 7, 24, 24` + `stb` reads the byte it inserts into,
  *     and the opaque standing for the `rlwimi` does not name it;
- *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
- *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
- *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
  *   • a read still held, at a return whose width the lift guessed, in the register that carries
  *     the second word of a two-word return (`unreadPairHalf`): asmlift returns one word where no
  *     declaration pins the width, so a value in the pair's second register is unused by the LIFT,
  *     not by the source — agbcc's leaf `long long k(long long *p) { return *p; }` is
  *     `ldr r1, [r0, #4]; ldr r0, [r0]; bx lr`, and stamping the r1 load would publish a one-word
- *     return that drops the high half beside an invented volatile read of RAM, byte-exact. A void
- *     function's return operand is the same question one register down, and is not asked here: the
- *     lift's `ret` reads the return register, so its read is used.
+ *     return that drops the high half beside an invented volatile read of RAM, byte-exact;
+ *   • a read still held in an argument register at a call whose arity no declaration states
+ *     (call-plan.ts `heldAtUndeclaredCall`): the guess passes what it counts, so a value it leaves
+ *     out is unused by the lift, not by the source — agbcc's `g(a, c ? p[1] : p[2])` leaves r0 at
+ *     its incoming value, the guess passes nothing, and stamping the r1 loads publishes `g();` beside
+ *     two invented volatile reads;
+ *   • a read a compare consumed (`compared`, gathered by each frontend that fuses a compare into the
+ *     branch that reads it): a compare no branch reads leaves no op, so the read looks dead only
+ *     because the lift has no op for its consumer — mwcc 2.3.3 at `-O4,s` keeps
+ *     `lwz r0, g; cmpwi r0, 0` for `if (g) { (g != 0); }`;
+ *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
+ *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
+ *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
  *  RESIDUE, untabled: a value an inline `asm("" :: "r"(x))` consumes. agbcc leaves the statement as a
  *  bare `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead and is stamped —
  *  sa3's `Task_150_80A619C` reads `gPlayers[0].charFlags.character` that way. The stamp keeps an
@@ -45,12 +63,13 @@
  *  extraction the asm consumed. And agbcc splits a DImode move into two word loads AFTER flow has
  *  deleted dead insns (`thumb_load_double_from_address`), so the half nothing uses survives as a
  *  plain read: `int f(long long *p) { long long v = *p; return (int)v; }` keeps `ldr r1, [r0, #4]`.
- *  Under a declaration that pins a one-word return the gate above does not fire, and that read is
+ *  Under a declaration that pins a one-word return the pair gate does not fire, and that read is
  *  stamped: the C recompiles byte-exact and computes the same values, but says `volatile` where the
  *  source did not. Without such a declaration the pair gate refuses it, as it refuses any read the
- *  lift leaves in the return pair's second register. */
+ *  lift leaves in the return pair's second register. A declared void return is trusted the same
+ *  way: a getter declared void has its returned read stamped. */
 import type { Block, Op, Value } from '../ir/core';
-import { deletableWhenDead } from '../ir/discipline';
+import { deadOps } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
 import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
@@ -66,10 +85,22 @@ export interface DeadRead {
   /** its value, or a value only it feeds, is still in the return pair's second register at a return
    *  whose width the lift guessed (`unreadPairHalf`) */
   readonly heldAtWordReturn: boolean;
+  /** its value, or a value only it feeds, is still in an argument register at a call whose arity no
+   *  declaration states (call-plan.ts `heldAtUndeclaredCall`) */
+  readonly heldAtUndeclaredCall: boolean;
+  /** its value, or a value only it feeds, is an operand of a compare (`DeadReadFacts.compared`) */
+  readonly compared: boolean;
   readonly target: TargetDescription;
 }
 
 export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
+  {
+    id: 'keeps-unused-reads',
+    why: 'at these flags the compiler keeps a plain read nothing uses, so an unused read is no evidence of volatile',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: keeps-unused-reads: mwcc -O0 keeps a dead assignment plain',
+    rejects: (c) => c.target.compilerBehaviors.keepsUnusedReads === true,
+  },
   {
     id: 'frame-object',
     why: 'a dead read of a local of this function is a reload, which nothing outside it observes',
@@ -92,6 +123,20 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => c.heldAtWordReturn,
   },
   {
+    id: 'held-at-undeclared-call',
+    why: 'the value may be an argument a guessed arity left out of the call',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: held-at-undeclared-call: a read the guessed arity leaves out stays plain',
+    rejects: (c) => c.heldAtUndeclaredCall,
+  },
+  {
+    id: 'compared',
+    why: 'a compare consumed the value; the lift has no op for a compare no branch reads',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: compared: a read only a dead compare consumes stays plain',
+    rejects: (c) => c.compared,
+  },
+  {
     id: 'not-a-volatile-read',
     why: 'a read that extends in a way the compiler never extends a volatile one was plain in the source',
     sound: false,
@@ -99,6 +144,20 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => !readCouldBeVolatile(c.target.compilerBehaviors, c.op),
   },
 ];
+
+/** What a frontend knows about its lift that the IR does not carry, for `pinDeadReads`. */
+export interface DeadReadFacts {
+  /** the function's own declaration: a declared void return's `ret` operand is no use */
+  readonly own?: FnProto;
+  /** what the return pair's second register may hold at a guessed word return (`unreadPairHalf`) */
+  readonly atWordReturn?: ReadonlySet<Value>;
+  /** what an argument register may hold at a call of undeclared arity (call-plan.ts) */
+  readonly atUndeclaredCall?: ReadonlySet<Value>;
+  /** every value a compare consumed, where a compare leaves no op of its own: Thumb's `cmp` and
+   *  PowerPC's `cmpw`/`cmpwi`/`cmplw`/`cmplwi` and record forms fuse into the branch that reads
+   *  them, and one no branch reads is gone */
+  readonly compared?: ReadonlySet<Value>;
+}
 
 /** THE RETURN PAIR'S SECOND REGISTER AT A WORD RETURN, gathered by a frontend as it emits a `ret`
  *  of one word (`held-at-word-return`): every value `pairReg` may hold at the end of block `bi`,
@@ -125,52 +184,17 @@ export function unreadPairHalf(
   });
 }
 
-/** The ops pattern/engine.ts `dce` would delete from these blocks, without deleting them: an op it
- *  may delete whose single result no op it keeps reads, to a fixed point. */
-function deadOps(irBlocks: readonly Block[]): Set<Op> {
-  const dead = new Set<Op>();
-  let changed = true;
-  while (changed) {
-    changed = false;
-    const used = new Set<Value>();
-    for (const b of irBlocks) {
-      for (const op of b.ops) {
-        if (dead.has(op)) {
-          continue;
-        }
-        for (const o of op.operands) {
-          used.add(o);
-        }
-        for (const s of op.successors) {
-          for (const a of s.args) {
-            used.add(a);
-          }
-        }
-      }
-    }
-    for (const b of irBlocks) {
-      for (const op of b.ops) {
-        if (!dead.has(op) && deletableWhenDead(op) && op.results.length === 1 && !used.has(op.results[0])) {
-          dead.add(op);
-          changed = true;
-        }
-      }
-    }
-  }
-  return dead;
-}
-
-/** Stamp `volatile` on every read these blocks never use that no gate refuses. `atWordReturn` is
- *  what the frontend gathered with `unreadPairHalf`.
+/** Stamp `volatile` on every read these blocks never use that no gate refuses, outermost first.
+ *  `facts` is what the frontend gathered while it filled the blocks.
  *
  *  CALLED BY EACH FRONTEND, at the end of its lift, and not once in pipeline.ts `liftStamped`: the
- *  pair gate needs what a return leaves in a register the lifted `ret` does not read, which only the
- *  frontend's SSA builder answers, and only while it is filling the blocks. The IR it hands back
- *  has no register left to ask. */
+ *  pair, call and compare gates need what a return, a call or a compare left in a register no op
+ *  reads, which only the frontend's SSA builder answers, and only while it is filling the blocks.
+ *  The IR it hands back has no register left to ask. */
 export function pinDeadReads(
   irBlocks: readonly Block[],
   target: TargetDescription,
-  atWordReturn: ReadonlySet<Value> = new Set(),
+  facts: DeadReadFacts = {},
   gates: readonly Gate<DeadRead>[] = DEAD_READ_GATES,
 ): void {
   const defOf = new Map<Value, Op>();
@@ -193,25 +217,60 @@ export function pinDeadReads(
     return (d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => fromFrame(o, depth + 1));
   };
   const unmodelled = irBlocks.some((b) => b.ops.some((op) => op.opcode === 'opaque'));
-  const dead = deadOps(irBlocks);
-  // The dead ops whose value reaches the pair's second register, through the dead ops it feeds: an
-  // extension of the read the return pair holds is the read held.
-  const held = new Set<Op>();
-  const hold = (v: Value): void => {
-    const d = defOf.get(v);
-    if (d !== undefined && dead.has(d) && !held.has(d)) {
-      held.add(d);
-      d.operands.forEach(hold);
+  const voidReturn = declaresVoidReturn(facts.own);
+  const usesOperands = (op: Op): boolean => !(voidReturn && op.opcode === 'ret');
+  const isRead = (op: Op): boolean => op.opcode === 'load' || op.opcode === 'aload';
+  const decided = new Set<Op>();
+  for (;;) {
+    const dead = deadOps(irBlocks, usesOperands);
+    // The dead ops whose value reaches one of `values`, through the dead ops it feeds: an extension
+    // of the read a register holds is the read held.
+    const reaching = (values: ReadonlySet<Value> | undefined): Set<Op> => {
+      const out = new Set<Op>();
+      const walk = (v: Value): void => {
+        const d = defOf.get(v);
+        if (d !== undefined && dead.has(d) && !out.has(d)) {
+          out.add(d);
+          d.operands.forEach(walk);
+        }
+      };
+      values?.forEach(walk);
+      return out;
+    };
+    const open = [...dead].filter((op) => isRead(op) && !decided.has(op));
+    // A read that, through dead ops, computes another open read's address waits for it.
+    const feeds = new Set<Op>();
+    const feed = (v: Value): void => {
+      const d = defOf.get(v);
+      if (d !== undefined && dead.has(d) && !feeds.has(d)) {
+        feeds.add(d);
+        if (!isRead(d)) {
+          d.operands.forEach(feed);
+        }
+      }
+    };
+    open.forEach((r) => r.operands.forEach(feed));
+    const ready = open.filter((r) => !feeds.has(r));
+    if (ready.length === 0) {
+      return; // nothing open, or (never in SSA) only reads that wait on each other
     }
-  };
-  atWordReturn.forEach(hold);
-  for (const op of dead) {
-    if (op.opcode !== 'load' && op.opcode !== 'aload') {
-      continue;
-    }
-    const facts = { op, fromFrame: fromFrame(op.operands[0]), unmodelled, heldAtWordReturn: held.has(op), target };
-    if (firstRejection(gates, facts) === null) {
-      op.attrs = { ...op.attrs, volatile: true };
+    const held = reaching(facts.atWordReturn);
+    const atCall = reaching(facts.atUndeclaredCall);
+    const compared = reaching(facts.compared);
+    for (const op of ready) {
+      decided.add(op);
+      const read: DeadRead = {
+        op,
+        fromFrame: fromFrame(op.operands[0]),
+        unmodelled,
+        heldAtWordReturn: held.has(op),
+        heldAtUndeclaredCall: atCall.has(op),
+        compared: compared.has(op),
+        target,
+      };
+      if (firstRejection(gates, read) === null) {
+        op.attrs = { ...op.attrs, volatile: true };
+      }
     }
   }
 }

@@ -2516,7 +2516,12 @@ function liftOnce(
     pinDeviceAccesses(irBlocks, verdict, target, symbols);
   }
   refuseSretOutsideFrame(name, irBlocks);
-  pinDeadReads(irBlocks, target, pairs.unreadHigh);
+  pinDeadReads(irBlocks, target, {
+    own: prototypes[name],
+    atWordReturn: pairs.unreadHigh,
+    atUndeclaredCall: fill.calls.heldAtUndeclaredCall,
+    compared: fill.flags.compared,
+  });
 
   abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);
   fn.localObjects = statics.finish();
@@ -4538,6 +4543,10 @@ function highRegisterHeld(ab: AsmBlock, from: number, hi: string, callClobbers: 
 interface ThumbFlagCarry {
   readonly exitCmp: Map<number, PendingCmp | string>;
   inheritedCmp(bi: number): PendingCmp | string;
+  /** every value a `cmp` compared, whether or not a branch reads the flags it set: a compare
+   *  nothing reads leaves no op, so this is the only record that the value was consumed (the
+   *  dead-read pin's `compared`, frontend/dead-reads.ts) */
+  readonly compared: Set<Value>;
 }
 
 function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmBlock, JumpTable>): ThumbFlagCarry {
@@ -4573,7 +4582,7 @@ function thumbFlagCarry({ asmBlocks, preds }: ThumbCfg, tables: ReadonlyMap<AsmB
         return plast !== undefined && classifyXfer(plast) === 'cond';
       },
     });
-  return { exitCmp, inheritedCmp };
+  return { exitCmp, inheritedCmp, compared: new Set<Value>() };
 }
 
 /** The two frame facts the fill accumulates and the frame-object audit reads: every offset the
@@ -4870,6 +4879,7 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
         }
         const rhs = b.startsWith('#') ? constVal(imm(b), bi) : readData(reg(b), bi);
         cur.pendingCmp = { lhs: readData(reg(a), bi), rhs };
+        fill.flags.compared.add(cur.pendingCmp.lhs).add(rhs);
         break;
       }
       case 'ldr':

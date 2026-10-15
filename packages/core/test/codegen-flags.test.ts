@@ -49,7 +49,7 @@ describe('targetFor', () => {
   // its description — what it lacks is a set to fall back ON, not a reading.
   test.each(IDS.filter((id) => !isCanonicalToolchainId(id)))('%s has no canonical flags at all', (id) => {
     expect(canonicalFlagsOf(id)).toBeUndefined();
-    expect(targetFor(id, ['-proc', 'gekko', '-O0,p']).target).toBe(DESCRIPTIONS[id]);
+    expect(targetFor(id, ['-proc', 'gekko', '-O4,p']).target).toBe(DESCRIPTIONS[id]);
   });
 
   // A profile of a compiler inherits its declarations. Withholding them would not claim nothing:
@@ -60,11 +60,24 @@ describe('targetFor', () => {
     ['agbcc', ['-mthumb-interwork', '-O2', '-fhex-asm', '-g', '-ansi']],
     ['ido7.1', ['-mips2', '-O2', '-g3', '-32', '-non_shared', '-G', '0']],
     ['gcc2.7.2kmc', [...TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags, '-Wa,-force-n64align', '-x', 'c']],
-    ['mwcc_242_81', ['-O0,p', '-inline', 'auto', '-sdata', '8']],
+    ['mwcc_242_81', ['-O4,p', '-inline', 'auto', '-sdata', '8']],
   ] as const)('%s at %j keeps every declared behavior', (id, flags) => {
     const r = targetFor(id, flags);
     expect(r.target).toBe(DESCRIPTIONS[id]);
     expect(structureOptionsFor(r.target, false)).toEqual(structureOptionsFor(DESCRIPTIONS[id], false));
+  });
+
+  // …save one the LEVEL changes: at a level where the compiler keeps a plain read nothing uses
+  // (target.ts `keepsUnusedReadsAt`), and every other declared behavior kept.
+  test.each([
+    ['mwcc_242_81', ['-O0,p', '-inline', 'auto', '-sdata', '8']],
+    ['mwcc_247_107', ['-proc', 'gekko', '-O0,p']],
+    ['ido7.1', ['-mips2', '-O1', '-32']],
+    ['agbcc', ['-O0', '-mthumb-interwork']],
+  ] as const)('%s at %j keeps unused reads, and every declared behavior', (id, flags) => {
+    const { keepsUnusedReads, ...rest } = targetFor(id, flags).target.compilerBehaviors;
+    expect(keepsUnusedReads).toBe(true);
+    expect(rest).toEqual(DESCRIPTIONS[id].compilerBehaviors);
   });
 
   // …save one the flags change: under `-fshort-enums` an enum is the smallest integer its values fit,

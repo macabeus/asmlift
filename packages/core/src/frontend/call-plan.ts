@@ -135,6 +135,11 @@ export interface CallDeclarations {
   plan(callee: string): CallPlan;
   /** the call `site` makes, planned and lowered: its `call` op, its result and its clobbers */
   lower(site: CallSite): void;
+  /** every value an argument register may hold at a call `lower` lowered at an UNDECLARED arity — a
+   *  guess, or the bound a call through an argument register sets — gathered as each such call is
+   *  lowered. One the call does not pass is unused by the LIFT, not proved unused by the source: the
+   *  dead-read pin refuses it (frontend/dead-reads.ts `held-at-undeclared-call`). */
+  readonly heldAtUndeclaredCall: ReadonlySet<Value>;
 }
 
 /** WHAT ONE ISA ALONE KNOWS ABOUT A CALL: everything `CallDeclarations.lower` asks a frontend. The
@@ -220,6 +225,7 @@ export function callDeclarations(
     );
   }
   const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
+  const heldAtUndeclaredCall = new Set<Value>();
   const isFloatHelperName = (callee: string): boolean => {
     const h = lookupHelper(target.runtimeHelpers, callee);
     return h !== undefined && isFloatHelper(h);
@@ -577,6 +583,17 @@ export function callDeclarations(
     if (widths === null) {
       guess?.refuse(argc);
     }
+    // WHAT EVERY ARGUMENT REGISTER HOLDS HERE, where no declaration stated the arity: a value the
+    // count leaves out (or a later trim cuts) may be an argument the source passed, so the dead-read
+    // pin may not call it unused. Asked through `holdsValue`, which reads no register.
+    if (widths === null || bound >= 0) {
+      for (const r of target.argRegs) {
+        ssa.holdsValue(r, bi, (v) => {
+          heldAtUndeclaredCall.add(v);
+          return false; // keep walking: every path's value, not the first
+        });
+      }
+    }
     // WHAT THE ARITY LEFT OUT, where no declaration stated it: an argument register past a guessed
     // count, or past the bound a call through an argument register sets, that a value reaches.
     // Where the frontend states `guess`, the gap refusal has already fired on any such register
@@ -750,6 +767,7 @@ export function callDeclarations(
     declaredParams,
     plan,
     lower,
+    heldAtUndeclaredCall,
   };
 }
 

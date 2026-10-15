@@ -52,7 +52,7 @@
 //     a read the stamp cannot place by byte — a runtime index, an `aload` — of an object the map
 //       qualifies only some members of, which may reach a plain member (symbols.ts
 //       `declaresVolatile`).
-import type { Op } from './core';
+import type { Block, Op, Value } from './core';
 import { MEM_BASE_OPS, type OpSig, opSig } from './opcodes';
 
 /** Why an op must run where the asm ran it. */
@@ -186,6 +186,50 @@ export function deletableWhenDead(op: Op): boolean {
   return !!sig && !sig.effects && !sig.terminator && !answered(op, 'keptWhenDead');
 }
 
+/** THE DEAD OPS of these blocks: each op `deletableWhenDead` answers yes for whose single result no
+ *  op outside the set reads, as an operand or as a successor's argument, to a fixed point. The ONE
+ *  definition of dead: pattern/engine.ts `dce` deletes exactly this set, and the dead-read pin
+ *  (frontend/dead-reads.ts) asks it of the raw lift before anything is deleted, so the pin's "dead"
+ *  cannot drift from what the pass would delete.
+ *
+ *  `usesOperands` says whether an op's operands are uses at all. Every op's are, for `dce`; the pin
+ *  passes the one exception a declaration makes: the `ret` of a function its own prototype declares
+ *  void, whose operand the structurer suppresses (structure/analysis.ts `indexUses`). */
+export function deadOps(blocks: readonly Block[], usesOperands: (op: Op) => boolean = () => true): Set<Op> {
+  const dead = new Set<Op>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const used = new Set<Value>();
+    for (const b of blocks) {
+      for (const op of b.ops) {
+        if (dead.has(op)) {
+          continue;
+        }
+        if (usesOperands(op)) {
+          for (const o of op.operands) {
+            used.add(o);
+          }
+        }
+        for (const s of op.successors) {
+          for (const a of s.args) {
+            used.add(a);
+          }
+        }
+      }
+    }
+    for (const b of blocks) {
+      for (const op of b.ops) {
+        if (!dead.has(op) && deletableWhenDead(op) && op.results.length === 1 && !used.has(op.results[0])) {
+          dead.add(op);
+          changed = true;
+        }
+      }
+    }
+  }
+  return dead;
+}
+
 /** Must the structurer still SPELL this op when nothing consumes its result — an effect, or a
  *  memory read?
  *
@@ -193,8 +237,9 @@ export function deletableWhenDead(op: Op): boolean {
  *  the C claim: nothing observes a load nobody reads. This one is the COMPILER claim: an optimizing
  *  compiler deletes every dead read it is allowed to delete, so one still in the target is evidence
  *  the source's access was `volatile`. A yes here only says the op may not be dropped silently;
- *  whether a `volatile` can reach the access is an ADDRESS-level question the caller asks
- *  (structure.ts `volatileQualifiable`), and a read it answers no to is dropped.
+ *  whether the read was `volatile` is decided once, by the dead-read pin (frontend/dead-reads.ts),
+ *  and the caller spells a read only where it is `qualified` (structure.ts `volatileQualifiable`),
+ *  dropping one the pin left plain.
  *
  *  Its own function and not `orderSensitive`, though the two agree on every registered opcode: they
  *  ask different questions, and a registry change that splits them is a decision to make at each. */

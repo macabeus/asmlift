@@ -19,14 +19,12 @@
 //     device may read, so a slot it cannot reach is not refused.
 //   • capabilities.blockTransferCalls → the same audit: a frame address handed to one of these
 //     as its SOURCE is read as far as the call's literal control word says, and never written.
-//   • capabilities.deviceRegisters → six readers, and they ask ONE question — "would a source
+//   • capabilities.deviceRegisters → five readers, and they ask ONE question — "would a source
 //     have spelled this address `volatile`" — which is a question about SPELLING and may be
 //     approximate: the `/vol-store` variation's eligibility (l3/volstore.ts), rank.ts's volatility
 //     tie-break between two byte-identical spellings, the first half of `/unreduce`'s
 //     disjointness gate (l3/unreduce.ts), the `/homesplit` pairing's refusal to leave a device
-//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), the
-//     structurer's refusal to SPELL a dead memory read whose address no qualifier could ever
-//     reach (structure.ts `volatileQualifiable`, threaded through StructureOptions), and the
+//     READ inline where the spelling it replaces would have qualified it (l3/homesplit.ts), and the
 //     device pin (frontend/device-pins.ts), which spells every access in the window `volatile`
 //     in a function the frame-object audit keeps as one object, and in one it accepts object by
 //     object every device read and the device stores a later store in their block overwrites —
@@ -955,6 +953,15 @@ export interface TargetDescription {
     // ABSENT ⇒ false: a sign-extending load says nothing about the qualifier, and a device read is
     // pinned, and a read of a declared object placed, whatever its extension.
     volatileReadsExtendInRegister?: boolean;
+    // Does this compiler, AT THESE FLAGS, keep a plain read whose value nothing uses? A FLAG fact,
+    // never written in a description: `targetFor` sets it from the optimisation level
+    // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
+    // the lift finds unused is no evidence of `volatile`, and the dead-read pin
+    // (frontend/dead-reads.ts) stamps none.
+    //
+    // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
+    // was qualified.
+    keepsUnusedReads?: boolean;
   };
 }
 
@@ -1562,6 +1569,19 @@ export interface ResolvedTarget {
   profile: CodegenProfile;
 }
 
+/** Does a compiler of `family`, at optimisation level `level` (the profile's `O` slot), keep a plain
+ *  read whose value nothing uses (`compilerBehaviors.keepsUnusedReads`)? COMPILED, `int x; x = p[5];
+ *  x = 0; *q = x;` and `int x = p[1];`: mwcc 2.3.3 and 2.4.2 at `-O0` and 2.4.7 at `-O0,p` keep
+ *  `lwz r31, 20(r3)` in a register nothing reads; IDO 7.1 at `-O0` and at `-O1` (its default) keeps
+ *  `lw t6, 20(a0)`; agbcc and KMC gcc 2.7.2 at `-O0` keep the read and store it to the frame. None
+ *  of them does at agbcc/KMC `-O1`, `-O2` or `-O3`, IDO `-O2` or `-O3`, or mwcc 2.4.2 `-O1` through
+ *  `-O4,p` and `-O4,s`. An expression statement's read (`*p;`) is gone at every level on every one of
+ *  them. A level no flag names (`undefined`) is not judged. */
+export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined): boolean {
+  const n = level === undefined ? undefined : /^\d/.exec(level)?.[0];
+  return n === '0' || (family === 'ido' && n === '1');
+}
+
 /** The target a function compiled by `toolchain` at `cflags` decompiles against, and the profile
  *  those flags describe. Throws on a level word the toolchain's family cannot read. */
 export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): ResolvedTarget {
@@ -1569,6 +1589,9 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   const profile = parseFlags(t.family, cflags);
   const cpp = dialectOf(profile.slots.lang) === 'c++';
   let target: TargetDescription = cpp ? { ...t.description, dialect: 'c++' } : t.description;
+  if (keepsUnusedReadsAt(t.family, profile.slots.O)) {
+    target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsUnusedReads: true } };
+  }
   if (profile.slots['-fshort-enums'] === 'on') {
     // every enum is the smallest integer its values fit (c-decl.c:6064-6065, :6123; compiled,
     // `sizeof(struct {enum {K0, K1} k[2];})` is 4 under the flag and 8 without), so none is enumBytes
@@ -1593,9 +1616,8 @@ export function structureOptionsFor(
   returnsVoid: boolean,
   prototypes: Prototypes = {},
 ): StructureOptions {
-  // `littleEndian` and `deviceRegisters` are the HARDWARE capabilities the structurer consumes
-  // (bitfield extract recognition is LSB-first; the dead-read spelling refuses outside the device
-  // window); everything else is a compiler behavior.
+  // `littleEndian` is the HARDWARE capability the structurer consumes (bitfield extract recognition
+  // is LSB-first); everything else is a compiler behavior.
   //
   // ONE FIELD IS NOT A STRAIGHT SPREAD, and this is where the difference belongs. A frame
   // direction has THREE states here — `ascending`, `descending`, and `'unknown'` meaning measured
@@ -1610,7 +1632,6 @@ export function structureOptionsFor(
     declaredReturns: declaredReturnTypes(prototypes),
     ...(t.dialect === 'c++' ? { dialect: 'c++' as const } : {}),
     littleEndian: t.capabilities.endianness === 'little',
-    ...(t.capabilities.deviceRegisters ? { deviceRegisters: t.capabilities.deviceRegisters } : {}),
     ...behaviors,
     ...(spillSlotOrder === 'ascending' || spillSlotOrder === 'descending' ? { spillSlotOrder } : {}),
   };
