@@ -7,6 +7,7 @@ import { expect, test } from 'vitest';
 
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { initFirstGuards } from '../src/l3/initfirst';
+import { signedOverUnsignedCompare } from '../src/l3/typing';
 import { c, s32, v } from './helpers';
 
 const assign = (name: string, value: Expr): Stmt => ({ k: 'assign', name, value });
@@ -501,4 +502,40 @@ test('refused: a `volatile` cast side — the qualifier is the access, and the s
     ),
   );
   expect(r).toBeNull();
+});
+
+// The swap's own proof is a VALUE proof the finished tree cannot repeat: over two `u16` operands
+// the unsigned compare is value-faithful uncast, and read through an `s32 v0` holding one of them
+// the declarations no longer show the range. rank.ts judges every emitted tree
+// (typing.ts signedOverUnsignedCompare), so a proved swap drops the compare's `unsignedCmp`
+// evidence, and an unproved one keeps it (kleod:sub_08014184:agbcc lost its winner without this).
+test('a proved swap marks the unsigned compare value-faithful; an unfaithful one stays judged', () => {
+  const u16t = { kind: 'int', width: 16, signed: false } as const;
+  const ucmp = (l: Expr, r: Expr): Expr => ({ k: 'bin', op: '<', l, r, unsignedCmp: true });
+  const run = (paramType: typeof u16t | typeof s32) =>
+    initFirstGuards({
+      name: 'f',
+      params: [
+        { name: 'a0', type: paramType },
+        { name: 'a1', type: paramType },
+      ],
+      locals: [{ name: 'v0', type: s32 }],
+      retType: s32,
+      body: [
+        {
+          k: 'if',
+          cond: ucmp(v('a1'), v('a0')),
+          then: [assign('v0', v('a1')), dowhile(bin('!=', v('v0'), c(0)), [])],
+          else: [],
+        },
+      ],
+    });
+  const proved = run(u16t);
+  expect((proved!.body[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(bin('<', v('v0'), v('a0')));
+  expect(signedOverUnsignedCompare(proved!)).toBe(false);
+  // over s32 operands the compare was signed before the swap (the /signed-cmp spelling) and the
+  // swap only keeps that, so the evidence stays for the judgment to find
+  const unproved = run(s32);
+  expect((unproved!.body[1] as Extract<Stmt, { k: 'if' }>).cond).toEqual(ucmp(v('v0'), v('a0')));
+  expect(signedOverUnsignedCompare(unproved!)).toBe(true);
 });

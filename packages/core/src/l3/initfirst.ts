@@ -48,7 +48,13 @@ import {
   stmtExprs,
   walkExprs,
 } from './ast';
-import { arithConversionSignedness, declaredTypes, exprIntWidth, provablyNonNegative } from './typing';
+import {
+  arithConversionSignedness,
+  declaredTypes,
+  exprIntWidth,
+  provablyNonNegative,
+  rendersSignedOverUnsigned,
+} from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
   mentionedName(e) === name || exprChildren(e).some((c) => readsVar(c, name));
@@ -136,6 +142,25 @@ const meaningPreserved = (
   const vv: Expr = { k: 'var', name: v };
   const after = side === 'l' ? arithConversionSignedness(vv, r, env) : arithConversionSignedness(l, vv, env);
   return before !== undefined && before === after;
+};
+
+/** `cond` with one side read through `v`, AFTER `meaningPreserved` said yes. That answer is a
+ *  value proof the finished tree cannot repeat: `v` holds X, but `v`'s declaration does not say
+ *  what range X had, so rank.ts's judgment of the tree (typing.ts `signedOverUnsignedCompare`)
+ *  would call an unsigned compare whose ORIGINAL operands were both non-negative signed, and
+ *  withhold a spelling that compares the same values. So a compare that was value-faithful before
+ *  the swap is marked proved: its `unsignedCmp` evidence is dropped. One that was not keeps it. */
+const swapSide = (
+  cond: Extract<Expr, { k: 'bin' }>,
+  side: 'l' | 'r',
+  v: string,
+  env: ReturnType<typeof declaredTypes>,
+): Expr => {
+  const out: Extract<Expr, { k: 'bin' }> = { ...cond, [side]: { k: 'var', name: v } };
+  if (cond.unsignedCmp === true && !rendersSignedOverUnsigned(cond.l, cond.r, env)) {
+    delete out.unsignedCmp;
+  }
+  return out;
 };
 
 /** TOTAL (reads and pure writes) — see the note on stmtTouches. Runs against the pre-rewrite
@@ -243,11 +268,11 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         if (cond.k === 'bin' && NEGATE_REL[cond.op]) {
           if (cond.l.k === 'const' && cond.l.value === hv.value) {
             if (meaningPreserved(cond.l, cond.r, 'l', hv.name, env)) {
-              cond = { ...cond, l: { k: 'var', name: hv.name } };
+              cond = swapSide(cond, 'l', hv.name, env);
             }
           } else if (cond.r.k === 'const' && cond.r.value === hv.value) {
             if (meaningPreserved(cond.l, cond.r, 'r', hv.name, env)) {
-              cond = { ...cond, r: { k: 'var', name: hv.name } };
+              cond = swapSide(cond, 'r', hv.name, env);
             }
           }
         }
@@ -288,7 +313,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         ) {
           out.push(init);
           moved.add(init);
-          cond = { ...cond, [side]: { k: 'var', name: init.name } };
+          cond = swapSide(cond, side, init.name, env);
           then = then.slice(1);
           changed = true;
         }
