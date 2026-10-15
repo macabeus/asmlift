@@ -53,8 +53,8 @@ export interface FnProto {
    *  parameter's index: what sizes it, and so how many argument words it takes on a target that
    *  passes one in words (`compilerBehaviors.byValueAggregateArgWords`, read by `aggregate.ts`
    *  `byValueCallArgs`). A context states it from the struct's definition, as it states
-   *  `returnLayout`. A by-value parameter with no layout here is unsized, and the call is lifted at
-   *  the argument-register guess. */
+   *  `returnLayout`. A by-value parameter with no layout here is unsized, and a call to it refuses
+   *  (`aggregate.ts` `byValueRefusal`) rather than take the argument-register guess. */
   byValueLayouts?: Readonly<Record<number, AggregateLayout>>;
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
@@ -175,7 +175,7 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits); and a list holding a
  *  spelling neither `declaredWidth` reads nor the declaration sizes — a project typedef
  *  (`bool8`, `Direction`, `TaskFunc`) that `wordParams` does not list, a by-value struct, a
- *  floating type. The first two are not a reading of the list at all. The third is a list read to
+ *  floating type. The by-value struct is answered elsewhere, below. The first two are not a reading of the list at all. The third is a list read to
  *  the end that cannot be CONVERTED: a parameter of unknown width occupies one argument register
  *  or two, and the choice moves every later argument's home. Where the declaration does settle it
  *  — a typedef'd enum, an array or a function type the context resolved to one word, which
@@ -188,6 +188,12 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  be a function that lifts when told nothing and declines when told more. Returning
  *  one-register-each instead would be a layout nothing could know to be right, and the frontend
  *  would then ASSERT those registers rather than ask for them.
+ *
+ *  A PARAMETER THE DECLARATION PASSES AS A STRUCT OR UNION BY VALUE IS THE EXCEPTION, because it is
+ *  known not to be one register: the caller asks `aggregate.ts` `byValueCallArgs` to place it, and
+ *  where no rule does (`byValueRefusal`) the call refuses (frontend/call-plan.ts
+ *  `refuseUnplacedByValue`). That is a function that declines when told more, on purpose: a guess
+ *  over a struct drops it or reads its words as separate arguments, and both compile.
  *
  *  THE MACHINE IS NOT A WITNESS FOR A WIDTH NOBODY STATED, which is the reading this replaces. The
  *  contiguous scan is wrong in both directions and neither is recoverable here. It OVER-counts:
