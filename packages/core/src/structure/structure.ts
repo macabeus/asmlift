@@ -5692,13 +5692,20 @@ export function structure(
       // body after the switch — the same program, but a spelling no source writes and the one the
       // `stop` reading's own refusal is the honest answer for. So the retry ends the switch only
       // at the default block or past every arm.
+      //
+      // THE DEFAULT BLOCK STAYS ELIGIBLE WHEN THE TABLE'S HOLES MAKE IT AN ARM. A table slot no
+      // `case` names holds the default edge's target, so on a table with a hole (`case 0`, `case 2`,
+      // `case 5`, but no `case 1`) that block is an arm by construction. It is not a case arm with
+      // a body: those values run exactly what an unmatched value runs, and ending the switch there
+      // spells them `case 1: break;`. The rule above is about an arm that is NOT the default edge's
+      // target, whose body would move after the switch, so it refuses that arm and only that arm.
       if (joined === null && read.declines) {
         const found = followOverReturns(b, stop, defEdge.block);
         const pastEnd = (end: Block): boolean =>
           leftOutOf(b, reachFrom, defEdge.block).some((s) =>
             [s, ...reachFrom(s)].some((x) => x !== b && layoutIndex(x) > layoutIndex(end)),
           );
-        const over = found !== null && !armOf.has(found) && !pastEnd(found) ? found : null;
+        const over = found !== null && (found === defEdge.block || !armOf.has(found)) && !pastEnd(found) ? found : null;
         const retry = over === null ? null : readArms(over);
         if (retry !== null && !retry.declines) {
           hooks.onEarlyReturnFollow?.({ block: fn.blocks.indexOf(b), follow: fn.blocks.indexOf(over!) });
