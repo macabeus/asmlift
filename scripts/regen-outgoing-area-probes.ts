@@ -6,9 +6,11 @@
 // (`docs/level-tower.md`, RE-READABLE IS NOT RE-MEASURABLE).
 //
 //   agbcc-restage.s — `survivorBound` (frontend/stackargs.ts) applies the contrapositive of "agbcc
-//     never reads a word of its outgoing area back after a call" (`target.ts`
-//     `localsAboveOutgoingArea`). `twice` re-stages an unchanged argument before its second call,
-//     and `owns` assigns to its own incoming stack parameter, which is its caller's outgoing word.
+//     never reads a word of its outgoing area back" (`target.ts` `localsAboveOutgoingArea`).
+//     `twice` re-stages an unchanged argument before its second call, `owns` assigns to its own
+//     incoming stack parameter, which is its caller's outgoing word, and `libcalls`/`nested`/
+//     `cond`/`spills` put calls inside stack arguments and spills beside them, and load no word of
+//     the area.
 //     Read by `packages/core/test/outgoing-area-probes.test.ts`.
 //   agbcc-escape.s — the `escape` event reads a handed-out frame address as a local's
 //     (`target.ts` `escapedFrameAddressNamesALocal`). `f0`/`f1` place an address-taken local at
