@@ -1122,7 +1122,9 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
 
     test('…and a captured store beneath every load still refuses, naming the bound it was judged by', () => {
       // Compiled agbcc, canonical flags: `struct S16 s = gS; use(k); return s.c + s.d;` — the
-      // block copy's last word lands at [sp,#0], beneath the lowest load at [sp,#8].
+      // block copy's `stmia` stores [sp,#0], [sp,#4], [sp,#8] and its `str` [sp,#12]. The decline
+      // names [sp,#0], the copy's first word: the lowest of the two stores beneath the lowest load,
+      // at [sp,#8].
       const copy =
         'v2:\n\tpush\t{r4, r5, lr}\n\tadd\tsp, sp, #-0x10\n\tmov\tr2, sp\n\tldr\tr1, .L3\n\tldmia\tr1!, {r3, r4, r5}\n' +
         '\tstmia\tr2!, {r3, r4, r5}\n\tldr\tr1, [r1]\n\tstr\tr1, [r2]\n\tbl\tuse\n\tldr\tr0, [sp, #0x8]\n' +

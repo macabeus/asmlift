@@ -531,9 +531,11 @@ export interface TargetDescription {
     // the contrapositive (`docs/level-tower.md`, THE CONTRAPOSITIVE OF A UNIVERSAL IS NOT A
     // BACKWARDS READING): a word loaded after a call is not in the area, so it is a local, and so is
     // every word above it (`frontend/frame-objects.ts` `storedNeverRead`). An own-frame word no store
-    // reaches on any path is a local too (`frontend/thumb.ts`'s own-frame load arm, which reads it as
-    // uninitialised): a callee that assigned it as its stack parameter ran before the load, so the
-    // load is after a call, and with no call reaching the load there is no such callee. It is
+    // reaches on any path is a local too, but only the Thumb frontend acts on that
+    // (`frontend/thumb.ts`'s own-frame load arm, which reads it as uninitialised), and it was probed
+    // on agbcc alone; a MIPS or PPC reader needs its own probe first. A callee that assigned the
+    // word as its stack parameter ran before the load, so the load is after a call, and with no
+    // call reaching the load there is no such callee. It is
     // exactly as sound as the universal, so its residue is every producer the universal does not
     // cover: hand-written asm that reads its outgoing argument back after a call loses that argument
     // silently. The premise is this compiler's, not the ISA's.
