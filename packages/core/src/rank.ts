@@ -264,12 +264,12 @@ export interface Candidate {
    *   • `l3/intcell.ts` spells a global as the integer a project may have declared it, where a
    *     pointer declaration scales the offset it adds, and no declaration is in the asm.
    *
-   *  A STRUCTURE variation can carry the same obligation (`StructureVariation.needsProof`), and one
-   *  does:
+   *  A third obligation is judged on the finished tree rather than declared by a variation
+   *  (`signedUnsignedCompare` below):
    *
-   *   • `/signed-cmp` spells an unsigned compare over signed-rendering operands, which compiles to a
-   *     signed compare unless the operands are non-negative, and the compiler's proof of that is not
-   *     in the asm.
+   *   • `/signed-cmp`, or a respell over its tree, spells an unsigned compare over signed-rendering
+   *     operands, which compiles to a signed compare unless the operands are non-negative, and the
+   *     compiler's proof of that is not in the asm.
    *
    *  What settles all three instead is the object: a candidate that assembles to the target's own
    *  bytes IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
@@ -279,7 +279,10 @@ export interface Candidate {
   /** The tree this source was emitted from spells some unsigned compare so that C evaluates it
    *  signed (l3/typing.ts `signedOverUnsignedCompare`, judged on the finished tree), which makes it
    *  `matchOnly` and names the fact it owes. Set for whichever variation got it there: emission
-   *  under `/signed-cmp`, or a respell that substituted into a compare emission had pinned. */
+   *  under `/signed-cmp`, or a respell that substituted into a compare emission had pinned. It is
+   *  the only place this obligation is decided: a pass that rebuilds a compare spreads the node to
+   *  keep its `unsignedCmp` evidence (l3/regspell.ts), or drops it only where its own gate proved
+   *  the new spelling compares the same values (l3/initfirst.ts `swapSide`, l3/reindex.ts). */
   signedUnsignedCompare?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
    *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
@@ -2294,12 +2297,7 @@ export function enumerateCandidates(
             // `LoadBGTilemapData` under docs/ranked-repro.md's flags: 66816 candidates either way,
             // and all 66816 `[score]` lines identical. It splits 0 keys, so the miss it can cause
             // has no inhabitant.
-            // A proof-carrying setting's tree is keyed apart: a SOUND setting that reaches the same
-            // tree must still emit, so the source dedup below can clear `matchOnly` off the text.
-            const settingNeedsProof = STRUCTURE_VARIATIONS.some(
-              (variation) => s[variation.flag] && variation.needsProof?.(sfn) === true,
-            );
-            const treeKey = (settingNeedsProof ? 'proof:' : '') + JSON.stringify(sfn);
+            const treeKey = JSON.stringify(sfn);
             if (seenTrees.has(treeKey)) {
               opts.onTreeDeduped?.();
               continue;
@@ -2327,7 +2325,7 @@ export function enumerateCandidates(
                 // set, not `seenTrees`: adding a rewritten tree there would let it skip a later
                 // STRUCTURED tree that happens to equal it, and that tree's own pre-respell output —
                 // which nothing has computed — would go with it.
-                const madeKey = (settingNeedsProof ? 'proof:' : '') + JSON.stringify(made);
+                const madeKey = JSON.stringify(made);
                 if (seenPreRespell.has(madeKey)) {
                   continue;
                 }
@@ -2397,7 +2395,7 @@ export function enumerateCandidates(
                 // published artifact is the text, so a spelling some sound route also produces is a
                 // proven one however the first route reached it — clear the flag rather than keeping
                 // whichever route the enumeration happened to walk first.
-                if (sp.matchOnly === undefined && !settingNeedsProof) {
+                if (sp.matchOnly === undefined) {
                   delete dup.matchOnly;
                   delete dup.signedUnsignedCompare;
                 }
@@ -2428,7 +2426,7 @@ export function enumerateCandidates(
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
-                ...(sp.matchOnly || settingNeedsProof ? { matchOnly: true as const } : {}),
+                ...(sp.matchOnly ? { matchOnly: true as const } : {}),
                 ...(sp.signedUnsignedCompare ? { signedUnsignedCompare: true as const } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),

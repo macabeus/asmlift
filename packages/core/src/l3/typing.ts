@@ -360,8 +360,8 @@ function nonNegative(e: Expr, varType: VarTypes, orXor: boolean): boolean {
  *  render as signed-promoting C (or as a type this env cannot see, which may be), neither is a
  *  pointer (C compares an address unsigned), and they are not both `nonNeg`. With the default,
  *  `provablyNonNegative`, a true answer means the C compares DIFFERENT values from the machine:
- *  the proof obligation, which emission records and `signedOverUnsignedCompare` asks again of the
- *  finished tree. structure.ts also asks it with `spelledNonNegative` to place the `(u32)` pin. */
+ *  the proof obligation, which `signedOverUnsignedCompare` asks of the finished tree.
+ *  structure.ts also asks it with `spelledNonNegative` to place the `(u32)` pin. */
 export function rendersSignedOverUnsigned(
   l: Expr,
   r: Expr,

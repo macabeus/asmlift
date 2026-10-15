@@ -486,15 +486,6 @@ export interface SFn {
    *  argument to its declared parameter (`declaredArgs`), and a pointer of another pointee written
    *  into a pointer slot, wherever it would for C++. */
   strictConversions?: true;
-  /** Some unsigned compare was spelled over operands that both render signed, neither provably
-   *  non-negative nor a pointer: C evaluates it signed where the machine compared unsigned. Only
-   *  `StructureOptions.unsignedCompareSpelling` OFF leaves one, and never printed: rank.ts's
-   *  `/signed-cmp` reads it, so a tree whose compares all render unsigned at emission needs no
-   *  proof. Set at emission, over the types lowerDef sees, so a later pass that drops the compare
-   *  or re-declares an operand unsigned or a pointer leaves it set, which only withholds more.
-   *  A later pass that SUBSTITUTES into the compare is the other direction, and this flag cannot
-   *  see it: rank.ts judges every emitted tree again (`signedOverUnsignedCompare`). */
-  signedUnsignedCompare?: true;
 }
 
 /** An initial element that is an ADDRESS CONSTANT (ir/core.ts `LocalObject.relocs`): `symbol`'s

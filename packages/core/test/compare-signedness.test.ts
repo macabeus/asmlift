@@ -157,7 +157,6 @@ test('an or/xor of masked operands keeps the pin, and its uncast spelling owes n
   expect(emit(ORXORCMP)).toContain('(u32)');
   const uncast = structured(ORXORCMP, false);
   expect(cBackend.emit(uncast)).not.toContain('(u32)');
-  expect(uncast.signedUnsignedCompare).toBeUndefined();
   expect(signedOverUnsignedCompare(uncast)).toBe(false);
 });
 
@@ -182,7 +181,6 @@ const ORNEGCMP = `fn ornegcmp {
 test('an or with a possibly-negative side owes the proof uncast', () => {
   expect(emit(ORNEGCMP)).toContain('(u32)');
   const uncast = structured(ORNEGCMP, false);
-  expect(uncast.signedUnsignedCompare).toBe(true);
   expect(signedOverUnsignedCompare(uncast)).toBe(true);
   expect(signedOverUnsignedCompare(structured(ORNEGCMP, true))).toBe(false);
 });

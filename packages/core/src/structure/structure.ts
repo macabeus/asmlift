@@ -2322,8 +2322,6 @@ export function structure(
     pointerGlobals,
     contextGlobals,
   } = opts;
-  // set where an unsigned compare is left spelled signed (`SFn.signedUnsignedCompare`)
-  let signedUnsignedCompare = false;
   // A read this stamp is the first to place was plain to every raising pass, and in a `&&`/`||`'s
   // guarded operand a short-circuit fold may have lifted it out of the arm it ran in: which side of
   // the branch the asm read it on is lost. The analysis names a counted op it finds there above the
@@ -4122,16 +4120,13 @@ export function structure(
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';
       };
-      // Two answers to one question (l3/typing.ts): `pinned` places the cast, `owesProof` says the
-      // uncast spelling compares different values. They differ on an `|`/`^` of non-negative
-      // sides, which stays pinned (the pin is codegen-visible) and owes no proof uncast.
+      // `pinned` places the cast (l3/typing.ts `spelledNonNegative`). Whether an uncast spelling
+      // compares different values is not decided here: the compare carries `unsignedCmp` evidence,
+      // and rank.ts asks `signedOverUnsignedCompare` of the finished tree, after every pass that
+      // could substitute into it. The two differ on an `|`/`^` of non-negative sides, which stays
+      // pinned (the pin is codegen-visible) and owes no proof uncast.
       const unsignedOrdering = /^icmp_u(lt|le|gt|ge)$/.test(d.opcode);
       const pinned = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv, spelledNonNegative);
-      const owesProof = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv);
-      if (owesProof && !unsignedCompareSpelling) {
-        // left signed: the `/signed-cmp` spelling, which `SFn.signedUnsignedCompare` reports
-        signedUnsignedCompare = true;
-      }
       if (pinned && unsignedCompareSpelling) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
         // AT THE OPERAND'S OWN RANK: `(u32)a` over a 64-bit `a` pins nothing, it truncates the
@@ -7198,7 +7193,6 @@ export function structure(
     ...(dialect !== undefined ? { dialect } : {}),
     ...(designatedInitializers ? { designators: true as const } : {}),
     ...(strictPointerConversions ? { strictConversions: true as const } : {}),
-    ...(signedUnsignedCompare ? { signedUnsignedCompare: true as const } : {}),
   };
   if (fn.localObjects === undefined) {
     return tree;

@@ -117,3 +117,24 @@ describe('a respelled compare is judged on the finished tree', () => {
     expect(dflt.matchOnly).toBeUndefined();
   });
 });
+
+// The register-copy respell (l3/regspell.ts) rebuilds the compare onto its copy and flips it. agbcc
+// -O2 of `int f(int x, int n) { int v; if ((u32)x < (u32)n) v = x; else v = x + 200; return v; }`
+// is `cmp r0, r1; bcs`; under `/signed-cmp` the copy reads `s32 w0 >= a1`, still a signed compare,
+// and only the evidence the rebuild keeps lets the finished-tree judgment withhold it.
+const REGCOPY =
+  'f:\n\tadd\tr2, r0, #0\n\tadd\tr2, r2, #0xc8\n\tcmp\tr0, r1\n\tbcs\t.L3\t@cond_branch\n' +
+  '\tadd\tr2, r0, #0\n.L3:\n\tadd\tr0, r2, #0\n\tbx\tlr\n';
+
+describe('a register copy of a signed compare is judged on its own tree', () => {
+  const cands = enumerateCandidates('f', REGCOPY, ARMV4T_AGBCC);
+  const named = (n: string) => cands.find((c) => c.variations.join('/') === n)!;
+
+  test('the copy over signed parameters is proof-carrying, its unsigned twin is not', () => {
+    const wrong = named('signed/signed-cmp/fresh-merge/regcopy');
+    expect(wrong.source).toMatch(/s32 f\(s32 a0, s32 a1\)[\s\S]*s32 w0;[\s\S]*if \(w0 >= a1\)/);
+    expect(wrong.matchOnly).toBe(true);
+    expect(wrong.signedUnsignedCompare).toBe(true);
+    expect(named('unsigned/fresh-merge/regcopy').matchOnly).toBeUndefined();
+  });
+});

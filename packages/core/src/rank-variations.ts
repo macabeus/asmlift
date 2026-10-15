@@ -80,11 +80,6 @@ export interface StructureVariation {
   sharedGate?: (sharedLift: Fn, defs: Map<Value, Op>) => boolean;
   perLiftGate?: (fn: Fn) => boolean;
   strip: boolean;
-  /** Whether the ON spelling, as structured into `sfn`, can compute something other than the asm,
-   *  which no gate over the C can rule out: every candidate such a tree reaches is
-   *  `Candidate.matchOnly`, published only on a byte-exact score. rank.ts's `PROOF_OBLIGATIONS`
-   *  names the fact the score stands in for. Asked only of a setting with the variation on. */
-  needsProof?: (sfn: SFn) => boolean;
 }
 export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // `/reread-globals` — the VALUE-HOME variation (structure/analysis.ts AnalyzeOptions). Whether the
@@ -235,16 +230,16 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
   // default spells it unsigned, the one spelling that is value-faithful without a proof. This one
   // is a real source too: a compiler emits the unsigned branch from a signed compare where it
   // PROVED both sides non-negative, and emission's provable set is smaller than the compiler's.
-  // Where that proof does not hold it compiles to a different compare, so a tree that spells one
-  // (`SFn.signedUnsignedCompare`) is `needsProof`: offered, scored, and published only byte-exact.
+  // Where that proof does not hold it compiles to a different compare, so a source whose finished
+  // tree spells one is `Candidate.matchOnly`: offered, scored, and published only byte-exact. This
+  // setting carries no flag of its own for that. Each lowered `icmp_u*` ordering carries
+  // `unsignedCmp` evidence, and rank.ts asks `signedOverUnsignedCompare` of every tree a source is
+  // emitted from, whichever setting or respell (`/unmerge`, `/regcopy`) spelled it signed.
   // A tie or a better nonmatch score is no evidence for it (`synthetic:selloop:gcc2.7.2kmc`:
   // `return 0 < v1;` over an s32 `v1` against `sltu v0,zero,v1`). A tree whose compares render
-  // unsigned at emission (an unsigned operand, a pointer) needs no proof, and differs from the
-  // default only in a declaration.
-  // The same obligation reaches a tree no structure setting spelled signed: a respell that
-  // substitutes into a pinned compare (`/unmerge`) can re-render it signed, so rank.ts judges every
-  // emitted tree again (`signedOverUnsignedCompare`) and marks that source too.
-  // KNOWN GAP, in the safe direction: both judgments read the tree's declarations. A compare that
+  // unsigned (an unsigned operand, a pointer) needs no proof, and differs from the default only in
+  // a declaration.
+  // KNOWN GAP, in the safe direction: the judgment reads the tree's declarations. A compare that
   // renders unsigned only in the PRINTED C — a global the backend's pointer-cell legalization and
   // the symbol declarations make `void *` (ptrcell.test.ts KR1, `g >= gLimit`) — still owes the
   // proof, and is withheld on a nonmatch. Neither of those is in the tree: globals are absent from
@@ -256,7 +251,6 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     options: (on) => ({ unsignedCompareSpelling: !on }),
     sharedGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
-    needsProof: (sfn) => sfn.signedUnsignedCompare === true,
   },
   // `/fresh-merge` — the parameter-merge-home variation (structure.ts `freshParamMerge`, whose
   // `FRESH_MERGE_GATES` carry the argument): a merge whose carrier is a parameter takes its own
