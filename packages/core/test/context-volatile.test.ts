@@ -20,6 +20,7 @@ const AGGREGATES_ONLY: ContextGlobals = {
   aggregates: CTX.aggregates,
   volatiles: new Set(),
   pointeeVolatiles: new Set(),
+  declared: new Set(),
 };
 
 /** agbcc -O2 of `void vpoll(void){ while (gV.a == 0); }` */

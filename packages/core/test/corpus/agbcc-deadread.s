@@ -107,3 +107,49 @@ pairhi:
 	bx	lr
 .Lfe6:
 	.size	 pairhi,.Lfe6-pairhi
+	.align	2, 0
+	.globl	samearms
+	.type	 samearms,function
+	.thumb_func
+samearms:
+	add	r1, r0, #0
+	ldr	r0, .L19
+	ldr	r0, [r0]
+	mov	r0, #0x1
+	str	r0, [r1]
+	mov	r0, #0x0
+	bx	lr
+.L20:
+	.align	2, 0
+.L19:
+	.word	gPlain
+.Lfe7:
+	.size	 samearms,.Lfe7-samearms
+	.align	2, 0
+	.globl	spill
+	.type	 spill,function
+	.thumb_func
+spill:
+	ldr	r1, [r0, #0x4]		@ created by thumb_load_double_from_address
+	ldr	r0, [r0]		@ created by thumb_load_double_from_address
+	bx	lr
+.Lfe8:
+	.size	 spill,.Lfe8-spill
+	.align	2, 0
+	.globl	widesum
+	.type	 widesum,function
+	.thumb_func
+widesum:
+	ldr	r2, [r0]		@ created by thumb_load_double_from_address
+	ldr	r3, [r0, #0x4]		@ created by thumb_load_double_from_address
+	cmp	r1, #0
+	beq	.L23	@cond_branch
+	mov	r0, #0x3
+	mov	r1, #0
+	add	r2, r2, r0
+	adc	r3, r3, r1
+.L23:
+	add	r0, r2, #0
+	bx	lr
+.Lfe9:
+	.size	 widesum,.Lfe9-widesum

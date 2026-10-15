@@ -4,6 +4,7 @@
 // for target→frontend dispatch.
 import type { Fn } from '../ir/core';
 import type { Prototypes } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
@@ -19,8 +20,10 @@ export interface Frontend {
    *  (and any other header facts the frontend needs); an empty map is valid. `asmData` is the
    *  OPTIONAL Regime-B side-table (data-section jump tables + relocations); absent ⇒ a
    *  dense-switch dispatch declines/loud-fails. `symbols` is the OPTIONAL address→symbol map
-   *  (symbols.ts); today only the Thumb frontend consumes it (numeric-pool promotion) — the
-   *  MIPS/PPC objdump dialect already carries symbol names in the asm text. */
+   *  (symbols.ts): the Thumb frontend promotes a numeric pool word through it — the
+   *  MIPS/PPC objdump dialect already carries symbol names in the asm text — and every frontend
+   *  hands it, with the OPTIONAL declaration `context`, to the dead-read pin, which reads a global's
+   *  declaration there (frontend/dead-reads.ts `declared-plain`). */
   lift(
     name: string,
     asm: string,
@@ -28,5 +31,6 @@ export interface Frontend {
     prototypes: Prototypes,
     asmData?: AsmData,
     symbols?: SymbolMap,
+    context?: ContextGlobals,
   ): Fn;
 }

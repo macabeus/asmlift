@@ -22,6 +22,7 @@ import { Block, Fn, Successor, Value, mergeClasses, mkOp, mkValue } from '../ir/
 import type { Opcode } from '../ir/opcodes';
 import { T, typeToString } from '../ir/types';
 import { type FnProto, type Prototypes, wordsOf } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import { type SymbolMap, lookupInterior, lookupSymbol } from '../symbols';
 import type { TargetDescription } from '../target';
 import type { AsmData } from './asmdata';
@@ -2445,8 +2446,11 @@ export function lift(
   prototypes: Prototypes = {},
   asmData?: AsmData,
   symbols?: SymbolMap,
+  context?: ContextGlobals,
 ): Fn {
-  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, symbols, oneObject));
+  return liftWithRelift(name, (oneObject) =>
+    liftOnce(name, asm, target, prototypes, asmData, symbols, context, oneObject),
+  );
 }
 
 /** ONE LIFT, AS STAGES RUN IN THEIR REFUSAL ORDER: every stage before the fill (`thumbFillOf`: the
@@ -2465,6 +2469,7 @@ function liftOnce(
   prototypes: Prototypes,
   _asmData: AsmData | undefined,
   symbols: SymbolMap | undefined,
+  context: ContextGlobals | undefined,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
   const fill = thumbFillOf(name, asm, target, prototypes, symbols, oneObject);
@@ -2521,6 +2526,8 @@ function liftOnce(
     atWordReturn: pairs.unreadHigh,
     atUndeclaredCall: fill.calls.heldAtUndeclaredCall,
     compared: fill.flags.compared,
+    spilled: ssa.frameWrites,
+    declarations: { symbols, context },
   });
 
   abiSortEntryParams(irBlocks[0], cfg.preds[0].length > 0, paramReg, argSlots);

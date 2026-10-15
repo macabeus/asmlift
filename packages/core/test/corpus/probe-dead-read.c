@@ -42,3 +42,29 @@ void param(volatile int *p, short *x) {
 long long pairhi(long long *p) {
     return *p;
 }
+
+/* Not volatile either: plain reads a compiler KEEPS with nothing using them, each refused by a gate
+ * of frontend/dead-reads.ts. agbcc merges two identical arms after flow has deleted the dead insns,
+ * so the read the branch tested survives (`samearms`, refused only where a declaration says the
+ * object is plain: `declared-plain`). O32 compilers store a copied struct, or a long long, to the
+ * frame, where the lift keeps the slot as a variable and drops the store (`spilled`); KMC keeps
+ * the high word's `addu` of a long long sum it then truncates (`computed`). */
+extern int gPlain;
+
+int samearms(int *q) {
+    if (gPlain) *q = 1; else *q = 1;
+    return 0;
+}
+
+struct Pair { int a, b; };
+
+int spill(struct Pair *p) {
+    struct Pair s = *p;
+    return s.a;
+}
+
+int widesum(long long *p, int c) {
+    long long v = *p;
+    if (c) v += 3;
+    return (int)v;
+}

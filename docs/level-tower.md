@@ -159,7 +159,15 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   structurer's default, which is some other compiler's behavior; so an unprobed profile inherits,
   and the differ referees an inherited value the way it referees any default. A probe pair that
   refutes a declaration WITH A CONSTANT at a named profile is what earns a per-profile value, and
-  none has yet. A pair that comes out one way at one site and the other way at another, on the same
+  `keepsUnusedReads` is the first: compiled, mwcc at `-O0` and IDO at `-O0` and `-O1` keep the read
+  of `x = p[5]; x = 0;` that every other level deletes, so `targetFor` sets it from the level
+  (target.ts `keepsUnusedReadsAt`). Inheriting is NOT the rule for a value nothing referees. The
+  dead-read pin (frontend/dead-reads.ts) reads that field in every candidate alike, with no dual
+  for the differ to weigh, so a profile whose level no flag names, or a word the flag table cannot
+  read may set (mwcc `-opt off`), is judged at the value that withholds the stamp — the lift main
+  made — rather than the one that publishes a `volatile` the source may not have written. Every
+  family's unflagged compile was measured keeping, so the refusal is also the measured answer.
+  A pair that comes out one way at one site and the other way at another, on the same
   compiler and the same flags, refutes the field as a declared default rather than its value:
   flipping the constant trades one site for the other, and the field has to be decided from the
   assembly at each site.

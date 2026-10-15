@@ -62,4 +62,44 @@ Disassembly of section .text:
   98:	lw	v0,0(a0)
   9c:	jr	ra
   a0:	lw	v1,4(a0)
-	...
+
+000000a4 <samearms>:
+  a4:	lui	t6,0x0
+  a8:	lw	t6,0(t6)
+  ac:	li	t8,1
+  b0:	li	t7,1
+  b4:	beqz	t6,c4 <samearms+0x20>
+  b8:	move	v0,zero
+  bc:	jr	ra
+  c0:	sw	t7,0(a0)
+  c4:	sw	t8,0(a0)
+  c8:	jr	ra
+  cc:	move	v0,zero
+
+000000d0 <spill>:
+  d0:	lw	t8,0(a0)
+  d4:	addiu	sp,sp,-8
+  d8:	addiu	t6,sp,0
+  dc:	sw	t8,0(t6)
+  e0:	lw	t7,4(a0)
+  e4:	sw	t7,4(t6)
+  e8:	lw	v0,0(sp)
+  ec:	jr	ra
+  f0:	addiu	sp,sp,8
+
+000000f4 <widesum>:
+  f4:	lw	t6,0(a0)
+  f8:	lw	t7,4(a0)
+  fc:	addiu	sp,sp,-8
+ 100:	sw	t6,0(sp)
+ 104:	beqz	a1,120 <widesum+0x2c>
+ 108:	sw	t7,4(sp)
+ 10c:	addiu	t1,t7,3
+ 110:	sltiu	at,t1,3
+ 114:	addu	t0,t6,at
+ 118:	sw	t0,0(sp)
+ 11c:	sw	t1,4(sp)
+ 120:	lw	v0,4(sp)
+ 124:	jr	ra
+ 128:	addiu	sp,sp,8
+ 12c:	nop

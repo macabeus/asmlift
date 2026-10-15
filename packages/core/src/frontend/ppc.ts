@@ -45,11 +45,13 @@ import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
 import { type FnProto, type Prototypes, declaredWidth, declaresVoidReturn, isFloatingSpelling } from '../proto';
+import type { ContextGlobals } from '../proto-context';
 import { registerSaveRoutineOf } from '../runtime-helpers';
+import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable } from './asmdata';
 import { type CallDeclarations, type ParamClass, callDeclarations } from './call-plan';
-import { pinDeadReads, unreadPairHalf } from './dead-reads';
+import { type Declarations, pinDeadReads, unreadPairHalf } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
   type DisasmInstr,
@@ -1052,8 +1054,12 @@ export function lift(
   target: TargetDescription,
   prototypes: Prototypes = {},
   asmData?: AsmData,
+  symbols?: SymbolMap,
+  context?: ContextGlobals,
 ): Fn {
-  return liftWithRelift(name, (oneObject) => liftOnce(name, asm, target, prototypes, asmData, oneObject));
+  return liftWithRelift(name, (oneObject) =>
+    liftOnce(name, asm, target, prototypes, asmData, { symbols, context }, oneObject),
+  );
 }
 
 function liftOnce(
@@ -1062,6 +1068,7 @@ function liftOnce(
   target: TargetDescription,
   prototypes: Prototypes,
   asmData: AsmData | undefined,
+  declarations: Declarations,
   oneObject: FrameRange | undefined,
 ): Fn | FrameObjectRelift {
   assertInputFormat('ppc', 'objdump', asm);
@@ -2809,6 +2816,8 @@ function liftOnce(
     atWordReturn: unreadHigh,
     atUndeclaredCall: calls.heldAtUndeclaredCall,
     compared,
+    spilled: ssa.frameWrites,
+    declarations,
   });
 
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);

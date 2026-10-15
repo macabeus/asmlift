@@ -59,3 +59,36 @@ Disassembly of section .text:
   88:	lwz     r3,0(r3)
   8c:	lwz     r4,4(r4)
   90:	blr
+
+00000094 <samearms>:
+  94:	lwz     r0,0(0)
+			94: R_PPC_EMB_SDA21	gPlain
+  98:	cmpwi   r0,0
+  9c:	beq-    ac <samearms+0x18>
+  a0:	li      r0,1
+  a4:	stw     r0,0(r3)
+  a8:	b       b4 <samearms+0x20>
+  ac:	li      r0,1
+  b0:	stw     r0,0(r3)
+  b4:	li      r3,0
+  b8:	blr
+
+000000bc <spill>:
+  bc:	stwu    r1,-16(r1)
+  c0:	lwz     r4,0(r3)
+  c4:	lwz     r0,4(r3)
+  c8:	stw     r4,8(r1)
+  cc:	mr      r3,r4
+  d0:	stw     r0,12(r1)
+  d4:	addi    r1,r1,16
+  d8:	blr
+
+000000dc <widesum>:
+  dc:	cmpwi   r4,0
+  e0:	lwz     r5,0(r3)
+  e4:	lwz     r3,4(r3)
+  e8:	beqlr-
+  ec:	li      r0,3
+  f0:	addc    r0,r3,r0
+  f4:	mr      r3,r0
+  f8:	blr

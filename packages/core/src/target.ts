@@ -1576,10 +1576,30 @@ export interface ResolvedTarget {
  *  `lw t6, 20(a0)`; agbcc and KMC gcc 2.7.2 at `-O0` keep the read and store it to the frame. None
  *  of them does at agbcc/KMC `-O1`, `-O2` or `-O3`, IDO `-O2` or `-O3`, or mwcc 2.4.2 `-O1` through
  *  `-O4,p` and `-O4,s`. An expression statement's read (`*p;`) is gone at every level on every one of
- *  them. A level no flag names (`undefined`) is not judged. */
+ *  them.
+ *
+ *  A LEVEL NO FLAG NAMES (`undefined`) KEEPS. Every family's unflagged compile was measured keeping:
+ *  agbcc's and IDO's are their `-O0` and `-O1` (codegen-flags.ts `EFFECTIVE` names them, so they
+ *  never reach here unnamed), KMC gcc 2.7.2 with no `-O` emits `-O0`'s object byte for byte, and
+ *  mwcc 2.4.2 with no level, with `-opt off` or with `-opt level=0` keeps `x = p[5]; x = 0;`'s
+ *  `lwz r31, 20(r3)` as at `-O0`. And the cost runs one way: answering "keeps" where the compiler
+ *  deletes withholds a `volatile` (main's lift, the read dropped), where answering "deletes" where it
+ *  keeps publishes one the source never wrote — a value this stamp alone decides, with no candidate
+ *  to referee it (docs/level-tower.md, A PROFILE OF A COMPILER INHERITS). */
 export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined): boolean {
-  const n = level === undefined ? undefined : /^\d/.exec(level)?.[0];
+  if (level === undefined) {
+    return true;
+  }
+  const n = /^\d/.exec(level)?.[0];
   return n === '0' || (family === 'ido' && n === '1');
+}
+
+/** The level `keepsUnusedReadsAt` judges a profile at: its `O` slot, or none where a word the table
+ *  does not read may set it too — mwcc's `-opt off` and `-opt level=0` compile at `-O0`, and the
+ *  table reads neither, so a profile that spells one has a level nothing here knows. */
+function unusedReadLevel(profile: CodegenProfile): string | undefined {
+  const optWord = profile.family === 'mwcc' && profile.unclassified.some((w) => w.startsWith('-opt'));
+  return optWord ? undefined : profile.slots.O;
 }
 
 /** The target a function compiled by `toolchain` at `cflags` decompiles against, and the profile
@@ -1589,7 +1609,7 @@ export function targetFor(toolchain: ToolchainId, cflags: readonly string[]): Re
   const profile = parseFlags(t.family, cflags);
   const cpp = dialectOf(profile.slots.lang) === 'c++';
   let target: TargetDescription = cpp ? { ...t.description, dialect: 'c++' } : t.description;
-  if (keepsUnusedReadsAt(t.family, profile.slots.O)) {
+  if (keepsUnusedReadsAt(t.family, unusedReadLevel(profile))) {
     target = { ...target, compilerBehaviors: { ...target.compilerBehaviors, keepsUnusedReads: true } };
   }
   if (profile.slots['-fshort-enums'] === 'on') {

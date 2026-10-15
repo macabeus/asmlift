@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DEAD_READ_GATES, pinDeadReads } from '../src/frontend/dead-reads';
+import { DEAD_READ_GATES, type Declarations, pinDeadReads } from '../src/frontend/dead-reads';
 import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { deadOps } from '../src/ir/discipline';
 import { T } from '../src/ir/types';
@@ -67,6 +67,28 @@ describe.each(TOOLCHAINS)('$fixture', ({ fixture: f, target, fns }) => {
 // the return pair is unused only because the lift guessed a one-word return, so it is no
 // `volatile` read of RAM. agbcc and mwcc lift the one word their ABI returns first; O32 refuses the
 // v0:v1 pair outright, before this rule is asked.
+// Plain reads a compiler KEEPS with nothing using them (probe-dead-read.c, compiled): agbcc's merged
+// identical arms, O32's struct copy and long long stored to a frame slot the lift keeps as a
+// variable, and KMC's `addu` of a long long's high word.
+describe('plain reads a compiler keeps are no dead read', () => {
+  test('samearms: agbcc keeps the read its merged arms tested, which a declaration says is plain', () => {
+    const asm = fixture('agbcc-deadread.s');
+    const declared = decompile('samearms', asm, ARMV4T_AGBCC, {
+      contextGlobals: globalsFromContext('extern int gPlain;', 'c'),
+    }).source;
+    expect(declared).not.toMatch(/gPlain/);
+    // RESIDUE: with no declaration in evidence it is the same instructions as `sym`'s `gR;`
+    expect(decompile('samearms', asm, ARMV4T_AGBCC).source).toMatch(/^\s*gPlain;$/m);
+  });
+  test.each([
+    ['spill', 'gcc272kmc-deadread.txt', MIPS_GCC],
+    ['widesum', 'gcc272kmc-deadread.txt', MIPS_GCC],
+    ['widesum', 'ido71-deadread.txt', MIPS_IDO],
+  ] as const)('%s on %s', (name, f, target) => {
+    expect(decompile(name, fixture(f), target).source).not.toMatch(/volatile/);
+  });
+});
+
 describe("pairhi: the return pair's second word is no dead read", () => {
   const unproto = (f: string, target: TargetDescription) => () => decompile('pairhi', fixture(f), target).source;
   test.each([
@@ -275,10 +297,9 @@ describe('the gates', () => {
   });
 
   test('keeps-unused-reads is a fact of the level, per family', () => {
-    expect(['0', '0,p', '1', '4,p', '4,s', undefined].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
+    expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,
       true,
-      false,
       false,
       false,
       false,
@@ -288,6 +309,24 @@ describe('the gates', () => {
     expect(['0', '1', '2'].map((l) => keepsUnusedReadsAt('gcc', l))).toEqual([true, false, false]);
     expect(targetFor('ido7.1', ['-O2']).target.compilerBehaviors.keepsUnusedReads).toBeUndefined();
     expect(targetFor('ido7.1', []).target.compilerBehaviors.keepsUnusedReads).toBe(true); // IDO's default is -O1
+  });
+
+  test("keeps-unused-reads: a level no flag names keeps, as every family's unflagged compile was measured to", () => {
+    // mwcc 2.4.2 with no level, with `-opt off` and with `-opt level=0` keeps `x = p[5]; x = 0;`'s
+    // `lwz r31, 20(r3)`; KMC gcc 2.7.2 with no -O emits -O0's object byte for byte
+    for (const f of ['mwcc', 'gcc', 'agbcc', 'ido'] as const) {
+      expect(keepsUnusedReadsAt(f, undefined)).toBe(true);
+    }
+    const keeps = (id: Parameters<typeof targetFor>[0], flags: string[]) =>
+      targetFor(id, flags).target.compilerBehaviors.keepsUnusedReads;
+    expect(keeps('mwcc_242_81', [])).toBe(true);
+    expect(keeps('mwcc_242_81', ['-opt', 'off'])).toBe(true);
+    expect(keeps('mwcc_242_81', ['-opt', 'level=0'])).toBe(true);
+    // an `-opt` word the table cannot read leaves the level unknown even beside a `-O` word
+    expect(keeps('mwcc_242_81', ['-O4,p', '-opt', 'off'])).toBe(true);
+    expect(keeps('mwcc_242_81', ['-O4,p'])).toBeUndefined();
+    expect(keeps('gcc2.7.2kmc', [])).toBe(true);
+    expect(keeps('gcc2.7.2kmc', ['-O2'])).toBeUndefined();
   });
 
   test('held-at-undeclared-call: a read the guessed arity leaves out stays plain', () => {
@@ -316,6 +355,92 @@ describe('the gates', () => {
       without(DEAD_READ_GATES, 'compared'),
     );
     expect(ablated.load.attrs.volatile).toBe(true);
+  });
+
+  test('spilled: a read whose value was stored to the frame stays plain', () => {
+    // KMC `struct S s = *p; return s.a;`: `lw v1, 4(a0); sw v1, 4(sp)`, a slot nothing reloads
+    const held = deadLoad(constAt(0x80001000), { off: 4, width: 4, signed: false });
+    pinDeadReads(held.blocks, MIPS_GCC, { spilled: new Set(held.load.results) });
+    expect(held.load.attrs.volatile).toBeUndefined();
+    const ablated = deadLoad(constAt(0x80001000), { off: 4, width: 4, signed: false });
+    pinDeadReads(
+      ablated.blocks,
+      MIPS_GCC,
+      { spilled: new Set(ablated.load.results) },
+      without(DEAD_READ_GATES, 'spilled'),
+    );
+    expect(ablated.load.attrs.volatile).toBe(true);
+  });
+
+  test('computed: a read a dead add consumes stays plain', () => {
+    // KMC `v += 3` on a long long it truncates: `lw a2, 0(a0)` feeds an `addu` nothing reads
+    const run = (gates?: Parameters<typeof pinDeadReads>[3]) => {
+      const base = constAt(0x80001000);
+      const raw = mkValue(T.unk(32));
+      const load = mkOp('load', { operands: [base.results[0]], results: [raw], attrs: { off: 0, width: 4 } });
+      const carry = mkValue(T.unk(32));
+      const sum = mkOp('add', { operands: [raw, carry], results: [mkValue(T.unk(32))] });
+      pinDeadReads([{ params: [carry], ops: [base, load, sum, mkOp('ret')] }], MIPS_GCC, {}, gates);
+      return load.attrs.volatile;
+    };
+    expect(run()).toBeUndefined();
+    expect(run(without(DEAD_READ_GATES, 'computed'))).toBe(true);
+  });
+
+  test('computed: a read that is the address of a read the pin left plain is that read’s use', () => {
+    // the outer read sign-extends on agbcc, so `not-a-volatile-read` leaves it plain, and the
+    // pointer it read through was the compiler's to compute
+    const pp = mkValue(T.unk(32));
+    const inner = mkOp('load', { operands: [pp], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 4 } });
+    const outer = mkOp('load', {
+      operands: [inner.results[0]],
+      results: [mkValue(T.unk(32))],
+      attrs: { off: 0, width: 2, signed: true },
+    });
+    pinDeadReads([{ params: [pp], ops: [inner, outer, mkOp('ret')] }], ARMV4T_AGBCC);
+    expect(outer.attrs.volatile).toBeUndefined();
+    expect(inner.attrs.volatile).toBeUndefined();
+  });
+
+  test('declared-plain: a dead read of a global declared plain stays deletable', () => {
+    const run = (declarations: Declarations, off = 0, gates?: Parameters<typeof pinDeadReads>[3]) => {
+      const { blocks, load } = deadLoad(mkOp('gaddr', { results: [mkValue(T.unk(32))], attrs: { sym: 'gS' } }), {
+        off,
+        width: 4,
+        signed: false,
+      });
+      pinDeadReads(blocks, ARMV4T_AGBCC, { declarations }, gates);
+      return load.attrs.volatile;
+    };
+    const ctx = (src: string) => ({ context: globalsFromContext(src, 'c') });
+    // agbcc merges `if (gS) *q = 1; else *q = 1;`'s arms after flow, and keeps the plain `ldr`
+    expect(run(ctx('extern int gS;'))).toBeUndefined();
+    expect(run(ctx('extern int gS;'), 0, without(DEAD_READ_GATES, 'declared-plain'))).toBe(true);
+    expect(run(ctx('extern volatile int gS;'))).toBe(true);
+    expect(run({})).toBe(true); // nothing declares it: no evidence either way
+    // a map that lays the object out answers by byte
+    const layout = (volatileAt4: boolean): Declarations => ({
+      symbols: new Map([
+        [
+          0x03000000,
+          [
+            {
+              name: 'gS',
+              kind: 'data',
+              declared: true,
+              shape: 'struct',
+              layout: [
+                { name: 'a', offset: 0, size: 4 },
+                { name: 'b', offset: 4, size: 4, volatile: volatileAt4 },
+              ],
+            },
+          ],
+        ],
+      ]),
+    });
+    expect(run(layout(true), 0)).toBeUndefined();
+    expect(run(layout(true), 4)).toBe(true);
+    expect(run(layout(false), 4)).toBeUndefined();
   });
 
   test('a read that computes another dead read’s address is decided after it, and is then live', () => {

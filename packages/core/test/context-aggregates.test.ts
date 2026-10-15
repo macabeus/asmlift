@@ -260,7 +260,12 @@ volatile int gFn(void);
 /** `ldrb` of a pool-addressed global at offset 0, and nothing else: the bare spelling's only reader */
 const READ = 'f:\n\tldr\tr0, .L1\n\tldrb\tr0, [r0]\n\tbx\tlr\n.L1:\n\t.word\tgInfo\n';
 const STORE = 'f:\n\tldr\tr1, .L1\n\tstrb\tr0, [r1]\n\tbx\tlr\n.L1:\n\t.word\tgInfo\n';
-const INFO: ContextGlobals = { aggregates: new Set(['gInfo']), volatiles: new Set(), pointeeVolatiles: new Set() };
+const INFO: ContextGlobals = {
+  aggregates: new Set(['gInfo']),
+  volatiles: new Set(),
+  pointeeVolatiles: new Set(),
+  declared: new Set(['gInfo']),
+};
 
 describe('a context-declared aggregate the map does not describe', () => {
   test('an offset-0 read and store are spelled through the address, not the bare name', () => {

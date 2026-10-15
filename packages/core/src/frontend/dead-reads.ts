@@ -3,9 +3,11 @@
  *  it, and the structurer spells it through a qualified pointer or declines.
  *
  *  The claim is the COMPILER's, and it is the one ir/discipline.ts `spelledWhenDead` already rests
- *  on: an optimizing compiler deletes every plain read whose value nothing uses. agbcc expands an
- *  expression statement with no target (stmt.c `expand_expr_stmt`) and its flow pass keeps an
- *  insn whose result is dead only when `volatile_refs_p` says it touches a `MEM_VOLATILE_P` cell
+ *  on: an optimizing compiler's dead-code pass deletes every plain read whose value nothing uses.
+ *  A pass that runs after it can still leave one behind — a split, a merge, a spill — and the gates
+ *  below name each one found. agbcc expands an expression statement with no target (stmt.c
+ *  `expand_expr_stmt`) and its flow pass keeps an insn whose result is dead only when
+ *  `volatile_refs_p` says it touches a `MEM_VOLATILE_P` cell
  *  (flow.c:1296, rtlanal.c:1628); measured, agbcc at -O2 and -O0, ido 7.1, gcc 2.7.2 (KMC) and
  *  mwcc 2.4.2 each emit no read for `gR; *p; *(int *)0x4000004;` and keep every one of them
  *  qualified. So a read still in the target whose result is overwritten or never consumed is the
@@ -19,7 +21,8 @@
  *  `load`/`aload` whose result reaches no op the pass keeps, through any chain of ops it would delete
  *  with it — an extension of the read nothing reads is as dead as the read. It is decided on the RAW
  *  lift, after the frontend's SSA is final and before any raise rewrite, so a read only asmlift's
- *  own folds orphan is never counted. One use the pass counts is not one here: the operand of the
+ *  own folds orphan is never counted — save one the frontend orphans itself by dropping a spill
+ *  nothing reloads, which `spilled` refuses. One use the pass counts is not one here: the operand of the
  *  `ret` of a function its OWN declaration says is void, which the structurer suppresses — the
  *  read-back that ends `void f(int b) { REG = b; REG; }` is in the return register at `bx lr`.
  *
@@ -31,7 +34,13 @@
  *  its own table (`tallying`, l3/gates.ts) to census the refusals.
  *   • any read of a function built at a level where the compiler keeps a plain read nothing uses
  *     (target.ts `keepsUnusedReadsAt`): mwcc at `-O0` keeps `x = p[5]; x = 0;`'s load in r31, so an
- *     unused read there says nothing about `volatile`;
+ *     unused read there says nothing about `volatile` — and a level no flag names, or one a word the
+ *     flag table cannot read may set (mwcc `-opt off`), is judged as keeping;
+ *   • a read of a global the project declares with no volatile byte where it reads (`declared-plain`:
+ *     the symbol map where it lays the object out, else the declaration context): the source spelled
+ *     the read plain, so the compiler kept it for some other reason — agbcc merges the identical
+ *     arms of `if (g.c) x = 0x800; else x = 0x800;` (kleod's `sub_08042024`) after flow has decided
+ *     which insns are dead, and the read the deleted branch tested survives, plain;
  *   • a read of the function's own frame object (`laddr`): a local nothing outside the function
  *     observes, whose dead read is a reload, not an access to keep;
  *   • any read of a function that holds an unmodelled instruction (`opaque`, frontend/opaque.ts):
@@ -53,6 +62,15 @@
  *     branch that reads it): a compare no branch reads leaves no op, so the read looks dead only
  *     because the lift has no op for its consumer — mwcc 2.3.3 at `-O4,s` keeps
  *     `lwz r0, g; cmpwi r0, 0` for `if (g) { (g != 0); }`;
+ *   • a read whose value was stored to the function's own stack (`spilled`, ssa.ts `frameWrites`):
+ *     each frontend keeps a stack slot as a variable and drops a store nothing reloads, so a read
+ *     only that store consumed looks dead because the lift dropped its consumer — KMC's `struct S
+ *     s = *p; return s.a;` stores both words to the frame, IDO a `long long` it truncates;
+ *   • a read the machine computed with (`computed`): an op the lift kept that consumes the value, or
+ *     an extension of it, other than an extension — the compiler did not judge the value unused
+ *     where it emitted that op. KMC splits a `long long` sum after flow, and keeps the high word's
+ *     `addu` of `v += 3; return (int)v;`. A read that is the address of a read the pin left plain is
+ *     that read's use, on the same ground;
  *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
  *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
  *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
@@ -65,13 +83,22 @@
  *  plain read: `int f(long long *p) { long long v = *p; return (int)v; }` keeps `ldr r1, [r0, #4]`.
  *  Under a declaration that pins a one-word return the pair gate does not fire, and that read is
  *  stamped: the C recompiles byte-exact and computes the same values, but says `volatile` where the
- *  source did not. Without such a declaration the pair gate refuses it, as it refuses any read the
- *  lift leaves in the return pair's second register. A declared void return is trusted the same
- *  way: a getter declared void has its returned read stamped. */
+ *  source did not. Without such a declaration the pair gate refuses it on Thumb and PowerPC, as it
+ *  refuses any read the lift leaves in the return pair's second register; O32 declines the v0:v1
+ *  pair before the pin is asked. The merged arms `declared-plain` refuses are the same instructions
+ *  as `gR;` where nothing declares the object, and as `*p;` through a pointer parameter, which no
+ *  declaration here describes: those are stamped, byte-exact and value-preserving, with a
+ *  `volatile` the source did not write. A declared void return is trusted the same way: a getter
+ *  declared void has its returned read stamped. And hand-written assembly is outside the compiler
+ *  claim altogether: klonoa's m4a `sub_0804FE6C` returns a byte in r3, which no ABI the lift models
+ *  reads, so that byte's read is stamped where the lift's own return model has already lost it. */
+import { globalBaseOf, globalCellOf } from '../ir/alias';
 import type { Block, Op, Value } from '../ir/core';
 import { deadOps } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
 import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
+import type { ContextGlobals } from '../proto-context';
+import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
 import type { SsaBuilder } from './ssa';
 
@@ -90,6 +117,14 @@ export interface DeadRead {
   readonly heldAtUndeclaredCall: boolean;
   /** its value, or a value only it feeds, is an operand of a compare (`DeadReadFacts.compared`) */
   readonly compared: boolean;
+  /** its value, or a value only it feeds, was stored to the function's own stack
+   *  (`DeadReadFacts.spilled`) */
+  readonly spilled: boolean;
+  /** its value, or an extension of it, is an operand of an op the lift kept that is no extension
+   *  (`computedWith`): arithmetic, or the address of a read the pin left plain */
+  readonly computed: boolean;
+  /** its address reaches one global, declared with no volatile byte where it reads (`declaredPlain`) */
+  readonly declaredPlain: boolean;
   readonly target: TargetDescription;
 }
 
@@ -100,6 +135,13 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     sound: false,
     guardedBy: 'dead-reads.test.ts: keeps-unused-reads: mwcc -O0 keeps a dead assignment plain',
     rejects: (c) => c.target.compilerBehaviors.keepsUnusedReads === true,
+  },
+  {
+    id: 'declared-plain',
+    why: 'the declaration of the object read has no volatile byte there, so the source spelled the read plain',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: declared-plain: a dead read of a global declared plain stays deletable',
+    rejects: (c) => c.declaredPlain,
   },
   {
     id: 'frame-object',
@@ -137,6 +179,20 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     rejects: (c) => c.compared,
   },
   {
+    id: 'spilled',
+    why: 'the machine stored the value to its stack; the lift keeps the slot as a variable and drops a store nothing reloads',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: spilled: a read whose value was stored to the frame stays plain',
+    rejects: (c) => c.spilled,
+  },
+  {
+    id: 'computed',
+    why: 'the machine computed with the value, so the compiler did not judge it unused where it emitted that op',
+    sound: false,
+    guardedBy: 'dead-reads.test.ts: computed: a read a dead add consumes stays plain',
+    rejects: (c) => c.computed,
+  },
+  {
     id: 'not-a-volatile-read',
     why: 'a read that extends in a way the compiler never extends a volatile one was plain in the source',
     sound: false,
@@ -157,6 +213,43 @@ export interface DeadReadFacts {
    *  PowerPC's `cmpw`/`cmpwi`/`cmplw`/`cmplwi` and record forms fuse into the branch that reads
    *  them, and one no branch reads is gone */
   readonly compared?: ReadonlySet<Value>;
+  /** every value the machine stored to its own stack, which the lift keeps as a slot variable
+   *  (ssa.ts `frameWrites`) */
+  readonly spilled?: ReadonlySet<Value>;
+  /** where a read's object is declared: the project's symbol map and the declaration context */
+  readonly declarations?: Declarations;
+}
+
+/** The declarations `declared-plain` reads. */
+export interface Declarations {
+  readonly symbols?: SymbolMap;
+  readonly context?: ContextGlobals;
+}
+
+/** IS THE GLOBAL `sym` DECLARED WITH NO VOLATILE BYTE AT `byte`? (`declared-plain`) `null` is an
+ *  access that names no byte, which is plain only where no byte of the object is qualified. The map
+ *  answers before the context where it lays the object out, as raise/declared-volatile.ts reads them;
+ *  a struct the map names with no layout, and an object neither declares, answer no — nothing is in
+ *  evidence. */
+export function declaredPlain(
+  sym: string,
+  byte: number | null,
+  info: SymbolInfo | undefined,
+  context: ContextGlobals | undefined,
+): boolean {
+  const layout = Array.isArray(info?.layout) ? info.layout : [];
+  if (layout.length > 0) {
+    return byte === null
+      ? info?.volatile !== true && !layout.some((f) => f.volatile === true)
+      : !declaresVolatile(info, byte);
+  }
+  if (context?.volatiles.has(sym) === true) {
+    return false;
+  }
+  if (info?.declared === true && info.shape !== undefined && info.shape !== 'struct') {
+    return info.volatile !== true;
+  }
+  return context?.declared.has(sym) === true;
 }
 
 /** THE RETURN PAIR'S SECOND REGISTER AT A WORD RETURN, gathered by a frontend as it emits a `ret`
@@ -217,6 +310,17 @@ export function pinDeadReads(
     return (d.opcode === 'add' || d.opcode === 'sub') && d.operands.some((o) => fromFrame(o, depth + 1));
   };
   const unmodelled = irBlocks.some((b) => b.ops.some((op) => op.opcode === 'opaque'));
+  let byName: Map<string, SymbolInfo> | undefined;
+  const plainGlobal = (op: Op): boolean => {
+    const sym = globalBaseOf(defOf, op.operands[0]);
+    if (sym === null) {
+      return false;
+    }
+    const symbols = facts.declarations?.symbols;
+    byName ??= symbols === undefined ? new Map() : symbolsByName(symbols);
+    const cell = op.opcode === 'load' ? globalCellOf(defOf, op.operands[0], op.attrs.off as number) : null;
+    return declaredPlain(sym, cell?.byte ?? null, byName.get(sym), facts.declarations?.context);
+  };
   const voidReturn = declaresVoidReturn(facts.own);
   const usesOperands = (op: Op): boolean => !(voidReturn && op.opcode === 'ret');
   const isRead = (op: Op): boolean => op.opcode === 'load' || op.opcode === 'aload';
@@ -257,6 +361,20 @@ export function pinDeadReads(
     const held = reaching(facts.atWordReturn);
     const atCall = reaching(facts.atUndeclaredCall);
     const compared = reaching(facts.compared);
+    const spilled = reaching(facts.spilled);
+    // Who consumes a value among the dead ops: an extension passes the read on, any other op the
+    // machine computed with it. A read among them was decided before this one (outermost first)
+    // and left plain, so the address it took was the compiler's use.
+    const usersOf = new Map<Value, Op[]>();
+    for (const d of dead) {
+      for (const o of d.operands) {
+        usersOf.set(o, [...(usersOf.get(o) ?? []), d]);
+      }
+    }
+    const computedWith = (v: Value, depth = 0): boolean =>
+      (usersOf.get(v) ?? []).some((u) =>
+        (u.opcode === 'zext' || u.opcode === 'sext') && depth < 8 ? computedWith(u.results[0], depth + 1) : true,
+      );
     for (const op of ready) {
       decided.add(op);
       const read: DeadRead = {
@@ -266,6 +384,9 @@ export function pinDeadReads(
         heldAtWordReturn: held.has(op),
         heldAtUndeclaredCall: atCall.has(op),
         compared: compared.has(op),
+        spilled: spilled.has(op),
+        computed: computedWith(op.results[0]),
+        declaredPlain: plainGlobal(op),
         target,
       };
       if (firstRejection(gates, read) === null) {

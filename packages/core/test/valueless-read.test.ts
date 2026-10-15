@@ -172,11 +172,14 @@ test('a map-declared VOLATILE global admits the read even outside the device win
   expect(lift(NAMED, true, new Map([[0x03000100, [gInfo(true)]]]))).toMatch(/^\s*gStatus;$/m);
 });
 
-test('the SAME global without the map’s `volatile` is read through a `volatile` cast on its address', () => {
-  // `gStatus;` under the map's plain declaration compiles to no read at all
+test('the SAME global without the map’s `volatile` is no dead read: the declaration says the source read it plain', () => {
+  // `gStatus;` under the map's plain declaration compiles to no read at all, and the dead-read pin
+  // takes the declaration's word over its own inference (frontend/dead-reads.ts `declared-plain`):
+  // agbcc keeps a plain read it merged two identical arms over, so a surviving read of an object
+  // declared plain is not evidence of a `volatile` the source wrote
   const src = lift(NAMED, true, new Map([[0x03000100, [gInfo(false)]]]));
-  expect(src).not.toMatch(/^\s*gStatus;$/m);
-  expect(src).toMatch(/^\s*\*\(volatile s32 \*\)&gStatus;$/m);
+  expect(src).not.toMatch(/gStatus;/);
+  expect(src).not.toMatch(/volatile/);
 });
 
 test('a map-declared VOLATILE register reached through a CAST is written and read through a `volatile` cast', () => {
@@ -241,9 +244,9 @@ test('a volatile CONTAINER admits its named member; a `vu16` MEMBER is accessed 
     '((volatile s32 *)&gState)[2] = 1;',
     '((volatile s32 *)&gState)[2];',
   ]);
-  // …and a plain container with a plain member: the member's NAME would drop the qualifier the
-  // stamp put on the read, so it is read through a `volatile` cast on the container's address
-  expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;', '((volatile s32 *)&gState)[2];']);
+  // …and a plain container with a plain member is declared plain where it is read, so the dead-read
+  // pin leaves the read plain (`declared-plain`) and it is deleted with the value nobody uses
+  expect(body(lift(asm, true, st(false, false)))).toEqual(['gState.ctl = 1;']);
 });
 
 // ── the payoff a stranger needs to see ───────────────────────────────────────────────────────
