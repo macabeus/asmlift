@@ -1554,13 +1554,15 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int k(int);',
     proto: { k: { params: 1 } },
   },
-  // A JOIN NO PATH DEFINES: `x = y` with both uninitialised joins two undefined values, so every
-  // edge copy into x's join carries nothing, and before the frontend collapsed such a join into one
-  // uninitialised value the structurer kept x's local and dropped all its assignments — a contract
-  // failure ("read but never assigned"). ido7.1 keeps x and y in frame words (sp@4, sp@0) and
-  // lifts; on both gcc 2.7.2 lanes they sit in v0 and v1, scratch registers hand-written asm passes
-  // inputs in (`hiddenInputRegs`), and with no definition meeting either entry value the lift
-  // declines rather than guess which. agbcc keeps them in saved registers across two calls.
+  // A JOIN NO PATH DEFINES: `x = y` with both uninitialised joins two undefined values, and the
+  // structurer drops an undefined edge copy, so left alone it kept x's local and dropped all its
+  // assignments — a contract failure ("read but never assigned"). ido7.1 keeps x and y in frame
+  // words (sp@4, sp@0); two words are two locals, so the copy is spelled `x = uninit_sp0` and the
+  // row MATCHes. On both gcc 2.7.2 lanes they sit in v0 and v1, scratch registers hand-written asm
+  // passes inputs in (`hiddenInputRegs`), and with no definition meeting either entry value the
+  // lift declines rather than guess which. agbcc keeps them in saved registers across two calls,
+  // where a register move is no evidence of a second local, so the join collapses into one
+  // uninitialised value and the move is lost (a nonmatch).
   {
     sym: 'uninit_both',
     src: 'int uninit_both(int c){ int x; int y; if (c) x = y; return x + c; }',
@@ -1576,6 +1578,23 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['agbcc'],
     ctx: 'void f(int,int,int,int);',
     proto: { f: { params: 4, returnsVoid: true } },
+  },
+  // A LOCAL A LOOP TRANSFORMS after assigning it on one arm — the Yaz0/MIO0 bit reader: `code` is
+  // loaded only when `bits` runs out, then shifted every trip. gcc 2.7.2 (KMC and stock) keeps it in
+  // t0, a scratch register hand-written asm also passes inputs in (`hiddenInputRegs`), so its entry
+  // value must meet a definition it does not feed at the loop header's join. The shift reaches the
+  // entry value only through the inner join the load also feeds, which makes it one; a test that
+  // walked through every join argument refused the row, and without the O32 live-in model t0 was a
+  // phantom fifth parameter. ido7.1 keeps it in a frame word, and mwcc 2.4.2 in a register its
+  // own way: the capability is the shared hidden-input rule, so both run too.
+  {
+    sym: 'uninit_bits',
+    src:
+      'int uninit_bits(unsigned char *src,unsigned char *dst,int n,int fill){ unsigned int code; int bits=0;' +
+      ' while(n>0){ if(bits==0){ code=*src++; bits=8; } if(code&0x80) *dst++=*src++; else *dst++=fill;' +
+      ' code<<=1; bits--; n--; } return bits; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
   },
   // The SCRATCH half of the same rule on CodeWarrior: a LEAF needs no saved register, so mwcc 2.4.2
   // homes its uninitialised local in a volatile register no argument travels in, with no save
