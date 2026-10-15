@@ -1019,21 +1019,78 @@ export function makeSsaBuilder(
     return m;
   };
 
-  /** A JOIN NO PATH DEFINES IS ONE UNINITIALISED VALUE. `int x, y; if (c) x = y; return x + c;`
-   *  joins two undefined values, and the structurer drops every edge copy of an undefined value
-   *  (structure.ts `undefCarriesNothing`) — so a join whose every argument is undefined would keep
-   *  its local and lose every assignment to it, which its own postcondition then reports as a local
-   *  read but never assigned. Such a join is replaced by one fresh undefined value at the entry,
-   *  keyed as the join was, which dominates every use the join had. The greatest such set, so a
-   *  loop that only carries an undefined value round (`phi(undef, phi(…))`) collapses with it.
-   *  Run after the hidden-input check, which refuses the joins whose undefined arguments are a
-   *  hand-written routine's inputs. */
+  /** ANOTHER STORAGE'S UNDEFINED VALUE IS AN ASSIGNMENT. `int x, y; if (c) x = y;` at ido7.1
+   *  copies the word at 0(sp) into 4(sp) on one path, so the join keyed `sp@4` takes `sp@0`'s
+   *  undefined value as an edge argument. The structurer drops an undefined edge copy (structure.ts
+   *  `undefCarriesNothing`), which is right for the join's OWN storage — that path left the local
+   *  unassigned — and wrong for another's, where the machine ran a load and a store. Each such edge
+   *  argument becomes its own undefined value under the source's key, marked `copied`, which the
+   *  structurer spells as the assignment `x = uninit_sp0` and names as the value it copies. A join
+   *  whose key the builder did not record is left as it was.
+   *
+   *  FRAME WORDS ONLY, both of them. A compiler gives a stack local one word and moves no local from
+   *  word to word, so two words are two locals. A register is no such identity: agbcc keeps a local
+   *  in r8 and moves it to a low register to use it (`synthetic:uninit_spill`), and a spill writes a
+   *  register's local to a word — one source variable under two keys, where a spelled copy would
+   *  invent an assignment the source never wrote. So `x = y` between two locals in registers
+   *  (`uninit_both_saved` on agbcc) still collapses into one undefined value. */
+  const markCopiedUndefs = () => {
+    const defOf = defOpMap(fn);
+    const replaced = new Set<Value>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        for (const s of op.successors) {
+          if (s.block === irBlocks[0]) {
+            continue;
+          }
+          s.block.params.forEach((p, i) => {
+            const d = defOf.get(s.args[i]);
+            const key = phiKey.get(p);
+            if (
+              d?.opcode !== 'undef' ||
+              d.attrs.copied === true ||
+              key === undefined ||
+              d.attrs.key === key ||
+              slotKeyOffset(key) === null ||
+              slotKeyOffset(String(d.attrs.key)) === null
+            ) {
+              return;
+            }
+            const copy = mkOp('undef', {
+              results: [mkValue(s.args[i].type)],
+              attrs: { key: d.attrs.key, copied: true },
+            });
+            irBlocks[0].ops.unshift(copy);
+            replaced.add(s.args[i]);
+            s.args[i] = copy.results[0];
+          });
+        }
+      }
+    }
+    if (replaced.size > 0) {
+      const used = new Set(
+        irBlocks.flatMap((b) => b.ops.flatMap((o) => [...o.operands, ...o.successors.flatMap((s) => s.args)])),
+      );
+      for (const blk of irBlocks) {
+        blk.ops = blk.ops.filter((o) => !replaced.has(o.results[0]) || used.has(o.results[0]));
+      }
+    }
+  };
+
+  /** A JOIN NO PATH DEFINES IS ONE UNINITIALISED VALUE. A join whose every argument is its own
+   *  storage's undefined value (`markCopiedUndefs` has already turned another frame word's into an
+   *  assignment) would keep its local and lose every assignment to it, since the structurer drops
+   *  each such edge copy, and its own postcondition then reports a local read but never assigned.
+   *  Such a join is replaced by one fresh undefined value at the entry, keyed as the join was,
+   *  which dominates every use the join had. The greatest such set, so a loop that only carries an
+   *  undefined value round (`phi(undef, phi(…))`) collapses with it. Run after the hidden-input
+   *  check, which refuses the joins whose undefined arguments are a hand-written routine's inputs. */
   const collapseUndefinedJoins = () => {
     const incoming = joinArgs();
     const undefs = new Set<Value>();
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
-        if (op.opcode === 'undef') {
+        if (op.opcode === 'undef' && op.attrs.copied !== true) {
           undefs.add(op.results[0]);
         }
       }
@@ -1315,6 +1372,7 @@ export function makeSsaBuilder(
           }
         }
       }
+      markCopiedUndefs();
       collapseUndefinedJoins();
       simplifyTrivialPhis(fn, dropPhiRecord);
       // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the

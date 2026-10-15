@@ -2632,6 +2632,7 @@ export function structure(
     const byOff = new Map<number, string>();
     const names = new Map<Op, string>();
     const undefNames = new Map<Op, string>();
+    const undefByKey = new Map<string, string>();
     for (const b of fn.blocks) {
       for (const op of b.ops) {
         if (op.opcode === 'laddr') {
@@ -2646,7 +2647,23 @@ export function structure(
           // Named from the key, like laddr's `sp<off>`: `uninit_sp8` says which frame slot to look
           // at in the assembly, and it stays put where a running counter would renumber every local
           // when an unrelated edit changed the order ops are minted in.
-          undefNames.set(op, mint(`uninit_${String(op.attrs.key).replace('@', '')}`));
+          // A `copied` undef is the same storage's content as the undef its key names, so it
+          // shares that one's name (and declaration) once both are minted, below.
+          if (op.attrs.copied !== true) {
+            const n = mint(`uninit_${String(op.attrs.key).replace('@', '')}`);
+            undefNames.set(op, n);
+            undefByKey.set(String(op.attrs.key), n);
+          }
+        }
+      }
+    }
+    for (const b of fn.blocks) {
+      for (const op of b.ops) {
+        if (op.opcode === 'undef' && op.attrs.copied === true) {
+          const key = String(op.attrs.key);
+          const n = undefByKey.get(key) ?? mint(`uninit_${key.replace('@', '')}`);
+          undefByKey.set(key, n);
+          undefNames.set(op, n);
         }
       }
     }
@@ -4775,7 +4792,9 @@ export function structure(
   /** The `atDef` copies `sideEffects` has spelled — `assertSunkCopiesPlaced`'s input. */
   const sunkCopiesEmitted = new Set<Stmt>();
   const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
-    if (defs.get(arg)?.opcode !== 'undef') {
+    // A `copied` undef is another storage's content moved into this one (`x = y` of two
+    // uninitialised locals): the machine ran that move, so the copy is spelled.
+    if (defs.get(arg)?.opcode !== 'undef' || defs.get(arg)!.attrs.copied === true) {
       return false;
     }
     const writesBefore = (home: Block | undefined): boolean =>
@@ -7400,6 +7419,7 @@ export function structure(
       ...fn.blocks
         .flatMap((b) => b.ops)
         .filter((op) => op.opcode === 'undef' && !coalescedUndefs.has(op))
+        .filter((op, i, all) => all.findIndex((o) => undefName.get(o) === undefName.get(op)) === i)
         .map((op) => ({
           name: undefName.get(op)!,
           type: varType.get(undefName.get(op)!) ?? op.results[0].type,

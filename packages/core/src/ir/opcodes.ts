@@ -214,13 +214,16 @@ export const OPCODES = {
   // live-in, and a live-in of the entry block is a PARAMETER — right for an argument register, a
   // fabricated argument for anything else.
   //
-  // Operand-free and pure like `laddr`, and out of raise/gvn.ts's NUMBERABLE set — where numbering
-  // it would be VACUOUS rather than harmful, since two undefs in one function always carry
-  // different keys. "Same key, therefore same value" is empty for a value that has none.
+  // Operand-free and pure like `laddr`, and out of raise/gvn.ts's NUMBERABLE set, which must keep
+  // it out: two undefs of one key are a storage's content and a `copied` move of it, and numbering
+  // them one value would erase the move.
   //
   // `key` names the storage (`sp@0`, `r4`); the structurer reads it to name the local
   // (`uninit_sp0`) and emits NO assignment — that absence is the recovery, and an edge argument
-  // that is one emits no copy either (structure.ts undefCarriesNothing).
+  // that is one emits no copy either (structure.ts undefCarriesNothing). OPTIONAL `copied: true`:
+  // the value another storage's content arrives at a join keyed elsewhere as (`if (c) x = y;` of
+  // two uninitialised locals, frontend/ssa.ts `markCopiedUndefs`) — the machine moved it, so that
+  // edge copy IS emitted, under the name of the undef its key names.
   undef: { operands: 0, results: 1, requiredAttrs: ['key'] },
   // --- black-box escape hatch (keeps lifting total) ---
   // `effects: true`: an instruction asmlift could not model may do anything — write memory, trap,

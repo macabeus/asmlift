@@ -271,10 +271,11 @@ describe('what a join must meet before an entry value is a local', () => {
     ).toMatch(/\w+ = \w+ << 1;/);
   });
 
-  // The same source at ido7.1 -O2 keeps x and y in frame words: a join of two undefined words is
-  // one uninitialised local, not a local whose every assignment the structurer drops (which its
+  // The same source at ido7.1 -O2 keeps x and y in frame words, and copies 0(sp) into 4(sp) on the
+  // c path. That copy is an assignment of y to x, spelled; the path that skips it leaves x as it
+  // was, which emits nothing. Neither drops the local's only assignment (which the structurer's
   // own postcondition reported as read but never assigned).
-  test('a join of two uninitialised frame words is one uninitialised local', () => {
+  test('a copy of one uninitialised frame word into another is an assignment', () => {
     expect(
       src(
         [
@@ -289,7 +290,32 @@ describe('what a join must meet before an entry value is a local', () => {
         ],
         MIPS_IDO,
       ),
-    ).toBe('s32 f(s32 a0) {\n    s32 uninit_sp4;\n    return uninit_sp4 + a0;\n}\n');
+    ).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n    if (a0 != 0) v0 = uninit_sp0;\n    return v0 + a0;\n}\n',
+    );
+  });
+
+  // `return x + y + c;`: y read directly is the word the copy read, so both are one local.
+  test('the word a copy reads and a direct read of it are one local', () => {
+    expect(
+      src(
+        [
+          '0:\tbeqz\ta0,10 <f+0x10>',
+          '4:\taddiu\tsp,sp,-8',
+          '8:\tlw\tt6,0(sp)',
+          'c:\tsw\tt6,4(sp)',
+          '10:\tlw\tt7,4(sp)',
+          '14:\tlw\tt8,0(sp)',
+          '18:\taddu\tt9,t7,t8',
+          '1c:\taddiu\tsp,sp,8',
+          '20:\tjr\tra',
+          '24:\taddu\tv0,t9,a0',
+        ],
+        MIPS_IDO,
+      ),
+    ).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp0;\n    if (a0 != 0) v0 = uninit_sp0;\n    return v0 + uninit_sp0 + a0;\n}\n',
+    );
   });
 });
 
