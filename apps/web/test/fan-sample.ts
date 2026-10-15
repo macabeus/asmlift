@@ -123,14 +123,14 @@ export const FAN_SAMPLE: readonly FunctionResult[] = [
   ranked(
     'synthetic:sizebound:agbcc',
     'nonmatch',
-    ['signed', 'expr-home', 'uns-cmp', 'livebase-block', 'volatile', 'initfirst', 'pollread'],
+    ['signed', 'expr-home', 'livebase-block', 'volatile', 'initfirst', 'pollread'],
     {
       signed: { candidates: 400 },
       unsigned: { candidates: 400 },
       defsite: { candidates: 304 },
       'expr-home': { candidates: 456 },
       'loop-entry': { candidates: 304 },
-      'uns-cmp': { candidates: 400 },
+      'signed-cmp': { candidates: 400 },
       initfirst: { candidates: 248 },
       livebase: { candidates: 256 },
       'livebase-block': { candidates: 256 },
@@ -165,14 +165,14 @@ export const FAN_SAMPLE: readonly FunctionResult[] = [
     unreduce: { candidates: 6, withheld: 4 },
     'vol-store': { candidates: 6, withheld: 2 },
   }),
-  ranked('synthetic:gcsefwd:agbcc', 'match', ['unsigned', 'shared-tail', 'reread-globals', 'uns-cmp'], {
+  ranked('synthetic:gcsefwd:agbcc', 'match', ['unsigned', 'shared-tail', 'reread-globals'], {
     unsigned: { candidates: 204 },
     'shared-tail': { candidates: 96 },
     'derived-home': { candidates: 68 },
     'flip-branch': { candidates: 48 },
     'flip-join': { candidates: 102 },
     'reread-globals': { candidates: 68 },
-    'uns-cmp': { candidates: 102 },
+    'signed-cmp': { candidates: 102 },
     basefold: { candidates: 24 },
     livebase: { candidates: 36 },
     offmember: { candidates: 48 },
@@ -224,7 +224,7 @@ export const FAN_SAMPLE: readonly FunctionResult[] = [
     unsigned: { candidates: 8 },
     defsite: { candidates: 12 },
     'flip-join': { candidates: 12 },
-    'uns-cmp': { candidates: 8 },
+    'signed-cmp': { candidates: 8 },
     'raw-globals': { candidates: 12 },
   }),
 ];

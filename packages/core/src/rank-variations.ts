@@ -71,7 +71,7 @@ export interface StructureVariation {
     | 'derivedHome'
     | 'mergeHome'
     | 'escapeHome'
-    | 'unsCmp'
+    | 'signedCmp'
     | 'freshMerge'
     | 'copyDefPos'
     | 'siteSense';
@@ -225,17 +225,22 @@ export const STRUCTURE_VARIATIONS: readonly StructureVariation[] = [
     perLiftGate: hasEscapingExtension,
     strip: true,
   },
-  // `/uns-cmp` — spell unsigned compares unsigned (structure.ts unsignedCompareSpelling): an
-  // icmp_u* operand takes a (u32) cast where the rendered operands do not guarantee the
-  // unsignedness, and a mixed-claimant declaration reconciles to u32 when nothing under the
-  // name needs signed. Which side the source spelled is genuinely ambiguous: a signed spelling
-  // that byte-matched was PROVED non-negative by the compiler (only then does it emit the
-  // unsigned branch from a signed compare), and emission's provable set is smaller than the
-  // compiler's. Gated on the function having an unsigned compare at all.
+  // `/signed-cmp` — spell an unsigned compare SIGNED (structure.ts unsignedCompareSpelling OFF): no
+  // `(u32)` cast at an icmp_u* and no u32 reconciliation of a mixed-claimant declaration. The
+  // default is the one spelling value-faithful without a proof; this one is a real source where the
+  // compiler PROVED both sides non-negative (only then does it emit the unsigned branch from a
+  // signed compare), which emission cannot always repeat. Where the proof does not hold it is a
+  // different program, so rank.ts judges every emitted tree (`signedOverUnsignedCompare`) and makes
+  // a signed rendering `Candidate.matchOnly`, whichever setting or respell spelled it. A tie or a
+  // better nonmatch score is no evidence for it (`synthetic:selloop:gcc2.7.2kmc`).
+  // KNOWN GAP, in the safe direction: the judgment reads the tree's declarations, and globals are
+  // not among them, so a compare that renders unsigned only through a `void *` global the backend
+  // declares (ptrcell.test.ts KR1, `g >= gLimit`) is still withheld on a nonmatch.
+  // Gated on the function having an unsigned compare at all.
   {
-    flag: 'unsCmp',
-    name: 'uns-cmp',
-    options: (on) => ({ unsignedCompareSpelling: on }),
+    flag: 'signedCmp',
+    name: 'signed-cmp',
+    options: (on) => ({ unsignedCompareSpelling: !on }),
     sharedGate: (sharedLift) => sharedLift.blocks.some((b) => b.ops.some((op) => op.opcode.startsWith('icmp_u'))),
     strip: true,
   },

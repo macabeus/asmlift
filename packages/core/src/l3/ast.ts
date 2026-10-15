@@ -9,7 +9,14 @@ export type Expr =
   // A `double` literal, carried as its IEEE bit pattern (ir/float-bits.ts) — a kind apart from the
   // integer `const`, so no integer fold, range test or signedness reading ever takes it for one.
   | { k: 'fconst'; bits: string }
-  | { k: 'bin'; op: BinOp; l: Expr; r: Expr }
+  // `unsignedCmp` is EVIDENCE, not spelling: an ordering compare (`<` `<=` `>` `>=`) lowered from an
+  // `icmp_u*`, which C spells with the same token as the signed one and decides from the operand
+  // types. The printer never reads it; `signedOverUnsignedCompare` (l3/typing.ts) does, over the
+  // FINISHED tree, so a pass that substitutes into a compare cannot re-spell it signed unseen.
+  // `exprEquals` ignores it, as it ignores `index.operandOff`: two nodes that print alike are
+  // alike to a CSE. A merge that keeps one of two equal nodes keeps it through `unionEvidence`, so
+  // the evidence of the one it drops is not lost with it.
+  | { k: 'bin'; op: BinOp; l: Expr; r: Expr; unsignedCmp?: true }
   | { k: 'un'; op: '-' | '~' | '!' | 'f-'; e: Expr }
   // A post-increment `name++` (`by` 1) or post-decrement `name--` (`by` -1): the value the local
   // held BEFORE the update, with the update as a side effect. The only expression form here that
@@ -247,9 +254,10 @@ export type Expr =
 // The divides earned it second, on pokeemerald:GetAnchorCoord — `(u32)(coord * a1) / (u32)a0`
 // standing beside two arithmetic shifts of the same values. Their only other channel is the operand
 // TYPES, reached by flipping a declaration, and there that flip is unreachable and unsound at
-// once: the divisor also feeds a signed compare, so the /uns-cmp reconciliation correctly refuses
-// it, and forcing it anyway makes agbcc delete the comparison as always-false. A per-operand pin is
-// the only spelling that says "this division alone is unsigned".
+// once: the divisor also feeds a signed compare, so the unsigned-compare reconciliation
+// (structure.ts unsignedCompareSpelling) correctly refuses it, and forcing it anyway makes agbcc
+// delete the comparison as always-false. A per-operand pin is the only spelling that says "this
+// division alone is unsigned".
 //
 // The COMPARISONS stay collapsed, and that asymmetry is the rule applying rather than an omission:
 // which side a compare was spelled from genuinely underdetermines — a signed spelling that
@@ -701,6 +709,60 @@ export function stmtEquals(a: Stmt, b: Stmt): boolean {
 /** {@link stmtEquals} over two lists, in order. */
 export function stmtsEqual(a: readonly Stmt[], b: readonly Stmt[]): boolean {
   return a.length === b.length && a.every((s, i) => stmtEquals(s, b[i]));
+}
+
+/** The node a merge KEEPS when it found `a` and `b` equal ({@link exprEquals}) and drops one: `a`,
+ *  with every compare carrying `unsignedCmp` if it did in EITHER. Equality ignores the evidence
+ *  because two compares that print alike are one expression to C; but when one of them was lowered
+ *  from an `icmp_u` and the other from a signed compare, the kept node now stands for both paths,
+ *  and the finished-tree judgment (l3/typing.ts `signedOverUnsignedCompare`) can only see the
+ *  unsigned one's obligation if the node still says so. Keeping `a` bare would publish a signed
+ *  `x < y` on the path that compared unsigned (an slt arm and an sltu arm merged by l3/tailmerge.ts
+ *  under `/signed-cmp`). Precondition: `exprEquals(a, b)`, so the two trees walk in step. */
+export function unionEvidence(a: Expr, b: Expr): Expr {
+  // `mapExprChildren` calls `f` in `exprChildren` order (an object literal evaluates its
+  // properties in source order), so the i-th call pairs with b's i-th child. Not by identity: one
+  // child object may sit in two positions, each with its own counterpart in `b`.
+  const bs = exprChildren(b);
+  let i = 0;
+  const out = mapExprChildren(a, (c) => unionEvidence(c, bs[i++]));
+  return out.k === 'bin' && b.k === 'bin' && b.unsignedCmp === true && out.unsignedCmp !== true
+    ? { ...out, unsignedCmp: true }
+    : out;
+}
+
+/** {@link unionEvidence} over two statements {@link stmtEquals} found equal. */
+export function unionStmtEvidence(a: Stmt, b: Stmt): Stmt {
+  switch (a.k) {
+    case 'assign':
+      return b.k === 'assign' ? { ...a, value: unionEvidence(a.value, b.value) } : a;
+    case 'store':
+      return b.k === 'store'
+        ? { ...a, lval: unionEvidence(a.lval, b.lval), value: unionEvidence(a.value, b.value) }
+        : a;
+    case 'exprstmt':
+      return b.k === 'exprstmt' ? { ...a, value: unionEvidence(a.value, b.value) } : a;
+    case 'return':
+      return b.k === 'return' && a.value !== undefined && b.value !== undefined
+        ? { ...a, value: unionEvidence(a.value, b.value) }
+        : a;
+    case 'if':
+      return b.k === 'if'
+        ? {
+            ...a,
+            cond: unionEvidence(a.cond, b.cond),
+            then: unionStmtsEvidence(a.then, b.then),
+            else: unionStmtsEvidence(a.else, b.else),
+          }
+        : a;
+    default:
+      return a;
+  }
+}
+
+/** {@link unionStmtEvidence} over two lists {@link stmtsEqual} found equal. */
+export function unionStmtsEvidence(a: readonly Stmt[], b: readonly Stmt[]): Stmt[] {
+  return a.map((s, i) => unionStmtEvidence(s, b[i]));
 }
 
 /** THE spelling of an `opaque`'s gap reason, in one place: `structure.ts` writes it into the

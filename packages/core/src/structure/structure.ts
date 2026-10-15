@@ -89,11 +89,18 @@ import {
   stmtChildren,
   stmtExprs,
   stmtsEqual,
+  unionStmtsEvidence,
   walkExprs,
 } from '../l3/ast';
 import { constantImageRefusal } from '../l3/constinit';
 import { type Gate, firstRejection } from '../l3/gates';
-import { exprCType, exprIntWidth, provablyNonNegative, renderedIntSignedness } from '../l3/typing';
+import {
+  exprCType,
+  exprIntWidth,
+  renderedIntSignedness,
+  rendersSignedOverUnsigned,
+  spelledNonNegative,
+} from '../l3/typing';
 import { castOffDeclaration, qualifiedMemoryAccess } from '../l3/volstore';
 import type { ContextGlobals } from '../proto-context';
 import { foldConstPair, isConstFoldOpcode } from '../raise/const';
@@ -1758,10 +1765,13 @@ export interface StructureOptions extends ArithCompilerFacts {
   readsStayWhereWritten?: boolean;
   // Spell unsigned compares unsigned: cast an icmp_u* operand where the rendered operands do not
   // guarantee it, and reconcile a mixed-claimant declaration to u32 when nothing under the name
-  // needs signed. Off by default: a signed spelling that byte-matched was PROVED non-negative by
-  // the compiler (it emits the unsigned branch from signed compares only then), so which spelling
-  // the source used is genuinely ambiguous at emission — rank.ts enumerates the ON spelling as
-  // the `/uns-cmp` variation and the differ referees.
+  // needs signed. ON by default, because it is the only spelling that is value-faithful without a
+  // proof: an unsigned compare spelled over two signed-rendering operands compiles to a SIGNED
+  // compare, which differs from the machine's wherever an operand's top bit is set. The OFF spelling
+  // is still a real source: a signed spelling that byte-matched was PROVED non-negative by the
+  // compiler (it emits the unsigned branch from signed compares only then), and emission's provable
+  // set is smaller than the compiler's. So rank.ts enumerates it as the `/signed-cmp` variation and
+  // publishes it only on a byte-exact score (`Candidate.matchOnly`).
   unsignedCompareSpelling?: boolean;
   // Merge two variables that a merge copy would join, when the values under them never interfere
   // (structure/namecoalesce.ts). Off by default; rank.ts enumerates the ON spelling as the
@@ -2302,7 +2312,7 @@ export function structure(
     contractsFloatProducts = false,
     keepsPointerSumAddend = false,
     staticLayout,
-    unsignedCompareSpelling = false,
+    unsignedCompareSpelling = true,
     coalesceMergeNames = false,
     freshParamMerge = false,
     followEarlyReturns = false,
@@ -2384,8 +2394,9 @@ export function structure(
   //     widens a load's render positions and narrows the write set that bars it, so it removes
   //     materializations rather than minting them. Extra materialization is what this guard is
   //     about (see above), and this variation adds none;
-  //   - `/uns-cmp` (unsignedCompareSpelling) writes `varType` and inserts casts at compares. It
-  //     touches no name and no copy, so no edge copy changes its elision under it;
+  //   - `/signed-cmp` (unsignedCompareSpelling OFF) drops the casts at compares and the u32
+  //     reconciliation of `varType`. It touches no name and no copy, so no edge copy changes its
+  //     elision under it;
   //   - `/copy-defpos` (preferDefPosCopyOrder) REORDERS the copies of one edge and adds or drops
   //     none. rank.ts states the same thing from the variation side, in the terms that matter there: a
   //     reordering cannot rescue a spelling whose OFF sibling failed the boundary contracts.
@@ -4110,15 +4121,14 @@ export function structure(
         const t2 = ctype(x);
         return t2?.kind === 'ptr' || t2?.kind === 'array';
       };
-      if (
-        unsignedCompareSpelling &&
-        /^icmp_u/.test(d.opcode) &&
-        !ptrSide(l) &&
-        !ptrSide(r) &&
-        renderedIntSignedness(l, vtEnv) !== false &&
-        renderedIntSignedness(r, vtEnv) !== false &&
-        !(provablyNonNegative(l, vtEnv) && provablyNonNegative(r, vtEnv))
-      ) {
+      // `pinned` places the cast (l3/typing.ts `spelledNonNegative`). Whether an uncast spelling
+      // compares different values is not decided here: the compare carries `unsignedCmp` evidence,
+      // and rank.ts asks `signedOverUnsignedCompare` of the finished tree, after every pass that
+      // could substitute into it. The two differ on an `|`/`^` of non-negative sides, which stays
+      // pinned (the pin is codegen-visible) and owes no proof uncast.
+      const unsignedOrdering = /^icmp_u(lt|le|gt|ge)$/.test(d.opcode);
+      const pinned = /^icmp_u/.test(d.opcode) && rendersSignedOverUnsigned(l, r, vtEnv, spelledNonNegative);
+      if (pinned && unsignedCompareSpelling) {
         const irUnsigned = (v: Value): boolean => v.type.kind === 'int' && !v.type.signed;
         // AT THE OPERAND'S OWN RANK: `(u32)a` over a 64-bit `a` pins nothing, it truncates the
         // compare to its low half. `exprIntWidth` is total and answers 64 only where it proves it.
@@ -4166,7 +4176,7 @@ export function structure(
           r = { k: 'cast', to: T.u(32), e: r };
         }
       }
-      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r };
+      return { k: 'bin', op: CMP_TO_BIN[d.opcode], l, r, ...(unsignedOrdering ? { unsignedCmp: true as const } : {}) };
     }
     if (ARITH_TO_BIN[d.opcode]) {
       const l = e(d.operands[0]);
@@ -6281,7 +6291,7 @@ export function structure(
       stmtsEqual(thenS, elseS) &&
       testRereadsOnly(term, b, { defs, useSitesOf, dom, ipdom, loops: forest.byHeader.values() })
     ) {
-      out.push(...thenS);
+      out.push(...unionStmtsEvidence(thenS, elseS));
     } else {
       out.push(negateHere ? { k: 'if', cond: negateCond(cond), then: elseS, else: thenS } : mkIf(cond, thenS, elseS));
     }

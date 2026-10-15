@@ -1,9 +1,9 @@
-// The /uns-cmp variation (structure.ts unsignedCompareSpelling): an icmp_u* whose operands both
-// render as signed-promoting C compiles to a signed compare — the u32-ness dies when a local
+// The unsigned-compare spelling (structure.ts unsignedCompareSpelling): an icmp_u* whose operands
+// both render as signed-promoting C compiles to a signed compare — the u32-ness dies when a local
 // declares with its first claimant's s32 type or when the operand is an inline `int`-typed
-// tree. With the variation on, one operand takes a (u32) cast (the side whose recovered value type
-// is unsigned) and a mixed-claimant declaration reconciles to u32. Off by default: a signed
-// spelling that byte-matched was proved non-negative by the compiler, so the differ referees.
+// tree. With the option on, one operand takes a (u32) cast (the side whose recovered value type
+// is unsigned) and a mixed-claimant declaration reconciles to u32. On by default; OFF is the
+// `/signed-cmp` variation, which publishes only byte-exact (signed-cmp.test.ts).
 //
 // The refusals are what these tests pin: a provably-unsigned operand leaves the spelling alone,
 // and so does a compare whose operands both provably sit in [0, 2^31) — `(u8)x > 4` is
@@ -18,14 +18,16 @@ import { expect, test } from 'vitest';
 import { cBackend } from '../src/backend/c';
 import { parse } from '../src/ir/parse';
 import { verify } from '../src/ir/verify';
+import { signedOverUnsignedCompare } from '../src/l3/typing';
 import { recoverTypes } from '../src/raise/recover';
 import { structure } from '../src/structure/structure';
 
-const emit = (ir: string, on = true): string => {
+// `on` undefined ⇒ the option is not passed at all, so the test reads structure()'s own default.
+const emit = (ir: string, on?: boolean): string => {
   const fn = parse(ir);
   verify(fn);
   recoverTypes(fn);
-  return cBackend.emit(structure(fn, { unsignedCompareSpelling: on }));
+  return cBackend.emit(structure(fn, on === undefined ? {} : { unsignedCompareSpelling: on }));
 };
 
 // A u32 counter merged through a name an s32 value claims first: the loop param's compare
@@ -93,6 +95,94 @@ const BYTECMP = `fn bytecmp {
 
 test('a byte-range compare keeps the signed spelling (both sides non-negative)', () => {
   expect(emit(BYTECMP)).not.toContain('(u32)(u8)');
+});
+
+// A masked value against a constant: `x & 65535` is in [0, 65535] whatever `x` is, so the compare
+// means the same signed or unsigned and needs no cast (kmc's `unsigned short c = g() + 1; c >= 24`).
+const MASKCMP = `fn maskcmp {
+^bb0(%0: s32):
+  %1: s32 = const {value=65535}
+  %2: s32 = and %0, %1
+  %3: s32 = const {value=24}
+  %4: u32 = icmp_uge %2, %3
+  cond_br %4, ^bb1(), ^bb2()
+^bb1():
+  %5: s32 = const {value=1}
+  ret %5
+^bb2():
+  %6: s32 = const {value=0}
+  ret %6
+}
+`;
+
+test('a masked operand keeps the signed spelling (the mask makes it non-negative)', () => {
+  const src = emit(MASKCMP);
+  expect(src).toMatch(/\(a0 & 65535\) (<|>=) 24/);
+  expect(src).not.toContain('(u32)');
+});
+
+// `|` and `^` of two masked values set no bit either side lacks, so the result is non-negative too:
+// `(a & 240 | b & 3 ^ 192) > 48` means the same signed or unsigned. The default still pins it,
+// because the pin is codegen-visible (mwcc `cmplwi` against `cmpwi`, typing.ts
+// spelledNonNegative), and the uncast spelling owes no proof.
+const ORXORCMP = `fn orxorcmp {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=240}
+  %3: s32 = and %0, %2
+  %4: s32 = const {value=3}
+  %5: s32 = and %1, %4
+  %6: s32 = or %3, %5
+  %7: s32 = const {value=192}
+  %8: s32 = xor %6, %7
+  %9: s32 = const {value=48}
+  %10: u32 = icmp_ugt %8, %9
+  cond_br %10, ^bb1(), ^bb2()
+^bb1():
+  %11: s32 = const {value=1}
+  ret %11
+^bb2():
+  %12: s32 = const {value=0}
+  ret %12
+}
+`;
+
+const structured = (ir: string, on: boolean) => {
+  const fn = parse(ir);
+  verify(fn);
+  recoverTypes(fn);
+  return structure(fn, { unsignedCompareSpelling: on });
+};
+
+test('an or/xor of masked operands keeps the pin, and its uncast spelling owes no proof', () => {
+  expect(emit(ORXORCMP)).toContain('(u32)');
+  const uncast = structured(ORXORCMP, false);
+  expect(cBackend.emit(uncast)).not.toContain('(u32)');
+  expect(signedOverUnsignedCompare(uncast)).toBe(false);
+});
+
+// One side that may be negative makes the whole `|` possibly negative: the uncast spelling owes it.
+const ORNEGCMP = `fn ornegcmp {
+^bb0(%0: s32, %1: s32):
+  %2: s32 = const {value=240}
+  %3: s32 = and %0, %2
+  %4: s32 = or %3, %1
+  %5: s32 = const {value=48}
+  %6: u32 = icmp_ugt %4, %5
+  cond_br %6, ^bb1(), ^bb2()
+^bb1():
+  %7: s32 = const {value=1}
+  ret %7
+^bb2():
+  %8: s32 = const {value=0}
+  ret %8
+}
+`;
+
+test('an or with a possibly-negative side owes the proof uncast', () => {
+  expect(emit(ORNEGCMP)).toContain('(u32)');
+  const uncast = structured(ORNEGCMP, false);
+  expect(signedOverUnsignedCompare(uncast)).toBe(true);
+  expect(signedOverUnsignedCompare(structured(ORNEGCMP, true))).toBe(false);
 });
 
 // Sign-agnostic compares never cast.
@@ -164,7 +254,12 @@ test('signed-use evidence blocks the flip', () => {
   expect(src).not.toMatch(/u32 v\d+;/);
 });
 
-test('off by default: the default spelling keeps the uncast signed rendering', () => {
+test('on by default: with no option set, an unsigned compare is spelled unsigned', () => {
+  expect(emit(LOOPBOUND)).toMatch(/\(u32\)/);
+  expect(emit(RECON)).toMatch(/u32 v\d+;/);
+});
+
+test('switched off, the spelling keeps the uncast signed rendering', () => {
   expect(emit(LOOPBOUND, false)).not.toContain('(u32)');
   expect(emit(RECON, false)).not.toMatch(/u32 v\d+;/);
 });

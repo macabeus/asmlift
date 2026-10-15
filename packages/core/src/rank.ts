@@ -55,6 +55,7 @@ import { reindexWalks } from './l3/reindex';
 import { hoistScopedBases } from './l3/scopebase';
 import { sinkInitsToFirstUse } from './l3/sinkinit';
 import type { SymbolRef } from './l3/symbol-refs';
+import { signedOverUnsignedCompare } from './l3/typing';
 import { type UnreduceResult, unreduceAccumulators } from './l3/unreduce';
 import { deviceVolatileClaims, volatilePtrLocals, volatileSubsetCandidates } from './l3/volatileptr';
 import { volatileValueLocals } from './l3/volatileval';
@@ -263,11 +264,27 @@ export interface Candidate {
    *   • `l3/intcell.ts` spells a global as the integer a project may have declared it, where a
    *     pointer declaration scales the offset it adds, and no declaration is in the asm.
    *
-   *  What settles both instead is the object: a candidate that assembles to the target's own bytes
-   *  IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
+   *  A third obligation is judged on the finished tree rather than declared by a variation
+   *  (`signedUnsignedCompare` below):
+   *
+   *   • `/signed-cmp`, or a respell over its tree, spells an unsigned compare over signed-rendering
+   *     operands, which compiles to a signed compare unless the operands are non-negative, and the
+   *     compiler's proof of that is not in the asm.
+   *
+   *  What settles all three instead is the object: a candidate that assembles to the target's own
+   *  bytes IS the program, whatever a gate could have proved. So the spelling is offered, scored, and then
    *  either wins on proof or is WITHHELD — never shown as a best-effort answer. Both ranking drivers
    *  ask `withheldReason`, so neither can publish what the other would not. */
   matchOnly?: true;
+  /** The tree this source was emitted from spells some unsigned compare so that C evaluates it
+   *  signed (l3/typing.ts `signedOverUnsignedCompare`, judged on the finished tree), which makes it
+   *  `matchOnly` and names the fact it owes. Set for whichever variation got it there: emission
+   *  under `/signed-cmp`, or a respell that substituted into a compare emission had pinned. It is
+   *  the only place this obligation is decided: a pass that rebuilds a compare spreads the node to
+   *  keep its `unsignedCmp` evidence (l3/regspell.ts), a merge that keeps one of two equal nodes
+   *  keeps the evidence of both (l3/ast.ts `unionEvidence`), or drops it only where its own gate proved
+   *  the new spelling compares the same values (l3/initfirst.ts `swapSide`, l3/reindex.ts). */
+  signedUnsignedCompare?: true;
   /** This candidate's lift is `/setup-args` and drops an earlier callee's result that a call through
    *  a register is passed (frontend/ssa.ts `setupArgsDiscardsPassedResult`). It loses every score
    *  tie (compareScored): a tie refutes neither reading, and a shorter spelling must not win by
@@ -369,7 +386,7 @@ export interface RankedResult<S> {
   candidates: Scored<S>[]; // sorted best (lowest) first
   /** candidates whose scoreFn threw — empty when every spelling built */
   dropped: DroppedCandidate[];
-  /** candidates withheld for want of a byte-exact proof — empty unless a `matchOnly` variation fired */
+  /** candidates withheld for want of a byte-exact proof — empty unless a `matchOnly` candidate scored a nonmatch */
   withheld: WithheldCandidate[];
 }
 
@@ -384,6 +401,9 @@ export function withheldReason<S extends { score: number }>(c: Candidate, score:
     return null;
   }
   const facts = c.variations.flatMap((v) => PROOF_OBLIGATIONS.get(v) ?? []);
+  if (c.signedUnsignedCompare === true) {
+    facts.push(SIGNED_COMPARE_OBLIGATION);
+  }
   const fact = facts.length > 0 ? facts.join(' and on ') : 'a fact no gate over the C can settle';
   return `this spelling rests on ${fact}; only a byte-exact score proves it`;
 }
@@ -393,6 +413,11 @@ const PROOF_OBLIGATIONS: ReadonlyMap<string, string> = new Map<VariationName, st
   ['unreduce', 'a device-behaviour fact no gate over the C can settle'],
   ['int-cell', 'the project declaring the global an integer, which the assembly does not show'],
 ]);
+
+/** The fact `Candidate.signedUnsignedCompare` rests on. Keyed by the flag, not by `/signed-cmp`:
+ *  that name is on candidates that owe nothing (a compare over a `u32` operand) and missing from
+ *  respells that do. */
+const SIGNED_COMPARE_OBLIGATION = "the compiler having proved every unsigned compare's operands non-negative";
 
 /** What a respell variation hands `respell`: its tree, or — when the variation cannot establish the
  *  candidate's semantics from inside the pass — the tree paired with that fact. `undefined`/`null`
@@ -457,6 +482,8 @@ interface TreeSource {
   deviceVolatile?: number;
   /** see `Candidate.matchOnly` — set by a variation that cannot establish its own semantics */
   matchOnly?: true;
+  /** see `Candidate.signedUnsignedCompare` */
+  signedUnsignedCompare?: true;
 }
 
 /** Emit the DISTINCT type/branch-sense candidates for `name` — PURE, no scoring.
@@ -985,6 +1012,14 @@ export function enumerateCandidates(
   // of `/volatile` — a candidate that did not fail and is still in the fan. The order
   // is the candidates' own (`[pf.name, ...sp.variations]`), so a reported name and an enumerated
   // candidate's variations name the same candidate the same way.
+  //
+  // THE COMPARE-SIGNEDNESS PROOF, asked of every tree a source is emitted from rather than of the
+  // passes that build them. Emission pins each unsigned compare it lowers (structure.ts), but a
+  // respell that substitutes into a compare — `/unmerge` putting an arm's `s16` global where the
+  // pinned `u32` local stood, against an `s32` parameter — re-renders it signed. So the finished
+  // tree is judged here, and a signed rendering of an `icmp_u*` is `matchOnly` whoever produced it.
+  const cmpProof = (tree: SFn): { matchOnly?: true; signedUnsignedCompare?: true } =>
+    signedOverUnsignedCompare(tree) ? { matchOnly: true, signedUnsignedCompare: true } : {};
   const respellTree = (sfn: SFn, preRespellVariations: readonly Variation[] = []): TreeSources => {
     // The walk→index respell variation (l3/reindex.ts) is a THIRD variation on the same footing as
     // signedness and branch sense: whether the source spelled `*p; p++` or `arr[i]` is
@@ -1002,7 +1037,7 @@ export function enumerateCandidates(
     // Pascal backend loud-declines). Refusing EVERY tree is still loud — the empty-enumeration
     // check at the end raises the last refusal.
     try {
-      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn) });
+      sources.push({ variations: [], source: backend.emit(sfn), ...refsOf(sfn), ...volOf(sfn), ...cmpProof(sfn) });
     } catch (e) {
       reportThrow(preRespellVariations, e);
       return { sources, emit: { error: e } };
@@ -1102,7 +1137,14 @@ export function enumerateCandidates(
         assertNoOrphanedLocals(sfn, alt);
         assertLocalStorageStaysInteger(sfn, alt);
         assertFrameUnionsViewed(alt);
-        sources.push({ variations, source: backend.emit(alt), ...refsOf(alt), ...volOf(alt), ...proof });
+        sources.push({
+          variations,
+          source: backend.emit(alt),
+          ...refsOf(alt),
+          ...volOf(alt),
+          ...proof,
+          ...cmpProof(alt),
+        });
         // STACKED variations, derived onto EVERY source (the POLICY note above carries the
         // admission argument). Each is a statement-order/shape or declaration-width fact
         // orthogonal to the respell variations outside the table; subsets compose in the fixed
@@ -1155,6 +1197,7 @@ export function enumerateCandidates(
                   ...volOf(shaped.out),
                   // a shape derived from a proof-gated spelling inherits the requirement
                   ...proof,
+                  ...cmpProof(shaped.out),
                 });
               }
             } catch (e) {
@@ -2358,6 +2401,7 @@ export function enumerateCandidates(
                 // whichever route the enumeration happened to walk first.
                 if (sp.matchOnly === undefined) {
                   delete dup.matchOnly;
+                  delete dup.signedUnsignedCompare;
                 }
                 if (!discardsPassedResult) {
                   delete dup.discardsPassedResult;
@@ -2386,7 +2430,8 @@ export function enumerateCandidates(
                 preference: symbolIndex,
                 ...(sp.symbolRefs ? { symbolRefs: sp.symbolRefs } : {}),
                 ...(sp.deviceVolatile ? { deviceVolatile: sp.deviceVolatile } : {}),
-                ...(sp.matchOnly ? { matchOnly: sp.matchOnly } : {}),
+                ...(sp.matchOnly ? { matchOnly: true as const } : {}),
+                ...(sp.signedUnsignedCompare ? { signedUnsignedCompare: true as const } : {}),
                 ...(discardsPassedResult ? { discardsPassedResult: true as const } : {}),
                 ...(guessesParamWidth ? { guessesParamWidth: true as const } : {}),
               };
@@ -2569,12 +2614,11 @@ function stillbornNote(stillborn: Stillborn, fan: number): string {
  *  result deterministic. Spelled explicitly rather than leaning on Array#sort's stability, which
  *  would make each preference an accident of two unrelated decisions.
  *
- *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. `/uns-cmp`'s whole output is
- *  that polarity, and it carries in a DECLARED TYPE rather than a cast — `castCount` reads 0 on
- *  both sides of the tie it loses — so at equal bytes enumeration order decides, and a rival
- *  variation's candidate can publish a signed compare where the asm's is unsigned. Weighing it needs
- *  the candidate's own SFn and the icmp facts it was structured from, neither of which this
- *  comparator carries; `deviceVolatile` is the shape such a term would take. */
+ *  WHAT NO TERM HERE WEIGHS: a comparison's rendered SIGNEDNESS. It needs none: every tree a
+ *  source is emitted from is judged for an unsigned compare that renders signed
+ *  (`Candidate.signedUnsignedCompare`), whichever variation spelled it so, and such a source is
+ *  `matchOnly` — on a nonmatch it is withheld before this comparator sees it, whatever it scores,
+ *  and on a match both spellings are the program. */
 export function compareScored<S extends { score: number }>(
   a: Candidate & { score: S; order: number },
   b: Candidate & { score: S; order: number },

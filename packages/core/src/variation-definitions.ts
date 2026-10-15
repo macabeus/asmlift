@@ -96,7 +96,7 @@ export const VARIATION_KIND_DEFINITIONS: { readonly [K in VariationKind]: Variat
     title: 'Structure',
     meaning:
       'How the checked control flow becomes C: which way a test reads, where a loop starts, what reaches a merge (the point where two paths meet), where a value is kept, and how a read or a compare is spelled.',
-    examples: ['flip-branch', 'defsite', 'loop-entry', 'reread-globals', 'uns-cmp'],
+    examples: ['flip-branch', 'defsite', 'loop-entry', 'reread-globals', 'signed-cmp'],
   },
   respell: {
     title: 'Respell',
@@ -296,7 +296,7 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       after: 's32 example(u32 a0, u32 a1)',
     },
     implementedIn: RANK,
-    seeAlso: ['signed', 'uns-cmp'],
+    seeAlso: ['signed', 'signed-cmp'],
   },
   signed: {
     title: 'Signed parameters',
@@ -797,14 +797,16 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     implementedIn: ANALYSIS,
     seeAlso: ['expr-home', 'derived-home'],
   },
-  'uns-cmp': {
-    title: 'Unsigned compare spelled unsigned',
-    summary: 'an unsigned compare carries a `(u32)` cast where its operands do not already say so',
+  'signed-cmp': {
+    title: 'Unsigned compare spelled signed',
+    summary: 'an unsigned compare drops the `(u32)` cast the default gives an operand that does not already say so',
     detail:
-      'An unsigned comparison takes a `(u32)` cast on an operand the rendering does not already make ' +
-      'unsigned, and a declaration claimed by both kinds of use becomes `u32` when nothing under it needs ' +
-      'signed. Which the source wrote is open in one direction: a signed spelling that matched was proved ' +
-      'non-negative by the compiler, and asmlift can prove less than the compiler can.',
+      'By default an unsigned comparison takes a `(u32)` cast on an operand the rendering does not already ' +
+      'make unsigned, and a declaration claimed by both kinds of use becomes `u32` when nothing under it ' +
+      'needs signed. This writes the comparison without them, as a signed one. The source may have done so: ' +
+      'a compiler emits an unsigned compare for a signed one where it proved both sides non-negative, and ' +
+      'asmlift can prove less than the compiler can. Where the sides can be negative it computes something ' +
+      'else, so it is published only when the candidate matches byte for byte; otherwise it is withheld.',
     compilerBehavior:
       'A compiler emits an unsigned branch from a signed compare only where it proved both sides non-negative.',
     offeredWhen: {
@@ -814,8 +816,8 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
     example: {
       compiler: 'agbcc',
       unit: CALLS + 'void example(s32 a, s32 b) { @ A(); }',
-      before: 'if (a < b)',
-      after: 'if ((u32)a < b)',
+      before: 'if ((u32)a < b)',
+      after: 'if (a < b)',
     },
     implementedIn: STRUCTURE,
     seeAlso: ['unsigned', 'signed'],

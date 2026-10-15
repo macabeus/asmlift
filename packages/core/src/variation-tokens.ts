@@ -87,7 +87,7 @@ const TOKENS = [
   { name: 'derived-home', variationKind: 'structure' },
   { name: 'merge-home', variationKind: 'structure' },
   { name: 'escape-home', variationKind: 'structure' },
-  { name: 'uns-cmp', variationKind: 'structure' },
+  { name: 'signed-cmp', variationKind: 'structure' },
   { name: 'fresh-merge', variationKind: 'structure' },
   { name: 'copy-defpos', variationKind: 'structure' },
   { name: 'site-sense', variationKind: 'structure' },

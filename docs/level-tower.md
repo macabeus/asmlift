@@ -131,8 +131,9 @@ asm ─▶ lift ─▶ idiom fold ─▶ recover types ─▶ structure ─▶ L
   `arch ==` branch. The line between a compiler behavior and a ranked variation is not how confident
   the author feels — it is whether the ASM UNDERDETERMINES THE SOURCE. A variation is right when some pass
   genuinely collapses two source spellings onto one output, so nothing but the differ can tell them
-  apart (`/uns-cmp`: a signed compare emits the unsigned branch only once the compiler has PROVED
-  the operand non-negative, and emission's provable set is smaller than the compiler's). A compiler
+  apart (`/signed-cmp`: a signed compare emits the unsigned branch only once the compiler has PROVED
+  the operand non-negative, and emission's provable set is smaller than the compiler's — which is
+  also why that spelling publishes only on a byte-exact score). A compiler
   behavior is right when the mapping is a function — `readsStayWhereWritten` says a compiler with neither an
   instruction scheduler nor a code hoister emits a memory read in the block the source spelled it
   in, so re-spelling a read at the block the asm performed it in reproduces that asm, while the sunk

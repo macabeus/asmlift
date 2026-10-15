@@ -425,6 +425,11 @@ function reindexCond(cond: Expr, walk: WalkLoop, iv: string): Expr | null {
     return null;
   }
   const i: Expr = { k: 'var', name: iv };
+  // A fresh node, so the compare's `unsignedCmp` evidence (l3/ast.ts) is dropped, and that is
+  // PROVED rather than lost: `p < base + n` compared addresses, which C compares unsigned, and the
+  // walk makes `p == base + i` (scaled), so `i < n` compares the same values. Kept, the evidence
+  // would have rank.ts withhold the index spelling over an `s32` counter that the pointer
+  // spelling, judged on the same rule, never owed.
   return swap ? { k: 'bin', op: cond.op, l: n, r: i } : { k: 'bin', op: cond.op, l: i, r: n };
 }
 

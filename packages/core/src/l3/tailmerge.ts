@@ -63,7 +63,7 @@
 // artifact still refuses to compile) but `collectMarkers` then reports it once rather than twice,
 // which is accurate — it is one gap that ran on both paths.
 import type { SFn, Stmt } from './ast';
-import { stmtEquals } from './ast';
+import { stmtEquals, unionStmtEvidence } from './ast';
 
 /** Statements this pass may move. Deliberately narrow — see SCOPE. */
 type Mergeable = Extract<Stmt, { k: 'assign' } | { k: 'store' } | { k: 'exprstmt' }>;
@@ -89,7 +89,9 @@ function rewrite(s: Stmt): Stmt[] {
       // it, but it is the one shape where a zero-arm merge is qualitatively unlike a partial one.
       const tail: Stmt[] = [];
       while (then.length > 0 && els.length > 0 && sameStmt(then[then.length - 1], els[els.length - 1])) {
-        tail.unshift(then[then.length - 1]);
+        // The two print alike, but an unsigned compare in one prints like the signed one in the
+        // other: the moved statement carries the evidence of both (ast.ts `unionEvidence`).
+        tail.unshift(unionStmtEvidence(then[then.length - 1], els[els.length - 1]));
         then.pop();
         els.pop();
       }

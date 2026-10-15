@@ -48,7 +48,13 @@ import {
   stmtExprs,
   walkExprs,
 } from './ast';
-import { arithConversionSignedness, declaredTypes, exprIntWidth, provablyNonNegative } from './typing';
+import {
+  arithConversionSignedness,
+  declaredTypes,
+  exprIntWidth,
+  provablyNonNegative,
+  rendersSignedOverUnsigned,
+} from './typing';
 
 const readsVar = (e: Expr, name: string): boolean =>
   mentionedName(e) === name || exprChildren(e).some((c) => readsVar(c, name));
@@ -95,8 +101,9 @@ const hoistableRead = (e: Expr, ownNames: ReadonlySet<string>, volatileLocals: R
 };
 
 /** A compare operand and the init's value denote the same 32-bit value under different SPELLINGS
- *  when a width-32 cast is all that separates them: `/uns-cmp` wraps one side in `(u32)` to make
- *  the branch unsigned, and on a zero-trip guard that side is the very const the init assigns.
+ *  when a width-32 cast is all that separates them: the unsigned-compare spelling wraps one side in
+ *  `(u32)` to make the branch unsigned, and on a zero-trip guard that side is the very const the
+ *  init assigns.
  *  The swap is still exact — `v = X` stores X's 32 bits and `v` is 32-bit-declared
  *  (meaningPreserved refuses otherwise), so `v` and `(u32)X` carry the same bit pattern and only
  *  the compare's rendered signedness can differ, which meaningPreserved checks separately. A
@@ -135,6 +142,25 @@ const meaningPreserved = (
   const vv: Expr = { k: 'var', name: v };
   const after = side === 'l' ? arithConversionSignedness(vv, r, env) : arithConversionSignedness(l, vv, env);
   return before !== undefined && before === after;
+};
+
+/** `cond` with one side read through `v`, AFTER `meaningPreserved` said yes. That answer is a
+ *  value proof the finished tree cannot repeat: `v` holds X, but `v`'s declaration does not say
+ *  what range X had, so rank.ts's judgment of the tree (typing.ts `signedOverUnsignedCompare`)
+ *  would call an unsigned compare whose ORIGINAL operands were both non-negative signed, and
+ *  withhold a spelling that compares the same values. So a compare that was value-faithful before
+ *  the swap is marked proved: its `unsignedCmp` evidence is dropped. One that was not keeps it. */
+const swapSide = (
+  cond: Extract<Expr, { k: 'bin' }>,
+  side: 'l' | 'r',
+  v: string,
+  env: ReturnType<typeof declaredTypes>,
+): Expr => {
+  const out: Extract<Expr, { k: 'bin' }> = { ...cond, [side]: { k: 'var', name: v } };
+  if (cond.unsignedCmp === true && !rendersSignedOverUnsigned(cond.l, cond.r, env)) {
+    delete out.unsignedCmp;
+  }
+  return out;
 };
 
 /** TOTAL (reads and pure writes) — see the note on stmtTouches. Runs against the pre-rewrite
@@ -234,16 +260,20 @@ export function initFirstGuards(sfn: SFn): SFn | null {
       // a COMMON-hoisted variable holds its const on both paths, so the condition's matching
       // const operand reads through it unconditionally — no tail gate needed.
       // A BARE const only, where the guard re-spelling below uses the cast-tolerant `sameValue`:
-      // this site does not run `meaningPreserved`, so it may not swap in a name whose declared
-      // type could re-render the compare's signedness — which is exactly what peeling a `(u32)`
-      // would put on the table. A row that needs `/uns-cmp`'s spelling hoisted here brings the
-      // gate with it.
+      // peeling a `(u32)` here would put a re-rendered signedness on the table with no cast left to
+      // say which. The name's DECLARED type can re-render it too — `if (a1 > 0)` read through a
+      // `u32 v` that holds the 0 is `a1 != 0` — so the swap asks `meaningPreserved` as the guard
+      // re-spelling does.
       for (const hv of hoisted) {
         if (cond.k === 'bin' && NEGATE_REL[cond.op]) {
           if (cond.l.k === 'const' && cond.l.value === hv.value) {
-            cond = { ...cond, l: { k: 'var', name: hv.name } };
+            if (meaningPreserved(cond.l, cond.r, 'l', hv.name, env)) {
+              cond = swapSide(cond, 'l', hv.name, env);
+            }
           } else if (cond.r.k === 'const' && cond.r.value === hv.value) {
-            cond = { ...cond, r: { k: 'var', name: hv.name } };
+            if (meaningPreserved(cond.l, cond.r, 'r', hv.name, env)) {
+              cond = swapSide(cond, 'r', hv.name, env);
+            }
           }
         }
       }
@@ -283,7 +313,7 @@ export function initFirstGuards(sfn: SFn): SFn | null {
         ) {
           out.push(init);
           moved.add(init);
-          cond = { ...cond, [side]: { k: 'var', name: init.name } };
+          cond = swapSide(cond, side, init.name, env);
           then = then.slice(1);
           changed = true;
         }
