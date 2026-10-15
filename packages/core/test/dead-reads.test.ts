@@ -51,6 +51,14 @@ describe.each(TOOLCHAINS)('$fixture', ({ fixture: f, target, fns }) => {
   });
 });
 
+test('a qualified read of a hoisted base reads through the local the hoist named', () => {
+  // `dmaRegs[2];` after the three stores through `dmaRegs`: inline, the qualified cast over the
+  // literal makes agbcc load a second pool word with the offset folded in, where the source read
+  // `[r4, #0x8]` off the base it already held (l3/basecse.ts `rewrite`).
+  expect(lift('dmaburst', fixture('agbcc-deadread.s'), ARMV4T_AGBCC)).toMatch(/^\s*\(\(volatile s32 \*\)p0\)\[2\];$/m);
+  expect(lift('dmaburst', fixture('ido71-deadread.txt'), MIPS_IDO)).toMatch(/^\s*\(\(volatile s32 \*\)p0\)\[2\];$/m);
+});
+
 /** One block reading `width` bytes at `base` into a value nothing uses, then returning. */
 const deadLoad = (base: Op, attrs: Op['attrs']): { blocks: Block[]; load: Op } => {
   const v = mkValue(T.unk(32));

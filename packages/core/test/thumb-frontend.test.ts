@@ -3736,11 +3736,12 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     const src = decompile('d3i', twoFills, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u16 sp0;');
     expect(src).toContain('    *(volatile u16 *)67109384 = 0;\n');
+    // pinned through the channel's base local, qualified at each access (l3/basecse.ts `rewrite`)
     expect(src).toContain(
-      '    *(volatile s32 *)67109076 = &sp0;\n    ((volatile s32 *)67109076)[1] = a0;\n' +
-        '    ((volatile s32 *)67109076)[2] = -2130706400;\n',
+      '    *(volatile s32 *)p0 = &sp0;\n    ((volatile s32 *)p0)[1] = a0;\n' +
+        '    ((volatile s32 *)p0)[2] = -2130706400;\n',
     );
-    expect(src).toContain('    p0[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n    *(u16 *)67109384 = 1;\n');
+    expect(src).toContain('    p0[2] = -2130706400;\n    ((volatile s32 *)p0)[2];\n    *(u16 *)67109384 = 1;\n');
   });
 
   // …and a read of the channel between the two fills does not stand for the first: agbcc forwards
@@ -3760,7 +3761,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\t0x1111\n\t.word\t0x40000d4\n\t.word\t-0x7effffe0\n\t.word\tgY\n\t.word\t0x40000dc\n' +
       '\t.word\t0x2222\n';
     expect(decompile('e2', readBetween, ARMV4T_AGBCC).source).toContain(
-      '    ((volatile s32 *)67109076)[2] = -2130706400;\n    ((volatile s32 *)67109076)[2];\n' +
+      '    ((volatile s32 *)p0)[2] = -2130706400;\n    ((volatile s32 *)p0)[2];\n' +
         '    gY = *(volatile s32 *)67109084;\n',
     );
   });
@@ -3784,7 +3785,7 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
       '\t.word\tgDst2\n\t.word\t-0x7affffe0\n\t.word\t0x4000006\n';
     const src = decompile('d1', pollAfterFills, ARMV4T_AGBCC).source;
     expect(src).toContain('volatile u16 sp0;');
-    expect(src.match(/^ {4}\(\(volatile s32 \*\)67109076\)\[2\];$/gm)).toHaveLength(2);
+    expect(src.match(/^ {4}\(\(volatile s32 \*\)p0\)\[2\];$/gm)).toHaveLength(2);
     expect(src).toContain('    do {\n        v0 = *(volatile u16 *)67108870;\n    } while (v0 != 160);\n');
   });
 
