@@ -137,6 +137,11 @@ const TM =
   '\tpop\t{r4, r5, r6}\n\tpop\t{r0}\n\tbx\tr0\n.L5:\n\t.align\t2, 0\n.L4:\n' +
   '\t.word\t-0x10000\n\t.word\t-0xff0001\n\t.word\t0xffffff\n';
 
+// `void byvalQ(s32 k) { takeQ(k, gQ); }`
+const BYVALQ =
+  'byvalQ:\n\tpush\t{lr}\n\tldr\tr1, .L9\n\tldr\tr2, [r1, #0x4]\n\tldr\tr1, [r1]\n\tbl\ttakeQ\n' +
+  '\tpop\t{r0}\n\tbx\tr0\n.L10:\n\t.align\t2, 0\n.L9:\n\t.word\tgQ\n';
+
 const A = {
   kind: 'struct' as const,
   members: [
@@ -308,11 +313,50 @@ describe('a struct passed by value in argument registers', () => {
     });
   });
 
-  test('without a layout the call is lifted as before, at the guessed arity', () => {
-    const { source } = decompile('byvalregs', BYVALREGS, ARMV4T_AGBCC, {
-      prototypes: { take2: { params: ['struct A'], returnsVoid: true } },
-      onGap: 'annotate',
-    });
-    expect(source).not.toContain('take2(sp0)');
+  // `void byvalQ(s32 k) { takeQ(k, gQ); }` — before the refusal, the arity guess lifted it `takeQ();`
+  // wherever the declaration did not lay `struct Q` out, which compiles against no header
+  test.each([
+    [
+      'a struct the declaration does not lay out',
+      { params: ['s32', 'struct Q'], returnsVoid: true },
+      'struct Q',
+      /the declaration does not lay it out/,
+    ],
+    ['a union', { params: ['s32', 'union V'], returnsVoid: true }, 'union V', /the declaration does not lay it out/],
+    [
+      'a union it lays out',
+      {
+        params: ['s32', 'union V'],
+        byValueLayouts: { 1: { kind: 'union' as const, members: [{ name: 'a', type: 'u32' }] } },
+        returnsVoid: true,
+      },
+      'union V',
+      /it, or another aggregate it takes by value, is a union or has a member this target does not size/,
+    ],
+  ])('%s declines, and is not guessed', (_, takeQ, spelling, why) => {
+    expect(() => decompile('byvalQ', BYVALQ, ARMV4T_AGBCC, { prototypes: { takeQ } })).toThrow(
+      new RegExp(`\`takeQ\` takes '${spelling}' by value as its parameter 2, and ${why.source}`),
+    );
+  });
+
+  test('without a layout it declines, and annotating degrades to the stub that names why', () => {
+    const take2 = { params: ['struct A'], returnsVoid: true };
+    expect(() => decompile('byvalregs', BYVALREGS, ARMV4T_AGBCC, { prototypes: { take2 } })).toThrow(
+      /`take2` takes 'struct A' by value as its parameter 1, and the declaration does not lay it out/,
+    );
+    const { source } = decompile('byvalregs', BYVALREGS, ARMV4T_AGBCC, { prototypes: { take2 }, onGap: 'annotate' });
+    expect(source).toContain("`take2` takes 'struct A' by value as its parameter 1");
+    expect(source).not.toContain('take2(');
+  });
+
+  test('laid out, the same call is passed the global whole', () => {
+    const takeQ = {
+      params: ['s32', 'struct Q'],
+      byValueLayouts: { 1: { kind: 'struct' as const, members: ['a', 'b'].map((name) => ({ name, type: 'u32' })) } },
+      returnsVoid: true,
+    };
+    expect(decompile('byvalQ', BYVALQ, ARMV4T_AGBCC, { prototypes: { takeQ } }).source).toContain(
+      '    takeQ(a0, gQ);\n',
+    );
   });
 });

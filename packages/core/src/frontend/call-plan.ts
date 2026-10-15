@@ -352,6 +352,37 @@ export function callDeclarations(
     const declared = declarationOf(callee)!;
     return params.map((spelling, k) => ({ kind: paramClassOf(declared, params, k), spelling }));
   };
+  // A STRUCT OR UNION PASSED BY VALUE THAT NO RULE PLACES REFUSES; IT IS NOT GUESSED. The arity
+  // guess counts argument registers, and a struct is not one: it takes as many words as its size
+  // (agbcc, O32), starts at an even word when it is 8-aligned (O32), or travels as the address of
+  // a copy (mwcc). A guess over it drops the struct or reads its words as separate arguments, and
+  // either is C that compiles. Measured: agbcc `takeQ(k, gQ)` with no layout for `struct Q` lifted
+  // `takeQ();`, and gcc2.7.2kmc `takeW(gW)`, where no rule placed it, `takeW(*(s32 *)&gW)`. This is
+  // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
+  // word: a parameter the declaration names a struct or union is known not to be.
+  const refuseUnplacedByValue = (callee: string): void => {
+    const p = declarationOf(callee);
+    if (p === undefined || !Array.isArray(p.params)) {
+      return;
+    }
+    const params = p.params;
+    const k = params.findIndex((_, i) => paramClassOf(p, params, i) === 'by-value');
+    if (k < 0) {
+      return;
+    }
+    const unsized = params.findIndex((_, i) => paramClassOf(p, params, i) === 'unsized');
+    const why = !target.compilerBehaviors.byValueAggregateArgWords
+      ? 'this target states no rule for which argument words carry one'
+      : p.byValueLayouts === undefined || !Object.hasOwn(p.byValueLayouts, k)
+        ? 'the declaration does not lay it out (a context does, by defining the struct)'
+        : unsized >= 0
+          ? `its parameter ${unsized + 1} '${params[unsized]}' is not sized, so where the struct starts is not known`
+          : 'it, or another aggregate it takes by value, is a union or has a member this target does not size';
+    fail(
+      `cannot lift '${name}': \`${callee}\` takes '${params[k]}' by value as its parameter ${k + 1}, and ${why} — ` +
+        'a struct passed by value is lifted only where its argument words are known',
+    );
+  };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
@@ -371,6 +402,9 @@ export function callDeclarations(
       { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
       declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target);
     const params = declared?.widths;
+    if (params === undefined) {
+      refuseUnplacedByValue(callee);
+    }
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
       fail(

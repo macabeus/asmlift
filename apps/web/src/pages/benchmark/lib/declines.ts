@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 228 distinct decline messages (the texts reached by
+// `packages/core/src` throws 229 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 108 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -82,14 +82,13 @@
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
 //   frontend/disasm.ts       7  the objdump `...` elision family
-//   frontend/call-plan.ts    6  a call returning a struct through a hidden pointer whose parameters
+//   frontend/call-plan.ts    4  a call returning a struct through a hidden pointer whose parameters
 //                               nothing sizes, one whose declaration the lifted source cannot print (a
 //                               type it has no spelling for, or a bare parameter count that states
-//                               none), one declared to return both a struct and a 64-bit value, a
-//                               struct passed by value that runs past the argument registers, and one
-//                               whose words are not one frame object or one global read whole
+//                               none), and one declared to return both a struct and a 64-bit value
 //                               (its two refusals of the struct return itself are `struct-return`'s,
-//                               and its two 64-bit refusals are NOT here either — both carry
+//                               its three of a struct passed by value `byvalue-arg`'s, and its two
+//                               64-bit refusals are NOT here either — both carry
 //                               `wide-call-arg`'s phrase, because they are that capability gap seen
 //                               from a lowering with no register pair: one for a declared wide
 //                               PARAMETER and one for a declared wide RETURN)
@@ -599,6 +598,20 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'struct-return',
     label: 'Struct returns a call plan cannot lower (hidden pointer or registers undecided)',
     pattern: /is declared to return [^,—]+ by value(?:, and | — )/,
+  },
+  {
+    // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.
+    // Three throws in `frontend/call-plan.ts` spell it, each straight after the callee: no rule
+    // places the aggregate in argument words (the target states none, the declaration does not
+    // lay it out, it is a union, or another parameter is unsized), it runs past the argument
+    // registers, or its words are not one frame object or one global read whole at the call.
+    // Before the first of them the call fell to the arity guess, which dropped the struct or read
+    // its words as separate arguments — C that compiles — so what this counts was wrong C once.
+    //
+    // ITS FIRST INHABITANT IS `byvalregs` ON ido7.1, which reached the call before its frame.
+    key: 'byvalue-arg',
+    label: 'Struct arguments passed by value that a call plan cannot place or fold',
+    pattern: / by value as its parameter [^,]+, and |by value, and its words are not one /,
   },
   {
     // The ABI destroyed the value, and nothing about the register file says so: the read has a
