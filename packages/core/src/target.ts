@@ -42,9 +42,9 @@
 //     Others are read off the target directly by a consumer that is not the structurer — among
 //     them `nearBaseSpan` and `foldsConstAddrOffset` (rank.ts, L3 respell variations),
 //     `reloadsLocalReread`, `narrowParamWitness` and `aggregateBoundary` (raise/pre-recovery.ts),
-//     `aggregateReturn`, `largestAlignment`, `enumBytes`, `bitfieldPacking`,
-//     `byValueAggregateArgWords` and `alignedAggregateArgsStartEven` (aggregate.ts, for
-//     frontend/call-plan.ts, frontend/thumb.ts, frontend/ppc.ts and frontend/frame-objects.ts),
+//     `aggregateReturn`, `largestAlignment`, `enumBytes`, `bitfieldPacking` and
+//     `byValueAggregateArgWords` (aggregate.ts, for frontend/call-plan.ts, frontend/thumb.ts,
+//     frontend/ppc.ts and frontend/frame-objects.ts),
 //     `hoistsSingleSetArm` (raise/narrowlocal.ts and raise/retsink.ts), `arrayShapeFromStride`
 //     (raise/globalshape.ts, run on the LIFTED fn), `eightByteReturnScratch`
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
@@ -204,11 +204,19 @@ export interface TargetDescription {
    *  PARM_BOUNDARY is 32 (:354).
    *
    *  o32 MIPS has an FPU and a double after an integer argument still takes two general words,
-   *  high first, at an even word as its `long long` does (IDO 7.1). The MIPS targets do not state it
-   *  because their frontend lays out no 64-bit argument (`CallLowering.pairs`). PowerPC EABI passes
-   *  a double in a float register that takes no general word (`fpu.slots: 'separate'`), so it has
-   *  none to state. */
+   *  high first, at an even word as its `long long` does (`evenWordAlignedArgs`). The MIPS targets
+   *  do not state it because their frontend lays out no 64-bit argument (`CallLowering.pairs`).
+   *  PowerPC EABI passes a double in a float register that takes no general word
+   *  (`fpu.slots: 'separate'`), so it has none to state. */
   doubleArgWords?: 'high-first';
+  /** AN ARGUMENT ALIGNED TO 8 STARTS AT AN EVEN ARGUMENT WORD, and the word it skips is left empty:
+   *  a `long long`, a `double` in general words, and a struct passed by value whose alignment is 8,
+   *  alike. `proto.ts` `wordsOf` counts the skipped word, and `aggregate.ts` `byValueCallArgs` reads
+   *  the same count to place a struct. O32, compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2:
+   *  `takeLL(1, 0x200000003LL)` and `takeD(1, 2.5)` set `a0` and `a2:a3` with `a1` unset, and so does
+   *  `takeL(s32 k, struct L { long long v; } l)`; at word 0 each is `a0:a1`. ABSENT ⇒ every argument
+   *  takes the next free word: agbcc (the note at `wordsOf`). */
+  evenWordAlignedArgs?: true;
   /** Registers this ABI does NOT pass arguments in — half of what makes a def-less live-in read an
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
@@ -927,18 +935,10 @@ export interface TargetDescription {
     // is `ldr r0..r2` off the frame copy ahead of `bl take2`. O32 too, compiled on ido7.1,
     // gcc2.7.2kmc and gcc2.7.2: `takeQ(s32 k, struct Q {u32 a, b;})` is passed `a1:a2` and a
     // three-word struct `a0..a2` (an 8-aligned one starts at an even word:
-    // `alignedAggregateArgsStartEven`); IDO also stores each word into its home slot, which the
+    // `evenWordAlignedArgs`); IDO also stores each word into its home slot, which the
     // call owns. ABSENT ⇒ the target passes one some other way or states nothing: mwcc passes the
     // address of a copy (frontend/ppc.ts refuses it).
     byValueAggregateArgWords?: boolean;
-    // AN AGGREGATE ALIGNED TO 8 STARTS AT AN EVEN ARGUMENT WORD, and the word it skips is left
-    // empty (`aggregate.ts` `byValueCallArgs`, which places one at an even word and refuses one that
-    // would start at an odd one). O32, compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2:
-    // `void takeL(s32 k, struct L { long long v; } l)` is passed `a0` and `a2:a3` with `a1` unset,
-    // and `takeD(s32 k, struct D { double d; } d)` the same; at word 0 both are `a0:a1`. ABSENT ⇒
-    // the target places every aggregate at the next free word: agbcc rounds nothing (thumb.h
-    // FUNCTION_ARG counts words), which is the note at `proto.ts` `wordsOf`.
-    alignedAggregateArgsStartEven?: boolean;
     // The bytes an enum takes as a struct member (`aggregate.ts`). agbcc: 4 — flag_short_enums is 0
     // unless `-fshort-enums` is given (toplev.c:3552-3554 with no DEFAULT_SHORT_ENUMS), so an enum
     // whose values fit an int is an int (c-decl.c:6123-6135); compiled, `sizeof(enum {K0, K1})`
@@ -1192,6 +1192,8 @@ export const MIPS_IDO: TargetDescription = {
   compiler: 'ido',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
+  // MEASURED on ido7.1, gcc2.7.2kmc and gcc2.7.2: the probes at the field.
+  evenWordAlignedArgs: true,
   // O32: at, v0-v1, a0-a3, t0-t9 and ra are all caller-saved. `frontend/mips.ts` reads the rest, and
   // `ra`, as the registers a frame store SAVES.
   callerSaved: [
@@ -1236,8 +1238,6 @@ export const MIPS_IDO: TargetDescription = {
     // and its `long long` twin put the member at 8 and size 16 (`sizeof` and the member's offset
     // compiled into `.data`).
     largestAlignment: 8,
-    // MEASURED on all three, the probe at the field.
-    alignedAggregateArgsStartEven: true,
     byValueAggregateArgWords: true,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
@@ -1276,6 +1276,8 @@ export const MIPS_GCC: TargetDescription = {
   compiler: 'gcc',
   argRegs: ['a0', 'a1', 'a2', 'a3'],
   returnReg: 'v0',
+  // MEASURED on ido7.1, gcc2.7.2kmc and gcc2.7.2: the probes at the field.
+  evenWordAlignedArgs: true,
   // The same O32 convention MIPS_IDO carries, read the same way.
   callerSaved: [
     'at',
@@ -1369,7 +1371,6 @@ export const MIPS_GCC: TargetDescription = {
     aggregateBoundary: 1,
     // MEASURED on BOTH toolchains this description serves, and on ido7.1: the probe at MIPS_IDO's.
     largestAlignment: 8,
-    alignedAggregateArgsStartEven: true,
     byValueAggregateArgWords: true,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and

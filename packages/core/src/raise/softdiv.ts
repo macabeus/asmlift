@@ -49,7 +49,7 @@ export function recognizeSoftDiv(fn: Fn, target: TargetDescription): boolean {
       }
       // Fold only when BOTH arguments were recovered (the signature makes this the norm). A
       // mis-recovered arity leaves the call untouched rather than fabricating a wrong divide.
-      if (op.operands.length !== wordsOf(helper.params) || op.results.length !== 1) {
+      if (op.operands.length !== wordsOf(helper.params, target) || op.results.length !== 1) {
         continue;
       }
       b.ops.splice(i, 1, helperOp(helper.op, op.attrs.target as string, op.operands, op.results[0]));

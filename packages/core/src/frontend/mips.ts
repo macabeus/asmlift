@@ -1244,7 +1244,7 @@ function liftOnce(
     rule: target.compilerBehaviors.o32LocalArea,
     stackWordsOf: (callee) => {
       const declared = callee === undefined ? null : calls.declaredCall(callee);
-      return declared === null ? null : Math.max(0, wordsOf(declared.widths) - ARG_REGS.length);
+      return declared === null ? null : Math.max(0, wordsOf(declared.widths, target) - ARG_REGS.length);
     },
     savedByCallee,
     splat,

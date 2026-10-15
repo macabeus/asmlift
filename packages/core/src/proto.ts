@@ -139,8 +139,10 @@ export interface AggregateMember {
 /** symbol → prototype. The function under decompilation and its callees share one table. */
 export type Prototypes = Record<string, FnProto>;
 
-/** How many argument REGISTERS a list of parameter WIDTHS occupies: a parameter wider than a
- *  machine word travels in a register pair, every other one in a single register.
+/** How many argument WORDS a list of parameter WIDTHS occupies: a parameter wider than a machine
+ *  word travels in a pair of words, every other one in a single word, and where the target aligns
+ *  an 8-byte argument (`TargetDescription.evenWordAlignedArgs`) a pair that would start at an odd
+ *  word skips one.
  *
  *  The rule lives here rather than beside either caller because it has two, and they are the two
  *  vocabularies a declaration is written in. `runtime-helpers.ts` states a compiler's own helper
@@ -148,17 +150,14 @@ export type Prototypes = Record<string, FnProto>;
  *  `declaredCallArgs` below reads the same widths off a project's C types. One ABI fact, one
  *  copy of it; a second copy is a rule that can disagree with itself.
  *
- *  NO EVEN-REGISTER ALIGNMENT, and that is a measured agbcc fact rather than an omission: its
- *  `thumb.h` computes an argument's register from a plain byte counter with no rounding, so
- *  `void f(s32, long long)` passes the pair in r1:r2 where AAPCS would pad to r2:r3.
- *
- *  AN ABI THAT DOES ALIGN HAS NO READER HERE YET, which is why the rule is flat rather than a
- *  knob on `TargetDescription` beside `argRegs` and `stagesOutgoingArgsInFrame`. MIPS o32 aligns a
- *  64-bit argument to an even register pair and is the target that will want one, and
- *  `frontend/mips.ts` refuses a declared 64-bit parameter (`CallLowering.pairs`), so every list it
- *  counts is one word per parameter. The lowering that builds an o32 pair owes the rule a home. */
-export function wordsOf(params: readonly number[]): number {
-  return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
+ *  agbcc DOES NOT ALIGN, a measured fact rather than an omission: its `thumb.h` computes an
+ *  argument's register from a plain byte counter with no rounding, so `void f(s32, long long)`
+ *  passes the pair in r1:r2 where AAPCS would pad to r2:r3. O32 does, for a scalar and a struct
+ *  alike, and that is the one fact both read here: `aggregate.ts` `byValueCallArgs` places a struct
+ *  by this count, and the lowering that builds an o32 pair, which `frontend/mips.ts` does not yet
+ *  (it refuses a declared 64-bit parameter, `CallLowering.pairs`), counts its words the same way. */
+export function wordsOf(params: readonly number[], target: Pick<TargetDescription, 'evenWordAlignedArgs'>): number {
+  return params.reduce((n, w) => (w > 32 ? n + (target.evenWordAlignedArgs === true ? n % 2 : 0) + 2 : n + 1), 0);
 }
 
 /** Whether a proto states a parameter list at all — readably or not. The tier question, asked

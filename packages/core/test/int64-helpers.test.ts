@@ -20,7 +20,7 @@ import { type FnProto, type Prototypes, wordsOf } from '../src/proto';
 import { enumerateCandidates } from '../src/rank';
 import { AGBCC_RUNTIME_HELPERS, helperPrototypes, isWideHelper } from '../src/runtime-helpers';
 import type { SymbolMap } from '../src/symbols';
-import { ARMV4T_AGBCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO } from '../src/target';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-int64-helpers.s'), 'utf8');
 const lift = (name: string) => decompile(name, asm, ARMV4T_AGBCC).source;
@@ -356,10 +356,20 @@ describe('the helper table is read by name, not by prototype chain', () => {
 
 describe('the table says what a helper takes, in widths and not in words', () => {
   test('a 64-bit parameter is one C parameter and two argument registers', () => {
-    expect(wordsOf([64, 32])).toBe(3);
-    expect(wordsOf([32, 32])).toBe(2);
-    expect(helperPrototypes(AGBCC_RUNTIME_HELPERS).__ashrdi3).toEqual({ params: 3 });
-    expect(helperPrototypes(AGBCC_RUNTIME_HELPERS).__divsi3).toEqual({ params: 2 });
+    expect(wordsOf([64, 32], ARMV4T_AGBCC)).toBe(3);
+    expect(wordsOf([32, 32], ARMV4T_AGBCC)).toBe(2);
+    expect(helperPrototypes(ARMV4T_AGBCC).__ashrdi3).toEqual({ params: 3 });
+    expect(helperPrototypes(ARMV4T_AGBCC).__divsi3).toEqual({ params: 2 });
+  });
+
+  // O32 compiled: `takeLL(1, 0x200000003LL)` sets a0 and a2:a3, leaving a1 empty; agbcc puts the
+  // pair in r1:r2
+  test('a 64-bit parameter at an odd word skips one where the target aligns it', () => {
+    expect(wordsOf([32, 64], ARMV4T_AGBCC)).toBe(3);
+    expect(wordsOf([32, 64], MIPS_GCC)).toBe(4);
+    expect(wordsOf([64, 32], MIPS_GCC)).toBe(3);
+    expect(wordsOf([32, 32, 64], MIPS_IDO)).toBe(4);
+    expect(helperPrototypes(MIPS_IDO).__ll_bit_insert).toEqual({ params: 6 });
   });
 
   test('the 32-bit soft divisions are not wide, and the 64-bit family is', () => {

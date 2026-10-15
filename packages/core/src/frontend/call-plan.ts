@@ -240,7 +240,7 @@ export function callDeclarations(
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
-  const helperProtos = helperPrototypes(target.runtimeHelpers);
+  const helperProtos = helperPrototypes(target);
   const wideHelper = (callee: string) => {
     // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
     // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
@@ -435,7 +435,7 @@ export function callDeclarations(
     }));
     // a struct partly in the registers and partly on the stack (FUNCTION_ARG_PARTIAL_NREGS) is
     // one value read from two places, which no lowering here builds
-    const past = byValue.find((b) => wordsOf(widths.slice(0, b.word)) + b.words > target.argRegs.length);
+    const past = byValue.find((b) => wordsOf(widths.slice(0, b.word), target) + b.words > target.argRegs.length);
     if (past !== undefined) {
       fail(
         `cannot lift '${name}': \`${callee}\` takes ${structSpelling(past.type)} by value as its parameter ${past.param + 1}, ` +
@@ -504,7 +504,7 @@ export function callDeclarations(
         );
       }
     }
-    if (!lowering.stackArgs && declared !== null && wordsOf(declared.widths) > target.argRegs.length) {
+    if (!lowering.stackArgs && declared !== null && wordsOf(declared.widths, target) > target.argRegs.length) {
       fail(
         `cannot lift '${name}': outgoing stack arguments not modelled — '${callee}' is declared with ` +
           `${declared.widths.length} parameters and the argument registers carry ${target.argRegs.length}, so the rest ` +
@@ -603,7 +603,7 @@ export function callDeclarations(
             accept: (v) => !placeholders?.has(v),
             gap: guess && { name, at: guess.at, fail },
           })
-        : wordsOf(widths);
+        : wordsOf(widths, target);
     if (widths === null) {
       guess?.refuse(argc);
     }

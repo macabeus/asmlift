@@ -217,6 +217,16 @@ describe('a struct passed by value in argument words', () => {
       ]);
       expect(byValueCallArgs(p, ARMV4T_AGBCC)?.widths).toEqual([32, 32, 32]);
     });
+
+    // one rule for every 8-aligned argument: the `long long` skips a1, so the struct after it
+    // starts at a4's word, which is even (`wordsOf`)
+    test('a struct after a `long long` counts the word the `long long` skipped', () => {
+      const after = byValueCallArgs({ params: ['s32', 's64', 'struct L'], byValueLayouts: { 2: L } }, O32);
+      expect(after?.widths).toEqual([32, 64, 32, 32]);
+      expect(byValueRefusal({ params: ['s64', 's32', 'struct L'], byValueLayouts: { 2: L } }, O32)?.refused).toMatch(
+        /would start at an odd argument word/,
+      );
+    });
   });
 
   test('says why it places none', () => {

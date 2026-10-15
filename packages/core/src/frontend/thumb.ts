@@ -3117,7 +3117,7 @@ interface ThumbFrame {
  *
  *  Null for an arity that fits in registers, where there IS no outgoing block. */
 function outgoingBlock(widths: readonly number[], target: TargetDescription): number[] | null {
-  const words = wordsOf(widths) - target.argRegs.length;
+  const words = wordsOf(widths, target) - target.argRegs.length;
   return words > 0 && target.compilerBehaviors.stagesOutgoingArgsInFrame === true
     ? Array.from({ length: words }, (_, i) => 4 * i)
     : null;
@@ -3465,7 +3465,7 @@ function measureThumbFrame({
       const declared = calls.declaredCall(call.ops[0] ?? '?');
       for (const arg of declared?.byValue ?? []) {
         // `word` indexes the call's widths, where a 64-bit argument is one entry of two registers
-        const reg = wordsOf(declared!.widths.slice(0, arg.word));
+        const reg = wordsOf(declared!.widths.slice(0, arg.word), target);
         const offs = target.argRegs.slice(reg, reg + arg.words).map((r) => {
           const def = instrs
             .slice(0, at)

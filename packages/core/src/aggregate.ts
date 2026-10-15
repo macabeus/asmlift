@@ -324,13 +324,13 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription): ByVal
       if (type?.kind !== 'struct' || type.size === undefined) {
         return { refused: 'it is a union, or has a member this target does not size', param: i };
       }
-      // O32 starts an 8-aligned aggregate at an even argument word and leaves the one it skips
-      // empty. Placed at an even word that changes nothing; placed at an odd one, the skipped word
-      // would be an argument operand nothing passes, so that one refuses.
+      // An 8-aligned struct starts at an even argument word where the target aligns one
+      // (`evenWordAlignedArgs`). Placed at an even word that changes nothing; placed at an odd
+      // one, the skipped word would be an argument operand nothing passes, so that one refuses.
       if (
-        target.compilerBehaviors.alignedAggregateArgsStartEven &&
+        target.evenWordAlignedArgs === true &&
         (aggregateSize(layout, target)?.align ?? 0) >= 8 &&
-        wordsOf(widths) % 2 === 1
+        wordsOf(widths, target) % 2 === 1
       ) {
         return {
           refused:
