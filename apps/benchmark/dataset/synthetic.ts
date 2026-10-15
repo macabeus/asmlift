@@ -1554,6 +1554,29 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int k(int);',
     proto: { k: { params: 1 } },
   },
+  // A JOIN NO PATH DEFINES: `x = y` with both uninitialised joins two undefined values, so every
+  // edge copy into x's join carries nothing, and before the frontend collapsed such a join into one
+  // uninitialised value the structurer kept x's local and dropped all its assignments — a contract
+  // failure ("read but never assigned"). ido7.1 keeps x and y in frame words (sp@4, sp@0) and
+  // lifts; on both gcc 2.7.2 lanes they sit in v0 and v1, scratch registers hand-written asm passes
+  // inputs in (`hiddenInputRegs`), and with no definition meeting either entry value the lift
+  // declines rather than guess which. agbcc keeps them in saved registers across two calls.
+  {
+    sym: 'uninit_both',
+    src: 'int uninit_both(int c){ int x; int y; if (c) x = y; return x + c; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+  },
+  {
+    sym: 'uninit_both_saved',
+    src:
+      'void f(int,int,int,int);\nint uninit_both_saved(int c,int a,int b,int d){ int x; int y; if (c) x = y;' +
+      ' f(a, b, d, c); f(d, a, b, c); return x + c + a + b + d; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void f(int,int,int,int);',
+    proto: { f: { params: 4, returnsVoid: true } },
+  },
   // The SCRATCH half of the same rule on CodeWarrior: a LEAF needs no saved register, so mwcc 2.4.2
   // homes its uninitialised local in a volatile register no argument travels in, with no save
   // (PPC_MWCC.scratchRegs). `uninit_r0` puts `x` in r0 (`mulli r0,r4,3; add r3,r0,r4`); in
