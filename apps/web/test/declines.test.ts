@@ -1033,19 +1033,15 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // transfer pair is a control-transfer capability sitting above `branch-form`, and
   // `mips.ts`'s sp-as-data refusal names both an address-taken local and local stack frames.
   //
-  // THE TWO STACK PAIRS ARE ONE THROW PER FRONTEND, and `stack-frames` says why it loses both: an
-  // sp-as-data refusal is keyed on the throw, and its `why` is what names a capability. Three of
-  // the four `address-taken-local` markers are the kleod census rows — `byvalregs` on ido7.1 and
-  // gcc2.7.2kmc by `mips.ts`'s spelling, and `uninitfirst` on agbcc by `thumb.ts`'s fallback
-  // `why`, the disjunction the class comment names. The
-  // `outgoing-stack-args` one is `spilldead:agbcc`, whose `why` comes from `frontend/stackargs.ts`
-  // ("it may be that call's outgoing stack argument"). The census found that store a dead spill,
-  // so the row is filed where its message's own hedge points — the refusal is what is attributed,
-  // and a reader of this pair should know the hedge is there.
+  // THE STACK PAIR IS ONE THROW, and `stack-frames` says why it loses: an sp-as-data refusal is
+  // keyed on the throw, and its `why` is what names a capability. All three markers are
+  // `mips.ts`'s spelling, the disjunction the class comment names — `byvalregs` on ido7.1 and
+  // gcc2.7.2kmc, and `af:suMtxMakeSRT` on ido7.1. No Thumb row reaches a stack pair:
+  // agbcc's `uninitfirst` and `spilldead` lift, as a frame word read before any store and as
+  // locals above the lowest loaded word.
   const OVERLAPS: [chain: string, markers: number][] = [
     ['indirect-call > branch-form', 10],
-    ['address-taken-local > stack-frames', 4],
-    ['outgoing-stack-args > stack-frames', 1],
+    ['address-taken-local > stack-frames', 3],
   ];
 
   test('every marker that more than one class matches is attributed by a listed ordering', () => {
