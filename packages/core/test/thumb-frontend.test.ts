@@ -862,8 +862,8 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     test('…and a later argument register the caller DID set up carries the result with it', () => {
-      // agbcc's `g(f(a, b), c)` — the shape of its soft-float `a * b + c` before the runtime table
-      // named the single helpers: the result comes back in r0 and stays there while `c` goes into
+      // agbcc's `g(f(a, b), c)` — the shape of its soft-float `a * b + c` with the single helpers
+      // undeclared: the result comes back in r0 and stays there while `c` goes into
       // r1. Argument 0 is unfresh and argument 1 is not, so the run bridges across r0 rather than
       // truncating the call to nothing.
       expect(dc('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n')).toContain('bar(foo(), ');
@@ -4395,7 +4395,8 @@ describe('a declared callee whose parameters are not laid out does not lose its 
   const lift = (prototypes: Prototypes) => decompile('fj', FJ, ARMV4T_AGBCC, { prototypes }).source;
 
   // agbcc has no FPU, and lays out a `double` in general words but not a `float` or a `long double`:
-  // `int g(int, float);` lifted `g(a0 + 1)`, and `float h(float);` `h(v)` as `h(a1, a1)`
+  // the guess would lift `int g(int, float);`'s call as `g(a0 + 1)`, and `float h(float);`'s `h(v)`
+  // as `h(a1, a1)`
   test('a parameter declared float or long double refuses on agbcc', () => {
     for (const t of ['float', 'f32', 'long double']) {
       expect(() => lift({ g: { params: ['s32', t], returns: 's32' } })).toThrow(
@@ -4407,7 +4408,7 @@ describe('a declared callee whose parameters are not laid out does not lose its 
   });
 
   // `void h(int, Foo);` with `Foo` unresolved: the list is unsized, the guess stands in, and it
-  // counted one register for a declaration of two
+  // counts one register for a declaration of two
   test('a guess shorter than an unsized declaration refuses', () => {
     expect(() => lift({ g: { params: ['s32', 'Foo'], returns: 's32' } })).toThrow(
       /`g` is declared with 2 parameters, which no layout here places, and the arity guess in its place finds 1 argument register set up/,

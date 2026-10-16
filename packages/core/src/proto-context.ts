@@ -1126,8 +1126,8 @@ function composable(unstated: readonly ParameterList[], stated: readonly Paramet
 
 /** Whether `fn`'s parentheses are C's empty list: `(void)`, or one parameter whose type is `void`
  *  through a typedef (`typedef void V; int k(V);`, C99 6.7.5.3p10). Read as a list of one
- *  parameter spelled `void`, the second has the call pass a register nothing set up for it:
- *  `k()` lifted `k(a0)`. */
+ *  parameter spelled `void`, the second would have the call pass a register nothing set up for it
+ *  (`k()` as `k(a0)`). */
 function isVoidList(
   fn: Extract<Derivation, { kind: 'function' }>,
   tokens: Tokens,

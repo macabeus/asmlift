@@ -156,16 +156,15 @@ export function helperPrototypes(
  *  NAMING THEM IS A TRADE, and these ten make it: a call the fold refuses declines where an unnamed
  *  helper would publish as a pass-through. So a function whose float arithmetic feeds a compare, a
  *  conversion or an ordinary call declines, where unnamed it would print `__muldf3(); g();`. For
- *  the singles that pass-through was no match bought for free but wrong C: unnamed, `__mulsf3`'s
- *  arity is GUESSED (frontend/ssa.ts `fallbackArgc`), and a guess drops what the function passes on
- *  unchanged — `a * b + c` published as `__addsf3(__mulsf3(), a2)`, `a + b` as `__addsf3()`. Named,
- *  the same rows lift `a0 * a1 + a2` and `a0 + a1` and score the same.
+ *  the singles that pass-through is wrong C: unnamed, `__mulsf3`'s arity is GUESSED (frontend/ssa.ts
+ *  `fallbackArgc`), and a guess drops what the function passes on unchanged — `a * b + c` as
+ *  `__addsf3(__mulsf3(), a2)`, `a + b` as `__addsf3()`.
  *
  *  THE COMPARES AND THE CONVERSIONS ARE HERE TOO, AND THEY ONLY SIGN: the IR has no int<->float op
  *  to fold one into, so each carries no `op` and refuses (`refuseUnmodelledHelpers`), as
- *  `IDO_RUNTIME_HELPERS` signs its conversions. Unnamed, each was the same guess: `(int)x` published
- *  as `__fixsfsi()`, `(float)i` as `__floatsisf()`, `a > b` as `__gtsf2() > 0`, the argument
- *  passed on unchanged dropped every time, and each a byte-exact MATCH. The names are the ones agbcc
+ *  `IDO_RUNTIME_HELPERS` signs its conversions. Unnamed, each would be the same guess, dropping the
+ *  argument passed on unchanged and matching byte for byte: `(int)x` as `__fixsfsi()`, `(float)i` as
+ *  `__floatsisf()`, `a > b` as `__gtsf2() > 0`. The names are the ones agbcc
  *  emits for every compare, every conversion between `int`, `unsigned`, `long long` and either
  *  precision, and every widening and narrowing between the two precisions (compiled evidence: one
  *  function per operation at the canonical flags); `__cmpdi2`, which it also calls converting an

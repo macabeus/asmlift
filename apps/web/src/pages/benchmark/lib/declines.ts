@@ -580,7 +580,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // states parameters no layout places — a float on a target with no FPU, or a count the guess
     // falls short of (`frontend/call-plan.ts` `refuseUnplacedFloat`, `refuseShortOfDeclared`),
     // both spelt "the arity guess in its place". Two of the three have a declaration, so the label
-    // names the guess, not a missing prototype. The key is older than the label.
+    // names the guess, not a missing prototype.
     key: 'no-prototype-args',
     label: 'Call arity guessed from the argument registers',
     pattern: /has no prototype|a prototype stating only its first|the arity guess in its place/,

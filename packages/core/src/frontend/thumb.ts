@@ -5754,15 +5754,11 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
     // same bytes), as it does with four parameters.
     withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
-    // A GAP IN THE ARGUMENT REGISTERS REFUSES (`fallbackArgc`). The guessed count stops at the first
-    // register nothing reaches, and a register this function never wrote still holds its own
-    // incoming argument, which the call may be handed unchanged: `logv(s, 1)` sets r1 alone and
-    // leaves `s` in r0, and a count that stops at r0 lifts it as `logv()`. A later register that
-    // does hold a value says the call takes arguments past the gap, so the count is not decidable.
-    // A run of incoming arguments passed on with no register set up past it (`g2(a, b)`) leaves no
-    // gap, is the same machine code as `g2()`, and is still lifted as the shorter call. The
-    // instruction carries no address, so the refusal names the call by where the .s puts it
-    // (`thumbCallLocator`).
+    // A GAP IN THE ARGUMENT REGISTERS REFUSES (`fallbackArgc`): `logv(s, 1)` sets r1 alone and
+    // leaves `s` in r0, so a count that stops at r0 would lift `logv()`. A run of incoming arguments
+    // passed on with no register set up past it (`g2(a, b)`) leaves no gap, is the same machine code
+    // as `g2()`, and is lifted as the shorter call. The instruction carries no address, so the
+    // refusal names the call by where the .s puts it (`thumbCallLocator`).
     //
     // No `refuse`: a guess that fills r0..r3 asks nothing of the outgoing area here. A word agbcc
     // stages at [sp, #k] for the call is an argument only where `analyzeOutgoingArgs` licensed the

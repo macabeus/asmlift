@@ -166,10 +166,9 @@ export interface CallSite {
   /** what this frontend defines registers with that is no value and so no argument — a pending
    *  high half (frontend/high-half.ts), a jump table's base (frontend/jump-table.ts) */
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
-  /** what a guessed arity refuses on. REQUIRED, because the gap refusal is (`fallbackArgc`): a
-   *  count that stopped at the first register nothing reaches would drop every argument past an
-   *  incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`), and no frontend may opt
-   *  out of it by omission. */
+  /** what a guessed arity refuses on. Required, as the gap refusal it feeds (`fallbackArgc`) has
+   *  no opt-out: a count that stopped at the first register nothing reaches would drop every
+   *  argument past an incoming one the call is handed unchanged (`logv(s, 1)` as `logv()`). */
   readonly guess: {
     /** where the call is, for the gap refusal: its address, or — for an ISA whose instructions
      *  carry none (Thumb's `.s` text) — a phrase that names it, printed as written */
@@ -397,13 +396,11 @@ export function callDeclarations(
   // Where the target has an FPU, `plan` refuses every floating parameter first (it travels in the
   // FPU's registers). Where it has none — agbcc — a `double` is laid out in general words
   // (`TargetDescription.doubleArgWords`) and a `float` or `long double` is not (`proto.ts`
-  // `declaredCallArgs`), so the list states no layout and the call would fall to the arity guess.
-  // That guess is wrong in both directions against the very declaration that was read past: a
-  // trailing argument passed through unchanged has no definition and is dropped (`int g(int,
-  // float)`: `g(a + 1, b)` as `g(a0 + 1)`), and a register left over from the caller is counted
-  // (`float h(float)`: `h(v)` as `h(a1, a1)`). Both compile without the header and neither compiles
-  // against it. The abstention an unsized typedef gets does not apply: a floating spelling is
-  // known, and what is missing is a layout, not a width.
+  // `declaredCallArgs`), so the call would fall to the arity guess, which is wrong both ways: a
+  // trailing argument passed through unchanged is dropped (`int g(int, float)`: `g(a + 1, b)` as
+  // `g(a0 + 1)`), and a register left over from the caller is counted (`float h(float)`: `h(v)` as
+  // `h(a1, a1)`). Neither compiles against the header. The unsized-typedef abstention does not
+  // apply: a floating spelling is known, and what is missing is a layout, not a width.
   const refuseUnplacedFloat = (callee: string): void => {
     const p = declarationOf(callee);
     const params = p?.params;
@@ -618,7 +615,7 @@ export function callDeclarations(
   // refuses (`SsaBuilder.finish`). So `int logv(const char *, int, ...)` lifts `logv(s + 1, c)` as
   // `logv(a0 + 1, a1)`, where a guess from r0 sees r1 untouched and refuses the gap. A fixed list
   // holding an UNSIZED spelling states no such words — the one may be two — and gets no floor; a
-  // fixed parameter known not to be one word has already refused (`refuseUnplacedByValue`).
+  // fixed parameter known not to be one word refuses (`refuseUnplacedByValue`, in `declaredCall`).
   const variadicFloor = (callee: string | undefined): number => {
     const own = callee === undefined ? undefined : known(prototypes, callee);
     const fixed = own?.params === undefined ? own?.variadicParams : undefined;

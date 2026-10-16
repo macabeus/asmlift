@@ -1167,10 +1167,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // each one word states its first argument words exactly, so they are read as stated and only what
   // the `...` takes is guessed, above them (frontend/call-plan.ts `variadicFloor`): `passvar` lifts
   // `logv(a0 + 1, a1)`, and `passfmt`, the `DebugPrintf(fmt, …)` shape, keeps the format it passes
-  // through below a set-up argument where a guess from the first register refuses the gap. On
-  // main, agbcc lifted both as the dropped call and ido7.1, gcc2.7.2kmc and gcc2.7.2 lifted
-  // `passvar` so. mwcc's variadic call clears a condition-register bit (`crclr`), which the PowerPC
-  // frontend does not model, so those cells decline. agbcc lays out a `double` in general
+  // through below a set-up argument where a guess from the first register refuses the gap. mwcc's
+  // variadic call clears a condition-register bit (`crclr`), which the PowerPC frontend does not
+  // model, so those cells decline. agbcc lays out a `double` in general
   // words and a `float` not at all, so `g(int, float)` refuses there (`refuseUnplacedFloat`); a
   // target with an FPU refuses it already, so that row is agbcc's alone, a declined witness.
   {

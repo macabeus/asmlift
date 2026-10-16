@@ -49,8 +49,8 @@ describe('prototypes from a declaration context', () => {
     expect(prototypesFromContext(src, 'c++').f).toEqual({ returns: 'int', params: [] });
   });
 
-  // `int k(V)` read as a list of one parameter spelled `void` passed the first argument register,
-  // and `k()` lifted `k(a0)` on agbcc, ido7.1, gcc2.7.2kmc, gcc2.7.2 and mwcc_242_81
+  // `int k(V)` read as a list of one parameter spelled `void` would pass the first argument
+  // register, and `k()` would lift as `k(a0)` on every toolchain
   test('a list of one `void` through a typedef is empty, and a pointer to it is a parameter', () => {
     const p = prototypesFromContext('typedef void V; typedef V *VP; int k(V); int kp(VP);', 'c');
     expect(p.k).toEqual({ returns: 'int', params: [] });

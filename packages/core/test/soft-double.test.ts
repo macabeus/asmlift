@@ -162,7 +162,7 @@ describe('the single-precision arithmetic helpers are the float ops', () => {
 
 describe('what the table names', () => {
   // The IR has no int<->float op to fold a compare or a conversion into, so the table SIGNS each
-  // and states no op: a call to one refuses, where unnamed its arity was guessed and the argument
+  // and states no op: a call to one refuses, where unnamed its arity would be guessed and the argument
   // it is handed unchanged dropped (`(int)x` as `__fixsfsi()`).
   test('every compare and conversion, signed and with no op', () => {
     const signed = {
