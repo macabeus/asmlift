@@ -10341,6 +10341,38 @@ export const SYNTHETIC: SynthSpec[] = [
       bvcg: { returnsVoid: true },
     },
   },
+
+  // ── THE RETURN PROOF: hand-written asm whose return jumps somewhere other than the caller ──
+  // `retmtlr` and `retjr` exist to be DECLINED, as `tax_gprel` does. `blr` and `jr ra` are returns by
+  // their name alone, so a function that first puts something else in the link register or in `ra`
+  // lifted as a C `return 7;` that, compiled, returns to the caller instead of to the address the
+  // function chose (frontend/ppc.ts `linkRegisterProof`, frontend/mips.ts
+  // `refuseReturnsNotThroughCallersRa`). No compiler emits the shape, so only `asm` can carry it
+  // into the tier: an `asm` function on CodeWarrior, and on GCC an `__asm__` statement before the
+  // `return` (gcc 2.7.2 does not know the statement writes `ra`, so its own `jr ra` follows it:
+  // `move ra,a1; jr ra; li v0,7` on both GCC builds, measured).
+  //
+  // The mwcc row sets its own `cflags` because two of its three builds have no canonical set; an
+  // `asm` function is the same object at any level. IDO 7.1 has no inline `asm`, so `ido7.1` is
+  // pinned by core's unit tests only (`packages/core/test/mips-return-proof.test.ts`).
+  //
+  // Before the proof asmlift lifted both as `return 7;`, which compiles to a function that returns
+  // to its caller; now each row declines.
+  {
+    sym: 'retmtlr',
+    src: 'asm int retmtlr(int a, int b)\n{\n    nofralloc\n    li r3, 7\n    mtlr r4\n    blr\n}',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['baseline'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'int retmtlr(int a, int b);',
+  },
+  {
+    sym: 'retjr',
+    src: 'int retjr(int a, int b)\n{\n    __asm__("move $31,$5");\n    return 7;\n}',
+    features: ['baseline'],
+    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int retjr(int a, int b);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

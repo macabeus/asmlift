@@ -31,7 +31,7 @@
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 109 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -57,7 +57,14 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/ppc.ts         17  `stwu` with update, a relocation on a stack-pointer adjust, a branch
+//   frontend/mips.ts        15  a relocation with an addend, an address below the symbol, a
+//                               non-numeric immediate, the caller's value a restore writes
+//                               read as a value (at the read, or through a merge), five refusals
+//                               about a disassembly the reader cannot account for, a `jal` no
+//                               relocation names, one relocated against a section, one in a delay
+//                               slot, one whose own slot is not the next word of its block, and a
+//                               `j` to another function (a tail call)
+//   frontend/ppc.ts         15  `stwu` with update, a relocation on a stack-pointer adjust, a branch
 //                               testing a cr field a call destroyed (no compiler emits it), the
 //                               return address `mflr` copies out stored anywhere but the link
 //                               register's save word, the reaching-compare throw whose reason is
@@ -69,18 +76,7 @@
 //                               number no runtime routine has, the floating-point routines, no
 //                               single frame address in r11, r1's depth unknown there), control
 //                               falling off the end, an `mflr` reading a link register a `bl`
-//                               overwrote, a return that may not jump through the caller's
-//                               return address (after a `bl` nothing put the saved address back
-//                               from, or through an `mtlr` of anything else), and a `b` out of
-//                               the function (a tail call)
-//   frontend/mips.ts        16  a relocation with an addend, an address below the symbol, a
-//                               non-numeric immediate, the caller's value a restore writes
-//                               read as a value (at the read, or through a merge), five refusals
-//                               about a disassembly the reader cannot account for, a `jal` no
-//                               relocation names, one relocated against a section, one in a delay
-//                               slot, one whose own slot is not the next word of its block, a
-//                               `j` to another function (a tail call), and a `jr ra` that may not
-//                               jump to the caller's return address
+//                               overwrote, and a `b` out of the function (a tail call)
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
@@ -658,6 +654,18 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'return-address',
     label: 'The return address read as a value (an `mflr` copy used as data)',
     pattern: /copies out is used as a value/,
+  },
+  {
+    // A return the frontend could not show jumps to the caller's return address: on PowerPC a `blr`
+    // after an `mtlr` of anything but the address an `mflr` copied out (or its reload from the link
+    // register's save word), or after a `bl` with no such `mtlr` since (`linkRegisterProof` in
+    // `frontend/ppc.ts`); on MIPS a `jr ra` where `ra` may hold anything else
+    // (`refuseReturnsNotThroughCallersRa` in `frontend/mips.ts`). Hand-written asm only — no compiler
+    // emits it — and its rows are the decline witnesses `synthetic:retmtlr:*` and `synthetic:retjr:*`.
+    // Thumb's own refusal of the same thing names an indirect jump, and stays in the residue.
+    key: 'return-target',
+    label: "Returns that may not jump to the caller's return address (hand-written asm)",
+    pattern: /may not return through the caller's (?:link register|return address)/,
   },
   {
     // agbcc spells a branch past Thumb's ±2 KB reach as `bl .Lx @far jump` (thumb.md `jump`,
