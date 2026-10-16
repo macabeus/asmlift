@@ -10770,8 +10770,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // `ugek` with `addi -K`). `nbceq`/`nbcne` are the controls spelled by neither trick but by
   // `cntlzw; srwi 5`, `subf; subf; or` and 2.3.3's `addic -1; subfe`, and the last four use the
   // boolean as a value: `nbcselult`'s `(a < b) ? 5 : 0` is `subfe; and` on 2.4.x, which lifts as
-  // `5 & -(a < b)` and recompiles to `andi.`. Folded in pattern/engine.ts MWCC_COMPARE_PATTERNS,
-  // over frontend/ppc.ts `readCarry`.
+  // `5 & -(a < b)` and recompiles to `andi.`. `nbcne0` is 2.3.3's `neg; addic -1; subfe`, whose
+  // carry tests the NEGATION, and `nbcshlult` the 2.4.x extract merged with its shift into one
+  // `rlwinm r3,r0,4,28,28`. Folded in pattern/engine.ts MWCC_COMPARE_PATTERNS, over
+  // frontend/ppc.ts `readCarry`.
   ...(
     [
       ['nbcult', 'unsigned a, unsigned b', 'a < b'],
@@ -10792,6 +10794,8 @@ export const SYNTHETIC: SynthSpec[] = [
       ['nbcaddult', 'unsigned a, unsigned b, int c', 'c + (a < b)'],
       ['nbcnegult', 'unsigned a, unsigned b', '-(a < b)'],
       ['nbcselult', 'unsigned a, unsigned b', '(a < b) ? 5 : 0'],
+      ['nbcne0', 'int a', 'a != 0'],
+      ['nbcshlult', 'unsigned a, unsigned b', '(a < b) << 3'],
     ] as const
   ).map(([sym, params, expr]): SynthSpec => ({
     sym,
