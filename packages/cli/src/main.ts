@@ -24,6 +24,7 @@ import {
   globalsFromContext,
   prototypesFromContext,
   withContextPrototypes,
+  withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
 import { type SymbolMap, asIfUndecompiled } from '@asmlift/core/symbols';
 import { TOOLCHAIN_TARGETS, type TargetDescription, isToolchainId } from '@asmlift/core/target';
@@ -726,7 +727,7 @@ export async function runCli(
       };
     }
     prototypes = withContextPrototypes(
-      prototypes,
+      withOwnReturnLayout(prototypes, name, text, unitTarget.dialect ?? 'c'),
       prototypesFromContext(text, unitTarget.dialect ?? 'c'),
       name,
       symbols,

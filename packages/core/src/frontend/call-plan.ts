@@ -229,28 +229,6 @@ export function callDeclarations(
         `argument register, and ${target.returnReg} is not ${target.argRegs[0]}`,
     );
   }
-  // THE CALLEE HALF OF A STRUCT RETURNED THROUGH MEMORY IS NOT MODELLED, on any frontend. A function
-  // declared to return a struct or union by value that its target's rule (`returnsInMemory`)
-  // returns through memory is handed its caller's hidden pointer in the first argument register, so
-  // its declared parameters sit one register up and its result is a run of stores through that
-  // pointer. Lifted as is, it is `s32 *f(s32 *a0, s32 a1)`: the machine code's function, and not
-  // the one the declaration names, so where the caller states that declaration it refuses rather
-  // than publish a signature that contradicts it. A context's own entry for the function is left
-  // out (`withContextPrototypes`), and there the pointer function is all the lift is told. Asked
-  // here because every frontend builds its calls through this, whatever its call lowering.
-  const self = Object.hasOwn(prototypes, name) ? prototypes[name] : undefined;
-  // One no rule here sizes may come back either way, and refuses with that said.
-  const selfInMemory = declaresAggregateReturn(self) ? returnsInMemory(returnedAggregate(self!), target) : false;
-  if (selfInMemory !== false) {
-    const how =
-      selfInMemory === true
-        ? `this target returns that through a hidden pointer in ${target.argRegs[0]}`
-        : `nothing here says whether this target returns it through a hidden pointer in ${target.argRegs[0]}`;
-    fail(
-      `cannot lift '${name}': it is declared to return ${self!.returns ?? 'a struct or union'} by value, and ${how} — ` +
-        'a function that itself returns a struct through a hidden pointer is not modelled',
-    );
-  }
   const pairReturnClobbers = callClobbers.filter((r) => r !== target.argRegs[1]);
   const heldAtUndeclaredCall = new Set<Value>();
   const isFloatHelperName = (callee: string): boolean => {

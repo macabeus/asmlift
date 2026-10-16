@@ -8,6 +8,7 @@ import { describe, expect, test } from 'vitest';
 import { renderDeclarations } from '../src/declare';
 import { decompile } from '../src/pipeline';
 import { declaresAggregateReturn, symbolPrototype } from '../src/proto';
+import { withOwnReturnLayout } from '../src/proto-context';
 import { enumerateCandidates } from '../src/rank';
 import { ARMV4T_AGBCC, PPC_MWCC } from '../src/target';
 
@@ -569,7 +570,7 @@ describe('a callee declared to return a struct or union by value', () => {
   });
 });
 
-// THE CALLEE HALF IS NOT MODELLED on any frontend (call-plan.ts `callDeclarations`). agbcc's
+// THE CALLEE HALF IS NOT MODELLED on any frontend (pipeline.ts `refuseOwnStructReturnThroughMemory`). agbcc's
 // `struct S8 rmk8(s32 x){ struct S8 s; s.a = x; s.b = x + 1; return s; }` stores through the r0 it
 // was handed, and lifted as is it is `s32 *rmk8(s32 *a0, s32 a1)`; mwcc_242_81's `rmk12`, a
 // 12-byte struct, stores through r3. A struct that comes back in r0 (agbcc's `struct S1 { u32 x; }`)
@@ -603,5 +604,45 @@ describe('a function that itself returns a struct', () => {
     const rmk1 = 'rmk1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
     const prototypes = { rmk1: { params: ['s32'], returns: 'struct S1', returnLayout: u32s('x') } };
     expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+  });
+
+  // A `--proto` table spells the return and lays nothing out; the context it is lifted beside does
+  // (`withOwnReturnLayout`), for a tag and for a typedef name alike
+  const CTX = 'typedef unsigned int u32;\nstruct S1 { u32 x; };\ntypedef struct { u32 a, b; } T8;\n';
+  const rmk1 = 'rmk1:\n\tadd\tr0, r0, #0x1\n\tbx\tlr\n';
+
+  test('a stated tag the context lays out in the return register lifts, and unsized it says what is missing', () => {
+    const stated = { rmk1: { params: ['s32'], returns: 'struct S1' } };
+    const prototypes = withOwnReturnLayout(stated, 'rmk1', CTX, 'c');
+    expect(prototypes?.rmk1?.returnLayout).toEqual(u32s('x'));
+    expect(decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes }).source).toMatch(/return a0 \+ 1;/);
+    expect(() => decompile('rmk1', rmk1, ARMV4T_AGBCC, { prototypes: stated })).toThrow(
+      /it is declared to return struct S1 by value, and nothing here lays it out, and this target's rule needs its layout/,
+    );
+  });
+
+  test('a stated typedef of a struct is that struct, and refuses where it comes back through memory', () => {
+    const rt8 = 'rt8:\n\tadd\tr2, r1, #0x1\n\tstr\tr2, [r0]\n\tstr\tr1, [r0, #0x4]\n\tbx\tlr\n';
+    const prototypes = withOwnReturnLayout({ rt8: { params: ['s32'], returns: 'T8' } }, 'rt8', CTX, 'c');
+    expect(prototypes?.rt8?.returnLayout).toEqual(u32s('a', 'b'));
+    expect(() => decompile('rt8', rt8, ARMV4T_AGBCC, { prototypes })).toThrow(
+      /cannot lift 'rt8': it is declared to return T8 by value, and this target returns that through a hidden pointer in r0/,
+    );
+  });
+
+  test('a scalar, a pointer or a name the context does not lay out is left as stated', () => {
+    const stated = { f: { returns: 'u32' }, g: { returns: 'struct S1 *' }, h: { returns: 'BOOL' } };
+    for (const name of ['f', 'g', 'h']) {
+      expect(withOwnReturnLayout(stated, name, CTX, 'c')).toBe(stated);
+    }
+  });
+
+  // mwcc's svr4 rule hands an eight-byte struct back in r3:r4, and the lift returns r3 alone
+  test('in a register pair, it refuses', () => {
+    const rmk8 = '0 <rmk8>:\n0:\taddi    r4,r3,0\n4:\taddi    r3,r3,1\n8:\tblr\n';
+    const prototypes = { rmk8: { params: ['s32'], returns: 'struct S8', returnLayout: u32s('a', 'b') } };
+    expect(() => decompile('rmk8', rmk8, PPC_MWCC, { prototypes })).toThrow(
+      /it is declared to return struct S8 by value, and this target hands its 8 bytes back in two registers/,
+    );
   });
 });

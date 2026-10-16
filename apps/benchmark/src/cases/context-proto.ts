@@ -14,6 +14,7 @@ import {
   globalsFromContext,
   prototypesFromContext,
   withContextPrototypes,
+  withOwnReturnLayout,
 } from '@asmlift/core/proto-context';
 import type { SymbolMap } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
@@ -40,7 +41,13 @@ export function rowPrototypes(
     derived = prototypesFromContext(ctxI, language);
     parsed.set(key, derived);
   }
-  const merged = withContextPrototypes(manifest, derived, sym, symbols, target);
+  const merged = withContextPrototypes(
+    withOwnReturnLayout(manifest, sym, ctxI, language),
+    derived,
+    sym,
+    symbols,
+    target,
+  );
   return Object.keys(merged).length > 0 ? merged : undefined;
 }
 

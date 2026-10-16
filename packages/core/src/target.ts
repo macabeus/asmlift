@@ -940,7 +940,8 @@ export interface TargetDescription {
     //     pointer, `move v0,a0`).
     // Under every rule only the caller's half is lowered (frontend/call-plan.ts); a function that
     // itself returns a struct through memory refuses where its declaration is stated, and is read
-    // as the pointer function it compiles to where it is not (call-plan.ts `callDeclarations`).
+    // as the pointer function it compiles to where it is not (pipeline.ts
+    // `refuseOwnStructReturnThroughMemory`).
     // ABSENT ⇒ unmeasured, and such a call declines.
     aggregateReturn?: 'apcs' | 'svr4' | 'memory';
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
