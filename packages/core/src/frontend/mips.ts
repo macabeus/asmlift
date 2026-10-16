@@ -838,21 +838,15 @@ interface RaState {
   readonly depth: number | null;
 }
 
-/** Bytes a store mnemonic writes, or undefined for an instruction that stores nothing. `swl`/`swr`
- *  write part of the aligned word around their address, so they are taken to reach the whole word
- *  either side of it. */
+/** Bytes a store mnemonic writes, or undefined for an instruction that stores nothing. Only the
+ *  stores the lowering models (`emitStore`) are named: the proof runs after the whole function is
+ *  lowered, and every other store (`swl`/`swr`, `sc`, `sd*`, `swc1`/`sdc1`) is refused before it by
+ *  `opaqueDest`'s `storeClass` or the FPU arm. A lowering that learns another store must name it
+ *  here, with the bytes it reaches. */
 const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
   sb: [0, 1],
   sh: [0, 2],
   sw: [0, 4],
-  sc: [0, 4],
-  swc1: [0, 4],
-  swl: [3, 7],
-  swr: [3, 7],
-  sd: [0, 8],
-  sdc1: [0, 8],
-  sdl: [7, 15],
-  sdr: [7, 15],
 };
 
 /** `k0`/`k1`, which O32 reserves to the kernel: an exception handler may overwrite them at any
@@ -865,11 +859,12 @@ const isKernelReg = (r: string) => /^\$?(k[01]|2[67])$/.test(r);
  *  `jr ra` reads as a return from its operand alone, and it is one only where `ra` holds the address
  *  this function was called with. It reads `ra` when it runs, before its delay slot. A forward
  *  dataflow over the blocks tracks where that address is:
- *    • `ra` holds it at entry; a call (`jal`, and every linking branch) writes `ra`, runs its delay
- *      slot, and only then destroys every register O32 lets a callee destroy (and its home area), so
- *      a slot's write is exposed to the callee; a slot that writes `ra` refuses, since the callee
- *      then returns somewhere other than the code after the call; a copy (`move`, `addu`/`or` with `zero`) carries it on;
- *      any other write to a register — `lw ra,0(a0)`, `addiu ra,ra,8`, `lui ra` — loses it;
+ *    • `ra` holds it at entry; a call (`jal`) writes `ra`, runs its delay slot, and only then
+ *      destroys every register O32 lets a callee destroy (and its home area), so a slot's write is
+ *      exposed to the callee; a slot that writes `ra` refuses, since the callee then returns
+ *      somewhere other than the code after the call; a copy (`move`, `addu`/`or` with `zero`)
+ *      carries it on; any other write to a register — `lw ra,0(a0)`, `addiu ra,ra,8`, `lui ra` —
+ *      loses it;
  *    • a `sw` of a register holding it through `sp` puts it in that word, named by its offset from
  *      the entry `sp` (this walk follows `addiu sp,sp,N`; any other write to `sp` makes the depth
  *      unknown), and a `lw` from that word copies it back out. Any other store reaching those bytes,
@@ -980,7 +975,8 @@ function refuseReturnsNotThroughCallersRa(
         lost = null;
       }
     };
-    // A call (`jal`; the lowering refuses one whose delay slot is not the next word of its block)
+    // A call (`jal`; the lowering refuses one whose delay slot is not the next word of its block, and
+    // every other linking transfer before `toBlocks`, so this walk only asserts it)
     // links `ra`, then runs its delay slot, and only then enters the callee — so what the slot writes
     // is exposed to the callee's clobbers, and a slot that writes `ra` itself makes the callee return
     // somewhere other than the code after the call (a reload of the save word: to our caller).
@@ -995,10 +991,9 @@ function refuseReturnsNotThroughCallersRa(
       lost = call;
       const delay = seq[k + 1];
       if (delay?.addr !== call.addr + 4) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': the delay slot of the '${call.mnemonic}' at 0x${call.addr.toString(16)} is not the ` +
-            `next instruction of its block, so the callee may not return through the caller's return address to ` +
-            `the code after the call`,
+        throw new Error(
+          `internal: the '${call.mnemonic}' at 0x${call.addr.toString(16)} in '${name}' reached the return proof ` +
+            `without its delay slot as the next instruction of its block, which the lowering's fill loop refuses`,
         );
       }
       const w = writtenReg(delay);
