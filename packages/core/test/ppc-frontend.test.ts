@@ -299,8 +299,8 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   });
 
   // A `bl` with no relocation is one the assembler resolved inside this section: in these hand-written
-  // asm functions, into the function's own body. Each lifted a call to an invented `func` on all three
-  // mwcc builds (`q_localfall` as `func(); return 7;`, `q_local` as `return func();`).
+  // asm functions, into the function's own body. Lowered as a call, each would name an invented `func`
+  // on all three mwcc builds (`q_localfall` as `func(); return 7;`, `q_local` as `return func();`).
   test.each(['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as const)(
     'on %s, a `bl` no relocation names declines',
     (tc) => {

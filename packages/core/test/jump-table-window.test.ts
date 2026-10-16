@@ -406,8 +406,8 @@ test('a `bgtlr` bound sends the default to a return of what r3 holds', () => {
 test('a `bgtlr` bound is asked the link-register proof like any return, on every mwcc build', () => {
   // Hand-written asm: the caller's return address is parked in r8 and r4 put in the link register,
   // so the out-of-range `bgtlr` jumps through r4. Every case puts the address back before its
-  // `blr`, so only the default edge can be wrong — it lifted `default: return a0;` before the
-  // table's bound was asked the proof.
+  // `blr`, so only the default edge can be wrong, as `default: return a0;` if the table's bound
+  // were not asked the proof.
   const lines = (park: string[], restore: string[]) => [
     ...park,
     'cmplwi  r3,3',

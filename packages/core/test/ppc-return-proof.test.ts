@@ -1,8 +1,9 @@
 // EVERY PowerPC RETURN JUMPS THROUGH THE CALLER'S RETURN ADDRESS, or the lift declines
 // (`linkRegisterProof`, frontend/ppc.ts). `blr` is a return by its name alone, so a function that
-// put anything else in the link register first — hand-written asm; no compiler emits it — lifted
-// as a C `return` that jumps somewhere else. Each shape below lifted wrong C on all three mwcc
-// builds before the proof (`li r3,7; mtlr r4; blr` was `return 7;`).
+// put anything else in the link register first — hand-written asm; no compiler emits it — would
+// read as a C `return` that jumps somewhere else. Each shape below is pinned on all three mwcc
+// builds; a case's "wrong C" is what it would otherwise lift as
+// (`li r3,7; mtlr r4; blr` as `return 7;`).
 import { describe, expect, test } from 'vitest';
 
 import { decompile } from '../src/pipeline';
@@ -33,7 +34,7 @@ describe.each(BUILDS)('on %s', (tc, flags) => {
     expect(() => lift('retmtlr', 'li      r3,7', 'mtlr    r4', 'blr')).toThrow(
       /the 'blr' at 0x8 may not return through the caller's link register — on some path the 'mtlr' at 0x4 put r4 there/,
     );
-    // `p_argtail`: a jump through the first argument, lifted `void p_argtail(void) { return; }`
+    // `p_argtail`: a jump through the first argument, wrong C `void p_argtail(void) { return; }`
     expect(() => lift('p_argtail', 'mtlr    r3', 'blr')).toThrow(NOT_THROUGH_LR);
     // `p_loadlr`: a word loaded from memory
     expect(() => lift('p_loadlr', 'lwz     r0,0(r3)', 'mtlr    r0', 'li      r3,7', 'blr')).toThrow(NOT_THROUGH_LR);
@@ -54,7 +55,7 @@ describe.each(BUILDS)('on %s', (tc, flags) => {
   });
 
   test('a call whose return address nothing put back declines', () => {
-    // `p_leafbl`: lifted `ext(); return 7;`, a return to the instruction after the `bl`
+    // `p_leafbl`: wrong C `ext(); return 7;`, a return to the instruction after the `bl`
     expect(() => lift('p_leafbl', bl('ext'), 'li      r3,7', 'blr')).toThrow(
       /the 'blr' at 0x8 may not return through the caller's link register — the 'bl' at 0x0 overwrote it/,
     );
@@ -100,7 +101,7 @@ describe.each(BUILDS)('on %s', (tc, flags) => {
 
   test('a restore routine reloads the registers a copy of the return address was kept in', () => {
     // `q_restr31`: r31 is the caller's r31 again after `_restgpr_29`, so the `blr` jumps there —
-    // lifted `return 7;`
+    // wrong C `return 7;`
     const restr31 = (...mid: string[]) =>
       lift(
         'q_restr31',
@@ -121,7 +122,7 @@ describe.each(BUILDS)('on %s', (tc, flags) => {
     expect(() => restr31()).toThrow(
       /the 'blr' at 0x2c may not return through the caller's link register — on some path the 'mtlr' at 0x20 put r31 there/,
     );
-    // `q_restr31b`, with a call before the restore: lifted `return ext();`
+    // `q_restr31b`, with a call before the restore: wrong C `return ext();`
     expect(() => restr31(bl('ext'))).toThrow(NOT_THROUGH_LR);
   });
 

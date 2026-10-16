@@ -753,7 +753,8 @@ interface LrState {
  *    • the link register holds it at entry; a `bl` writes it (a call, and a register save or restore
  *      routine too), and an `mtlr rS` puts back whatever rS holds;
  *    • `mflr rD` copies it into rD, `mr` copies it on, and any other write to a register loses it —
- *      an ordinary call loses every register the EABI lets a callee destroy, a save routine none;
+ *      an ordinary call loses every register the EABI lets a callee destroy, a save routine none, and
+ *      a GPR restore routine the r{first}..r31 it reloads, as `lmw` does;
  *    • a `stw` of a register holding it into the link register's save word (`LR_SAVE_WORD`, named
  *      from the entry r1 through `r1At`) puts it in that word, and a `lwz` from that word copies it
  *      back out. Any other store reaching those bytes, a store through r1 at an unknown depth, a call

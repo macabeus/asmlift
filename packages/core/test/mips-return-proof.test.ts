@@ -1,8 +1,9 @@
 // EVERY MIPS `jr ra` JUMPS TO THE CALLER'S RETURN ADDRESS, or the lift declines
 // (`refuseReturnsNotThroughCallersRa`, frontend/mips.ts). `jr ra` is a return by its operand alone,
 // so a function that wrote anything else into `ra` first — hand-written asm; no compiler emits it —
-// lifted as a C `return` that jumps somewhere else. Each shape below lifted wrong C on all three
-// MIPS toolchains before the proof (`move ra,a1; jr ra; li v0,7` was `return 7;`).
+// would read as a C `return` that jumps somewhere else. Each shape below is pinned on all three
+// MIPS toolchains; a case's "wrong C" is what it would otherwise lift as
+// (`move ra,a1; jr ra; li v0,7` as `return 7;`).
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
@@ -54,7 +55,7 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
   });
 
   test('a call whose ra nothing reloaded declines', () => {
-    // `m_leafjal2`: a frame, a call, no save — lifted `return ext() + 1;`
+    // `m_leafjal2`: a frame, a call, no save — wrong C `return ext() + 1;`
     expect(() =>
       src(
         [
@@ -104,7 +105,7 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
         [[0xc, 'ext']],
       );
     // `m_jaldelaymove`: the slot puts the caller's address back into ra, so ext returns straight to
-    // our caller — lifted `ext(); return 7;`
+    // our caller — wrong C `ext(); return 7;`
     expect(() => frame('move\tra,s0', '14:\tnop', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toThrow(
       /the 'move' at 0x10 in the delay slot of the 'jal' at 0xc writes ra/,
     );
@@ -124,7 +125,7 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
         [[8, 'ext']],
       ),
     ).toThrow(/the 'lw' at 0xc in the delay slot of the 'jal' at 0x8 writes ra/);
-    // `m_jaldelayt0`: a copy into t0 in the slot — ext may destroy t0, lifted `return ext();`
+    // `m_jaldelayt0`: a copy into t0 in the slot — ext may destroy t0, wrong C `return ext();`
     expect(() => frame('move\tt0,s0', '14:\tmove\tra,t0', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toThrow(
       /the 'jr ra' at 0x24 may not return through the caller's return address — on some path the 'move' at 0x14/,
     );
@@ -137,12 +138,12 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
   });
 
   // O32 reserves k0/k1 to the kernel (`kernelRegs`): an exception handler may overwrite them at any
-  // instruction, so a read of one is no value this function wrote. Each lifted wrong C before.
+  // instruction, so a read of one is no value this function wrote.
   test('a read of k0 or k1 declines, whatever it was copied from', () => {
     const KERNEL_READ = (k: string) =>
       new RegExp(`cannot lift 'f': ${k} read as a value — the ABI reserves it to the kernel`);
     for (const k of ['k0', 'k1']) {
-      // `m_k0`: ra kept in k0 across the call — lifted `return ext() + 1;`
+      // `m_k0`: ra kept in k0 across the call — wrong C `return ext() + 1;`
       expect(() =>
         src(
           [
@@ -158,7 +159,7 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
           [[8, 'ext']],
         ),
       ).toThrow(KERNEL_READ(k));
-      // `m_k0call`: an argument kept in k0 across the call — lifted `return ext(a0) + a0;`
+      // `m_k0call`: an argument kept in k0 across the call — wrong C `return ext(a0) + a0;`
       expect(() =>
         src(
           [
@@ -176,7 +177,7 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
           [[0xc, 'ext']],
         ),
       ).toThrow(KERNEL_READ(k));
-      // `m_k0data`, with no call: lifted `return a0;`
+      // `m_k0data`, with no call: wrong C `return a0;`
       expect(() => src([`0:\tmove\t${k},a0`, '4:\tjr\tra', `8:\tmove\tv0,${k}`])).toThrow(KERNEL_READ(k));
     }
   });

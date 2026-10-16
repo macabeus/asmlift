@@ -662,8 +662,9 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // after an `mtlr` of anything but the address an `mflr` copied out (or its reload from the link
     // register's save word), or after a `bl` with no such `mtlr` since (`linkRegisterProof` in
     // `frontend/ppc.ts`); on MIPS a `jr ra` where `ra` may hold anything else, or a call whose delay
-    // slot writes `ra` (`refuseReturnsNotThroughCallersRa` in `frontend/mips.ts`). Hand-written asm only — no compiler
-    // emits it — and its rows are the decline witnesses `synthetic:retmtlr:*` and `synthetic:retjr:*`.
+    // slot writes `ra` (`refuseReturnsNotThroughCallersRa` in `frontend/mips.ts`). Hand-written asm
+    // only — no compiler emits it — and its rows are the decline witnesses `synthetic:retmtlr:*` and
+    // `synthetic:retjr:*`.
     // Thumb's own refusal of the same thing names an indirect jump, and stays in the residue.
     key: 'return-target',
     label: "Returns that may not jump to the caller's return address (hand-written asm)",

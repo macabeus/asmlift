@@ -876,7 +876,7 @@ const isKernelReg = (kernelRegs: readonly string[], r: string) =>
  *  only, and a `jal` whose `ra` nothing reloaded all decline, where every compiler's `sw ra,N(sp)` …
  *  `lw ra,N(sp)` and a leaf that never names `ra` are returns. A reload from a word another
  *  register was saved in already refuses (`emitLoad`). No compiler emits a violation; hand-written
- *  asm can, and it lifted as a C `return`. A tail call (`j` to another function) and an indirect
+ *  asm can, and it would otherwise lift as a C `return`. A tail call (`j` to another function) and an indirect
  *  `jr` already refuse in `lift`, so `jr ra` is the only exit asked.
  *
  *  A copy into a kernel register (`kernelRegs`, O32's `k0`/`k1`) holds nothing: an exception handler
@@ -977,11 +977,9 @@ function refuseReturnsNotThroughCallersRa(
         lost = null;
       }
     };
-    // A call (`jal`; the lowering refuses one whose delay slot is not the next word of its block, and
-    // every other linking transfer before `toBlocks`, so this walk only asserts it)
-    // links `ra`, then runs its delay slot, and only then enters the callee — so what the slot writes
-    // is exposed to the callee's clobbers, and a slot that writes `ra` itself makes the callee return
-    // somewhere other than the code after the call (a reload of the save word: to our caller).
+    // A call links `ra`, runs its delay slot, then enters the callee (the doc above). The lowering
+    // refuses a `jal` whose slot is not the next word of its block, and every other linking transfer
+    // before `toBlocks`, so this walk only asserts it.
     const seq = [...b.body, ...(b.branch ? [b.branch] : []), ...(b.delay ? [b.delay] : [])];
     for (let k = 0; k < seq.length; k++) {
       const call = seq[k];
@@ -2589,7 +2587,7 @@ function liftOnce(
     declarations: { symbols, context },
   });
 
-  // Asked once everything else lifted, so a function that declines for another reason keeps it.
+  // Asked once everything else lifted, so a function that declines for another reason keeps that message.
   refuseReturnsNotThroughCallersRa(
     name,
     blocks,
