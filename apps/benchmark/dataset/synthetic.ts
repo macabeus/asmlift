@@ -10809,6 +10809,44 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'int k0read(int a);',
   },
+  // A GLOBAL INDEXED BETWEEN ITS RELOCATED HALVES. ido 7.1, KMC GCC and GCC 2.7.2 address `S[i]` as
+  // `lui rH,%hi(S); addu rH,rH,idx; l*/s* x,%lo(S)(rH)` — the scaled index added to the HIGH half,
+  // the constant element or field offset riding the %lo immediate (negative for `S[i - k]`), and a
+  // store's half in `at` (measured by compiling each body below on all three). Before these rows
+  // the only synthetic MIPS `lui; addu` were jump-table dispatches (`sw_jt*`), so nothing in the
+  // tier pinned the data access. agbcc and mwcc_242_81 are controls: agbcc adds the index to a
+  // pooled address and mwcc to an `@ha/@l` pair completed first, neither of which is this shape.
+  {
+    sym: 'hidx_ld',
+    src: 'extern u8 gTab[16];\nu32 hidx_ld(u32 i)\n{\n    return gTab[i];\n}',
+    features: ['global', 'array', 'variable-index'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
+    ctx: 'u32 hidx_ld(u32 i);',
+  },
+  {
+    sym: 'hidx_st',
+    src: 'extern u32 gTab[16];\nvoid hidx_st(u32 i, u32 v)\n{\n    gTab[i] = v;\n}',
+    features: ['global', 'array', 'variable-index', 'store'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
+    ctx: 'void hidx_st(u32 i, u32 v);',
+    proto: { hidx_st: { returnsVoid: true } },
+  },
+  {
+    sym: 'hidx_fld',
+    src:
+      'struct HidxS { u16 a; u16 b; u32 c; };\nextern struct HidxS gHidx[8];\n' +
+      'u32 hidx_fld(u32 i)\n{\n    return gHidx[i].b;\n}',
+    features: ['global', 'array', 'variable-index', 'struct', 'field'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
+    ctx: 'u32 hidx_fld(u32 i);',
+  },
+  {
+    sym: 'hidx_neg',
+    src: 'extern u32 gTab[16];\nu32 hidx_neg(u32 i)\n{\n    return gTab[i - 1];\n}',
+    features: ['global', 'array', 'variable-index'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
+    ctx: 'u32 hidx_neg(u32 i);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
