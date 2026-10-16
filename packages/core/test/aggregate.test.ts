@@ -4,11 +4,18 @@
 // and mwcc at the synthetic tier's.
 import { describe, expect, test } from 'vitest';
 
-import { aggregateSize, aggregateType, byValueCallArgs, byValueRefusal, returnsInMemory } from '../src/aggregate';
+import {
+  aggregateSize,
+  aggregateType,
+  byValueCallArgs,
+  byValueRefusal,
+  returnsInMemory,
+  returnsWithoutHiddenPointer,
+} from '../src/aggregate';
 import { T } from '../src/ir/types';
 import { type AggregateLayout, type AggregateMember, spellableProto } from '../src/proto';
 import { prototypesFromContext } from '../src/proto-context';
-import { ARMV4T_AGBCC, MIPS_GCC, PPC_MWCC } from '../src/target';
+import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
 
 const struct = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'struct', members });
 const union = (...members: AggregateMember[]): AggregateLayout => ({ kind: 'union', members });
@@ -103,6 +110,32 @@ describe('mwcc (8 bytes or less in r3/r3:r4)', () => {
   test('a long long aligns to 8', () => {
     // compiled: `struct { u8 a; long long d; }` puts `d` at 8 and sizes 16
     expect(aggregateSize(struct(m('a', 'u8'), m('d', 'long long')), PPC_MWCC)).toEqual({ size: 16, align: 8 });
+  });
+});
+
+// compiled on ido7.1, gcc2.7.2kmc and gcc2.7.2: `T t = mkT(x);` hands `addiu a0,sp,N` over ahead of
+// the `jal` for every one of these, a one-byte struct and a union included
+describe('O32 (every aggregate through memory)', () => {
+  test.each<[string, AggregateLayout]>([
+    ['{ u8 c; }', struct(m('c', 'u8'))],
+    ['{ u32 x; }', struct(m('x', 'u32'))],
+    ['{ float f; }', struct(m('f', 'float'))],
+    ['{ u32 a, b, c; }', struct(m('a', 'u32'), m('b', 'u32'), m('c', 'u32'))],
+    ['union { u32 a; u16 b; }', union(m('a', 'u32'), m('b', 'u16'))],
+    ['{ u32 a : 8; u32 b : 8; }', struct(m('a', 'u32', { bits: 8 }), m('b', 'u32', { bits: 8 }))],
+    ['a struct whose members were not read', { kind: 'struct' }],
+  ])('%s', (_label, layout) => {
+    expect(returnsInMemory(layout, MIPS_IDO)).toBe(true);
+    expect(returnsInMemory(layout, MIPS_GCC)).toBe(true);
+  });
+
+  test('a callee returning one is handed a hidden pointer', () => {
+    const mkw = { params: ['s32'], returns: 'struct W1', returnLayout: struct(m('x', 'u32')) };
+    for (const target of [MIPS_IDO, MIPS_GCC]) {
+      expect(returnsWithoutHiddenPointer('mkw', { mkw }, target)).toBe(false);
+    }
+    // the same declaration comes back in r0 on agbcc
+    expect(returnsWithoutHiddenPointer('mkw', { mkw }, ARMV4T_AGBCC)).toBe(true);
   });
 });
 

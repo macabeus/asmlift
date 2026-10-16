@@ -922,8 +922,8 @@ export interface TargetDescription {
     largestAlignment?: number;
     // HOW A STRUCT OR UNION RETURNED BY VALUE COMES BACK, which decides whether a call to a function
     // declared to return one hands it a hidden pointer as argument 0 and moves every declared
-    // argument one register up (`aggregate.ts` `returnsInMemory`, read by frontend/thumb.ts and
-    // frontend/ppc.ts).
+    // argument one register up (`aggregate.ts` `returnsInMemory`, read by the call lowering every
+    // frontend shares, frontend/call-plan.ts).
     //   • 'apcs' — in memory when bigger than a word, when a struct has a second member that is not
     //     a bitfield, or when a union has a member that would be; in the return register otherwise.
     //     agbcc, thumb.c:1423-1493 (compiled: `{u8 a,b,c,d}` through memory; `{u32}`, `{u32 w[1]}`,
@@ -932,10 +932,13 @@ export interface TargetDescription {
     //     included); in memory otherwise. mwcc_242_81, mwcc_233_163n and mwcc_247_107 alike
     //     (compiled: 1 to 8 bytes, `{float}`, `{double}` and a union come back in r3/r3:r4; a 9- and a
     //     12-byte struct are handed `addi r3,…` ahead of the call).
-    // ABSENT ⇒ unmeasured, and such a call declines. IDO 7.1 returns every aggregate through memory,
-    // a one-word one included (compiled: `struct {u32 x;} mkw(s32)` is called `addiu a0,sp,28 / jal
-    // mkw / lw v0,28(sp)`), and states nothing: the MIPS frontend lowers no call to read it.
-    aggregateReturn?: 'apcs' | 'svr4';
+    //   • 'memory' — always in memory, whatever its size or members. ido7.1, gcc2.7.2kmc and gcc2.7.2
+    //     alike (compiled: `{u8}`, `{u16}`, `{u32}`, `{float}`, `{double}`, 4-, 8- and 12-byte
+    //     structs, `union {u32; u16;}` and `{u32 a:8; u32 b:8;}` are each handed `addiu a0,sp,N`
+    //     ahead of the `jal`, with the declared arguments from a1 on, and the callee returns that
+    //     pointer, `move v0,a0`).
+    // ABSENT ⇒ unmeasured, and such a call declines.
+    aggregateReturn?: 'apcs' | 'svr4' | 'memory';
     // A STRUCT PASSED BY VALUE TRAVELS IN CONSECUTIVE ARGUMENT WORDS, the first at the next free
     // argument word, its size rounded up to words (`aggregate.ts` `byValueCallArgs`). agbcc,
     // thumb.h:632-650 (FUNCTION_ARG places by word offset, FUNCTION_ARG_PARTIAL_NREGS splits a
@@ -1329,6 +1332,8 @@ export const MIPS_IDO: TargetDescription = {
     // and its `long long` twin put the member at 8 and size 16 (`sizeof` and the member's offset
     // compiled into `.data`).
     largestAlignment: 8,
+    // MEASURED on all three O32 toolchains: the probes at the field.
+    aggregateReturn: 'memory',
     byValueAggregateArgWords: true,
     // MEASURED at `-mips2 -O2 -32 -non_shared -G 0`: the `sll` leads the function for BOTH
     // spellings, so the prologue position cannot decide; a narrow DECLARED parameter is the one that
@@ -1470,6 +1475,8 @@ export const MIPS_GCC: TargetDescription = {
     aggregateBoundary: 1,
     // MEASURED on BOTH toolchains this description serves, and on ido7.1: the probe at MIPS_IDO's.
     largestAlignment: 8,
+    // MEASURED on BOTH toolchains this description serves: the probes at the field.
+    aggregateReturn: 'memory',
     byValueAggregateArgWords: true,
     // MEASURED on BOTH toolchains this description serves: `int f(s8 x){return x;}` and
     // `int f(s32 x){return (s8)x;}` compile to BYTE-IDENTICAL objects, gcc2.7.2kmc at -O2 and
