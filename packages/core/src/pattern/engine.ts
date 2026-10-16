@@ -162,6 +162,117 @@ export const CNTLZW_EQ0: RewritePattern = {
   replaceWith: { op: 'icmp_eq', args: ['X', { constImm: 0 }], resultType: T.u(32) },
 };
 
+// ── mwcc's branch-free compares ─────────────────────────────────────────────────────────────
+// CodeWarrior 2.4.x materialises a 0/1 compare with no branch and no set-on-compare instruction,
+// as a bit trick on the two operands. Each fold is an IDENTITY over every pair of 32-bit words
+// (PPC `slw` by 32 is 0; mwcc-compare.test.ts evaluates both sides over the edge words). The
+// compiled forms, at -O4,p (2.4.2 and 2.4.7 identical), a and b in r3 and r4:
+//
+//   a <u b     xor r0,b,a; cntlzw r0,r0; slw r0,b,r0; srwi r3,r0,31
+//   a >=u b    subf r0,b,a; orc r3,a,b; srwi r0,r0,1; subf r0,r0,r3; srwi r3,r0,31
+//   a <s b     xor r0,b,a; srawi r3,r0,1; and r0,r0,b; subf r0,r0,r3; srwi r3,r0,31
+//
+// `>` and `<=` are the same code with the operands swapped, and fold to `b < a` / `b >= a`. A
+// constant operand is materialised once, into a register the trick reads twice — except in the
+// `orc` form, which subtracts it as `addi rD,a,-K`, hence that form's second pattern. The signed
+// and unsigned forms share no shape, so no fold reads one as the other.
+const mwccOnly = { compilers: ['mwcc'] };
+const C31 = { imm: 31 };
+
+/** `shr_u(shl(b, clz(a ^ b)), 31)`: b's bit at the highest bit where a and b differ, set exactly
+ *  when b is the larger. */
+export const MWCC_CLZ_ULT: RewritePattern = {
+  id: 'mwcc-clz-ult',
+  applies: mwccOnly,
+  match: {
+    op: 'shr_u',
+    attrEquals: C31,
+    args: [
+      {
+        op: 'shl',
+        args: [{ bind: 'B' }, { op: 'clz', args: [{ op: 'xor', args: [{ bind: 'A' }, { same: 'B' }] }] }],
+      },
+    ],
+  },
+  replaceWith: { op: 'icmp_ult', args: ['A', 'B'], resultType: T.u(32) },
+};
+
+/** `shr_u((a | ~b) - ((a - b) >>u 1), 31)`, and its constant-b twin over `a + -K`. */
+export const MWCC_ORC_UGE: RewritePattern[] = [
+  {
+    id: 'mwcc-orc-uge',
+    applies: mwccOnly,
+    match: {
+      op: 'shr_u',
+      attrEquals: C31,
+      args: [
+        {
+          op: 'sub',
+          args: [
+            { op: 'or', args: [{ bind: 'A' }, { op: 'not', args: [{ bind: 'B' }] }] },
+            { op: 'shr_u', attrEquals: { imm: 1 }, args: [{ op: 'sub', args: [{ same: 'A' }, { same: 'B' }] }] },
+          ],
+        },
+      ],
+    },
+    replaceWith: { op: 'icmp_uge', args: ['A', 'B'], resultType: T.u(32) },
+  },
+  {
+    id: 'mwcc-orc-uge-k',
+    applies: mwccOnly,
+    match: {
+      op: 'shr_u',
+      attrEquals: C31,
+      args: [
+        {
+          op: 'sub',
+          args: [
+            { op: 'or', args: [{ bind: 'A' }, { op: 'not', args: [{ constImm: 'k' }] }] },
+            {
+              op: 'shr_u',
+              attrEquals: { imm: 1 },
+              args: [{ op: 'add', args: [{ same: 'A' }, { constEq: { op: '-', args: [0, { imm: 'k' }] } }] }],
+            },
+          ],
+        },
+      ],
+    },
+    replaceWith: { op: 'icmp_uge', args: ['A', { constImm: { imm: 'k' } }], resultType: T.u(32) },
+  },
+];
+
+/** `shr_u(((a ^ b) >>s 1) - ((a ^ b) & b), 31)`. The `and` names b, so the two xor operand orders
+ *  are two patterns: a commutative match commits to the first order that binds. */
+const xorSlt = (first: string, second: string): RewritePattern => ({
+  id: `mwcc-xor-slt/${first}${second}`,
+  applies: mwccOnly,
+  match: {
+    op: 'shr_u',
+    attrEquals: C31,
+    args: [
+      {
+        op: 'sub',
+        args: [
+          {
+            op: 'shr_s',
+            attrEquals: { imm: 1 },
+            args: [{ op: 'xor', ordered: true, args: [{ bind: first }, { bind: second }] }],
+          },
+          {
+            op: 'and',
+            args: [{ op: 'xor', ordered: true, args: [{ same: first }, { same: second }] }, { same: 'B' }],
+          },
+        ],
+      },
+    ],
+  },
+  replaceWith: { op: 'icmp_slt', args: ['A', 'B'], resultType: T.u(32) },
+});
+export const MWCC_XOR_SLT: RewritePattern[] = [xorSlt('A', 'B'), xorSlt('B', 'A')];
+
+/** The branch-free compare bundle. */
+export const MWCC_COMPARE_PATTERNS: RewritePattern[] = [MWCC_CLZ_ULT, ...MWCC_ORC_UGE, ...MWCC_XOR_SLT];
+
 // The PPC rotate mirror, as pure data: hardware only rotates LEFT, so mwcc spells `rotr(x, n)`
 // as `rotlw(x, 32 - n)`. Lowering that literally emits `x << (32 - n) | x >> (32 - (32 - n))`,
 // whose inner subtraction recompiles to an extra instruction; folding to `rotr(x, n)` lets the
@@ -442,6 +553,7 @@ export const DEFAULT_IDIOM_PATTERNS: RewritePattern[] = [
   SDIV_POW2_2,
   ...HWMOD_PATTERNS,
   CNTLZW_EQ0,
+  ...MWCC_COMPARE_PATTERNS,
   // AFTER cntlzw-eq0, which is what turns mwcc's `clz(x) >> 5` into the `icmp_eq` this fold then
   // negates — `!(x == 0)` composes only in that order (each pattern runs to fixpoint in turn).
   ...NOT_CMP_PATTERNS,

@@ -10761,6 +10761,48 @@ export const SYNTHETIC: SynthSpec[] = [
     },
   },
 
+  // ── CodeWarrior's branch-free compares, at -O4,p ──
+  // mwcc 2.4.2/2.4.7 materialise a 0/1 compare with no branch, as a bit trick on the operands
+  // (`xor; cntlzw; slw` for `<u`, `subf; orc; srwi; subf` for `>=u`, `xor; srawi; and; subf` for
+  // `<s`). Each relation is a row, `>`/`<=` being the swapped code; the `k` rows put the constant
+  // where the code distinguishes it (`ulek` subtracts it with `subfic`, `ugek` with `addi -K`).
+  // `nbceq`/`nbcne` are the controls spelled by neither trick but by `cntlzw; srwi 5` and
+  // `subf; subf; or`, and the last two use the boolean as a value. Folded in pattern/engine.ts
+  // MWCC_COMPARE_PATTERNS.
+  ...(
+    [
+      ['nbcult', 'unsigned a, unsigned b', 'a < b'],
+      ['nbcule', 'unsigned a, unsigned b', 'a <= b'],
+      ['nbcugt', 'unsigned a, unsigned b', 'a > b'],
+      ['nbcuge', 'unsigned a, unsigned b', 'a >= b'],
+      ['nbcultk', 'unsigned a', 'a < 10'],
+      ['nbculek', 'unsigned a', 'a <= 10'],
+      ['nbcugek', 'unsigned a', 'a >= 10'],
+      ['nbcslt', 'int a, int b', 'a < b'],
+      ['nbcsgt', 'int a, int b', 'a > b'],
+      ['nbcsltk', 'int a', 'a < 10'],
+      ['nbceq', 'unsigned a, unsigned b', 'a == b'],
+      ['nbcne', 'unsigned a, unsigned b', 'a != b'],
+      ['nbcaddult', 'unsigned a, unsigned b, int c', 'c + (a < b)'],
+    ] as const
+  ).map(([sym, params, expr]): SynthSpec => ({
+    sym,
+    src: `int ${sym}(${params}) { return ${expr}; }`,
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: params.startsWith('unsigned') ? ['compare', 'unsigned'] : ['compare'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107'],
+    ctx: `int ${sym}(${params});`,
+  })),
+  {
+    sym: 'nbcstult',
+    src: 'void nbcstult(unsigned a, unsigned b, int *p) { *p = a < b; }',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['compare', 'unsigned', 'store'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107'],
+    ctx: 'void nbcstult(unsigned a, unsigned b, int *p);',
+    proto: { nbcstult: { returnsVoid: true } },
+  },
+
   // ── THE RETURN PROOF: hand-written asm whose return jumps somewhere other than the caller ──
   // `retmtlr` and `retjr` exist to be DECLINED, as `tax_gprel` does. `blr` and `jr ra` are returns by
   // their name alone, so a function that first puts something else in the link register or in `ra`
