@@ -510,3 +510,102 @@ test('the shipped sign-extend folds declare IDO and nothing else', () => {
     undefined,
   ]);
 });
+
+// ── three match/replace forms the branch-free compares need ──────────────────────────────────
+// `same` over two constants of one word, `constEq` over a bound immediate, and a nested replacement.
+const SAME_PROBE: RewritePattern = {
+  id: 'test/same-const',
+  applies: {},
+  match: { op: 'sub', args: [{ bind: 'X' }, { op: 'and', args: [{ same: 'X' }, { bind: 'Y' }] }] },
+  replaceWith: { op: 'and', args: ['X', { op: 'not', args: ['Y'] }] },
+};
+
+test('`same` accepts a second constant of the same 32-bit word, and no other', () => {
+  const at = (k: number) =>
+    parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = const {value=-1}
+  %2: unk32 = const {value=${k}}
+  %3: unk32 = and %2, %0
+  %4: unk32 = sub %1, %3
+  ret %4
+}`);
+  const same = at(0xffffffff);
+  expect(applyPattern(same, SAME_PROBE, PPC_MWCC)).toBe(1);
+  dce(same);
+  verify(same);
+  // the nested `not` is spliced in before its reader
+  expect(print(same)).toContain('= not %0');
+  expect(print(same)).toMatch(/= not %0\n {2}%\d+: unk32 = and %1, %\d+\n/);
+  expect(applyPattern(at(1), SAME_PROBE, PPC_MWCC)).toBe(0);
+});
+
+test('`constEq` compares a constant with an expression over a bound immediate, modulo 2^32', () => {
+  const p: RewritePattern = {
+    id: 'test/const-eq',
+    applies: {},
+    match: {
+      op: 'add',
+      args: [
+        { op: 'xor', args: [{ bind: 'X' }, { constImm: 'k' }] },
+        { constEq: { op: '-', args: [0, { imm: 'k' }] } },
+      ],
+    },
+    replaceWith: { op: 'sub', args: ['X', { constImm: { imm: 'k' } }] },
+  };
+  const at = (k: number, m: number) =>
+    parse(`fn f {
+^bb0(%0: unk32):
+  %1: unk32 = const {value=${k}}
+  %2: unk32 = xor %0, %1
+  %3: unk32 = const {value=${m}}
+  %4: unk32 = add %2, %3
+  ret %4
+}`);
+  expect(applyPattern(at(10, -10), p, PPC_MWCC)).toBe(1);
+  expect(applyPattern(at(10, 0xfffffff6), p, PPC_MWCC)).toBe(1);
+  expect(applyPattern(at(10, 10), p, PPC_MWCC)).toBe(0);
+});
+
+// A `bdnz` tests its decremented counter as `(ctr - 1) != 0`, and the decrement is the next
+// iteration's counter: a fold of that test declared `foldsOnlyDyingInterior` must leave it be, and
+// still fire where the only other reader of its interior is itself dead.
+test('`foldsOnlyDyingInterior` refuses a live outside reader and ignores a dead one', () => {
+  const p: RewritePattern = {
+    id: 'test/sub-zero',
+    applies: {},
+    foldsOnlyDyingInterior: true,
+    match: {
+      op: 'icmp_ne',
+      args: [
+        { op: 'sub', args: [{ bind: 'B' }, { bind: 'A' }] },
+        { op: 'const', attrEquals: { value: 0 }, args: [] },
+      ],
+    },
+    replaceWith: { op: 'icmp_ne', args: ['A', 'B'] },
+  };
+  const loop = parse(`fn f {
+^bb0(%0: unk32):
+  br ^bb1(%0)
+^bb1(%1: unk32):
+  %2: unk32 = const {value=1}
+  %3: unk32 = sub %1, %2
+  %4: unk32 = const {value=0}
+  %5: u32 = icmp_ne %3, %4
+  cond_br %5, ^bb1(%3), ^bb2()
+^bb2():
+  ret %0
+}`);
+  expect(applyPattern(loop, p, PPC_MWCC)).toBe(0);
+  const dies = parse(`fn f {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = sub %1, %0
+  %3: unk32 = const {value=-1}
+  %4: unk32 = add %2, %3
+  %5: unk32 = const {value=0}
+  %6: u32 = icmp_ne %2, %5
+  ret %6
+}`);
+  expect(applyPattern(dies, p, PPC_MWCC)).toBe(1);
+  expect(print(dies)).toContain('icmp_ne %0, %1');
+});

@@ -23,8 +23,11 @@ export type MatchNode =
       args: MatchNode[];
     }
   | { bind: string } // bind this operand's VALUE to a name
-  | { same: string } // this operand must equal a previously-bound value
-  | { constImm: string }; // this operand must be a `const`; bind its numeric VALUE to an imm name
+  // this operand must equal a previously-bound value — or, when both are `const`, have its value:
+  // two `li rN,10` are one operand to C, as they are to the compiler that materialised both
+  | { same: string }
+  | { constImm: string } // this operand must be a `const`; bind its numeric VALUE to an imm name
+  | { constEq: ImmExpr }; // this operand must be a `const` whose value is this, modulo 2^32
 
 // A tiny declarative arithmetic over bound immediate names. It keeps a *computed* replacement
 // attribute DATA rather than a JS closure, so a strength-reduced idiom whose replacement is a
@@ -61,7 +64,16 @@ function evalImm(e: ImmExpr, imms: Map<string, number>): number {
 // A replacement operand is either a previously-BOUND value (by name) or a SYNTHESIZED constant
 // computed from the bound immediates (e.g. the derived multiplier `2^k+1`). A synthesized const
 // is materialized as its own `const` op spliced in before the rewrite site.
-export type ReplaceArg = string | { constImm: ImmExpr };
+// A NESTED replacement — an op of its own, spliced in before the root — lets an idiom fold to a
+// two-op expression (`-(a < b)`) without a pattern per intermediate.
+export type ReplaceArg = string | { constImm: ImmExpr } | Replacement;
+
+export interface Replacement {
+  op: string;
+  args: ReplaceArg[];
+  attrs?: Record<string, number | ImmExpr>;
+  resultType?: IrType;
+}
 
 export interface RewritePattern {
   id: string;
@@ -76,7 +88,7 @@ export interface RewritePattern {
   // a computed divisor proof and lives as the bespoke raise/magicdiv.ts pass instead. The
   // COMPUTED-attr half of the envelope (ImmExpr, above) IS built — earned by the
   // multiply-by-constant idioms.
-  replaceWith: { op: string; args: ReplaceArg[]; attrs?: Record<string, number | ImmExpr>; resultType?: IrType };
+  replaceWith: Replacement;
   /** Two REPLACEMENT operand names, in the order the replacement RENDERS them, whose defs C leaves
    *  UNSEQUENCED against each other. A fold that collapses a multi-op idiom into one op drops its
    *  operands from several uses to one, which lets the structurer inline both at that one use — and
@@ -99,6 +111,11 @@ export interface RewritePattern {
    *  compiler absent from it was either measured neutral or not measured — `validatePattern`
    *  refuses a name that is not in `applies.compilers`, where the fold cannot fire anyway. */
   recomputesSharedInterior?: string[];
+  /** The fold fires only where its interior DIES with it, on every compiler: an interior op some
+   *  live op outside the match still reads refuses it (a read by an op `dce` will delete does not
+   *  count). For an idiom whose interior means something of its own to a later pass — a `bdnz`'s
+   *  decremented counter is the loop's, not a subtraction to fold away. */
+  foldsOnlyDyingInterior?: true;
 }
 
 /** What the pattern layer reads off a target. STRUCTURAL on purpose: the pattern set is
@@ -450,13 +467,27 @@ interface Binds {
   interior: Set<Value>;
 }
 
+/** Two constants that are the same 32-bit word (`-1` and `0xffffffff` are one register value). */
+function sameWord(x: unknown, y: unknown): boolean {
+  return typeof x === 'number' && typeof y === 'number' && x >>> 0 === y >>> 0;
+}
+
 function tryMatch(node: MatchNode, v: Value, defs: Map<Value, Op>, b: Binds): boolean {
   if ('bind' in node) {
     b.values.set(node.bind, v);
     return true;
   }
   if ('same' in node) {
-    return b.values.get(node.same) === v;
+    const bound = b.values.get(node.same);
+    if (bound === v) {
+      return true;
+    }
+    const [x, y] = [bound && defs.get(bound), defs.get(v)];
+    return x?.opcode === 'const' && y?.opcode === 'const' && sameWord(x.attrs.value, y.attrs.value);
+  }
+  if ('constEq' in node) {
+    const d = defs.get(v);
+    return d?.opcode === 'const' && sameWord(d.attrs.value, evalImm(node.constEq, b.imms));
   }
   if ('constImm' in node) {
     const d = defs.get(v);
@@ -711,11 +742,11 @@ function reordersUnsequenced(
  *
  *  Refusing leaves the raw ops standing, which is the spelling that was byte-exact before any fold
  *  existed — a worse-READING answer, never a worse-scoring one. */
-function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value, Op>): boolean {
+function sharesInterior(fn: Fn, root: Op, interior: Set<Value>, defs: Map<Value, Op>, dead?: Set<Op>): boolean {
   const matched = new Set([...interior].map((v) => defs.get(v)));
   for (const b of fn.blocks) {
     for (const o of b.ops) {
-      if (matched.has(o)) {
+      if (matched.has(o) || dead?.has(o)) {
         continue; // a read from INSIDE the idiom is one this rewrite is replacing
       }
       for (const v of [...o.operands, ...o.successors.flatMap((x) => x.args)]) {
@@ -754,35 +785,45 @@ export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget)
         if (pat.recomputesSharedInterior?.includes(target.compiler) && sharesInterior(fn, op, binds.interior, defs)) {
           continue;
         }
+        if (pat.foldsOnlyDyingInterior && sharesInterior(fn, op, binds.interior, defs, deadOps(fn.blocks))) {
+          continue;
+        }
         if (pat.unsequencedRightFirst && reordersUnsequenced(fn, op, pat.unsequencedRightFirst, binds, defs, pat.id)) {
           continue;
         }
-        // Materialize any synthesized-constant replacement operands as their own `const` ops,
+        // Materialize the replacement: synthesized constants and nested ops become their own ops,
         // spliced in before the rewrite; bound-value operands resolve from the value binds.
-        const rw = pat.replaceWith;
-        const newRes = mkValue(rw.resultType ?? op.results[0].type);
-        const consts: Op[] = [];
-        const operands: Value[] = rw.args.map((a) => {
-          if (typeof a === 'string') {
-            // Attribute a malformed pattern HERE with its id — an unbound value would otherwise
-            // become `undefined` and detonate stages later; patterns are meant to become
-            // AI-generated data, so diagnosability is first-class.
-            const bound = binds.values.get(a);
-            if (!bound) {
-              throw new Error(`pattern '${pat.id}' replaceWith references unbound value '${a}'`);
+        const spliced: Op[] = [];
+        const build = (rw: Replacement, type: IrType): Op => {
+          const operands: Value[] = rw.args.map((a) => {
+            if (typeof a === 'string') {
+              // Attribute a malformed pattern HERE with its id — an unbound value would otherwise
+              // become `undefined` and detonate stages later; patterns are meant to become
+              // AI-generated data, so diagnosability is first-class.
+              const bound = binds.values.get(a);
+              if (!bound) {
+                throw new Error(`pattern '${pat.id}' replaceWith references unbound value '${a}'`);
+              }
+              return bound;
             }
-            return bound;
+            if ('constImm' in a) {
+              const cv = mkValue(T.s());
+              spliced.push(mkOp('const', { results: [cv], attrs: { value: evalImm(a.constImm, binds.imms) } }));
+              return cv;
+            }
+            const inner = build(a, a.resultType ?? T.unk(32));
+            spliced.push(inner);
+            return inner.results[0];
+          });
+          const attrs: Record<string, number> = {};
+          for (const [k, v] of Object.entries(rw.attrs ?? {})) {
+            attrs[k] = typeof v === 'number' ? v : evalImm(v, binds.imms);
           }
-          const cv = mkValue(T.s());
-          consts.push(mkOp('const', { results: [cv], attrs: { value: evalImm(a.constImm, binds.imms) } }));
-          return cv;
-        });
-        const attrs: Record<string, number> = {};
-        for (const [k, v] of Object.entries(rw.attrs ?? {})) {
-          attrs[k] = typeof v === 'number' ? v : evalImm(v, binds.imms);
-        }
-        const newOp = mkOp(rw.op as Opcode, { operands, results: [newRes], attrs }); // pattern data boundary: verify() rejects unknowns
-        b.ops.splice(i, 1, ...consts, newOp);
+          return mkOp(rw.op as Opcode, { operands, results: [mkValue(type)], attrs }); // pattern data boundary: verify() rejects unknowns
+        };
+        const newOp = build(pat.replaceWith, pat.replaceWith.resultType ?? op.results[0].type);
+        const newRes = newOp.results[0];
+        b.ops.splice(i, 1, ...spliced, newOp);
         replaceAllUsesWith(fn, op.results[0], newRes);
         count++;
         changed = true;
