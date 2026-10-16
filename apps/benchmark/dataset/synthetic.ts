@@ -1138,6 +1138,29 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { k: { params: 1 } },
   },
 
+  // AN ARGUMENT PASSED ON UNCHANGED TO AN UNDECLARED CALLEE, with another set up past it. Nothing
+  // states the callee's arity, so it is guessed from the argument registers a value reaches, and a
+  // register this function never wrote may still hold its own incoming argument: `s` stays in the
+  // first argument register while `1` goes into the second, and a count that stops at the first
+  // lifts `logv() + 1`. Every frontend refuses the gap (frontend/ssa.ts `fallbackArgc`), so both
+  // rows are declined witnesses. `ctx` declares neither callee, so neither decompiler is told the
+  // arity. A run of pass-through arguments with nothing set up past it (`g2(a, b)`) is the same
+  // machine code as `g2()`, so no row expects a decline for it.
+  {
+    sym: 'passgap',
+    src: 'int logv();\nint passgap(const char *s){ return logv(s, 1) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int passgap(const char *);',
+  },
+  {
+    sym: 'passmid',
+    src: 'int g3();\nint passmid(int a, int b){ return g3(1, b, 3) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int passmid(int, int);',
+  },
+
   // ── nested control flow ─────────────────────────────────────────────────────────────────
   {
     sym: 'nestedif',
@@ -2216,6 +2239,32 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['float', 'arithmetic'],
     toolchains: ALL,
     ctx: 'float fma1(float,float,float);',
+  },
+  // agbcc's single-precision runtime (core runtime-helpers.ts AGBCC_RUNTIME_HELPERS): `__negsf2`
+  // folds to a negation, and a helper whose result reaches only a GUESSED call declines. That call
+  // does not count r0, which the helper wrote, so `(int)(a + b)` would read `__addsf3();
+  // return __fixsfsi();` and, folded, `return __fixsfsi();`, the sum deleted
+  // (raise/floathelpers.ts). agbcc only: the other toolchains have a hardware FPU.
+  {
+    sym: 'fneg',
+    src: 'float fneg(float a){ return -a; }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float fneg(float);',
+  },
+  {
+    sym: 'fconv',
+    src: 'int fconv(float a,float b){ return (int)(a+b); }',
+    features: ['float', 'cast', 'float-to-int', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'int fconv(float,float);',
+  },
+  {
+    sym: 'fcall',
+    src: 'float g1(float);\nfloat fcall(float a,float b){ return g1(a*b); }',
+    features: ['float', 'arithmetic'],
+    toolchains: ['agbcc'],
+    ctx: 'float fcall(float,float);',
   },
   {
     sym: 'dadd',
