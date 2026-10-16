@@ -103,10 +103,13 @@
  *     (`thumb_load_double_from_address`), so `int f(long long *p) { long long v = *p; return
  *     (int)v; }` keeps `ldr r1, [r0, #4]`. With no such declaration the pair gate refuses it on Thumb
  *     and PowerPC; O32 declines the v0:v1 pair before the pin is asked;
- *   • a plain read under an arithmetic or a cast nothing uses, at mwcc `-O0`: `p[5] + 1;` and
- *     `(char)p[5];` keep `lwz r0, 20(r3)` (the cast with an `extsb`/`clrlwi` of r0), which is the
- *     register the compiler discards a volatile read into, so the read is stamped. No unit of Mario
- *     Party 4's 409 at `-O0,p` holds one;
+ *   • a plain read under an arithmetic or a sign-extending cast nothing uses, at mwcc `-O0`:
+ *     `p[5] + 1;` and `(char)p[5];` keep `lwz r0, 20(r3)` (the cast with an `extsb`/`extsh` of r0
+ *     where `char` is signed), which is the register the compiler discards a volatile read into,
+ *     so the read is stamped. A zero-extending cast (`clrlwi r0,r0,24`: `(unsigned char)`, and
+ *     `(char)` under `-char unsigned`, as the 2.4.7 and 2.3.3 projects build) lowers to an `and`,
+ *     which `computed` rejects, so that read is left plain. No unit of Mario Party 4's 409 at
+ *     `-O0,p` holds one;
  *   • merged identical arms where no declaration is in evidence: the same instructions as `gR;` on an
  *     object nothing declares, and as `*p;` through a pointer parameter;
  *   • a read returned by a getter wrongly declared void: the declaration is trusted, as the pair
