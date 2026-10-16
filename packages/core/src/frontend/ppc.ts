@@ -1920,7 +1920,7 @@ function liftOnce(
     };
     // A `bl` into a register save or restore routine is frame bookkeeping, not a call: it writes no
     // register this function reads (only the link register, already copied out — which
-    // `linkRegisterOverwrites` checks), so nothing is destroyed and r0 keeps the return address
+    // `linkRegisterProof` checks), so nothing is destroyed and r0 keeps the return address
     // `mflr` put there. A SAVE records a save slot per word, at the routine's fixed offsets below the
     // frame address in r11; a RESTORE must find the same register in every word it reloads. It
     // refuses where:
