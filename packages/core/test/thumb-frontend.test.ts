@@ -849,10 +849,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     });
 
     test('…and a later argument register the caller DID set up carries the result with it', () => {
-      // agbcc's soft-float `a * b + c`: the product comes back in r0 and stays there while `c` goes
-      // into r1. Argument 0 is unfresh and argument 1 is not — a one-argument `__addsf3` is not a
-      // thing, so the run bridges across r0 rather than truncating the call to nothing.
-      expect(dc('\tbl\t__mulsf3\n\tadd\tr1, r4, #0\n\tbl\t__addsf3\n')).toContain('__addsf3(__mulsf3(), ');
+      // agbcc's `g(f(a, b), c)` — the shape of its soft-float `a * b + c` before the runtime table
+      // named the single helpers: the result comes back in r0 and stays there while `c` goes into
+      // r1. Argument 0 is unfresh and argument 1 is not, so the run bridges across r0 rather than
+      // truncating the call to nothing.
+      expect(dc('\tbl\tfoo\n\tadd\tr1, r4, #0\n\tbl\tbar\n')).toContain('bar(foo(), ');
     });
 
     test('…and the HOLE a 64-bit return spans is not a hole once the helper table states its width', () => {

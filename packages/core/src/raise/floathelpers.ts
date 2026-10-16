@@ -34,7 +34,14 @@ import { isArgumentPair } from './pairparams';
  *     target's word order into an `fconst` (`a + 1.5` stages `0x3ff80000` in r2, its high word);
  *   - an argument the function also reads on its own, as a word or as one half of a pair;
  *   - a result read as a word or a half (`*(int *)&c` is a double's HIGH word, in r0), passed to
- *     any other call, or carried across an edge.
+ *     any other call, or carried across an edge;
+ *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` deletes the arithmetic.
+ *     A call whose result nothing reads is not proof the source dropped it: a guessed arity leaves
+ *     one, where a call after the helper takes its result in r0 and the guess (frontend/ssa.ts
+ *     `fallbackArgc`, `trimClobberedCallArgs`) does not count a register a call wrote. agbcc's
+ *     `(int)(a + b)` reads as `__addsf3(); return __fixsfsi();`, and folded it would print
+ *     `return __fixsfsi();`. A double's pair refuses that shape at the frontend already, naming
+ *     the half the next call reads; a single is one word, so it reaches here.
  *  A call refused takes every call its result feeds or is fed by with it, so what folds is a closed
  *  set of floats and verify's float rule holds by construction. */
 export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolean {
@@ -140,13 +147,14 @@ export function recognizeFloatHelpers(fn: Fn, target: TargetDescription): boolea
   const source = (v: Value, calls: ReadonlySet<Op>) => argument(v, calls) || fromCall(v, calls) || literal(v, calls);
   for (;;) {
     const calls = new Set(sites);
-    const kept = sites.filter(
-      (op) =>
+    const kept = sites.filter((op) => {
+      const read = (users.get(op.results[0]) ?? []).filter((u) => !deadHalf(u));
+      return (
         op.operands.every((o) => source(o, calls)) &&
-        (users.get(op.results[0]) ?? []).every(
-          (u) => deadHalf(u) || floatUse(u, op.results[0], calls) || u?.opcode === 'ret',
-        ),
-    );
+        read.length > 0 &&
+        read.every((u) => floatUse(u, op.results[0], calls) || u?.opcode === 'ret')
+      );
+    });
     if (kept.length === sites.length) {
       break;
     }

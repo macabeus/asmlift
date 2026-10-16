@@ -147,20 +147,22 @@ export function helperPrototypes(
  *  operand SET-UP instead — `asr rN,rM,#31` per half for signed, `mov rN,#0` for unsigned. The
  *  DIVISIONS do split, and their entries say so.
  *
- *  THE DOUBLE ARITHMETIC IS HERE, AND NOTHING ELSE OF THE SOFT FLOAT. `optabs.c:4022`
- *  `init_floating_libfuncs` names DFmode's add, sub, mul, div (4129-4140) and neg (4155), and
- *  `thumb.md` has no DF pattern but the move, so every one of them is a call; the ABI is a long
- *  long's (thumb.h:632, 655). `raise/floathelpers.ts` folds them to the float ops over a `double`.
+ *  THE FLOAT ARITHMETIC OF BOTH PRECISIONS IS HERE, AND NOTHING ELSE OF THE SOFT FLOAT.
+ *  `optabs.c:4022` `init_floating_libfuncs` names each mode's add, sub, mul, div (4129-4140) and neg
+ *  (4155), and `thumb.md` has no SF or DF pattern but the move, so every one of them is a call; a
+ *  single travels as an int's word and a double as a long long's pair (thumb.h:632, 655).
+ *  `raise/floathelpers.ts` folds them to the float ops over a `float` or a `double`.
  *
- *  NAMING THEM IS A TRADE, and these five make it: a call the fold refuses declines where an
- *  unnamed helper would publish as a pass-through that matches for free. So a function whose
- *  double arithmetic feeds a compare (`__gtdf2`…), a conversion (`__fixdfsi`…) or any other call
- *  declines, where unnamed it would print `__muldf3(); return __fixdfsi();`. The compares and
- *  conversions of both precisions stay out, because the IR has no int<->float op to fold one into;
- *  the single-precision arithmetic stays out because its pass-throughs are what the float rows
- *  score on (`synthetic:fadd:agbcc`), and declining them is the same trade, to be made with a
- *  measurement of those rows. Making it is a table row: the fold reads each value's width off the
- *  signature. */
+ *  NAMING THEM IS A TRADE, and these ten make it: a call the fold refuses declines where an unnamed
+ *  helper would publish as a pass-through. So a function whose float arithmetic feeds a compare
+ *  (`__gtsf2`…), a conversion (`__fixsfsi`…) or any other call declines, where unnamed it would
+ *  print `__muldf3(); return __fixdfsi();`. For the singles that pass-through was no match bought
+ *  for free but wrong C: unnamed, `__mulsf3`'s arity is GUESSED (frontend/ssa.ts `fallbackArgc`),
+ *  and a guess drops what the function passes on unchanged — `a * b + c` published as
+ *  `__addsf3(__mulsf3(), a2)`, `a + b` as `__addsf3()`. Named, the same rows lift `a0 * a1 + a2` and
+ *  `a0 + a1` and score the same. The compares and conversions of both precisions stay out, because
+ *  the IR has no int<->float op to fold one into, so they are still guessed. Adding one is a table
+ *  row: the fold reads each value's width off the signature. */
 export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   // 32-bit software division — the ops `raise/softdiv.ts` rewrites, gated on the target having no
   // hardware divider, which is what those four are about.
@@ -185,6 +187,12 @@ export const AGBCC_RUNTIME_HELPERS: Readonly<Record<string, RuntimeHelper>> = {
   __muldf3: { op: 'fmul', params: [64, 64], returns: 64 },
   __divdf3: { op: 'fdiv', params: [64, 64], returns: 64 },
   __negdf2: { op: 'fneg', params: [64], returns: 64 },
+  // Single arithmetic, one float in one register each way (thumb.h:632's word).
+  __addsf3: { op: 'fadd', params: [32, 32], returns: 32 },
+  __subsf3: { op: 'fsub', params: [32, 32], returns: 32 },
+  __mulsf3: { op: 'fmul', params: [32, 32], returns: 32 },
+  __divsf3: { op: 'fdiv', params: [32, 32], returns: 32 },
+  __negsf2: { op: 'fneg', params: [32], returns: 32 },
 };
 
 /** CodeWarrior's PowerPC runtime (`Runtime.PPCEABI.H`), as the GameCube projects vendor it.

@@ -13,7 +13,7 @@ import { describe, expect, test } from 'vitest';
 import { decompile } from '../src/pipeline';
 import type { Prototypes } from '../src/proto';
 import { AGBCC_RUNTIME_HELPERS, isFloatHelper } from '../src/runtime-helpers';
-import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, type TargetDescription, targetFor } from '../src/target';
+import { ARMV4T_AGBCC, TOOLCHAIN_TARGETS, targetFor } from '../src/target';
 import { decompileTraced } from '../src/trace';
 
 const asm = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-double.s'), 'utf8');
@@ -115,22 +115,12 @@ describe('what refuses', () => {
   });
 });
 
-// THE FOLD READS EACH VALUE'S WIDTH OFF THE HELPER'S SIGNATURE, so a single-precision row is a
-// table entry and nothing else. The shipped table leaves the singles out (its note says why), so
-// these rows are stated here, over agbcc's own listings of the same four shapes.
-describe('a single-precision helper folds through the same path', () => {
+// THE FOLD READS EACH VALUE'S WIDTH OFF THE HELPER'S SIGNATURE, so the single-precision arithmetic
+// is a table entry and nothing else, over agbcc's own listings of the same shapes.
+describe('the single-precision arithmetic helpers are the float ops', () => {
   const single = readFileSync(join(import.meta.dirname, 'corpus', 'agbcc-soft-single.s'), 'utf8');
-  const withSingles: TargetDescription = {
-    ...ARMV4T_AGBCC,
-    runtimeHelpers: {
-      ...AGBCC_RUNTIME_HELPERS,
-      __addsf3: { op: 'fadd', params: [32, 32], returns: 32 },
-      __mulsf3: { op: 'fmul', params: [32, 32], returns: 32 },
-      __negsf2: { op: 'fneg', params: [32], returns: 32 },
-    },
-  };
   const liftSingle = (name: string, prototypes: Prototypes = {}) =>
-    decompile(name, single, withSingles, { prototypes }).source;
+    decompile(name, single, ARMV4T_AGBCC, { prototypes }).source;
 
   test.each([
     ['fadd', 'float fadd(float a0, float a1) {\n    return a0 + a1;\n}\n'],
@@ -144,19 +134,49 @@ describe('a single-precision helper folds through the same path', () => {
   test('a result passed to an ordinary callee refuses', () => {
     expect(() => liftSingle('fpass', { fuse: { params: 1 } })).toThrow(/no model for the runtime helper '__addsf3'/);
   });
+
+  // A RESULT NOTHING READS IS ONE A GUESSED ARITY CUT. The call after the helper guesses its arity,
+  // and a register a call wrote is not one it counts, so `fuse(a + b)` reads as `fuse()` and
+  // `(int)(a + b)` as `__fixsfsi()`. Folded, the sum would be dead and `dce` would delete it; the
+  // helper stays a call, and the function declines naming it.
+  test.each([
+    ['fpass', '__addsf3'],
+    ['fconv', '__addsf3'],
+  ])('%s: a result nothing reads refuses', (name, helper) => {
+    expect(() => liftSingle(name)).toThrow(`no model for the runtime helper '${helper}'`);
+  });
 });
 
 describe('what the table names', () => {
-  // The IR has no int<->float op to fold a compare or a conversion into; the singles' absence is the
-  // table note's trade.
-  test('only the double arithmetic', () => {
-    for (const name of ['__addsf3', '__mulsf3', '__gtdf2', '__eqdf2', '__floatsidf', '__fixdfsi', '__extendsfdf2']) {
+  // The IR has no int<->float op to fold a compare or a conversion into.
+  test('no compare and no conversion', () => {
+    for (const name of [
+      '__gtsf2',
+      '__fixsfsi',
+      '__floatsisf',
+      '__gtdf2',
+      '__eqdf2',
+      '__floatsidf',
+      '__fixdfsi',
+      '__extendsfdf2',
+    ]) {
       expect(AGBCC_RUNTIME_HELPERS[name], name).toBeUndefined();
     }
   });
 
-  test('the double arithmetic is float helpers, and nothing else in the table is', () => {
+  test('the float arithmetic is float helpers, and nothing else in the table is', () => {
     const floats = Object.keys(AGBCC_RUNTIME_HELPERS).filter((name) => isFloatHelper(AGBCC_RUNTIME_HELPERS[name]));
-    expect(floats).toEqual(['__adddf3', '__subdf3', '__muldf3', '__divdf3', '__negdf2']);
+    expect(floats).toEqual([
+      '__adddf3',
+      '__subdf3',
+      '__muldf3',
+      '__divdf3',
+      '__negdf2',
+      '__addsf3',
+      '__subsf3',
+      '__mulsf3',
+      '__divsf3',
+      '__negsf2',
+    ]);
   });
 });
