@@ -86,6 +86,55 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
     ).toThrow(/'20\(sp\)' at 0x10 is a word this function both saves a register in and stores a value to/);
   });
 
+  test("a call's delay slot runs after the link and before the callee", () => {
+    const frame = (slot: string, ...rest: string[]) =>
+      src(
+        [
+          '0:\taddiu\tsp,sp,-32',
+          '4:\tsw\ts0,24(sp)',
+          '8:\tmove\ts0,ra',
+          'c:\tjal\t0 <f>',
+          `10:\t${slot}`,
+          ...rest,
+          '20:\taddiu\tsp,sp,32',
+          '24:\tjr\tra',
+          '28:\tli\tv0,7',
+        ],
+        [[0xc, 'ext']],
+      );
+    // `m_jaldelaymove`: the slot puts the caller's address back into ra, so ext returns straight to
+    // our caller — lifted `ext(); return 7;`
+    expect(() => frame('move\tra,s0', '14:\tnop', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toThrow(
+      /the 'move' at 0x10 in the delay slot of the 'jal' at 0xc writes ra/,
+    );
+    // `m_jaldelaylw`: the slot reloads ra from its save word, and sp is never popped
+    expect(() =>
+      src(
+        [
+          '0:\taddiu\tsp,sp,-24',
+          '4:\tsw\tra,20(sp)',
+          '8:\tjal\t0 <f>',
+          'c:\tlw\tra,20(sp)',
+          '10:\tli\tv0,7',
+          '14:\taddiu\tsp,sp,24',
+          '18:\tjr\tra',
+          '1c:\tnop',
+        ],
+        [[8, 'ext']],
+      ),
+    ).toThrow(/the 'lw' at 0xc in the delay slot of the 'jal' at 0x8 writes ra/);
+    // `m_jaldelayt0`: a copy into t0 in the slot — ext may destroy t0, lifted `return ext();`
+    expect(() => frame('move\tt0,s0', '14:\tmove\tra,t0', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toThrow(
+      /the 'jr ra' at 0x24 may not return through the caller's return address — on some path the 'move' at 0x14/,
+    );
+    // `m_homejal`: a copy stored in the call's home area in the slot — ext may write its a0 home
+    expect(() => frame('sw\ts0,0(sp)', '14:\tlw\tra,0(sp)', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toThrow(
+      /the 'jr ra' at 0x24 may not return through the caller's return address — on some path the 'lw' at 0x14/,
+    );
+    // a copy kept in s0 across the call, put back after it, is a return
+    expect(frame('nop', '14:\tmove\tra,s0', '18:\tnop', '1c:\tlw\ts0,24(sp)')).toMatch(/return 7;/);
+  });
+
   test("the compilers' own save of ra is a return, and so is a leaf", () => {
     // `m_good`
     expect(

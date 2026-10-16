@@ -826,14 +826,11 @@ function frameDepths(blocks: readonly MipsBlock[], entryReentered: boolean): Rea
   return depths;
 }
 
-// Split the instruction stream into basic blocks. Delay slots are consumed into their
-// branching block; leaders are the entry, every branch target, and each conditional branch's
-// fall-through. A branch-LIKELY's slot is not consumed — it becomes its own block (see
-// `normaliseBranchLikely`). Unreachable trailing blocks (padding `nop`s) are dropped.
 /** What the return proof knows at one point: which registers hold the caller's return address on
  *  every path (`regs`, `ra` among them while it is untouched), the instruction that last wrote
  *  something else into `ra` on some path (`lost`), the entry-`sp` offset of the word it was saved
- *  in (`slot`), and `sp`'s depth below its entry value (`depth`), each null where unknown. */
+ *  in (`slot`), and `sp`'s signed offset from its entry value (`depth`, -24 after `addiu sp,sp,-24`;
+ *  the opposite sign to `frameDepths`' positive depth), each null where unknown. */
 interface RaState {
   readonly regs: ReadonlySet<string>;
   readonly lost: Instr | null;
@@ -864,8 +861,10 @@ const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
  *  `jr ra` reads as a return from its operand alone, and it is one only where `ra` holds the address
  *  this function was called with. It reads `ra` when it runs, before its delay slot. A forward
  *  dataflow over the blocks tracks where that address is:
- *    • `ra` holds it at entry; a call (`jal`, and every linking branch) writes `ra` and destroys every
- *      register O32 lets a callee destroy; a copy (`move`, `addu`/`or` with `zero`) carries it on;
+ *    • `ra` holds it at entry; a call (`jal`, and every linking branch) writes `ra`, runs its delay
+ *      slot, and only then destroys every register O32 lets a callee destroy (and its home area), so
+ *      a slot's write is exposed to the callee; a slot that writes `ra` refuses, since the callee
+ *      then returns somewhere other than the code after the call; a copy (`move`, `addu`/`or` with `zero`) carries it on;
  *      any other write to a register — `lw ra,0(a0)`, `addiu ra,ra,8`, `lui ra` — loses it;
  *    • a `sw` of a register holding it through `sp` puts it in that word, named by its offset from
  *      the entry `sp` (this walk follows `addiu sp,sp,N`; any other write to `sp` makes the depth
@@ -912,7 +911,7 @@ function refuseReturnsNotThroughCallersRa(
     const regs = new Set(inState.regs);
     let { lost, slot, depth } = inState;
     const b = blocks[bi];
-    for (const ins of [...b.body, ...(b.branch ? [b.branch] : []), ...(b.delay ? [b.delay] : [])]) {
+    const step = (ins: Instr): void => {
       const mn = ins.mnemonic;
       if (mn === 'jr' && canon(ins.ops[0] ?? '') === 'ra' && !regs.has('ra')) {
         throw new FrontendUnsupportedError(
@@ -935,21 +934,11 @@ function refuseReturnsNotThroughCallersRa(
             slot = null;
           }
         }
-        continue;
-      }
-      if (isCallInstr(ins)) {
-        for (const r of [...callerSaved, 'ra']) {
-          regs.delete(r);
-        }
-        lost = ins;
-        if (slot !== null && (depth === null || (slot >= depth && slot < depth + STACK_ARGS_AT))) {
-          slot = null;
-        }
-        continue;
+        return;
       }
       const w = writtenReg(ins);
       if (w === null) {
-        continue;
+        return;
       }
       const dest = canon(w);
       const mem = ins.ops[1] ?? '';
@@ -982,6 +971,44 @@ function refuseReturnsNotThroughCallersRa(
       if (dest === 'ra' && holds) {
         lost = null;
       }
+    };
+    // A call (`jal`; the lowering refuses one whose delay slot is not the next word of its block)
+    // links `ra`, then runs its delay slot, and only then enters the callee — so what the slot writes
+    // is exposed to the callee's clobbers, and a slot that writes `ra` itself makes the callee return
+    // somewhere other than the code after the call (a reload of the save word: to our caller).
+    const seq = [...b.body, ...(b.branch ? [b.branch] : []), ...(b.delay ? [b.delay] : [])];
+    for (let k = 0; k < seq.length; k++) {
+      const call = seq[k];
+      if (!isCallInstr(call)) {
+        step(call);
+        continue;
+      }
+      regs.delete('ra');
+      lost = call;
+      const delay = seq[k + 1];
+      if (delay?.addr !== call.addr + 4) {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the delay slot of the '${call.mnemonic}' at 0x${call.addr.toString(16)} is not the ` +
+            `next instruction of its block, so whether the callee returns through the caller's return address to ` +
+            `the code after the call is not known`,
+        );
+      }
+      const w = writtenReg(delay);
+      if (w !== null && canon(w) === 'ra') {
+        throw new FrontendUnsupportedError(
+          `cannot lift '${name}': the '${delay.mnemonic}' at 0x${delay.addr.toString(16)} in the delay slot of the ` +
+            `'${call.mnemonic}' at 0x${call.addr.toString(16)} writes ra, so the callee may not return through the ` +
+            `caller's return address to the code after the call`,
+        );
+      }
+      step(delay);
+      k++;
+      for (const r of callerSaved) {
+        regs.delete(r);
+      }
+      if (slot !== null && (depth === null || (slot >= depth && slot < depth + STACK_ARGS_AT))) {
+        slot = null;
+      }
     }
     return { regs, lost, slot, depth };
   };
@@ -1006,6 +1033,10 @@ function refuseReturnsNotThroughCallersRa(
   }
 }
 
+// Split the instruction stream into basic blocks. Delay slots are consumed into their
+// branching block; leaders are the entry, every branch target, and each conditional branch's
+// fall-through. A branch-LIKELY's slot is not consumed — it becomes its own block (see
+// `normaliseBranchLikely`). Unreachable trailing blocks (padding `nop`s) are dropped.
 function toBlocks(
   instrs: Instr[],
   jts: Map<number, MipsJT>,
