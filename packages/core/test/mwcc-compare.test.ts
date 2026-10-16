@@ -129,6 +129,33 @@ describe('2.4.x branch-free compares fold to the compare, and still compute it',
     }
   });
 
+  test('a shift mwcc merges into the extract still folds: `(a < b) << 3` ends in one rlwinm', () => {
+    // 2.4.2/2.4.7 at -O4,p: the `srwi 31` and the `<< k` are one `rlwinm rD,rS,k+1,31-k,31-k`
+    const shifted: [string[], (x: number, y: number) => number, string][] = [
+      [
+        ['xor     r0,r4,r3', 'cntlzw  r0,r0', 'slw     r0,r4,r0', 'rlwinm  r3,r0,4,28,28'],
+        (x, y) => b(u(x) < u(y)) << 3,
+        'icmp_ult',
+      ],
+      [
+        ['subf    r0,r4,r3', 'orc     r3,r3,r4', 'srwi    r0,r0,1', 'subf    r0,r0,r3', 'rlwinm  r3,r0,3,29,29'],
+        (x, y) => b(u(x) >= u(y)) << 2,
+        'icmp_uge',
+      ],
+      [
+        ['xor     r0,r4,r3', 'srawi   r3,r0,1', 'and     r0,r0,r4', 'subf    r0,r0,r3', 'rlwinm  r3,r0,6,26,26'],
+        (x, y) => b(s(x) < s(y)) << 5,
+        'icmp_slt',
+      ],
+    ];
+    for (const [body, want, cmp] of shifted) {
+      agreesOverWords(lifted(body, false), want, WORDS);
+      const fn = lifted(body, true);
+      agreesOverWords(fn, want, WORDS);
+      expect(fn.blocks[0].ops.map((o) => o.opcode)).toEqual([cmp, 'shl', 'ret']);
+    }
+  });
+
   test('another compiler keeps the arithmetic', () => {
     const fn = lift('f', ppcFixture('f', FORMS[0][2]), PPC_MWCC);
     applyIdiomPatterns(fn, { ...PPC_MWCC, compiler: 'agbcc' });

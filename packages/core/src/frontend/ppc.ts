@@ -2815,18 +2815,38 @@ function liftOnce(
           const [sh, mb, me] = [parseImm(ins.ops[2]), parseImm(ins.ops[3]), parseImm(ins.ops[4])];
           // `rlwinm rD,rS,SH,MB,ME` = rotl(rS,SH) & mask(MB,ME). Three cases we can lower exactly:
           //  • SH==0            — a pure masked AND.
-          //  • right-shift EXTRACT `(x>>n)&m` — ME==31 and the field does not wrap (SH+MB>=32): the
-          //    compiler's form for `(x>>n)&mask`, with n=32-SH and mask=mask(MB,31). Emit the shift
-          //    then the AND — the faithful, idiomatic C that recompiles to this exact rlwinm.
+          //  • right-shift EXTRACT `(x>>n)&m` — the field lies in the SH bits the rotate brings round
+          //    from the top (MB >= 32-SH, MB <= ME): the compiler's form for `(x>>n)&mask`, with
+          //    n=32-SH and mask=mask(MB,ME). Emit the shift then the AND — the faithful, idiomatic C
+          //    that recompiles to this exact rlwinm. Where that field is the one bit x's sign bit
+          //    lands on (MB == ME == 32-SH) it is `(x >>u 31) << (SH-1)`: mwcc merges a shift of a
+          //    0/1 value into its extract (`(a < b) << 3` ends `rlwinm r3,r0,4,28,28` on 2.4.x), and
+          //    the `srwi 31` the branch-free compare folds read is then whole (pattern/engine.ts
+          //    MWCC_COMPARE_PATTERNS).
+          //  • left-shift INSERT `(x&m)<<SH` — the field lies wholly in the bits the shift fills
+          //    (MB <= ME <= 31-SH): `(x & (mask >> SH)) << SH`, mwcc's form for a masked value moved
+          //    up (`(a < b) << 5` over 2.3.3's `& 1` ends `rlwinm r3,r0,5,26,26`).
           //  • anything else (a genuine rotate / bitfield insert) stays an opaque — loud, not dropped.
           if (sh === 0) {
             emitBin('and', d, read(s), constVal(rlwinmMask(mb, me)));
             break;
           }
-          if (me === 31 && sh + mb >= 32) {
+          if (mb === me && mb === 32 - sh && sh > 1) {
+            const sign = mkValue(T.unk(32));
+            ops.push(mkOp('shr_u', { operands: [read(s)], results: [sign], attrs: { imm: 31 } }));
+            emitShImm('shl', d, sign, sh - 1);
+            break;
+          }
+          if (mb <= me && me <= 31 - sh) {
+            const masked = mkValue(T.unk(32));
+            ops.push(mkOp('and', { operands: [read(s), constVal(rlwinmMask(mb, me) >>> sh)], results: [masked] }));
+            emitShImm('shl', d, masked, sh);
+            break;
+          }
+          if (mb <= me && sh + mb >= 32) {
             const shifted = mkValue(T.unk(32));
             ops.push(mkOp('shr_u', { operands: [read(s)], results: [shifted], attrs: { imm: (32 - sh) & 31 } }));
-            emitBin('and', d, shifted, constVal(rlwinmMask(mb, 31)));
+            emitBin('and', d, shifted, constVal(rlwinmMask(mb, me)));
             break;
           }
           emitOpaqueDest(ins);
