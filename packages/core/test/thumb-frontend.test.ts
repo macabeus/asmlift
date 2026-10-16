@@ -4365,6 +4365,22 @@ describe('a gap in the argument registers of an undeclared call refuses', () => 
     const allp = 'allp:\n\tpush\t{lr}\n\tbl\tg2\n\tadd\tr0, r0, #0x1\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('allp', allp, ARMV4T_AGBCC).source).toContain('return g2() + 1;');
   });
+
+  // A Thumb instruction has no address, so the refusal names the call where the .s puts it. A block
+  // the splitter opened after a branch has a made-up label no .s spells, so a call there is named
+  // within the function — by its ordinal where the function calls the same callee more than once.
+  // `int logv(); int loc(const char *s, int c){ if (c == 0) return 0; return logv(s, 1); }`
+  test('a call in a block the .s does not label is named within its function', () => {
+    const loc = (other: string) =>
+      'loc:\n\tpush\t{lr}\n\tcmp\tr1, #0x0\n\tbeq\t.L2\n\tmov\tr1, #0x1\n\tbl\tlogv\n\tb\t.L3\n' +
+      `.L2:\n${other}.L3:\n\tpop\t{r1}\n\tbx\tr1\n`;
+    expect(() => decompile('loc', loc('\tmov\tr0, #0x0\n'), ARMV4T_AGBCC)).toThrow(
+      /the call 'bl logv' in 'loc' has no prototype, r1 holds a value/,
+    );
+    expect(() => decompile('loc', loc('\tmov\tr1, #0x2\n\tbl\tlogv\n'), ARMV4T_AGBCC)).toThrow(
+      /the call 'bl logv' in 'loc' \(the 1st of its 2 calls there\) has no prototype/,
+    );
+  });
 });
 
 // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT. The guessed count stops at the first argument
