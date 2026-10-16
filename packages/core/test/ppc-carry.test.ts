@@ -269,3 +269,43 @@ test('a `bdnz` loop keeps its counter test: the `(b - a) != 0` fold leaves a liv
   ];
   expect(decompile('f', fixture('f', body), PPC_MWCC).source).toMatch(/\} while \(v\d+ != 0\);/);
 });
+
+describe('a word return whose r4 holds a value the function computed and nothing reads refuses', () => {
+  const refusal =
+    /r4 holds a value this function computed and nothing reads, which is the other word of a 64-bit return/;
+  const asm = (body: string[]) => fixture('f', body);
+
+  test('the cancelling `subfe` of a zero-extended 64-bit subtract, beside its 32-bit twin', () => {
+    // `(unsigned long long)a - b`: the low word stays in r4, and the high word is the `subfe` a
+    // 32-bit `-(a < b)` is
+    expect(() => decompile('f', asm(['subfc   r4,r4,r3', 'subfe   r3,r4,r4']), PPC_MWCC)).toThrow(refusal);
+    expect(decompile('f', asm(['subfc   r0,r4,r3', 'subfe   r3,r0,r0']), PPC_MWCC).source).toMatch(/-\(a0 < a1\)/);
+    // a stated word return leaves r4 unused by the source too
+    const declared = { prototypes: { f: { params: ['u32', 'u32'], returns: 's32' } } };
+    expect(decompile('f', asm(['subfc   r4,r4,r3', 'subfe   r3,r4,r4']), PPC_MWCC, declared).source).toMatch(
+      /-\(a0 < a1\)/,
+    );
+  });
+
+  test('one that reaches the return through a join', () => {
+    // `long long x = a; if (c) x = -x; return x;`: r4 joins `0 - a` and the entry `a`
+    const join = (low: string) =>
+      '0 <f>:\n   0:\tcmpwi   r4,0\n   4:\tli      r0,0\n   8:\tbeq-    14 <f+0x14>\n' +
+      `   c:\t${low}\n  10:\tsubfze  r0,r0\n  14:\tmr      r4,r3\n  18:\tmr      r3,r0\n  1c:\tblr\n`;
+    expect(() => decompile('f', join('subfic  r3,r3,0'), PPC_MWCC)).toThrow(refusal);
+  });
+
+  test('nor is one a carry reader folded away', () => {
+    // ac-decomp's mSP_GetRealShopLevel: `return x >= 25000;` reads its `li r4,-1` through `subfze`
+    const ge = ['li      r0,25000', 'li      r4,-1', 'subfc   r0,r0,r3', 'subfze  r3,r4'];
+    expect(decompile('f', asm(ge), PPC_MWCC).source).toMatch(/a0 >= 25000/);
+    // 2.3.3's `x != 0` cancels the `x - 1` it leaves in r4
+    expect(decompile('f', asm(['addic   r4,r3,-1', 'subfe   r3,r4,r3']), PPC_MWCC).source).toMatch(/a0 != 0/);
+  });
+
+  test('a value r4 holds that something reads is no evidence', () => {
+    expect(decompile('f', asm(['addi    r4,r3,1', 'stw     r4,0(r5)', 'mr      r3,r4']), PPC_MWCC).source).toMatch(
+      /a0 \+ 1/,
+    );
+  });
+});

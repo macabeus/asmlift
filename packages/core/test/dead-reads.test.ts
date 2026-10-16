@@ -65,8 +65,9 @@ describe.each(TOOLCHAINS)('$fixture', ({ fixture: f, target, fns }) => {
 
 // `long long pairhi(long long *p) { return *p; }`, lifted with no declaration: the second word of
 // the return pair is unused only because the lift guessed a one-word return, so it is no
-// `volatile` read of RAM. agbcc and mwcc lift the one word their ABI returns first; O32 refuses the
-// v0:v1 pair outright, before this rule is asked.
+// `volatile` read of RAM. agbcc lifts the one word its ABI returns first; O32 refuses the v0:v1
+// pair outright, before this rule is asked, and mwcc refuses the r4 load nothing reads as the other
+// word of a 64-bit return (frontend/ppc.ts `computedPairHalf`).
 // Plain reads a compiler KEEPS with nothing using them (probe-dead-read.c, compiled): agbcc's merged
 // identical arms, O32's struct copy and long long stored to a frame slot the lift keeps as a
 // variable, and KMC's `addu` of a long long's high word.
@@ -91,11 +92,11 @@ describe('plain reads a compiler keeps are no dead read', () => {
 
 describe("pairhi: the return pair's second word is no dead read", () => {
   const unproto = (f: string, target: TargetDescription) => () => decompile('pairhi', fixture(f), target).source;
-  test.each([
-    ['agbcc-deadread.s', ARMV4T_AGBCC],
-    ['mwcc242-deadread.txt', PPC_MWCC],
-  ] as const)('%s', (f, target) => {
-    expect(unproto(f, target)()).not.toMatch(/volatile/);
+  test('agbcc-deadread.s', () => {
+    expect(unproto('agbcc-deadread.s', ARMV4T_AGBCC)()).not.toMatch(/volatile/);
+  });
+  test('mwcc242-deadread.txt declines', () => {
+    expect(unproto('mwcc242-deadread.txt', PPC_MWCC)).toThrow(/the other word of a 64-bit return/);
   });
   test.each([
     ['ido71-deadread.txt', MIPS_IDO],

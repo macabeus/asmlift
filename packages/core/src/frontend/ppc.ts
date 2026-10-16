@@ -40,7 +40,7 @@
 // `mtctr`. NOTE mwcc at -O4 aggressively UNROLLS loops into a `bdnz` main loop + a remainder
 // loop; an unrolled loop recovers as the unrolled form (sound, rarely a match).
 import { Block, Fn, Op, Successor, Value, mkOp, mkValue, replaceAllUsesWith } from '../ir/core';
-import { spelledWhenDead } from '../ir/discipline';
+import { deletableWhenDead, spelledWhenDead } from '../ir/discipline';
 import type { Opcode } from '../ir/opcodes';
 import { T } from '../ir/types';
 import { demangle } from '../mangle';
@@ -1643,6 +1643,9 @@ function liftOnce(
   // nothing reads leaves no op, so this is the only record that the value was used
   // (frontend/dead-reads.ts `compared`).
   const compared = new Set<Value>();
+  // Every value a carry reader consumed by folding it away: the constant a `subfze` reads, and the
+  // `rB - 1` a `subfe rD,rA,rB` cancels. The machine read them, and no op says so (`computedPairHalf`).
+  const readWithoutOp = new Set<Value>();
   // Every load into the register the compiler discards an unused read into at a level that keeps a
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`).
   const discarded = new Set<Value>();
@@ -2667,6 +2670,7 @@ function liftOnce(
           const b = read(t);
           const def = ops.find((o) => o.results[0] === read(s));
           if (def?.opcode === 'add' && def.operands[0] === b && constIn(def.operands[1]) === -1) {
+            readWithoutOp.add(def.results[0]);
             write(d, readCarry(ins));
             break;
           }
@@ -2677,6 +2681,7 @@ function liftOnce(
           const x = read(s);
           const k = constIn(x);
           if (k !== undefined) {
+            readWithoutOp.add(x);
             const ca = readCarry(ins);
             ~k === 0 ? write(d, ca) : emitBin('add', d, constVal(~k), ca);
             break;
@@ -3150,8 +3155,19 @@ function liftOnce(
   }
   const argSlots = ppcArgSlots(name, fpuArgSlots(name, fpu, ARG_REGS, isFpKey, fpType), ARG_REGS, prototypes[name]);
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
+  const droppedPairHalf = computedPairHalf(
+    irBlocks,
+    unreadHigh,
+    (v) => compared.has(v) || readWithoutOp.has(v) || ssa.frameWrites.has(v),
+  );
   ssa.finish();
   resolveJoinedCarryConsts(name, ssa.fn, joinedCarryConsts);
+  if (droppedPairHalf) {
+    throw new PpcUnsupportedError(
+      `cannot lift '${name}': at a word return no declaration sizes, r4 holds a value this function computed ` +
+        'and nothing reads, which is the other word of a 64-bit return (r3:r4); returning r3 alone would drop it',
+    );
+  }
   highHalves.assertNoneEscaped(name, irBlocks);
   tableBases.assertNoneEscaped(name, irBlocks);
   // A non-value reaches a use through a join's incoming arguments as well as directly (`nonValues`).
@@ -3198,6 +3214,79 @@ function liftOnce(
   abiSortEntryParams(irBlocks[0], preds[0].length > 0, paramReg, argSlots);
   ssa.fn.localObjects = statics.finish();
   return ssa.fn;
+}
+
+/** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `held` is what r4, the second
+ *  register of an r3:r4 return, may hold at each word return no declaration pins the width of
+ *  (`unreadHigh`, frontend/dead-reads.ts `unreadPairHalf`). Where one of those values is the result
+ *  of an op that nothing reads — directly, or through joins nothing reads — the compiler computed it
+ *  for the caller: an optimizing compiler deletes a pure computation nobody reads, so a value that
+ *  survives in r4 with no reader is the other word of a 64-bit return, and returning r3 alone drops
+ *  it. mwcc's `(unsigned long long)a - b` is `subfc r4,r4,r3; subfe r3,r4,r4`, whose high word is
+ *  the very `subfe` a 32-bit `-(a < b)` is, and `long long x = a; if (c) x = -x; return x;` joins
+ *  `0 - a` into r4 below the branch; both would lift as their high word.
+ *
+ *  Asked BEFORE `ssa.finish`, while every join is still a parameter with its incoming values wired,
+ *  so a join the trivial-phi pass would fold is walked, not lost, and refused AFTER it, so an unmodelled
+ *  instruction or an unresolved `subfze` keeps its own message. `exempt` names a value the machine
+ *  did use where the lift left no op for the use: one a compare consumed (`compared`), one a carry
+ *  reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns `(x >= 25000)` as
+ *  `li r4,-1; subfc r0,r0,r3; subfze r3,r4`) and one stored to the frame (`frameWrites`). A function that holds an unmodelled instruction is not asked: the
+ *  `opaque` may read r4 without naming it, and it declines under its own name. A value r4 holds that the function did not compute — its entry
+ *  value, the caller's `a` that `long long z(unsigned a) { return a; }` moves there — is not seen,
+ *  and that word return still drops the low word. */
+function computedPairHalf(blocks: readonly Block[], held: ReadonlySet<Value>, exempt: (v: Value) => boolean): boolean {
+  // An unmodelled instruction may read r4 without naming it, and declines with its own message.
+  if (held.size === 0 || blocks.some((b) => b.ops.some((o) => o.opcode === 'opaque'))) {
+    return false;
+  }
+  const defOf = new Map<Value, Op>();
+  const incoming = new Map<Value, Value[]>();
+  for (const b of blocks) {
+    for (const o of b.ops) {
+      o.results.forEach((r) => defOf.set(r, o));
+      for (const succ of o.successors) {
+        succ.args.forEach((a, i) => {
+          const p = succ.block.params[i];
+          incoming.set(p, [...(incoming.get(p) ?? []), a]);
+        });
+      }
+    }
+  }
+  // What some kept op reads, through the joins that carry it there.
+  const read = new Set<Value>();
+  const work: Value[] = [];
+  const mark = (v: Value) => {
+    if (!read.has(v)) {
+      read.add(v);
+      work.push(v);
+    }
+  };
+  for (const b of blocks) {
+    for (const o of b.ops) {
+      if (!deletableWhenDead(o)) {
+        o.operands.forEach(mark);
+      }
+    }
+  }
+  while (work.length > 0) {
+    const v = work.pop()!;
+    defOf.get(v)?.operands.forEach(mark);
+    incoming.get(v)?.forEach(mark);
+  }
+  const seen = new Set<Value>();
+  const computedForNothing = (v: Value): boolean => {
+    if (seen.has(v) || read.has(v) || exempt(v)) {
+      return false;
+    }
+    seen.add(v);
+    const def = defOf.get(v);
+    if (def !== undefined) {
+      return def.opcode !== 'undef';
+    }
+    return (incoming.get(v) ?? []).some(computedForNothing);
+  };
+  return [...held].some(computedForNothing);
 }
 
 /** Settle each `subfze rD,rA` whose rA came in through a join (the `subfze` decode): where every

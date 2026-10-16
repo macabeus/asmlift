@@ -1146,6 +1146,7 @@ describe('a class may not outlive the message it classifies', () => {
     ['runtime-helper', 'no model for the runtime helper', 'packages/core/src/l3/ast.ts'],
     ['carry', 'reads the carry bit (XER[CA])', 'packages/core/src/frontend/ppc.ts'],
     ['wide-call-arg', 'half of a 64-bit value', 'packages/core/src/frontend/call-plan.ts'],
+    ['wide-call-arg', 'the other word of a 64-bit return', 'packages/core/src/frontend/ppc.ts'],
     ['wide-call-arg', 'is a `double` its callee declares', 'packages/core/src/raise/floathelpers.ts'],
     ['opaque-ops', 'unmodelled effect instruction', 'packages/core/src/frontend/opaque.ts'],
     ['opaque-ops', 'no lowering for op', 'packages/core/src/structure/structure.ts'],
