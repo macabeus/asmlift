@@ -35,6 +35,11 @@ export interface HighHalfInfo {
   addend: number;
   addr: number;
   mnemonic: string;
+  /** A RUNTIME BYTE INDEX added between the halves (`lui rH,%hi(S); addu rH,rH,idx; lw x,%lo(S)(rH)`,
+   *  which is how ido, KMC and GCC 2.7.2 address `S[i]`), set only on a half `index` derived. The
+   *  index sits outside both relocated immediates, so the `%lo` carry is the same with and without
+   *  it and the completed address is exactly `S + addend + lo + index`. */
+  index?: Value;
 }
 
 /** How one ISA spells the two halves in a refusal, and how it fails loud. */
@@ -59,6 +64,14 @@ export interface HighHalves {
    *  `reg` and what it really holds. The half is CONSUMED on the way out, which is why this is a
    *  call and not a public flag: the mark and the proof cannot come apart. */
   pair(site: string, reg: string, v: Value, loSym: string, alsoMatches?: (hi: HighHalfInfo) => boolean): HighHalfInfo;
+  /** AN INDEXED HIGH HALF: `v` is the half `base` plus the runtime byte index `idx`, made by the
+   *  instruction at `at`. It is a placeholder like the half it came from — read as a value, left
+   *  uncompleted or carried into a merge it refuses through the same guards, because it lives in the
+   *  same value-keyed map — and only its `%lo` completes it, `pair` handing the index back. Deriving
+   *  CONSUMES `base`: the derivation is the use the base half was waiting for. Indexing a half that
+   *  is already indexed refuses — no compiler measured chains two (lui;addu;addu); a frontend that
+   *  meets one has hand-written or unmodelled code, not `S[i][j]`, which every compiler sums first. */
+  index(v: Value, base: Value, idx: Value, at: { addr: number; mnemonic: string }): void;
   /** True when `v` is a placeholder — for a caller that must EXCLUDE one (a call's argument count
    *  must not treat a half parked in an argument register as an argument). */
   has(v: Value): boolean;
@@ -82,6 +95,21 @@ export function makeHighHalves(d: HighHalfDialect): HighHalves {
   return {
     record: (v, info) => void halves.set(v, { info, consumed: false }),
     has: (v) => halves.has(v),
+    index(v, base, idx, at) {
+      const entry = halves.get(base);
+      if (!entry) {
+        d.fail(`the '${at.mnemonic}' at 0x${at.addr.toString(16)} indexes a value that holds no high half`);
+      }
+      if (entry!.info.index !== undefined) {
+        d.fail(
+          `the '${at.mnemonic}' at 0x${at.addr.toString(16)} adds a second index to the high half of ` +
+            `'${entry!.info.sym}' (the '${entry!.info.mnemonic}' at 0x${entry!.info.addr.toString(16)}) — ` +
+            `a chain of indexes between the halves is not modelled`,
+        );
+      }
+      entry!.consumed = true;
+      halves.set(v, { info: { ...entry!.info, addr: at.addr, mnemonic: at.mnemonic, index: idx }, consumed: false });
+    },
     pair(site, reg, v, loSym, alsoMatches) {
       const entry = halves.get(v);
       const hi = entry && entry.info.sym === loSym && (alsoMatches?.(entry.info) ?? true) ? entry.info : undefined;
