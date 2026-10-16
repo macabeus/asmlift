@@ -650,10 +650,11 @@ is `K >=u rA`, while `addic rD,rA,K` carries out of `rA + K`, so its carry is `r
 for mwcc's `addic -1`) — because that is what mwcc reads it for: a materialised compare with no
 branch (`subfc; subfe rD,rY,rY` is `-(a <u b)`, `adde` over two sign words is `a >=s b`), which the
 mwcc patterns fold to the `icmp` (pattern/engine.ts `MWCC_COMPARE_PATTERNS`). The 64-bit reading is
-not built: `addc` leaves the carry unknown, a `subfe` or `subfze` whose register halves do not
-cancel stays an unmodelled instruction, and a reader of an unknown carry refuses, naming its writer.
-A `subfze` reads a constant, which mwcc may hoist out of the loop it sits in; one that comes in through
-a join is kept only where every path brings the same constant.
+not built: `addc` leaves the carry unknown, an `adde` or `addze` over an `addic` carry (2.4.x's
+`(long long)x + K`) refuses, a `subfe` or `subfze` whose register halves do not cancel stays an
+unmodelled instruction, and a reader of an unknown carry refuses, naming its writer. A `subfze`
+reads a constant, which mwcc may hoist out of the loop it sits in or out of the branch above it; one
+that comes from another block is kept only where every path brings the same constant.
 
 **A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
 a returned pair are the same instructions, so the frontend is given the fact rather than reading it:

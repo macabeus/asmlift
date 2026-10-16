@@ -10814,6 +10814,17 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void nbcstult(unsigned a, unsigned b, int *p);',
     proto: { nbcstult: { returnsVoid: true } },
   },
+  {
+    // 2.3.3 loads the `li r6,-1` its `>=u` subfzes read once, in the entry block, and reads it in
+    // the blocks below the branches (frontend/ppc.ts `resolveJoinedCarryConsts`). 2.4.x spells the
+    // same compares with `orc`, which this row pins as well.
+    sym: 'nbcbruge',
+    src: 'unsigned nbcbruge(unsigned a, unsigned b, unsigned c) { unsigned r = a >= b; if (c) r += b >= c; if (c > 5) r += a >= c; return r; }',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['compare', 'unsigned', 'branch'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
+    ctx: 'unsigned nbcbruge(unsigned a, unsigned b, unsigned c);',
+  },
 
   // ── THE RETURN PROOF: hand-written asm whose return jumps somewhere other than the caller ──
   // `retmtlr` and `retjr` exist to be DECLINED, as `tax_gprel` does. `blr` and `jr ra` are returns by

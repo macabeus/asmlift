@@ -410,8 +410,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
   },
   {
     // A reader of PowerPC's carry bit whose writer is not one the frontend reads as a compare
-    // (frontend/ppc.ts `readCarry`): a 64-bit add or subtract's halves (`addc`/`adde`, an extended
-    // form's own carry-out), the signed `/2^k` round-up `srawi` leaves for `addze`, or a carry set
+    // (frontend/ppc.ts `readCarry`): a 64-bit add or subtract's halves (`addc`/`adde`, an `addic`
+    // carry under `adde`/`addze`, an extended form's own carry-out), the signed `/2^k` round-up `srawi` leaves for `addze`, or a carry set
     // in another block or before a call.
     key: 'carry',
     label: 'A carry bit (XER[CA]) set by an instruction the PPC frontend does not read as a compare',

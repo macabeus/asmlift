@@ -159,6 +159,12 @@ describe('a carry this frontend cannot name refuses at its reader, saying why', 
 
   test('a 64-bit add or subtract set it', () => {
     expect(declines(['addc    r4,r4,r6', 'adde    r3,r3,r5'])).toThrow(/the 'addc' at 0x0 set it/);
+    // 2.4.x's `(long long)x + K` sets its low word's carry with an addic, read only as a compare
+    for (const hi of ['adde    r3,r5,r0', 'addze   r3,r5']) {
+      expect(declines(['srawi   r0,r3,31', 'li      r5,0', 'addic   r4,r3,1', hi])).toThrow(
+        /the '(adde|addze)' at 0xc reads the carry bit .*an addic set it: an extended add over that carry is the high word/,
+      );
+    }
     // the high half of a 64-bit subtract stays an unmodelled instruction
     expect(declines(['subfc   r4,r6,r4', 'subfe   r3,r5,r3'])).toThrow(/unmodelled instruction 'subfe'/);
     // and its carry out is the high word's
@@ -208,6 +214,20 @@ describe('a `subfze` constant mwcc hoisted out of the loop it sits in', () => {
     // the same constant on both is that constant
     const same = asm.replace('li      r6,5', 'li      r6,-1');
     expect(decompile('f', same, PPC_MWCC).source).toMatch(/a0 >= a1/);
+  });
+
+  test('is read where it comes down through a block with one predecessor', () => {
+    // `r = c ? a >= b : c`, with mwcc's `li r6,-1` in the entry block and its subfze below the branch
+    const asm = (pre: string) =>
+      `0 <f>:\n   0:\t${pre}\n   4:\tcmpwi   r5,0\n   8:\tmr      r0,r5\n   c:\tbeq-    18 <f+0x18>\n` +
+      '  10:\tsubfc   r3,r4,r3\n  14:\tsubfze  r0,r6\n  18:\tmr      r3,r0\n  1c:\tblr\n';
+    const src = decompile('f', asm('li      r6,-1'), PPC_MWCC).source;
+    expect(src).toMatch(/a0 >= a1/);
+    expect(src).not.toMatch(/~/);
+    // and refused where what comes down is the caller's r6
+    expect(() => decompile('f', asm('nop'), PPC_MWCC)).toThrow(
+      /unmodelled instruction 'subfze' at 0x14 — it reads r6, which is not one constant/,
+    );
   });
 });
 

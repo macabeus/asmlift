@@ -1650,8 +1650,8 @@ function liftOnce(
   // Every value written to a register other than the discard register: `leftInDiscardRegister`
   // takes out of `discarded` each load one of them derives from, which mwcc put in a home.
   const writtenElsewhere: Value[] = [];
-  // A `subfze` over a register this block takes in from a join: modelled as `~rA + CA`, and kept
-  // only where `ssa.finish` resolves rA to one constant on every path in (`subfze` case below).
+  // A `subfze` over a register this block takes in from another block: modelled as `~rA + CA`, and
+  // kept only where `ssa.finish` resolves rA to one constant on every path in (`subfze` case below).
   const joinedCarryConsts: { ins: Instr; not: Op; add: Op; ca: Value }[] = [];
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
@@ -2239,20 +2239,31 @@ function liftOnce(
     // UNKNOWN, and its reader refuses naming why, when no instruction of this block set it (a carry
     // across a block edge is not modelled), a call clobbered it, or a writer this frontend does not
     // model set it: `srawi`/`sraw` (the signed `/2^k` round-up), `addc` (the low half of a 64-bit
-    // add), and the extended forms, whose own carry-out is a high word's.
-    type Carry = { make: () => Value } | { why: string };
+    // add), and the extended forms, whose own carry-out is a high word's. An `addic` carry is
+    // read only as a compare (`subfe`, `subfze`): `adde`/`addze` over it is the high word of
+    // mwcc 2.4.x's 64-bit add of a constant, which is not built, so they refuse it as they refuse
+    // an `addc` carry.
+    type Carry = { make: () => Value; addic: boolean } | { why: string };
     let carry: Carry = { why: 'nothing in its own block set it (a carry across a block edge is not modelled)' };
-    const setCarry = (make: () => Value) => {
-      carry = { make };
+    const setCarry = (make: () => Value, addic = false) => {
+      carry = { make, addic };
     };
-    const readCarry = (ins: Instr): Value => {
-      if ('why' in carry) {
+    /** The carry, as the compare that set it. `wide` marks an extended add (`adde`/`addze`), which
+     *  over an `addic` carry is the high word of a 64-bit add. */
+    const readCarry = (ins: Instr, wide = false): Value => {
+      const why =
+        'why' in carry
+          ? carry.why
+          : wide && carry.addic
+            ? 'an addic set it: an extended add over that carry is the high word of a 64-bit add, which is not modelled'
+            : undefined;
+      if (why !== undefined) {
         throw new PpcUnsupportedError(
           `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
-            `reads the carry bit (XER[CA]), and ${carry.why}`,
+            `reads the carry bit (XER[CA]), and ${why}`,
         );
       }
-      return carry.make();
+      return (carry as { make: () => Value }).make();
     };
     /** The value of `v` when this block defines it as a `const`. */
     const constIn = (v: Value): number | undefined => {
@@ -2597,12 +2608,14 @@ function liftOnce(
             emitBin('add', d, a, constVal(k));
             if (mnem === 'addic') {
               // a + K carries out exactly when a >=u 2^32 - K; K == 0 never carries.
-              setCarry(() =>
-                k === 0
-                  ? constVal(0)
-                  : k === -1
-                    ? kit.tmp('icmp_ne', [a, constVal(0)])
-                    : kit.tmp('icmp_uge', [a, constVal((2 ** 32 - (k >>> 0)) | 0)]),
+              setCarry(
+                () =>
+                  k === 0
+                    ? constVal(0)
+                    : k === -1
+                      ? kit.tmp('icmp_ne', [a, constVal(0)])
+                      : kit.tmp('icmp_uge', [a, constVal((2 ** 32 - (k >>> 0)) | 0)]),
+                true,
               );
             }
           }
@@ -2671,8 +2684,10 @@ function liftOnce(
           // mwcc hoists the constant out of a loop (`li r3,-1` ahead of the loop, `subfze r0,r3` in
           // its body), so the register comes in through a join. Whether every path brings the same
           // constant is known only once every block is filled; the exact `~rA + CA` stands until then.
-          // An entry parameter is the caller's value, never a constant.
-          if (bi === 0 || !irBlocks[bi].params.includes(x)) {
+          // The value may also come down through blocks with one predecessor from the block that set
+          // it, so only a value this block computes is settled here; an entry parameter is the
+          // caller's value, never a constant, and the settling refuses it.
+          if (bi === 0 || ops.some((o) => o.results.includes(x))) {
             emitOpaqueDest(ins);
             break;
           }
@@ -2685,10 +2700,10 @@ function liftOnce(
           break;
         }
         case 'adde':
-          emitBin('add', d, binTmp('add', read(s), read(t)), readCarry(ins));
+          emitBin('add', d, binTmp('add', read(s), read(t)), readCarry(ins, true));
           break;
         case 'addze':
-          emitBin('add', d, read(s), readCarry(ins));
+          emitBin('add', d, read(s), readCarry(ins, true));
           break;
         case 'neg':
           emitUn('neg', d, read(s));
