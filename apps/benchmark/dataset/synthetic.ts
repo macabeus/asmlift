@@ -10012,7 +10012,9 @@ export const SYNTHETIC: SynthSpec[] = [
   //      same as its void out-pointer twin, so neither is the struct return. mwcc_242_81 declines
   //      on r3 read after the call destroyed it.
   //      sret1w, sret2h, sret8 and sret12 pin the O32 rule at {u32}, {u16}, 8 and 12 bytes, and
-  //      sretglob a struct returned straight into a global, which declines. A u32 member read
+  //      sretglob a struct returned straight into a global, which declines. sretloop calls one in a
+  //      loop gcc rotates, so a0 is set ahead of the loop and in the back branch's delay slot and
+  //      reaches the jal as a merge naming one local; ido7.1 does not rotate it. A u32 member read
   //      whole spells through an s32 cast (structure.ts `spellsAccessType`), which is what keeps
   //      sret1w off a match on gcc and sret8/sret12 on ido7.1. On agbcc {u32} and {u16} come back
   //      in r0, 8 and 12 bytes decline on the temp overlapping an SSA slot; mwcc_242_81 returns 8
@@ -10256,6 +10258,30 @@ export const SYNTHETIC: SynthSpec[] = [
         },
       },
       sretglob: { returnsVoid: true },
+    },
+  },
+  {
+    sym: 'sretloop',
+    src:
+      'struct QR { s32 quot, rem; };\nextern struct QR qdiv(s32 n, s32 d);\n' +
+      'void sretloop(u8 *p, s32 lo)\n{\n    struct QR qr;\n    while (lo > 0) {\n' +
+      "        qr = qdiv(lo, 10);\n        *--p = qr.rem + '0';\n        lo = qr.quot;\n    }\n}",
+    features: ['struct-return', 'field'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'struct QR { s32 quot, rem; };\nstruct QR qdiv(s32 n, s32 d);\nvoid sretloop(u8 *p, s32 lo);',
+    proto: {
+      qdiv: {
+        params: ['s32', 's32'],
+        returns: 'struct QR',
+        returnLayout: {
+          kind: 'struct',
+          members: [
+            { name: 'quot', type: 's32' },
+            { name: 'rem', type: 's32' },
+          ],
+        },
+      },
+      sretloop: { returnsVoid: true },
     },
   },
   {
