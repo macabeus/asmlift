@@ -296,6 +296,54 @@ describe('the gates', () => {
     expect(o4.load.attrs.volatile).toBe(true);
   });
 
+  // Compiled at the keeping levels, one statement per line: a volatile `*p;` is the load into the
+  // register the compiler discards it into (target.ts `discardsUnusedReadsInto`), the plain
+  // `int x; x = p[5]; x = 0; *q = x;` takes a home, and `register int x;` the same.
+  const objdump = (body: string) => `00000000 <f>:\n${body}`;
+  const voidF = (params: string[]) => ({ prototypes: { f: { params, returnsVoid: true } } });
+  test('keeps-unused-reads: mwcc -O0,p discards a volatile read into r0, and a dead local takes a home', () => {
+    const o0 = targetFor('mwcc_242_81', ['-O0,p']).target;
+    const vol = objdump('   0:\tlwz     r0,0(r3)\n   4:\tblr\n');
+    expect(decompile('f', vol, o0, voidF(['volatile s32 *'])).source).toMatch(/^\s*\*\(volatile s32 \*\)a0;$/m);
+    const home = objdump(
+      '   0:\tstwu    r1,-16(r1)\n   4:\tstw     r31,12(r1)\n   8:\tlwz     r31,20(r3)\n   c:\tli      r31,0\n' +
+        '  10:\tstw     r31,0(r4)\n  14:\tlwz     r31,12(r1)\n  18:\taddi    r1,r1,16\n  1c:\tblr\n',
+    );
+    expect(decompile('f', home, o0, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+  });
+  test('keeps-unused-reads: IDO -O1 and -O0 discard a volatile read into $zero, and a dead local takes a home', () => {
+    const header = 'f.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    const vol = header + objdump('   0:\tjr\tra\n   4:\tlw\tzero,0(a0)\n');
+    for (const level of ['-O1', '-O0']) {
+      const t = targetFor('ido7.1', ['-mips2', level, '-32', '-non_shared', '-G', '0']).target;
+      expect(decompile('f', vol, t, voidF(['volatile s32 *'])).source).toMatch(/^\s*\*\(volatile s32 \*\)a0;$/m);
+    }
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']).target;
+    // `register int x;`: the load is in a2, which the next instruction overwrites
+    const reg = objdump(
+      '   0:\tlw\ta2,20(a0)\n   4:\taddiu\tsp,sp,-8\n   8:\tmove\ta2,zero\n   c:\tsw\ta2,0(a1)\n' +
+        '  10:\tjr\tra\n  14:\taddiu\tsp,sp,8\n',
+    );
+    expect(decompile('f', header + reg, o1, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+    // `int x;`: the load is in t6 and stored to the frame
+    const home = objdump(
+      '   0:\tlw\tt6,20(a0)\n   4:\taddiu\tsp,sp,-8\n   8:\tsw\tt6,4(sp)\n   c:\tsw\tzero,4(sp)\n' +
+        '  10:\tsw\tzero,0(a1)\n  14:\tjr\tra\n  18:\taddiu\tsp,sp,8\n',
+    );
+    expect(decompile('f', header + home, o1, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+  });
+  test('keeps-unused-reads: the discard register is what admits a read, not the level', () => {
+    // the same read handed in as discarded is stamped at mwcc -O0; on agbcc, which names no
+    // register, the fact is never gathered and the gate refuses as before
+    const o0 = targetFor('mwcc_242_81', ['-O0']).target;
+    const r0 = deadLoad(constAt(0x80001000), { off: 0, width: 4, signed: false });
+    pinDeadReads(r0.blocks, o0, { discarded: new Set(r0.load.results) });
+    expect(r0.load.attrs.volatile).toBe(true);
+    const r31 = deadLoad(constAt(0x80001000), { off: 0, width: 4, signed: false });
+    pinDeadReads(r31.blocks, o0, { discarded: new Set() });
+    expect(r31.load.attrs.volatile).toBeUndefined();
+  });
+
   test('keeps-unused-reads is a fact of the level, per family', () => {
     expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,

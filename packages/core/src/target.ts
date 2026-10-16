@@ -50,8 +50,10 @@
 //     (frontend/thumb.ts, which reads the epilogue), `callThunks` (frontend/thumb.ts, which
 //     lowers a `bl` to one as a call through its register), `farJumpRelay` (frontend/thumb.ts,
 //     which lowers a marked `bl` to the branch it stands for), `roundTripsDoubleLiterals`
-//     (raise/floathelpers.ts) and `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
-//     raise/declared-volatile.ts through liftStamped and the offset-name pass). The
+//     (raise/floathelpers.ts), `volatileReadsExtendInRegister` (frontend/device-pins.ts, and
+//     raise/declared-volatile.ts through liftStamped and the offset-name pass), and
+//     `keepsUnusedReads` and `discardsUnusedReadsInto` (frontend/dead-reads.ts, the second
+//     gathered by frontend/ppc.ts and frontend/mips.ts as they lower a load). The
 //     field names are a SUPERSET of
 //     StructureOptions' — see `structureOptionsFor`.
 //
@@ -1008,7 +1010,8 @@ export interface TargetDescription {
     // never written in a description: `targetFor` sets it from the optimisation level
     // (`keepsUnusedReadsAt`), so a target at other flags has it absent. Where it holds, a read
     // the lift finds unused is no evidence of `volatile`, and the dead-read pin
-    // (frontend/dead-reads.ts) stamps none.
+    // (frontend/dead-reads.ts) stamps only one the machine loaded into the register the compiler
+    // discards a volatile read into (`discardsUnusedReadsInto`).
     //
     // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
     // was qualified.

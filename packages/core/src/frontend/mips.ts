@@ -1446,6 +1446,12 @@ function liftOnce(
   const saveSlots = new Map<number, string>();
   const valueSlots = new Set<number>();
   const restores = new Map<Value, { reg: string; addr: number }>();
+  // Every load into the register the compiler discards an unused read into at a level that keeps a
+  // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`):
+  // IDO's `lw zero`, which `write` drops, so the load's value is recorded here or nowhere.
+  const discarded = new Set<Value>();
+  const discardReg = target.compilerBehaviors.discardsUnusedReadsInto;
+  const discards = (r: string) => discardReg !== undefined && (r === discardReg || (isZero(r) && isZero(discardReg)));
   // A `$`-spelt operand is an FPU register or a bare number, and the target's list names neither.
   const savedByCallee = (r: string) =>
     r === 'ra' || (!r.startsWith('$') && !target.callerSaved.includes(r) && !['zero', 'sp', 'gp'].includes(r));
@@ -2202,12 +2208,18 @@ function liftOnce(
       const sum = raw === undefined ? undefined : frameSums.get(raw);
       return sum === undefined ? undefined : materialize(sum, off);
     };
+    const loaded = (d: string, res: Value) => {
+      if (discards(d)) {
+        discarded.add(res);
+      }
+      write(d, res);
+    };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
       const g = globalBase(ins, mem);
       if (g) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [g.base], results: [res], attrs: { off: g.off, width, signed } }));
-        write(d, res);
+        loaded(d, res);
         return;
       }
       const { off, base } = parseMem(mem);
@@ -2216,7 +2228,7 @@ function liftOnce(
       if (at !== undefined) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [at], results: [res], attrs: { off: 0, width, signed } }));
-        write(d, res);
+        loaded(d, res);
         return;
       }
       // A word reload from a stack slot is transparent to dataflow — the SAME value spilled — so
@@ -2270,7 +2282,7 @@ function liftOnce(
       }
       const res = mkValue(T.unk(32));
       ops.push(mkOp('load', { operands: [read(base)], results: [res], attrs: { off, width, signed } }));
-      write(d, res);
+      loaded(d, res);
     };
     const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
       const g = globalBase(ins, mem);
@@ -2584,6 +2596,7 @@ function liftOnce(
     own: prototypes[name],
     atUndeclaredCall: calls.heldAtUndeclaredCall,
     spilled: ssa.frameWrites,
+    discarded,
     declarations: { symbols, context },
   });
 

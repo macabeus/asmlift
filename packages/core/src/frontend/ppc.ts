@@ -1639,6 +1639,10 @@ function liftOnce(
   // nothing reads leaves no op, so this is the only record that the value was used
   // (frontend/dead-reads.ts `compared`).
   const compared = new Set<Value>();
+  // Every load into the register the compiler discards an unused read into at a level that keeps a
+  // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`).
+  const discarded = new Set<Value>();
+  const discardReg = target.compilerBehaviors.discardsUnusedReadsInto;
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -2133,7 +2137,10 @@ function liftOnce(
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
       const { base, off } = memOperand(ins, mem, width);
-      emit('load', d, [base], { off, width, signed });
+      const v = emit('load', d, [base], { off, width, signed });
+      if (d === discardReg) {
+        discarded.add(v);
+      }
     };
     const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
       const { base, off } = memOperand(ins, mem, width);
@@ -2162,7 +2169,10 @@ function liftOnce(
       return addr;
     };
     const emitLoadX = (d: string, rA: string, rB: string, width: number, signed: boolean) => {
-      emit('load', d, [addrX(rA, rB)], { off: 0, width, signed });
+      const v = emit('load', d, [addrX(rA, rB)], { off: 0, width, signed });
+      if (d === discardReg) {
+        discarded.add(v);
+      }
     };
     const emitStoreX = (srcReg: string, rA: string, rB: string, width: number) => {
       ops.push(mkOp('store', { operands: [addrX(rA, rB), read(srcReg)], attrs: { off: 0, width } }));
@@ -3011,6 +3021,7 @@ function liftOnce(
     atUndeclaredCall: calls.heldAtUndeclaredCall,
     compared,
     spilled: ssa.frameWrites,
+    discarded,
     declarations,
   });
 

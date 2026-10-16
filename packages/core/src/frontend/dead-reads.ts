@@ -32,10 +32,13 @@
  *
  *  The reads the rule must not claim are tabled (`DEAD_READ_GATES`) and REPORTED: a caller may hand
  *  its own table (`tallying`, l3/gates.ts) to census the refusals.
- *   • any read of a function built at a level where the compiler keeps a plain read nothing uses
- *     (target.ts `keepsUnusedReadsAt`): mwcc at `-O0` keeps `x = p[5]; x = 0;`'s load in r31, so an
- *     unused read there says nothing about `volatile` — and a level no flag names, or one a word the
- *     flag table cannot read may set (mwcc `-opt off`), is judged as keeping;
+ *   • a read of a function built at a level where the compiler keeps a plain read nothing uses
+ *     (target.ts `keepsUnusedReadsAt`), save one the machine loaded into the register that compiler
+ *     discards a volatile read into (`discarded`, target.ts `discardsUnusedReadsInto`): mwcc at
+ *     `-O0` keeps `x = p[5]; x = 0;`'s load in r31 and IDO at `-O1` in t6, so a read in a home says
+ *     nothing about `volatile`, where `*p;` through a volatile pointer is `lwz r0` and `lw zero` —
+ *     and a level no flag names, or one a word the flag table cannot read may set (mwcc
+ *     `-opt off`), is judged as keeping;
  *   • a read of a global the project declares with no volatile byte where it reads (`declared-plain`:
  *     the symbol map where it lays the object out, else the declaration context): the source spelled
  *     the read plain, so the compiler kept it for some other reason — agbcc merges the identical
@@ -125,16 +128,19 @@ export interface DeadRead {
   readonly computed: boolean;
   /** its address reaches one global, declared with no volatile byte where it reads (`declaredPlain`) */
   readonly declaredPlain: boolean;
+  /** the machine loaded it into the register the compiler discards an unused read into
+   *  (`DeadReadFacts.discarded`, target.ts `discardsUnusedReadsInto`) */
+  readonly discarded: boolean;
   readonly target: TargetDescription;
 }
 
 export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
   {
     id: 'keeps-unused-reads',
-    why: 'at these flags the compiler keeps a plain read nothing uses, so an unused read is no evidence of volatile',
+    why: 'at these flags the compiler keeps a plain read nothing uses, and this one is not in the register it discards a volatile read into',
     sound: false,
     guardedBy: 'dead-reads.test.ts: keeps-unused-reads: mwcc -O0 keeps a dead assignment plain',
-    rejects: (c) => c.target.compilerBehaviors.keepsUnusedReads === true,
+    rejects: (c) => c.target.compilerBehaviors.keepsUnusedReads === true && !c.discarded,
   },
   {
     id: 'declared-plain',
@@ -216,6 +222,9 @@ export interface DeadReadFacts {
   /** every value the machine stored to its own stack, which the lift keeps as a slot variable
    *  (ssa.ts `frameWrites`) */
   readonly spilled?: ReadonlySet<Value>;
+  /** every value a load put in the register the compiler discards an unused read into
+   *  (target.ts `discardsUnusedReadsInto`): mwcc's `lwz r0`, IDO's `lw zero` */
+  readonly discarded?: ReadonlySet<Value>;
   /** where a read's object is declared: the project's symbol map and the declaration context */
   readonly declarations?: Declarations;
 }
@@ -371,6 +380,7 @@ export function pinDeadReads(
     const atCall = reaching(facts.atUndeclaredCall);
     const compared = reaching(facts.compared);
     const spilled = reaching(facts.spilled);
+    const discarded = reaching(facts.discarded);
     // Who consumes a value among the dead ops: an extension passes the read on, any other op the
     // machine computed with it. A read among them was decided before this one (outermost first)
     // and left plain, so the address it took was the compiler's use.
@@ -396,6 +406,7 @@ export function pinDeadReads(
         spilled: spilled.has(op),
         computed: computedWith(op.results[0]),
         declaredPlain: plainGlobal(op),
+        discarded: discarded.has(op),
         target,
       };
       if (firstRejection(gates, read) === null) {
