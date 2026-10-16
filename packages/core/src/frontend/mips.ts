@@ -1728,6 +1728,10 @@ function liftOnce(
     // Set by every case entitled to fold a relocation, cleared per instruction, and answered by
     // `relocPlaceholder`.
     let relocTaken = false;
+    // The word the last load into the discard register read (`emitLoad`'s pair half): its base
+    // register, or the symbol a relocation names, and its offset. Any other memory access ends it,
+    // and so does a write to that base register or a call.
+    let firstWord: { reg: string | undefined; sym: string | undefined; off: number } | undefined;
     // EVERY immediate this frontend turns into a value goes through here. objdump prints them as
     // numbers, so a non-numeric one means the operand is not an immediate at all — a relocation
     // spelling the reader failed to resolve, a label — and bare `parseImm` answers NaN, which
@@ -1746,6 +1750,13 @@ function liftOnce(
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
       relocTaken = false;
+      if (
+        firstWord !== undefined &&
+        ins.mnemonic !== 'lw' &&
+        (ins.mnemonic.startsWith('jal') || (firstWord.reg !== undefined && writtenReg(ins) === firstWord.reg))
+      ) {
+        firstWord = undefined;
+      }
       // The GOT/small-data base register `gp` is set up by IDO's PIC prologue (`lui gp; addiu gp,gp,lo;
       // addu gp,gp,t9`, an `_gp_disp` HI16/LO16 pair). It is a RELOCATION base, never program data — and
       // reading `t9` for the `addu` would fabricate a phantom leading parameter (like the sp/r1 guards).
@@ -2208,18 +2219,37 @@ function liftOnce(
       const sum = raw === undefined ? undefined : frameSums.get(raw);
       return sum === undefined ? undefined : materialize(sum, off);
     };
-    const loaded = (d: string, res: Value) => {
-      if (discards(d)) {
+    // IDO reads a `volatile` doubleword nothing uses into the register PAIR its discard register
+    // heads: `lw zero,0(a0)` then `lw at,4(a0)` (O32 pairs a register with the next one, and `at`
+    // follows `zero`), measured at -O1 and -O0 for `volatile long long` and `volatile double`
+    // through a pointer, an index and a global (`lui at` re-formed between the words), the `at`
+    // word in the `jr`'s delay slot at -O1. So a word load into `at` is discarded too where it reads
+    // the word above the one the discard register took, with no memory access between and the
+    // same address (`firstWord`); anywhere else `at` is the assembler's own temporary.
+    const loaded = (d: string, res: Value, discard: boolean) => {
+      if (discard) {
         discarded.add(res);
       }
       write(d, res);
     };
     const emitLoad = (ins: Instr, d: string, mem: string, width: number, signed: boolean) => {
+      const sym = ins.reloc?.type === 'R_MIPS_LO16' ? ins.reloc.sym : undefined;
+      const { off: wordOff, base: wordBase } = parseMem(mem);
+      const word = { reg: sym === undefined ? wordBase : undefined, sym, off: wordOff };
+      const pairHalf =
+        firstWord !== undefined &&
+        d === 'at' &&
+        width === 4 &&
+        word.reg === firstWord.reg &&
+        word.sym === firstWord.sym &&
+        word.off === firstWord.off + 4;
+      const discard = discards(d) || pairHalf;
+      firstWord = discards(d) && width === 4 ? word : undefined;
       const g = globalBase(ins, mem);
       if (g) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [g.base], results: [res], attrs: { off: g.off, width, signed } }));
-        loaded(d, res);
+        loaded(d, res, discard);
         return;
       }
       const { off, base } = parseMem(mem);
@@ -2228,7 +2258,7 @@ function liftOnce(
       if (at !== undefined) {
         const res = mkValue(T.unk(32));
         ops.push(mkOp('load', { operands: [at], results: [res], attrs: { off: 0, width, signed } }));
-        loaded(d, res);
+        loaded(d, res, discard);
         return;
       }
       // A word reload from a stack slot is transparent to dataflow — the SAME value spilled — so
@@ -2282,9 +2312,10 @@ function liftOnce(
       }
       const res = mkValue(T.unk(32));
       ops.push(mkOp('load', { operands: [read(base)], results: [res], attrs: { off, width, signed } }));
-      loaded(d, res);
+      loaded(d, res, discard);
     };
     const emitStore = (ins: Instr, srcReg: string, mem: string, width: number) => {
+      firstWord = undefined;
       const g = globalBase(ins, mem);
       if (g) {
         ops.push(mkOp('store', { operands: [g.base, read(srcReg)], attrs: { off: g.off, width } }));

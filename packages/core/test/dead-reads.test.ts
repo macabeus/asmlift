@@ -389,6 +389,18 @@ describe('the gates', () => {
     expect(decompile('f', cast, o0, voidF(['volatile s32 *'])).source).toMatch(/volatile s32/);
   });
 
+  test('keeps-unused-reads: IDO discards a volatile doubleword into the pair zero:at', () => {
+    const header = 'f.o:     file format elf32-tradbigmips\n\n\nDisassembly of section .text:\n\n';
+    const o1 = targetFor('ido7.1', ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']).target;
+    const pair = header + objdump('   0:\tlw\tzero,0(a0)\n   4:\tjr\tra\n   8:\tlw\tat,4(a0)\n   c:\tnop\n');
+    const both = decompile('f', pair, o1, voidF(['volatile s32 *'])).source;
+    expect(both).toMatch(/^\s*\*\(volatile s32 \*\)a0;$/m);
+    expect(both).toMatch(/^\s*\(\(volatile s32 \*\)a0\)\[1\];$/m);
+    // an `at` word that is not the one above the discarded word is not its pair
+    const apart = header + objdump('   0:\tlw\tzero,0(a0)\n   4:\tjr\tra\n   8:\tlw\tat,8(a0)\n   c:\tnop\n');
+    expect(decompile('f', apart, o1, voidF(['volatile s32 *'])).source).not.toMatch(/\[2\]/);
+  });
+
   test('keeps-unused-reads is a fact of the level, per family', () => {
     expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,
