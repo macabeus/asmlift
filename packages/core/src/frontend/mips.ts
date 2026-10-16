@@ -2201,19 +2201,13 @@ function liftOnce(
     // the join, which is not a half and refuses.
     const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } =>
       addressAt(ins, pairLoHalf(ins, rHi, loImm));
-    /** `&SYM + off` (`+ index` for an indexed half), for the `%lo` at `ins` that completed it. An
-     *  address BELOW the symbol refuses unless an index sits between the halves: then it is
-     *  `S[i - k]`, the constant element riding the `%lo` (`lw v0,-4(v0)` for `gTab[i - 1]` on ido,
-     *  KMC and GCC 2.7.2), and the subscript recompiles to it. */
+    /** `&SYM + off` (`+ index` for an indexed half), for the `%lo` at `ins` that completed it. `off`
+     *  may be negative: `S[i - k]` puts the constant element in the `%lo`, whether the index is added
+     *  between the halves (`lw v0,-4(v0)`, ido, KMC and GCC 2.7.2) or after a base completed first
+     *  (`addiu v0,v0,%lo(S)-4; addu v0,a0,v0`, KMC and GCC 2.7.2), and the address is exactly
+     *  `S + off` either way. */
     const addressAt = (ins: Instr, { off, index }: { off: number; index?: Value }): { base: Value; off: number } => {
-      const lo = ins.reloc!;
-      if (off < 0 && index === undefined) {
-        throw new FrontendUnsupportedError(
-          `${site(ins)} completes '${lo.sym}' at ` +
-            `byte offset ${off} — an address BELOW the symbol (an index-biased array base) is not yet modelled`,
-        );
-      }
-      const g = emitGaddr(lo.sym);
+      const g = emitGaddr(ins.reloc!.sym);
       if (index === undefined) {
         return { base: g, off };
       }

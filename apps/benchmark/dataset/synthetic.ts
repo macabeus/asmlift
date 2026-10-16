@@ -10847,6 +10847,23 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
     ctx: 'u32 hidx_neg(u32 i);',
   },
+  // `S[i - k]` with the base COMPLETED FIRST: KMC GCC and GCC 2.7.2 spell `&gTab[i - 1]` and
+  // `g2[i - 1][j]` as `lui; addiu rB,rB,%lo(S)-k; ...; addu idx`, an address below the symbol that
+  // only the index brings back inside it (ido keeps the indexed-half spelling of `hidx_neg`).
+  {
+    sym: 'hidx_negp',
+    src: 'extern u32 gTab[16];\nu32 *hidx_negp(u32 i)\n{\n    return &gTab[i - 1];\n}',
+    features: ['global', 'array', 'variable-index', 'pointer'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
+    ctx: 'u32 *hidx_negp(u32 i);',
+  },
+  {
+    sym: 'hidx_neg2d',
+    src: 'extern u8 g2[4][8];\nu32 hidx_neg2d(u32 i, u32 j)\n{\n    return g2[i - 1][j];\n}',
+    features: ['global', 'array', 'variable-index', 'multi-arg'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'agbcc', 'mwcc_242_81'],
+    ctx: 'u32 hidx_neg2d(u32 i, u32 j);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────

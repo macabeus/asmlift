@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 246 distinct decline messages (the texts reached by
+// `packages/core/src` throws 245 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 104 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 103 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -56,7 +56,7 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        14  a relocation with an addend, an address below the symbol, a
+//   frontend/mips.ts        13  a relocation with an addend, a
 //                               non-numeric immediate, the caller's value a restore writes read as
 //                               a value (at the read, or through a merge), five refusals about a
 //                               disassembly the reader cannot account for, a `jal` relocated

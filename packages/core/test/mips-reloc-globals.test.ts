@@ -96,18 +96,25 @@ test('a relocation carrying an addend refuses — MIPS is REL and the addend rid
   );
 });
 
-test('an address BELOW the symbol refuses instead of folding an index-biased base', () => {
-  // `lui %hi(gTab-8000)` / `lw %lo(gTab-8000)` recombines to byte offset -8000. The arithmetic is
-  // right, but an address below a symbol is an index-biased array base — a capability with its own
-  // `memAccess` question, unbuilt and unbenched — and this frontend will not guess at it.
-  const asm = '00000000 <getn>:\n   0:\tlui\tv0,0xffff\n   4:\tjr\tra\n   8:\tlw\tv0,-32768(v0)\n';
+test('an address BELOW the symbol completes as S + off, whichever instruction carries the %lo', () => {
+  // `return &gTab[i - 1];` on KMC GCC and GCC 2.7.2 completes the base first, the -4 in the `addiu`'s
+  // `%lo`, and adds the index after (recompiled byte-identical on both). The address is exactly
+  // S - 4 + idx whether the index sits between the halves (below) or after them.
+  const negp =
+    '00000000 <negp>:\n   0:\tsll\ta0,a0,0x2\n   4:\tlui\tv0,0x0\n   8:\taddiu\tv0,v0,-4\n   c:\tjr\tra\n  10:\taddu\tv0,a0,v0\n';
   const rs = relocs([
+    { off: 4, type: 'R_MIPS_HI16', sym: 'gTab' },
+    { off: 8, type: 'R_MIPS_LO16', sym: 'gTab' },
+  ]);
+  expect(decompile('negp', negp, MIPS_GCC, { asmData: rs }).source).toContain('(a0 << 2) + ((u32)&gTab + -4)');
+  // and with no index at all (hand-written): `lui %hi(gTab-98304)` / `lw %lo(gTab-98304)` is one
+  // constant element far below the symbol
+  const asm = '00000000 <getn>:\n   0:\tlui\tv0,0xffff\n   4:\tjr\tra\n   8:\tlw\tv0,-32768(v0)\n';
+  const rs2 = relocs([
     { off: 0, type: 'R_MIPS_HI16', sym: 'gTab' },
     { off: 8, type: 'R_MIPS_LO16', sym: 'gTab' },
   ]);
-  expect(() => decompile('getn', asm, MIPS_GCC, { asmData: rs })).toThrow(
-    /completes 'gTab' at byte offset -\d+ — an address BELOW the symbol/s,
-  );
+  expect(decompile('getn', asm, MIPS_GCC, { asmData: rs2 }).source).toContain('((s32 *)&gTab)[-24576]');
 });
 
 // ── The high half is not a value ────────────────────────────────────────────────────────────────
@@ -386,8 +393,7 @@ test('two indexes off ONE high half each complete their own access (hand-written
 
 test('an INDEXED half may complete below the symbol: S[i - k] puts -k elements in the %lo (ido, KMC, GCC 2.7.2)', () => {
   // `return gTab[i - 1];` is `lw v0,-4(v0)` on all three. With an index between the halves the
-  // address is S + idx - 4, which C spells as a subscript, so only the UN-indexed below-symbol
-  // address keeps its refusal (the test above). Recompiled byte-identical on all three.
+  // address is S + idx - 4, which C spells as a subscript. Recompiled byte-identical on all three.
   const asm =
     '00000000 <off_neg>:\n   0:\tsll\tt6,a0,0x2\n   4:\tlui\tv0,0x0\n   8:\taddu\tv0,v0,t6\n   c:\tjr\tra\n  10:\tlw\tv0,-4(v0)\n';
   expect(lift('off_neg', asm, pair('gTab', 4, 0x10), true)).toContain('((s32 *)&gTab)[a0 + -1]');
