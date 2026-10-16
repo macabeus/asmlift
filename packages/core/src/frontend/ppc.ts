@@ -3016,6 +3016,7 @@ function liftOnce(
     }
   }
   pinDeadReads(irBlocks, target, {
+    name,
     own: prototypes[name],
     atWordReturn: unreadHigh,
     atUndeclaredCall: calls.heldAtUndeclaredCall,

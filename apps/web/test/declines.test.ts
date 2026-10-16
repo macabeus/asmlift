@@ -960,6 +960,8 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
+  // `undecided-unused-read` is new with its refusal (frontend/dead-reads.ts `refuseUndecidedRead`);
+  // its row, `synthetic:deadreado0:agbcc`, reaches the artifact when the bench is next run whole.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
@@ -971,6 +973,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'stack-frames',
     'structs',
     'tu-scoped-name',
+    'undecided-unused-read',
     'unread-data-directive',
     'unstored-slot',
   ];
@@ -1196,6 +1199,11 @@ describe('a class may not outlive the message it classifies', () => {
     ['unnamed-callee', 'has no callee symbol — no ', 'packages/core/src/frontend/ppc.ts'],
     ['unnamed-callee', 'has no callee symbol — no R_MIPS_26 relocation names it', 'packages/core/src/frontend/mips.ts'],
     ['kernel-register', 'the ABI reserves it to the kernel', 'packages/core/src/frontend/mips.ts'],
+    [
+      'undecided-unused-read',
+      'a read nothing uses at a level that keeps plain ones',
+      'packages/core/src/frontend/dead-reads.ts',
+    ],
     ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
     ['far-jump', 'does not target a code label of this function', 'packages/core/src/frontend/thumb.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],

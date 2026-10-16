@@ -2593,6 +2593,7 @@ function liftOnce(
     }
   }
   pinDeadReads(irBlocks, target, {
+    name,
     own: prototypes[name],
     atUndeclaredCall: calls.heldAtUndeclaredCall,
     spilled: ssa.frameWrites,

@@ -103,6 +103,7 @@ import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
 import type { ContextGlobals } from '../proto-context';
 import { type SymbolInfo, type SymbolMap, declaresVolatile, symbolsByName } from '../symbols';
 import { type TargetDescription, readCouldBeVolatile } from '../target';
+import { FrontendUnsupportedError } from './errors';
 import type { SsaBuilder } from './ssa';
 
 /** What a dead-read gate judges: the read, and the facts about it the gates read. */
@@ -140,7 +141,10 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
     why: 'at these flags the compiler keeps a plain read nothing uses, and this one is not in the register it discards a volatile read into',
     sound: false,
     guardedBy: 'dead-reads.test.ts: keeps-unused-reads: mwcc -O0 keeps a dead assignment plain',
-    rejects: (c) => c.target.compilerBehaviors.keepsUnusedReads === true && !c.discarded,
+    rejects: (c) =>
+      c.target.compilerBehaviors.keepsUnusedReads === true &&
+      c.target.compilerBehaviors.discardsUnusedReadsInto !== undefined &&
+      !c.discarded,
   },
   {
     id: 'declared-plain',
@@ -209,6 +213,9 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
 
 /** What a frontend knows about its lift that the IR does not carry, for `pinDeadReads`. */
 export interface DeadReadFacts {
+  /** the function's own name, for the refusal a read no gate claims makes where the compiler names
+   *  no discard register (`refuseUndecidedRead`) */
+  readonly name?: string;
   /** the function's own declaration: a declared void return's `ret` operand is no use */
   readonly own?: FnProto;
   /** what the return pair's second register may hold at a guessed word return (`unreadPairHalf`) */
@@ -410,8 +417,28 @@ export function pinDeadReads(
         target,
       };
       if (firstRejection(gates, read) === null) {
+        refuseUndecidedRead(facts.name, target);
         op.attrs = { ...op.attrs, volatile: true };
       }
     }
+  }
+}
+
+/** A READ NO GATE CLAIMS, AT A LEVEL THAT KEEPS A PLAIN ONE, ON A COMPILER WITH NO DISCARD
+ *  REGISTER: refuse the lift, never drop or stamp the read. agbcc, gcc 2.7.2 and KMC at `-O0` load
+ *  a volatile `*p;` into a register nothing then reads (`ldr r0`, `lw v0`), and a `register` local
+ *  assigned and overwritten (`register int x; x = p[5]; x = 0;`) is the same instructions, so
+ *  neither spelling is in evidence — and either one, published, is a function the machine's
+ *  source did not write: dropped, the volatile access is gone; stamped, the plain one gains an
+ *  access. A read the compiler stored to the frame never reaches here (`spilled`), nor one of the
+ *  frame (`frame-object`). Where the compiler names a register (target.ts
+ *  `discardsUnusedReadsInto`), `keeps-unused-reads` decides instead. */
+function refuseUndecidedRead(name: string | undefined, target: TargetDescription): void {
+  const b = target.compilerBehaviors;
+  if (b.keepsUnusedReads === true && b.discardsUnusedReadsInto === undefined) {
+    throw new FrontendUnsupportedError(
+      `cannot lift '${name ?? '?'}': a read nothing uses at a level that keeps plain ones, which ${target.compiler} ` +
+        `loads into no register of its own — a volatile read and a register local are the same code here`,
+    );
   }
 }

@@ -344,6 +344,34 @@ describe('the gates', () => {
     expect(r31.load.attrs.volatile).toBeUndefined();
   });
 
+  test('a keeping level on a compiler with no discard register refuses a read no gate claims', () => {
+    // agbcc -O0 of `void f(volatile int *p) { *p; }`: `ldr r0, [r1]` nothing reads, the same code as
+    // `register int x; x = p[5]; x = 0;` — dropped or stamped, one of the two is wrong C
+    const o0 = targetFor('agbcc', ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix']).target;
+    const vol =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr1, [r7]\n' +
+      '\tldr\tr0, [r1]\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', vol, o0, voidF(['volatile s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
+    // `int x; x = p[5]; x = 0; *q = x;`: the read is stored to the frame, and lifts
+    const home =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0xc\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tstr\tr1, [r7, #0x4]\n' +
+      '\tldr\tr1, [r7]\n\tadd\tr0, r1, #0\n\tadd\tr0, r0, #0x14\n\tldr\tr1, [r0]\n\tstr\tr1, [r7, #0x8]\n' +
+      '\tmov\tr0, #0x0\n\tstr\tr0, [r7, #0x8]\n\tldr\tr0, [r7, #0x4]\n\tldr\tr1, [r7, #0x8]\n\tstr\tr1, [r0]\n' +
+      '\tadd\tsp, sp, #0xc\n\tpop\t{r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(decompile('f', home, o0, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
+    // …and the IR-level pin: a read a gate claims is left plain, one none claims refuses
+    const spilled = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    pinDeadReads(spilled.blocks, o0, { spilled: new Set(spilled.load.results) });
+    expect(spilled.load.attrs.volatile).toBeUndefined();
+    const bare = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    expect(() => pinDeadReads(bare.blocks, o0, { name: 'f' })).toThrow(/cannot lift 'f': a read nothing uses/);
+    // at -O2 the same read is stamped
+    pinDeadReads(bare.blocks, ARMV4T_AGBCC);
+    expect(bare.load.attrs.volatile).toBe(true);
+  });
+
   test('keeps-unused-reads is a fact of the level, per family', () => {
     expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,

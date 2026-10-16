@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 237 distinct decline messages (the texts reached by
+// `packages/core/src` throws 238 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -685,6 +685,17 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'kernel-register',
     label: 'Kernel registers read as a value (O32 `k0`/`k1`)',
     pattern: /the ABI reserves it to the kernel/,
+  },
+  {
+    // `frontend/dead-reads.ts` `refuseUndecidedRead`: a read nothing uses, in a function built at a
+    // level that keeps a plain one (target.ts `keepsUnusedReadsAt`, `-O0` on every family), on a
+    // compiler that names no register it discards a volatile read into (agbcc, gcc 2.7.2 and KMC).
+    // There a volatile `*p;` and a `register` local assigned and overwritten are the same
+    // instructions, so dropping the read and stamping it are each wrong C for one of the two.
+    // Its row is `synthetic:deadreado0:agbcc`.
+    key: 'undecided-unused-read',
+    label: 'A read nothing uses at -O0 where the compiler spells volatile and register locals alike',
+    pattern: /a read nothing uses at a level that keeps plain ones/,
   },
   {
     // agbcc spells a branch past Thumb's ±2 KB reach as `bl .Lx @far jump` (thumb.md `jump`,
