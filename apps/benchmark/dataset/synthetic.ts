@@ -6987,6 +6987,40 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'void dvstmt(volatile s32 *p, s32 *q);',
     proto: { dvstmt: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
   },
+  // What the discard register does NOT say. `dvnarrow` is the control for a load that leaves it:
+  // CodeWarrior at -O0,p reads the plain `s8 x; x = p[5];` as `lwz r0` + `extsb r31,r0`, a home,
+  // which stays unstamped (the volatile twin is the same code). `dvdword` is IDO's doubleword
+  // discard, `lw zero,0(a0)` + `lw at,4(a0)`: both words are read, so both are kept (as two word
+  // reads, which recompile to two `lw zero`). `dvif` is agbcc -O0's `if (*p) {}`, the same
+  // `ldr; cmp; beq` as its plain twin, so it DECLINES (`undecided-unused-read`) rather than drop
+  // the read.
+  {
+    sym: 'dvnarrow',
+    src: 'void dvnarrow(s32 *p, s32 *q)\n{\n    s8 x;\n    x = p[5];\n    x = 0;\n    *q = x;\n}',
+    features: ['pointer', 'store'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
+    cflags: MWCC_O0P,
+    ctx: 'void dvnarrow(s32 *p, s32 *q);',
+    proto: { dvnarrow: { params: ['s32 *', 's32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'dvdword',
+    src: 'void dvdword(volatile s64 *p, s32 *q)\n{\n    *p;\n    *q = 3;\n}',
+    features: ['pointer', 'store'],
+    toolchains: ['ido7.1'],
+    cflags: ['-mips2', '-O1', '-32', '-non_shared', '-G', '0'],
+    ctx: 'void dvdword(volatile s64 *p, s32 *q);',
+    proto: { dvdword: { params: ['volatile s64 *', 's32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'dvif',
+    src: 'void dvif(volatile s32 *p, s32 *q)\n{\n    if (*p) {\n    }\n    *q = 0;\n}',
+    features: ['pointer', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    cflags: ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix'],
+    ctx: 'void dvif(volatile s32 *p, s32 *q);',
+    proto: { dvif: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
+  },
 
   // ── THE MAP-ASKING VARIATIONS, and the synthetic rows that carry a map ─────────────────────
   //
