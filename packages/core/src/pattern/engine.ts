@@ -105,7 +105,8 @@ export interface RewritePattern {
    *  declaring pattern's compiler gate to that set; widening it fails loud. */
   unsequencedRightFirst?: [string, string];
   /** The compilers measured to RECOMPUTE this idiom instead of CSEing it back, when an interior op
-   *  of the match survives the fold because something outside still reads it. On one of these the
+   *  of the match survives the fold because something outside still reads it (a read by an op `dce`
+   *  will delete does not count, as for `foldsOnlyDyingInterior`). On one of these the
    *  fold refuses that shape (`sharesInterior`, which carries the disassemblies); everywhere else
    *  it is byte-neutral and refusing it costs matches, so the list is opt-in and per-compiler. A
    *  compiler absent from it was either measured neutral or not measured — `validatePattern`
@@ -1019,10 +1020,11 @@ export function applyPattern(fn: Fn, pat: RewritePattern, target: PatternTarget)
         if (!tryMatch(pat.match, op.results[0], defs, binds)) {
           continue;
         }
-        if (pat.recomputesSharedInterior?.includes(target.compiler) && sharesInterior(fn, op, binds.interior, defs)) {
-          continue;
-        }
-        if (pat.foldsOnlyDyingInterior && sharesInterior(fn, op, binds.interior, defs, deadOps(fn.blocks))) {
+        // Both interior gates ask one question — does an interior op outlive the fold? — and both
+        // skip a reader `dce` will delete: the stage DCEs only after every pattern ran, so an op an
+        // earlier fold orphaned still reads the interior here and keeps nothing alive.
+        const askInterior = pat.foldsOnlyDyingInterior || pat.recomputesSharedInterior?.includes(target.compiler);
+        if (askInterior && sharesInterior(fn, op, binds.interior, defs, deadOps(fn.blocks))) {
           continue;
         }
         if (pat.unsequencedRightFirst && reordersUnsequenced(fn, op, pat.unsequencedRightFirst, binds, defs, pat.id)) {
