@@ -98,6 +98,10 @@ import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
+/** The instructions that READ the carry bit (each also writes it), and every other writer of it. */
+const CARRY_READERS = /^(adde|addme|addze|subfe|subfme|subfze)o?$/;
+const CARRY_WRITERS = /^(addc|addco|addic|subfc|subfco|subfic|srawi|sraw|mtxer|mcrxr)$/;
+
 // Branch-condition mnemonic → the icmp for its TAKEN edge, split by compare signedness. PowerPC's
 // branch already names the relation (no negation fold needed). `signed` picks the row.
 const COND_SIGNED: Record<string, Opcode> = {
@@ -2222,6 +2226,37 @@ function liftOnce(
       compared.add(lhs).add(rhs);
     };
 
+    // The carry bit, XER[CA], as a 0/1 value. mwcc computes a materialised compare branch-free
+    // through it (`subfc` then `subfe`/`subfze`/`adde`/`addze`), so a reader needs the comparison
+    // the writer left there. Three writers are modelled, each as the compare its carry IS:
+    //   subfc rD,rA,rB   rD = rB - rA          CA = rB >=u rA
+    //   subfic rD,rA,K   rD = K - rA           CA = K >=u rA   (K == 0: rA == 0)
+    //   addic rD,rA,K    rD = rA + K           CA = carry of the unsigned add (K == -1: rA != 0)
+    // The compare is built at its reader, so a carry nothing reads adds no op. A carry is
+    // UNKNOWN, and its reader refuses naming why, when no instruction of this block set it (a carry
+    // across a block edge is not modelled), a call clobbered it, or a writer this frontend does not
+    // model set it: `srawi`/`sraw` (the signed `/2^k` round-up), `addc` (the low half of a 64-bit
+    // add), and the extended forms, whose own carry-out is a high word's.
+    type Carry = { make: () => Value } | { why: string };
+    let carry: Carry = { why: 'nothing in its own block set it (a carry across a block edge is not modelled)' };
+    const setCarry = (make: () => Value) => {
+      carry = { make };
+    };
+    const readCarry = (ins: Instr): Value => {
+      if ('why' in carry) {
+        throw new PpcUnsupportedError(
+          `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reads the carry bit ` +
+            `(XER[CA]), and ${carry.why}`,
+        );
+      }
+      return carry.make();
+    };
+    /** The value of `v` when this block defines it as a `const`. */
+    const constIn = (v: Value): number | undefined => {
+      const def = ops.find((o) => o.results[0] === v);
+      return def?.opcode === 'const' ? (def.attrs.value as number) : undefined;
+    };
+
     const decode = (ins: Instr) => {
       const [d, s, t] = ins.ops;
       // Record form: a trailing `.` (the Rc bit) means the op ALSO sets cr0 from a signed compare
@@ -2232,6 +2267,15 @@ function liftOnce(
       const mnem = rc ? ins.mnemonic.slice(0, -1) : ins.mnemonic;
       lastDef = null;
       relocTaken = false;
+      // Every carry writer and every call leaves the carry unknown unless its case below models it.
+      const clobberCarry = (how: string) => {
+        carry = { why: `the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ${how}` };
+      };
+      if (CARRY_WRITERS.test(mnem)) {
+        clobberCarry('set it, a carry this frontend does not model');
+      } else if (/^b.*l$/.test(mnem)) {
+        clobberCarry('is a call, which clobbers it');
+      }
       switch (mnem) {
         case 'nop':
           break;
@@ -2544,7 +2588,21 @@ function liftOnce(
             write(d, read(s));
             break;
           }
-          emitBin('add', d, read(s), constVal(parseImm(t)));
+          {
+            const a = read(s);
+            const k = parseImm(t);
+            emitBin('add', d, a, constVal(k));
+            if (mnem === 'addic') {
+              // a + K carries out exactly when a >=u 2^32 - K; K == 0 never carries.
+              setCarry(() =>
+                k === 0
+                  ? constVal(0)
+                  : k === -1
+                    ? kit.tmp('icmp_ne', [a, constVal(0)])
+                    : kit.tmp('icmp_uge', [a, constVal((2 ** 32 - (k >>> 0)) | 0)]),
+              );
+            }
+          }
           break;
         // add immediate SHIFTED — the register-based `%ha` anchor: mwcc derives an absolute base
         // from a scaled index (`addis r4,r3,-32736` = r3 + 0x80200000). The jump-table lis/addi
@@ -2559,13 +2617,62 @@ function liftOnce(
           emitBin('add', d, read(s), constVal((parseImm(t) << 16) >> 0));
           break;
         case 'subf':
-        case 'subfc':
         case 'subfo':
-          emitBin('sub', d, read(t), read(s));
+        case 'subfc':
+        case 'subfco': {
+          const b = read(t);
+          const a = read(s);
+          emitBin('sub', d, b, a);
+          if (mnem.startsWith('subfc')) {
+            setCarry(() => kit.tmp('icmp_uge', [b, a]));
+          }
           break; // rD = rB - rA (reversed)
-        case 'subfic':
-          emitBin('sub', d, constVal(parseImm(t)), read(s));
+        }
+        case 'subfic': {
+          const k = constVal(parseImm(t));
+          const a = read(s);
+          emitBin('sub', d, k, a);
+          setCarry(() => (parseImm(t) === 0 ? kit.tmp('icmp_eq', [a, constVal(0)]) : kit.tmp('icmp_uge', [k, a])));
           break; // rD = imm - rA
+        }
+        // The carry READERS, each over the carry its block's writer left (`readCarry`):
+        //   subfe rD,rA,rB = ~rA + rB + CA      adde rD,rA,rB = rA + rB + CA
+        //   subfze rD,rA   = ~rA + CA           addze rD,rA   = rA + CA
+        // Two `subfe` shapes are modelled, both of whose register halves cancel: `subfe rD,rY,rY`
+        // (~y + y = -1, so CA - 1, reading no rY — mwcc writes it over a register holding anything,
+        // the return address included) and `subfe rD,rA,rB` with rA = rB - 1 (~(x-1) + x = 0, so
+        // CA). Any other `subfe` is the high half of a 64-bit subtract, and `subfze` over a register
+        // is a 64-bit negate: both stay unmodelled, as do `addme`/`subfme`.
+        case 'subfe': {
+          if (s === t) {
+            emitBin('add', d, readCarry(ins), constVal(-1));
+            break;
+          }
+          const b = read(t);
+          const def = ops.find((o) => o.results[0] === read(s));
+          if (def?.opcode === 'add' && def.operands[0] === b && constIn(def.operands[1]) === -1) {
+            write(d, readCarry(ins));
+            break;
+          }
+          emitOpaqueDest(ins);
+          break;
+        }
+        case 'subfze': {
+          const k = constIn(read(s));
+          if (k === undefined) {
+            emitOpaqueDest(ins);
+            break;
+          }
+          const ca = readCarry(ins);
+          ~k === 0 ? write(d, ca) : emitBin('add', d, constVal(~k), ca);
+          break;
+        }
+        case 'adde':
+          emitBin('add', d, binTmp('add', read(s), read(t)), readCarry(ins));
+          break;
+        case 'addze':
+          emitBin('add', d, read(s), readCarry(ins));
+          break;
         case 'neg':
           emitUn('neg', d, read(s));
           break;
@@ -2824,6 +2931,9 @@ function liftOnce(
         default:
           emitOpaqueDest(ins);
           break; // unmodelled: an honest opaque, never a silent drop
+      }
+      if (CARRY_READERS.test(mnem)) {
+        clobberCarry('set it as the carry out of an extended add or subtract, which is not modelled');
       }
       // A record-form op sets cr0 from a signed compare of its result against 0. Wire that so the
       // next branch reading cr0 fuses (`andi. r0,r3,1; beq …` → `if ((a0 & 1) == 0)`).

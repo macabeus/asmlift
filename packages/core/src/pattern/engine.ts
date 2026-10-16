@@ -163,14 +163,21 @@ export const CNTLZW_EQ0: RewritePattern = {
 };
 
 // ── mwcc's branch-free compares ─────────────────────────────────────────────────────────────
-// CodeWarrior 2.4.x materialises a 0/1 compare with no branch and no set-on-compare instruction,
-// as a bit trick on the two operands. Each fold is an IDENTITY over every pair of 32-bit words
-// (PPC `slw` by 32 is 0; mwcc-compare.test.ts evaluates both sides over the edge words). The
-// compiled forms, at -O4,p (2.4.2 and 2.4.7 identical), a and b in r3 and r4:
+// CodeWarrior materialises a 0/1 compare with no branch and no set-on-compare instruction: either
+// through the carry bit (the frontend reads each carry as the compare it is — frontend/ppc.ts
+// `readCarry`), or with a bit trick on the operands. Each fold is an IDENTITY over every pair of
+// 32-bit words (PPC `slw` by 32 is 0; mwcc-compare.test.ts and ppc-carry.test.ts evaluate both
+// sides over the edge words).
+// The compiled forms, at -O4,p (2.4.2 and 2.4.7 identical), a and b in r3 and r4:
 //
-//   a <u b     xor r0,b,a; cntlzw r0,r0; slw r0,b,r0; srwi r3,r0,31
-//   a >=u b    subf r0,b,a; orc r3,a,b; srwi r0,r0,1; subf r0,r0,r3; srwi r3,r0,31
-//   a <s b     xor r0,b,a; srawi r3,r0,1; and r0,r0,b; subf r0,r0,r3; srwi r3,r0,31
+//   a <u b     2.4.x  xor r0,b,a; cntlzw r0,r0; slw r0,b,r0; srwi r3,r0,31
+//              2.3.3  subfc r3,b,a; subfe r0,r0,r0; neg r3,r0          -(CA - 1), CA = a >=u b
+//   a >=u b    2.4.x  subf r0,b,a; orc r3,a,b; srwi r0,r0,1; subf r0,r0,r3; srwi r3,r0,31
+//              2.3.3  subfc r0,b,a; li r0,-1; subfze r3,r0              CA itself
+//   a <s b     2.4.x  xor r0,b,a; srawi r3,r0,1; and r0,r0,b; subf r0,r0,r3; srwi r3,r0,31
+//              2.3.3  eqv r0,b,a; subfc r3,b,a; srwi r0,r0,31; addze r3,r0; clrlwi r3,r3,31
+//   a >=s b    all    srawi r6,a,31; srwi r5,b,31; subfc r0,b,a; adde r3,r6,r5
+//   -(a <u b)  2.4.x  subfc r0,b,a; subfe r3,r0,r0                     CA - 1
 //
 // `>` and `<=` are the same code with the operands swapped, and fold to `b < a` / `b >= a`. A
 // constant operand is materialised once, into a register the trick reads twice — except in the
@@ -270,8 +277,106 @@ const xorSlt = (first: string, second: string): RewritePattern => ({
 });
 export const MWCC_XOR_SLT: RewritePattern[] = [xorSlt('A', 'B'), xorSlt('B', 'A')];
 
+/** `(a >>s 31) + (b >>u 31) + (a >=u b)`, `adde` over the `subfc` carry: the sign words cancel
+ *  when the signs agree, and decide the compare when they differ. */
+export const MWCC_ADDE_SGE: RewritePattern = {
+  id: 'mwcc-adde-sge',
+  applies: mwccOnly,
+  match: {
+    op: 'add',
+    args: [
+      { op: 'icmp_uge', args: [{ bind: 'A' }, { bind: 'B' }] },
+      {
+        op: 'add',
+        args: [
+          { op: 'shr_s', attrEquals: C31, args: [{ same: 'A' }] },
+          { op: 'shr_u', attrEquals: C31, args: [{ same: 'B' }] },
+        ],
+      },
+    ],
+  },
+  replaceWith: { op: 'icmp_sge', args: ['A', 'B'], resultType: T.u(32) },
+};
+
+/** 2.3.3's `((~(a ^ b) >>u 31) + (a >=u b)) & 1`, `addze` over the `subfc` carry: one plus the
+ *  carry when the signs agree, the carry alone when they differ. */
+export const MWCC_EQV_SLT: RewritePattern = {
+  id: 'mwcc-eqv-slt',
+  applies: mwccOnly,
+  match: {
+    op: 'and',
+    args: [
+      {
+        op: 'add',
+        args: [
+          { op: 'icmp_uge', args: [{ bind: 'A' }, { bind: 'B' }] },
+          {
+            op: 'shr_u',
+            attrEquals: C31,
+            args: [{ op: 'not', args: [{ op: 'xor', args: [{ same: 'A' }, { same: 'B' }] }] }],
+          },
+        ],
+      },
+      { op: 'const', attrEquals: { value: 1 }, args: [] },
+    ],
+  },
+  replaceWith: { op: 'icmp_slt', args: ['A', 'B'], resultType: T.u(32) },
+};
+
+/** A carry less one (`subfe rD,rY,rY`): `cmp - 1` is `-(!cmp)`, and negated again (2.3.3's `neg`)
+ *  `!cmp`. One of each per comparison of NEGATED_ICMP, since a carry is any of them (`addic -1`
+ *  makes `!=`, `subfic 0` makes `==`); the negated form runs first, while the `- 1` is whole. */
+const carryLessOne = (cmp: string): MatchNode => ({
+  op: 'add',
+  args: [
+    { op: cmp, args: [{ bind: 'A' }, { bind: 'B' }] },
+    { op: 'const', attrEquals: { value: -1 }, args: [] },
+  ],
+});
+const carryNot = (cmp: string): RewritePattern => ({
+  id: `mwcc-carry-not/${cmp}`,
+  applies: mwccOnly,
+  match: { op: 'neg', args: [carryLessOne(cmp)] },
+  replaceWith: { op: NEGATED_ICMP[cmp], args: ['A', 'B'], resultType: T.u(32) },
+});
+const carryMask = (cmp: string): RewritePattern => ({
+  id: `mwcc-carry-mask/${cmp}`,
+  applies: mwccOnly,
+  match: carryLessOne(cmp),
+  replaceWith: { op: 'neg', args: [{ op: NEGATED_ICMP[cmp], args: ['A', 'B'], resultType: T.u(32) }] },
+});
+
+/** `(b - a) == 0` / `!= 0` is `a == b` / `a != b`: the form 2.3.3's `!=` takes through the carry
+ *  (`subf r3,a,b; addic r0,r3,-1; subfe r3,r0,r3`), and every build's `==` (`subf; cntlzw; srwi`),
+ *  measured byte-exact in this operand order for both on 2.3.3 and for `==` on 2.4.2. Only where
+ *  the difference dies: a `bdnz` tests its decremented counter this way, and a record-form `subf.`
+ *  its result. */
+const subZeroTest = (test: 'icmp_eq' | 'icmp_ne'): RewritePattern => ({
+  id: `mwcc-sub-zerotest/${test}`,
+  applies: mwccOnly,
+  foldsOnlyDyingInterior: true,
+  match: {
+    op: test,
+    args: [
+      { op: 'sub', args: [{ bind: 'B' }, { bind: 'A' }] },
+      { op: 'const', attrEquals: { value: 0 }, args: [] },
+    ],
+  },
+  replaceWith: { op: test, args: ['A', 'B'], resultType: T.u(32) },
+});
+
 /** The branch-free compare bundle. */
-export const MWCC_COMPARE_PATTERNS: RewritePattern[] = [MWCC_CLZ_ULT, ...MWCC_ORC_UGE, ...MWCC_XOR_SLT];
+export const MWCC_COMPARE_PATTERNS: RewritePattern[] = [
+  MWCC_CLZ_ULT,
+  ...MWCC_ORC_UGE,
+  ...MWCC_XOR_SLT,
+  MWCC_ADDE_SGE,
+  MWCC_EQV_SLT,
+  ...Object.keys(NEGATED_ICMP).map(carryNot),
+  ...Object.keys(NEGATED_ICMP).map(carryMask),
+  subZeroTest('icmp_eq'),
+  subZeroTest('icmp_ne'),
+];
 
 // The PPC rotate mirror, as pure data: hardware only rotates LEFT, so mwcc spells `rotr(x, n)`
 // as `rotlw(x, 32 - n)`. Lowering that literally emits `x << (32 - n) | x >> (32 - (32 - n))`,
