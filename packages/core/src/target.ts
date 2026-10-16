@@ -1205,14 +1205,17 @@ const O32_NON_ARG_REGS = [
  *  over in them: af's famicom_emu routines are handed a value in t0 or v1 (`sw t0,6348(s8)` is
  *  its first instruction), and a label inside a function starts with its registers live.
  *  MEASURED over every function and label symbol of the vendored snowboardkids2 (KMC),
- *  marioparty3 (gcc 2.7.2) and af (IDO) objects, 29,399 in all, the refusal below fires on 18 —
- *  twelve labels, four hand-written routines (three of famicom_emu's and libkmc's `div64_64_1`) and
+ *  marioparty3 (gcc 2.7.2) and af (IDO) objects, 29,399 in all, the refusal below fires on 17 —
+ *  twelve labels, three hand-written routines (two of famicom_emu's and libkmc's `div64_64_1`) and
  *  two data symbols disassembled as code — and on no compiled function. A
  *  compiled local is assigned on some path, so its entry value meets that assignment at a join;
  *  `uninitfirst` also reads one before the switch that assigns it, which a join allows. The join
  *  must take a definition the entry value does not feed, because an input carried round a loop
- *  (`addiu t0,t0,-1; bnez t0,top`) meets only its own next value at the loop header — the fourth
- *  routine, famicom_emu's `func_8082E4E0_jp`, is that shape. The cost is a local NO path assigns
+ *  (`addiu t0,t0,-1; bnez t0,top`) meets only its own next value at the loop header. famicom_emu's
+ *  hand-written Yaz0 reader `func_8082E4E0_jp` is NOT that shape, though it once refused as one:
+ *  its t0 is a bit buffer loaded whenever the count runs out (and the count starts at 0), then
+ *  shifted each trip, and it lifts with t0 an uninitialised local no path reads before the load.
+ *  The cost is a local NO path assigns
  *  (`int r; return r + a;` is `jr ra; addu v0,v0,a0` on gcc, and `int x, y; if (c) x = y;` joins
  *  v0 with v1), which refuses: none of the 29,399 is one.
  *
