@@ -1188,6 +1188,29 @@ export const SYNTHETIC: SynthSpec[] = [
     ctx: 'int logv(const char *, int, ...);\nint passvar(const char *, int);',
     proto: { logv: { returns: 'int', variadicParams: ['const char *', 'int'] } },
   },
+  // …AND PAST THAT FLOOR, A REGISTER THE FUNCTION ONLY READ. A read of its own incoming argument (a
+  // compare, IDO's home store of an unused parameter) leaves the entry value behind as a definition,
+  // so a guess would count it as set up and hand the callee an argument the source never passed:
+  // `passread` lifted `dprint(a0, a1)`, and on IDO `passhome` lifted `logv(a0, a1, a2)`. Whether
+  // the call is handed it is the gap's own undecidable question, so both refuse there
+  // (frontend/ssa.ts `fallbackArgc`). `passhome` leaves its unused `x` untouched on the other
+  // compilers, where `logv(a0, a1)` is the bytes it compiles to.
+  {
+    sym: 'passread',
+    src: 'int dprint(const char *, ...);\nint passread(const char *s, int x){ if (x) return dprint(s) + 1; return 0; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int dprint(const char *, ...);\nint passread(const char *, int);',
+    proto: { dprint: { returns: 'int', variadicParams: ['const char *'] } },
+  },
+  {
+    sym: 'passhome',
+    src: 'int logv(const char *, int, ...);\nint passhome(const char *s, int c, int x){ return logv(s, c) + 1; }',
+    features: [],
+    toolchains: [...ALL, 'gcc2.7.2'],
+    ctx: 'int logv(const char *, int, ...);\nint passhome(const char *, int, int);',
+    proto: { logv: { returns: 'int', variadicParams: ['const char *', 'int'] } },
+  },
   {
     sym: 'passflt',
     src: 'int g(int, float);\nint passflt(int a, float b){ return g(a + 1, b); }',

@@ -741,7 +741,9 @@ guess, which would drop the struct or split it into separate arguments. A variad
 fixed parameters (`variadicParams`) are its only layout. Where each is one word they are the first
 that many argument words, read as stated, so one this function passes through untouched is its own
 argument and one a call destroyed refuses; only what the `...` takes is guessed, above them, and a
-gap there refuses as for an undeclared callee (frontend/call-plan.ts `variadicFloor`). Where one is
+gap there refuses as for an undeclared callee (frontend/call-plan.ts `variadicFloor`), and so does a
+register there that still holds this function's own incoming value, which a read of it leaves behind
+as a definition (frontend/ssa.ts `fallbackArgc`). Where one is
 a struct, a 64-bit value or a floating type the call refuses (`variadicRefusal`). Where one is an
 unsized spelling, which may be two words, the guess places the call from the first register. Every
 parameter is at least one word, so a guess that counts fewer registers than that declaration's fixed

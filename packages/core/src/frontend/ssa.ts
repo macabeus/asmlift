@@ -1591,16 +1591,42 @@ export function fallbackArgc(
     /** the leading arguments a declaration states (`GuessedCallSite.floor`): counted whether or not
      *  the caller set them up, so only the registers above them are guessed */
     floor?: number;
+    /** whether `v` is this function's own incoming value of argument register `reg` (an entry
+     *  parameter), which a read leaves behind as a definition */
+    entry?: (reg: string, v: Value) => boolean;
   },
 ): number {
+  const accept = opts.accept ?? (() => true);
   // whether the caller set argument register k up: a definition reaches it, through a call too
-  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, opts.accept);
-  let n = opts.floor ?? 0;
-  while (n < argRegs.length && setUp(n)) {
-    n++;
-  }
+  const setUp = (k: number) => ssa.hasReachingDef(argRegs[k], bi, accept);
   const { name, at, fail } = opts.gap;
   const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
+  const floor = opts.floor ?? 0;
+  let n = floor;
+  while (n < argRegs.length && setUp(n)) {
+    // PAST A DECLARATION'S STATED WORDS, A REGISTER STILL HOLDING ITS INCOMING VALUE REFUSES. A
+    // read of it (a home store, a compare, a store to a global) leaves the entry parameter behind
+    // as a definition, so it reads as set up, and it is exactly as undecidable as the gap below: the
+    // function's own argument passed on, or one the call is not handed. Counted, it is an argument
+    // the source never passed — `int logv(const char *, int, ...)` and `logv(s, c) + 1` in a
+    // function whose unused third parameter IDO home-stores lifts `logv(a0, a1, a2)`. Below a
+    // floor the scan never asks, and with none the guess keeps counting it: there it is the far
+    // commoner `if (a) g(a)`, and the same refusal declines 17 lifts of kleod's 20 units and 40 of
+    // sa3's (`DecompressAlloc(a0)`, `m4aSongNumStart(a1)`), where the floored rule moves none.
+    if (
+      floor > 0 &&
+      opts.entry !== undefined &&
+      ssa.hasReachingDef(argRegs[n], bi, (v) => accept(v) && opts.entry!(argRegs[n], v))
+    ) {
+      fail(
+        `cannot lift '${name}': the call ${call} has a prototype stating only its first ${floor} ` +
+          `argument${floor === 1 ? '' : 's'}, and ${argRegs[n]} past them still holds this function's own incoming ` +
+          'value — an argument passed on unchanged and one the call is not handed look the same here, so the ' +
+          'argument count is not decidable',
+      );
+    }
+    n++;
+  }
   for (let k = n + 1; k < argRegs.length; k++) {
     if (setUp(k)) {
       fail(

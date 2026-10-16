@@ -484,6 +484,21 @@ describe('fallbackArgc', () => {
     );
   });
 
+  // past a declaration's stated words, a register holding only this function's own incoming value
+  // (which a read leaves behind as a definition) is as undecidable as a gap
+  test('refuses an entry value past the floor, and counts it with no floor', () => {
+    const entry = mkValue(T.unk(32));
+    const read = {
+      hasReachingDef: (reg: string, _b: number, accept: (v: Value) => boolean = () => true) =>
+        (reg === 'r0' || reg === 'r1') && accept(entry),
+    };
+    const isEntry = (reg: string, v: Value) => reg === 'r1' && v === entry;
+    expect(() => fallbackArgc(read, regs, 0, { gap: { name: 'f', at: 0x10, fail }, floor: 1, entry: isEntry })).toThrow(
+      /'f': the call at 0x10 has a prototype stating only its first 1 argument, and r1 past them still holds this function's own incoming value/,
+    );
+    expect(fallbackArgc(read, regs, 0, { gap: { name: 'f', at: 0x10, fail }, entry: isEntry })).toBe(2);
+  });
+
   test('does not refuse a contiguous count', () => {
     const contiguous = { hasReachingDef: (reg: string) => reg === 'r0' || reg === 'r1' };
     expect(fallbackArgc(contiguous, regs, 0, { gap: { name: 'f', at: 0, fail } })).toBe(2);
