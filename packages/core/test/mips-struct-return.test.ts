@@ -56,6 +56,7 @@ const PROTOS: Prototypes = {
   mk12: returning('S12', layout(['a', 'u32'], ['b', 'u32'], ['c', 'u32']), ['s32']),
   mk5: returning('S8', S8, ['s32', 's32', 's32', 's32']),
   mkil: returning('S8', S8, ['s32', 'long long']),
+  ldiv: returning('QR', layout(['quot', 's32'], ['rem', 's32']), ['s32', 's32']),
   mkf: returning('SF', layout(['f', 'float']), ['float']),
   mk: returning('S4', layout(['a', 'u16'], ['b', 'u8'], ['pad', 'u8']), ['u16', 'u16', 'u8']),
   tk3: { ...returning('S8', S8, ['s32', 'struct L']), byValueLayouts: { 1: layout(['v', 's64']) } },
@@ -441,6 +442,34 @@ const KMC_PC: Fixture = {
   ],
 };
 
+// gcc2.7.2kmc `void litoa(u8 *p, s32 lo){ struct QR qr; while (lo > 0) { qr = ldiv(lo, 10);
+// *--p = qr.rem + '0'; lo = qr.quot; } }`: the rotated loop sets a0 ahead of it and in the delay
+// slot of its back branch
+const KMC_LITOA: Fixture = {
+  lines: [
+    '0:\taddiu\tsp,sp,-32',
+    '4:\tsw\ts0,24(sp)',
+    '8:\tmove\ts0,a0',
+    'c:\tblez\ta1,3c <litoa+0x3c>',
+    '10:\tsw\tra,28(sp)',
+    '14:\taddiu\ta0,sp,16',
+    '18:\tjal\t0 <litoa>',
+    '1c:\tli\ta2,10',
+    '20:\tlw\tv0,20(sp)',
+    '24:\taddiu\ts0,s0,-1',
+    '28:\taddiu\tv0,v0,48',
+    '2c:\tsb\tv0,0(s0)',
+    '30:\tlw\ta1,16(sp)',
+    '34:\tbgtz\ta1,18 <litoa+0x18>',
+    '38:\taddiu\ta0,sp,16',
+    '3c:\tlw\tra,28(sp)',
+    '40:\tlw\ts0,24(sp)',
+    '44:\tjr\tra',
+    '48:\taddiu\tsp,sp,32',
+  ],
+  rs: [[0x18, 'R_MIPS_26', 'ldiv']],
+};
+
 // gcc2.7.2kmc `struct S1w rmk1(s32 x){ struct S1w r; r.x = x + 1; return r; }`: the callee's half
 const KMC_RMK1: Fixture = {
   lines: ['0:\tmove\tv0,a0', '4:\taddiu\ta1,a1,1', '8:\tjr\tra', 'c:\tsw\ta1,0(v0)'],
@@ -499,10 +528,36 @@ describe('a hidden pointer that is not a local of this frame declines', () => {
     expect(() => lift(name, f, target)).toThrow(outside);
   });
 
-  // ido7.1 puts a call in each arm, so each names its own `laddr` and the source lifts
-  test('a local address that reaches the call through a merge says so', () => {
-    expect(() => lift('pc', KMC_PC, MIPS_GCC)).toThrow(
-      /`mk8` returns struct S8 through the pointer in a0, and that pointer is a local's address that reaches the call through a merge/,
+  // hand-written: `pc` with its frame grown and the else arm's temp moved to sp+24, so the merge
+  // names two locals, which the audit refuses before the struct return is asked
+  test("a merge of two locals' addresses declines", () => {
+    const two: Fixture = {
+      ...KMC_PC,
+      lines: KMC_PC.lines.map((l) =>
+        l
+          .replace('sp,sp,-32', 'sp,sp,-40')
+          .replace('sp,sp,32', 'sp,sp,40')
+          .replace('ra,24(sp)', 'ra,32(sp)')
+          .replace('18:\taddiu\ta0,sp,16', '18:\taddiu\ta0,sp,24'),
+      ),
+    };
+    expect(() => lift('pc', two, MIPS_GCC)).toThrow(
+      /a phi merges the frame objects at \[sp,#16\] and \[sp,#24\] — one value, two objects/,
+    );
+  });
+});
+
+// gcc hoists `addiu a0,sp,16` into both arms ahead of one shared `jal` (`pc`), and rotates a loop
+// so that it runs once ahead of the loop and once in the delay slot of the back branch (`litoa`):
+// every path names the one local, which the call is handed (`nameMergedSretObjects`)
+describe('a hidden pointer that names one local on every path is that local', () => {
+  test('two arms ahead of one call', () => {
+    expect(lift('pc', KMC_PC, MIPS_GCC)).toMatch(/struct S8 sp16;\n\s+if \(a0 == 0\) a0 = 1;\n\s+sp16 = mk8\(a0\);/);
+  });
+
+  test('a rotated loop', () => {
+    expect(lift('litoa', KMC_LITOA, MIPS_GCC)).toMatch(
+      /struct QR sp16;[^]*do \{\n\s+sp16 = ldiv\(a1, 10\);[^]*a1 = sp16\.quot;\n\s+\} while \(a1 > 0\);/,
     );
   });
 });

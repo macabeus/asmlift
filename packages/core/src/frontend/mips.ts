@@ -48,6 +48,7 @@ import {
   areaAboveOutgoing,
   landsOnArea,
   liftWithRelift,
+  nameMergedSretObjects,
   refuseSretOutsideFrame,
 } from './frame-objects';
 import type { Frontend } from './frontend';
@@ -2603,6 +2604,7 @@ function liftOnce(
   // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
   // before the audit judges the frame objects, as on Thumb.
   foldByValueArgs(name, irBlocks, calls, { symbols, context });
+  nameMergedSretObjects(irBlocks);
 
   if (frame !== null) {
     refuseEscapedFrameSums(name, irBlocks, frameSums);
