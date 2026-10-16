@@ -55,8 +55,8 @@ describe('the O32 register partition', () => {
 
 describe('the register half: scratch and saved registers', () => {
   // `int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }`, gcc2.7.2kmc -O2 (and gcc2.7.2
-  // -O1, byte-identical): r lives in v0, set only in the branch-likely slot. Before the model this
-  // lifted as `uninit_join(s32 a0, s32 a1)` with `return a1 | 1`.
+  // -O1, byte-identical): r lives in v0, set only in the branch-likely slot. Without the model it
+  // lifts as `uninit_join(s32 a0, s32 a1)` with `return a1 | 1`.
   const UJOIN_KMC = ['0:\tbgtzl\ta0,c <f+0xc>', '4:\tsll\tv0,a0,0x1', '8:\tnop', 'c:\tjr\tra', '10:\tori\tv0,v0,0x1'];
 
   test.each([
@@ -70,8 +70,8 @@ describe('the register half: scratch and saved registers', () => {
 
   // `int k(int); int uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a);
   // return k(k(k(k(b)+c)+d)+e) + x; }` at gcc2.7.2 -O1: x lives across the calls in s2, which the
-  // prologue saved, and the path that skips the call reads what the caller left there. Before the
-  // model that read was a SEVENTH parameter.
+  // prologue saved, and the path that skips the call reads what the caller left there. Without the
+  // model that read is a SEVENTH parameter.
   const USAVED_GCC272 = [
     '0:\taddiu\tsp,sp,-40',
     '4:\tsw\tra,36(sp)',
@@ -144,7 +144,8 @@ describe('the register half: scratch and saved registers', () => {
 
   // Hand-written O32 asm hands values over in scratch registers (af's famicom_emu stores the t0 it
   // is handed, `sw t0,6348(s8)`), while a local the compiler homed in one is assigned on some path,
-  // so its entry value meets that assignment at a join. An entry value no join takes refuses.
+  // so its entry value meets that assignment at a join. An entry value no join takes refuses (and
+  // one a join takes with no definition of its own, below).
   test.each([
     ['gcc', MIPS_GCC],
     ['ido', MIPS_IDO],
@@ -274,7 +275,7 @@ describe('what a join must meet before an entry value is a local', () => {
   // The same source at ido7.1 -O2 keeps x and y in frame words, and copies 0(sp) into 4(sp) on the
   // c path. That copy is an assignment of y to x, spelled; the path that skips it leaves x as it
   // was, which emits nothing. Neither drops the local's only assignment (which the structurer's
-  // own postcondition reported as read but never assigned).
+  // own postcondition would report as read but never assigned).
   test('a copy of one uninitialised frame word into another is an assignment', () => {
     expect(
       src(

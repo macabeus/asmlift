@@ -131,8 +131,8 @@ test('a callee-saved register stored after it was written is a value, reloaded l
 test('a caller-saved t-register stored with nothing in it is no save, so reloading it elsewhere is no save refusal', () => {
   // `t0` is not one the callee preserves, so the store says nothing about the caller: the word is
   // an ordinary value slot, and a save's cross-register refusal would be the wrong reading of it.
-  // What does refuse is the value: a t0 entry value no join takes is an input (MIPS_IDO
-  // `hiddenInputRegs`).
+  // What does refuse is the value: a t0 entry value no definition meets at a join is an input
+  // (MIPS_IDO `hiddenInputRegs`).
   expect(
     lift('0:\taddiu\tsp,sp,-8', '4:\tsw\tt0,4(sp)', '8:\tlw\tv0,4(sp)', 'c:\tjr\tra', '10:\taddiu\tsp,sp,8'),
   ).toThrow(/t0 is read before anything writes it, and no join meets it with a definition of its own/);

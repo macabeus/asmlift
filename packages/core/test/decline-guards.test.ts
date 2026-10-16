@@ -254,7 +254,7 @@ test('MIPS: sp accesses outside the word-slot model decline, never a bogus slot'
   // `a1` standing in for uninitialised stack. Both frontends assert the symptom at the same
   // boundary (frontend/ssa.ts `finish`), which is total where a per-read test cannot be.
   //
-  // BOTH FRONTENDS NOW RECOVER THIS SHAPE as an uninitialised local (`undef`). The recovery needs
+  // BOTH FRONTENDS RECOVER THIS SHAPE as an uninitialised local (`undef`). The recovery needs
   // "nothing incoming can reach this key", and each proves it its own way: Thumb bounds a slot by
   // `off < localArea`; MIPS claims `[0, frameSize)` of a leaf's one push, at the frame's depth,
   // with no frame address taken (frontend/mips.ts `ownedFrame`), and keys incoming stack words

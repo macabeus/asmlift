@@ -1503,8 +1503,8 @@ inner join). Independence is a least fixpoint grown from nothing, so no join cou
 the strength of its own back edge. Sweeping every
 function and label symbol in the vendored snowboardkids2, marioparty3 and af objects, **29,399**,
 that refusal fires on 17 and on no compiled function: twelve labels, three hand-written routines
-and two data symbols disassembled as code. (famicom_emu's hand-written Yaz0 reader, once counted
-here as a loop-carried `t0`, is the bit-reader shape and lifts.) What it
+and two data symbols disassembled as code. (famicom_emu's hand-written Yaz0 reader is the
+bit-reader shape and lifts.) What it
 cannot describe is a local no path assigns at all, which declines; none of the 29,399 is one.
 
 `int x, y; if (c) x = y;` joins two undefined values, and the structurer drops an undefined edge

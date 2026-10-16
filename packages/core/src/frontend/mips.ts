@@ -1108,13 +1108,13 @@ function liftOnce(
   // THE SLOT MODEL CLAIMS ONE PARTITION, `ownedLocals` (`ownedFrame`, below): a def-less read of a
   // word this function provably owns is an uninitialised local, and any other def-less slot read
   // refuses (frontend/ssa.ts, LiveInModel) unless `emitLoad` places it. It declares no
-  // `declaredLocals`, so no slot is stamped a declaration rank. A slot key is the RAW `sp@<off>`; what the offset
-  // names is read through the frame depth (`frameDepths`, below): a word at or past entry + 16 is
-  // incoming stack argument k, read and written as `@sarg<k>` (`incomingStackKey`; O32's `<pentry
-  // offset="16">` in `mips32be.cspec`), and `[0,16)` at entry is the caller-owned home of a0..a3,
-  // which is in neither range. A function that takes a frame address gets a local area as well
-  // (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory through an
-  // `laddr` the shared frame-object audit proves, as on Thumb.
+  // `declaredLocals`, so no slot is stamped a declaration rank. A slot key is the RAW `sp@<off>`;
+  // what the offset names is read through the frame depth (`frameDepths`, below): a word at or past
+  // entry + 16 is incoming stack argument k, read and written as `@sarg<k>` (`incomingStackKey`;
+  // O32's `<pentry offset="16">` in `mips32be.cspec`), and `[0,16)` at entry is the caller-owned
+  // home of a0..a3, which is in neither range. A function that takes a frame address gets a local
+  // area as well (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory
+  // through an `laddr` the shared frame-object audit proves, as on Thumb.
   //
   // THE REGISTER HALF of the live-in model IS claimed: a def-less read of a register O32 passes no
   // argument in, and that is scratch or the prologue saved (`prologueSavedRegs`), is an

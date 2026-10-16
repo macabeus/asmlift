@@ -1459,8 +1459,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // and Braun's construction resolves a def-less read to a live-in, which at the entry block is a
   // PARAMETER. WHERE the local lands decides which way that goes, and the two differ sharply:
   //   • a stack slot ⇒ loud. Two guards split it — stored on SOME path (frontend/ssa.ts `finish`)
-  //     vs stored on NO path reaching the read (frontend/mips.ts `emitLoad`). uninit_join and
-  //     uninit_sw hit one each, on ido7.1, until O32 claimed the words of its own frame (below).
+  //     vs stored on NO path reaching the read (frontend/mips.ts `emitLoad`), each outside the
+  //     frame words a function provably owns (below).
   //   • an ARGUMENT register ⇒ silent: nothing guards it and the read becomes a fabricated extra
   //     parameter. MEASURED: both agbcc rows byte-MATCH anyway, because the invented parameter
   //     lands in the register the local was allocated to — `uninit_sw(s32 a0, s32 a1, s32 a2)` for
@@ -1495,14 +1495,14 @@ export const SYNTHETIC: SynthSpec[] = [
   // register half, like uninit_sw:agbcc, reached through CodeWarrior's switch dispatch), and three
   // lift to nonmatches nothing here attributes (uninit_join, uninit_sw and uninit_spill on
   // gcc2.7.2kmc).
-  // Of those five, uninit_spill:agbcc was the first recovered, and uninit_sw:agbcc is the register
+  // Of those five, uninit_spill:agbcc is recovered on Thumb, and uninit_sw:agbcc is the register
   // half, which `undef` does not touch.
-  // THE O32 HALVES (frontend/mips.ts), which closed the rest. The three gcc2.7.2kmc nonmatches
-  // were the REGISTER half: KMC homes the local in a scratch register (v0 in uninit_join, v1 in
-  // uninit_sw), and with no O32 partition each def-less read was a fabricated parameter —
+  // THE O32 HALVES (frontend/mips.ts). The three gcc2.7.2kmc rows are the REGISTER half: KMC homes
+  // the local in a scratch register (v0 in uninit_join, v1 in uninit_sw), and with no O32
+  // partition each def-less read is a fabricated parameter —
   // `uninit_join(s32 a0, s32 a1)`. MIPS_GCC/MIPS_IDO `scratchRegs` and the prologue's saves make it
-  // an `undef`. The ido7.1 rows were the FRAME half: IDO homes the same locals in words of its own
-  // frame, and O32 now owns `[0, frameSize)` of a leaf's one push (past the outgoing area where it
+  // an `undef`. The ido7.1 rows are the FRAME half: IDO homes the same locals in words of its own
+  // frame, and O32 owns `[0, frameSize)` of a leaf's one push (past the outgoing area where it
   // calls) when no frame address is taken (`ownedFrame`), so a def-less read there is an `undef`
   // whether or not anything stores the word — uninit_spill:ido7.1 reads 36(sp) and 0(sp), which
   // nothing does. uninit_spill and uninitfirst on gcc2.7.2kmc keep a2 (and a3) as parameters: KMC
@@ -1555,8 +1555,8 @@ export const SYNTHETIC: SynthSpec[] = [
     proto: { k: { params: 1 } },
   },
   // A JOIN NO PATH DEFINES: `x = y` with both uninitialised joins two undefined values, and the
-  // structurer drops an undefined edge copy, so left alone it kept x's local and dropped all its
-  // assignments — a contract failure ("read but never assigned"). ido7.1 keeps x and y in frame
+  // structurer drops an undefined edge copy, so left alone it would keep x's local and drop all its
+  // assignments (frontend/ssa.ts `markCopiedUndefs`, `collapseUndefinedJoins`). ido7.1 keeps x and y in frame
   // words (sp@4, sp@0); two words are two locals, so the copy is spelled `x = uninit_sp0` and the
   // row MATCHes. On both gcc 2.7.2 lanes they sit in v0 and v1, scratch registers hand-written asm
   // passes inputs in (`hiddenInputRegs`), and with no definition meeting either entry value the
@@ -1584,7 +1584,7 @@ export const SYNTHETIC: SynthSpec[] = [
   // t0, a scratch register hand-written asm also passes inputs in (`hiddenInputRegs`), so its entry
   // value must meet a definition it does not feed at the loop header's join. The shift reaches the
   // entry value only through the inner join the load also feeds, which makes it one; a test that
-  // walked through every join argument refused the row, and without the O32 live-in model t0 was a
+  // walks through every join argument refuses the row, and without the O32 live-in model t0 is a
   // phantom fifth parameter. ido7.1 keeps it in a frame word, and mwcc 2.4.2 in a register its
   // own way: the capability is the shared hidden-input rule, so both run too.
   {

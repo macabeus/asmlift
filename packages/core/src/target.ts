@@ -249,7 +249,8 @@ export interface TargetDescription {
    *  What separates the two is MEASURED on 2.4.2 and 2.3.3: the uninitialised local the compiler
    *  homes in r11 or r12 is assigned on SOME path (`uninit_r12`: `if (s) { x = a*b; ... }`), so its
    *  entry value meets that definition at a join. A def-less read of one of these registers whose
-   *  entry value NO JOIN TAKES refuses (frontend/ssa.ts `LiveInModel.hiddenInputRegs`). r0 is not
+   *  entry value no join meets with a definition of its own refuses (frontend/ssa.ts
+   *  `LiveInModel.hiddenInputRegs`). r0 is not
    *  listed: the same compilers read a never-assigned local straight out of r0 (`int x; return x +
    *  a;` is `add r3,r0,r3`), and the runtime passes nothing there.
    *
@@ -1212,7 +1213,7 @@ const O32_NON_ARG_REGS = [
  *  `uninitfirst` also reads one before the switch that assigns it, which a join allows. The join
  *  must take a definition the entry value does not feed, because an input carried round a loop
  *  (`addiu t0,t0,-1; bnez t0,top`) meets only its own next value at the loop header. famicom_emu's
- *  hand-written Yaz0 reader `func_8082E4E0_jp` is NOT that shape, though it once refused as one:
+ *  hand-written Yaz0 reader `func_8082E4E0_jp` is NOT that shape:
  *  its t0 is a bit buffer loaded whenever the count runs out (and the count starts at 0), then
  *  shifted each trip, and it lifts with t0 an uninitialised local no path reads before the load.
  *  The cost is a local NO path assigns
