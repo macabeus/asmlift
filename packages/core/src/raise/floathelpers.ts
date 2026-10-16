@@ -37,13 +37,17 @@ import { isArgumentPair } from './pairparams';
  *     any other call, or carried across an edge;
  *   - a result NOTHING reads. Folded, it would be a dead float op, and `dce` deletes the arithmetic.
  *     A call whose result nothing reads is not proof the source dropped it — it is proof the
- *     source USED it: agbcc deletes a helper call whose result is dead (`s = a * b; g(); return 0;`
- *     calls no `__mulsf3`), so the one reader there was is a call after the helper that took the
+ *     source USED it: optimising, agbcc deletes a helper call whose result is dead (at -O1 and
+ *     -O2, `s = a * b; g(); return 0;` calls no `__mulsf3`), so the one reader there was is a call
+ *     after the helper that took the
  *     result in r0, and the guess there (frontend/ssa.ts `fallbackArgc`, `trimClobberedCallArgs`)
  *     does not count a register a call wrote. agbcc's `g1(a * b)` with `g1` undeclared reads as
  *     `__mulsf3(); return g1();`, and folded it would print `return g1();`. A double's pair refuses
  *     that shape at the frontend already, naming the half the next call reads; a single is one
- *     word, so it reaches here.
+ *     word, so it reaches here. At -O0 the premise does not hold — agbcc keeps the call and stores
+ *     its result to the frame — and the rule is not asked: that store reads the result, and nothing
+ *     at -O0 folds anyway, because its arguments are read from frame homes (`ok0`'s `return a * b`
+ *     declines naming `__mulsf3`). A frontend that reads those homes must re-measure this.
  *     A result some other op ALSO reads proves no such thing, and is not refused: `s = a * b; g(s);
  *     return s;` and `s = a * b; g(); return s;` are the same bytes on agbcc, and the trim's
  *     `g()` is the reading every guessed call after a call gets (`trimClobberedCallArgs`, which a
