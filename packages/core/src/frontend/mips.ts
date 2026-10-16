@@ -69,7 +69,7 @@ import {
   stackArgSlots,
   stackSlotKey,
 } from './ssa';
-import { makeSsaBuilder } from './ssa';
+import { makeSsaBuilder, registerLiveIns } from './ssa';
 
 type Instr = DisasmInstr;
 
@@ -1105,17 +1105,36 @@ function liftOnce(
     }
   });
 
-  // THE SLOT MODEL CLAIMS NO PARTITION OF ITS OWN, so a def-less slot read refuses (frontend/ssa.ts,
-  // LiveInModel) unless `emitLoad` places it. A slot key is the RAW `sp@<off>`; what the offset
-  // names is read through the frame depth (`frameDepths`, below): a word at or past entry + 16 is
-  // incoming stack argument k, read and written as `@sarg<k>` (`incomingStackKey`; O32's `<pentry
-  // offset="16">` in `mips32be.cspec`), and `[0,16)` at entry is the caller-owned home of a0..a3,
-  // which is in neither range. A function that takes a frame address gets a local area as well
-  // (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory through an
-  // `laddr` the shared frame-object audit proves, as on Thumb.
+  // THE SLOT MODEL CLAIMS ONE PARTITION, `ownedLocals` (`ownedFrame`, below): a def-less read of a
+  // word this function provably owns is an uninitialised local, and any other def-less slot read
+  // refuses (frontend/ssa.ts, LiveInModel) unless `emitLoad` places it. It declares no
+  // `declaredLocals`, so no slot is stamped a declaration rank. A slot key is the RAW `sp@<off>`;
+  // what the offset names is read through the frame depth (`frameDepths`, below): a word at or past
+  // entry + 16 is incoming stack argument k, read and written as `@sarg<k>` (`incomingStackKey`;
+  // O32's `<pentry offset="16">` in `mips32be.cspec`), and `[0,16)` at entry is the caller-owned
+  // home of a0..a3, which is in neither range. A function that takes a frame address gets a local
+  // area as well (`measureO32Frame`, `compilerBehaviors.o32LocalArea`), whose accesses are memory
+  // through an `laddr` the shared frame-object audit proves, as on Thumb.
+  //
+  // THE REGISTER HALF of the live-in model IS claimed: a def-less read of a register O32 passes no
+  // argument in, and that is scratch or the prologue saved (`prologueSavedRegs`), is an
+  // uninitialised local (`registerLiveIns`, frontend/ssa.ts, as on Thumb and PPC). The saves are
+  // measured HERE, before any block is lowered, because the builder evaluates the model once, at
+  // its first use, while `saveSlots` below fills progressively.
   const fpType = fpPrecision(instrs, (m) => FP_ARITH[m]?.width);
-  const ssa = makeSsaBuilder(name, blocks.length, preds, undefined, (k) =>
-    isFpKey(k) ? (fpType ?? T.f32()) : undefined,
+  const savedRegs = prologueSavedRegs([...blocks[0].body, ...(blocks[0].delay ? [blocks[0].delay] : [])], target);
+  // The frame half is measured further down (`ownedFrame`), once the frame depths are; a model the
+  // builder asks for before that claims no frame, which only refuses more.
+  let ownedFrameOf: (() => { from: number; to: number } | undefined) | undefined;
+  const ssa = makeSsaBuilder(
+    name,
+    blocks.length,
+    preds,
+    () => {
+      const owned = ownedFrameOf?.();
+      return { ...registerLiveIns(target, savedRegs), ...(owned === undefined ? {} : { ownedLocals: owned }) };
+    },
+    (k) => (isFpKey(k) ? (fpType ?? T.f32()) : undefined),
   );
   const { irBlocks, readVar, writeVar, paramReg } = ssa;
   const RET = target.returnReg;
@@ -1235,6 +1254,11 @@ function liftOnce(
   // taken, or the frame is one this cannot partition, and then every capture keeps the
   // sp-as-data refusal.
   const code = blocks.flatMap((b) => [...b.body, ...(b.delay ? [b.delay] : [])]);
+  /** The stack words a `jal`'s callee takes, by its declaration; null where nothing declares it. */
+  const stackWordsOf = (callee: string | undefined): number | null => {
+    const declared = callee === undefined ? null : calls.declaredCall(callee);
+    return declared === null ? null : Math.max(0, wordsOf(declared.widths, target) - ARG_REGS.length);
+  };
   const frame = measureO32Frame({
     name,
     code,
@@ -1242,10 +1266,7 @@ function liftOnce(
     depthAt,
     frameSize,
     rule: target.compilerBehaviors.o32LocalArea,
-    stackWordsOf: (callee) => {
-      const declared = callee === undefined ? null : calls.declaredCall(callee);
-      return declared === null ? null : Math.max(0, wordsOf(declared.widths, target) - ARG_REGS.length);
-    },
+    stackWordsOf,
     savedByCallee,
     splat,
   });
@@ -1287,6 +1308,63 @@ function liftOnce(
     const { base, off } = parseMem(ins.ops[ins.ops.length - 1]);
     return isStackPtr(base) && !inLocalArea(ins, off, ins.mnemonic.includes('b') ? 1 : 2);
   });
+
+  // THE FRAME HALF of the live-in model (`LiveInModel.ownedLocals`), in the raw `sp@<off>` keys
+  // the slot model uses: the words of the one frame this function pushed that it OWNS, so that a
+  // def-less read of one is an uninitialised local — IDO homes `int r; if (a > 0) r = a*2;` in
+  // `4(sp)` of an 8-byte leaf frame and reads it back on the path that never stored it. A word no
+  // store reaches on ANY path is the same local (`uninit_spill` reads `36(sp)` and `0(sp)`, which
+  // no instruction stores), as on Thumb (`lowerLoad`).
+  //
+  // WHAT ELSE COULD HAVE WRITTEN THE WORD is the whole soundness of it, and the claim is made only
+  // where the answer is "nothing":
+  //   • another function holding a frame address — none is taken (`takesFrameAddress`), so the
+  //     frame-object audit has nothing to retract;
+  //   • a CALLEE, which O32 lets write the bottom of this frame: it stores its a0..a3 into the
+  //     home words `[0,16)` (IDO: `sw a2,40(sp)` in its own frame) and assigns a stack parameter in
+  //     place (`compilerBehaviors.localsAboveOutgoingArea`'s probe). So a function that calls owns
+  //     only the words past its widest call's outgoing area, `[16 + 4·words, frameSize)`, and one
+  //     whose callee no declaration sizes claims nothing. A leaf owns the whole frame;
+  //   • the same raw offset at ANOTHER depth — the key is the raw offset, so a word reached before
+  //     the push or after the pop names other storage under the same spelling. Every `sp` access
+  //     must run at the frame's own depth, save the incoming stack words that are keyed `@sarg<k>`.
+  // The caller's home `[frameSize, frameSize + 16)` is in no range, so a def-less read there still
+  // refuses. Sub-word frame traffic turns the slot model off (`spSlotSafe`) and claims nothing.
+  let ownedMemo: { range: { from: number; to: number } | undefined } | undefined;
+  const ownedFrame = (): { from: number; to: number } | undefined =>
+    (ownedMemo ??= { range: measureOwnedFrame() }).range;
+  const measureOwnedFrame = (): { from: number; to: number } | undefined => {
+    if (frameSize === undefined || depthAt === null || !spSlotSafe || code.some(takesFrameAddress)) {
+      return undefined;
+    }
+    for (const ins of code) {
+      const last = ins.ops[ins.ops.length - 1] ?? '';
+      if (!last.includes('(') || !isStackPtr(parseMem(last).base) || depthAt.get(ins) === frameSize) {
+        continue;
+      }
+      if (ins.mnemonic === 'lw' || ins.mnemonic === 'sw') {
+        if (incomingStackKey(ins, parseMem(last).off) !== undefined) {
+          continue;
+        }
+      }
+      return undefined;
+    }
+    // A declaration the call lowering cannot carry out refuses THERE, in its own words; measured
+    // here first, it claims nothing rather than pre-empting that refusal with another.
+    let outgoing: ReturnType<typeof o32OutgoingArea>;
+    try {
+      outgoing = o32OutgoingArea(code, stackWordsOf, splat);
+    } catch (e) {
+      if (e instanceof FrontendUnsupportedError) {
+        return undefined;
+      }
+      throw e;
+    }
+    return outgoing.unsized === undefined && outgoing.end < frameSize
+      ? { from: outgoing.end, to: frameSize }
+      : undefined;
+  };
+  ownedFrameOf = ownedFrame;
 
   // Hardware divide state (capabilities.hwDivide). MIPS `div`/`divu rs,rt` set the hi/lo pair
   // implicitly; a later `mflo`/`mfhi` reads the quotient/remainder. FUNCTION-scoped: GCC schedules
@@ -1958,7 +2036,12 @@ function liftOnce(
           write(d, readVar(incoming, bi));
           return;
         }
-        if (!ssa.hasReachingDef(stackSlot(off), bi)) {
+        // A word of the frame this function OWNS (`ownedFrame`) that no store reaches is an
+        // uninitialised local, which `readVar` answers with `undef` through the live-in model.
+        const owned = ownedFrame();
+        const ownsWord =
+          owned !== undefined && depthAt?.get(ins) === frameSize && off >= owned.from && off + 4 <= owned.to;
+        if (!ownsWord && !ssa.hasReachingDef(stackSlot(off), bi)) {
           throw new FrontendUnsupportedError(
             `cannot lift '${name}': load from stack slot sp@${off} that was never stored ` +
               `(stack-passed argument beyond the 4 register args, or an address-taken/uninitialised local) — not modelled`,
@@ -2329,6 +2412,40 @@ function takesFrameAddress(ins: Instr): boolean {
   );
 }
 
+/** THE REGISTERS THE PROLOGUE SAVES: a word store to `sp` of a register O32 makes a callee
+ *  preserve, in the entry block (its delay slot included — the slot of a branch-likely is its own
+ *  block, so never this one) before any instruction NAMES that register, read or written. What it
+ *  stores is then what the caller left there, which is the half of `LiveInModel.uninitRegs` the
+ *  frontend owes: a compiler homes a local in a callee-saved register only after saving it, so a
+ *  def-less read of a saved one is that local, uninitialised, and of an unsaved one stays the
+ *  parameter it would have been. "Nothing named it first" is PPC's condition
+ *  (`prologueSavedRegs` there): a read before the store would be a use of the caller's value. A
+ *  re-entered entry gets an empty preheader as `blocks[0]`, so it measures no save at all. */
+function prologueSavedRegs(entry: readonly Instr[], target: TargetDescription): ReadonlySet<string> {
+  const saved = new Set<string>();
+  const named = new Set<string>();
+  const calleeSaved = (r: string) => isMipsReg(r) && !r.startsWith('$') && !target.callerSaved.includes(r);
+  for (const ins of entry) {
+    const [src, mem] = ins.ops;
+    if (ins.mnemonic === 'sw' && src !== undefined && mem !== undefined && isStackPtr(parseMem(mem).base)) {
+      if (calleeSaved(src) && !named.has(src)) {
+        saved.add(src);
+      }
+    }
+    for (const op of ins.ops) {
+      const reg = op.includes('(') ? parseMem(op).base : op;
+      if (isMipsReg(reg)) {
+        named.add(reg);
+      }
+    }
+    const w = writtenReg(ins);
+    if (w !== null) {
+      named.add(w);
+    }
+  }
+  return saved;
+}
+
 /** The local area of a function that takes a frame address (`o32LocalArea`), and the depth every
  *  access it routes runs at — or null, which leaves every capture its sp-as-data refusal. Null
  *  where nothing takes a frame address; where the depth walk is unproven or the frame is not one
@@ -2348,6 +2465,25 @@ function takesFrameAddress(ins: Instr): boolean {
  *  the outgoing area lies below whatever its extent, so there the undeclared call costs nothing.
  *  The saves are the prologue's: a store of `ra` or a callee-saved register in the entry block
  *  before anything writes it. */
+/** THE OUTGOING ARGUMENT AREA OF AN O32 FRAME, the part of it a callee may write: the a0..a3 home
+ *  words `[0,16)` and the widest call's stack words past them, by each callee's declaration. `end`
+ *  is where it stops, 0 in a leaf. `unsized` is the first call no declaration sizes (a `jal` nothing
+ *  declares, or a call through a register), counted in `end` as taking no stack words: what that
+ *  costs is each caller's to decide — `measureO32Frame` refuses where it could move the local area,
+ *  and `ownedFrame` claims no frame at all. */
+function o32OutgoingArea(
+  code: readonly Instr[],
+  stackWordsOf: (callee: string | undefined) => number | null,
+  splat: boolean,
+): { end: number; unsized: Instr | undefined } {
+  const calls = code.filter(isCallInstr);
+  const words = calls.map((ins) => (ins.mnemonic === 'jal' ? stackWordsOf(jalCallee(ins, splat)) : null));
+  return {
+    end: calls.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0)),
+    unsized: calls.find((_, k) => words[k] === null),
+  };
+}
+
 export function measureO32Frame({
   name,
   code,
@@ -2395,14 +2531,11 @@ export function measureO32Frame({
       written.add(writtenReg(ins)!);
     }
   }
-  const jals = code.filter((ins) => ins.mnemonic === 'jal');
-  const words = jals.map((ins) => stackWordsOf(jalCallee(ins, splat)));
-  const outgoingEnd = jals.length === 0 ? 0 : STACK_ARGS_AT + 4 * Math.max(0, ...words.map((w) => w ?? 0));
+  const { end: outgoingEnd, unsized: undeclared } = o32OutgoingArea(code, stackWordsOf, splat);
   const area = o32LocalArea(rule, { frameSize, outgoingEnd, saves });
   if (area === null) {
     return null;
   }
-  const undeclared = jals.find((_, k) => words[k] === null);
   if (undeclared !== undefined) {
     const widest = o32LocalArea(rule, {
       frameSize,

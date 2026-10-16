@@ -221,8 +221,8 @@ export interface TargetDescription {
    *  uninitialised local rather than an argument. The other half is a measurement the FRONTEND
    *  owes (did this function save the register), and the rule that combines them is in
    *  frontend/ssa.ts (LiveInModel.uninitRegs). Thumb and PPC state it and measure the save half
-   *  from their prologues (Thumb `savedRegs`, PPC `prologueSavedRegs`). ABSENT ⇒ no register partition
-   *  is claimed, which is what both MIPS targets take today.
+   *  from their prologues (Thumb `savedRegs`, PPC and MIPS `prologueSavedRegs`). ABSENT ⇒ no register
+   *  partition is claimed.
    *
    *  It must be DISJOINT from `argRegs`, and the frontend hands both to the builder so that is
    *  checked rather than trusted (`checkedLiveInModel`): a spelling that lands in both lists used
@@ -239,19 +239,20 @@ export interface TargetDescription {
    *  is classified with no evidence at all, which is the defect the save half exists to close. Every
    *  entry must appear in `nonArgRegs`; the frontend refuses a target where one does not. */
   scratchRegs?: readonly string[];
-  /** Of `scratchRegs`, the ones this compiler's RUNTIME hands a hidden input in, outside the C
-   *  calling convention. mwcc's register save routines take their frame address in r11
+  /** Of `scratchRegs`, the ones something outside the C calling convention hands an input in. On
+   *  PPC that is mwcc's RUNTIME: its register save routines take their frame address in r11
    *  (`addi r11,r1,N; bl _savegpr_NN`, and `_savegpr_31` is `stw r31,-4(r11); blr`), and
-   *  `__ptmf_scall` takes its member-function pointer in r12 (`lwz r0,0(r12)`). Hand-written asm
-   *  that reads one of these first is being handed a value, not reading an uninitialised local.
+   *  `__ptmf_scall` takes its member-function pointer in r12 (`lwz r0,0(r12)`). On O32 it is
+   *  hand-written asm, and every scratch register (`O32_SCRATCH_REGS`). Asm that reads one of these
+   *  first is being handed a value, not reading an uninitialised local.
    *
    *  What separates the two is MEASURED on 2.4.2 and 2.3.3: the uninitialised local the compiler
    *  homes in r11 or r12 is assigned on SOME path (`uninit_r12`: `if (s) { x = a*b; ... }`), so its
-   *  entry value reaches the body only through a join. A def-less read of one of these registers
-   *  that is USED DIRECTLY — the entry value with no path's definition beside it — refuses
-   *  (frontend/ssa.ts `LiveInModel.hiddenInputRegs`). r0 is not listed: the same compilers read a
-   *  never-assigned local straight out of r0 (`int x; return x + a;` is `add r3,r0,r3`), and the
-   *  runtime passes nothing there.
+   *  entry value meets that definition at a join. A def-less read of one of these registers whose
+   *  entry value no join meets with a definition of its own refuses (frontend/ssa.ts
+   *  `LiveInModel.hiddenInputRegs`). r0 is not
+   *  listed: the same compilers read a never-assigned local straight out of r0 (`int x; return x +
+   *  a;` is `add r3,r0,r3`), and the runtime passes nothing there.
    *
    *  Every entry must appear in `scratchRegs`; the frontend refuses a target where one does not. */
   hiddenInputRegs?: readonly string[];
@@ -1182,6 +1183,58 @@ export const ARMV4T_AGBCC: TargetDescription = {
  *  halves (`$f13`, `$f15`) carry the other word of a DOUBLE argument, which no frontend lifts. */
 const O32_FPU: TargetDescription['fpu'] = { argRegs: ['$f12', '$f14'], returnReg: '$f0', slots: 'leading' };
 
+/** O32's register partition, shared by every compiler that targets it (`nonArgRegs` and
+ *  `scratchRegs`). Every general register but the four argument registers and the ones that are
+ *  never a local's home (`zero`, `k0`/`k1`, `gp`, `sp`, `ra`). `s8` and `fp` are the two spellings
+ *  of $30, listed both as `ARMV4T_AGBCC` lists `r12` and `ip`: objdump prints `s8`, and a spelling
+ *  nobody listed keeps its existing treatment. */
+const O32_NON_ARG_REGS = [
+  'at',
+  'v0',
+  'v1',
+  ...Array.from({ length: 10 }, (_, i) => `t${i}`),
+  ...Array.from({ length: 8 }, (_, i) => `s${i}`),
+  's8',
+  'fp',
+] as const;
+/** Of those, the ones O32 lets a callee use with no save — `at`, `v0`/`v1` and `t0`..`t9`, the
+ *  caller-saved registers that pass no argument. MEASURED on GCC_KMC_TOOLCHAIN and the stock gcc
+ *  2.7.2 toolchain at their synthetic flags: a leaf homes an uninitialised local in v0
+ *  (`uninit_join`: `bgtzl a0,…; sll v0,a0,1; jr ra; ori v0,v0,1`) and in v1 (`uninit_sw`).
+ *
+ *  Every one of them is also a `hiddenInputRegs` entry, because O32's hand-written asm hands values
+ *  over in them: af's famicom_emu routines are handed a value in t0 or v1 (`sw t0,6348(s8)` is
+ *  its first instruction), and a label inside a function starts with its registers live.
+ *  MEASURED over every function and label symbol of the vendored snowboardkids2 (KMC),
+ *  marioparty3 (gcc 2.7.2) and af (IDO) objects, 29,399 in all, the refusal below fires on 17 —
+ *  twelve labels, three hand-written routines (two of famicom_emu's and libkmc's `div64_64_1`) and
+ *  two data symbols disassembled as code — and on no compiled function. A
+ *  compiled local is assigned on some path, so its entry value meets that assignment at a join;
+ *  `uninitfirst` also reads one before the switch that assigns it, which a join allows. The join
+ *  must take a definition the entry value does not feed, because an input carried round a loop
+ *  (`addiu t0,t0,-1; bnez t0,top`) meets only its own next value at the loop header. famicom_emu's
+ *  hand-written Yaz0 reader `func_8082E4E0_jp` is NOT that shape:
+ *  its t0 is a bit buffer loaded whenever the count runs out (and the count starts at 0), then
+ *  shifted each trip, and it lifts with t0 an uninitialised local no path reads before the load.
+ *  The cost is a local NO path assigns
+ *  (`int r; return r + a;` is `jr ra; addu v0,v0,a0` on gcc, and `int x, y; if (c) x = y;` joins
+ *  v0 with v1), which refuses: none of the 29,399 is one.
+ *
+ *  THE RULE'S BLIND SIDE is a count a hand-written routine is handed and RELOADS on an outer arm
+ *  (`… addiu t0,t0,-1; bnez t0,inner; …; bnezl a1,inner; li t0,8`): the outer arm's constant is a
+ *  definition of its own at the inner loop's header, so the entry value counts as met and the first
+ *  pass reads an undeclared local — the input is dropped. Nothing tells it from compiled
+ *  `int t; do { do { … } while (--t); t = 8; } while (--n);`, and none of the 29,399 is either.
+ *  The same side holds an input RELOADED FROM MEMORY on one arm and then transformed: hand
+ *  func_8082E4E0_jp its count in a2 as well (drop its `move a2,zero`), and the arm that runs when
+ *  the count is not 0 reads the caller's bit buffer in t0, but the loop header's join meets the
+ *  shift `sll t0,t0,1`, which reaches t0's entry value only through the join the load `lw t0,0(a0)`
+ *  also feeds. So the shift is a definition of its own, the routine lifts with `int code;` read on
+ *  that first pass, and the caller's t0 is dropped. Nothing tells it from compiled `int code;`
+ *  with the bit count a parameter, and none of the 29,399 is that shape: the real routine zeroes
+ *  a2 before the loop, so its load runs first. */
+const O32_SCRATCH_REGS = ['at', 'v0', 'v1', ...Array.from({ length: 10 }, (_, i) => `t${i}`)] as const;
+
 /** MIPS-II / IDO 7.1 target. IDO is the IRIX C compiler,
  *  statically recompiled to run natively (ido-static-recomp). Unlike agbcc
  *  it emits no textual asm, so asmlift's input is the DISASSEMBLED object (`mips-linux-gnu-
@@ -1216,6 +1269,12 @@ export const MIPS_IDO: TargetDescription = {
     't9',
     'ra',
   ],
+  // O32's partition (`O32_NON_ARG_REGS`). The frontend narrows it to the scratch half and the
+  // callee-saved registers its prologue saves (frontend/mips.ts `prologueSavedRegs`).
+  nonArgRegs: O32_NON_ARG_REGS,
+  scratchRegs: O32_SCRATCH_REGS,
+  // Every scratch register, for the measurement at `O32_SCRATCH_REGS`.
+  hiddenInputRegs: O32_SCRATCH_REGS,
   runtimeHelpers: IDO_RUNTIME_HELPERS,
   // MEASURED with this toolchain's own flags: `float f(float a, float b){ return a + b; }` is
   // `jr ra; add.s $f0,$f12,$f14`, and the `'leading'` rule's two halves are the pair in `fpu`'s note.
@@ -1299,6 +1358,10 @@ export const MIPS_GCC: TargetDescription = {
     't9',
     'ra',
   ],
+  // O32's partition, as at MIPS_IDO.
+  nonArgRegs: O32_NON_ARG_REGS,
+  scratchRegs: O32_SCRATCH_REGS,
+  hiddenInputRegs: O32_SCRATCH_REGS,
   runtimeHelpers: MIPS_GCC_RUNTIME_HELPERS,
   // KMC GCC keeps a loop seeded from an argument register IN that register (coalesceLoopInit
   // true, like IDO): test/corpus/gcc-gcd.asm runs its whole loop on a0/a1 with no init copies,

@@ -27,7 +27,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { ARM_DISJOINT_GATES, COALESCE_GATES, armDisjointUnder, coalesceUnder } from '../src/l3/coalesce';
 import { orderSlotLocals } from '../src/l3/slotorder';
-import { raiseRecovered, structureChecked } from '../src/pipeline';
+import { decompile, raiseRecovered, structureChecked } from '../src/pipeline';
 import { type StructureOptions, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
@@ -138,13 +138,14 @@ test('a slot outside the declared local area is NOT stamped', () => {
 });
 
 // MIPS reaches the SAME shared stamp — and gets nothing, which is the correct answer and not a
-// gap in the plumbing. frontend/mips.ts claims no frame partition at all (`addiu sp,sp,±N` is
-// transparent there), so its `sp@k` keys span O32's CALLER-owned register-parameter home area
+// gap in the plumbing. frontend/mips.ts claims no DECLARATION partition (`declaredLocals`; the
+// words it owns, `ownedLocals`, answer only whether a def-less read is uninitialised), and this
+// fixture pushes no frame, so its `sp@k` keys span O32's CALLER-owned register-parameter home area
 // `[0,16)` and the incoming stack arguments above it. This fixture's `sw a0,0(sp) / sw a1,4(sp)`
 // is squarely inside that home area: those offsets are the caller's, not this function's
 // declaration ranks. Stamping them would have made a per-compiler ordering read the wrong storage
 // the moment `MIPS_IDO.compilerBehaviors.spillSlotOrder` stopped being `'unknown'`.
-test('MIPS reaches the same shared stamp and is refused: it claims no frame partition', () => {
+test('MIPS reaches the same shared stamp and is refused: it claims no declaration partition', () => {
   const fn = frontendFor(MIPS_IDO).lift('spillslot', read('mips-spillslot.asm'), MIPS_IDO, {}, undefined, undefined);
   expect(fn.slotHomes!.size).toBe(0);
 });
@@ -381,6 +382,17 @@ test('and no `undef` local reaches the ordering: the emitted tree carries none, 
     'v5@4',
     'v6@8',
   ]);
+});
+
+// The default arm leaves every local as it was, and agbcc homed two of them in r5 and r8 — where the
+// prologue's `mov r5, r8; push {r5, …}` staged r8 for its save. That copy is the save's: lifted, it
+// made both locals one undefined value, which an undefined value two joins take must spell as an
+// assignment on that arm (frontend/ssa.ts `markCopiedUndefs`), relating two locals the source never
+// related. thumb.ts `prologueSavedRegs` hands the staging `mov` to the fill to skip.
+test("the prologue's high-register staging copy relates no two uninitialised locals", () => {
+  const out = decompile('uninit_spill', read('agbcc-uninit-spill.s'), ARMV4T_AGBCC, {}).source;
+  expect(out).not.toMatch(/default:/);
+  expect(out).not.toMatch(/= uninit_/);
 });
 
 // THE `SFn.locals` DOC IS ONE BLOCK, and this is the guard that keeps it one. TypeScript attaches

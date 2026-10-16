@@ -32,9 +32,9 @@
 //               materializes a multi-use `const` that is live across a call into a named local, and
 //               its own comment records that this exact widening ("the small-constant regression")
 //               already cost matches once.
-//   `undef`   — numbering it would be VACUOUS: two `undef`s in one function always carry different
-//               `key`s (ir/opcodes.ts says so at the opcode), so "same key, therefore same value"
-//               never has two members to collapse.
+//   `undef`   — numbering it would be HARMFUL: two `undef`s of one `key` are a storage's content
+//               and a `copied` move of it into another storage's join (ir/opcodes.ts says so at the
+//               opcode), and one number would erase the move the structurer spells.
 //
 // The gate is a MATCHING policy, not a property of the opcode — which is why it is not a flag on
 // the opcode table, where `const` would satisfy it.

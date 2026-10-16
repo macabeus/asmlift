@@ -3078,6 +3078,9 @@ const THUMB_CALL_LOWERING: CallLowering = {
 interface ThumbFrame {
   readonly localArea: number;
   readonly savedRegs: ReadonlySet<string>;
+  /** the prologue's `mov rLow, rHi` that only stage a high register for its `push` (see
+   *  `prologueSavedRegs`); the fill does not lift them */
+  readonly saveCarriers: ReadonlySet<Instr>;
   readonly capturedObjectIsTheWholeFrame: boolean;
   /** the offsets of the escaped frame addresses the outgoing-argument verdict leans on, which the
    *  audit re-proves of the lifted IR; empty where the verdict leans on none */
@@ -3260,7 +3263,7 @@ function measureThumbFrame({
   );
 
   const localArea = reservedLocalArea(asmBlocks[0]);
-  const savedRegs = prologueSavedRegs(asmBlocks[0]);
+  const { saved: savedRegs, carriers: saveCarriers } = prologueSavedRegs(asmBlocks[0]);
 
   // …AND THE FRAME IS THAT OBJECT. The two escape scans above are facts about a REGISTER — that a
   // bare `mov rD, sp` is still held when a callee is entered, or when it is stored to memory.
@@ -3679,6 +3682,7 @@ function measureThumbFrame({
   return {
     localArea,
     savedRegs,
+    saveCarriers,
     capturedObjectIsTheWholeFrame,
     escapesReliedOn,
     callsReliedOn,
@@ -4119,6 +4123,9 @@ function reservedLocalArea(entry: AsmBlock): number {
   return Math.max(0, reserved);
 }
 
+/** the low registers agbcc's callers expect back intact (r0-r3 are argument and scratch) */
+const CALLEE_SAVED_LOW_REGS: ReadonlySet<string> = new Set(['r4', 'r5', 'r6', 'r7']);
+
 // WHAT THE PROLOGUE SAVED — the second half of the register partition (frontend/ssa.ts,
 // LiveInModel.uninitRegs), in operand spellings. "The ABI does not pass arguments here" is a fact
 // about the CALLER and cannot on its own make a def-less read an uninitialised local; what does is
@@ -4135,9 +4142,30 @@ function reservedLocalArea(entry: AsmBlock): number {
 // the set. `HIGH_REGS` have no `push` encoding, so agbcc saves them as `mov rLow, rHi; push
 // {rLow}` and the source of such a `mov` joins the set when its low register is pushed — every
 // high-register inhabitant in the corpus goes through that idiom.
-function prologueSavedRegs(entry: AsmBlock): ReadonlySet<string> {
+//
+// THAT `mov` IS THE SAVE'S, NOT THE FUNCTION'S, and is returned as `carriers` for the fill to
+// skip. Lifted, it leaves the low register holding the high one's entry value, so where a local
+// homed in each is left uninitialised on one path (`synthetic:dma_fill_uninit`: a switch with no
+// default, ten locals spread over r5-r7 and r8-sl) the two read as one undefined value, and
+// frontend/ssa.ts `markCopiedUndefs` spells that relation as an assignment between two locals the
+// source never related. What the machine relates there is the CALLER's register to its own save
+// copy; no statement of this function computed it. Skipped, the low register's def-less read is
+// its own undefined value, which the push has saved (so it is in `saved`). The blind side, which
+// the relation this drops is: a body that reads the low register before writing it and compares
+// it with the high one sees two unrelated values where the machine holds one — agbcc only does
+// this for two distinct uninitialised locals, which no statement of the source relates.
+//
+// ONLY A CALLEE-SAVED LOW REGISTER THAT AN EARLIER `push` ALREADY SAVED IS A CARRIER. That is the
+// shape agbcc emits (`push {r4-r7, lr}; mov r7, sl; mov r6, r8; push {r6, r7}`): the low register's
+// own entry value is safe in the first save, so the `mov` destroys nothing the function could
+// read. Hand-written asm may stage through anything — `mov r3, r8; push {r3}; add r0, r0, r3`
+// reads r3 as the high register's value, and skipping that `mov` there would turn r3 into the
+// caller's fourth argument. Such a `mov` is lifted as the function's own; the high register still
+// joins `saved`, as it always has.
+function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carriers: ReadonlySet<Instr> } {
   const saved = new Set<string>();
-  const carries = new Map<string, string>(); // low register ← the high one moved into it
+  const carriers = new Set<Instr>();
+  const carries = new Map<string, { mov: Instr; carrier: boolean }>(); // low register ← the `mov` that moved a high one into it
   for (const x of entry.instrs) {
     if (x.mnemonic === 'push') {
       const list = regListOf(x.ops);
@@ -4146,18 +4174,22 @@ function prologueSavedRegs(entry: AsmBlock): ReadonlySet<string> {
       }
       for (const r of list) {
         saved.add(r);
-        const hi = carries.get(r);
-        if (hi !== undefined) {
-          saved.add(hi);
+        const staged = carries.get(r);
+        if (staged !== undefined) {
+          saved.add(staged.mov.ops[1]);
+          if (staged.carrier) {
+            carriers.add(staged.mov);
+          }
+          carries.delete(r);
         }
       }
     } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
-      carries.set(x.ops[0], x.ops[1]);
+      carries.set(x.ops[0], { mov: x, carrier: CALLEE_SAVED_LOW_REGS.has(x.ops[0]) && saved.has(x.ops[0]) });
     } else if (spAdjust(x) === null) {
       break;
     }
   }
-  return saved;
+  return { saved, carriers };
 }
 
 /** How the fill reads and writes an operand: the guards that keep sp, pc and a data label from
@@ -4761,6 +4793,9 @@ function fillThumbBlock(fill: ThumbFill, ab: AsmBlock, bi: number): void {
     switch (ins.mnemonic) {
       case 'mov':
       case 'movs': {
+        if (fill.frame.saveCarriers.has(ins)) {
+          break; // the save's staging copy, not the function's (`prologueSavedRegs`)
+        }
         lowerMov(fill, cur, ins);
         break;
       }

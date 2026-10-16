@@ -1413,7 +1413,7 @@ behind the `unaff_<reg>` this section already cited, and it is one list per targ
 def-less read a LOCAL is that the compiler was free to home one there, which it is only after
 saving the register. So the classification is an intersection — the target's list against a save set
 the frontend measures (`frontend/ssa.ts`'s `LiveInModel.uninitRegs`, fed by Thumb's `savedRegs` and
-PPC's `prologueSavedRegs`; `registerLiveIns` composes it for both, with the target's
+the `prologueSavedRegs` of PPC and MIPS; `registerLiveIns` composes it for all three, with the target's
 `scratchRegs`, which need no save, less the `hiddenInputRegs` a runtime passes a value in, whose
 entry value may reach the body only through a join) —
 and it is not the elision the sentence feared, only a read of the prologue that was already
@@ -1459,7 +1459,7 @@ follows no such rule.
 
 The second clause was not there when the register half landed, and the population that needed it is
 small enough to name. Sweeping every Thumb function in the three vendored agbcc projects — klonoa,
-sa3 and pokeemerald, **2962** functions; `af` is N64/MIPS and declares no register partition at all
+sa3 and pokeemerald, **2962** functions; `af` is N64/MIPS, swept on its own below
 — the ABI list on its own renders a register undef in 9 functions (13 (function, register) pairs),
 and **3** of them are outside the model: the MP2K engine's hand-written `ChnVolSetAsm`, vendored
 identically in all three, which receives two pointers in `r4`/`r5` with **no prologue at all** and
@@ -1487,6 +1487,38 @@ The gap this leaves is one direction only. A register in the ABI list that the p
 falls back to being a parameter — the treatment a target declaring no partition gets — so what the
 model cannot describe costs an invented argument, never an invented local.
 
+O32 needs the same clause for the opposite reason. Its scratch set is thirteen registers (`at`,
+`v0`/`v1`, `t0`-`t9`) where Thumb's is `ip` alone, so the save is no evidence there, and hand-written
+MIPS asm is handed live values in them: af's famicom_emu routines store a `t0` or `v1` they never
+wrote, and lifted with the scratch exemption alone they came out storing `uninit_t0`. The evidence
+O32 has is a JOIN. A local the compiler homed in a scratch register is assigned on some path, so its
+entry value meets that definition as a join's edge argument, and an entry value no such join takes
+is an input (`hiddenInputRegs`, the rule mwcc's r11/r12 follow too). Meeting a join is not by
+itself meeting a definition: a hand-written routine that carries a count round a loop in `t0` sends
+the entry value into the loop header's join, whose back-edge argument is only that count's next
+value. So the join must also take a definition the entry value does not feed — directly, or
+through an inner join one of whose arguments is one (`for (…) if (c) x = i;`, and a bit reader's
+`if (!bits) code = *src++; … code <<= 1;`, whose shift reaches the entry value only through that
+inner join). Independence is a least fixpoint grown from nothing, so no join counts as independent on
+the strength of its own back edge. Sweeping every
+function and label symbol in the vendored snowboardkids2, marioparty3 and af objects, **29,399**,
+that refusal fires on 17 and on no compiled function: twelve labels, three hand-written routines
+and two data symbols disassembled as code. (famicom_emu's hand-written Yaz0 reader is the
+bit-reader shape and lifts.) What it
+cannot describe is a local no path assigns at all, which declines; none of the 29,399 is one.
+
+`int x, y; if (c) x = y;` joins two undefined values, and the structurer drops an undefined edge
+copy — right for the join's OWN storage, which that path left unassigned, and wrong for another's,
+where the machine ran a move. In frame words (ido7.1 copies 0(sp) into 4(sp)) two words are two
+locals, so the frontend gives such an edge its own undefined value marked `copied`, which the
+structurer spells as `x = uninit_sp0`. Registers carry no such identity — agbcc moves one local from
+r8 to a low register, and a spill writes a register's local to a word — so a join whose every
+argument is undefined there is collapsed into one uninitialised value before the structurer sees it
+(left standing it would lose every assignment to its local, which the structurer's postcondition
+reports as read but never assigned). In saved registers (agbcc) that lifts, with the move lost; in
+two O32 scratch registers the hidden-input rule above refuses first, since neither entry value meets
+a definition.
+
 The reusable lesson is where the decision lives, not the op, and it is easier to state as the two
 arrangements that do not work.
 
@@ -1513,8 +1545,11 @@ an offset against them, refusing anything that falls in neither. The register co
 as a second declarative member (`uninitRegs`, a LIST rather than a range, because the complement of
 the argument registers also holds the frontends' virtual keys) under the same generic rule. The dependency became an argument
 instead of a promise: Thumb passes `{ from: 0, to: localArea }`, so when the prologue walk cannot
-measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims no
-partition, so a def-less `sp@` read there still refuses; what reaches the model instead is an
+measure the frame that range collapses to empty and every slot refuses on its own. MIPS claims only
+the words of the one frame it pushed that nothing else can write (`ownedFrame` in
+`frontend/mips.ts`: a leaf's whole frame, or what lies past the widest declared call's outgoing
+area, and nothing once a frame address is taken), so any other def-less `sp@` read there still
+refuses; what reaches the model instead is an
 incoming stack word under its own key, `@sarg<k>`, which the frontend places by the frame depth
 (`frameDepths`) as Thumb keys its incoming words, for its stores as well as its loads, so nothing
 incoming reaches a `sp@` key on MIPS either where the depth is measured (and where it is not, a read

@@ -1459,8 +1459,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // and Braun's construction resolves a def-less read to a live-in, which at the entry block is a
   // PARAMETER. WHERE the local lands decides which way that goes, and the two differ sharply:
   //   • a stack slot ⇒ loud. Two guards split it — stored on SOME path (frontend/ssa.ts `finish`)
-  //     vs stored on NO path reaching the read (frontend/mips.ts, which still conflates the
-  //     second with a 5th+ stack argument). uninit_join and uninit_sw hit one each, on ido7.1.
+  //     vs stored on NO path reaching the read (frontend/mips.ts `emitLoad`), each outside the
+  //     frame words a function provably owns (below).
   //   • an ARGUMENT register ⇒ silent: nothing guards it and the read becomes a fabricated extra
   //     parameter. MEASURED: both agbcc rows byte-MATCH anyway, because the invented parameter
   //     lands in the register the local was allocated to — `uninit_sw(s32 a0, s32 a1, s32 a2)` for
@@ -1495,22 +1495,34 @@ export const SYNTHETIC: SynthSpec[] = [
   // register half, like uninit_sw:agbcc, reached through CodeWarrior's switch dispatch), and three
   // lift to nonmatches nothing here attributes (uninit_join, uninit_sw and uninit_spill on
   // gcc2.7.2kmc).
-  // Of those five, only uninit_spill:agbcc is recovered: the ido7.1 pair declines because that
-  // frontend claims no frame partition (its slot keys reach O32's caller-owned argument home area),
-  // and uninit_sw:agbcc is the register half, which `undef` does not touch.
+  // Of those five, uninit_spill:agbcc is recovered on Thumb, and uninit_sw:agbcc is the register
+  // half, which `undef` does not touch.
+  // THE O32 HALVES (frontend/mips.ts). The three gcc2.7.2kmc rows are the REGISTER half: KMC homes
+  // the local in a scratch register (v0 in uninit_join, v1 in uninit_sw), and with no O32
+  // partition each def-less read is a fabricated parameter —
+  // `uninit_join(s32 a0, s32 a1)`. MIPS_GCC/MIPS_IDO `scratchRegs` and the prologue's saves make it
+  // an `undef`. The ido7.1 rows are the FRAME half: IDO homes the same locals in words of its own
+  // frame, and O32 owns `[0, frameSize)` of a leaf's one push (past the outgoing area where it
+  // calls) when no frame address is taken (`ownedFrame`), so a def-less read there is an `undef`
+  // whether or not anything stores the word — uninit_spill:ido7.1 reads 36(sp) and 0(sp), which
+  // nothing does. uninit_spill and uninitfirst on gcc2.7.2kmc keep a2 (and a3) as parameters: KMC
+  // homes a local in an argument register past the declared arity, which only an own-arity rule
+  // can tell from an argument.
+  // uninit_join and uninit_sw also run on stock gcc2.7.2 — the tier's first rows on that compiler —
+  // because it homes the local exactly where KMC does, so the register half is pinned on both.
   // The first two rows are kept to ≤4 parameters on purpose: at 5+ the O32 reader takes its
   // stack-argument path and would decline for a reason that has nothing to do with initialisation.
   {
     sym: 'uninit_join',
     src: 'int uninit_join(int a){ int r; if(a>0) r=a*2; return r+1; }',
     features: ['uninit-local', 'branch'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
   },
   {
     sym: 'uninit_sw',
     src: 'int uninit_sw(int k,int a){ int r; switch(k){case 0:r=a;break;case 1:r=a*2;break;case 2:r=a*3;break;case 3:r=a*4;break;} return r+1; }',
     features: ['uninit-local'],
-    toolchains: ALL,
+    toolchains: [...ALL, 'gcc2.7.2'],
   },
   {
     sym: 'uninit_spill',
@@ -1527,18 +1539,73 @@ export const SYNTHETIC: SynthSpec[] = [
   // and the path that skips the assignment reads what the caller left there. Without the
   // prologue's save set as the PPC frontend's live-in model, that read is a seventh PARAMETER for a
   // six-parameter source (`if (a0 != 0) a6 = k(a1);`, a nonmatch); with it, the row MATCHes with
-  // `s32 v0;` declared and never initialised. mwcc_242_81 only, by measurement: agbcc already lifts
-  // the shape as `s32 v0;` through Thumb's own live-in model (the rule that closed `loopfall`,
-  // below), and ido7.1 and both gcc 2.7.2 lanes decline on a `jal` with no callee symbol, so on those
-  // lanes the row would pin another capability or another blocker. The other two CodeWarrior builds
-  // are pinned by packages/cli/test/matching/ppc-save-routines.test.ts.
+  // `s32 v0;` declared and never initialised. agbcc is left out: it already lifts the shape as
+  // `s32 v0;` through Thumb's own live-in model (the rule that closed `loopfall`, below). On MIPS
+  // the row pins BOTH O32 homes of the same local: gcc 2.7.2 (KMC and stock) keeps `x` in the
+  // callee-saved s2 its prologue stored — the register half, a phantom seventh parameter without a
+  // MIPS live-in model — and ido7.1 keeps it in a frame word (sp@28) read after the calls, above
+  // the 16-byte outgoing area — the frame half. The other two CodeWarrior builds are pinned by
+  // packages/cli/test/matching/ppc-save-routines.test.ts.
   {
     sym: 'uninit_saved',
     src: 'int k(int);\nint uninit_saved(int s,int a,int b,int c,int d,int e){ int x; if (s) x = k(a); return k(k(k(k(b)+c)+d)+e) + x; }',
     features: ['uninit-local', 'branch'],
-    toolchains: ['mwcc_242_81'],
+    toolchains: ['mwcc_242_81', 'ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'int k(int);',
     proto: { k: { params: 1 } },
+  },
+  // A JOIN NO PATH DEFINES: `x = y` with both uninitialised joins two undefined values, and the
+  // structurer drops an undefined edge copy, so left alone it would keep x's local and drop all its
+  // assignments (frontend/ssa.ts `markCopiedUndefs`, `collapseUndefinedJoins`). ido7.1 keeps x and y in frame
+  // words (sp@4, sp@0); two words are two locals, so the copy is spelled `x = uninit_sp0` and the
+  // row MATCHes. On both gcc 2.7.2 lanes they sit in v0 and v1, scratch registers hand-written asm
+  // passes inputs in (`hiddenInputRegs`), and with no definition meeting either entry value the
+  // lift declines rather than guess which. agbcc keeps them in saved registers across two calls,
+  // where a register move is no evidence of a second local, so the join collapses into one
+  // uninitialised value and the move is lost (a nonmatch).
+  {
+    sym: 'uninit_both',
+    src: 'int uninit_both(int c){ int x; int y; if (c) x = y; return x + c; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
+  },
+  // A REGISTER CACHING TWO UNINITIALISED FRAME WORDS. ido7.1 -O2 gives x and y their words and
+  // loads them into v1 and a0 on each arm (`lw a0,0(sp); move v1,a0` against `lw v1,4(sp);
+  // move a0,v1`), so the joins are register-keyed over two frame words' undefined values. Read as
+  // one undefined value per register, x - y is two unrelated locals; read as a copy on each arm,
+  // both arms leave them equal, as the machine does. Only ido homes these locals in frame words.
+  {
+    sym: 'uninit_swap',
+    src: 'int uninit_swap(int c){ int x; int y; if (c) x = y; else y = x; return x - y; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['ido7.1'],
+  },
+  {
+    sym: 'uninit_both_saved',
+    src:
+      'void f(int,int,int,int);\nint uninit_both_saved(int c,int a,int b,int d){ int x; int y; if (c) x = y;' +
+      ' f(a, b, d, c); f(d, a, b, c); return x + c + a + b + d; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['agbcc'],
+    ctx: 'void f(int,int,int,int);',
+    proto: { f: { params: 4, returnsVoid: true } },
+  },
+  // A LOCAL A LOOP TRANSFORMS after assigning it on one arm — the Yaz0/MIO0 bit reader: `code` is
+  // loaded only when `bits` runs out, then shifted every trip. gcc 2.7.2 (KMC and stock) keeps it in
+  // t0, a scratch register hand-written asm also passes inputs in (`hiddenInputRegs`), so its entry
+  // value must meet a definition it does not feed at the loop header's join. The shift reaches the
+  // entry value only through the inner join the load also feeds, which makes it one; a test that
+  // walks through every join argument refuses the row, and without the O32 live-in model t0 is a
+  // phantom fifth parameter. ido7.1 keeps it in a frame word, and mwcc 2.4.2 in a register its
+  // own way: the capability is the shared hidden-input rule, so both run too.
+  {
+    sym: 'uninit_bits',
+    src:
+      'int uninit_bits(unsigned char *src,unsigned char *dst,int n,int fill){ unsigned int code; int bits=0;' +
+      ' while(n>0){ if(bits==0){ code=*src++; bits=8; } if(code&0x80) *dst++=*src++; else *dst++=fill;' +
+      ' code<<=1; bits--; n--; } return bits; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2', 'mwcc_242_81'],
   },
   // The SCRATCH half of the same rule on CodeWarrior: a LEAF needs no saved register, so mwcc 2.4.2
   // homes its uninitialised local in a volatile register no argument travels in, with no save
@@ -1547,9 +1614,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // (`mullw r11,r4,r5; mullw r12,r7,r8` on one arm, `subf r4,r12,r11` after the join). Without the
   // target's scratch registers in the PPC live-in model, each def-less read lifts as one more
   // PARAMETER — a third for a two-parameter source, and a ninth and tenth past the eight argument
-  // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and both
-  // MIPS frontends claim no register partition. mwcc_233_163n is pinned by
-  // packages/cli/test/matching/ppc-save-routines.test.ts.
+  // registers. mwcc_242_81 only: the Thumb half of the composed rule is `uninit_sw:agbcc`, and the
+  // O32 half is `uninit_join` and `uninit_sw` on both gcc 2.7.2 lanes (v0 and v1, MIPS_GCC
+  // `scratchRegs`). mwcc_233_163n is pinned by packages/cli/test/matching/ppc-save-routines.test.ts.
   {
     sym: 'uninit_r0',
     src: 'int uninit_r0(int s,int a){ int x; if (s) x = a*3; return x + a; }',

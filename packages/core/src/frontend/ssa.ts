@@ -27,6 +27,7 @@ import {
   defOpMap,
   mkOp,
   mkValue,
+  replaceAllUsesWith,
   terminator,
   truncateCallArgs,
 } from '../ir/core';
@@ -205,8 +206,8 @@ export interface LiveInModel {
    *  eight more). None reaches the ordering today, for an unrelated reason (`l3/slotorder.ts`'s
    *  REACH note), so nothing downstream is guarding this.
    *
-   *  ABSENT ⇒ NO STAMP. MIPS and PPC declare no frame partition at all, so they stamp nothing,
-   *  which is the refusing direction. */
+   *  ABSENT ⇒ NO STAMP. MIPS and PPC declare none (MIPS claims `ownedLocals` alone), so they stamp
+   *  nothing, which is the refusing direction. */
   declaredLocals?: { from: number; to: number };
   /** Storage the CALLER wrote — incoming stack arguments ⇒ a def-less read is a parameter.
    *  `[from, to)`. O32's register-parameter home area belongs to NEITHER range: caller-owned, but
@@ -225,7 +226,8 @@ export interface LiveInModel {
    *  the leading push run (`savedRegs`). PPC reads every save in the entry block of a register
    *  nothing before it named (`prologueSavedRegs`), because mwcc interleaves its saves with the
    *  body (`stw r31; mr r31,r3; stw r30`); "nothing named it first" is the condition Thumb's
-   *  leading run meets by construction. A frontend that cannot measure it passes nothing here and
+   *  leading run meets by construction; MIPS reads its entry block the same way
+   *  (frontend/mips.ts `prologueSavedRegs`). A frontend that cannot measure it passes nothing here and
    *  keeps the parameter it would have got anyway.
    *
    *  The one register class exempt from the save is the ABI's scratch set (`target.scratchRegs`):
@@ -243,10 +245,12 @@ export interface LiveInModel {
    *
    *  Declaring this obliges `argRegs` below, and the two must be DISJOINT. */
   uninitRegs?: readonly string[];
-  /** Of `uninitRegs`, the ones a runtime hands a hidden input in (`target.hiddenInputRegs`). The
-   *  entry value of one may reach the body only THROUGH A JOIN, beside some path's definition —
-   *  the shape of a local the compiler assigned on one arm. Used directly, it is the input, and
-   *  `finish` refuses rather than spell it `uninit_<reg>`. */
+  /** Of `uninitRegs`, the ones something outside the C convention hands an input in
+   *  (`target.hiddenInputRegs`). The entry value of one must reach A JOIN that also takes a
+   *  definition the entry value does not feed — the shape of a local the compiler assigned on one
+   *  arm, which may also be read before that assignment. A join alone is not enough: an input
+   *  carried round a loop meets its own next value at the loop header. Meeting no such join, it is
+   *  the input, and `finish` refuses rather than spell it `uninit_<reg>`. */
   hiddenInputRegs?: readonly string[];
   /** Registers the ABI DOES pass arguments in — the other side of the register partition, and the
    *  only reason the side above is checkable rather than believed. The frame coordinate declares
@@ -349,6 +353,10 @@ interface StaleRead {
   fromOp: number;
   /** a call in this very block destroyed it, so the predecessors have nothing to add. */
   local: boolean;
+  /** The OTHER keys this block wrote the read's value into after it — a `move` or a slot store of
+   *  the destroyed register, which carries the callee's leftover out of the block under a name no
+   *  call destroyed. */
+  carriedBy: Set<string>;
 }
 
 /** The registers a call leaves holding nothing the CALLER can name — what {@link SsaBuilder.noteCall}
@@ -417,7 +425,7 @@ export function makeSsaBuilder(
   // invisible to the escape check below. Braun's construction gives no other way to tell.
   const phiKey = new Map<Value, string>();
   // The entry value of a register a runtime hands a hidden input in (`LiveInModel.hiddenInputRegs`),
-  // minted as an uninitialised local, for `finish` to check it reached nothing but joins.
+  // minted as an uninitialised local, for `finish` to check that a join takes it.
   const hiddenEntryValues = new Map<Value, string>();
   const paramReg = new Map<Value, string>();
   // Parameters created by ensureParam that nothing has read yet. They are deliberately NOT in
@@ -452,6 +460,7 @@ export function makeSsaBuilder(
   const clobberedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const decidedLocal: Array<Set<string>> = irBlocks.map(() => new Set());
   const staleCandidates: StaleRead[] = [];
+  const staleByValue = new Map<Value, StaleRead[]>();
   /** The op-less uses `useOutsideOps` recorded, each at the op count of its block when it happened. */
   const usesOutsideOps: Array<{ value: Value; block: number; atOp: number }> = [];
   // `readVar` runs once per operand, so a memo per (register, verdict) keeps the record list
@@ -596,6 +605,11 @@ export function makeSsaBuilder(
     }
     noteSlotHome(reg, v);
     noteSlotTraffic(reg, v);
+    for (const c of staleByValue.get(v) ?? []) {
+      if (c.block === b && c.reg !== reg) {
+        c.carriedBy.add(reg);
+      }
+    }
     if (b === 0 && !firstEntryWrite.has(reg)) {
       firstEntryWrite.set(reg, v);
     }
@@ -631,7 +645,9 @@ export function makeSsaBuilder(
       return;
     }
     staleSeen[b].set(key, v);
-    staleCandidates.push({ reg, value: v, block: b, fromOp: irBlocks[b].ops.length, local });
+    const c: StaleRead = { reg, value: v, block: b, fromOp: irBlocks[b].ops.length, local, carriedBy: new Set() };
+    staleCandidates.push(c);
+    staleByValue.set(v, [...(staleByValue.get(v) ?? []), c]);
   };
 
   const newPhi = (reg: string, b: number): Value => {
@@ -933,6 +949,35 @@ export function makeSsaBuilder(
     }
     return destroyedIn;
   };
+  /** A destroyed value a copy carries OUT of its block (`StaleRead.carriedBy`) is used where any
+   *  block the read's block reaches uses it — an edge argument included, which is how a slot the
+   *  copy stored reaches its reload at a join. The destroyed register itself needs none of this:
+   *  every block it reaches marks it destroyed on entry (`destroyedOnEntry`) and judges its own
+   *  reads. Every later use of the value counts, under whatever name, which can only refuse more. */
+  const carriedOut = (c: StaleRead): boolean => {
+    if (![...c.carriedBy].some((k) => defs[c.block].get(k) === c.value)) {
+      return false;
+    }
+    const index = new Map(irBlocks.map((blk, i) => [blk, i]));
+    const usesIt = (op: Op) => op.operands.includes(c.value) || op.successors.some((s) => s.args.includes(c.value));
+    const seen = new Set<number>();
+    const work = irBlocks[c.block].ops.slice(c.fromOp).flatMap((op) => op.successors.map((s) => s.block));
+    if (irBlocks[c.block].ops.slice(c.fromOp).some(usesIt)) {
+      return true;
+    }
+    for (let blk = work.pop(); blk !== undefined; blk = work.pop()) {
+      const b = index.get(blk);
+      if (b === undefined || seen.has(b)) {
+        continue;
+      }
+      seen.add(b);
+      if (blk.ops.some(usesIt) || usesOutsideOps.some((u) => u.value === c.value && u.block === b)) {
+        return true;
+      }
+      work.push(...blk.ops.flatMap((op) => op.successors.map((s) => s.block)));
+    }
+    return false;
+  };
   const refuseStaleCallerSavedReads = () => {
     if (staleCandidates.length === 0) {
       return;
@@ -945,13 +990,287 @@ export function makeSsaBuilder(
       const ops = irBlocks[c.block].ops;
       if (
         ops.slice(c.fromOp).some((op) => op.operands.includes(c.value)) ||
-        usesOutsideOps.some((u) => u.value === c.value && u.block === c.block && u.atOp >= c.fromOp)
+        usesOutsideOps.some((u) => u.value === c.value && u.block === c.block && u.atOp >= c.fromOp) ||
+        carriedOut(c)
       ) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': ${c.reg} is read on a path where a call has destroyed it, so what ` +
             `it holds is the callee's and not a value this function named — not modelled`,
         );
       }
+    }
+  };
+
+  /** Where each value is read: the joins it is an edge argument of, and `null` for an op's operand. */
+  const readersOf = (): Map<Value, Set<Value | null>> => {
+    const readers = new Map<Value, Set<Value | null>>();
+    const note = (v: Value, r: Value | null) => (readers.get(v) ?? readers.set(v, new Set()).get(v)!).add(r);
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        op.operands.forEach((v) => note(v, null));
+        for (const s of op.successors) {
+          s.args.forEach((v, i) => note(v, s.block.params[i]));
+        }
+      }
+    }
+    return readers;
+  };
+
+  /** Each non-entry block param → the argument every in-edge passes it, in edge order. */
+  const joinArgs = (): Map<Value, Value[]> => {
+    const m = new Map<Value, Value[]>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        for (const s of op.successors) {
+          if (s.block === irBlocks[0]) {
+            continue;
+          }
+          s.block.params.forEach((p, i) => {
+            (m.get(p) ?? m.set(p, []).get(p)!).push(s.args[i]);
+          });
+        }
+      }
+    }
+    return m;
+  };
+
+  /** ANOTHER STORAGE'S UNDEFINED VALUE IS AN ASSIGNMENT. `int x, y; if (c) x = y;` at ido7.1
+   *  copies the word at 0(sp) into 4(sp) on one path, so the join keyed `sp@4` takes `sp@0`'s
+   *  undefined value as an edge argument. The structurer drops an undefined edge copy (structure.ts
+   *  `undefCarriesNothing`), which is right for the join's OWN storage — that path left the local
+   *  unassigned — and wrong for another's, where the machine ran a load and a store. Each such edge
+   *  argument becomes its own undefined value under the source's key, marked `copied`, which the
+   *  structurer spells as the assignment `x = uninit_sp0` and names as the value it copies. A join
+   *  whose key the builder did not record is left as it was.
+   *
+   *  FRAME WORDS ONLY, both of them. A compiler gives a stack local one word and moves no local from
+   *  word to word, so two words are two locals. A register is no such identity: agbcc keeps a local
+   *  in r8 and moves it to a low register to use it (`synthetic:uninit_spill`), and a spill writes a
+   *  register's local to a word — one source variable under two keys, where a spelled copy would
+   *  invent an assignment the source never wrote. So `x = y` between two locals in registers
+   *  (`uninit_both_saved` on agbcc) still collapses into one undefined value where nothing else
+   *  reads it (below).
+   *
+   *  A REGISTER CACHING TWO FRAME WORDS. ido7.1 -O2 gives an uninitialised local its word and then
+   *  caches it in a register across a loop or an arm: `int x, y; if (c) x = y; else y = x;
+   *  return x - y;` is `lw a0,0(sp); move v1,a0` on one arm and `lw v1,4(sp); move a0,v1` on the
+   *  other, so the joins keyed v1 and a0 each take sp@0's undefined value on one edge and sp@4's on
+   *  the other, and collapsing them into two unrelated undefined values loses that x - y is 0.
+   *  Where the joins one register-keyed join is connected to by its edge arguments (a loop header's
+   *  and the arm join inside it, in `for (…) if (i & 1) x = y;`) take the undefined values of TWO
+   *  OR MORE frame words between them, the register is no one local's home, and each such edge
+   *  argument is marked `copied` too: every one is a load the machine ran. Of ONE frame word only
+   *  (an arm that leaves the cached local as it was) the web is that local's, and stays as it was —
+   *  so long as nothing else reads the value, below.
+   *
+   *  A VALUE READ ELSEWHERE IS A RELATION, whatever the keys. Dropping an edge copy leaves the
+   *  join's local unassigned on that path, which is as undefined as the machine's word only where
+   *  that word is read through this join alone. `int x, z; if (c) z = x; else z = 7; return z - x;`
+   *  at ido7.1 caches x's word 4(sp) in z's register v1 on one arm and reads 4(sp) again for the
+   *  subtraction, so `c != 0` returns 0; with the copy dropped, z's local is unassigned there and
+   *  the C returns garbage. So an undefined edge argument, of any storage and into a join of any
+   *  key (registers too: gcc 2.7.2 keeps x in v1 and runs `move v0,v1`), is a copy here whenever
+   *  ANOTHER JOIN also takes it, since that join's local and this one hold the same value on the
+   *  machine. One the function also reads directly is left to the structurer, which names the
+   *  value as the join's local when it can (`g = x; if (c) x = 5; return x;`) and spells the copy
+   *  when it cannot (structure.ts `undefCarriesNothing`); `collapseUndefinedJoins` keeps such a
+   *  join for it. What agbcc's prologue relates by staging a high register for its push is not
+   *  this function's copy and never reaches here (thumb.ts `prologueSavedRegs`). */
+  const markCopiedUndefs = () => {
+    const defOf = defOpMap(fn);
+    const replaced = new Set<Value>();
+    const frameUndefKey = (v: Value): string | undefined => {
+      const d = defOf.get(v);
+      return d?.opcode === 'undef' && d.attrs.copied !== true && slotKeyOffset(String(d.attrs.key)) !== null
+        ? String(d.attrs.key)
+        : undefined;
+    };
+    // The register-keyed joins whose web of joins takes two or more frame words' undefined values.
+    const mixedRegisterJoins = new Set<Value>();
+    {
+      const incoming = joinArgs();
+      const isRegJoin = (p: Value) => {
+        const k = phiKey.get(p);
+        return incoming.has(p) && k !== undefined && slotKeyOffset(k) === null;
+      };
+      const parent = new Map<Value, Value>();
+      const find = (v: Value): Value => {
+        let r = v;
+        while (parent.get(r) !== undefined && parent.get(r) !== r) {
+          r = parent.get(r)!;
+        }
+        parent.set(v, r);
+        return r;
+      };
+      for (const [p, args] of incoming) {
+        if (!isRegJoin(p)) {
+          continue;
+        }
+        if (!parent.has(p)) {
+          parent.set(p, p);
+        }
+        for (const a of args) {
+          if (isRegJoin(a)) {
+            if (!parent.has(a)) {
+              parent.set(a, a);
+            }
+            parent.set(find(a), find(p));
+          }
+        }
+      }
+      const keysOf = new Map<Value, Set<string>>();
+      for (const [p, args] of incoming) {
+        if (!isRegJoin(p)) {
+          continue;
+        }
+        const root = find(p);
+        const ks = keysOf.get(root) ?? keysOf.set(root, new Set()).get(root)!;
+        for (const a of args) {
+          const k = frameUndefKey(a);
+          if (k !== undefined) {
+            ks.add(k);
+          }
+        }
+      }
+      for (const p of parent.keys()) {
+        if ((keysOf.get(find(p))?.size ?? 0) >= 2) {
+          mixedRegisterJoins.add(p);
+        }
+      }
+    }
+    const readers = readersOf();
+    const joinedElsewhere = (u: Value, p: Value) => [...(readers.get(u) ?? [])].some((r) => r !== null && r !== p);
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        for (const s of op.successors) {
+          if (s.block === irBlocks[0]) {
+            continue;
+          }
+          s.block.params.forEach((p, i) => {
+            const d = defOf.get(s.args[i]);
+            const key = phiKey.get(p);
+            if (d?.opcode !== 'undef' || d.attrs.copied === true || key === undefined) {
+              return;
+            }
+            const frameCopy =
+              d.attrs.key !== key &&
+              slotKeyOffset(String(d.attrs.key)) !== null &&
+              (slotKeyOffset(key) !== null || mixedRegisterJoins.has(p));
+            if (!frameCopy && !joinedElsewhere(s.args[i], p)) {
+              return;
+            }
+            const copy = mkOp('undef', {
+              results: [mkValue(s.args[i].type)],
+              attrs: { key: d.attrs.key, copied: true },
+            });
+            irBlocks[0].ops.unshift(copy);
+            replaced.add(s.args[i]);
+            s.args[i] = copy.results[0];
+          });
+        }
+      }
+    }
+    if (replaced.size > 0) {
+      const used = new Set(
+        irBlocks.flatMap((b) => b.ops.flatMap((o) => [...o.operands, ...o.successors.flatMap((s) => s.args)])),
+      );
+      for (const blk of irBlocks) {
+        blk.ops = blk.ops.filter((o) => !replaced.has(o.results[0]) || used.has(o.results[0]));
+      }
+    }
+  };
+
+  /** A JOIN NO PATH DEFINES IS ONE UNINITIALISED VALUE. A join whose every argument is its own
+   *  storage's undefined value (`markCopiedUndefs` has already turned another frame word's into an
+   *  assignment) would keep its local and lose every assignment to it, since the structurer drops
+   *  each such edge copy, and its own postcondition then reports a local read but never assigned.
+   *  Such a join is replaced by one fresh undefined value at the entry, keyed as the join was,
+   *  which dominates every use the join had. The greatest such set, so a loop that only carries an
+   *  undefined value round (`phi(undef, phi(…))`) collapses with it. Run after the hidden-input
+   *  check, which refuses the joins whose undefined arguments are a hand-written routine's inputs. */
+  const collapseUndefinedJoins = () => {
+    const incoming = joinArgs();
+    const undefs = new Set<Value>();
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        if (op.opcode === 'undef' && op.attrs.copied !== true) {
+          undefs.add(op.results[0]);
+        }
+      }
+    }
+    if (undefs.size === 0) {
+      return;
+    }
+    // A join one of whose undefined arguments is also read directly keeps it: the fresh value it
+    // would collapse into is a second undefined value where the machine holds one, and the
+    // structurer spells the edge copy instead (`markCopiedUndefs`, A VALUE READ ELSEWHERE).
+    const readers = readersOf();
+    const readDirectly = (a: Value) => undefs.has(a) && (readers.get(a)?.has(null) ?? false);
+    const doomed = new Set(
+      [...incoming.keys()].filter((p) => incoming.get(p)!.length > 0 && !incoming.get(p)!.some(readDirectly)),
+    );
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const p of doomed) {
+        if (incoming.get(p)!.some((a) => a !== p && !undefs.has(a) && !doomed.has(a))) {
+          doomed.delete(p);
+          changed = true;
+        }
+      }
+    }
+    // ...and reaches an undefined value at all: a param only its own back edge feeds is a cycle no
+    // entry reaches (`readRecursive`'s unreachable walk), which carries no value to collapse into.
+    const grounded = new Set<Value>();
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const p of doomed) {
+        if (!grounded.has(p) && incoming.get(p)!.some((a) => undefs.has(a) || grounded.has(a))) {
+          grounded.add(p);
+          changed = true;
+        }
+      }
+    }
+    for (const p of [...doomed]) {
+      if (!grounded.has(p)) {
+        doomed.delete(p);
+      }
+    }
+    if (doomed.size === 0) {
+      return;
+    }
+    const orphans = new Set([...doomed].flatMap((p) => incoming.get(p)!.filter((a) => undefs.has(a))));
+    for (const p of doomed) {
+      const firstUndef = incoming.get(p)!.find((a) => undefs.has(a));
+      const key = phiKey.get(p) ?? (firstUndef && defOpMap(fn).get(firstUndef)?.attrs.key) ?? '';
+      const op = mkOp('undef', { results: [mkValue(T.unk(32))], attrs: { key } });
+      irBlocks[0].ops.unshift(op);
+      replaceAllUsesWith(fn, p, op.results[0]);
+    }
+    for (const blk of irBlocks) {
+      for (let i = blk.params.length - 1; i >= 0; i--) {
+        const p = blk.params[i];
+        if (!doomed.has(p)) {
+          continue;
+        }
+        dropPhiRecord(p);
+        blk.params.splice(i, 1);
+        for (const b2 of irBlocks) {
+          for (const o of b2.ops) {
+            for (const s of o.successors) {
+              if (s.block === blk) {
+                s.args.splice(i, 1);
+              }
+            }
+          }
+        }
+      }
+    }
+    // The undefined arguments the collapsed joins took and nothing else reads.
+    const used = new Set(
+      irBlocks.flatMap((b) => b.ops.flatMap((o) => [...o.operands, ...o.successors.flatMap((s) => s.args)])),
+    );
+    for (const blk of irBlocks) {
+      blk.ops = blk.ops.filter((o) => !orphans.has(o.results[0]) || used.has(o.results[0]));
     }
   };
 
@@ -1063,23 +1382,110 @@ export function makeSsaBuilder(
       simplifyTrivialPhis(fn, dropPhiRecord);
       pruneDeadParams(fn, dropPhiRecord);
       // A HIDDEN INPUT IS NO UNINITIALISED LOCAL (`LiveInModel.hiddenInputRegs`). After the
-      // trivial-phi pass, so a join every path of which arrives undefined counts as the direct use
-      // it now is. An edge arg is the one use allowed: the compiler's local, assigned on another
-      // path, meets its entry value there.
+      // trivial-phi pass, so a join every path of which arrives undefined is no join. The
+      // compiler's local is assigned on SOME path, and its entry value meets that definition as a
+      // join's edge argument; once it does, a direct use is the same local read before that
+      // assignment (`uninitfirst`). An entry value that meets no such definition is the input.
+      //
+      // MEETING A JOIN IS NOT MEETING A DEFINITION. A register that carries an input round a loop
+      // (`addiu t0,t0,-1; bnez t0,top` on a hand-written count) sends its entry value into the
+      // loop header's join too, and the back edge's argument is that input's own next value. So
+      // the join must also take an INDEPENDENT definition (`independentOfEntry`): a value no chain
+      // of operands or join arguments derives from the entry value, other than through a join one
+      // of whose other arguments is itself independent. A conditional assignment inside a loop
+      // (`for (…) if (c) x = i;`) meets that through the inner join, and so does one the loop then
+      // transforms before its back edge — a bit reader's `if (!bits) code = *src++; … code <<= 1;`,
+      // whose shift reaches the entry value only through the join the load also feeds. A counter
+      // that only advances the entry value, and two undefined values joined (`phi(t0, v1)`), do
+      // not, and refuse. A bit reader HANDED its buffer meets the same join and lifts with the
+      // input dropped: the rule's blind side, at `O32_SCRATCH_REGS` in target.ts.
       if (hiddenEntryValues.size > 0) {
+        const incoming = joinArgs();
+        const defOf = defOpMap(fn);
+        // Read forwards: who reads each value, as an operand or as a join's edge argument.
+        const readers = new Map<Value, Value[]>();
+        const addReader = (v: Value, r: Value) => (readers.get(v) ?? readers.set(v, []).get(v)!).push(r);
         for (const blk of irBlocks) {
           for (const op of blk.ops) {
-            const reg = op.operands.map((v) => hiddenEntryValues.get(v)).find((r) => r !== undefined);
+            for (const v of op.operands) {
+              for (const r of op.results) {
+                addReader(v, r);
+              }
+            }
+          }
+        }
+        for (const [p, args] of incoming) {
+          for (const a of args) {
+            addReader(a, p);
+          }
+        }
+        const isJoin = (v: Value) => incoming.has(v) && !irBlocks[0].params.includes(v);
+        /** The values independent of `u`, as a least fixpoint. A join is independent once one of
+         *  its arguments is; any other value once no chain of operands or join arguments reaches
+         *  `u` without passing through an independent join. Grown from nothing, so no join is
+         *  independent on the strength of its own back edge (`addiu t0,t0,-1` round a loop). */
+        const independentOfEntry = (u: Value): ((v: Value) => boolean) => {
+          const absorbing = new Set<Value>();
+          for (;;) {
+            const derived = new Set<Value>([u]);
+            const work = [u];
+            for (let w = work.pop(); w !== undefined; w = work.pop()) {
+              for (const r of readers.get(w) ?? []) {
+                if (!derived.has(r) && !absorbing.has(r)) {
+                  derived.add(r);
+                  work.push(r);
+                }
+              }
+            }
+            const indep = (v: Value) =>
+              v !== u && defOf.get(v)?.opcode !== 'undef' && (absorbing.has(v) || (!isJoin(v) && !derived.has(v)));
+            let grew = false;
+            for (let changed = true; changed;) {
+              changed = false;
+              for (const [p, args] of incoming) {
+                if (isJoin(p) && !absorbing.has(p) && args.some(indep)) {
+                  absorbing.add(p);
+                  changed = grew = true;
+                }
+              }
+            }
+            if (!grew) {
+              return indep;
+            }
+          }
+        };
+        const metMemo = new Map<Value, boolean>();
+        const met = (u: Value): boolean => {
+          let m = metMemo.get(u);
+          if (m === undefined) {
+            const joins = [...incoming.entries()].filter(([p, args]) => isJoin(p) && args.includes(u));
+            const indep = joins.length === 0 ? undefined : independentOfEntry(u);
+            m = indep !== undefined && joins.some(([, args]) => args.some(indep));
+            metMemo.set(u, m);
+          }
+          return m;
+        };
+        for (const blk of irBlocks) {
+          for (const op of blk.ops) {
+            const reg = [...op.operands, ...op.successors.flatMap((s) => s.args)]
+              .filter((v) => hiddenEntryValues.has(v) && !met(v))
+              .map((v) => hiddenEntryValues.get(v))
+              .find((r) => r !== undefined);
             if (reg !== undefined) {
               throw new FrontendUnsupportedError(
-                `cannot lift '${name}': ${reg} is read before anything writes it, and no path's ` +
-                  `definition joins it — a hidden input this compiler's runtime passes there ` +
-                  `(a save routine's frame address, a member-function pointer), not an uninitialised local`,
+                `cannot lift '${name}': ${reg} is read before anything writes it, and ` +
+                  `no join meets it with a definition of its own — an input handed over outside the ` +
+                  `C convention (a save routine's frame address, a member-function pointer, a register ` +
+                  `hand-written asm passes a value in, a count it carries round a loop), not modelled ` +
+                  `as an uninitialised local`,
               );
             }
           }
         }
       }
+      markCopiedUndefs();
+      collapseUndefinedJoins();
+      simplifyTrivialPhis(fn, dropPhiRecord);
       // SEAL THE PARAMETER EVIDENCE (ir/core.ts `ParamEvidence`). Here and not at the store or the
       // write, because `pruneDeadParams` above is the last thing that can retire an entry
       // parameter, and an observation about a value no longer in the signature is one the reader

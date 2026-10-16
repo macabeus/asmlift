@@ -596,7 +596,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         ),
       ).toBe('s32 sj(s32 a0, s32 a1) {\n    s32 v0;\n    if (a0 != 0) v0 = a1 * 3;\n    return v0 + a1;\n}\n');
       expect(() => dis('sc', `0:\tadd     r3,r3,${r}\n4:\tblr\n`)).toThrow(
-        new RegExp(`${r} is read before anything writes it, and no path's definition joins it`),
+        new RegExp(`${r} is read before anything writes it, and no join meets it with a definition of its own`),
       );
     }
     // The runtime's own `_savegpr_31` stores through its frame address, r11; `__ptmf_scall` loads
