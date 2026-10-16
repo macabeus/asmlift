@@ -176,6 +176,19 @@ export function declaresParams(p: FnProto | undefined): boolean {
   return typeof p?.params === 'number' || Array.isArray(p?.params);
 }
 
+/** The declaration a call to `callee` is read at — THE TIER ORDER, written once: the project's own
+ *  entry where it states a parameter list (`declaresParams`), then the compiler's runtime table
+ *  (`helpers`: `runtime-helpers.ts` `helperPrototypes` of the target), then the signatures the C
+ *  standard fixes. `frontend/call-plan.ts` lowers every call at it, and the CLI asks it which
+ *  callees a run guessed, so a callee the lowering reads a signature for is never reported as
+ *  guessed, and one it guesses for always is. `Object.hasOwn` on all three tables: a callee named
+ *  `toString` would otherwise read a `Function` off `Object.prototype` as its entry. */
+export function calleeDeclaration(callee: string, prototypes: Prototypes, helpers: Prototypes): FnProto | undefined {
+  const known = (t: Prototypes) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
+  const own = known(prototypes);
+  return declaresParams(own) ? own : (known(helpers) ?? known(STANDARD_SIGNATURES));
+}
+
 /** What a declaration says about the argument registers a call occupies — the width each declared
  *  parameter travels in, in argument order — or `undefined` when it says nothing this can act on.
  *

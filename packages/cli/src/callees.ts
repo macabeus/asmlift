@@ -11,7 +11,8 @@
 // and nothing here can change what is emitted.
 import { byValueCallArgs, byValueRefusal } from '@asmlift/core/aggregate';
 import type { Reloc } from '@asmlift/core/frontend/asmdata';
-import { type Prototypes, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
+import { type Prototypes, calleeDeclaration, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
+import { helperPrototypes } from '@asmlift/core/runtime-helpers';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 
@@ -98,7 +99,8 @@ function ownRange(lines: readonly string[], self: string | undefined): [number, 
 }
 
 /** Of those callees, the ones whose arity this run had to GUESS: no `--proto` entry this can
- *  convert into argument registers, and no signature in the project's own DWARF either.
+ *  convert into argument registers, no signature in the target's runtime table or the C standard's
+ *  behind it, and no signature in the project's own DWARF either.
  *
  *  `declaredCallArgs` IS THE READER, AND IT IS THE ONE THE FRONTEND ACTS ON, asked about the same
  *  target. Three declarations state nothing it can lay out — `params` omitted, `params` mistyped
@@ -126,14 +128,20 @@ export function guessedArityCallees(
   relocs?: readonly Reloc[],
 ): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
-  return calleeNames(asm, self, relocs).filter(
-    (n) =>
-      declaredCallArgs(prototypes?.[n], target) === undefined &&
-      byValueCallArgs(prototypes?.[n], target) === undefined &&
-      byValueRefusal(prototypes?.[n], target) === undefined &&
-      variadicRefusal(prototypes?.[n]) === undefined &&
-      declared?.get(n)?.signature === undefined,
-  );
+  const helpers = helperPrototypes(target);
+  return calleeNames(asm, self, relocs).filter((n) => {
+    // read at the declaration the lowering reads it at: a compiler's runtime helper (`__divsi3`,
+    // `__addsf3`) and a C-standard function are signed by their table behind the project's own
+    const at = calleeDeclaration(n, prototypes ?? {}, helpers);
+    return (
+      declaredCallArgs(at, target) === undefined &&
+      byValueCallArgs(at, target) === undefined &&
+      byValueRefusal(at, target) === undefined &&
+      variadicRefusal(prototypes !== undefined && Object.hasOwn(prototypes, n) ? prototypes[n] : undefined) ===
+        undefined &&
+      declared?.get(n)?.signature === undefined
+    );
+  });
 }
 
 /** The one stderr line, or '' when every callee's arity was declared. */

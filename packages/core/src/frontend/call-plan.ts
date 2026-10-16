@@ -28,7 +28,7 @@ import {
   type FnProto,
   type ParamClass,
   type Prototypes,
-  STANDARD_SIGNATURES,
+  calleeDeclaration,
   declaredCallArgs,
   declaredReturnWidth,
   declaresAggregateReturn,
@@ -342,11 +342,8 @@ export function callDeclarations(
   // because it is the most specific thing that was seen.
   const known = (t: Prototypes, callee: string) => (Object.hasOwn(t, callee) ? t[callee] : undefined);
   /** the declaration a callee is read at: the project's, then the runtime table's, then the C
-   *  standard's (the tier order `declaredCall` gives the reasons for) */
-  const declarationOf = (callee: string): FnProto | undefined => {
-    const own = known(prototypes, callee);
-    return declaresParams(own) ? own : (known(helperProtos, callee) ?? known(STANDARD_SIGNATURES, callee));
-  };
+   *  standard's (`proto.ts` `calleeDeclaration`; `declaredCall` gives the reasons for the order) */
+  const declarationOf = (callee: string): FnProto | undefined => calleeDeclaration(callee, prototypes, helperProtos);
   const declaredParams = (callee: string): readonly DeclaredParam[] | null => {
     const params = declarationOf(callee)?.params;
     if (typeof params === 'number') {
