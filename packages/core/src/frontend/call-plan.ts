@@ -168,8 +168,9 @@ export interface CallSite {
   readonly placeholders?: Pick<HighHalves, 'has' | 'guardRead'>;
   /** what a guessed arity refuses on; without it a gap in the argument registers ends the count */
   readonly guess?: {
-    /** the call's address, for the gap refusal */
-    readonly at: number;
+    /** where the call is, for the gap refusal: its address, or — for an ISA whose instructions
+     *  carry none (Thumb's `.s` text) — a phrase that names it, printed as written */
+    readonly at: number | string;
     /** refuses a guess of `argc` words this ABI's outgoing area could extend */
     refuse(argc: number): void;
   };

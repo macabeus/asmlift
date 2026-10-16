@@ -4,7 +4,7 @@ import { describe, expect, test } from 'vitest';
 
 import { type CallLowering, type CallPairs, callDeclarations } from '../src/frontend/call-plan';
 import { FrontendUnsupportedError } from '../src/frontend/errors';
-import { type SsaBuilder, makeSsaBuilder } from '../src/frontend/ssa';
+import { type SsaBuilder, fallbackArgc, makeSsaBuilder } from '../src/frontend/ssa';
 import { type Value, mkOp, mkValue } from '../src/ir/core';
 import { T } from '../src/ir/types';
 import type { Prototypes } from '../src/proto';
@@ -444,5 +444,33 @@ describe('callDeclarations.plan for a callee declared with a float', () => {
 
   test('plans one where the target passes floats in general registers', () => {
     expect(thumbCalls({ g: { params: ['float'], returns: 'float' } }).plan('g').returns).toEqual({ kind: 'word' });
+  });
+});
+
+describe('fallbackArgc', () => {
+  // r0 and r2 hold a value, r1 none: a gap the count cannot decide
+  const gapped = { hasReachingDef: (reg: string) => reg === 'r0' || reg === 'r2' };
+  const regs = ['r0', 'r1', 'r2', 'r3'];
+
+  test('stops at the first argument register nothing reaches when the lowering states no guess', () => {
+    expect(fallbackArgc(gapped, regs, 0)).toBe(1);
+  });
+
+  test('names the call by its address in the gap refusal', () => {
+    expect(() => fallbackArgc(gapped, regs, 0, { gap: { name: 'f', at: 0x3c, fail } })).toThrow(
+      /'f': the call at 0x3c has no prototype, r2 holds a value and r1 holds none/,
+    );
+  });
+
+  // an ISA whose instructions carry no address (Thumb's `.s` text) names the call another way
+  test('names the call by a phrase where the lowering has no address for it', () => {
+    expect(() => fallbackArgc(gapped, regs, 0, { gap: { name: 'f', at: "'bl g' in block 'f'", fail } })).toThrow(
+      /'f': the call 'bl g' in block 'f' has no prototype, r2 holds a value and r1 holds none/,
+    );
+  });
+
+  test('does not refuse a contiguous count', () => {
+    const contiguous = { hasReachingDef: (reg: string) => reg === 'r0' || reg === 'r1' };
+    expect(fallbackArgc(contiguous, regs, 0, { gap: { name: 'f', at: 0, fail } })).toBe(2);
   });
 });

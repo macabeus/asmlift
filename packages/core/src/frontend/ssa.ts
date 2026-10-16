@@ -1583,8 +1583,8 @@ export function fallbackArgc(
   bi: number,
   opts: {
     accept?: (v: Value) => boolean;
-    /** the call's function and address, and the frontend's own refusal */
-    gap?: { name: string; at: number; fail: FrontendRefusal };
+    /** the call's function, where it is (`CallLowering`'s `guess.at`), and the frontend's own refusal */
+    gap?: { name: string; at: number | string; fail: FrontendRefusal };
   } = {},
 ): number {
   // whether the caller set argument register k up: a definition reaches it, through a call too
@@ -1595,10 +1595,11 @@ export function fallbackArgc(
   }
   if (opts.gap !== undefined) {
     const { name, at, fail } = opts.gap;
+    const call = typeof at === 'number' ? `at 0x${at.toString(16)}` : at;
     for (let k = n + 1; k < argRegs.length; k++) {
       if (setUp(k)) {
         fail(
-          `cannot lift '${name}': the call at 0x${at.toString(16)} has no prototype, ${argRegs[k]} holds a ` +
+          `cannot lift '${name}': the call ${call} has no prototype, ${argRegs[k]} holds a ` +
             `value and ${argRegs[n]} holds none — an argument register left at its incoming value and one ` +
             `the call does not pass look the same here, so the argument count is not decidable`,
         );
