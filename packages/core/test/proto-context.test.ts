@@ -205,7 +205,7 @@ describe('prototypes from a declaration context', () => {
     expect(p.d).toEqual({ returns: 'double', params: [] });
   });
 
-  test('skips members, namespaces, templates, operators and variadics; drops an overloaded name', () => {
+  test('skips members, namespaces, templates and operators, keeps only the fixed parameters of a variadic; drops an overloaded name', () => {
     const p = prototypesFromContext(
       `class Card { public: int probe(int chan); };
        namespace zen { int helper(int); }
@@ -219,8 +219,85 @@ describe('prototypes from a declaration context', () => {
       'c++',
     );
     expect(Object.keys(p).sort()).toEqual(['after', 'last', 'printf', 'same']);
-    expect(p.printf).toEqual({ returns: 'int' });
+    expect(p.printf).toEqual({ returns: 'int', variadicParams: ['const char *'] });
     expect(p.after).toEqual({ returns: 'int', params: ['int'] });
+  });
+
+  // Compatible redeclarations are one function: read as a conflict, the name would be dropped, and
+  // with it the by-value and variadic refusals its entry carries — the call would take the arity
+  // guess (`takeW(*(s32 *)&gW)`, `takeL(*p0, p0[1])`), and a void callee's v0 would read as its return.
+  test('two declarations of one function that differ only in top-level parameter qualifiers keep the entry', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; struct W { u32 x; }; typedef const int CI;
+       void takeW(const struct W w); void takeW(struct W w);
+       void takeL(const long long x, ...); void takeL(long long x, ...);
+       int logv(const int k, ...); int logv(int k, ...);
+       int g(int *const p); int g(int *p);
+       int f(CI x); int f(int x);
+       int h(const char *s); int h(char *s);
+       int n(int x); int n(long long x);`,
+      'c',
+    );
+    expect(p.takeW).toMatchObject({ returnsVoid: true, params: ['struct W'], byValueParams: [0] });
+    expect(p.takeL).toEqual({ returnsVoid: true, variadicParams: ['long long'] });
+    expect(p.logv).toEqual({ returns: 'int', variadicParams: ['int'] });
+    expect(p.g).toEqual({ returns: 'int', params: ['int *'] });
+    expect(p.f).toEqual({ returns: 'int', params: ['int'] });
+    // a qualifier on what a pointer points at is the parameter's type, and a different type conflicts
+    expect(p.h).toBeUndefined();
+    expect(p.n).toBeUndefined();
+  });
+
+  test('in C, a declaration whose parameters are not read is one with the declaration that states them', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned int u32; struct W { u32 x; };
+       void takeW(); void takeW(struct W w);
+       int logv(const char *fmt, ...); int logv(const char *restrict fmt, ...);
+       int r(); long long r(int);`,
+      'c',
+    );
+    expect(p.takeW).toMatchObject({ returnsVoid: true, params: ['struct W'], byValueParams: [0] });
+    expect(p.logv).toEqual({ returns: 'int', variadicParams: ['const char *'] });
+    // the returns disagree: a conflict
+    expect(p.r).toBeUndefined();
+    // in C++, `()` states no parameters, and two lists that differ are overloads
+    const cpp = prototypesFromContext('struct W { int x; }; void takeW(); void takeW(struct W w);', 'c++');
+    expect(cpp.takeW).toBeUndefined();
+  });
+
+  // `()` before a list is compatible with it only where the list is not variadic and its parameters
+  // keep their types under the default argument promotions (C99 6.7.5.3p15); after one, it is a
+  // conflict whatever the types (byvalue-args.test.ts, mwcc). agbcc, gcc2.7.2kmc and gcc2.7.2 compile
+  // `void f(char); void f();` without a word and the call unprototyped, so reading it as `f(char)`
+  // would trim `f(1, 2)` to `f(1)`. An enum may be narrow (`-fshort-enums`), and a name never
+  // resolved may be `u8`: neither composes.
+  test('in C, a `()` declaration is one with a list only where no parameter is promoted', () => {
+    const p = prototypesFromContext(
+      `typedef unsigned char u8; typedef int s32; typedef float F; enum E { A, B };
+       typedef struct { int x; } S; struct W { int x; };
+       void c(char); void c();
+       void cr(); void cr(char);
+       void sh(); void sh(short, char);
+       void u(); void u(u8);
+       void b(); void b(_Bool);
+       void fl(); void fl(F);
+       void e(); void e(enum E);
+       void un(); void un(Unknown);
+       void v(); void v(int, ...);
+       void ok(); void ok(s32, double, char *, struct W, S, int[4]);
+       void ov(); void ov(void);
+       int rs(const char *restrict s, ...); int rs(const char *s, int n);
+       int ra(const char *restrict s, int n); int ra(const char *s);
+       int rk(const char *restrict s, int n); int rk(const char *s, int n);`,
+      'c',
+    );
+    for (const name of ['c', 'cr', 'sh', 'u', 'b', 'fl', 'e', 'un', 'v', 'rs', 'ra']) {
+      expect(p[name], name).toBeUndefined();
+    }
+    expect(p.ok).toMatchObject({ returnsVoid: true, byValueParams: [3, 4] });
+    expect(p.ok?.params).toHaveLength(6);
+    expect(p.ov).toEqual({ returnsVoid: true, params: [] });
+    expect(p.rk).toEqual({ returns: 'int', params: ['const char *', 'int'] });
   });
 
   test('a parameter nothing sizes is listed where it still travels in one register', () => {
@@ -839,7 +916,7 @@ describe('a context register return under a mapped signature', () => {
       'enum Mode { M0, M1 }; int pr(char *buf, const char *fmt, ...); int kr(); int two(enum Mode m, int n);',
       'c',
     );
-    expect(odd.pr).toEqual({ returns: 'int' });
+    expect(odd.pr).toEqual({ returns: 'int', variadicParams: ['char *', 'const char *'] });
     expect(odd.kr).toEqual({ returns: 'int' });
     const ptr = { size: 4, signed: null, pointer: true };
     const sigs = new Map([

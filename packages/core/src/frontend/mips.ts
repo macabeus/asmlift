@@ -26,7 +26,7 @@ import type { ContextGlobals } from '../proto-context';
 import type { SymbolMap } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type AsmData, readJumpTable, textRelocAt } from './asmdata';
-import { callDeclarations } from './call-plan';
+import { callDeclarations, foldByValueArgs } from './call-plan';
 import { pinDeadReads } from './dead-reads';
 import { pinDeviceAccesses } from './device-pins';
 import {
@@ -1244,7 +1244,7 @@ function liftOnce(
     rule: target.compilerBehaviors.o32LocalArea,
     stackWordsOf: (callee) => {
       const declared = callee === undefined ? null : calls.declaredCall(callee);
-      return declared === null ? null : Math.max(0, wordsOf(declared.widths) - ARG_REGS.length);
+      return declared === null ? null : Math.max(0, wordsOf(declared.widths, target) - ARG_REGS.length);
     },
     savedByCallee,
     splat,
@@ -2250,6 +2250,10 @@ function liftOnce(
       );
     }
   }
+
+  // A struct passed by value becomes the one object its words hold (call-plan.ts `foldByValueArgs`)
+  // before the audit judges the frame objects, as on Thumb.
+  foldByValueArgs(name, irBlocks, calls, { symbols, context });
 
   if (frame !== null) {
     refuseEscapedFrameSums(name, irBlocks, frameSums);

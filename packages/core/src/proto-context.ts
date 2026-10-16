@@ -101,6 +101,33 @@ export interface ContextGlobals {
    *  dead-read pin's `declared-plain` gate reads (frontend/dead-reads.ts) — the source spelled a
    *  read of it plain, so a read the target keeps that nothing uses is not the source's `volatile`. */
   declared: ReadonlySet<string>;
+  /** The type each object of `declared` that is no array, pointer or function is declared as, as
+   *  written (`Q_t`, `struct Q`). An object passed bare as a struct by value must be declared as
+   *  that struct (frontend/call-plan.ts `foldByValueArgs`): `gQs` over `extern struct Q gQs[4];` or
+   *  `gO2` over `extern struct O2 gO2;` names the right address and is a type error as an argument
+   *  of `struct Q`. Compared by the struct it names (`structNamed`, which follows the typedefs),
+   *  not by spelling. */
+  objectTypes: ReadonlyMap<string, string>;
+  /** The struct or union each typedef name stands for, as far as its chain goes with no
+   *  derivation: by its tag (`struct Q`), or, for an untagged body, by the typedef name that binds
+   *  it. Read through `structNamed`, which is how two spellings of one struct are told to be one:
+   *  `typedef struct Q {…} Q;` spells the struct `Q`, `struct Q` and every other alias of it. */
+  structTypes: ReadonlyMap<string, string>;
+}
+
+/** The struct or union `spelling` names, qualifiers aside, by the identity `structTypes` keys it
+ *  under: `struct Tag` as written, or what a typedef name stands for. Undefined for any other
+ *  spelling, and for a name the context does not resolve to one — which then names no struct this
+ *  can compare, and the spellings are compared as written. */
+export function structNamed(
+  spelling: string,
+  context: Pick<ContextGlobals, 'structTypes'> | undefined,
+): string | undefined {
+  const s = spelling
+    .replace(/\b(?:const|volatile)\b/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return /^(?:struct|union) [A-Za-z_$][\w$]*$/.test(s) ? s : context?.structTypes.get(s);
 }
 
 /** The globals a preprocessed declaration context declares, read for {@link ContextGlobals}. */
@@ -112,6 +139,7 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
   const volatiles = new Set<string>();
   const pointeeVolatiles = new Set<string>();
   const declared = new Set<string>();
+  const objectTypes = new Map<string, string>();
   for (const d of ctx.declarations) {
     if (d.specifiers.typedef || d.body !== undefined) {
       continue;
@@ -123,6 +151,9 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       const t = declaredType(d.specifiers, x.derivations);
       if (t.derivations[0]?.kind !== 'function') {
         declared.add(x.name);
+      }
+      if (t.derivations.length === 0) {
+        objectTypes.set(x.name, t.spelling);
       }
       if (isAggregate(t, table, scope.typedefs)) {
         aggregates.add(x.name);
@@ -139,7 +170,37 @@ export function globalsFromContext(src: string, language: Language): ContextGlob
       }
     }
   }
-  return { aggregates, volatiles, pointeeVolatiles, declared };
+  const structTypes = new Map<string, string>();
+  for (const name of scope.typedefs.keys()) {
+    const named = structOfTypedef(name, scope.typedefs);
+    if (named !== undefined) {
+      structTypes.set(name, named);
+    }
+  }
+  return { aggregates, volatiles, pointeeVolatiles, declared, objectTypes, structTypes };
+}
+
+/** The struct or union the typedef `name` stands for (`ContextGlobals.structTypes`): its tag where
+ *  the chain ends at one, else the last name in the chain, which binds the untagged body. */
+function structOfTypedef(name: string, typedefs: ReadonlyMap<string, DeclaredType>): string | undefined {
+  let binder = name;
+  let at = typedefs.get(name);
+  for (let hops = 0; hops < 16 && at !== undefined && at.derivations.length === 0; hops++) {
+    const t = at.type;
+    if (t.kind === 'tag') {
+      return t.keyword === 'struct' || t.keyword === 'union'
+        ? t.tag === undefined
+          ? binder
+          : `${t.keyword} ${t.tag}`
+        : undefined;
+    }
+    if (t.words.length !== 1 || at.unknownWords.length > 0) {
+      return undefined;
+    }
+    binder = t.words[0];
+    at = typedefs.get(binder);
+  }
+  return undefined;
 }
 
 /** Every struct, union and class body the context defines, by `keyword Tag` (and, in C++, by the bare
@@ -900,22 +961,80 @@ function memberShape(
   return { name: d.name, pointer: stars.length > 0, ...(dims.length > 0 ? { dims } : {}), returns: [] };
 }
 
+/** A declaration's reading: the entry as written, the `key` two declarations are compared by, and
+ *  the `lists` of every declaration it stands for, which say whether a declaration that states no
+ *  parameters can be one with a declaration that does (`composable`). */
+type Read = { proto: FnProto; key: FnProto; lists: readonly ParameterList[] };
+
+/** What a declaration's parentheses say of its parameters, as `composable` needs it: `()` in C,
+ *  which states none; a list this could not read, with how many FIXED parameters its top-level commas
+ *  separate and whether it ends in `...`; or a list it read, with whether every parameter keeps its
+ *  type under the default argument promotions (C99 6.5.2.2p6) — undefined where one may not. */
+type ParameterList =
+  | { kind: 'unstated' }
+  | { kind: 'unread'; fixed: number; variadic: boolean }
+  | { kind: 'read'; fixed: number; variadic: boolean; promotes: boolean };
+
 /** Every function the declarations name by a plain identifier, keyed by it. A declaration that
  *  spells no type is a constructor's, a destructor's or a conversion operator's; one that defines a
  *  body, or spells a `class`, declares no C function. */
 function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: LayoutOf): Prototypes {
-  const found = new Map<string, FnProto | null>();
+  const found = new Map<string, Read | null>();
   const written = typedefTypes(ctx);
   // a function one of whose declarations retypes a parameter with `mode`, which gives it the type
   // the mode names in place of the one spelled (c-common.c:563): compiled, `int x
   // __attribute__((mode(DI)))` takes a register pair. Its parameters are not read, in any
   // declaration of it; its return is.
   const unreadParams = new Set<string>();
+  // Two declarations of one function name one type, and the entry is that type's: the same reading
+  // twice, or — in C — a declaration whose parameters are not read (`()`, which states none, or a
+  // list this cannot read, `const char *restrict fmt`) beside one whose are, where the return reads
+  // alike and the two are COMPATIBLE (`composable`). The C compiler takes the composite of the two
+  // (C99 6.2.7p3), which is the one that states the parameters, so the entry is that one: dropping
+  // the name would drop the refusals its parameters carry with it, and send the call to the arity
+  // guess. Anything else is a conflict (C++ overloads, or a header this misreads), and the name is
+  // dropped.
+  //
+  // A `()` is read with a list only where it PRECEDES it: one that follows a list is a conflict,
+  // whatever the types (below). And `()` beside a list that is not compatible with it is no
+  // composite: agbcc, gcc2.7.2kmc and
+  // gcc2.7.2 compile `void f(char); void f();` without a word, the later `()` wins, and a call is
+  // compiled UNPROTOTYPED — any arity, no conversion. Read as `f(char)`, `f(1, 2)` would lift as
+  // `f(1)`, and `f(5)` under `f(short, char)` as `f(5, a1)`.
+  const unstated = (p: FnProto) => p.params === undefined && p.variadicParams === undefined;
+  const merged = (kept: Read, a: Read, b: Read): Read => ({ ...kept, lists: [...a.lists, ...b.lists] });
+  const composite = (a: Read, b: Read): Read | null => {
+    if (b.lists.some((l) => l.kind === 'unstated') && a.lists.some((l) => l.kind === 'read')) {
+      // a `()` AFTER a parameter list: mwcc (2.4.2, 2.4.7, 2.3.3) lets it replace the prototype
+      // outright, even where every parameter is a word — `void f(int); void f();` compiles `f(1, 2)`
+      // as two arguments, `f(1.5)` in f1, and `f(1)` under `void f(double)` in r3 — so the list is
+      // no fact about the call. Read as the list, `f(1, 2)` lifts as `f(1)`. gcc and IDO reject what
+      // that call would need, so nothing is lost on them by a conflict.
+      return null;
+    }
+    if (same(a.key, b.key)) {
+      return merged(b, a, b);
+    }
+    // …and where the list follows a `()` that itself followed a list this could not read, the `()`
+    // still replaced it: the two keep their return (`same`, above), and no later list joins them
+    const all = [...a.lists, ...b.lists];
+    if (
+      ctx.language !== 'c' ||
+      all.some((l, i) => l.kind === 'unstated' && all.slice(0, i).some((m) => m.kind !== 'unstated'))
+    ) {
+      return null;
+    }
+    if (unstated(a.key) && same(a.key, returnOnly(b.key)) && composable(a.lists, b.lists)) {
+      return merged(b, a, b);
+    }
+    return unstated(b.key) && same(b.key, returnOnly(a.key)) && composable(b.lists, a.lists) ? merged(a, a, b) : null;
+  };
   const returnOnly = ({
     params: _unread,
     wordParams: _words,
     byValueParams: _copies,
     byValueLayouts: _layouts,
+    variadicParams: _fixed,
     ...rest
   }: FnProto): FnProto => rest;
   for (const d of ctx.declarations) {
@@ -941,28 +1060,122 @@ function functionPrototypes(ctx: ParsedContext, table: TypeTable, layoutOf: Layo
       if (retyped) {
         unreadParams.add(x.name);
       }
-      const read = readSignature(
-        declaredType(s, returns),
-        fn,
-        ctx,
-        table.typedefs,
-        (t) => layoutOf(t, 0),
-        (t) => passingOf(t, table, written),
-      );
-      const proto = unreadParams.has(x.name) ? returnOnly(read) : read;
+      const reading = (qualifiers: 'kept' | 'dropped') =>
+        readSignature(
+          declaredType(s, returns),
+          fn,
+          ctx,
+          table.typedefs,
+          (t) => layoutOf(t, 0),
+          (t) => passingOf(t, table, written),
+          qualifiers,
+        );
+      const read = reading('kept');
+      // what the declaration says of the function's TYPE, which is what two declarations of it are
+      // compared by: a parameter's top-level qualifiers are not part of it (C99 6.7.5.3p15), so
+      // `void takeW(const struct W w);` and `void takeW(struct W w);` declare one function. Read
+      // as a conflict, they would drop the name, and with it every refusal its entry carries
+      // (`byValueRefusal`, `variadicRefusal`): the call would take the arity guess they exist to
+      // refuse. The entry kept is the later declaration's, spelled as written.
+      const typed = reading('dropped');
+      const [proto, key] = unreadParams.has(x.name) ? [returnOnly(read), returnOnly(typed)] : [read, typed];
+      const lists = [parameterList(fn, ctx, table.typedefs, (t) => passingOf(t, table, written))];
       const prior = found.get(x.name);
-      const had = prior && unreadParams.has(x.name) ? returnOnly(prior) : prior;
-      found.set(x.name, had === undefined || same(had, proto) ? proto : null);
+      const had =
+        prior && unreadParams.has(x.name)
+          ? { ...prior, proto: returnOnly(prior.proto), key: returnOnly(prior.key) }
+          : prior;
+      found.set(
+        x.name,
+        had === undefined ? { proto, key, lists } : had === null ? null : composite(had, { proto, key, lists }),
+      );
     }
   }
   const out: Prototypes = {};
-  for (const [name, p] of found) {
+  for (const [name, read] of found) {
+    const p = read?.proto ?? null;
     const valid = p === null ? undefined : admissible(name, p);
     if (valid !== undefined) {
       out[name] = valid;
     }
   }
   return out;
+}
+
+/** Whether declarations that state no parameters (`unstated`, each `()` or a list this could not
+ *  read) are compatible with ones that state them (`stated`), as two declarations of one C function
+ *  must be for their composite to be the stated one (C99 6.7.5.3p15). `()` is compatible with a
+ *  list that is not variadic and whose every parameter keeps its type under the default argument
+ *  promotions: not `char`, `short`, `float`, `_Bool`, nor a typedef or an enum that may be one — an
+ *  enum's type is the compiler's to pick, and it may be narrow (`-fshort-enums`, mwcc's `-enum
+ *  min`). A name the context never resolves is read by its spelling as `declaredWidth` reads it
+ *  (`s32` is a word, `u8` a byte) and is otherwise taken to promote. An unread list is compatible with a list of as many fixed parameters, variadic alike. */
+function composable(unstated: readonly ParameterList[], stated: readonly ParameterList[]): boolean {
+  const lists = stated.filter((l) => l.kind === 'read');
+  return (
+    lists.length > 0 &&
+    unstated.every((u) =>
+      lists.every((l) =>
+        u.kind === 'unstated'
+          ? !l.variadic && !l.promotes
+          : u.kind === 'unread' && u.fixed === l.fixed && u.variadic === l.variadic,
+      ),
+    )
+  );
+}
+
+/** What `fn`'s parentheses say of its parameters (`ParameterList`). */
+function parameterList(
+  fn: Extract<Derivation, { kind: 'function' }>,
+  { tokens, language }: ParsedContext,
+  typedefs: ReadonlyMap<string, DeclaredType>,
+  passing: (t: DeclaredType) => Passing,
+): ParameterList {
+  const { params, list } = fn;
+  if (params === undefined) {
+    // the top-level commas, and a trailing `...`
+    let items = list.to > list.from ? 1 : 0;
+    let variadic = false;
+    for (let i = list.from; i < list.to; i++) {
+      const close = tokens.match(i);
+      if (close > i) {
+        i = close;
+      } else if (tokens.is(i, ',')) {
+        items++;
+      } else if (tokens.is(i, '...')) {
+        variadic = true;
+      }
+    }
+    return { kind: 'unread', fixed: variadic ? items - 1 : items, variadic };
+  }
+  if (params.length === 0 && !fn.variadic && language === 'c') {
+    return { kind: 'unstated' };
+  }
+  if (list.to === list.from + 1 && tokens.is(list.from, 'void')) {
+    return { kind: 'read', fixed: 0, variadic: false, promotes: false };
+  }
+  const promotes = params.some((p) => {
+    const declared = asParameter(declaredType(p.specifiers, p.declarator.derivations));
+    if (passing(declared) === 'by-value') {
+      // a struct, union or class, which no promotion converts
+      return false;
+    }
+    const t = resolve(declared, typedefs, tokens);
+    if (t.derivations.length > 0) {
+      // a pointer, or an array or a function the parameter adjusts to one
+      return false;
+    }
+    if (t.type.kind === 'tag') {
+      return t.type.keyword === 'enum';
+    }
+    const spelled = spellType(withoutTopQualifiers(t), tokens);
+    if (spelled === 'double' || spelled === 'long double') {
+      return false;
+    }
+    const width = declaredWidth(spelled);
+    return width === undefined || width < 32;
+  });
+  return { kind: 'read', fixed: params.length, variadic: fn.variadic, promotes };
 }
 
 /** The entry as a table `validatePrototypes` accepts, the check every `--proto` table passes, so a
@@ -984,6 +1197,7 @@ function readSignature(
   typedefs: ReadonlyMap<string, DeclaredType>,
   layoutOf: (t: DeclaredType) => AggregateLayout | undefined,
   passing: (t: DeclaredType) => Passing,
+  qualifiers: 'kept' | 'dropped' = 'kept',
 ): FnProto {
   const proto: FnProto = {};
   const resolved = resolve(ret, typedefs, tokens);
@@ -1028,9 +1242,6 @@ function readSignature(
     proto.params = [];
     return proto;
   }
-  if (fn.variadic) {
-    return proto;
-  }
   // Each parameter's type, its name taken off: an array or a function nearest the name is a
   // pointer, and the typedef names it is built on resolve as a return's do. A spelling that sizes to
   // nothing and is no floating type is read through those names for what it positively is: a type
@@ -1039,9 +1250,20 @@ function readSignature(
   // `FnProto.wordParams`; or a struct, union or class passed BY VALUE, which mwcc passes as the
   // address of a copy in the caller's frame — listed in `FnProto.byValueParams`. A name the context
   // never resolves is in neither, and every reader leaves it unsized.
+  //
+  // A VARIADIC declaration's are read alike and kept as its fixed parameters (`variadicParams`): its
+  // arity is the call's, so they are no `params`, and no layout is read for a struct among them,
+  // whose call refuses (`variadicRefusal`).
   const types = params.map((p) => asParameter(declaredType(p.specifiers, p.declarator.derivations)));
-  const spelled = types.map((t) => spellType(resolve(t, typedefs, tokens), tokens));
-  proto.params = spelled;
+  const spelled = types.map((t) => {
+    const r = resolve(t, typedefs, tokens);
+    return spellType(qualifiers === 'kept' ? r : withoutTopQualifiers(r), tokens);
+  });
+  if (fn.variadic) {
+    proto.variadicParams = spelled;
+  } else {
+    proto.params = spelled;
+  }
   const unsized = (k: number) => declaredWidth(spelled[k]) === undefined && !isFloatingSpelling(spelled[k]);
   const listed = (as: Passing) => types.flatMap((t, k) => (unsized(k) && passing(t) === as ? [k] : []));
   const words = listed('word');
@@ -1051,6 +1273,8 @@ function readSignature(
   }
   if (copies.length > 0) {
     proto.byValueParams = copies;
+  }
+  if (copies.length > 0 && !fn.variadic) {
     // …and the members of each one the context defines, which size it (`FnProto.byValueLayouts`)
     const layouts = Object.fromEntries(
       copies.flatMap((k) => {
@@ -1063,6 +1287,16 @@ function readSignature(
     }
   }
   return proto;
+}
+
+/** `t` less its top-level qualifiers: the derivation nearest the name's (`char *const`), or the
+ *  base's where there is none (`const struct W`). A pointer's target keeps its own (`const char *`). */
+function withoutTopQualifiers(t: DeclaredType): DeclaredType {
+  const [first, ...rest] = t.derivations;
+  if (first === undefined) {
+    return { ...t, qualifiers: [] };
+  }
+  return first.kind === 'pointer' ? { ...t, derivations: [{ ...first, qualifiers: [] }, ...rest] } : t;
 }
 
 /** How a parameter of type `t` is passed, read through the typedef names it is built on: in ONE

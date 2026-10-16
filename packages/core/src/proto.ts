@@ -53,9 +53,17 @@ export interface FnProto {
    *  parameter's index: what sizes it, and so how many argument words it takes on a target that
    *  passes one in words (`compilerBehaviors.byValueAggregateArgWords`, read by `aggregate.ts`
    *  `byValueCallArgs`). A context states it from the struct's definition, as it states
-   *  `returnLayout`. A by-value parameter with no layout here is unsized, and the call is lifted at
-   *  the argument-register guess. */
+   *  `returnLayout`. A by-value parameter with no layout here is unsized, and a call to it refuses
+   *  (`aggregate.ts` `byValueRefusal`) rather than take the argument-register guess. */
   byValueLayouts?: Readonly<Record<number, AggregateLayout>>;
+  /** The FIXED parameters of a VARIADIC declaration, spelled as a typed `params` list spells them.
+   *  Such a declaration states no `params`, because its arity is the call's and a list would read
+   *  as the whole of it; `wordParams` and `byValueParams` index into this list instead. A context
+   *  states it (`prototypesFromContext`). Read only to refuse a call (`variadicRefusal`): the call
+   *  is placed by the arity guess, which reads argument words one by one, so a fixed parameter that
+   *  is not one word is split or dropped: `void takeV(struct W, ...)` would lift
+   *  `takeV(*(s32 *)&gW, 5)`, which compiles against the header. */
+  variadicParams?: ParamType[];
   /** The declared return type is `void`. Read for the function under decompilation, where a
    *  trailing `bx lr` leaves a meaningless return register that must not surface as a `return`
    *  value — and, since the out-parameter path landed, for a CALLEE, where it is the only thing
@@ -139,8 +147,10 @@ export interface AggregateMember {
 /** symbol → prototype. The function under decompilation and its callees share one table. */
 export type Prototypes = Record<string, FnProto>;
 
-/** How many argument REGISTERS a list of parameter WIDTHS occupies: a parameter wider than a
- *  machine word travels in a register pair, every other one in a single register.
+/** How many argument WORDS a list of parameter WIDTHS occupies: a parameter wider than a machine
+ *  word travels in a pair of words, every other one in a single word, and where the target aligns
+ *  an 8-byte argument (`TargetDescription.evenWordAlignedArgs`) a pair that would start at an odd
+ *  word skips one.
  *
  *  The rule lives here rather than beside either caller because it has two, and they are the two
  *  vocabularies a declaration is written in. `runtime-helpers.ts` states a compiler's own helper
@@ -148,17 +158,14 @@ export type Prototypes = Record<string, FnProto>;
  *  `declaredCallArgs` below reads the same widths off a project's C types. One ABI fact, one
  *  copy of it; a second copy is a rule that can disagree with itself.
  *
- *  NO EVEN-REGISTER ALIGNMENT, and that is a measured agbcc fact rather than an omission: its
- *  `thumb.h` computes an argument's register from a plain byte counter with no rounding, so
- *  `void f(s32, long long)` passes the pair in r1:r2 where AAPCS would pad to r2:r3.
- *
- *  AN ABI THAT DOES ALIGN HAS NO READER HERE YET, which is why the rule is flat rather than a
- *  knob on `TargetDescription` beside `argRegs` and `stagesOutgoingArgsInFrame`. MIPS o32 aligns a
- *  64-bit argument to an even register pair and is the target that will want one, and
- *  `frontend/mips.ts` refuses a declared 64-bit parameter (`CallLowering.pairs`), so every list it
- *  counts is one word per parameter. The lowering that builds an o32 pair owes the rule a home. */
-export function wordsOf(params: readonly number[]): number {
-  return params.reduce((n, w) => n + (w > 32 ? 2 : 1), 0);
+ *  agbcc DOES NOT ALIGN, a measured fact rather than an omission: its `thumb.h` computes an
+ *  argument's register from a plain byte counter with no rounding, so `void f(s32, long long)`
+ *  passes the pair in r1:r2 where AAPCS would pad to r2:r3. O32 does, for a scalar and a struct
+ *  alike, and that is the one fact both read here: `aggregate.ts` `byValueCallArgs` places a struct
+ *  by this count, and the lowering that builds an o32 pair, which `frontend/mips.ts` does not yet
+ *  (it refuses a declared 64-bit parameter, `CallLowering.pairs`), counts its words the same way. */
+export function wordsOf(params: readonly number[], target: Pick<TargetDescription, 'evenWordAlignedArgs'>): number {
+  return params.reduce((n, w) => (w > 32 ? n + (target.evenWordAlignedArgs === true ? n % 2 : 0) + 2 : n + 1), 0);
 }
 
 /** Whether a proto states a parameter list at all — readably or not. The tier question, asked
@@ -176,9 +183,10 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  bare `"u8"` string, the shape the untyped CLI `--proto` JSON admits); and a list holding a
  *  spelling neither `declaredWidth` reads nor the declaration sizes — a project typedef
  *  (`bool8`, `Direction`, `TaskFunc`) that `wordParams` does not list, a by-value struct, a
- *  floating type. The first two are not a reading of the list at all. The third is a list read to
- *  the end that cannot be CONVERTED: a parameter of unknown width occupies one argument register
- *  or two, and the choice moves every later argument's home. Where the declaration does settle it
+ *  floating type (a by-value struct is the exception below). The first two are not a reading of the
+ *  list at all. The third is a list read to the end that cannot be CONVERTED: a parameter of
+ *  unknown width occupies one argument register or two, and the choice moves every later argument's
+ *  home. Where the declaration does settle it
  *  — a typedef'd enum, an array or a function type the context resolved to one word, which
  *  `wordParams` lists (`paramClassOf`) — the parameter is 32 bits and the list converts.
  *
@@ -189,6 +197,12 @@ export function declaresParams(p: FnProto | undefined): boolean {
  *  be a function that lifts when told nothing and declines when told more. Returning
  *  one-register-each instead would be a layout nothing could know to be right, and the frontend
  *  would then ASSERT those registers rather than ask for them.
+ *
+ *  A PARAMETER THE DECLARATION PASSES AS A STRUCT OR UNION BY VALUE IS THE EXCEPTION, because it is
+ *  known not to be one register: the caller asks `aggregate.ts` `byValueCallArgs` to place it, and
+ *  where no rule does (`byValueRefusal`) the call refuses (frontend/call-plan.ts
+ *  `refuseUnplacedByValue`). That is a function that declines when told more, on purpose: a guess
+ *  over a struct drops it or reads its words as separate arguments, and both compile.
  *
  *  THE MACHINE IS NOT A WITNESS FOR A WIDTH NOBODY STATED, which is the reading this replaces. The
  *  contiguous scan is wrong in both directions and neither is recoverable here. It OVER-counts:
@@ -264,6 +278,33 @@ export function paramClassOf(p: FnProto, params: readonly ParamType[], k: number
         : p.byValueParams?.includes(k) || BY_VALUE_SPELLING.test(spelling.replace(/\b(?:const|volatile)\b/g, ' '))
           ? 'by-value'
           : 'unsized';
+}
+
+/** Why a call to the VARIADIC declaration `p` cannot be placed by the arity guess: its first fixed
+ *  parameter (`FnProto.variadicParams`, an index into it) that is not one argument word, and the
+ *  reason. Undefined where `p` is no variadic declaration, or where every fixed parameter is a word
+ *  or UNSIZED — a spelling nothing here resolved, which may be one word, and on which every reader
+ *  abstains (`declaredCallArgs`) rather than refuse. */
+export function variadicRefusal(p: FnProto | undefined): { refused: string; param: number } | undefined {
+  const fixed = p?.variadicParams;
+  if (fixed === undefined || p?.params !== undefined) {
+    return undefined;
+  }
+  const reasons: Partial<Record<ParamClass, string>> = {
+    'by-value': 'reads a struct or union passed by value as that many separate words',
+    wide: 'reads a value wider than a word as two separate arguments',
+    float: 'reads a floating-point value as integer words, or misses it in the FPU registers',
+  };
+  for (const k of fixed.keys()) {
+    const why = reasons[paramClassOf(p!, fixed, k)];
+    if (why !== undefined) {
+      return {
+        refused: `its declaration is variadic: the call's arguments are placed by the arity guess, which ${why}`,
+        param: k,
+      };
+    }
+  }
+  return undefined;
 }
 
 /** Whether a declared type is `double`, qualifiers aside. */
@@ -700,23 +741,34 @@ export function validatePrototypes(value: unknown): string[] {
         key !== 'returnLayout' &&
         key !== 'wordParams' &&
         key !== 'byValueParams' &&
-        key !== 'byValueLayouts'
+        key !== 'byValueLayouts' &&
+        key !== 'variadicParams'
       ) {
         problems.push(
           `${sym}: unknown key "${key}" (expected "params", "returnsVoid", "returns", "returnLayout", "wordParams", ` +
-            '"byValueParams" or "byValueLayouts")',
+            '"byValueParams", "byValueLayouts" or "variadicParams")',
         );
       }
     }
-    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts } = proto as {
-      params?: unknown;
-      returnsVoid?: unknown;
-      returns?: unknown;
-      returnLayout?: unknown;
-      wordParams?: unknown;
-      byValueParams?: unknown;
-      byValueLayouts?: unknown;
-    };
+    const { params, returnsVoid, returns, returnLayout, wordParams, byValueParams, byValueLayouts, variadicParams } =
+      proto as {
+        params?: unknown;
+        returnsVoid?: unknown;
+        returns?: unknown;
+        returnLayout?: unknown;
+        wordParams?: unknown;
+        byValueParams?: unknown;
+        byValueLayouts?: unknown;
+        variadicParams?: unknown;
+      };
+    // a variadic declaration's fixed parameters, which it states beside no typed list
+    if (
+      variadicParams !== undefined &&
+      !(Array.isArray(variadicParams) && variadicParams.every((t) => typeof t === 'string') && params === undefined)
+    ) {
+      problems.push(`${sym}: "variadicParams" must be a list of parameter types, beside no "params"`);
+    }
+    const listed = Array.isArray(params) ? params : Array.isArray(variadicParams) ? variadicParams : undefined;
     for (const [key, list] of [
       ['wordParams', wordParams],
       ['byValueParams', byValueParams],
@@ -724,12 +776,12 @@ export function validatePrototypes(value: unknown): string[] {
       if (
         list !== undefined &&
         !(
-          Array.isArray(params) &&
+          listed !== undefined &&
           Array.isArray(list) &&
-          list.every((k) => Number.isInteger(k) && k >= 0 && k < params.length)
+          list.every((k) => Number.isInteger(k) && k >= 0 && k < listed.length)
         )
       ) {
-        problems.push(`${sym}: "${key}" must list indices into a typed "params" list`);
+        problems.push(`${sym}: "${key}" must list indices into a typed "params" or "variadicParams" list`);
       }
     }
     // Two answers to one question — whether the parameter travels in a register or as a copy.

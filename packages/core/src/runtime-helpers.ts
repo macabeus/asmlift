@@ -32,6 +32,7 @@ import { type Op, type Value, mkOp } from './ir/core';
 import { FLOAT_OPS, type Opcode, WIDE_BITS } from './ir/opcodes';
 import { type IrType, intWidth } from './ir/types';
 import { type Prototypes, wordsOf } from './proto';
+import type { TargetDescription } from './target';
 
 export interface RuntimeHelper {
   /** the op this helper computes, where asmlift has one. Absent for a helper it can only SIGN. */
@@ -129,8 +130,12 @@ export function isFloatHelper(h: RuntimeHelper): boolean {
 
 /** Signatures for a target's helpers, in the WORD arity the frontend's prototype lookup speaks.
  *  Consumed behind any caller-supplied prototype — the project's own headers win. */
-export function helperPrototypes(table: Readonly<Record<string, RuntimeHelper>> | undefined): Prototypes {
-  return Object.fromEntries(Object.entries(table ?? {}).map(([sym, h]) => [sym, { params: wordsOf(h.params) }]));
+export function helperPrototypes(
+  target: Pick<TargetDescription, 'runtimeHelpers' | 'evenWordAlignedArgs'>,
+): Prototypes {
+  return Object.fromEntries(
+    Object.entries(target.runtimeHelpers ?? {}).map(([sym, h]) => [sym, { params: wordsOf(h.params, target) }]),
+  );
 }
 
 /** agbcc's runtime, which is GCC 2.9's libgcc for ARM.

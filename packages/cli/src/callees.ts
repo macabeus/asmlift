@@ -9,8 +9,8 @@
 // So the CLI says which names it had to guess for. Purely textual: the asm the run was given, the
 // `--proto` table it parsed, and the project ELF's callee signatures — no pipeline stage involved,
 // and nothing here can change what is emitted.
-import { byValueCallArgs } from '@asmlift/core/aggregate';
-import { type Prototypes, declaredCallArgs } from '@asmlift/core/proto';
+import { byValueCallArgs, byValueRefusal } from '@asmlift/core/aggregate';
+import { type Prototypes, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
 
@@ -72,7 +72,11 @@ export function calleeNames(asm: string, self?: string): string[] {
  *  a re-declaration.
  *
  *  A list with a struct passed by value is laid out by `byValueCallArgs` instead, where the
- *  declaration lays the struct out and the target passes it in argument words. */
+ *  declaration lays the struct out and the target passes it in argument words; where it does not
+ *  (`byValueRefusal`), the frontend refuses the call rather than guess, so that callee is not
+ *  guessed either — and a `params: N` count, which would read the struct as N separate words, is
+ *  not advice to give for it. A variadic declaration whose fixed parameters are not all words
+ *  (`variadicRefusal`) refuses the same way, and a count would only state its arity for one call. */
 export function guessedArityCallees(
   asm: string,
   self: string,
@@ -85,6 +89,8 @@ export function guessedArityCallees(
     (n) =>
       declaredCallArgs(prototypes?.[n], target) === undefined &&
       byValueCallArgs(prototypes?.[n], target) === undefined &&
+      byValueRefusal(prototypes?.[n], target) === undefined &&
+      variadicRefusal(prototypes?.[n]) === undefined &&
       declared?.get(n)?.signature === undefined,
   );
 }

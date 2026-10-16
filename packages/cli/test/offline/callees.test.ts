@@ -92,7 +92,22 @@ describe('guessedArityCallees', () => {
       DecompressAlloc: { params: 2 },
     };
     expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, typed)).toEqual([]);
-    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', PPC_MWCC, typed)).toEqual(['thunk_HeapFree']);
+  });
+
+  // `byValueRefusal`: the frontend refuses such a call rather than guess its arity, so the note
+  // neither calls it guessed nor advises a `params: N` that would read the struct as N words
+  it('does not count a struct passed by value that no rule places, which the frontend refuses', () => {
+    const layout = { kind: 'struct' as const, members: [{ name: 'a', type: 'u32' }] };
+    const typed = {
+      thunk_HeapFree: { params: ['struct S'], byValueLayouts: { 0: layout } },
+      DecompressAlloc: { params: 2 },
+    };
+    // a target that passes no struct in words
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', PPC_MWCC, typed)).toEqual([]);
+    // a declaration that does not lay the struct out
+    const unlaid = { ...typed, thunk_HeapFree: { params: ['s32', 'struct S'] } };
+    expect(guessedArityCallees(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, unlaid)).toEqual([]);
+    expect(guessedArityNote(LBG, 'LoadBGTilemapData', ARMV4T_AGBCC, unlaid)).toBe('');
   });
 
   it('counts a signature the project ELF declares', () => {

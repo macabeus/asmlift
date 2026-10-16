@@ -16,6 +16,7 @@ import {
   type ByValueArg,
   aggregateType,
   byValueCallArgs,
+  byValueRefusal,
   returnedAggregate,
   returnsInMemory,
   returnsWithoutHiddenPointer,
@@ -36,12 +37,16 @@ import {
   isFloatingSpelling,
   paramClassOf,
   spellableProto,
+  variadicRefusal,
   wordsOf,
 } from '../proto';
+import { type ContextGlobals, structNamed } from '../proto-context';
 import { helperPrototypes, isFloatHelper, isWideHelper, lookupHelper } from '../runtime-helpers';
+import { type SymbolMap, symbolsByName } from '../symbols';
 import type { TargetDescription } from '../target';
 import { type FrontendRefusal, FrontendUnsupportedError } from './errors';
 import type { HighHalves } from './high-half';
+import { unspellableReason } from './reloc-symbol';
 import { type SsaBuilder, clobberedByCall, fallbackArgc } from './ssa';
 
 /** What the frontend's own call lowering can carry out. */
@@ -237,7 +242,7 @@ export function callDeclarations(
   // The compiler's own runtime, off the TARGET (runtime-helpers.ts): which helpers a compiler
   // emits is a compiler fact, and reading one table for every ISA is how a scan for `__*di3`
   // reports zero on a compiler whose runtime spells them `__ll_*`.
-  const helperProtos = helperPrototypes(target.runtimeHelpers);
+  const helperProtos = helperPrototypes(target);
   const wideHelper = (callee: string) => {
     // Through the table's one reader (`lookupHelper`): a bare index answers with a member of
     // `Object.prototype` for a callee named `toString`, which is truthy and has no `params` for
@@ -352,6 +357,39 @@ export function callDeclarations(
     const declared = declarationOf(callee)!;
     return params.map((spelling, k) => ({ kind: paramClassOf(declared, params, k), spelling }));
   };
+  // A STRUCT OR UNION PASSED BY VALUE THAT NO RULE PLACES REFUSES; IT IS NOT GUESSED. The arity
+  // guess counts argument registers, and a struct is not one: it takes as many words as its size
+  // (agbcc, O32), starts at an even word when it is 8-aligned (O32), or travels as the address of
+  // a copy (mwcc). A guess over it drops the struct (agbcc `takeQ(k, gQ)` with no layout for
+  // `struct Q` guesses `takeQ();`) or reads its words as separate arguments (O32 `takeW(gW)` as
+  // `takeW(*(s32 *)&gW)`), and either is C that compiles. This is
+  // not the abstention `declaredCallArgs` documents for an unsized typedef, which may still be one
+  // word: a parameter the declaration names a struct or union is known not to be.
+  //
+  // A VARIADIC DECLARATION REFUSES THE SAME GUESS over a fixed parameter that is not one word: its
+  // call is placed by the guess alone (`FnProto.variadicParams`), which splits a struct, a 64-bit
+  // value or a `double` into words. Its parameters are the project's fact, read off its own entry,
+  // which `declarationOf` reads past because it states no `params`.
+  const refuseUnplacedByValue = (callee: string): void => {
+    const own = known(prototypes, callee);
+    const fixed = variadicRefusal(own);
+    if (fixed !== undefined) {
+      const spelling = own!.variadicParams![fixed.param];
+      const byValue = paramClassOf(own!, own!.variadicParams!, fixed.param) === 'by-value';
+      fail(
+        `cannot lift '${name}': \`${callee}\` takes '${spelling}'${byValue ? ' by value' : ''} as its parameter ` +
+          `${fixed.param + 1}, and ${fixed.refused} — a variadic call is lifted only where each fixed parameter is one argument word`,
+      );
+    }
+    const p = declarationOf(callee);
+    const why = byValueRefusal(p, target);
+    if (why !== undefined) {
+      fail(
+        `cannot lift '${name}': \`${callee}\` takes '${(p!.params as readonly string[])[why.param]}' by value as its ` +
+          `parameter ${why.param + 1}, and ${why.refused} — a struct passed by value is lifted only where its argument words are known`,
+      );
+    }
+  };
   const declaredCall = (callee: string): DeclaredCall | null => {
     // Three tiers, narrowing: the project's own headers, then the compiler's runtime helpers,
     // then the signatures the C standard fixes (proto.ts). A project that re-declares one of the
@@ -371,6 +409,9 @@ export function callDeclarations(
       { widths: readonly number[]; doubles: ReadonlySet<number>; byValue?: readonly ByValueArg[] } | undefined =
       declaredCallArgs(declarationOf(callee), target) ?? byValueCallArgs(declarationOf(callee), target);
     const params = declared?.widths;
+    if (params === undefined) {
+      refuseUnplacedByValue(callee);
+    }
     if (params === undefined && returned !== undefined && returned !== 'register') {
       // a guessed arity reads argument registers from the first, which holds the hidden pointer
       fail(
@@ -411,7 +452,7 @@ export function callDeclarations(
     }));
     // a struct partly in the registers and partly on the stack (FUNCTION_ARG_PARTIAL_NREGS) is
     // one value read from two places, which no lowering here builds
-    const past = byValue.find((b) => wordsOf(widths.slice(0, b.word)) + b.words > target.argRegs.length);
+    const past = byValue.find((b) => wordsOf(widths.slice(0, b.word), target) + b.words > target.argRegs.length);
     if (past !== undefined) {
       fail(
         `cannot lift '${name}': \`${callee}\` takes ${structSpelling(past.type)} by value as its parameter ${past.param + 1}, ` +
@@ -480,7 +521,7 @@ export function callDeclarations(
         );
       }
     }
-    if (!lowering.stackArgs && declared !== null && wordsOf(declared.widths) > target.argRegs.length) {
+    if (!lowering.stackArgs && declared !== null && wordsOf(declared.widths, target) > target.argRegs.length) {
       fail(
         `cannot lift '${name}': outgoing stack arguments not modelled — '${callee}' is declared with ` +
           `${declared.widths.length} parameters and the argument registers carry ${target.argRegs.length}, so the rest ` +
@@ -579,7 +620,7 @@ export function callDeclarations(
             accept: (v) => !placeholders?.has(v),
             gap: guess && { name, at: guess.at, fail },
           })
-        : wordsOf(widths);
+        : wordsOf(widths, target);
     if (widths === null) {
       guess?.refuse(argc);
     }
@@ -831,9 +872,14 @@ function structReturnOf(
  *    offset. The operand becomes that offset's address, and the frame-object audit judges the
  *    object as the struct (frame-objects.ts `objectShapes`).
  *  - A GLOBAL the words are loaded off, or were just stored to — word accesses at consecutive words
- *    from the symbol's own address (`gaddr`), loaded off it or stored there as the very values
- *    passed. The operand becomes the symbol's address, spelled bare (`take(gS)`), which compiles
- *    only where the declarations type the global as the struct.
+ *    from the symbol's own address (`gaddr`, one or one per word of the same symbol), loaded off it
+ *    or stored there as the very values passed. The operand becomes the symbol's address, spelled
+ *    bare (`take(gS)`), which compiles only where the declarations type the global as the struct.
+ *    So a symbol C cannot name (a section symbol, `.bss`; a function-scope static's `sQ.3`)
+ *    refuses, and so does one the declaration context or the symbol map types as anything else:
+ *    the struct at offset 0 of `gQs[4]` or of `struct O2 { struct Q q; … } gO2` sits at the
+ *    symbol's own address too, and `take(gQs)` is a type error against the header that declares
+ *    it (`bareStructRefusal`).
  *
  *  Either way every access is unqualified and in the call's own block, and no store or call lies
  *  between the earliest of them and the call but those accesses themselves, so the object holds at
@@ -844,7 +890,12 @@ function structReturnOf(
  *  names the struct too (`passedAs`), so value numbering never merges it with a plain address of
  *  the symbol. The call then names which operands it passes by value (`byValue`, pairs of operand
  *  and declared parameter, read by ir/core.ts `byValueOperands`). */
-export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<CallDeclarations, 'declaredCall'>): void {
+export function foldByValueArgs(
+  name: string,
+  irBlocks: Block[],
+  calls: Pick<CallDeclarations, 'declaredCall'>,
+  declarations: { symbols: SymbolMap | undefined; context: ContextGlobals | undefined },
+): void {
   const defs = new Map<Value, { op: Op; blk: Block }>();
   for (const blk of irBlocks) {
     for (const op of blk.ops) {
@@ -911,14 +962,15 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
             const d = v === undefined ? undefined : defs.get(v)?.op;
             return d?.opcode === 'gaddr' && d.attrs.code !== true ? (d.attrs.sym as string) : undefined;
           };
+          // ONE SYMBOL, NOT ONE VALUE: kmc addresses each word through a `lui`/`lw` pair of its own,
+          // so the words come off several `gaddr`s of the same symbol rather than one base. Each
+          // access is still at its word's offset from the symbol's own address.
+          const ofSymbol = (op: Op | undefined, i: number, sym0: string): op is Op =>
+            op !== undefined && symbol(op.operands[0]) === sym0 && wordAt(op, i, op.operands[0]);
+          const sym0 = symbol(base0);
           let sym: string | undefined;
-          if (
-            loaded &&
-            symbol(base0) !== undefined &&
-            loads.every((d, i) => wordAt(d, i, base0)) &&
-            settled(loads as Op[])
-          ) {
-            sym = symbol(base0);
+          if (loaded && sym0 !== undefined && loads.every((d, i) => ofSymbol(d, i, sym0)) && settled(loads as Op[])) {
+            sym = sym0;
           } else {
             // the words stored to a global just before the call: the last store of each, in order
             const stores = passed.map((v) =>
@@ -927,10 +979,17 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
                 .filter((op) => op.opcode === 'store' && op.operands[1] === v)
                 .at(-1),
             );
-            const sink = stores[0]?.operands[0];
-            if (symbol(sink) !== undefined && stores.every((st, i) => wordAt(st, i, sink)) && settled(stores as Op[])) {
-              sym = symbol(sink);
+            const sink = symbol(stores[0]?.operands[0]);
+            if (sink !== undefined && stores.every((st, i) => ofSymbol(st, i, sink)) && settled(stores as Op[])) {
+              sym = sink;
             }
+          }
+          const misnamed = sym === undefined ? undefined : bareStructRefusal(sym, type, declarations);
+          if (misnamed !== undefined) {
+            throw new FrontendUnsupportedError(
+              `cannot lift '${name}': the call to \`${callee ?? 'a function pointer'}\` passes ${structSpelling(type)} ` +
+                `by value off '${sym}', and ${misnamed} — the struct would be spelled as that symbol bare`,
+            );
           }
           if (sym !== undefined) {
             object = mkOp('gaddr', {
@@ -973,6 +1032,46 @@ export function foldByValueArgs(name: string, irBlocks: Block[], calls: Pick<Cal
       };
     }
   }
+}
+
+/** Why the global `sym` cannot be spelled bare as the struct `type` a call passes by value, or
+ *  undefined where it can: a C name, declared as exactly that struct where a declaration context or
+ *  a symbol map types it at all. A symbol neither types is declared from the call (declare.ts
+ *  `passedAs`). */
+function bareStructRefusal(
+  sym: string,
+  type: IrType,
+  { symbols, context }: { symbols: SymbolMap | undefined; context: ContextGlobals | undefined },
+): string | undefined {
+  // the linker's name for the object, where it is one no C source spells: a static at its
+  // section's start relocated against the section (`.bss`), or a function-scope static's name and
+  // counter (`sQ.3`), which only the static's definition spells (frontend/reloc-symbol.ts)
+  const unspellable = unspellableReason(sym);
+  if (unspellable !== null) {
+    return `that is no name C can spell: it ${unspellable}`;
+  }
+  // ONE STRUCT, MANY SPELLINGS: `typedef struct Q {…} Q_t;` spells it `Q_t` and `struct Q`, and a
+  // header passes one and declares the other. Each side is resolved to the struct it names through
+  // the context's typedefs (`structNamed`), and a spelling that resolves to none matches only as
+  // written.
+  const spelling = structSpelling(type);
+  const passed = structNamed(spelling, context);
+  const isPassed = (other: string): boolean =>
+    other === spelling || (passed !== undefined && structNamed(other, context) === passed);
+  if (context?.declared.has(sym) && !isPassed(context.objectTypes.get(sym) ?? '')) {
+    return `the declaration context does not declare it as ${spelling} (an array, an enclosing struct, another type)`;
+  }
+  const info = symbols === undefined ? undefined : symbolsByName(symbols, new Set([sym])).get(sym);
+  // the map names a struct by its tag, or by the typedef name that binds an untagged one
+  // (symbols.ts `structName`)
+  const mapped = info?.structName;
+  if (
+    info?.shape !== undefined &&
+    !(info.shape === 'struct' && mapped !== undefined && (isPassed(`struct ${mapped}`) || passed === mapped))
+  ) {
+    return `the symbol map types it as ${info.shape === 'struct' ? `struct ${info.structName ?? '(untagged)'}` : `${info.shape === 'array' ? 'an' : 'a'} ${info.shape}`}`;
+  }
+  return undefined;
 }
 
 /** Removes `op` where nothing reads its result. */

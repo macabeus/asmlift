@@ -106,6 +106,68 @@ describe('a MIPS call recompiles byte-exact', () => {
   );
 });
 
+// A struct passed by value from a global (call-plan.ts `foldByValueArgs`): O32 passes it in
+// consecutive argument words, kmc through a `lui`/`lw` pair per word and IDO with a store into each
+// word's home slot. The candidate recompiles against the same header, which defines the structs.
+// Each body is one statement per line, the way the lift prints it, since IDO schedules by line.
+describe('a struct passed by value from a global recompiles byte-exact', () => {
+  const HEADER =
+    'struct W { u32 x; };\nstruct Q { u32 a, b; };\nstruct T { u32 a, b, c; };\n' +
+    'void takeW(struct W w);\nvoid takeQ(s32 k, struct Q q);\nvoid takeT(struct T t);\n' +
+    'extern struct W gW;\nextern struct Q gQ;\nextern struct T gT;\n';
+  const BYVAL = [
+    { sym: 'bvwg', body: 'void bvwg(void)\n{\n    takeW(gW);\n}\n', call: 'takeW(gW);' },
+    { sym: 'bvqg', body: 'void bvqg(s32 k)\n{\n    takeQ(k, gQ);\n}\n', call: 'takeQ(a0, gQ);' },
+    { sym: 'bvtg', body: 'void bvtg(void)\n{\n    takeT(gT);\n}\n', call: 'takeT(gT);' },
+  ];
+  const prototypes = prototypesFromContext(HEADER, 'c');
+
+  test.runIf(idoAvailable()).each(BYVAL)('ido7.1: $sym', ({ sym, body, call }) => {
+    const flags = TOOLCHAIN_TARGETS['ido7.1'].canonicalFlags;
+    const { obj, asm } = compileMipsTarget(HEADER + body, sym, flags);
+    const source = lift(sym, asm, obj, MIPS_IDO, prototypes);
+    expect(source).toContain(call);
+    expect(scoreCMips(HEADER + source, sym, obj, flags).score).toBe(0);
+  });
+
+  test.runIf(kmcGate('mips-calls-kmc')).each(BYVAL)(
+    'gcc2.7.2kmc: $sym',
+    ({ sym, body, call }) => {
+      const flags = TOOLCHAIN_TARGETS['gcc2.7.2kmc'].canonicalFlags;
+      const { obj, asm } = compileMipsGccTarget(HEADER + body, sym, flags);
+      const source = lift(sym, asm, obj, MIPS_GCC, prototypes);
+      expect(source).toContain(call);
+      expect(scoreCMipsGcc(HEADER + source, sym, obj, flags).score).toBe(0);
+    },
+    60_000,
+  );
+
+  test.runIf(gcc272Available()).each(BYVAL)(
+    'gcc2.7.2: $sym',
+    ({ sym, body, call }) => {
+      const flags = TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags;
+      const { obj, asm } = compileMipsGcc272Target(HEADER + body, sym, flags);
+      const source = lift(sym, asm, obj, MIPS_GCC, prototypes);
+      expect(source).toContain(call);
+      expect(scoreObjects(obj, compileMipsGcc272Target(HEADER + source, sym, flags).obj, sym).score).toBe(0);
+    },
+    60_000,
+  );
+
+  // words read through a pointer are no object the fold names, and the arity guess would split them
+  test.runIf(gcc272Available())(
+    'gcc2.7.2: through a pointer it declines',
+    () => {
+      const body = 'void bvqp(s32 k, struct Q *p)\n{\n    takeQ(k, *p);\n}\n';
+      const { obj, asm } = compileMipsGcc272Target(HEADER + body, 'bvqp', TOOLCHAIN_TARGETS['gcc2.7.2'].canonicalFlags);
+      expect(() => lift('bvqp', asm, obj, MIPS_GCC, prototypes)).toThrow(
+        /the call to `takeQ` passes struct Q by value, and its words are not one frame object or one global/,
+      );
+    },
+    60_000,
+  );
+});
+
 // A conversion between a 64-bit integer and a double is a runtime call on all three toolchains, and
 // the double comes back in $f0. Lifted as an ordinary call it recompiles to the same `jal`.
 describe('a 64-bit conversion declines, naming its helper', () => {

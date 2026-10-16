@@ -27,7 +27,7 @@ import { ARMV4T_AGBCC, C_TYPEDEFS, PPC_MWCC } from '../src/target';
  *  which one it means. */
 const argRegs = (p: FnProto | undefined): number | undefined => {
   const widths = layout(p);
-  return widths === undefined ? undefined : wordsOf(widths);
+  return widths === undefined ? undefined : wordsOf(widths, ARMV4T_AGBCC);
 };
 
 /** the widths a declaration lays out on agbcc */
@@ -387,7 +387,7 @@ describe('declaredCallArgs on a double', () => {
   test('on agbcc a double is two words, marked, with no alignment', () => {
     const five = declaredCallArgs({ params: ['s32', 's32', 's32', 's32', 'double'] }, soft)!;
     expect(five.widths).toEqual([32, 32, 32, 32, 64]);
-    expect(wordsOf(five.widths)).toBe(6);
+    expect(wordsOf(five.widths, soft)).toBe(6);
     expect([...five.doubles]).toEqual([4]);
     // qualifiers aside, and a `long long` beside it is 64 bits and no double
     const mixed = declaredCallArgs({ params: ['s32', 'const double', 'long long'] }, soft)!;

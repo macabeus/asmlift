@@ -962,7 +962,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'no-prototype-args',
     'pool-word-shape',
     'stack-frames',
-    'store-class',
     'structs',
     'tu-scoped-name',
     'unread-data-directive',
@@ -1179,6 +1178,8 @@ describe('a class may not outlive the message it classifies', () => {
     ['struct-return', 'is declared to return ', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', ' by value, and ', 'packages/core/src/frontend/call-plan.ts'],
     ['struct-return', ' by value — ', 'packages/core/src/frontend/call-plan.ts'],
+    ['byvalue-arg', ' by value as its parameter ', 'packages/core/src/frontend/call-plan.ts'],
+    ['byvalue-arg', 'by value, and its words are not one frame object', 'packages/core/src/frontend/call-plan.ts'],
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['return-address', 'copies out is used as a value', 'packages/core/src/frontend/ppc.ts'],
     ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
@@ -1255,12 +1256,12 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/ppc.ts', 15],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
-    ['frontend/call-plan.ts', 6],
+    ['frontend/call-plan.ts', 5],
     ['frontend/ssa.ts', 3],
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 108;
+  const RESIDUE_TOTAL = 107;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file
