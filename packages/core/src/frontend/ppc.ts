@@ -2658,10 +2658,14 @@ function liftOnce(
           break;
         // Sign-extend byte/halfword to 32 bits: `extsb rD,rS` = (s32)(s8)rS, `extsh` = (s32)(s16)rS.
         // `sext` carries the NARROW width; structure/backend spell it `(s8)e` / `(s16)e`.
-        case 'extsb':
+        case 'extsb': {
+          const v = read(s);
+          moved(d, v, emit('sext', d, [v], { width: 8 }));
+          break;
+        }
         case 'extsh': {
           const v = read(s);
-          moved(d, v, emit('sext', d, [v], { width: ins.mnemonic === 'extsb' ? 8 : 16 }));
+          moved(d, v, emit('sext', d, [v], { width: 16 }));
           break;
         }
         case 'slw':
