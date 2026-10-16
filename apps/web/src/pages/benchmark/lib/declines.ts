@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 246 distinct decline messages (the texts reached by
+// `packages/core/src` throws 247 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -407,6 +407,15 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'runtime-helper',
     label: "Runtime-helper calls with no model (a compiler's own libcall)",
     pattern: /no model for the runtime helper/,
+  },
+  {
+    // A reader of PowerPC's carry bit whose writer is not one the frontend reads as a compare
+    // (frontend/ppc.ts `readCarry`): a 64-bit add or subtract's halves (`addc`/`adde`, an extended
+    // form's own carry-out), the signed `/2^k` round-up `srawi` leaves for `addze`, or a carry set
+    // in another block or before a call.
+    key: 'carry',
+    label: 'A carry bit (XER[CA]) set by an instruction the PPC frontend does not read as a compare',
+    pattern: /reads the carry bit \(XER\[CA\]\)/,
   },
   // BELOW `float`, ABOVE the shape classes, and both halves matter. This pattern has no mnemonic
   // filter, so it subsumes every instruction `float` claims and would swallow the largest MIPS

@@ -2245,8 +2245,8 @@ function liftOnce(
     const readCarry = (ins: Instr): Value => {
       if ('why' in carry) {
         throw new PpcUnsupportedError(
-          `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reads the carry bit ` +
-            `(XER[CA]), and ${carry.why}`,
+          `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} ` +
+            `reads the carry bit (XER[CA]), and ${carry.why}`,
         );
       }
       return carry.make();

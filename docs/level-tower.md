@@ -644,6 +644,14 @@ parameter fusion reads it unchanged, and `wideReturn` reads the return off the p
 register copies, which agbcc makes of a sum it computed outside r0:r1. A pair that reaches the return
 from another block is refused rather than joined: a 64-bit phi is the capability not built.
 
+**PowerPC's carry is read as a compare, not as a 64-bit add.** `frontend/ppc.ts` keeps XER[CA] per
+block as the 0/1 compare its writer leaves — `subfc rD,rA,rB` is `rB >=u rA`, `subfic` and `addic`
+the same over an immediate — because that is what mwcc reads it for: a materialised compare with no
+branch (`subfc; subfe rD,rY,rY` is `-(a <u b)`, `adde` over two sign words is `a >=s b`), which the
+mwcc patterns fold to the `icmp` (pattern/engine.ts `MWCC_COMPARE_PATTERNS`). The 64-bit reading is
+not built: `addc` leaves the carry unknown, a `subfe` or `subfze` whose register halves do not
+cancel stays an unmodelled instruction, and a reader of an unknown carry refuses, naming its writer.
+
 **A CALLEE's width the asm cannot decide, so it is told.** `mov r3,#0x2a ; bl f ; add r4,r3,#0` and
 a returned pair are the same instructions, so the frontend is given the fact rather than reading it:
 from the target's runtime-helper table, whose signatures are the COMPILER's and need no header, or
