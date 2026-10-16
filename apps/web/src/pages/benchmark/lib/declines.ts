@@ -589,10 +589,10 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     //
     // TWO MORE THROWS ARE THE STRUCT RETURN TOO: `frontend/frame-objects.ts` `refuseSretOutsideFrame`,
     // for a call that does lower but whose hidden pointer is not a local of this frame (a global, a
-    // pointer, a forwarded argument 0) — `sretglob` on ido7.1, gcc2.7.2kmc and gcc2.7.2 — or is a
-    // local's address that reaches the call through a merge (no row reaches it). And
-    // `frontend/mips.ts`'s refusal of a function whose own stated declaration returns a struct (the
-    // callee's half), which opens on the same clause as `plan`'s; no row states its own.
+    // pointer, a forwarded argument 0) — `sretglob` on ido7.1, gcc2.7.2kmc and gcc2.7.2. And
+    // `pipeline.ts` `refuseOwnStructReturnThroughMemory`, on every frontend, of a function whose own
+    // stated declaration returns a struct (the callee's half) through memory, or in a register pair,
+    // or by a rule nothing sizes, which opens on the same clause as `plan`'s; no row states its own.
     //
     // ITS FIRST INHABITANTS WERE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc, before O32
     // stated its return rule; it is `sret12` on mwcc_242_81 now, which the PowerPC lowering does not
@@ -602,7 +602,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'struct-return',
     label: 'Struct returns a call plan cannot lower (hidden pointer or registers undecided)',
     pattern:
-      /is declared to return [^,—]+ by value(?:, and | — )|returns struct [^,—]+ through the pointer in \w+, and that pointer is (?:not the address of a local|a local's address that reaches the call through a merge)/,
+      /is declared to return [^,—]+ by value(?:, and | — )|returns struct [^,—]+ through the pointer in \w+, and that pointer is not the address of a local/,
   },
   {
     // A CALL DECLARED TO TAKE A STRUCT OR UNION BY VALUE that the call plan cannot pass whole.

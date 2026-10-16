@@ -2784,7 +2784,7 @@ function mergedFrameAddresses(irBlocks: readonly Block[]): Map<Value, ReadonlySe
  *  reads a block parameter, but every path hands it the same frame address, so the call is handed
  *  that address: an `laddr` of it, minted ahead of the call, which the frame-object audit types as
  *  the struct (`declaredStructs`) and `refuseSretOutsideFrame` accepts. A merge of two offsets is
- *  two objects, and is left for that refusal. Run before the audit, on every frontend whose call
+ *  two objects, and is left for the audit to refuse. Run before the audit, on every frontend whose call
  *  lowering passes the hidden pointer. */
 export function nameMergedSretObjects(irBlocks: Block[]): void {
   const merged = mergedFrameAddresses(irBlocks);
@@ -2804,26 +2804,18 @@ export function nameMergedSretObjects(irBlocks: Block[]): void {
 /** A STRUCT RETURNED THROUGH MEMORY IS SPELLED `local = f(..)`, which hands the callee that local's
  *  address: the hidden pointer must be a frame object the audit accepted. A global or a pointer
  *  handed over directly — `gS = f(..)` (agbcc, ido, gcc), IDO's `*p = f(..)`, and the caller's own
- *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. So is
- *  a merge of two frame addresses, which names no one storage (the audit refuses one of two objects
- *  first, `a phi merges the frame objects`); a merge that names one address on every path was
- *  handed that address's `laddr` before the audit (`nameMergedSretObjects`). Asked
+ *  hidden pointer forwarded by `return f(..)` — is another spelling, which nothing here states. A
+ *  merge of frame addresses never reaches here: one that names one address on every path was handed
+ *  that address's `laddr` before the audit (`nameMergedSretObjects`), and a merge of two names no one
+ *  storage, which the audit refuses first (`addressFlow`: `a phi merges the frame objects`). Asked
  *  of every frontend whose call lowering passes the hidden pointer
  *  (`CallLowering.memoryReturn`). */
 export function refuseSretOutsideFrame(name: string, irBlocks: readonly Block[], target: TargetDescription): void {
   const laddrs = new Set(
     irBlocks.flatMap((b) => b.ops.filter((op) => op.opcode === 'laddr').map((op) => op.results[0])),
   );
-  const merged = mergedFrameAddresses(irBlocks);
   for (const op of irBlocks.flatMap((b) => b.ops)) {
     if (op.opcode === 'call' && op.attrs.sret === true && !laddrs.has(op.operands[0])) {
-      if (merged.has(op.operands[0])) {
-        throw new FrontendUnsupportedError(
-          `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} ` +
-            `through the pointer in ${target.argRegs[0]}, and that pointer is a local's address that reaches the call through a merge ` +
-            'of paths that hand it different frame addresses — a struct returned into storage the path chooses is not modelled',
-        );
-      }
       throw new FrontendUnsupportedError(
         `cannot lift '${name}': \`${op.attrs.target as string}\` returns struct ${typeToString(op.results[0].type)} through the pointer in ${target.argRegs[0]}, ` +
           'and that pointer is not the address of a local of this frame — a struct returned into a global or ' +
