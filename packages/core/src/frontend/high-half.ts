@@ -6,7 +6,9 @@
 // lives entirely in the two relocation records — so the high half is NOT A VALUE but a placeholder
 // that means nothing until its matching low half completes it. Letting one reach the IR as an
 // ordinary number hands the pipeline a plausible address that compiles and is simply wrong, so the
-// invariant is absolute: a placeholder is either consumed by its low half or refuses.
+// invariant is absolute: a placeholder is either consumed by its low half or refuses. The one other
+// consumer is `index`, and it does not break the rule: it consumes the half only to define a NEW
+// placeholder, the half plus a runtime index, which is held to the same rule in turn.
 //
 // KEYED BY VALUE, NOT BY REGISTER, and the difference is the whole point. A register-keyed map
 // answers "was a high half put in rX?", which is not the question; the question is "does the half
@@ -62,8 +64,20 @@ export interface HighHalves {
    *  placeholder a producer defined, and the two halves must name the same symbol (`alsoMatches`
    *  adds the per-ISA rest of the match — PowerPC's RELA addend). Anything else refuses, naming
    *  `reg` and what it really holds. The half is CONSUMED on the way out, which is why this is a
-   *  call and not a public flag: the mark and the proof cannot come apart. */
-  pair(site: string, reg: string, v: Value, loSym: string, alsoMatches?: (hi: HighHalfInfo) => boolean): HighHalfInfo;
+   *  call and not a public flag: the mark and the proof cannot come apart.
+   *
+   *  An INDEXED half (`index`) pairs only for a caller that passes `takesIndex`, and the index and
+   *  the proof cannot come apart either: a consumer that completes the address as `gaddr(sym) +
+   *  addend` without reading `index` would drop the index and still compile. So a caller that has
+   *  not said it adds `index` back gets a refusal in place of that address. */
+  pair(
+    site: string,
+    reg: string,
+    v: Value,
+    loSym: string,
+    alsoMatches?: (hi: HighHalfInfo) => boolean,
+    takesIndex?: boolean,
+  ): HighHalfInfo;
   /** AN INDEXED HIGH HALF: `v` is the half `base` plus the runtime byte index `idx`, made by the
    *  instruction at `at`. It is a placeholder like the half it came from — read as a value, left
    *  uncompleted or carried into a merge it refuses through the same guards, because it lives in the
@@ -110,8 +124,15 @@ export function makeHighHalves(d: HighHalfDialect): HighHalves {
       entry!.consumed = true;
       halves.set(v, { info: { ...entry!.info, addr: at.addr, mnemonic: at.mnemonic, index: idx }, consumed: false });
     },
-    pair(site, reg, v, loSym, alsoMatches) {
+    pair(site, reg, v, loSym, alsoMatches, takesIndex = false) {
       const entry = halves.get(v);
+      if (entry?.info.index !== undefined && !takesIndex) {
+        d.fail(
+          `${site} carries the '${d.lo}' half of '${loSym}' but ${reg} holds the high half of ` +
+            `'${entry.info.sym}' plus a runtime index (the '${entry.info.mnemonic}' at ` +
+            `0x${entry.info.addr.toString(16)}), and this consumer completes no index`,
+        );
+      }
       const hi = entry && entry.info.sym === loSym && (alsoMatches?.(entry.info) ?? true) ? entry.info : undefined;
       if (!hi) {
         d.fail(

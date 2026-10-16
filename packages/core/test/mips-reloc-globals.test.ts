@@ -11,6 +11,9 @@
 import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
+import { makeHighHalves } from '../src/frontend/high-half';
+import { mkValue } from '../src/ir/core';
+import { T } from '../src/ir/types';
 import { decompile } from '../src/pipeline';
 import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
@@ -464,6 +467,27 @@ test('an indexed half completed by the %lo of ANOTHER symbol refuses', () => {
     { off: 0xc, type: 'R_MIPS_LO16', sym: 'gB' },
   ];
   expect(() => lift('o', asm, rs)).toThrow(/'%lo' half of 'gB' but v0 holds the high half of 'gA'/);
+});
+
+test('an indexed half pairs only for a consumer that says it completes the index', () => {
+  // The index rides on the SHARED HighHalfInfo, so a consumer that builds `gaddr(sym) + addend`
+  // and never reads it (PowerPC's folds today) would drop the index and still compile. pair()
+  // makes the opt-in explicit, so such a consumer refuses instead.
+  const hh = makeHighHalves({
+    hi: '%hi',
+    hiArticle: 'a',
+    lo: '%lo',
+    fail: (m) => {
+      throw new Error(m);
+    },
+  });
+  const [half, indexed, idx] = [mkValue(T.unk(32)), mkValue(T.unk(32)), mkValue(T.unk(32))];
+  hh.record(half, { sym: 'gTab', addend: 0, addr: 0, mnemonic: 'lui' });
+  hh.index(indexed, half, idx, { addr: 4, mnemonic: 'addu' });
+  expect(() => hh.pair('the lw at 0xc', 'v0', indexed, 'gTab')).toThrow(
+    /plus a runtime index \(the 'addu' at 0x4\), and this consumer completes no index/,
+  );
+  expect(hh.pair('the lw at 0xc', 'v0', indexed, 'gTab', undefined, true).index).toBe(idx);
 });
 
 test('an UNRECOVERED jump-table dispatch through an indexed half still declines', () => {

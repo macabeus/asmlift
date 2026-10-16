@@ -1643,8 +1643,9 @@ function liftOnce(
           `cannot lift '${name}': gp used as data (PIC / small-data global access) — not supported`,
         );
       }
-      // A register holding the high half of an address is NOT a value. The legitimate consumers
-      // (`addiu %lo`, a `%lo` load/store base) reach the half through `foldLoHalf` instead.
+      // A register holding the high half of an address is NOT a value. Its legitimate consumers
+      // (`addiu %lo`, a `%lo` load/store base, and `addu` adding a runtime index between the
+      // halves) reach the half without this read.
       const v = readVar(r, bi);
       const sum = frameSums.get(v);
       if (sum !== undefined) {
@@ -1904,7 +1905,7 @@ function liftOnce(
           // `S[i]`: a runtime byte index added BETWEEN the halves. rD is still no value — it is an
           // indexed half (frontend/high-half.ts `index`) that only its `%lo` completes, to
           // `gaddr(S) + idx` at the halves' combined offset. Either operand order is accepted, as
-          // `addu` commutes (every compiler measured puts rH first). Both sources halves refuse: two
+          // `addu` commutes (every compiler measured puts rH first). Two halves added together refuse: two
           // addresses added is not an address. A COPY (`addu rD,rH,zero`) is no index: it reads the
           // half as a value and refuses, as `move` and `or rD,rH,zero` do.
           const [hs, ht] = copiedReg(ins) === undefined ? [halfIn(s), halfIn(t)] : [false, false];
@@ -2220,7 +2221,8 @@ function liftOnce(
      *  and the runtime byte index an indexed half added between the halves. */
     const pairLoHalf = (ins: Instr, rHi: string, loImm: number): { off: number; index?: Value } => {
       relocTaken = true;
-      const hi = highHalves.pair(site(ins), rHi, readVar(rHi, bi), ins.reloc!.sym);
+      // `addressAt` adds the index back, so this consumer takes an indexed half.
+      const hi = highHalves.pair(site(ins), rHi, readVar(rHi, bi), ins.reloc!.sym, undefined, true);
       // The addend is split across the two instruction immediates because MIPS is REL.
       return { off: hi.addend + loImm, index: hi.index };
     };
