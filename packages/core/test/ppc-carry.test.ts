@@ -10,7 +10,7 @@ import { describe, expect, test } from 'vitest';
 import { lift } from '../src/frontend/ppc';
 import type { Fn } from '../src/ir/core';
 import { applyIdiomPatterns, decompile } from '../src/pipeline';
-import { PPC_MWCC } from '../src/target';
+import { PPC_MWCC, targetFor } from '../src/target';
 import { agreesOverWords, edgeWords, ppcFixture } from './helpers';
 
 const fixture = ppcFixture;
@@ -327,6 +327,17 @@ describe('a word return whose r4 holds a value the function computed and nothing
     expect(() => decompile('f', asm(['subfc   r4,r4,r3', 'subfe   r0,r3,r3', 'or      r3,r5,r0']), PPC_MWCC)).toThrow(
       refusal,
     );
+  });
+
+  test('nor, at a level that keeps dead code, is a dead parameter store beside an untouched r3', () => {
+    // mwcc -O0 keeps `b = a + 1;` in b's register: `int f(int a, int b) { b = a + 1; return a; }`
+    const o0 = targetFor('mwcc_242_81', ['-O0']).target;
+    expect(decompile('f', asm(['addi    r4,r3,1']), o0).source).toMatch(/return a0;/);
+    // where r3 is computed too, -O0's 64-bit op writes both words: `x | 0xff` on a `long long`
+    const or = ['li      r5,255', 'li      r0,0', 'or      r4,r4,r5', 'or      r3,r3,r0'];
+    expect(() => decompile('f', asm(or), o0)).toThrow(refusal);
+    // and -O4 deletes the dead store, so there an untouched r3 is a 64-bit result's high word
+    expect(() => decompile('f', asm(['addi    r4,r3,1']), PPC_MWCC)).toThrow(refusal);
   });
 
   test('a value r4 holds that something reads is no evidence', () => {

@@ -1639,6 +1639,8 @@ function liftOnce(
   // What r4, the second register of an r3:r4 return, may hold at each word return where no
   // declaration pins the width (frontend/dead-reads.ts `unreadPairHalf`).
   const unreadHigh = new Set<Value>();
+  // Each of those word returns: what r3 returns there and what r4 may hold (`computedPairHalf`).
+  const pairReturns: PairReturn[] = [];
   // Every value a compare consumed, whether or not a branch reads the field it set: a compare
   // nothing reads leaves no op, so this is the only record that the value was used
   // (frontend/dead-reads.ts `compared`).
@@ -1673,7 +1675,10 @@ function liftOnce(
     if (op.operands.length > 0) {
       wordReturn = true;
       wordReturns.push(bi);
-      unreadPairHalf(ssa, prototypes[name], ARG_REGS[1], bi, unreadHigh);
+      const high = new Set<Value>();
+      unreadPairHalf(ssa, prototypes[name], ARG_REGS[1], bi, high);
+      high.forEach((v) => unreadHigh.add(v));
+      pairReturns.push({ word: op.operands[0], high });
     } else {
       bareReturns.push({ op, bi });
     }
@@ -3193,7 +3198,10 @@ function liftOnce(
   mintArgSlotHoles(ssa, preds[0].length > 0, argSlots);
   const droppedPairHalf = computedPairHalf(
     irBlocks,
-    unreadHigh,
+    pairReturns,
+    target.compilerBehaviors.keepsUnusedReads === true
+      ? (v) => paramReg.get(v) === RET && irBlocks[0].params.includes(v)
+      : undefined,
     (v) => compared.has(v) || readWithoutOp.has(v) || comparedDifference.has(v) || ssa.frameWrites.has(v),
   );
   ssa.finish();
@@ -3252,31 +3260,48 @@ function liftOnce(
   return ssa.fn;
 }
 
-/** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `held` is what r4,
- *  the second register of an r3:r4 return, may hold at each word return no declaration pins the
- *  width of (`unreadHigh`, frontend/dead-reads.ts `unreadPairHalf`). Where one of those values is
- *  the result of an op that nothing reads — directly, or through joins nothing reads — the compiler
- *  computed it for the caller: an optimizing compiler deletes a pure computation nobody reads, so a
- *  value that survives in r4 with no reader is the other word of a 64-bit return, and returning r3
- *  alone drops it. mwcc's `(unsigned long long)a - b` is `subfc r4,r4,r3; subfe r3,r4,r4`, whose
- *  high word is the very `subfe` a 32-bit `-(a < b)` is, and `long long x = a; if (c) x = -x;
- *  return x;` joins `0 - a` into r4 below the branch; both would lift as their high word.
+/** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `returns` holds,
+ *  for each word return no declaration pins the width of, the word r3 returns and what r4, the
+ *  second register of an r3:r4 return, may hold there (frontend/dead-reads.ts `unreadPairHalf`).
+ *  Where one of those values is the result of an op that nothing reads — directly, or through joins
+ *  nothing reads — the compiler computed it for the caller: an optimizing compiler deletes a pure
+ *  computation nobody reads, so a value that survives in r4 with no reader is the other word of a
+ *  64-bit return, and returning r3 alone drops it. mwcc's `(unsigned long long)a - b` is `subfc
+ *  r4,r4,r3; subfe r3,r4,r4`, whose high word is the very `subfe` a 32-bit `-(a < b)` is, and `long
+ *  long x = a; if (c) x = -x; return x;` joins `0 - a` into r4 below the branch; both would lift as
+ *  their high word.
+ *
+ *  AT A LEVEL THAT KEEPS DEAD CODE (`entryWord` given, where `keepsUnusedReads` holds) that premise
+ *  fails for a parameter: mwcc -O0 keeps `b = a + 1;` in b's register r4. There a return whose r3
+ *  is still the entry value (`entryWord`, directly or through joins of only it) is not asked, since
+ *  -O0 spells a 64-bit op as both words' ops and writes r3 even where its word is unchanged (`x |
+ *  0xff` is `or r4,r4,r5; or r3,r3,r0` with r0 = 0), in every 64-bit shape measured on 2.4.2, 2.4.7
+ *  and 2.3.3. At -O4 an untouched r3 is evidence of nothing: `((u64)a << 32) | (b + 1)` is `addi
+ *  r4,r4,1`. A dead parameter store beside a computed r3 (`b = a * 3; return a + 1;`) still
+ *  refuses.
  *
  *  Asked BEFORE `ssa.finish`, while every join is still a parameter with its incoming values wired,
  *  so a join the trivial-phi pass would fold is walked, not lost, and refused AFTER it, so an
  *  unmodelled instruction or an unresolved `subfze` keeps its own message. `exempt` names a value
  *  the machine did use where the lift left no op for the use: one a compare consumed (`compared`),
- *  one a carry reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns
- *  `(x >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`), a `subfc`/`subfic` difference
- *  whose carry a reader turned into a 0/1 truth value (`comparedDifference`: 2.3.3's `a + (a < b)`
- *  is `subfc r4,r4,r3; subfe r0,r0,r0; neg r0,r0; add r3,r3,r0`, over the dead `b`, and the signed
- *  one keeps bit 0 of an `addze`; a 64-bit high word reads the borrow as `CA - 1` and neither
- *  negates it nor masks it to a bit) and one stored to the frame (`frameWrites`). A function that holds an unmodelled instruction is not asked: the `opaque` may
- *  read r4 without naming it, and it declines under its own name. A value r4 holds that the
- *  function did not compute — its entry value, the caller's `a` that `long long z(unsigned a) {
- *  return a; }` moves there — is not seen, and that word return still drops the low word. */
-function computedPairHalf(blocks: readonly Block[], held: ReadonlySet<Value>, exempt: (v: Value) => boolean): boolean {
-  if (held.size === 0 || blocks.some((b) => b.ops.some((o) => o.opcode === 'opaque'))) {
+ *  one a carry reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns `(x
+ *  >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`), a `subfc`/`subfic` difference whose
+ *  carry a reader turned into a 0/1 truth value (`comparedDifference`: 2.3.3's `a + (a < b)` is
+ *  `subfc r4,r4,r3; subfe r0,r0,r0; neg r0,r0; add r3,r3,r0` over the dead `b`, and the signed one
+ *  keeps bit 0 of an `addze`; a 64-bit high word reads the borrow as `CA - 1` and neither negates
+ *  it nor masks it to a bit), and one stored to the frame (`frameWrites`). A function that holds an
+ *  unmodelled instruction is not asked: the `opaque` may read r4 without naming it, and it declines
+ *  under its own name. A value r4 holds that the function did not compute — its entry value, the
+ *  caller's `a` that `long long z(unsigned a) { return a; }` moves there — is not seen, and that
+ *  word return still drops the low word. */
+type PairReturn = { word: Value; high: ReadonlySet<Value> };
+function computedPairHalf(
+  blocks: readonly Block[],
+  returns: readonly PairReturn[],
+  entryWord: ((v: Value) => boolean) | undefined,
+  exempt: (v: Value) => boolean,
+): boolean {
+  if (returns.every((r) => r.high.size === 0) || blocks.some((b) => b.ops.some((o) => o.opcode === 'opaque'))) {
     return false;
   }
   const defOf = new Map<Value, Op>();
@@ -3325,7 +3350,21 @@ function computedPairHalf(blocks: readonly Block[], held: ReadonlySet<Value>, ex
     }
     return (incoming.get(v) ?? []).some(computedForNothing);
   };
-  return [...held].some(computedForNothing);
+  // Whether `v` is r3's entry value on every path: directly, or through joins of nothing else.
+  const entry = (v: Value, on: Set<Value>): boolean => {
+    if (entryWord!(v)) {
+      return true;
+    }
+    const ins = incoming.get(v);
+    if (ins === undefined || on.has(v)) {
+      return ins !== undefined;
+    }
+    on.add(v);
+    return ins.every((x) => entry(x, on));
+  };
+  return returns.some(
+    (r) => !(entryWord !== undefined && entry(r.word, new Set())) && [...r.high].some(computedForNothing),
+  );
 }
 
 /** Settle each `subfze rD,rA` whose rA came in through a join (the `subfze` decode): where every
