@@ -344,7 +344,7 @@ describe('the gates', () => {
     expect(r31.load.attrs.volatile).toBeUndefined();
   });
 
-  test('a keeping level on a compiler with no discard register refuses a read no gate claims', () => {
+  test('undecided-at-keeping-level: a keeping level on a compiler with no discard register refuses a read no evidence claims', () => {
     // agbcc -O0 of `void f(volatile int *p) { *p; }`: `ldr r0, [r1]` nothing reads, the same code as
     // `register int x; x = p[5]; x = 0;` — dropped or stamped, one of the two is wrong C
     const o0 = targetFor('agbcc', ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix']).target;
@@ -370,6 +370,37 @@ describe('the gates', () => {
     // at -O2 the same read is stamped
     pinDeadReads(bare.blocks, ARMV4T_AGBCC);
     expect(bare.load.attrs.volatile).toBe(true);
+    // ablated, the read no gate claims is stamped at -O0 too
+    const ablated = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    pinDeadReads(ablated.blocks, o0, { name: 'f' }, without(DEAD_READ_GATES, 'undecided-at-keeping-level'));
+    expect(ablated.load.attrs.volatile).toBe(true);
+    // a compare or a computation is no evidence at a keeping level: agbcc -O0's `if (*vp) {}` is
+    // the same `ldr; cmp; beq` as `if (p[0]) {}`, and a volatile bitfield's `ldr; lsl; lsr` reads
+    // as arithmetic. Both refuse, where the gates that rest on an optimiser left them plain.
+    const compared = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
+    expect(() => pinDeadReads(compared.blocks, o0, { name: 'f', compared: new Set(compared.load.results) })).toThrow(
+      /cannot lift 'f'/,
+    );
+    pinDeadReads(
+      compared.blocks,
+      o0,
+      { name: 'f', compared: new Set(compared.load.results) },
+      without(DEAD_READ_GATES, 'undecided-at-keeping-level'),
+    );
+    expect(compared.load.attrs.volatile).toBeUndefined();
+    const ifEmpty =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
+      '\tldr\tr1, [r0]\n\tcmp\tr1, #0\n\tbeq\t.L3\n.L3:\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', ifEmpty, o0, voidF(['volatile s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
+    const bitfield =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
+      '\tldr\tr1, [r0]\n\tlsl\tr2, r1, #0x18\n\tlsr\tr0, r2, #0x1b\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', bitfield, o0, voidF(['s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
   });
 
   test('keeps-unused-reads: mwcc -O0,p moves a narrowing assignment out of r0 into a home, which is no discard', () => {
@@ -507,19 +538,27 @@ describe('the gates', () => {
     expect(run(without(DEAD_READ_GATES, 'computed'))).toBe(true);
   });
 
-  test('computed: a read that is the address of a read the pin left plain is that read’s use', () => {
+  test('addresses-plain-read: a read that is the address of a read the pin left plain is that read’s use', () => {
     // the outer read sign-extends on agbcc, so `not-a-volatile-read` leaves it plain, and the
-    // pointer it read through was the compiler's to compute
-    const pp = mkValue(T.unk(32));
-    const inner = mkOp('load', { operands: [pp], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 4 } });
-    const outer = mkOp('load', {
-      operands: [inner.results[0]],
-      results: [mkValue(T.unk(32))],
-      attrs: { off: 0, width: 2, signed: true },
-    });
-    pinDeadReads([{ params: [pp], ops: [inner, outer, mkOp('ret')] }], ARMV4T_AGBCC);
-    expect(outer.attrs.volatile).toBeUndefined();
-    expect(inner.attrs.volatile).toBeUndefined();
+    // pointer it read through was the compiler's to compute — at -O0 as at -O2, where it is
+    // evidence the refusal does not override
+    const o0 = targetFor('agbcc', ['-mthumb-interwork', '-O0']).target;
+    const run = (target: typeof o0, gates?: Parameters<typeof pinDeadReads>[3]) => {
+      const pp = mkValue(T.unk(32));
+      const inner = mkOp('load', { operands: [pp], results: [mkValue(T.unk(32))], attrs: { off: 0, width: 4 } });
+      const outer = mkOp('load', {
+        operands: [inner.results[0]],
+        results: [mkValue(T.unk(32))],
+        attrs: { off: 0, width: 2, signed: true },
+      });
+      pinDeadReads([{ params: [pp], ops: [inner, outer, mkOp('ret')] }], target, { name: 'f' }, gates);
+      expect(outer.attrs.volatile).toBeUndefined();
+      return inner.attrs.volatile;
+    };
+    expect(run(ARMV4T_AGBCC)).toBeUndefined();
+    expect(run(o0)).toBeUndefined();
+    expect(run(ARMV4T_AGBCC, without(DEAD_READ_GATES, 'addresses-plain-read'))).toBe(true);
+    expect(() => run(o0, without(DEAD_READ_GATES, 'addresses-plain-read'))).toThrow(/cannot lift 'f'/);
   });
 
   test('declared-plain: a dead read of a global declared plain stays deletable', () => {
