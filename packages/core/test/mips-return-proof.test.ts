@@ -6,6 +6,7 @@
 import { describe, expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
+import { __testing } from '../src/frontend/mips';
 import { decompile } from '../src/pipeline';
 import { type ToolchainId, canonicalFlagsOf, targetFor } from '../src/target';
 
@@ -160,6 +161,46 @@ describe.each(TOOLCHAINS)('on %s', (tc) => {
         src([`0:\tmove\t${k},ra`, '4:\tli\tra,0', `8:\tmove\tra,${k}`, 'c:\tjr\tra', '10:\tli\tv0,7']),
       ).toThrow(NOT_THROUGH_RA);
     }
+  });
+
+  // THE PROOF ITSELF, on one block ending `jr ra; nop`. The lowering refuses an unmodelled store
+  // before the proof runs, so a lift cannot reach this answer.
+  const prove = (body: [mnemonic: string, ...ops: string[]][]) => () => {
+    const ins = (k: number, [mnemonic, ...ops]: [string, ...string[]]) => ({ addr: 4 * k, mnemonic, ops });
+    __testing.refuseReturnsNotThroughCallersRa(
+      'f',
+      [
+        {
+          startAddr: 0,
+          body: body.map((l, k) => ins(k, l)),
+          branch: ins(body.length, ['jr', 'ra']),
+          delay: ins(body.length + 1, ['nop']),
+          delayAnnulled: false,
+        },
+      ],
+      [[]],
+      target.callerSaved,
+    );
+  };
+
+  test('in the proof, a store it cannot size overwrites the saved ra', () => {
+    const framed = (store: string, mem = '20(sp)') =>
+      prove([
+        ['addiu', 'sp', 'sp', '-24'],
+        ['sw', 'ra', '20(sp)'],
+        ['jal', '0 <f>'],
+        ['nop'],
+        [store, 'a1', mem],
+        ['lw', 'ra', '20(sp)'],
+        ['addiu', 'sp', 'sp', '24'],
+      ]);
+    for (const store of ['swl', 'swr', 'sc']) {
+      expect(framed(store)).toThrow(
+        /the 'jr ra' at 0x1c may not return through the caller's return address — on some path the 'lw' at 0x14/,
+      );
+    }
+    // a store the proof sizes, into another word, leaves the save word holding ra
+    expect(framed('sw', '16(sp)')).not.toThrow();
   });
 
   test("the compilers' own save of ra is a return, and so is a leaf", () => {

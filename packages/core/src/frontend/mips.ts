@@ -838,11 +838,10 @@ interface RaState {
   readonly depth: number | null;
 }
 
-/** Bytes a store mnemonic writes, or undefined for an instruction that stores nothing. Only the
- *  stores the lowering models (`emitStore`) are named: the proof runs after the whole function is
- *  lowered, and every other store (`swl`/`swr`, `sc`, `sd*`, `swc1`/`sdc1`) is refused before it by
- *  `opaqueDest`'s `storeClass` or the FPU arm. A lowering that learns another store must name it
- *  here, with the bytes it reaches. */
+/** Bytes a store mnemonic writes. Only the stores the lowering models (`emitStore`) are named; the
+ *  proof treats any other instruction that writes no register and addresses memory through `sp`
+ *  (`swl`/`swr`, `sc`, `sd*`, `swc1`/`sdc1`, all refused earlier by `opaqueDest`'s `storeClass` or
+ *  the FPU arm today) as a store of unknown bytes, which overwrites the save word. */
 const STORE_BYTES: Readonly<Record<string, [before: number, width: number]>> = {
   sb: [0, 1],
   sh: [0, 2],
@@ -868,8 +867,8 @@ const isKernelReg = (r: string) => /^\$?(k[01]|2[67])$/.test(r);
  *    • a `sw` of a register holding it through `sp` puts it in that word, named by its offset from
  *      the entry `sp` (this walk follows `addiu sp,sp,N`; any other write to `sp` makes the depth
  *      unknown), and a `lw` from that word copies it back out. Any other store reaching those bytes,
- *      a store through `sp` at an unknown depth, and a call whose home area (`[sp, sp+16)` at the
- *      call) holds the word overwrite it.
+ *      a store through `sp` at an unknown depth or of unknown width (`STORE_BYTES`), and a call whose
+ *      home area (`[sp, sp+16)` at the call) holds the word overwrite it.
  *  Paths meet by agreement: a register or the word holds the address only if it does on every path
  *  in, and a depth the paths disagree on is unknown.
  *
@@ -941,6 +940,9 @@ function refuseReturnsNotThroughCallersRa(
       }
       const w = writtenReg(ins);
       if (w === null) {
+        if (ins.ops.some((op) => op.includes('(') && isStackPtr(parseMem(op).base))) {
+          slot = null;
+        }
         return;
       }
       const dest = canon(w);
@@ -2857,4 +2859,4 @@ export const mipsFrontend: Frontend = { id: 'mips', inputFormat: 'objdump', lift
 
 /** Internal surface for this module's own tests, and for nothing else (`frontend/frame-objects.ts`
  *  says why it is not a plain export). */
-export const __testing = { o32LocalArea };
+export const __testing = { o32LocalArea, refuseReturnsNotThroughCallersRa };
