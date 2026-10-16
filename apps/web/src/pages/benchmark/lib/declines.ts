@@ -692,7 +692,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // compiler that names no register it discards a volatile read into (agbcc, gcc 2.7.2 and KMC).
     // There a volatile `*p;` and a `register` local assigned and overwritten are the same
     // instructions, so dropping the read and stamping it are each wrong C for one of the two.
-    // Its row is `synthetic:deadreado0:agbcc`.
+    // Its row is `synthetic:dvstmt:agbcc`.
     key: 'undecided-unused-read',
     label: 'A read nothing uses at -O0 where the compiler spells volatile and register locals alike',
     pattern: /a read nothing uses at a level that keeps plain ones/,

@@ -72,6 +72,21 @@ export interface SynthSpec {
 }
 
 const ALL: ToolchainId[] = ['agbcc', 'ido7.1', 'gcc2.7.2kmc', 'mwcc_242_81'];
+// The CodeWarrior -O0,p set `framelist`, `deadloc` and `homecall` build at, and the dead-read rows
+// on all three CodeWarrior builds.
+const MWCC_O0P = [
+  '-proc',
+  'gekko',
+  '-O0,p',
+  '-enum',
+  'int',
+  '-inline',
+  'auto',
+  '-fp',
+  'hard',
+  '-Cpp_exceptions',
+  'off',
+];
 const CALL: ToolchainId[] = ['agbcc', 'gcc2.7.2kmc', 'mwcc_242_81']; // see the header for ido7.1
 
 // The map the `/no-ptr-elem` row below is fed: a struct global with a SIZED pointer member
@@ -6892,6 +6907,85 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ALL,
     ctx: 'void deadreadparam(volatile s32 *p, s16 *x);',
     proto: { deadreadparam: { params: ['volatile s32 *', 's16 *'], returnsVoid: true } },
+  },
+  // …AND AT A LEVEL THAT KEEPS A PLAIN ONE, ONLY WHERE THE REGISTER SAYS SO. At -O0 (and IDO's
+  // -O1) a plain dead local keeps its load too, so an unused read is evidence of `volatile` only
+  // where the compiler puts it in the register it discards one into (target.ts
+  // `discardsUnusedReadsInto`): `lwz r0` on the three CodeWarrior builds at -O0,p, `lw zero` /
+  // `lbu zero` on IDO. `dvstmt` is the bare `*p;`, `dvmemb` Mario Party 4's WipeExecAlways
+  // `wipe->type;` (a `volatile u8` member, the one dead r0 load in its 409 -O0,p units), `dvback`
+  // a store read back, and `dvglob` an `extern volatile` read. `dvhome` is the control: its plain
+  // `x = p[5]; x = 0;` keeps the load in a home (`lwz r31`; IDO `lw t6` and a frame store), which
+  // stays unstamped — the row nonmatches for the dead local the lift drops, and a stamp would move
+  // its score. On agbcc at -O0 a volatile `*p;` is an `ldr r0` nothing reads, the same code as a
+  // `register` local, so `dvstmt:agbcc` DECLINES (`undecided-unused-read`) rather than drop it.
+  // The IDO rows are written one statement per line: IDO schedules by source line. A level twin
+  // takes its own sym, so IDO -O0 carries `dvglob` alone and -O1 the other four.
+  ...(
+    [
+      ['mwcc', ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'], MWCC_O0P],
+      ['ido-O1', ['ido7.1'], ['-mips2', '-O1', '-32', '-non_shared', '-G', '0']],
+    ] as const
+  ).flatMap(([, toolchains, cflags]): SynthSpec[] => [
+    {
+      sym: 'dvstmt',
+      src: 'void dvstmt(volatile s32 *p, s32 *q)\n{\n    *p;\n    *q = 0;\n}',
+      features: ['pointer', 'store'],
+      toolchains: [...toolchains],
+      cflags,
+      ctx: 'void dvstmt(volatile s32 *p, s32 *q);',
+      proto: { dvstmt: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
+    },
+    {
+      sym: 'dvmemb',
+      src: 'typedef struct { s32 a; volatile u8 type; } DvW;\nvoid dvmemb(DvW *w, s32 *q)\n{\n    w->type;\n    *q = 1;\n}',
+      features: ['struct', 'store'],
+      toolchains: [...toolchains],
+      cflags,
+      ctx: 'typedef struct { s32 a; volatile u8 type; } DvW; void dvmemb(DvW *w, s32 *q);',
+      proto: { dvmemb: { params: ['DvW *', 's32 *'], returnsVoid: true } },
+    },
+    {
+      sym: 'dvback',
+      src: 'void dvback(volatile s32 *p, s32 b)\n{\n    *p = b;\n    *p;\n}',
+      features: ['pointer', 'store'],
+      toolchains: [...toolchains],
+      cflags,
+      ctx: 'void dvback(volatile s32 *p, s32 b);',
+      proto: { dvback: { params: ['volatile s32 *', 's32'], returnsVoid: true } },
+    },
+    {
+      sym: 'dvhome',
+      src: 'void dvhome(s32 *p, s32 *q)\n{\n    s32 x;\n    x = p[5];\n    x = 0;\n    *q = x;\n}',
+      features: ['pointer', 'store'],
+      toolchains: [...toolchains],
+      cflags,
+      ctx: 'void dvhome(s32 *p, s32 *q);',
+      proto: { dvhome: { params: ['s32 *', 's32 *'], returnsVoid: true } },
+    },
+  ]),
+  ...(
+    [
+      [['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'], MWCC_O0P],
+      [['ido7.1'], ['-mips2', '-O0', '-32', '-non_shared', '-G', '0']],
+    ] as const
+  ).map(([toolchains, cflags]): SynthSpec => ({
+    sym: 'dvglob',
+    src: 'extern volatile s32 gDvV;\nvoid dvglob(s32 *q)\n{\n    gDvV;\n    *q = 2;\n}',
+    features: ['global', 'store'],
+    toolchains: [...toolchains],
+    cflags,
+    ctx: 'void dvglob(s32 *q);',
+    proto: { dvglob: { params: ['s32 *'], returnsVoid: true } },
+  })),
+  {
+    sym: 'dvstmt',
+    src: 'void dvstmt(volatile s32 *p, s32 *q)\n{\n    *p;\n    *q = 0;\n}',
+    features: ['pointer', 'store'],
+    toolchains: ['agbcc'],
+    cflags: ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix'],
+    ctx: 'void dvstmt(volatile s32 *p, s32 *q);',
+    proto: { dvstmt: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
   },
 
   // ── THE MAP-ASKING VARIATIONS, and the synthetic rows that carry a map ─────────────────────

@@ -961,7 +961,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
   // `undecided-unused-read` is new with its refusal (frontend/dead-reads.ts `refuseUndecidedRead`);
-  // its row, `synthetic:deadreado0:agbcc`, reaches the artifact when the bench is next run whole.
+  // its row, `synthetic:dvstmt:agbcc`, reaches the artifact when the bench is next run whole.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
