@@ -8,7 +8,7 @@ import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
-import { MIPS_GCC, MIPS_IDO, PPC_MWCC } from '../src/target';
+import { MIPS_GCC, MIPS_IDO, PPC_MWCC, targetFor } from '../src/target';
 
 /** An objdump listing of `f` from instruction lines, four bytes apart. `L:` on its own line labels the
  *  next instruction; `@L` in an operand is that label's address; `#HA sym` / `#LO sym` after an
@@ -397,6 +397,37 @@ test('a `bgtlr` bound sends the default to a return of what r3 holds', () => {
   // the bound is still the `cmplwi` the conditional return reads
   const cr1 = asm.replace(/bgt-\s+\S+ <f\+0x\w+>/, 'bgtlr-').replace('cmplwi  r3,3', 'cmplwi  cr1,r3,3');
   expect(() => liftPpc({ asm: cr1, at })).toThrow(/unmodelled control transfer 'bctr'/);
+});
+
+test('a `bgtlr` bound is asked the link-register proof like any return, on every mwcc build', () => {
+  // Hand-written asm: the caller's return address is parked in r8 and r4 put in the link register,
+  // so the out-of-range `bgtlr` jumps through r4. Every case puts the address back before its
+  // `blr`, so only the default edge can be wrong — it lifted `default: return a0;` before the
+  // table's bound was asked the proof.
+  const lines = (park: string[], restore: string[]) => [
+    ...park,
+    'cmplwi  r3,3',
+    'bgtlr-',
+    'lis     r4,0 #HA tbl',
+    'slwi    r0,r3,2',
+    'addi    r4,r4,0 #LO tbl',
+    'lwzx    r0,r4,r0',
+    'mtctr   r0',
+    'bctr',
+    ...[10, 20, 30, 40].flatMap((k, i) => [`C${i}:`, `li      r3,${k}`, ...restore, 'blr']),
+  ];
+  for (const tc of ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'] as const) {
+    const { target } = targetFor(tc, ['-O4,p']);
+    const lift = ({ asm, at }: ReturnType<typeof listing>) =>
+      decompile('f', asm, target, { asmData: ppcTable(['C0', 'C1', 'C2', 'C3'].map((k) => at.get(k)!)) }).source;
+    expect(() => lift(listing(lines(['mflr    r8', 'mtlr    r4'], ['mtlr    r8'])))).toThrow(
+      /the 'bgtlr' at 0xc may not return through the caller's link register — on some path the 'mtlr' at 0x4 put r4 there/,
+    );
+    // the same table with the link register untouched lifts, its default a return of r3
+    const src = lift(listing(lines([], [])));
+    expect(src).toContain('switch (a0)');
+    expect(src).toMatch(/default:\s*\n\s*return a0;/);
+  }
 });
 
 test('a return nothing wrote r3 for still returns r3, when another return hands back a word', () => {

@@ -2833,6 +2833,12 @@ function liftOnce(
     // blocks (dense 0..N-1) then the default (last successor). The `cmplwi`/`bgt` and the elided
     // dispatch (`lis…lwzx;mtctr;bctr`) are subsumed.
     const jt = br ? jts.get(br.addr) : undefined;
+    // Asked before the jump-table lowering: a table whose bound is a conditional return
+    // (`cmplwi rS,N; bgtlr`) lowers that return as the switch's default edge, and it jumps through
+    // whatever the link register holds there exactly as a plain `bgtlr` does.
+    if (br && (isReturn(br) || isCondReturn(br))) {
+      refuseOverwrittenLink(br);
+    }
     if (jt) {
       if (jt.hoisted) {
         tableBases.demand(jt.hoisted, bi, jt.bctrAddr);
@@ -2890,9 +2896,6 @@ function liftOnce(
       const cond = mkCmp(ops, 'icmp_ne', dec, constVal(0));
       ops.push(mkOp('cond_br', { operands: [cond], successors: succIdx[bi].map((j) => succ(j)) }));
       return;
-    }
-    if (br && (isReturn(br) || isCondReturn(br))) {
-      refuseOverwrittenLink(br);
     }
     if (br && (isCond(br) || isCondReturn(br))) {
       const base = isCondReturn(br) ? condReturnBase(br)! : br.mnemonic;
