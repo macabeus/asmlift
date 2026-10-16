@@ -372,6 +372,23 @@ describe('the gates', () => {
     expect(bare.load.attrs.volatile).toBe(true);
   });
 
+  test('keeps-unused-reads: mwcc -O0,p moves a narrowing assignment out of r0 into a home, which is no discard', () => {
+    // `signed char x; x = p[5]; x = 0;` is `lwz r0` + `extsb r31,r0`: a home, plain or volatile alike
+    const o0 = targetFor('mwcc_242_81', ['-O0,p']).target;
+    const home = objdump(
+      '   0:\tstwu    r1,-16(r1)\n   4:\tstw     r31,12(r1)\n   8:\tlwz     r0,20(r3)\n   c:\textsb   r31,r0\n' +
+        '  10:\tli      r31,0\n  14:\tlwz     r31,12(r1)\n  18:\taddi    r1,r1,16\n  1c:\tblr\n',
+    );
+    expect(decompile('f', home, o0, voidF(['s32 *'])).source).not.toMatch(/volatile/);
+    const param = objdump('   0:\tlwz     r0,20(r3)\n   4:\textsb   r4,r0\n   8:\tblr\n');
+    expect(decompile('f', param, o0, voidF(['s32 *', 's8'])).source).not.toMatch(/volatile/);
+    const moved = objdump('   0:\tlwz     r0,20(r3)\n   4:\tmr      r4,r0\n   8:\tblr\n');
+    expect(decompile('f', moved, o0, voidF(['s32 *', 's32'])).source).not.toMatch(/volatile/);
+    // an extension that stays in r0 is still the discard: `(short)*vp;`
+    const cast = objdump('   0:\tlwz     r0,0(r3)\n   4:\textsh   r0,r0\n   8:\tblr\n');
+    expect(decompile('f', cast, o0, voidF(['volatile s32 *'])).source).toMatch(/volatile s32/);
+  });
+
   test('keeps-unused-reads is a fact of the level, per family', () => {
     expect(['0', '0,p', '1', '4,p', '4,s'].map((l) => keepsUnusedReadsAt('mwcc', l))).toEqual([
       true,

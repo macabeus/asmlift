@@ -1643,6 +1643,24 @@ function liftOnce(
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`).
   const discarded = new Set<Value>();
   const discardReg = target.compilerBehaviors.discardsUnusedReadsInto;
+  // A load the discard register took whose value a move or an extension then put in ANOTHER
+  // register is not discarded: mwcc at -O0,p loads `signed char x; x = p[5]; x = 0;` as
+  // `lwz r0,20(r3)` + `extsb r31,r0`, a narrowing assignment to a home, plain — and a volatile
+  // twin is the same instructions. `extended` maps an extension the discard register still holds
+  // to the load it extends (`(char)*vp;` is `extsb r0,r0`, which stays discarded).
+  const extended = new Map<Value, Value>();
+  const homed = new Set<Value>();
+  const moved = (d: string, from: Value, to: Value) => {
+    const load = discarded.has(from) ? from : extended.get(from);
+    if (load === undefined) {
+      return;
+    }
+    if (d === discardReg) {
+      extended.set(to, load);
+    } else {
+      homed.add(load);
+    }
+  };
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
     const op = mkOp('ret', { operands: returnOperands(bi) });
@@ -2397,9 +2415,12 @@ function liftOnce(
           assertOrdinaryMem(s);
           emitOpaqueDest(ins);
           break;
-        case 'mr':
-          write(d, read(s));
+        case 'mr': {
+          const v = read(s);
+          moved(d, v, v);
+          write(d, v);
           break; // move register (or rD,rS,rS)
+        }
         case 'li':
           // SDA21 ADDRESS formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21:
           // the linker rewrites it to `addi rD,r13,SYM@sdarx`, i.e. rD = &SYM. Same relocation and
@@ -2638,11 +2659,11 @@ function liftOnce(
         // Sign-extend byte/halfword to 32 bits: `extsb rD,rS` = (s32)(s8)rS, `extsh` = (s32)(s16)rS.
         // `sext` carries the NARROW width; structure/backend spell it `(s8)e` / `(s16)e`.
         case 'extsb':
-          emit('sext', d, [read(s)], { width: 8 });
+        case 'extsh': {
+          const v = read(s);
+          moved(d, v, emit('sext', d, [v], { width: ins.mnemonic === 'extsb' ? 8 : 16 }));
           break;
-        case 'extsh':
-          emit('sext', d, [read(s)], { width: 16 });
-          break;
+        }
         case 'slw':
           emitBin('shl', d, read(s), read(t));
           break;
@@ -3022,7 +3043,7 @@ function liftOnce(
     atUndeclaredCall: calls.heldAtUndeclaredCall,
     compared,
     spilled: ssa.frameWrites,
-    discarded,
+    discarded: new Set([...discarded].filter((v) => !homed.has(v))),
     declarations,
   });
 
