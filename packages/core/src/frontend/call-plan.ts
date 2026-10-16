@@ -514,9 +514,16 @@ export function callDeclarations(
       // register as its own value would honour the declaration by handing the callee one half.
       const wideAt = declared.widths.findIndex((w) => w > 32);
       if (wideAt >= 0) {
+        // `widths` holds argument words — a hidden struct-return pointer ahead of the declared
+        // list, and each word of a struct passed by value — and the text names the parameter
+        const hidden = declared.returned !== undefined && declared.returned !== 'register' ? 1 : 0;
+        const param =
+          wideAt -
+          hidden -
+          (declared.byValue ?? []).filter((b) => b.word < wideAt).reduce((n, b) => n + b.words - 1, 0);
         fail(
           `cannot lift '${name}': one half of a 64-bit value would be handed to '${callee}' — its parameter ` +
-            `${wideAt + 1} is declared wider than a register, and this frontend passes each argument ` +
+            `${param + 1} is declared wider than a register, and this frontend passes each argument ` +
             'register as its own value rather than building the pair the ABI passes it in',
         );
       }

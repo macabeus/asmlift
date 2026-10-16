@@ -511,7 +511,9 @@ describe('a hidden pointer that is not a local of this frame declines', () => {
 // `void sretf(float x){ struct SF s = mkf(x); gF = s.f; }` passes x in a1 (`mfc1 a1,$f12`)
 describe('what the lowering does not build still declines', () => {
   test('a 64-bit argument after the hidden pointer', () => {
-    expect(() => lift('sretil', KMC_SRETIL, MIPS_GCC)).toThrow(/one half of a 64-bit value would be handed to 'mkil'/);
+    expect(() => lift('sretil', KMC_SRETIL, MIPS_GCC)).toThrow(
+      /one half of a 64-bit value would be handed to 'mkil' — its parameter 2 is declared wider/,
+    );
   });
 
   test('a float argument', () => {
