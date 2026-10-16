@@ -1688,6 +1688,9 @@ function liftOnce(
     // materializes everything else.
     const rawFrame = (r: string | undefined): Value | undefined =>
       frame === null || r === undefined || isZero(r) || isStackPtr(r) || r === 'gp' ? undefined : readVar(r, bi);
+    /** Whether `r` holds a pending `%hi` half here (indexed or not), unguarded. */
+    const halfIn = (r: string | undefined): boolean =>
+      r !== undefined && !isZero(r) && !isStackPtr(r) && r !== 'gp' && highHalves.has(readVar(r, bi));
     // `slt`-family results, so a following `beqz`/`bnez` can fold into one compare.
     //
     // Keyed by the SSA VALUE the compare produced, never by its register. Keying by register is the
@@ -1855,9 +1858,10 @@ function liftOnce(
           if (ins.reloc?.type === 'R_MIPS_LO16') {
             const at = pairLoHalf(ins, s, imm(ins, t));
             // The base of a jump table a dispatch reads from outside its block is no value but the
-            // table base (frontend/jump-table.ts), which only that dispatch may take.
-            const table = { sym: ins.reloc.sym, addend: at };
-            if (tableBases.wants(table)) {
+            // table base (frontend/jump-table.ts), which only that dispatch may take — and a table
+            // base is never indexed.
+            const table = { sym: ins.reloc.sym, addend: at.off };
+            if (at.index === undefined && tableBases.wants(table)) {
               const base = mkValue(T.unk(32));
               tableBases.record(base, table, ins.addr);
               write(d, base);
@@ -1894,6 +1898,25 @@ function liftOnce(
           if ((cs === undefined) !== (ct === undefined)) {
             movedCaptures.add((cs === undefined ? rt : rs)!);
             write(d, deferSum((cs ?? ct)!, read(cs === undefined ? s : t)));
+            break;
+          }
+          // `lui rH,%hi(S); addu rH,rH,idx; l*/s* x,%lo(S)(rH)` is ido's, KMC's and GCC 2.7.2's
+          // `S[i]`: a runtime byte index added BETWEEN the halves. rD is still no value — it is an
+          // indexed half (frontend/high-half.ts `index`) that only its `%lo` completes, to
+          // `gaddr(S) + idx` at the halves' combined offset. Either operand order is accepted, as
+          // `addu` commutes (every compiler measured puts rH first). Both sources halves refuse: two
+          // addresses added is not an address.
+          const [hs, ht] = [halfIn(s), halfIn(t)];
+          if (hs && ht) {
+            throw new FrontendUnsupportedError(
+              `${site(ins)} adds a high half to another high half — the sum of two addresses is not an address this frontend can write down`,
+            );
+          }
+          if (hs || ht) {
+            const idx = read(hs ? t! : s);
+            const v = mkValue(T.unk(32));
+            highHalves.index(v, readVar(hs ? s : t!, bi), idx, { addr: ins.addr, mnemonic: ins.mnemonic });
+            write(d, v);
             break;
           }
           emitBin('add', d, read(s), read(t));
@@ -2178,8 +2201,8 @@ function liftOnce(
     // the join, which is not a half and refuses.
     const foldLoHalf = (ins: Instr, rHi: string, loImm: number): { base: Value; off: number } =>
       addressAt(ins, pairLoHalf(ins, rHi, loImm));
-    /** `&SYM + off`, for the `%lo` at `ins` that completed it. */
-    const addressAt = (ins: Instr, off: number): { base: Value; off: number } => {
+    /** `&SYM + off` (`+ index` for an indexed half), for the `%lo` at `ins` that completed it. */
+    const addressAt = (ins: Instr, { off, index }: { off: number; index?: Value }): { base: Value; off: number } => {
       const lo = ins.reloc!;
       if (off < 0) {
         throw new FrontendUnsupportedError(
@@ -2187,14 +2210,21 @@ function liftOnce(
             `byte offset ${off} — an address BELOW the symbol (an index-biased array base) is not yet modelled`,
         );
       }
-      return { base: emitGaddr(lo.sym), off };
+      const g = emitGaddr(lo.sym);
+      if (index === undefined) {
+        return { base: g, off };
+      }
+      const v = mkValue(T.unk(32));
+      ops.push(mkOp('add', { operands: [g, index], results: [v] }));
+      return { base: v, off };
     };
-    /** The byte offset into its symbol of the address the `%lo` at `ins` completes, the pair proven. */
-    const pairLoHalf = (ins: Instr, rHi: string, loImm: number): number => {
+    /** The byte offset into its symbol of the address the `%lo` at `ins` completes, the pair proven,
+     *  and the runtime byte index an indexed half added between the halves. */
+    const pairLoHalf = (ins: Instr, rHi: string, loImm: number): { off: number; index?: Value } => {
       relocTaken = true;
       const hi = highHalves.pair(site(ins), rHi, readVar(rHi, bi), ins.reloc!.sym);
       // The addend is split across the two instruction immediates because MIPS is REL.
-      return hi.addend + loImm;
+      return { off: hi.addend + loImm, index: hi.index };
     };
     // A displacement memory operand whose base is a `%hi` half: the global's address plus the
     // access offset. A non-`%lo` instruction returns null (the caller falls through to the ordinary

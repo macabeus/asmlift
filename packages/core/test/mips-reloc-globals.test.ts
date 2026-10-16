@@ -12,7 +12,7 @@ import { expect, test } from 'vitest';
 
 import type { AsmData } from '../src/frontend/asmdata';
 import { decompile } from '../src/pipeline';
-import { MIPS_GCC } from '../src/target';
+import { MIPS_GCC, MIPS_IDO } from '../src/target';
 
 // A minimal AsmData carrying only .text relocations (the bridge reads nothing else).
 const relocs = (rs: { off: number; type: string; sym: string }[]): AsmData => ({
@@ -169,8 +169,9 @@ test('two high halves of ONE symbol pair by VALUE, not by address order', () => 
 });
 
 test('a high half READ AS DATA refuses, naming the lui that produced it', () => {
-  // `addu v0,v0,a0` reads the half as an operand. It is a link-time placeholder, not a number.
-  const asm = '00000000 <asdata>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\tjr\tra\n   c:\tnop\n';
+  // `or v0,v0,a0` reads the half as an operand. It is a link-time placeholder, not a number. (An
+  // `addu` of an index is the one non-`%lo` reader that keeps it a half; see below.)
+  const asm = '00000000 <asdata>:\n   0:\tlui\tv0,0x0\n   4:\tor\tv0,v0,a0\n   8:\tjr\tra\n   c:\tnop\n';
   const rs = relocs([{ off: 0, type: 'R_MIPS_HI16', sym: 'gBase' }]);
   expect(() => decompile('asdata', asm, MIPS_GCC, { asmData: rs })).toThrow(/high half of 'gBase'/);
 });
@@ -295,4 +296,156 @@ test('a symbol read SIGNED and UNSIGNED at offset 0 has no bare spelling', () =>
   expect(src).toContain('*(s16 *)&gPun');
   expect(src).toContain('*(u16 *)&gPun');
   expect(src).not.toContain('gPun + gPun');
+});
+
+// ── An index between the halves ─────────────────────────────────────────────────────────────────
+// ido 7.1, KMC GCC and GCC 2.7.2 all address `S[i]` as `lui rH,%hi(S); addu rH,rH,idx;
+// l*/s* x,%lo(S)(rH)`: the scaled byte index is added to the HIGH half, and the `%lo` completes the
+// sum. The index sits outside both relocated immediates, so the `%lo` carry is the same with and
+// without it and the address is exactly `S + lo + idx` (frontend/high-half.ts `index`). Every input
+// below is the named compiler's own output at the benchmark's flags, relocation offsets and all,
+// unless it says it is hand-written.
+
+const lift = (name: string, asm: string, rs: { off: number; type: string; sym: string }[], ido = false) =>
+  decompile(name, asm, ido ? MIPS_IDO : MIPS_GCC, { asmData: relocs(rs) }).source;
+const pair = (sym: string, hi: number, lo: number) => [
+  { off: hi, type: 'R_MIPS_HI16', sym },
+  { off: lo, type: 'R_MIPS_LO16', sym },
+];
+
+test('an index added to the high half completes as S[i] (ido u32 load)', () => {
+  // `u32 hi_u32(u32 i) { return gTab[i]; }`
+  const asm =
+    '00000000 <hi_u32>:\n   0:\tsll\tt6,a0,0x2\n   4:\tlui\tv0,0x0\n   8:\taddu\tv0,v0,t6\n   c:\tjr\tra\n  10:\tlw\tv0,0(v0)\n';
+  expect(lift('hi_u32', asm, pair('gTab', 4, 0x10), true)).toContain('((s32 *)&gTab)[a0]');
+});
+
+test('an indexed STORE through `at` completes as S[i] = v (KMC/GCC 2.7.2 u32 store)', () => {
+  // `void st_u32(u32 i, u32 v) { gTab[i] = v; }` — a store's high half lives in the assembler temporary
+  const asm =
+    '00000000 <st_u32>:\n   0:\tsll\ta0,a0,0x2\n   4:\tlui\tat,0x0\n   8:\taddu\tat,at,a0\n   c:\tjr\tra\n  10:\tsw\ta1,0(at)\n';
+  expect(lift('st_u32', asm, pair('gTab', 4, 0x10))).toMatch(/\(\(s32 \*\)&gTab\)\[a0\] = a1;/);
+});
+
+test('an indexed s16 load and a struct FIELD ride the %lo immediate (GCC 2.7.2)', () => {
+  // `return gTab[i];` on `s16 gTab[]`, and `return gArr[i].b;` on an 8-byte struct (lhu 2(v0))
+  const s16 =
+    '00000000 <ld_s16>:\n   0:\tsll\ta0,a0,0x1\n   4:\tlui\tv0,0x0\n   8:\taddu\tv0,v0,a0\n   c:\tjr\tra\n  10:\tlh\tv0,0(v0)\n';
+  expect(lift('ld_s16', s16, pair('gTab', 4, 0x10))).toContain('((s16 *)&gTab)[a0]');
+  const fld =
+    '00000000 <fld>:\n   0:\tsll\ta0,a0,0x3\n   4:\tlui\tv0,0x0\n   8:\taddu\tv0,v0,a0\n   c:\tjr\tra\n  10:\tlhu\tv0,2(v0)\n';
+  expect(lift('fld', fld, pair('gArr', 4, 0x10))).toContain('((struct Elem0 *)&gArr)[a0].field_2');
+});
+
+test('a pre-summed 2-D index, and a load and a store of two globals, each pair to their own symbol (ido)', () => {
+  // `return g2[i][j];` on `u8 g2[4][8]`: ido sums (i << 3) + j first, then adds it to the half
+  const twoD =
+    '00000000 <two_d>:\n   0:\tsll\tt6,a0,0x3\n   4:\taddu\tt7,t6,a1\n   8:\tlui\tv0,0x0\n   c:\taddu\tv0,v0,t7\n  10:\tjr\tra\n  14:\tlbu\tv0,0(v0)\n';
+  expect(lift('two_d', twoD, pair('g2', 8, 0x14), true)).toContain('((u8 *)&g2)[(a0 << 3) + a1]');
+  // `gA[i] = gB[j];` on u16 tables
+  const ldst =
+    '00000000 <ldst>:\n   0:\tsll\tt6,a1,0x1\n   4:\tlui\tt7,0x0\n   8:\taddu\tt7,t7,t6\n   c:\tlhu\tt7,0(t7)\n' +
+    '  10:\tsll\tt8,a0,0x1\n  14:\tlui\tat,0x0\n  18:\taddu\tat,at,t8\n  1c:\tjr\tra\n  20:\tsh\tt7,0(at)\n';
+  const src = lift('ldst', ldst, [...pair('gB', 4, 0xc), ...pair('gA', 0x14, 0x20)], true);
+  expect(src).toMatch(
+    /\(\(u16 \*\)&gA\)\[a0\] = \(\(u16 \*\)&gB\)\[a1\]|= \(\(u16 \*\)&gB\)\[a1\];[\s\S]*\(\(u16 \*\)&gA\)\[a0\] =/,
+  );
+});
+
+test('each arm of a branch pairs its own indexed half, the constant element in the %lo (ido)', () => {
+  // `if (c) return gTab[i]; return gTab[i + 1];` — the `i + 1` arm reads `lw v0,4(v0)`
+  const asm =
+    '00000000 <cond>:\n   0:\tbeqz\ta1,1c <cond+0x1c>\n   4:\tsll\tt7,a0,0x2\n   8:\tsll\tt6,a0,0x2\n' +
+    '   c:\tlui\tv0,0x0\n  10:\taddu\tv0,v0,t6\n  14:\tjr\tra\n  18:\tlw\tv0,0(v0)\n' +
+    '  1c:\tlui\tv0,0x0\n  20:\taddu\tv0,v0,t7\n  24:\tlw\tv0,4(v0)\n  28:\tjr\tra\n  2c:\tnop\n';
+  const src = lift('cond', asm, [...pair('gTab', 0xc, 0x18), ...pair('gTab', 0x1c, 0x24)], true);
+  expect(src).toMatch(/\[a0 \+ 1\]/);
+  expect(src).toMatch(/\[a0\]/);
+});
+
+test('the index may come FIRST in the addu — it commutes (hand-written: no compiler measured emits it)', () => {
+  const asm =
+    '00000000 <rev>:\n   0:\tsll\tt6,a0,0x2\n   4:\tlui\tv0,0x0\n   8:\taddu\tv0,t6,v0\n   c:\tjr\tra\n  10:\tlw\tv0,0(v0)\n';
+  expect(lift('rev', asm, pair('gTab', 4, 0x10), true)).toContain('((s32 *)&gTab)[a0]');
+});
+
+test('two indexes off ONE high half each complete their own access (hand-written)', () => {
+  // No compiler measured shares one `lui` between two indexed accesses, but each derivation is its
+  // own `S + idx`, so the sum is exact either way.
+  const asm =
+    '00000000 <shared>:\n   0:\tlui\tv1,0x0\n   4:\taddu\tt0,v1,a0\n   8:\taddu\tt1,v1,a1\n' +
+    '   c:\tlbu\tv0,0(t0)\n  10:\tlbu\tt2,0(t1)\n  14:\tjr\tra\n  18:\taddu\tv0,v0,t2\n';
+  const rs = [
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gTab' },
+    { off: 0xc, type: 'R_MIPS_LO16', sym: 'gTab' },
+    { off: 0x10, type: 'R_MIPS_LO16', sym: 'gTab' },
+  ];
+  const src = lift('shared', asm, rs, true);
+  expect(src).toMatch(/\[a0\] \+ [\s\S]*\[a1\]/);
+});
+
+// The refusals. Every one is hand-written: no compiler measured emits these shapes, and each would
+// otherwise lift a placeholder as a number or drop the address it was building.
+test('an indexed half READ AS A VALUE refuses', () => {
+  const asm =
+    '00000000 <v>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\tor\tv0,v0,a1\n   c:\tjr\tra\n  10:\tnop\n';
+  expect(() => lift('v', asm, [{ off: 0, type: 'R_MIPS_HI16', sym: 'gTab' }])).toThrow(
+    /v0 holds the high half of 'gTab' \(the 'addu' at 0x4\) and is read as a value/,
+  );
+});
+
+test('an indexed half RETURNED with no %lo refuses: the address is never completed', () => {
+  const asm = '00000000 <r>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\tjr\tra\n   c:\tnop\n';
+  expect(() => lift('r', asm, [{ off: 0, type: 'R_MIPS_HI16', sym: 'gTab' }])).toThrow(
+    /'addu' at 0x4 carries the '%hi' half of 'gTab' and no modelled instruction consumes its '%lo' half/,
+  );
+});
+
+test('an indexed half carried into a MERGE refuses', () => {
+  // one arm leaves the indexed half in v0, the other an ordinary value; the join's `lw` cannot pair
+  const asm =
+    '00000000 <m>:\n   0:\tlui\tv0,0x0\n   4:\tbeqz\ta1,10 <m+0x10>\n   8:\taddu\tv0,v0,a0\n   c:\tmove\tv0,a2\n' +
+    '  10:\tlw\tv0,0(v0)\n  14:\tjr\tra\n  18:\tnop\n';
+  const rs = [
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gTab' },
+    { off: 0x10, type: 'R_MIPS_LO16', sym: 'gTab' },
+  ];
+  expect(() => lift('m', asm, rs)).toThrow(/'%lo' half of 'gTab' but v0 holds no high half here/);
+});
+
+test('two high halves added together, and a second index chained on an indexed half, refuse', () => {
+  const both =
+    '00000000 <b>:\n   0:\tlui\tv0,0x0\n   4:\tlui\tv1,0x0\n   8:\taddu\tv0,v0,v1\n   c:\tjr\tra\n  10:\tlw\tv0,0(v0)\n';
+  const rsBoth = [
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gA' },
+    { off: 4, type: 'R_MIPS_HI16', sym: 'gB' },
+    { off: 0x10, type: 'R_MIPS_LO16', sym: 'gA' },
+  ];
+  expect(() => lift('b', both, rsBoth)).toThrow(/adds a high half to another high half/);
+  const chain =
+    '00000000 <c>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\taddu\tv0,v0,a1\n   c:\tjr\tra\n  10:\tlw\tv0,0(v0)\n';
+  expect(() => lift('c', chain, pair('gTab', 0, 0x10))).toThrow(/adds a second index to the high half of 'gTab'/);
+});
+
+test('an indexed half completed by the %lo of ANOTHER symbol refuses', () => {
+  const asm = '00000000 <o>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\tjr\tra\n   c:\tlw\tv0,0(v0)\n';
+  const rs = [
+    { off: 0, type: 'R_MIPS_HI16', sym: 'gA' },
+    { off: 0xc, type: 'R_MIPS_LO16', sym: 'gB' },
+  ];
+  expect(() => lift('o', asm, rs)).toThrow(/'%lo' half of 'gB' but v0 holds the high half of 'gA'/);
+});
+
+test('an UNRECOVERED jump-table dispatch through an indexed half still declines', () => {
+  // `lui at,%hi(jtbl); addu at,at,t6; lw t6,%lo(jtbl)(at); jr t6` with no `.rodata` contents to
+  // recover the table from: the load lifts, and the jump through what it loaded must refuse.
+  const asm =
+    '00000000 <sw>:\n   0:\tsltiu\tat,a0,4\n   4:\tbeqz\tat,28 <sw+0x28>\n   8:\tsll\tt6,a0,0x2\n' +
+    '   c:\tlui\tat,0x0\n  10:\taddu\tat,at,t6\n  14:\tlw\tt6,0(at)\n  18:\tjr\tt6\n  1c:\tnop\n' +
+    '  20:\tjr\tra\n  24:\tli\tv0,1\n  28:\tjr\tra\n  2c:\tmove\tv0,zero\n';
+  const rs = [
+    { off: 0xc, type: 'R_MIPS_HI16', sym: '.rodata' },
+    { off: 0x14, type: 'R_MIPS_LO16', sym: '.rodata' },
+  ];
+  expect(() => lift('sw', asm, rs, true)).toThrow(/indirect jump 'jr t6' at 0x18/);
 });
