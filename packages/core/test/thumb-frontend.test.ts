@@ -738,10 +738,11 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     // reaches it here.
     const hi =
       'f:\n\tpush\t{r4, r5, r6, r7, lr}\n\tmov\tr7, r8\n\tpush\t{r7}\n\tldr\tr0, [sp, #0x28]\n\tadd\tr0, r0, r7\n\tbx\tlr\n';
-    // NINE parameters — the stack argument holds slot 8, and the r8 live-in is an uninitialised local
+    // NINE parameters — the stack argument holds slot 8, and what r7 holds is an uninitialised
+    // local: r7's own, since `mov r7, r8` only stages r8 for its push (thumb.ts `prologueSavedRegs`)
     expect(decompile('f', hi, ARMV4T_AGBCC).source).toBe(
       's32 f(s32 a0, s32 a1, s32 a2, s32 a3, s32 a4, s32 a5, s32 a6, s32 a7, s32 a8) {\n' +
-        '    s32 uninit_r8;\n    return a8 + uninit_r8;\n}\n',
+        '    s32 uninit_r7;\n    return a8 + uninit_r7;\n}\n',
     );
     // The same at the low end, where a phantom `r4` would otherwise outrank argument 5. SAVED, which
     // the `hi` case already is, and which the rule requires: the next test is the other side.

@@ -346,6 +346,163 @@ describe('what a join must meet before an entry value is a local', () => {
   });
 });
 
+// AN UNDEFINED VALUE ANOTHER LOCAL COPIED. A join's edge copy of an undefined value is dropped only
+// where nothing else reads that value: there the path leaves the join's local unassigned, which is
+// as undefined as the machine's word. Where the value is ALSO read elsewhere (directly, or through
+// a second join), the path's local holds that same value on the machine, so the copy is spelled.
+// Each of these lifted with a local left unassigned on one arm where the machine holds a value
+// another read sees.
+describe('an undefined value another local copied is assigned on that arm', () => {
+  // `int x, z; if (c) z = x; else z = 7; return z - x;` at ido7.1 -O2: z lives in v1, loaded from
+  // x's word 4(sp) on one arm, and x is read from 4(sp) again for the subtraction. c != 0 returns 0.
+  test('a register caching one frame word that is also read directly (ido7.1)', () => {
+    expect(
+      src(
+        [
+          '0:\tbeqz\ta0,10 <f+0x10>',
+          '4:\taddiu\tsp,sp,-8',
+          '8:\tb\t14 <f+0x14>',
+          'c:\tlw\tv1,4(sp)',
+          '10:\tli\tv1,7',
+          '14:\tlw\tt6,4(sp)',
+          '18:\taddiu\tsp,sp,8',
+          '1c:\tjr\tra',
+          '20:\tsubu\tv0,v1,t6',
+        ],
+        MIPS_IDO,
+      ),
+    ).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_sp4;\n    if (a0 != 0) {\n        v0 = uninit_sp4;\n    } else {\n' +
+        '        v0 = 7;\n    }\n    return v0 - uninit_sp4;\n}\n',
+    );
+  });
+
+  // The same source at gcc 2.7.2 (KMC) -O2: x lives in v1 and the arm is `move v0,v1`.
+  test('a register copying another register that is also read directly (gcc 2.7.2 KMC)', () => {
+    expect(
+      src(['0:\tbeqz\ta0,c <f+0xc>', '4:\tli\tv0,7', '8:\tmove\tv0,v1', 'c:\tjr\tra', '10:\tsubu\tv0,v0,v1'], MIPS_GCC),
+    ).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_v1;\n    if (a0 != 0) {\n        v0 = uninit_v1;\n    } else {\n' +
+        '        v0 = 7;\n    }\n    return v0 - uninit_v1;\n}\n',
+    );
+  });
+
+  // `int x, y, z; if (c) { x = y; z = x; } else { y = x; z = 7; } if (d) y = z; return x - y;` at
+  // ido7.1 -O2: z's register v0 takes x's word on the c arm, which the subtraction also reads; c != 0
+  // and d != 0 return 0.
+  test('a third register copying one of two cached frame words (ido7.1)', () => {
+    expect(
+      src(
+        [
+          '0:\tbeqz\ta0,18 <f+0x18>',
+          '4:\taddiu\tsp,sp,-8',
+          '8:\tlw\ta0,0(sp)',
+          'c:\tmove\tv1,a0',
+          '10:\tb\t24 <f+0x24>',
+          '14:\tmove\tv0,a0',
+          '18:\tlw\tv1,4(sp)',
+          '1c:\tli\tv0,7',
+          '20:\tmove\ta0,v1',
+          '24:\tbeqzl\ta1,34 <f+0x34>',
+          '28:\tsubu\tv0,v1,a0',
+          '2c:\tmove\ta0,v0',
+          '30:\tsubu\tv0,v1,a0',
+          '34:\tjr\tra',
+          '38:\taddiu\tsp,sp,8',
+        ],
+        MIPS_IDO,
+      ),
+    ).toBe(
+      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 v3;\n    s32 uninit_sp4;\n' +
+        '    s32 uninit_sp0;\n    if (a0 != 0) {\n        v1 = uninit_sp0;\n        v0 = uninit_sp0;\n' +
+        '        v2 = uninit_sp0;\n    } else {\n        v0 = uninit_sp4;\n        v2 = 7;\n        v1 = uninit_sp4;\n' +
+        '    }\n    if (a1 != 0) {\n        v3 = v0 - v2;\n    } else {\n        v3 = v0 - v1;\n    }\n    return v3;\n}\n',
+    );
+  });
+
+  // `int x, y, r; if (c) r = x; else r = y; if (d) x = 1; else y = 2; return r + x + y;` at ido7.1
+  // -O2: r is x on the c arm, and x's register keeps x's word wherever d is 0.
+  test('a copy whose source register keeps the word on the other arm of a later branch (ido7.1)', () => {
+    expect(
+      src(
+        [
+          '0:\taddiu\tsp,sp,-8',
+          '4:\tbeqz\ta0,1c <f+0x1c>',
+          '8:\tmove\ta2,a1',
+          'c:\tlw\ta0,4(sp)',
+          '10:\tlw\ta1,0(sp)',
+          '14:\tb\t28 <f+0x28>',
+          '18:\tmove\tv1,a0',
+          '1c:\tlw\ta1,0(sp)',
+          '20:\tlw\ta0,4(sp)',
+          '24:\tmove\tv1,a1',
+          '28:\tbeqzl\ta2,3c <f+0x3c>',
+          '2c:\tli\ta1,2',
+          '30:\tb\t3c <f+0x3c>',
+          '34:\tli\ta0,1',
+          '38:\tli\ta1,2',
+          '3c:\taddu\tt6,v1,a0',
+          '40:\taddu\tv0,t6,a1',
+          '44:\tjr\tra',
+          '48:\taddiu\tsp,sp,8',
+        ],
+        MIPS_IDO,
+      ),
+    ).toBe(
+      's32 f(s32 a0, s32 a1) {\n    s32 v0;\n    s32 v1;\n    s32 v2;\n    s32 uninit_sp0;\n    s32 uninit_sp4;\n' +
+        '    if (a0 != 0) {\n        v0 = uninit_sp4;\n    } else {\n        v0 = uninit_sp0;\n    }\n' +
+        '    if (a1 != 0) {\n        v2 = uninit_sp0;\n        v1 = 1;\n    } else {\n        v1 = uninit_sp4;\n' +
+        '        v2 = 2;\n    }\n    return v0 + v1 + v2;\n}\n',
+    );
+  });
+
+  // The same source at gcc 2.7.2 (KMC) -O2: x lives in v1 and r in v0 (`move v0,v1` on the c arm);
+  // y stays in a2, which reads as a parameter, as it did before uninitialised locals.
+  test("a register's own join keeps the value another register copied (gcc 2.7.2 KMC)", () => {
+    expect(
+      src(
+        [
+          '0:\tbeqz\ta0,c <f+0xc>',
+          '4:\tmove\tv0,a2',
+          '8:\tmove\tv0,v1',
+          'c:\tbeqzl\ta1,18 <f+0x18>',
+          '10:\tli\ta2,2',
+          '14:\tli\tv1,1',
+          '18:\taddu\tv0,v0,v1',
+          '1c:\tjr\tra',
+          '20:\taddu\tv0,v0,a2',
+        ],
+        MIPS_GCC,
+      ),
+    ).toBe(
+      's32 f(s32 a0, s32 a1, s32 a2) {\n    s32 v0;\n    s32 v1;\n    s32 uninit_v1;\n    if (a0 != 0) {\n' +
+        '        v0 = uninit_v1;\n    } else {\n        v0 = a2;\n    }\n    if (a1 != 0) {\n        v1 = 1;\n' +
+        '    } else {\n        v1 = uninit_v1;\n        a2 = 2;\n    }\n    return v0 + v1 + a2;\n}\n',
+    );
+  });
+
+  // `int x, z; z = x; if (c) x = 5; return x * 2 + z;` at gcc 2.7.2 (KMC) -O2: x lives in v0, its
+  // entry value is read as z (`move v1,v0`), and the join that keeps it on c == 0 is x's own.
+  test("a register's own join, its entry value also read directly (gcc 2.7.2 KMC)", () => {
+    expect(
+      src(
+        [
+          '0:\tbeqz\ta0,c <f+0xc>',
+          '4:\tmove\tv1,v0',
+          '8:\tli\tv0,5',
+          'c:\tsll\tv0,v0,0x1',
+          '10:\tjr\tra',
+          '14:\taddu\tv0,v0,v1',
+        ],
+        MIPS_GCC,
+      ),
+    ).toBe(
+      's32 f(s32 a0) {\n    s32 v0;\n    s32 uninit_v0;\n    if (a0 != 0) {\n        v0 = 5;\n    } else {\n' +
+        '        v0 = uninit_v0;\n    }\n    return (v0 << 1) + uninit_v0;\n}\n',
+    );
+  });
+});
+
 describe('the frame half: words of the frame the function pushed', () => {
   // `uninit_join` at ido7.1 -O2: r lives in 4(sp) of an 8-byte leaf frame, pushed in the first
   // branch's delay slot.

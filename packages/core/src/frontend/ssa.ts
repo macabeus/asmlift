@@ -1001,6 +1001,21 @@ export function makeSsaBuilder(
     }
   };
 
+  /** Where each value is read: the joins it is an edge argument of, and `null` for an op's operand. */
+  const readersOf = (): Map<Value, Set<Value | null>> => {
+    const readers = new Map<Value, Set<Value | null>>();
+    const note = (v: Value, r: Value | null) => (readers.get(v) ?? readers.set(v, new Set()).get(v)!).add(r);
+    for (const blk of irBlocks) {
+      for (const op of blk.ops) {
+        op.operands.forEach((v) => note(v, null));
+        for (const s of op.successors) {
+          s.args.forEach((v, i) => note(v, s.block.params[i]));
+        }
+      }
+    }
+    return readers;
+  };
+
   /** Each non-entry block param → the argument every in-edge passes it, in edge order. */
   const joinArgs = (): Map<Value, Value[]> => {
     const m = new Map<Value, Value[]>();
@@ -1033,7 +1048,8 @@ export function makeSsaBuilder(
    *  in r8 and moves it to a low register to use it (`synthetic:uninit_spill`), and a spill writes a
    *  register's local to a word — one source variable under two keys, where a spelled copy would
    *  invent an assignment the source never wrote. So `x = y` between two locals in registers
-   *  (`uninit_both_saved` on agbcc) still collapses into one undefined value.
+   *  (`uninit_both_saved` on agbcc) still collapses into one undefined value where nothing else
+   *  reads it (below).
    *
    *  A REGISTER CACHING TWO FRAME WORDS. ido7.1 -O2 gives an uninitialised local its word and then
    *  caches it in a register across a loop or an arm: `int x, y; if (c) x = y; else y = x;
@@ -1044,7 +1060,22 @@ export function makeSsaBuilder(
    *  and the arm join inside it, in `for (…) if (i & 1) x = y;`) take the undefined values of TWO
    *  OR MORE frame words between them, the register is no one local's home, and each such edge
    *  argument is marked `copied` too: every one is a load the machine ran. Of ONE frame word only
-   *  (an arm that leaves the cached local as it was) the web is that local's, and stays as it was. */
+   *  (an arm that leaves the cached local as it was) the web is that local's, and stays as it was —
+   *  so long as nothing else reads the value, below.
+   *
+   *  A VALUE READ ELSEWHERE IS A RELATION, whatever the keys. Dropping an edge copy leaves the
+   *  join's local unassigned on that path, which is as undefined as the machine's word only where
+   *  that word is read through this join alone. `int x, z; if (c) z = x; else z = 7; return z - x;`
+   *  at ido7.1 caches x's word 4(sp) in z's register v1 on one arm and reads 4(sp) again for the
+   *  subtraction, so `c != 0` returns 0; with the copy dropped, z's local is unassigned there and
+   *  the C returns garbage. So an undefined edge argument, of any storage and into a join of any
+   *  key (registers too: gcc 2.7.2 keeps x in v1 and runs `move v0,v1`), is a copy here whenever
+   *  ANOTHER JOIN also takes it, since that join's local and this one hold the same value on the
+   *  machine. One the function also reads directly is left to the structurer, which names the
+   *  value as the join's local when it can (`g = x; if (c) x = 5; return x;`) and spells the copy
+   *  when it cannot (structure.ts `undefCarriesNothing`); `collapseUndefinedJoins` keeps such a
+   *  join for it. What agbcc's prologue relates by staging a high register for its push is not
+   *  this function's copy and never reaches here (thumb.ts `prologueSavedRegs`). */
   const markCopiedUndefs = () => {
     const defOf = defOpMap(fn);
     const replaced = new Set<Value>();
@@ -1107,6 +1138,8 @@ export function makeSsaBuilder(
         }
       }
     }
+    const readers = readersOf();
+    const joinedElsewhere = (u: Value, p: Value) => [...(readers.get(u) ?? [])].some((r) => r !== null && r !== p);
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         for (const s of op.successors) {
@@ -1116,14 +1149,14 @@ export function makeSsaBuilder(
           s.block.params.forEach((p, i) => {
             const d = defOf.get(s.args[i]);
             const key = phiKey.get(p);
-            if (
-              d?.opcode !== 'undef' ||
-              d.attrs.copied === true ||
-              key === undefined ||
-              d.attrs.key === key ||
-              (slotKeyOffset(key) === null && !mixedRegisterJoins.has(p)) ||
-              slotKeyOffset(String(d.attrs.key)) === null
-            ) {
+            if (d?.opcode !== 'undef' || d.attrs.copied === true || key === undefined) {
+              return;
+            }
+            const frameCopy =
+              d.attrs.key !== key &&
+              slotKeyOffset(String(d.attrs.key)) !== null &&
+              (slotKeyOffset(key) !== null || mixedRegisterJoins.has(p));
+            if (!frameCopy && !joinedElsewhere(s.args[i], p)) {
               return;
             }
             const copy = mkOp('undef', {
@@ -1168,7 +1201,14 @@ export function makeSsaBuilder(
     if (undefs.size === 0) {
       return;
     }
-    const doomed = new Set([...incoming.keys()].filter((p) => incoming.get(p)!.length > 0));
+    // A join one of whose undefined arguments is also read directly keeps it: the fresh value it
+    // would collapse into is a second undefined value where the machine holds one, and the
+    // structurer spells the edge copy instead (`markCopiedUndefs`, A VALUE READ ELSEWHERE).
+    const readers = readersOf();
+    const readDirectly = (a: Value) => undefs.has(a) && (readers.get(a)?.has(null) ?? false);
+    const doomed = new Set(
+      [...incoming.keys()].filter((p) => incoming.get(p)!.length > 0 && !incoming.get(p)!.some(readDirectly)),
+    );
     for (let changed = true; changed;) {
       changed = false;
       for (const p of doomed) {

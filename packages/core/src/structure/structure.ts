@@ -4791,11 +4791,31 @@ export function structure(
   const NO_COPIES_AT_A_DEF: ReadonlyMap<Op, Stmt[]> = new Map();
   /** The `atDef` copies `sideEffects` has spelled — `assertSunkCopiesPlaced`'s input. */
   const sunkCopiesEmitted = new Set<Stmt>();
-  const undefCarriesNothing = (arg: Value, name: string, pred: Block): boolean => {
+  const undefCarriesNothing = (arg: Value, name: string, pred: Block, coalescing = false): boolean => {
     // A `copied` undef is another storage's content moved into this one (`x = y` of two
     // uninitialised locals): the machine ran that move, so the copy is spelled.
     if (defs.get(arg)?.opcode !== 'undef' || defs.get(arg)!.attrs.copied === true) {
       return false;
+    }
+    // AN UNDEFINED VALUE READ UNDER ANOTHER NAME IS A RELATION. Dropping the copy leaves `name`
+    // holding whatever it held, which equals the undefined value only where nothing else reads that
+    // value: `int x, z; z = x; if (c) x = 5; return x * 2 + z;` at gcc 2.7.2 keeps x in v0 and
+    // reads it as z too, so on `c == 0` the join's local IS z, and an unassigned `v0` beside
+    // `uninit_v0` loses that. So the copy is dropped only where every other read of the value goes
+    // through `name` itself: the coalesced undef below (which the coalescing test asks before it
+    // has renamed it), or edge copies into joins of the same name.
+    if (!coalescing) {
+      const op = defs.get(arg)!;
+      for (const site of useSitesOf.get(arg) ?? []) {
+        if (site.op.operands.includes(arg) && undefName.get(op) !== name) {
+          return false;
+        }
+        for (const s of site.op.successors) {
+          if (s.args.some((a, i) => a === arg && varName.get(s.block.params[i]) !== name)) {
+            return false;
+          }
+        }
+      }
     }
     const writesBefore = (home: Block | undefined): boolean =>
       home === undefined || home === pred || reachFrom(home).has(pred);
@@ -4857,7 +4877,7 @@ export function structure(
       readIn.size === 0 ||
       !/^v\d+$/.test(name) ||
       globalNames.has(name) ||
-      ![...intoJoin, ...readIn].every((b) => undefCarriesNothing(u, name, b))
+      ![...intoJoin, ...readIn].every((b) => undefCarriesNothing(u, name, b, true))
     ) {
       continue;
     }

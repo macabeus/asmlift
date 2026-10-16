@@ -27,7 +27,7 @@ import { T } from '../src/ir/types';
 import type { Expr, SFn, Stmt } from '../src/l3/ast';
 import { ARM_DISJOINT_GATES, COALESCE_GATES, armDisjointUnder, coalesceUnder } from '../src/l3/coalesce';
 import { orderSlotLocals } from '../src/l3/slotorder';
-import { raiseRecovered, structureChecked } from '../src/pipeline';
+import { decompile, raiseRecovered, structureChecked } from '../src/pipeline';
 import { type StructureOptions, structure } from '../src/structure/structure';
 import { ARMV4T_AGBCC, MIPS_GCC, MIPS_IDO, PPC_MWCC, structureOptionsFor } from '../src/target';
 
@@ -382,6 +382,17 @@ test('and no `undef` local reaches the ordering: the emitted tree carries none, 
     'v5@4',
     'v6@8',
   ]);
+});
+
+// The default arm leaves every local as it was, and agbcc homed two of them in r5 and r8 — where the
+// prologue's `mov r5, r8; push {r5, …}` staged r8 for its save. That copy is the save's: lifted, it
+// made both locals one undefined value, which an undefined value two joins take must spell as an
+// assignment on that arm (frontend/ssa.ts `markCopiedUndefs`), relating two locals the source never
+// related. thumb.ts `prologueSavedRegs` hands the staging `mov` to the fill to skip.
+test("the prologue's high-register staging copy relates no two uninitialised locals", () => {
+  const out = decompile('uninit_spill', read('agbcc-uninit-spill.s'), ARMV4T_AGBCC, {}).source;
+  expect(out).not.toMatch(/default:/);
+  expect(out).not.toMatch(/= uninit_/);
 });
 
 // THE `SFn.locals` DOC IS ONE BLOCK, and this is the guard that keeps it one. TypeScript attaches
