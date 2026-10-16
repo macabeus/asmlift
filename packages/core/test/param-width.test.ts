@@ -22,7 +22,7 @@ import { T } from '../src/ir/types';
 import { verify } from '../src/ir/verify';
 import { without } from '../src/l3/gates';
 import type { FnProto } from '../src/proto';
-import { fuseParamPairs } from '../src/raise/pairparams';
+import { fuseParamPairs, refuseSplitWideParams } from '../src/raise/pairparams';
 import {
   PARAM_READER_WIDTH_GATES,
   PARAM_WIDTH_GATES,
@@ -443,6 +443,36 @@ describe('the declaration witness', () => {
     const self: FnProto = { params: ['long long', 's16', 's32 *'] };
     expect(narrowEntryParams(fn, AGBCC_WITNESS, self)).toBe(1);
     expect(fn.blocks[0].params[1].type).toEqual(T.int(16, true));
+  });
+
+  // A DECLARED 64-BIT PARAMETER LEFT IN TWO WORDS REFUSES. `int f(long long a) { return a != 0; }`
+  // is an `or` of the halves on every compiler, so no `concat` names the pair and the lift would
+  // print `s32 f(s32 a0, s32 a1)` against the caller's own declaration.
+  test('a declared `long long` the lift reads as two words refuses; one it fused does not', () => {
+    const split = parse(`fn f {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk32 = or %0, %1
+  ret %2
+}
+`);
+    verify(split);
+    expect(fuseParamPairs(split)).toBe(false);
+    expect(() => refuseSplitWideParams(split, { params: ['long long'] })).toThrow(
+      /parameter 1 as 'long long', and this lift reads the two halves of a 64-bit value as two word parameters/,
+    );
+    // no declaration, or a word one, asks nothing
+    expect(() => refuseSplitWideParams(split, undefined)).not.toThrow();
+    expect(() => refuseSplitWideParams(split, { params: ['s32', 's32'] })).not.toThrow();
+    const fused = parse(`fn f {
+^bb0(%0: unk32, %1: unk32):
+  %2: unk64 = concat %0, %1
+  %3: unk32 = lo32 %2
+  ret %3
+}
+`);
+    verify(fused);
+    expect(fuseParamPairs(fused)).toBe(true);
+    expect(() => refuseSplitWideParams(fused, { params: ['s64'] })).not.toThrow();
   });
 
   // …and the declaration still VETOES, which is the gate this width now reaches. A `long long`

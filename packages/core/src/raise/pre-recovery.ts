@@ -34,7 +34,7 @@ import { recognizeMagicDivision } from './magicdiv';
 import { recognizeMemberArrays } from './memberarrays';
 import { rerootNarrowReads } from './narrow';
 import { type MergeShape, mergeShapes, narrowBlockLocals } from './narrowlocal';
-import { fuseParamPairs } from './pairparams';
+import { fuseParamPairs, refuseSplitWideParams } from './pairparams';
 import { PARAM_READER_WIDTH_GATES, PARAM_WIDTH_GATES, narrowEntryParams, narrowExtendedParams } from './paramwidth';
 import { type BranchShortCircuitOptions, recognizeBranchShortCircuit, recognizeShortCircuit } from './shortcircuit';
 import { recognizeSoftDiv } from './softdiv';
@@ -179,7 +179,17 @@ export const PRE_RECOVERY_PASSES: PreRecoveryPass[] = [
   // AFTER it, because the `concat`s it reads are the ones the frontend built at the call the pass
   // above has just rewritten — and because a pair the rewrite refused is a pair this must not fuse
   // into a signature either.
-  { id: 'pairparams', run: (fn) => fuseParamPairs(fn), dce: false },
+  // It also refuses a declared 64-bit parameter the lift left in halves, which is the one place the
+  // fusion's answer is final (`refuseSplitWideParams`).
+  {
+    id: 'pairparams',
+    run: (fn, self) => {
+      const fused = fuseParamPairs(fn);
+      refuseSplitWideParams(fn, self);
+      return fused;
+    },
+    dce: false,
+  },
   // AFTER `const`, which folds a shift pair over a constant to the constant it computes, and BEFORE
   // the three array recognizers, whose input this pass produces: `shl(ext(x), k)` is an element
   // scale they legalize and the fused pair is not. `dce: true` — the `shl` a fold leaves readerless.
