@@ -573,8 +573,8 @@ const PARAM_AREA_AT = 8;
 
 /** The register save or restore routine a `bl` calls (runtime-helpers.ts `RegisterSaveRoutines`),
  *  named by its `R_PPC_REL24`, or null for any other `bl`. Only the relocation names it: a `bl` with
- *  none — a linked image, or an objdump without `-r` — is an ordinary call to an unnamed target, and
- *  the frame address its routine would have consumed then refuses at the end of `lift`. */
+ *  none — a linked image, or an objdump without `-r` — is no routine, and `case 'bl'` refuses it
+ *  there as a call with no callee symbol. */
 const saveRoutineOf = (target: TargetDescription, ins: Instr) =>
   ins.mnemonic === 'bl' && ins.reloc?.type === 'R_PPC_REL24'
     ? registerSaveRoutineOf(target.registerSaveRoutines, ins.reloc.sym)
@@ -734,53 +734,223 @@ function r1Displacements(blocks: PpcBlock[], succIdx: number[][]): Map<Instr, nu
   return at;
 }
 
-/** THE LINK REGISTER, per instruction that needs the return address in it: the `bl` that may have
- *  overwritten it on some path from the entry, with no `mtlr` since. Absent where every path still
- *  carries the return address, or one an `mtlr` put back.
+/** What the link-register proof knows at one point: what the link register holds (`lr`: null where
+ *  it is still the caller's return address on every path, else the instruction that put something
+ *  else there on some path), which general registers hold a copy of the return address on every
+ *  path (`regs`), and whether the link register's save word does (`slot`). */
+interface LrState {
+  readonly lr: Instr | null;
+  readonly regs: ReadonlySet<string>;
+  readonly slot: boolean;
+}
+
+/** EVERY RETURN OF THIS FUNCTION JUMPS THROUGH THE CALLER'S RETURN ADDRESS, or the lift declines —
+ *  PowerPC's half of what `refuseReturnsNotThroughCallersLr` asks of Thumb (frontend/thumb.ts).
  *
- *  Asked of two readers, about different writers:
- *  - an `mflr`, after ANY `bl`. Its copy is taken as the return address (`return-address` in
- *    `nonValues`), and after a `bl` it is the address that follows the `bl` instead.
- *  - a return (`blr`, or a conditional one, which jumps through it), after a `bl` into a register
- *    SAVE ROUTINE only. This frontend erases that call (`saveRoutine`) on the premise that it
- *    overwrites only a link register already copied out, and this is what checks the premise. An
- *    ordinary call lifts as a call, and claims nothing about the link register.
- *  No compiler emits either violation; hand-written asm can. */
-function linkRegisterOverwrites(
+ *  `blr` and a conditional return (`beqlr`) read as returns from the instruction alone, and each is
+ *  one only where the link register holds the address this function was called with. A forward
+ *  dataflow over the blocks tracks where that address is:
+ *    • the link register holds it at entry; a `bl` writes it (a call, and a register save or restore
+ *      routine too), and an `mtlr rS` puts back whatever rS holds;
+ *    • `mflr rD` copies it into rD, `mr` copies it on, and any other write to a register loses it —
+ *      an ordinary call loses every register the EABI lets a callee destroy, a save routine none, and
+ *      a GPR restore routine the r{first}..r31 it reloads, as `lmw` does;
+ *    • a `stw` of a register holding it into the link register's save word (`LR_SAVE_WORD`, named
+ *      from the entry r1 through `r1At`) puts it in that word, and a `lwz` from that word copies it
+ *      back out. Any other store reaching those bytes, a store through r1 at an unknown depth, a call
+ *      made before the frame push (the callee saves ITS return address in that very word), and a
+ *      save routine whose frame address could reach it all overwrite it.
+ *  Paths meet by agreement: the link register, a register or the word holds the address only if it
+ *  does on every path in.
+ *
+ *  So `li r3,7; mtlr r4; blr`, `lwz r0,0(r3); mtlr r0; blr`, `mflr r0; addi r0,r0,4; mtlr r0; blr`, an
+ *  `mtlr` on one path only, and a `bl` with no saved address put back before the `blr` all decline,
+ *  where mwcc's `mflr r0; stw r0,N+4(r1)` … `lwz r0,N+4(r1); mtlr r0; blr` (2.3.3 saves at `4(r1)`
+ *  before the push) and a leaf that never names the link register are returns. No compiler emits a
+ *  violation; hand-written asm can, and it would otherwise lift as a C `return`.
+ *
+ *  Returned per instruction that reads the link register as the return address where it may not be
+ *  that, with the instruction that put something else there on some path: a return, and an `mflr`
+ *  after a `bl` (its copy would be taken for the return address, and is the address after the `bl`
+ *  instead). Absent everywhere else. Blocks no path from the entry reaches are not asked: they never
+ *  run.
+ *
+ *  NOT ASKED: a store through a register holding a frame address (`addi r3,r1,N`) is not traced to
+ *  the save word. A compiler addresses that word only through r1. */
+function linkRegisterProof(
   blocks: PpcBlock[],
   succIdx: number[][],
-  isRoutine: (ins: Instr) => boolean,
+  r1At: ReadonlyMap<Instr, number | string>,
+  target: TargetDescription,
 ): Map<Instr, Instr> {
   const at = new Map<Instr, Instr>();
-  type Lr = { any: Instr | null; routine: Instr | null };
-  const into: Array<Lr | undefined> = blocks.map(() => undefined);
-  into[0] = { any: null, routine: null };
+  const destroyed = new Set(['r0', ...target.argRegs, ...target.callerSaved]);
+  const frameReg = target.registerSaveRoutines?.frameReg;
+  const join = (a: LrState, b: LrState): LrState => ({
+    lr: a.lr ?? b.lr,
+    regs: new Set([...a.regs].filter((r) => b.regs.has(r))),
+    slot: a.slot && b.slot,
+  });
+  const same = (a: LrState, b: LrState) =>
+    a.lr === b.lr && a.slot === b.slot && a.regs.size === b.regs.size && [...a.regs].every((r) => b.regs.has(r));
+  // The bytes `[lo, hi)` a store through r1 writes, as entry-r1 offsets, or null where r1's depth is
+  // not known there or the address takes an index register.
+  const storedRange = (ins: Instr): [number, number] | null => {
+    const d = r1At.get(ins);
+    const mem = ins.ops[1];
+    if (typeof d !== 'number' || !mem?.includes('(')) {
+      return null;
+    }
+    const mn = ins.mnemonic;
+    const width =
+      mn === 'stmw'
+        ? 4 * (32 - Number(ins.ops[0].slice(1)))
+        : /^stb/.test(mn)
+          ? 1
+          : /^sth/.test(mn)
+            ? 2
+            : /^stfd/.test(mn)
+              ? 8
+              : 4;
+    const lo = parseMem(mem).off + d;
+    return [lo, lo + width];
+  };
+  const namesR1 = (ins: Instr) => ins.ops.some((op) => (op.includes('(') ? parseMem(op).base : op) === 'r1');
+
+  const run = (bi: number, inState: LrState, record: boolean): LrState => {
+    let { lr, slot } = inState;
+    const regs = new Set(inState.regs);
+    let frameAddress: number | null = null;
+    for (const ins of [...blocks[bi].body, ...(blocks[bi].branch ? [blocks[bi].branch] : [])]) {
+      const mn = ins.mnemonic;
+      const [d, s] = ins.ops;
+      if (
+        record &&
+        ((mn === 'mflr' && lr?.mnemonic === 'bl') || ((isReturn(ins) || isCondReturn(ins)) && lr !== null))
+      ) {
+        at.set(ins, lr!);
+      }
+      if (mn === 'bl') {
+        const routine = saveRoutineOf(target, ins);
+        lr = ins;
+        if (routine) {
+          // A save routine stores below its frame address; a restore routine writes no memory.
+          const bytes = routine.fpr ? 8 : 4;
+          if (
+            !routine.restore &&
+            (frameAddress === null ||
+              (frameAddress - bytes * (32 - routine.first) < LR_SAVE_WORD + 4 && frameAddress > LR_SAVE_WORD))
+          ) {
+            slot = false;
+          }
+          // A GPR restore routine reloads r{first}..r31 from their save words, as `lmw` does: none of
+          // them holds the return address after it, whatever was copied into them before.
+          if (routine.restore && !routine.fpr) {
+            for (const r of [...regs]) {
+              if (Number(r.slice(1)) >= routine.first) {
+                regs.delete(r);
+              }
+            }
+          }
+        } else {
+          for (const r of destroyed) {
+            regs.delete(r);
+          }
+          if (r1At.get(ins) === 0 || typeof r1At.get(ins) !== 'number') {
+            slot = false;
+          }
+        }
+        continue;
+      }
+      if (mn === 'mtlr') {
+        lr = regs.has(d) ? null : ins;
+        continue;
+      }
+      if (mn === 'mflr') {
+        if (lr === null) {
+          regs.add(d);
+        } else {
+          regs.delete(d);
+        }
+        continue;
+      }
+      if (/^st/.test(mn)) {
+        if (namesR1(ins)) {
+          const range = storedRange(ins);
+          if (mn === 'stw' && range !== null && range[0] === LR_SAVE_WORD && regs.has(d)) {
+            slot = true;
+          } else if (range === null || (range[0] < LR_SAVE_WORD + 4 && range[1] > LR_SAVE_WORD)) {
+            slot = false;
+          }
+        }
+        // An update form writes its base register.
+        if (/^st\w*ux?$/.test(mn)) {
+          regs.delete(s?.includes('(') ? parseMem(s).base : s);
+        }
+        continue;
+      }
+      if (/^(cmp|tw|mt|dc|ic|b|sync|isync|eieio)/.test(mn)) {
+        continue;
+      }
+      if (mn === 'lmw' || /^lsw/.test(mn)) {
+        const first = mn === 'lmw' ? Number(d.slice(1)) : 0;
+        for (const r of [...regs]) {
+          if (Number(r.slice(1)) >= first) {
+            regs.delete(r);
+          }
+        }
+        continue;
+      }
+      const copies =
+        (mn === 'mr' && regs.has(s)) ||
+        (mn === 'or' && s === ins.ops[2] && regs.has(s)) ||
+        (mn === 'lwz' &&
+          slot &&
+          s?.includes('(') &&
+          parseMem(s).base === 'r1' &&
+          typeof r1At.get(ins) === 'number' &&
+          parseMem(s).off + (r1At.get(ins) as number) === LR_SAVE_WORD);
+      if (frameReg !== undefined && mn === 'addi' && d === frameReg && s === 'r1' && !ins.reloc) {
+        const depth = r1At.get(ins);
+        frameAddress = typeof depth === 'number' ? depth + parseImm(ins.ops[2]) : null;
+      } else if (d === frameReg) {
+        frameAddress = null;
+      }
+      if (isReg(d)) {
+        regs.delete(d);
+      }
+      // A load with update writes its base register too.
+      if (/^l\w*ux?$/.test(mn) && mn !== 'lux') {
+        regs.delete(s?.includes('(') ? parseMem(s).base : s);
+      }
+      if (copies && isReg(d)) {
+        regs.add(d);
+      }
+    }
+    return { lr, regs, slot };
+  };
+
+  const into: Array<LrState | undefined> = blocks.map(() => undefined);
+  into[0] = { lr: null, regs: new Set(), slot: false };
   const work = [0];
   while (work.length) {
     const bi = work.pop()!;
-    let { any, routine } = into[bi]!;
-    for (const ins of [...blocks[bi].body, ...(blocks[bi].branch ? [blocks[bi].branch] : [])]) {
-      const by = ins.mnemonic === 'mflr' ? any : isReturn(ins) || isCondReturn(ins) ? routine : null;
-      if (by !== null) {
-        at.set(ins, by);
-      }
-      if (ins.mnemonic === 'bl') {
-        any = ins;
-        routine = isRoutine(ins) ? ins : routine;
-      } else if (ins.mnemonic === 'mtlr') {
-        any = routine = null;
-      }
-    }
+    const out = run(bi, into[bi]!, false);
     for (const s of succIdx[bi]) {
-      // MAY: one path that overwrote it is enough; the `bl` named is the last one on the first such path.
-      const old = into[s];
-      const next = { any: old?.any ?? any, routine: old?.routine ?? routine };
-      if (old === undefined || next.any !== old.any || next.routine !== old.routine) {
+      const prev = into[s];
+      const next = prev === undefined ? out : join(prev, out);
+      if (prev === undefined || !same(prev, next)) {
         into[s] = next;
         work.push(s);
       }
     }
   }
+  // Ask each reader once the states are settled, so a reason names the fixed point's writer.
+  into.forEach((st, bi) => {
+    if (st !== undefined) {
+      run(bi, st, true);
+    }
+  });
   return at;
 }
 
@@ -1134,7 +1304,7 @@ function liftOnce(
   };
   const fail = ppcRefusal;
   const { blocks, succIdx, r1At, savedRegs, calls, frame } = liftPrelude(name, instrs, target, prototypes, jts);
-  const lrOverwrittenBy = linkRegisterOverwrites(blocks, succIdx, (ins) => Boolean(saveRoutineOf(target, ins)));
+  const lrUnproven = linkRegisterProof(blocks, succIdx, r1At, target);
 
   const preds: number[][] = blocks.map(() => []);
   blocks.forEach((_, i) => {
@@ -1252,18 +1422,31 @@ function liftOnce(
     fail(
       `cannot lift '${name}': stack pointer r1 used as data (address-taken local / frame arithmetic) — not supported`,
     );
-  /** An `mflr` or a return reached by a `bl` with no `mtlr` since (`linkRegisterOverwrites`): what
-   *  the link register holds there is the address after that `bl`, not this function's return
-   *  address. */
+  /** An `mflr` reached by a `bl` with no `mtlr` since, or a return the link-register proof could
+   *  not show jumps through the caller's return address (`linkRegisterProof`). */
   const refuseOverwrittenLink = (ins: Instr) => {
-    const by = lrOverwrittenBy.get(ins);
-    if (by !== undefined) {
+    const by = lrUnproven.get(ins);
+    const at = (i: Instr) => `'${i.mnemonic}' at 0x${i.addr.toString(16)}`;
+    if (by === undefined) {
+      return;
+    }
+    if (ins.mnemonic === 'mflr') {
       fail(
-        `cannot lift '${name}': the '${ins.mnemonic}' at 0x${ins.addr.toString(16)} reads the link register the ` +
-          `'bl' at 0x${by.addr.toString(16)} overwrote on some path, with no 'mtlr' since — the return address ` +
-          `is lost there`,
+        `cannot lift '${name}': the ${at(ins)} reads the link register the ${at(by)} overwrote on some path, ` +
+          `with no 'mtlr' since — the return address is lost there`,
       );
     }
+    if (by.mnemonic === 'bl') {
+      fail(
+        `cannot lift '${name}': the ${at(ins)} may not return through the caller's link register — the ` +
+          `${at(by)} overwrote it on some path, and no 'mtlr' put the saved return address back`,
+      );
+    }
+    fail(
+      `cannot lift '${name}': the ${at(ins)} may not return through the caller's link register — on some ` +
+        `path the ${at(by)} put ${by.ops[0]} there, which does not hold the return address an 'mflr' copied ` +
+        `out or its reload from the link register's save word`,
+    );
   };
   /** DEFINITIONS THAT ARE NOT VALUES: the frame bookkeeping this frontend erases. Each kind is
    *  written into a register as an ordinary SSA definition, so SSA answers whether one reaches a use,
@@ -1279,9 +1462,9 @@ function liftOnce(
    *    routine (`saveRoutineOf`), which takes it in the target's `registerSaveRoutines.frameReg`, so
    *    that register is the only destination deferred; every other `addi rD,r1,N` refuses where it
    *    stands. Any other use is the frame read as data, and refuses as the `addi` itself would. One
-   *    no routine took refuses too, even where nothing reads it (`assertNonValuesConsumed`): a `bl`
-   *    to the routine that carries no relocation (a linked image, or objdump without `-r`) is lowered
-   *    as an ordinary call, which never reads r11 and destroys the registers the routine preserves.
+   *    no routine took refuses too, even where nothing reads it (`assertNonValuesConsumed`). A `bl`
+   *    to the routine that carries no relocation (a linked image, or objdump without `-r`) never gets
+   *    that far: it is no routine, and `case 'bl'` refuses it as a call with no callee symbol.
    *  - `restored`: the caller's value a restore puts back in a callee-saved register
    *    (`restoreFrom`). No C value names it, so it has no consumer.
    *  - `return-address`: what `mflr rD` copies out of the link register, with the address of the
@@ -1747,7 +1930,7 @@ function liftOnce(
     };
     // A `bl` into a register save or restore routine is frame bookkeeping, not a call: it writes no
     // register this function reads (only the link register, already copied out — which
-    // `linkRegisterOverwrites` checks), so nothing is destroyed and r0 keeps the return address
+    // `linkRegisterProof` checks), so nothing is destroyed and r0 keeps the return address
     // `mflr` put there. A SAVE records a save slot per word, at the routine's fixed offsets below the
     // frame address in r11; a RESTORE must find the same register in every word it reloads. It
     // refuses where:
@@ -2048,7 +2231,15 @@ function liftOnce(
             saveRoutine(ins, routine);
             break;
           }
-          const sym = ins.reloc?.sym ?? 'func';
+          // A `bl` no relocation names is a call the assembler resolved to an offset in this
+          // section — into this function's own body, or to a neighbour — and has no name to call.
+          if (ins.reloc?.type !== 'R_PPC_REL24') {
+            throw new PpcUnsupportedError(
+              `cannot lift '${name}': the 'bl' at 0x${ins.addr.toString(16)} has no callee symbol — no ` +
+                `R_PPC_REL24 relocation names it, so it calls an offset in this section, which has no name to call it by`,
+            );
+          }
+          const sym = ins.reloc.sym;
           calls.lower({
             callee: sym,
             ssa,
@@ -2651,6 +2842,12 @@ function liftOnce(
     // blocks (dense 0..N-1) then the default (last successor). The `cmplwi`/`bgt` and the elided
     // dispatch (`lis…lwzx;mtctr;bctr`) are subsumed.
     const jt = br ? jts.get(br.addr) : undefined;
+    // Asked before the jump-table lowering: a table whose bound is a conditional return
+    // (`cmplwi rS,N; bgtlr`) lowers that return as the switch's default edge, and it jumps through
+    // whatever the link register holds there exactly as a plain `bgtlr` does.
+    if (br && (isReturn(br) || isCondReturn(br))) {
+      refuseOverwrittenLink(br);
+    }
     if (jt) {
       if (jt.hoisted) {
         tableBases.demand(jt.hoisted, bi, jt.bctrAddr);
@@ -2708,9 +2905,6 @@ function liftOnce(
       const cond = mkCmp(ops, 'icmp_ne', dec, constVal(0));
       ops.push(mkOp('cond_br', { operands: [cond], successors: succIdx[bi].map((j) => succ(j)) }));
       return;
-    }
-    if (br && (isReturn(br) || isCondReturn(br))) {
-      refuseOverwrittenLink(br);
     }
     if (br && (isCond(br) || isCondReturn(br))) {
       const base = isCondReturn(br) ? condReturnBase(br)! : br.mnemonic;

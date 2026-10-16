@@ -1191,6 +1191,11 @@ describe('a class may not outlive the message it classifies', () => {
     ['clobbered-value', 'is read on a path where a call has destroyed it', 'packages/core/src/frontend/ssa.ts'],
     ['hidden-input', 'no join meets it with a definition of its own', 'packages/core/src/frontend/ssa.ts'],
     ['return-address', 'copies out is used as a value', 'packages/core/src/frontend/ppc.ts'],
+    ['return-target', "may not return through the caller's link register", 'packages/core/src/frontend/ppc.ts'],
+    ['return-target', "may not return through the caller's ", 'packages/core/src/frontend/mips.ts'],
+    ['unnamed-callee', 'has no callee symbol — no ', 'packages/core/src/frontend/ppc.ts'],
+    ['unnamed-callee', 'has no callee symbol — no R_MIPS_26 relocation names it', 'packages/core/src/frontend/mips.ts'],
+    ['kernel-register', 'the ABI reserves it to the kernel', 'packages/core/src/frontend/mips.ts'],
     ['far-jump', 'would drop the lr write a', 'packages/core/src/frontend/thumb.ts'],
     ['far-jump', 'does not target a code label of this function', 'packages/core/src/frontend/thumb.ts'],
     ['indirect-call', 'an indirect call', 'packages/core/src/frontend/ppc.ts'],
@@ -1261,8 +1266,8 @@ describe('the classifier is measured against the messages core can throw, not on
   const RESIDUE_BY_FILE: [file: string, count: number][] = [
     ['frontend/thumb.ts', 31],
     ['structure/structure.ts', 21],
-    ['frontend/mips.ts', 15],
     ['frontend/ppc.ts', 15],
+    ['frontend/mips.ts', 14],
     ['frontend/splat.ts', 8],
     ['frontend/disasm.ts', 7],
     ['frontend/call-plan.ts', 5],
@@ -1270,7 +1275,7 @@ describe('the classifier is measured against the messages core can throw, not on
     ['frontend/format.ts', 1],
     ['pipeline.ts', 1],
   ];
-  const RESIDUE_TOTAL = 106;
+  const RESIDUE_TOTAL = 105;
 
   // …AND THE WHOLE PARAGRAPH, clause by clause. The residue is a fraction of "every message core
   // can throw", and a gate on the denominator alone leaves the numerator and the eight per-file

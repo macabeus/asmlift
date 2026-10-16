@@ -429,13 +429,16 @@ describe('what the local area refuses', () => {
 
 describe('a word stored and never read back', () => {
   // fn_1_3994's shape at mwcc_242_81 -O0,p: `sp8 = p->unk0` in a loop, never read
+  // A call saves the link register around it, which a function that makes none does not need.
   const dead = (call: string[]) => [
     'stwu    r1,-32(r1)',
+    ...(call.length > 0 ? ['mflr    r0', 'stw     r0,36(r1)'] : []),
     'stw     r31,28(r1)',
     ...call,
     'lwz     r0,0(r3)',
     'stw     r0,8(r1)',
     'lwz     r31,28(r1)',
+    ...(call.length > 0 ? ['lwz     r0,36(r1)', 'mtlr    r0'] : []),
     'addi    r1,r1,32',
     'blr',
   ];

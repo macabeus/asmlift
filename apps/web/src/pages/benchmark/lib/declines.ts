@@ -26,12 +26,12 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 231 distinct decline messages (the texts reached by
+// `packages/core/src` throws 237 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
 // its string-literal pieces and replacing every interpolation with a placeholder — a subclass is a
-// separate NAME to that harvest, so it is listed separately here too). 106 of them classify as "other". Some belong
+// separate NAME to that harvest, so it is listed separately here too). 105 of them classify as "other". Some belong
 // there — a `disasm.ts` "symbol not found in the disassembly" and a `format.ts` frontend mismatch
 // are input errors, not capability gaps — but most are gaps nothing in the corpus has reached yet:
 //
@@ -57,11 +57,11 @@
 //                               (no subscript spells it), and three internal invariants (an ambiguous
 //                               array offset, a parallel-copy bug, an access a recovered union has no
 //                               view for)
-//   frontend/mips.ts        15  a relocation with an addend, an address below the symbol, a
-//                               non-numeric immediate, the caller's value a restore writes
-//                               read as a value (at the read, or through a merge), five refusals
-//                               about a disassembly the reader cannot account for, a `jal` no
-//                               relocation names, one relocated against a section, one in a delay
+//   frontend/mips.ts        14  a relocation with an addend, an address below the symbol, a
+//                               non-numeric immediate, the caller's value a restore writes read as
+//                               a value (at the read, or through a merge), five refusals about a
+//                               disassembly the reader cannot account for, a `jal` relocated
+//                               against a section, one in a delay
 //                               slot, one whose own slot is not the next word of its block, and a
 //                               `j` to another function (a tail call)
 //   frontend/ppc.ts         15  `stwu` with update, a relocation on a stack-pointer adjust, a branch
@@ -75,9 +75,8 @@
 //                               save or restore routine is not the bookkeeping it looks like (a
 //                               number no runtime routine has, the floating-point routines, no
 //                               single frame address in r11, r1's depth unknown there), control
-//                               falling off the end, an `mflr` or a return reading a link
-//                               register a `bl` overwrote, and a `b` out of the function (a tail
-//                               call)
+//                               falling off the end, an `mflr` reading a link register a `bl`
+//                               overwrote, and a `b` out of the function (a tail call)
 //   frontend/splat.ts        8  a data directive in the code stream, a tail call / cross-function
 //                               branch, an unparsable constant expression, and a magnitude with a
 //                               leading zero (octal to the assembler)
@@ -655,6 +654,37 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     key: 'return-address',
     label: 'The return address read as a value (an `mflr` copy used as data)',
     pattern: /copies out is used as a value/,
+  },
+  {
+    // A return the frontend could not show jumps to the caller's return address: on PowerPC a `blr`
+    // after an `mtlr` of anything but the address an `mflr` copied out (or its reload from the link
+    // register's save word), or after a `bl` with no such `mtlr` since (`linkRegisterProof` in
+    // `frontend/ppc.ts`); on MIPS a `jr ra` where `ra` may hold anything else, or a call whose delay
+    // slot writes `ra` (`refuseReturnsNotThroughCallersRa` in `frontend/mips.ts`). Hand-written asm
+    // only — no compiler emits it — and its rows are the decline witnesses `synthetic:retmtlr:*` and
+    // `synthetic:retjr:*`.
+    // Thumb's own refusal of the same thing names an indirect jump, and stays in the residue.
+    key: 'return-target',
+    label: "Returns that may not jump to the caller's return address (hand-written asm)",
+    pattern: /may not return through the caller's (?:link register|return address)/,
+  },
+  {
+    // A call no relocation names: the assembler resolved its target to an offset in this section,
+    // so there is no callee to call by name. PowerPC's `bl` (`frontend/ppc.ts` `case 'bl'`) and
+    // MIPS's `jal` (`frontend/mips.ts`) say it in the same words; a `jal` relocated against a
+    // section is the MIPS sibling and stays in the residue. Hand-written asm only, and its rows are
+    // the decline witnesses `synthetic:bllocal:*`.
+    key: 'unnamed-callee',
+    label: 'Calls no relocation names (a `bl` or `jal` to an offset in this section)',
+    pattern: /has no callee symbol — no R_\w+ relocation names it/,
+  },
+  {
+    // A read of a register the ABI reserves to the kernel (`TargetDescription.kernelRegs`, O32's
+    // `k0`/`k1`), which an exception handler may overwrite at any instruction (`frontend/mips.ts`
+    // `read`). Hand-written asm only, and its rows are the decline witnesses `synthetic:k0read:*`.
+    key: 'kernel-register',
+    label: 'Kernel registers read as a value (O32 `k0`/`k1`)',
+    pattern: /the ABI reserves it to the kernel/,
   },
   {
     // agbcc spells a branch past Thumb's ±2 KB reach as `bl .Lx @far jump` (thumb.md `jump`,

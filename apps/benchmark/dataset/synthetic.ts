@@ -10341,6 +10341,55 @@ export const SYNTHETIC: SynthSpec[] = [
       bvcg: { returnsVoid: true },
     },
   },
+
+  // ── THE RETURN PROOF: hand-written asm whose return jumps somewhere other than the caller ──
+  // `retmtlr` and `retjr` exist to be DECLINED, as `tax_gprel` does. `blr` and `jr ra` are returns by
+  // their name alone, so a function that first puts something else in the link register or in `ra`
+  // would read as a C `return 7;` that, compiled, returns to the caller instead of to the address the
+  // function chose (frontend/ppc.ts `linkRegisterProof`, frontend/mips.ts
+  // `refuseReturnsNotThroughCallersRa`). No compiler emits the shape, so only `asm` can carry it
+  // into the tier: an `asm` function on CodeWarrior, and on GCC an `__asm__` statement before the
+  // `return` (gcc 2.7.2 does not know the statement writes `ra`, so its own `jr ra` follows it:
+  // `move ra,a1; jr ra; li v0,7` on both GCC builds, measured).
+  //
+  // The mwcc row sets its own `cflags` because two of its three builds have no canonical set; an
+  // `asm` function is the same object at any level. IDO 7.1 has no inline `asm`, so `ido7.1` is
+  // pinned by core's unit tests only (`packages/core/test/mips-return-proof.test.ts`).
+  {
+    sym: 'retmtlr',
+    src: 'asm int retmtlr(int a, int b)\n{\n    nofralloc\n    li r3, 7\n    mtlr r4\n    blr\n}',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['baseline'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'int retmtlr(int a, int b);',
+  },
+  {
+    sym: 'retjr',
+    src: 'int retjr(int a, int b)\n{\n    __asm__("move $31,$5");\n    return 7;\n}',
+    features: ['baseline'],
+    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int retjr(int a, int b);',
+  },
+  // `bllocal` and `k0read` are declined witnesses of the same kind, one per toolchain family. A `bl`
+  // into the function's own body carries no relocation, so it has no callee to name (lifting it as a
+  // call to an invented `func` is wrong C); a read of k0, which an exception handler may overwrite at
+  // any instruction, is not the value written there (`return a0;` is wrong C). Each declines
+  // (frontend/ppc.ts `case 'bl'`, frontend/mips.ts `read` with `TargetDescription.kernelRegs`).
+  {
+    sym: 'bllocal',
+    src: 'asm int bllocal(int a)\n{\n    nofralloc\n    mflr r31\n    bl next\nnext:\n    mtlr r31\n    li r3, 7\n    blr\n}',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['baseline'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'int bllocal(int a);',
+  },
+  {
+    sym: 'k0read',
+    src: 'int k0read(int a)\n{\n    int r;\n    __asm__("move $26,%1\\n\\tmove %0,$26" : "=r"(r) : "r"(a));\n    return r;\n}',
+    features: ['baseline'],
+    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int k0read(int a);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
