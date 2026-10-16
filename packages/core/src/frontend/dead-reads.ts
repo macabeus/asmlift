@@ -187,7 +187,7 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
   {
     id: 'keeps-unused-reads',
     why: 'at these flags the compiler keeps a plain read nothing uses, and this one is not in the register it discards a volatile read into',
-    sound: false,
+    sound: true,
     guardedBy: 'dead-reads.test.ts: keeps-unused-reads: mwcc -O0 keeps a dead assignment plain',
     rejects: (c) =>
       c.target.compilerBehaviors.keepsUnusedReads === true &&
@@ -254,7 +254,7 @@ export const DEAD_READ_GATES: readonly Gate<DeadRead>[] = [
   {
     id: UNDECIDED,
     why: 'at these flags the compiler keeps a plain read nothing uses and has no register of its own for a volatile one, so the lift refuses',
-    sound: false,
+    sound: true,
     guardedBy:
       'dead-reads.test.ts: undecided-at-keeping-level: a keeping level on a compiler with no discard register refuses a read no evidence claims',
     rejects: (c) =>
