@@ -10,6 +10,7 @@
 // `--proto` table it parsed, and the project ELF's callee signatures — no pipeline stage involved,
 // and nothing here can change what is emitted.
 import { byValueCallArgs, byValueRefusal } from '@asmlift/core/aggregate';
+import type { Reloc } from '@asmlift/core/frontend/asmdata';
 import { type Prototypes, declaredCallArgs, variadicRefusal } from '@asmlift/core/proto';
 import { type SymbolMap, symbolsByName } from '@asmlift/core/symbols';
 import type { TargetDescription } from '@asmlift/core/target';
@@ -35,19 +36,38 @@ const CALL = /^\s*(?:bl|blx|jal)\s+(?:[^<]*<([^>+]+)>|([A-Za-z_.$][\w.$]*))\s*(?
  *  intra-function long branch (one klonoa function is 28 KB of it), and treating those targets as
  *  callees would bury the real ones. The function's own name is dropped for the same reason —
  *  a recursive call needs no external arity. */
-export function calleeNames(asm: string, self?: string): string[] {
+export function calleeNames(asm: string, self?: string, relocs?: readonly Reloc[]): string[] {
+  const all = asm.split('\n');
+  const [from, to] = ownRange(all, self);
   const defined = new Set<string>();
-  for (const line of asm.split('\n')) {
+  for (const line of all.slice(from, to)) {
     const m = LABEL_DEF.exec(line);
     if (m) {
       defined.add(m[1]);
     }
   }
+  // The relocation against a call names its callee: the `<name>` objdump puts in the operand is
+  // the address the unrelocated field holds — an O32 `jal 0` reads as the symbol at .text+0 — and
+  // only a relocation against a section (`.text`, a static callee) leaves that one right. `objdump
+  // -dr` prints it under the call (PowerPC); the MIPS dump has none, and the object's side table
+  // (`relocs`) does, by section and offset.
+  const relocAt = new Map((relocs ?? []).map((r) => [`${r.section} ${r.offset}`, r.sym]));
+  let section: string | undefined;
   const out: string[] = [];
   const seen = new Set<string>();
-  for (const line of asm.split('\n')) {
-    const m = CALL.exec(line.replace(PREFIX, ' ').replace(OBJDUMP_PREFIX, ' '));
-    const target = m?.[1] ?? m?.[2];
+  for (const [i, line] of all.entries()) {
+    section = SECTION.exec(line)?.[1] ?? section;
+    if (i < from || i >= to) {
+      continue;
+    }
+    const op = line.replace(PREFIX, ' ').replace(OBJDUMP_PREFIX, ' ');
+    const m = CALL.exec(op);
+    const at = /^\s*([0-9a-fA-F]+):/.exec(line)?.[1];
+    const reloc = !CALL_OP.test(op)
+      ? undefined
+      : (RELOC.exec(all[i + 1] ?? '')?.[1] ??
+        (at !== undefined && section !== undefined ? relocAt.get(`${section} ${parseInt(at, 16)}`) : undefined));
+    const target = reloc !== undefined && !reloc.startsWith('.') ? reloc : (m?.[1] ?? m?.[2]);
     if (!target || defined.has(target) || target === self || seen.has(target)) {
       continue;
     }
@@ -55,6 +75,26 @@ export function calleeNames(asm: string, self?: string): string[] {
     out.push(target);
   }
   return out;
+}
+
+/** A direct call's mnemonic, whatever its operand spells. */
+const CALL_OP = /^\s*(?:bl|blx|jal)\s/;
+/** A relocation line of `objdump -dr`, and the symbol it is against. */
+const RELOC = /^\s*[0-9a-fA-F]+:\s+R_\w+\s+([A-Za-z_.$][\w.$]*)(?:[+-]0x[0-9a-fA-F]+)?\s*$/;
+/** An `objdump -d` function header, `00000030 <rt1>:`, and a section's. */
+const OBJDUMP_HEADER = /^[0-9a-fA-F]+ <([^>]+)>:\s*$/;
+const SECTION = /^Disassembly of section (\S+):\s*$/;
+
+/** The lines of `self` in an objdump of a whole object — from its header to the next — where the
+ *  dump has one; otherwise all of them. An object's disassembly holds every function in it, and a
+ *  call another one makes is no callee of this lift. */
+function ownRange(lines: readonly string[], self: string | undefined): [number, number] {
+  const start = self === undefined ? -1 : lines.findIndex((l) => OBJDUMP_HEADER.exec(l)?.[1] === self);
+  if (start < 0) {
+    return [0, lines.length];
+  }
+  const end = lines.findIndex((l, i) => i > start && (OBJDUMP_HEADER.test(l) || SECTION.test(l)));
+  return [start, end < 0 ? lines.length : end];
 }
 
 /** Of those callees, the ones whose arity this run had to GUESS: no `--proto` entry this can
@@ -83,9 +123,10 @@ export function guessedArityCallees(
   target: TargetDescription,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
+  relocs?: readonly Reloc[],
 ): string[] {
   const declared = symbols ? symbolsByName(symbols) : undefined;
-  return calleeNames(asm, self).filter(
+  return calleeNames(asm, self, relocs).filter(
     (n) =>
       declaredCallArgs(prototypes?.[n], target) === undefined &&
       byValueCallArgs(prototypes?.[n], target) === undefined &&
@@ -102,8 +143,9 @@ export function guessedArityNote(
   target: TargetDescription,
   prototypes?: Prototypes,
   symbols?: SymbolMap,
+  relocs?: readonly Reloc[],
 ): string {
-  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols);
+  const guessed = guessedArityCallees(asm, self, target, prototypes, symbols, relocs);
   return guessed.length === 0
     ? ''
     : `asmlift: [proto] ${guessed.length} callee(s) have no declared arity, guessed from the argument registers: ` +
