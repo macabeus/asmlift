@@ -393,7 +393,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
         'addi    r1,r1,32',
         'blr',
       );
-      expect(() => dis('nm', none)).toThrow(/the 'blr' at 0x1c reads the link register the 'bl' at 0x14 overwrote/);
+      expect(() => dis('nm', none)).toThrow(
+        /the 'blr' at 0x1c may not return through the caller's link register — the 'bl' at 0x14 overwrote it/,
+      );
       // An ordinary call before the `mflr` overwrote it the same way.
       const call = lines('stwu    r1,-32(r1)', bl('foo'), 'mflr    r0', 'stw     r0,36(r1)', ...EPI);
       expect(() => dis('oc', call)).toThrow(/the 'mflr' at 0x8 reads the link register the 'bl' at 0x4 overwrote/);
