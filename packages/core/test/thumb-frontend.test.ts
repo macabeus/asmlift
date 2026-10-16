@@ -754,6 +754,28 @@ describe('incoming stack arguments (AAPCS args 5+)', () => {
     );
   });
 
+  test('a high register staged through a register the function had not saved is a copy the function made', () => {
+    // `prologueSavedRegs` skips a staging `mov rLow, rHi` only where agbcc emits it: rLow is
+    // callee-saved and an EARLIER push already holds its own entry value. Hand-written asm may stage
+    // through a scratch register and then read it; skipping that `mov` made r3 the caller's fourth
+    // argument — `s32 h1(s32 a0, s32 a1, s32 a2, s32 a3) { return a0 + a3; }` — where the machine
+    // holds r8. Lifted, the copy carries r8's entry value, which is r8's own uninitialised local.
+    const h1 =
+      'h1:\n\tpush\t{lr}\n\tmov\tr3, r8\n\tpush\t{r3}\n\tadd\tr0, r0, r3\n\tpop\t{r3}\n\tmov\tr8, r3\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('h1', h1, ARMV4T_AGBCC).source).toBe(
+      's32 h1(s32 a0) {\n    s32 uninit_r8;\n    return a0 + uninit_r8;\n}\n',
+    );
+    // a callee-saved register staged before anything saved it is the same: its entry value is not
+    // in a save yet, so the `mov` is not the save's alone
+    const unsaved =
+      'h2:\n\tmov\tr4, r8\n\tpush\t{r4, lr}\n\tadd\tr0, r0, r4\n\tpop\t{r4}\n\tmov\tr8, r4\n' +
+      '\tpop\t{r1}\n\tbx\tr1\n';
+    expect(decompile('h2', unsaved, ARMV4T_AGBCC).source).toBe(
+      's32 h2(s32 a0) {\n    s32 uninit_r8;\n    return a0 + uninit_r8;\n}\n',
+    );
+  });
+
   // The other side of that fixture's premise, and the reason it had to be stated: the rule is
   // "the compiler homed a local here", which is only true of a register the function SAVED.
   test('a register the prologue never saved is not one the compiler homed a local in', () => {

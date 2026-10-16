@@ -4123,6 +4123,9 @@ function reservedLocalArea(entry: AsmBlock): number {
   return Math.max(0, reserved);
 }
 
+/** the low registers agbcc's callers expect back intact (r0-r3 are argument and scratch) */
+const CALLEE_SAVED_LOW_REGS: ReadonlySet<string> = new Set(['r4', 'r5', 'r6', 'r7']);
+
 // WHAT THE PROLOGUE SAVED — the second half of the register partition (frontend/ssa.ts,
 // LiveInModel.uninitRegs), in operand spellings. "The ABI does not pass arguments here" is a fact
 // about the CALLER and cannot on its own make a def-less read an uninitialised local; what does is
@@ -4151,10 +4154,18 @@ function reservedLocalArea(entry: AsmBlock): number {
 // the relation this drops is: a body that reads the low register before writing it and compares
 // it with the high one sees two unrelated values where the machine holds one — agbcc only does
 // this for two distinct uninitialised locals, which no statement of the source relates.
+//
+// ONLY A CALLEE-SAVED LOW REGISTER THAT AN EARLIER `push` ALREADY SAVED IS A CARRIER. That is the
+// shape agbcc emits (`push {r4-r7, lr}; mov r7, sl; mov r6, r8; push {r6, r7}`): the low register's
+// own entry value is safe in the first save, so the `mov` destroys nothing the function could
+// read. Hand-written asm may stage through anything — `mov r3, r8; push {r3}; add r0, r0, r3`
+// reads r3 as the high register's value, and skipping that `mov` there would turn r3 into the
+// caller's fourth argument. Such a `mov` is lifted as the function's own; the high register still
+// joins `saved`, as it always has.
 function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carriers: ReadonlySet<Instr> } {
   const saved = new Set<string>();
   const carriers = new Set<Instr>();
-  const carries = new Map<string, Instr>(); // low register ← the `mov` that moved a high one into it
+  const carries = new Map<string, { mov: Instr; carrier: boolean }>(); // low register ← the `mov` that moved a high one into it
   for (const x of entry.instrs) {
     if (x.mnemonic === 'push') {
       const list = regListOf(x.ops);
@@ -4163,15 +4174,17 @@ function prologueSavedRegs(entry: AsmBlock): { saved: ReadonlySet<string>; carri
       }
       for (const r of list) {
         saved.add(r);
-        const mov = carries.get(r);
-        if (mov !== undefined) {
-          saved.add(mov.ops[1]);
-          carriers.add(mov);
+        const staged = carries.get(r);
+        if (staged !== undefined) {
+          saved.add(staged.mov.ops[1]);
+          if (staged.carrier) {
+            carriers.add(staged.mov);
+          }
           carries.delete(r);
         }
       }
     } else if (/^movs?$/.test(x.mnemonic) && HIGH_REGS.has(x.ops[1] ?? '') && !HIGH_REGS.has(x.ops[0] ?? '')) {
-      carries.set(x.ops[0], x);
+      carries.set(x.ops[0], { mov: x, carrier: CALLEE_SAVED_LOW_REGS.has(x.ops[0]) && saved.has(x.ops[0]) });
     } else if (spAdjust(x) === null) {
       break;
     }
