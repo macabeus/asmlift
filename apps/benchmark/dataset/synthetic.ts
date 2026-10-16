@@ -10373,6 +10373,26 @@ export const SYNTHETIC: SynthSpec[] = [
     toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
     ctx: 'int retjr(int a, int b);',
   },
+  // `bllocal` and `k0read` are declined witnesses of the same kind, one per toolchain family. A `bl`
+  // into the function's own body carries no relocation, and lifted as a call to an invented `func`
+  // (`func(); return 7;`); a read of k0, which an exception handler may overwrite at any instruction,
+  // lifted as the value written there (`return a0;`). Each now declines (frontend/ppc.ts `case 'bl'`,
+  // frontend/mips.ts `read` with `TargetDescription.kernelRegs`).
+  {
+    sym: 'bllocal',
+    src: 'asm int bllocal(int a)\n{\n    nofralloc\n    mflr r31\n    bl next\nnext:\n    mtlr r31\n    li r3, 7\n    blr\n}',
+    cflags: ['-proc', 'gekko', '-O4,p', '-fp', 'hard'],
+    features: ['baseline'],
+    toolchains: ['mwcc_242_81', 'mwcc_233_163n', 'mwcc_247_107'],
+    ctx: 'int bllocal(int a);',
+  },
+  {
+    sym: 'k0read',
+    src: 'int k0read(int a)\n{\n    int r;\n    __asm__("move $26,%1\\n\\tmove %0,$26" : "=r"(r) : "r"(a));\n    return r;\n}',
+    features: ['baseline'],
+    toolchains: ['gcc2.7.2kmc', 'gcc2.7.2'],
+    ctx: 'int k0read(int a);',
+  },
 ];
 
 // ── C++ (mwcc `.cp` frontend, PPC only) ───────────────────────────────────────────────────
