@@ -105,6 +105,17 @@ describe('the compares mwcc builds through the carry fold to the compare, and st
     expect(fn.blocks[0].ops.map((o) => o.opcode).filter((o) => o !== 'const')).toEqual([cmp, 'ret']);
   });
 
+  test('2.3.3 tests `x != 0` on its negation, and the fold reads through it', () => {
+    // `a != 0` (and `a > 0u`) is `neg; addic -1; subfe`: the `!= 0` is of `x` itself
+    const ne0 = lifted(['neg     r3,r3', 'addic   r0,r3,-1', 'subfe   r3,r0,r3'], true);
+    agrees(ne0, (x) => b(u(x) !== 0));
+    expect(ne0.blocks[0].ops.map((o) => o.opcode).filter((o) => o !== 'const')).toEqual(['icmp_ne', 'ret']);
+    // `(a - b) != 0` keeps its subtraction: 2.3.3's `a != b` is `subf; addic; subfe`, with no `neg`
+    const diff = lifted(['subf    r0,r4,r3', 'neg     r3,r0', 'addic   r0,r3,-1', 'subfe   r3,r0,r3'], true);
+    agrees(diff, (x, y) => b(u(x) !== u(y)));
+    expect(diff.blocks[0].ops.map((o) => o.opcode).filter((o) => o !== 'const')).toEqual(['sub', 'icmp_ne', 'ret']);
+  });
+
   test('-(a <u b) is `-(a < b)`, from 2.4.x `subfe rD,rY,rY` and 2.3.3 alike', () => {
     for (const body of [
       ['subfc   r0,r4,r3', 'subfe   r3,r0,r0'],

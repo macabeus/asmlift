@@ -365,6 +365,24 @@ const subZeroTest = (test: 'icmp_eq' | 'icmp_ne'): RewritePattern => ({
   replaceWith: { op: test, args: ['A', 'B'], resultType: T.u(32) },
 });
 
+/** `-x == 0` / `-x != 0` is `x == 0` / `x != 0`: 2.3.3 materialises every `x != 0` as `neg; addic
+ *  -1; subfe` (`a != 0`, `a > 0u`, `(a - b) != 0`), so the carry reads the negation. AFTER
+ *  `subZeroTest`, which must not see the difference this exposes: 2.3.3's `a != b` is `subf; addic;
+ *  subfe` with no `neg`, so `(a - b) != 0` keeps its subtraction. No dying gate: a `bdnz` counts down
+ *  with a `sub`, never a `neg`. */
+const negZeroTest = (test: 'icmp_eq' | 'icmp_ne'): RewritePattern => ({
+  id: `mwcc-neg-zerotest/${test}`,
+  applies: mwccOnly,
+  match: {
+    op: test,
+    args: [
+      { op: 'neg', args: [{ bind: 'X' }] },
+      { op: 'const', attrEquals: { value: 0 }, args: [] },
+    ],
+  },
+  replaceWith: { op: test, args: ['X', { constImm: 0 }], resultType: T.u(32) },
+});
+
 /** The branch-free compare bundle. */
 export const MWCC_COMPARE_PATTERNS: RewritePattern[] = [
   MWCC_CLZ_ULT,
@@ -376,6 +394,8 @@ export const MWCC_COMPARE_PATTERNS: RewritePattern[] = [
   ...Object.keys(NEGATED_ICMP).map(carryMask),
   subZeroTest('icmp_eq'),
   subZeroTest('icmp_ne'),
+  negZeroTest('icmp_eq'),
+  negZeroTest('icmp_ne'),
 ];
 
 // The PPC rotate mirror, as pure data: hardware only rotates LEFT, so mwcc spells `rotr(x, n)`
