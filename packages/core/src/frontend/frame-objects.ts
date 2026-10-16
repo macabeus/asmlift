@@ -2728,7 +2728,7 @@ function returnedSize(call: Op): number {
 /** The block parameters every incoming value of which is a local's address or another such
  *  parameter: the greatest set closed under that, so a loop-carried address is one too. Each maps to
  *  the frame offsets its incoming addresses name, through such parameters. The entry block's are the
- *  function's parameters, and no edge reaches them. */
+ *  function's parameters, and are left out. */
 function mergedFrameAddresses(irBlocks: readonly Block[]): Map<Value, ReadonlySet<number>> {
   const laddrOff = new Map<Value, number>();
   for (const op of irBlocks.flatMap((b) => b.ops)) {

@@ -889,7 +889,7 @@ inside the project's headers drops that block.
 | frontend    | a memory return whose parameters nothing sizes                                                                        | a guessed arity reads from argument 0, which holds the pointer       |
 | frontend    | a memory-returned union                                                                                               | its IR type carries no name to declare the local by                  |
 | frontend    | a pointer at argument 0 that is not a local of this frame                                                             | a struct returned into a global or through a pointer is not modelled |
-| frontend    | PowerPC and MIPS: a memory return                                                                                     | only the register return is lowered there                            |
+| frontend    | PowerPC: a memory return                                                                                              | only the register return is lowered there                            |
 | frame audit | a write, an index or any other use of the return temp but a read inside it                                            | only a read of a returned struct is modelled                         |
 | frontend    | the return register read after a struct came back in it                                                               | its bytes are a struct, not a word this function named               |
 
@@ -917,8 +917,8 @@ onto the temp, but the frontend does not route a word there to an `laddr` as it 
 by-value block. A struct returned straight into a global, through a pointer, or through the
 caller's own forwarded pointer — each refuses on every frontend that passes the pointer
 (`frame-objects.ts` `refuseSretOutsideFrame`); so does one returned into whichever of two locals the
-path chose (the audit, above);
-MIPS and Thumb pass it, and PowerPC refuses a call that would. THE CALLEE HALF, on every frontend: a function
+path chose (the audit, above). MIPS and Thumb pass the pointer, and PowerPC refuses a call that
+would. THE CALLEE HALF, on every frontend: a function
 that itself returns a struct through a hidden pointer reads that pointer as its first parameter and
 returns it, so it lifts as `s32 *f(s32 *a0, …)` — the machine's function, not the declared one. Its
 own declaration is left out of a context's prototypes (`withContextPrototypes`), so nothing there

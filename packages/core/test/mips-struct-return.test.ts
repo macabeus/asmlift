@@ -1,7 +1,8 @@
 // A call to a function declared to return a struct or union BY VALUE on O32 (ido7.1, gcc2.7.2kmc,
 // gcc2.7.2). Every aggregate comes back through memory: the caller hands the callee a hidden pointer
 // in a0 and every declared argument one register up. Every fixture is the compiler's own output at
-// the benchmark's flags for the source above it, read with `objdump -dr`, unless marked hand-written:
+// the benchmark's flags, read with `objdump -dr`, for the source quoted above it or above the
+// `describe` that reads it, unless marked hand-written. The declarations they share:
 //
 //   struct S1w { u32 x; }; struct S2 { u16 h; }; struct S8 { u32 a, b; }; struct S12 { u32 a, b, c; };
 //   struct SF { float f; }; struct S4 { u16 a; u8 b; u8 pad; };

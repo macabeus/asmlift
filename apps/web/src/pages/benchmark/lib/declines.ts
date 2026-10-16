@@ -584,7 +584,7 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // struct's layout, and `frontend/call-plan.ts` refuses where it has neither. Two throws spell
     // it — `structReturnOf`'s, whose reason is interpolated ("nothing here says whether it comes
     // back through a hidden pointer", a type no local can be declared with, a union), and `plan`'s
-    // for a lowering that receives no struct through memory (MIPS, PowerPC) — and both open on
+    // for a lowering that receives no struct through memory (PowerPC) — and both open on
     // the same clause, straight after the function's name and the callee's.
     //
     // TWO MORE THROWS ARE THE STRUCT RETURN TOO: `frontend/frame-objects.ts` `refuseSretOutsideFrame`,
@@ -594,9 +594,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // stated declaration returns a struct (the callee's half) through memory, or in a register pair,
     // or by a rule nothing sizes, which opens on the same clause as `plan`'s; no row states its own.
     //
-    // ITS FIRST INHABITANTS WERE `sret4mem` AND `sret4two` ON ido7.1 AND gcc2.7.2kmc, before O32
-    // stated its return rule; it is `sret12` on mwcc_242_81 now, which the PowerPC lowering does not
-    // pass a hidden pointer for. The call-plan refusals that only HAVE a struct return in them — its
+    // ITS `plan` INHABITANT IS `sret12` ON mwcc_242_81, a 12-byte struct the PowerPC lowering passes
+    // no hidden pointer for. The call-plan refusals that only HAVE a struct return in them — its
     // parameters unsized, its declaration unprintable, a struct and a 64-bit value at once — stay
     // in the residue: what each names to build is the declaration, not the return.
     key: 'struct-return',

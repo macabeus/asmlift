@@ -285,11 +285,10 @@ export function liftStamped(
  *  hands back in one register (agbcc's one-word struct in r0) is the lift's own return; one it hands
  *  back in two (mwcc's svr4 eight-byte struct in r3:r4) refuses, since the lift returns one word.
  *
- *  A context's own entry for the function is left out (`withContextPrototypes`), and there the
- *  pointer function is all the lift is told; a STATED return that names a struct the context lays
- *  out — `struct S` or a typedef of one — reaches here with that layout (`withOwnReturnLayout`).
- *  Asked of the declaration alone, before any frontend runs, beside the other refusal of the
- *  function's own declaration below. */
+ *  A context's own entry for the function is left out (`withContextPrototypes`), so there the
+ *  pointer function is all the lift is told; a stated return naming a struct the context lays out
+ *  reaches here with that layout (`withOwnReturnLayout`). Asked of the declaration alone, before
+ *  any frontend runs. */
 function refuseOwnStructReturnThroughMemory(name: string, target: TargetDescription, own: FnProto | undefined): void {
   if (!declaresAggregateReturn(own)) {
     return;

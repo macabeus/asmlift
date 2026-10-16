@@ -335,7 +335,7 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
       // (`evenWordAlignedArgs`). Placed at an even word that changes nothing; placed at an odd
       // one, the skipped word would be an argument operand nothing passes, so that one refuses.
       // The word is counted from argument 0, a hidden struct-return pointer included: O32's
-      // `struct S8 f(s32 k, struct L l)` passes `l` in a2:a3, and `f(struct L l)` skips a1.
+      // `struct S8 f(s32 k, struct L l)` passes `l` in a2:a3, and `struct S8 f(struct L l)` skips a1.
       if (
         target.evenWordAlignedArgs === true &&
         (aggregateSize(layout, target)?.align ?? 0) >= 8 &&

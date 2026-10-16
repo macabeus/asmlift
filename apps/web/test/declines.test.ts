@@ -939,7 +939,7 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // that clobbers CTR, and a dispatch the recognizer refuses, and no benchmark row reaches any of
   // them.
   //
-  // `stack-frames` is inhabited again, by `sret1w` and `sret8` on mwcc_242_81: mwcc returns 4 and
+  // `stack-frames` is inhabited by `sret1w` and `sret8` on mwcc_242_81: mwcc returns 4 and
   // 8 bytes in r3/r3:r4 and stores them to a frame word the lift never sees read back.
   //
   // `far-jump` keys on the far-jump lowering's own refusals in `frontend/thumb.ts` — a relay whose
