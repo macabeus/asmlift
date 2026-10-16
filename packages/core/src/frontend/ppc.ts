@@ -2661,7 +2661,7 @@ function liftOnce(
         // (~y + y = -1, so CA - 1, reading no rY — mwcc writes it over a register holding anything,
         // the return address included) and `subfe rD,rA,rB` with rA = rB - 1 (~(x-1) + x = 0, so
         // CA). Any other `subfe` is the high half of a 64-bit subtract, and `subfze` over a register
-        // is a 64-bit negate: both stay unmodelled, as do `addme`/`subfme`.
+        // that is no constant is a 64-bit negate: both stay unmodelled, as do `addme`/`subfme`.
         case 'subfe': {
           if (s === t) {
             emitBin('add', d, readCarry(ins), constVal(-1));
@@ -3216,27 +3216,27 @@ function liftOnce(
   return ssa.fn;
 }
 
-/** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `held` is what r4, the second
- *  register of an r3:r4 return, may hold at each word return no declaration pins the width of
- *  (`unreadHigh`, frontend/dead-reads.ts `unreadPairHalf`). Where one of those values is the result
- *  of an op that nothing reads — directly, or through joins nothing reads — the compiler computed it
- *  for the caller: an optimizing compiler deletes a pure computation nobody reads, so a value that
- *  survives in r4 with no reader is the other word of a 64-bit return, and returning r3 alone drops
- *  it. mwcc's `(unsigned long long)a - b` is `subfc r4,r4,r3; subfe r3,r4,r4`, whose high word is
- *  the very `subfe` a 32-bit `-(a < b)` is, and `long long x = a; if (c) x = -x; return x;` joins
- *  `0 - a` into r4 below the branch; both would lift as their high word.
+/** WHETHER A WORD RETURN'S r4 WAS COMPUTED FOR NOTHING, which the lift refuses. `held` is what r4,
+ *  the second register of an r3:r4 return, may hold at each word return no declaration pins the
+ *  width of (`unreadHigh`, frontend/dead-reads.ts `unreadPairHalf`). Where one of those values is
+ *  the result of an op that nothing reads — directly, or through joins nothing reads — the compiler
+ *  computed it for the caller: an optimizing compiler deletes a pure computation nobody reads, so a
+ *  value that survives in r4 with no reader is the other word of a 64-bit return, and returning r3
+ *  alone drops it. mwcc's `(unsigned long long)a - b` is `subfc r4,r4,r3; subfe r3,r4,r4`, whose
+ *  high word is the very `subfe` a 32-bit `-(a < b)` is, and `long long x = a; if (c) x = -x;
+ *  return x;` joins `0 - a` into r4 below the branch; both would lift as their high word.
  *
  *  Asked BEFORE `ssa.finish`, while every join is still a parameter with its incoming values wired,
- *  so a join the trivial-phi pass would fold is walked, not lost, and refused AFTER it, so an unmodelled
- *  instruction or an unresolved `subfze` keeps its own message. `exempt` names a value the machine
- *  did use where the lift left no op for the use: one a compare consumed (`compared`), one a carry
- *  reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns `(x >= 25000)` as
- *  `li r4,-1; subfc r0,r0,r3; subfze r3,r4`) and one stored to the frame (`frameWrites`). A function that holds an unmodelled instruction is not asked: the
- *  `opaque` may read r4 without naming it, and it declines under its own name. A value r4 holds that the function did not compute — its entry
- *  value, the caller's `a` that `long long z(unsigned a) { return a; }` moves there — is not seen,
- *  and that word return still drops the low word. */
+ *  so a join the trivial-phi pass would fold is walked, not lost, and refused AFTER it, so an
+ *  unmodelled instruction or an unresolved `subfze` keeps its own message. `exempt` names a value
+ *  the machine did use where the lift left no op for the use: one a compare consumed (`compared`),
+ *  one a carry reader folded away (`readWithoutOp`: ac-decomp's `mSP_GetRealShopLevel` returns
+ *  `(x >= 25000)` as `li r4,-1; subfc r0,r0,r3; subfze r3,r4`) and one stored to the frame
+ *  (`frameWrites`). A function that holds an unmodelled instruction is not asked: the `opaque` may
+ *  read r4 without naming it, and it declines under its own name. A value r4 holds that the
+ *  function did not compute — its entry value, the caller's `a` that `long long z(unsigned a) {
+ *  return a; }` moves there — is not seen, and that word return still drops the low word. */
 function computedPairHalf(blocks: readonly Block[], held: ReadonlySet<Value>, exempt: (v: Value) => boolean): boolean {
-  // An unmodelled instruction may read r4 without naming it, and declines with its own message.
   if (held.size === 0 || blocks.some((b) => b.ops.some((o) => o.opcode === 'opaque'))) {
     return false;
   }

@@ -10768,8 +10768,8 @@ export const SYNTHETIC: SynthSpec[] = [
   // for every relation on 2.3.3. Each relation is a row, `>`/`<=` being the swapped code; the `k`
   // rows put the constant where the code distinguishes it (`ulek` subtracts it with `subfic`,
   // `ugek` with `addi -K`). `nbceq`/`nbcne` are the controls spelled by neither trick but by
-  // `cntlzw; srwi 5`, `subf; subf; or` and 2.3.3's `addic -1; subfe`, and the last four use the
-  // boolean as a value: `nbcselult`'s `(a < b) ? 5 : 0` is `subfe; and` on 2.4.x, which lifts as
+  // `cntlzw; srwi 5`, `subf; subf; or` and 2.3.3's `addic -1; subfe`. `nbcaddult`, `nbcnegult`,
+  // `nbcselult` and `nbcstult` use the boolean as a value: `nbcselult`'s `(a < b) ? 5 : 0` is `subfe; and` on 2.4.x, which lifts as
   // `5 & -(a < b)` and recompiles to `andi.`. `nbcne0` is 2.3.3's `neg; addic -1; subfe`, whose
   // carry tests the NEGATION, and `nbcshlult` the 2.4.x extract merged with its shift into one
   // `rlwinm r3,r0,4,28,28`. Folded in pattern/engine.ts MWCC_COMPARE_PATTERNS, over

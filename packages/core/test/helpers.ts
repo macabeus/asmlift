@@ -591,7 +591,7 @@ export function irAgreement(ir: string, sfn: SFn, seeds: readonly number[]): { j
 /** A straight-line function's result over 32-bit WORDS, its entry params bound to `args` in order:
  *  the oracle for a branch-free idiom and the compare it folds to. Shifts take PowerPC's register
  *  semantics (an amount of 32 to 63 shifts every bit out), which is what the frontend that emits a
- *  register-amount shift means by it. One block only, and only the opcodes listed; anything else
+ *  register-amount shift means by it. One block only, and only the opcodes it models; anything else
  *  throws rather than guess. */
 export function evalWords(fn: Fn, args: readonly number[]): number {
   if (fn.blocks.length !== 1) {

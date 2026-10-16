@@ -1,8 +1,10 @@
 // The PowerPC carry bit (XER[CA]) — frontend/ppc.ts `readCarry` — and the compares CodeWarrior
-// builds through it (pattern/engine.ts MWCC_COMPARE_PATTERNS). Toolchain-free: each fixture is the
-// objdump text mwcc emits at -O4,p, lifted and EVALUATED over edge words (`evalWords`) against what
-// the instructions compute — raw, and again after the idiom folds, where the function must be the
-// one compare the source wrote. The carry-free 2.4.x forms are mwcc-compare.test.ts's.
+// builds through it (pattern/engine.ts MWCC_COMPARE_PATTERNS). Toolchain-free: each fixture is
+// objdump text mwcc emitted. A straight-line one is lifted and EVALUATED over edge words
+// (`evalWords`) against what the instructions compute — raw, and again after the idiom folds, where
+// the function must be the one compare the source wrote. The rest pin where a carry reader
+// refuses, a `subfze` constant read through a join, a `bdnz` counter test the folds leave alone, and
+// the r4 refusal at a guessed word return. The carry-free 2.4.x forms are mwcc-compare.test.ts's.
 import { describe, expect, test } from 'vitest';
 
 import { lift } from '../src/frontend/ppc';
