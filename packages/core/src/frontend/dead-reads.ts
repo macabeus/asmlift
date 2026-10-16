@@ -77,7 +77,7 @@
  *   • a read the compiler could not have made of a `volatile` (target.ts `readCouldBeVolatile`): on
  *     a compiler that extends a qualified narrow read in a register, a sign-extending load is a
  *     plain read in the source, the same rule frontend/device-pins.ts applies to a device read.
- *  RESIDUE, untabled: reads stamped with a `volatile` the source did not write. The first three
+ *  RESIDUE, untabled: reads stamped with a `volatile` the source did not write. The first four
  *  recompile byte-exact and compute the same values; the last two inherit a wrong input.
  *   • a bare read an inline `asm("" :: "r"(x))` took whole. agbcc leaves the statement as a bare
  *     `.code 16` the Thumb frontend skips, so the read it keeps alive looks dead; where the asm took
@@ -88,13 +88,27 @@
  *     (`thumb_load_double_from_address`), so `int f(long long *p) { long long v = *p; return
  *     (int)v; }` keeps `ldr r1, [r0, #4]`. With no such declaration the pair gate refuses it on Thumb
  *     and PowerPC; O32 declines the v0:v1 pair before the pin is asked;
+ *   • a plain read under an arithmetic or a cast nothing uses, at mwcc `-O0`: `p[5] + 1;` and
+ *     `(char)p[5];` keep `lwz r0, 20(r3)` (the cast with an `extsb`/`clrlwi` of r0), which is the
+ *     register the compiler discards a volatile read into, so the read is stamped. No unit of Mario
+ *     Party 4's 409 at `-O0,p` holds one;
  *   • merged identical arms where no declaration is in evidence: the same instructions as `gR;` on an
  *     object nothing declares, and as `*p;` through a pointer parameter;
  *   • a read returned by a getter wrongly declared void: the declaration is trusted, as the pair
  *     gate trusts a declared width;
  *   • hand-written assembly, which is outside the compiler claim: klonoa's m4a `sub_0804FE6C` returns
  *     a byte in r3, which no ABI the lift models reads, so the lift's return model has already lost
- *     that byte and its read is stamped. */
+ *     that byte and its read is stamped.
+ *  DROPPED, untabled: volatile reads left plain, which the lift's dead-code pass deletes.
+ *   • a volatile read assigned to a local nothing reads (`x = *vp; x = 0;`, `int x = *vp;`) at a
+ *     keeping level: the same instructions as its plain twin on every compiler measured (mwcc's
+ *     r31 home, IDO's `t6` and a frame store, agbcc's and gcc's frame store), so no fact tells the
+ *     two apart, and the plain one is the population: the 924 non-frame loads nothing reads over
+ *     Mario Party 4's -O0,p units all sit in r17-r31 and f18-f31 homes;
+ *   • a read held in the return pair's second register at a return whose width the lift guessed,
+ *     at a keeping level on a compiler with no discard register: agbcc `-O0` keeps
+ *     `return (*p, 1);`'s volatile read in r1, and `held-at-word-return` leaves it plain before
+ *     the refusal is asked. A declaration that pins the return width sends it to the refusal. */
 import { globalBaseOf, globalCellOf } from '../ir/alias';
 import type { Block, Op, Value } from '../ir/core';
 import { deadOps } from '../ir/discipline';

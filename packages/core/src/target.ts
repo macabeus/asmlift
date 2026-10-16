@@ -1732,17 +1732,19 @@ export interface ResolvedTarget {
  *  `lwz r31, 20(r3)` in a register nothing reads; IDO 7.1 at `-O0` and at `-O1` (its default) keeps
  *  `lw t6, 20(a0)`; agbcc and KMC gcc 2.7.2 at `-O0` keep the read and store it to the frame. None
  *  of them does at agbcc/KMC `-O1`, `-O2` or `-O3`, IDO `-O2` or `-O3`, or mwcc 2.4.2 `-O1` through
- *  `-O4,p` and `-O4,s`. An expression statement's read (`*p;`) is gone at every level on every one of
- *  them.
+ *  `-O4,p` and `-O4,s`. A plain expression statement's read (`*p;`) is gone at every level on every
+ *  one of them; a volatile one stays, at a keeping level in the register `discardsUnusedReadsInto`
+ *  names where the compiler has one.
  *
  *  A LEVEL NO FLAG NAMES (`undefined`) KEEPS. Every family's unflagged compile was measured keeping:
  *  agbcc's and IDO's are their `-O0` and `-O1` (codegen-flags.ts `EFFECTIVE` names them, so they
  *  never reach here unnamed), KMC gcc 2.7.2 with no `-O` emits `-O0`'s object byte for byte, and
  *  mwcc 2.4.2 with no level, with `-opt off` or with `-opt level=0` keeps `x = p[5]; x = 0;`'s
  *  `lwz r31, 20(r3)` as at `-O0`. And the cost runs one way: answering "keeps" where the compiler
- *  deletes withholds a `volatile` (the read is dropped as plain), while answering "deletes" where it
- *  keeps publishes one the source never wrote — a value this stamp alone decides, with no candidate
- *  to referee it (docs/level-tower.md, A PROFILE OF A COMPILER INHERITS). */
+ *  deletes withholds a `volatile` outside the discard register (`discardsUnusedReadsInto`): the
+ *  read is dropped as plain on mwcc and IDO, and the lift refuses on a compiler with none. Answering
+ *  "deletes" where it keeps publishes one the source never wrote, a value this stamp alone decides,
+ *  with no candidate to referee it (docs/level-tower.md, A PROFILE OF A COMPILER INHERITS). */
 export function keepsUnusedReadsAt(family: FlagFamily, level: string | undefined): boolean {
   if (level === undefined) {
     return true;
