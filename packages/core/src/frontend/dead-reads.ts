@@ -134,7 +134,7 @@
  *     are `lw t6` + `beqz t6`, where the plain twins compile to nothing, so the compare is evidence
  *     of `volatile` there, and no gate reads it (at `-O0` the plain twin is the same code). */
 import { globalBaseOf, globalCellOf } from '../ir/alias';
-import type { Block, Op, Value } from '../ir/core';
+import { type Block, type Op, type Successor, type Value, forwardingTarget } from '../ir/core';
 import { deadOps } from '../ir/discipline';
 import { type Gate, firstRejection } from '../l3/gates';
 import { type FnProto, declaresVoidReturn, ownReturnWidth } from '../proto';
@@ -410,11 +410,16 @@ export function pinDeadReads(
   const voidReturn = declaresVoidReturn(facts.own);
   // A branch whose two edges reach one block with the same arguments chooses nothing, so its
   // condition is no use either: agbcc at -O0 keeps `if (*vp) {}` as `ldr; cmp; beq` to the next
-  // instruction, which the structurer would spell `*p == 0;` with the read plain.
+  // instruction, which the structurer would spell `*p == 0;` with the read plain. The edges are
+  // compared by DESTINATION (ir/core.ts `forwardingTarget`), not by identity: agbcc keeps
+  // `if (*vp) {} else {}` and `*vp ? 1 : 2;` as `beq .L4; b .L4`, whose fallthrough edge reaches
+  // the join through a bodyless forwarder. An edge carrying arguments is compared as it stands,
+  // since a forwarder past it would drop the values it supplies.
+  const destination = (e: Successor): Block => (e.args.length === 0 ? forwardingTarget(e.block) : e.block);
   const choosesNothing = (op: Op): boolean =>
     op.opcode === 'cond_br' &&
     op.successors.length === 2 &&
-    op.successors[0].block === op.successors[1].block &&
+    destination(op.successors[0]) === destination(op.successors[1]) &&
     op.successors[0].args.length === op.successors[1].args.length &&
     op.successors[0].args.every((a, i) => a === op.successors[1].args[i]);
   const usesOperands = (op: Op): boolean => !(voidReturn && op.opcode === 'ret') && !choosesNothing(op);

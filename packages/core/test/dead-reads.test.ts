@@ -394,6 +394,15 @@ describe('the gates', () => {
     expect(() => decompile('f', ifEmpty, o0, voidF(['volatile s32 *'])).source).toThrow(
       /a read nothing uses at a level that keeps plain ones/,
     );
+    // `if (*vp) {} else {}` and `*vp ? 1 : 2;` are `beq .L4; b .L4`: the two edges meet only
+    // through the forwarder the `b` sits in, and the branch chooses nothing all the same
+    const forwarded =
+      'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
+      '\tldr\tr1, [r0]\n\tcmp\tr1, #0\n\tbeq\t.L4\n\tb\t.L4\n.L3:\n.L4:\n.L2:\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n' +
+      '\tpop\t{r0}\n\tbx\tr0\n';
+    expect(() => decompile('f', forwarded, o0, voidF(['volatile s32 *'])).source).toThrow(
+      /a read nothing uses at a level that keeps plain ones/,
+    );
     const bitfield =
       'f:\n\tpush\t{r7, lr}\n\tadd\tsp, sp, #-0x4\n\tmov\tr7, sp\n\tstr\tr0, [r7]\n\tldr\tr0, [r7]\n' +
       '\tldr\tr1, [r0]\n\tlsl\tr2, r1, #0x18\n\tlsr\tr0, r2, #0x1b\n\tadd\tsp, sp, #0x4\n\tpop\t{r7}\n' +
