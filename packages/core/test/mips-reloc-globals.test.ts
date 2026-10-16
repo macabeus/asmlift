@@ -413,6 +413,17 @@ test('an indexed half READ AS A VALUE refuses', () => {
   );
 });
 
+test('a COPY of a high half refuses in every spelling, addu with zero included', () => {
+  // `addu v1,v0,zero` is the same move as `move v1,v0` and `or v1,v0,zero`; it is no index
+  const copy = (op: string) =>
+    `00000000 <c>:\n   0:\tlui\tv0,0x0\n   4:\t${op}\n   8:\tlw\tv0,4(v1)\n   c:\tjr\tra\n  10:\tnop\n`;
+  for (const op of ['move\tv1,v0', 'or\tv1,v0,zero', 'addu\tv1,v0,zero', 'addu\tv1,zero,v0']) {
+    expect(() => lift('c', copy(op), pair('gTab', 0, 8))).toThrow(
+      /v0 holds the high half of 'gTab' \(the 'lui' at 0x0\) and is read as a value/,
+    );
+  }
+});
+
 test('an indexed half RETURNED with no %lo refuses: the address is never completed', () => {
   const asm = '00000000 <r>:\n   0:\tlui\tv0,0x0\n   4:\taddu\tv0,v0,a0\n   8:\tjr\tra\n   c:\tnop\n';
   expect(() => lift('r', asm, [{ off: 0, type: 'R_MIPS_HI16', sym: 'gTab' }])).toThrow(

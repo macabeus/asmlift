@@ -1905,8 +1905,9 @@ function liftOnce(
           // indexed half (frontend/high-half.ts `index`) that only its `%lo` completes, to
           // `gaddr(S) + idx` at the halves' combined offset. Either operand order is accepted, as
           // `addu` commutes (every compiler measured puts rH first). Both sources halves refuse: two
-          // addresses added is not an address.
-          const [hs, ht] = [halfIn(s), halfIn(t)];
+          // addresses added is not an address. A COPY (`addu rD,rH,zero`) is no index: it reads the
+          // half as a value and refuses, as `move` and `or rD,rH,zero` do.
+          const [hs, ht] = copiedReg(ins) === undefined ? [halfIn(s), halfIn(t)] : [false, false];
           if (hs && ht) {
             throw new FrontendUnsupportedError(
               `${site(ins)} adds a high half to another high half — the sum of two addresses is not an address this frontend can write down`,
