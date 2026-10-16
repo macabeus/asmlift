@@ -26,7 +26,7 @@
 // RESIDUE MEANS ONE THING IN THIS FILE, and it is this: the decline messages core can throw that no
 // class here claims. It is not what a landed capability left behind (`branch-likely` is labelled
 // "residual shapes only" for that) and it is not a catch-all class.
-// `packages/core/src` throws 234 distinct decline messages (the texts reached by
+// `packages/core/src` throws 236 distinct decline messages (the texts reached by
 // `FrontendUnsupportedError`, `PpcUnsupportedError`, `RaiseUnsupportedError`, its `StructOverlapError`
 // subclass and `StructureError`, or by the `FrontendRefusal` a frontend hands the code it shares,
 // harvested by taking each throw's balanced-paren argument, keeping
@@ -659,8 +659,8 @@ export const DECLINE_CLASSES: DeclineClass[] = [
     // A return the frontend could not show jumps to the caller's return address: on PowerPC a `blr`
     // after an `mtlr` of anything but the address an `mflr` copied out (or its reload from the link
     // register's save word), or after a `bl` with no such `mtlr` since (`linkRegisterProof` in
-    // `frontend/ppc.ts`); on MIPS a `jr ra` where `ra` may hold anything else
-    // (`refuseReturnsNotThroughCallersRa` in `frontend/mips.ts`). Hand-written asm only — no compiler
+    // `frontend/ppc.ts`); on MIPS a `jr ra` where `ra` may hold anything else, or a call whose delay
+    // slot writes `ra` (`refuseReturnsNotThroughCallersRa` in `frontend/mips.ts`). Hand-written asm only — no compiler
     // emits it — and its rows are the decline witnesses `synthetic:retmtlr:*` and `synthetic:retjr:*`.
     // Thumb's own refusal of the same thing names an indirect jump, and stays in the residue.
     key: 'return-target',

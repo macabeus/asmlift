@@ -989,8 +989,8 @@ function refuseReturnsNotThroughCallersRa(
       if (delay?.addr !== call.addr + 4) {
         throw new FrontendUnsupportedError(
           `cannot lift '${name}': the delay slot of the '${call.mnemonic}' at 0x${call.addr.toString(16)} is not the ` +
-            `next instruction of its block, so whether the callee returns through the caller's return address to ` +
-            `the code after the call is not known`,
+            `next instruction of its block, so the callee may not return through the caller's return address to ` +
+            `the code after the call`,
         );
       }
       const w = writtenReg(delay);
