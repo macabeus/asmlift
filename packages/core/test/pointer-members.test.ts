@@ -280,7 +280,8 @@ describe('a map-declared pointer VALUE is spelled legally where it is assigned',
     [0x03004790, [ptrsInfo()]],
     [0x03000100, [gPtrInfo]],
   ]);
-  const run2 = (asm: string) => decompile('f', asm, ARMV4T_AGBCC, { symbols: twoSyms }).source;
+  const run2 = (asm: string) =>
+    decompile('f', asm, ARMV4T_AGBCC, { symbols: twoSyms, prototypes: { Prep: { params: 0 } } }).source;
 
   test('member ← member of a DIFFERENT pointee is defused through `void *`', () => {
     // `u16 *pMap = <u8 * member>` is `assignment from incompatible pointer type`, fatal under the
@@ -309,8 +310,10 @@ describe('a map-declared pointer VALUE is spelled legally where it is assigned',
     // the map says nothing about the pointee, so the recovered `struct Struct0 *` is this pass's
     // own choice; `(void *)` would be legal too, but the exact type is available here and is not
     // where the map's declaration and this one can disagree
+    // `Prep` is declared: undeclared, the pool address left in r1 past an r0 nothing set is a gap the
+    // guessed arity refuses (frontend/ssa.ts `fallbackArgc`)
     const src = run2(
-      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tSideEffect\n' +
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tPrep\n' +
         '\tldr\tr0, [r4, #0x18]\n\tldrb\tr1, [r4]\n\tadd\tr0, r0, r1\n\tstr\tr0, [r4, #0x18]\n' +
         '\tmov\tr0, #0x0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n.L2:\n\t.word\t0x03000100\n',
     );
@@ -321,7 +324,7 @@ describe('a map-declared pointer VALUE is spelled legally where it is assigned',
     // `assignment makes integer from pointer without a cast`, the other half of the same class:
     // the temp's type is this pass's own either way, so the answer is the same `(T)`
     const src = run2(
-      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tSideEffect\n' +
+      'f:\n\tpush\t{r4, lr}\n\tldr\tr1, .L2\n\tldr\tr4, [r1]\n\tbl\tPrep\n' +
         '\tmov\tr0, r4\n\tbl\tSideEffect\n\tmov\tr0, #0x0\n\tpop\t{r4}\n\tpop\t{r1}\n\tbx\tr1\n' +
         '.L2:\n\t.word\t0x03000100\n',
     );

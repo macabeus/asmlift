@@ -119,7 +119,9 @@ describe("asmlift matches an example's `after` only through its variation", () =
       expect(example.compiler).toBe('agbcc');
       const asm = compileTargetAsm(spell(example.unit, example.after), flagsOf('agbcc'));
       const matched = (
-        await decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm))
+        await decompileRanked(EXAMPLE_FUNCTION, asm, ARMV4T_AGBCC, assembleTarget(asm), {
+          prototypes: example.prototypes,
+        })
       ).candidates.filter((c) => c.score.match);
       expect(matched.length).toBeGreaterThan(0);
       expect(matched.filter((c) => !hasVariation(c.variations, name)).map((c) => c.variations.join('/'))).toEqual([]);

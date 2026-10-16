@@ -1,7 +1,7 @@
 // Signatures the C standard fixes (proto.ts STANDARD_SIGNATURES), consumed by the frontend's
 // arity lookup. What an entry buys is what RUNTIME_HELPERS buys for `__divsi3`: the call's
-// ARGUMENTS ARE RECOVERED. Without one the guess is revisited in `finish()` and a call whose
-// argument registers were never written in this function keeps none of them.
+// ARGUMENTS ARE RECOVERED. Without one the arity is guessed, and a call whose argument registers
+// were never written in this function would keep none of them.
 import { expect, test } from 'vitest';
 
 import { returnsWithoutHiddenPointer } from '../src/aggregate';
@@ -17,8 +17,10 @@ const callsWith4ParamsLive = (callee: string) =>
 const lift = (callee: string, prototypes = {}) =>
   decompile('f', callsWith4ParamsLive(callee), ARMV4T_AGBCC, { prototypes }).source;
 
-test('an undeclared callee loses arguments the function never wrote', () => {
-  expect(lift('g')).toContain('g();');
+// Undeclared, the guess would keep none of them: r3 is read and r0 is not, a gap the guessed arity
+// refuses rather than lifting `g()` (frontend/ssa.ts `fallbackArgc`).
+test('an undeclared callee the function passes arguments it never wrote declines', () => {
+  expect(() => lift('g')).toThrow(/the call 'bl g' in block 'f' has no prototype, r3 holds a value and r0 holds none/);
 });
 
 test('`memcpy` takes three, because the standard says so and no header is needed', () => {

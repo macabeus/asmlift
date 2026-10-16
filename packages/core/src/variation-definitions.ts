@@ -25,6 +25,7 @@
 // Pure data: this module stays browser-safe. `offeredWhen` names admission tables by key; their rules
 // are `variation-gates.ts`, which a reader of a title or a summary never loads.
 import type { FlagFamily } from './codegen-flags';
+import type { Prototypes } from './proto';
 import type { CanonicalToolchainId } from './target';
 import type { GateTableName } from './variation-gates';
 import type { GatingBehavior, VariationKind, VariationName } from './variation-tokens';
@@ -151,6 +152,10 @@ export interface VariationExample {
   /** a complete translation unit defining `EXAMPLE_FUNCTION`, holding `EXAMPLE_HOLE` exactly once */
   unit: string;
   note?: string;
+  /** the callee declarations the example's own lift reads, where `unit` declares a callee without
+   *  its parameters and the call's arity is not decidable from the argument registers alone
+   *  (frontend/ssa.ts `fallbackArgc` refuses the gap) */
+  prototypes?: Prototypes;
 }
 
 /** An export of a core source file, relative to the repository root: where a decision is made. */
@@ -868,6 +873,9 @@ export const VARIATION_DEFINITIONS: { readonly [N in VariationName]: VariationDe
       before: 'v2 = a1; v1 = a0;',
       after: 'v1 = a0; v2 = a1;',
       note: 'the copies at the end of one path into a merge',
+      // `bl f` sees `c` read in r2 and a0 untouched in r0, which a pass-through `f(a0, a1, c)` would
+      // leave the same way
+      prototypes: { f: { params: 0 }, g: { params: 0 }, h: { params: 2 } },
     },
     implementedIn: STRUCTURE,
   },

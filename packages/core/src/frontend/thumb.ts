@@ -5688,13 +5688,13 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // A FRAME ADDRESS AN UNDECLARED ARITY LEAVES OUT IS AN ARGUMENT ALL THE SAME. The frame walks
     // read the call as handed every argument register it holds (`frameAddressReceivers`), and the
     // lift reads the object as written by that receiver (`isFrameObjectAccess`, with no reaching-
-    // definition test). The guessed count stops at the first register this function did not write,
-    // which is also an incoming argument passed on unchanged, so a capture in r3 behind r1 and r2
-    // left at their incoming values falls outside it: the call is lifted without the address, and
-    // the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])` as `func()`,
-    // then `*data = sp1`). A call through r1 stops at the bound r1 sets and leaves r2 out the same
-    // way (`CallDeclarations.lower`'s KNOWN GAP). Which count is right the register file cannot
-    // say, so this refuses.
+    // definition test). A count that leaves out a register holding one lifts the call without the
+    // address, and the object's reads come back as a local nothing wrote (`func(p0, p1, p2, &d[1])`
+    // as `func()`, then `*data = sp1`). A GUESSED count leaves one out only past a register it did
+    // not set, which is a gap the guess refuses first (`guess` below); what reaches here is a call
+    // through r1, which stops at the bound r1 sets and leaves r2 out (`CallDeclarations.lower`'s
+    // KNOWN GAP), and the `/setup-args` cut (`asksEveryCut`). Which count is right the register
+    // file cannot say, so this refuses.
     //
     // …UNLESS A REGISTER IT DOES PASS HOLDS THE SAME ADDRESS, in the call's own block: the callee is
     // handed the object either way, and agbcc leaves a capture it addressed through in r3 beside
@@ -5729,6 +5729,22 @@ function lowerCall(fill: ThumbFill, cur: BlockCursor, ins: Instr): void {
     // load into the entry block instead (`w[1] = e; if (a) g(n, w)` as `g(n)`, which assembles to the
     // same bytes), as it does with four parameters.
     withholdsSetupArgs: () => frame.callsReliedOn.has(ins) || fill.frameUses.offEntryArgReads.size > 0,
+    // A GAP IN THE ARGUMENT REGISTERS REFUSES (`fallbackArgc`). The guessed count stops at the first
+    // register nothing reaches, and a register this function never wrote still holds its own
+    // incoming argument, which the call may be handed unchanged: `logv(s, 1)` sets r1 alone and
+    // leaves `s` in r0, and a count that stops at r0 lifts it as `logv()`. A later register that
+    // does hold a value says the call takes arguments past the gap, so the count is not decidable.
+    // A run of incoming arguments passed on with no register set up past it (`g2(a, b)`) leaves no
+    // gap, is the same machine code as `g2()`, and is still lifted as the shorter call. The
+    // instruction carries no address, so the refusal names the call by its block.
+    guess: {
+      at: `'${ins.mnemonic} ${callee}' in block '${fill.cfg.asmBlocks[bi].label}'`,
+      // A guess that fills r0..r3 asks nothing of the outgoing area here: a word agbcc stages at
+      // [sp, #k] for the call is an argument only where `analyzeOutgoingArgs` licensed the block,
+      // and the frame model refuses any other store there. agbcc's `g5(1, 2, 3, 4, a)` to an
+      // undeclared `g5` declines as "stack pointer used as data" before any call is lowered.
+      refuse: () => {},
+    },
     // …AND AT EVERY OTHER CALL OF A FUNCTION WHOSE VERDICT LEANED ON AN ESCAPE, the reading asks
     // `leftOut` of every register it cuts, not only of those this block wrote. The verdict read every
     // argument register as possibly handed over, so a frame address an EARLIER block left there is

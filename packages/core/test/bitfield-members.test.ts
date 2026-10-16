@@ -352,7 +352,12 @@ describe('refusals — the honest mask spelling stays', () => {
       '\tldrb\tr2, [r5]\n\tmov\tr3, #0x3\n\tbic\tr2, r3\n\tmov\tr4, r2\n\tbl\tSideEffect\n' +
       '\torr\tr6, r4\n\tstrb\tr6, [r5]\n\tmov\tr0, #0x0\n\tpop\t{r4, r5, r6}\n\tpop\t{r1}\n\tbx\tr1\n' +
       '.L1:\n\t.word\t0x03005220\n';
-    const src = runW(withCall);
+    // `SideEffect` declared: undeclared, the temps left in r2 and r3 past an r1 nothing set are a
+    // gap the guessed arity refuses (frontend/ssa.ts `fallbackArgc`)
+    const src = decompile('f', withCall, ARMV4T_AGBCC, {
+      symbols: mapWith(writeInfo()),
+      prototypes: { SideEffect: { params: 0 } },
+    }).source;
     expect(src).not.toContain('gState.hearts =');
     expect(src).toMatch(/v\d+ = \*\(u8 \*\)&gState;[\s\S]*SideEffect/);
     // …and the same function without the call DOES fold, so the refusal is the call's

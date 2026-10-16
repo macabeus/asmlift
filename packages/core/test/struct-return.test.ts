@@ -369,14 +369,16 @@ describe('a callee declared to return a struct or union by value', () => {
       'f:\n\tpush\t{r4, lr}\n\tadd\tr4, r1, #0\n\tbl\tmv\n\tadd\tr1, r4, #0\n\tbl\tother\n' +
       '\tpop\t{r4}\n\tpop\t{r0}\n\tbx\tr0\n';
     const layout = { kind: 'struct' as const, members: [{ name: 'a', type: 's32' }] };
-    for (const mv of [
-      { returns: 'struct One', returnLayout: layout },
-      { params: ['s32'], returns: 'struct One', returnLayout: layout },
-    ]) {
-      expect(() => decompile('f', F, ARMV4T_AGBCC, { prototypes: { mv } })).toThrow(
-        /argument 1 of the call to 'other' is a struct an earlier call handed back in r0/,
-      );
-    }
+    expect(() =>
+      decompile('f', F, ARMV4T_AGBCC, {
+        prototypes: { mv: { params: ['s32'], returns: 'struct One', returnLayout: layout } },
+      }),
+    ).toThrow(/argument 1 of the call to 'other' is a struct an earlier call handed back in r0/);
+    // …and where `mv`'s own parameters are unstated its guess refuses first: `b` read into r4 and
+    // `a` left in r0 is a gap (frontend/ssa.ts `fallbackArgc`)
+    expect(() =>
+      decompile('f', F, ARMV4T_AGBCC, { prototypes: { mv: { returns: 'struct One', returnLayout: layout } } }),
+    ).toThrow(/the call 'bl mv' in block 'f' has no prototype, r1 holds a value and r0 holds none/);
   });
 
   // `struct One { s32 a; }; struct One mv(s32 x, ...); s32 cv(s32 a) { return mv(a).a; }` — agbcc
