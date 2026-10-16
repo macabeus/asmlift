@@ -311,6 +311,21 @@ describe('the gates', () => {
     expect(targetFor('ido7.1', []).target.compilerBehaviors.keepsUnusedReads).toBe(true); // IDO's default is -O1
   });
 
+  test('the register a keeping level discards an unused read into is a fact of the compiler', () => {
+    // compiled at -O0,p (mwcc) and -O1/-O0 (IDO): a volatile `*p;` is `lwz r0` / `lw zero`; agbcc,
+    // gcc 2.7.2 and KMC at -O0 load it into a register a `register` local takes as well
+    const into = (id: Parameters<typeof targetFor>[0], flags: string[]) =>
+      targetFor(id, flags).target.compilerBehaviors.discardsUnusedReadsInto;
+    for (const id of ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'] as const) {
+      expect(into(id, ['-O0,p'])).toBe('r0');
+    }
+    expect(into('ido7.1', ['-O1'])).toBe('zero');
+    expect(into('ido7.1', ['-O0'])).toBe('zero');
+    for (const id of ['agbcc', 'gcc2.7.2kmc', 'gcc2.7.2'] as const) {
+      expect(into(id, ['-O0'])).toBeUndefined();
+    }
+  });
+
   test("keeps-unused-reads: a level no flag names keeps, as every family's unflagged compile was measured to", () => {
     // mwcc 2.4.2 with no level, with `-opt off` and with `-opt level=0` keeps `x = p[5]; x = 0;`'s
     // `lwz r31, 20(r3)`; KMC gcc 2.7.2 with no -O emits -O0's object byte for byte

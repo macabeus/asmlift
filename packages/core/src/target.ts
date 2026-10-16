@@ -1013,6 +1013,25 @@ export interface TargetDescription {
     // ABSENT ⇒ false: the compiler deletes every plain read nobody uses, so one still in the target
     // was qualified.
     keepsUnusedReads?: boolean;
+    // WHERE DOES THIS COMPILER PUT A READ NOBODY USES, at a level that keeps a plain one
+    // (`keepsUnusedReads`)? The register a `volatile` read with no consumer is loaded into, and no
+    // plain local is ever homed in. COMPILED at the keeping levels, one statement per line:
+    // `*p;`, `s->b;`, `gV;` and `(*p, 1)` through a volatile lvalue load into `r0` on mwcc 2.4.2,
+    // 2.4.7 and 2.3.3 at `-O0,p`, and into `$zero` on IDO 7.1 at `-O1` and `-O0`; the plain
+    // `x = p[5]; x = 0;` takes a home there instead (`lwz r31`, `lw t6` and a frame store), and so
+    // does a `register` local (`lwz r31`, `lw a2`). Over the 409 complete Mario Party 4 units built
+    // at `-O0,p`, 924 non-frame loads nothing reads land in r17-r31 and f18-f31, and exactly one in
+    // r0: WipeExecAlways's `wipe->type;`, a `volatile u8` member. So a dead load into this
+    // register is a qualified read, and the dead-read pin (frontend/dead-reads.ts) stamps it at a
+    // keeping level too. mwcc keeps one plain read in r0 as well, a read under an arithmetic or a
+    // cast nothing uses (`p[5] + 1;`, `(char)p[5];`), which no real unit holds: that is the pin's
+    // residue.
+    //
+    // ABSENT ⇒ the compiler has no such register, or it is unmeasured. agbcc, gcc 2.7.2 and KMC
+    // gcc 2.7.2 at `-O0` have none: a volatile `*p;` is an `ldr r0`/`lw v0` nothing stores, the
+    // same instructions as a `register` local assigned and overwritten, so the pin cannot tell the
+    // two apart there and refuses rather than drop the read.
+    discardsUnusedReadsInto?: string;
   };
 }
 
@@ -1331,6 +1350,9 @@ export const MIPS_IDO: TargetDescription = {
     // unchanged argument is staged again before each call, and a callee assigns to its stack
     // parameter in place. Read by the frame-object audit alone here (`storedNeverRead`).
     localsAboveOutgoingArea: true,
+    // MEASURED at -O1 and -O0: the note at the field — `lw zero` for a volatile read, a `t6` load
+    // and a frame store for a plain dead local, `lw a2` for a `register` one.
+    discardsUnusedReadsInto: 'zero',
   },
 };
 
@@ -1565,6 +1587,9 @@ export const PPC_MWCC: TargetDescription = {
     // first: `frontend/ppc.ts` claims no `LiveInModel.declaredLocals`, so the shared stamp records
     // no slot home on this target at all and a direction here would order nothing until it does.
     spillSlotOrder: 'unknown',
+    // MEASURED on all three builds at -O0,p: the note at the field — `lwz r0` for a volatile read,
+    // an `r31` home for a plain or `register` dead local.
+    discardsUnusedReadsInto: 'r0',
   },
 };
 
