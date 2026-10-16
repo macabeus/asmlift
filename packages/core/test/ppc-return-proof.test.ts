@@ -98,6 +98,33 @@ describe.each(BUILDS)('on %s', (tc, flags) => {
     ).toThrow(/'20\(r1\)' at 0x10 is a word this function both saves a register in and stores a value to/);
   });
 
+  test('a restore routine reloads the registers a copy of the return address was kept in', () => {
+    // `q_restr31`: r31 is the caller's r31 again after `_restgpr_29`, so the `blr` jumps there —
+    // lifted `return 7;`
+    const restr31 = (...mid: string[]) =>
+      lift(
+        'q_restr31',
+        'stwu    r1,-32(r1)',
+        'mflr    r0',
+        'stw     r0,36(r1)',
+        'addi    r11,r1,32',
+        bl('_savegpr_29'),
+        'mr      r31,r0',
+        ...mid,
+        'addi    r11,r1,32',
+        bl('_restgpr_29'),
+        'mtlr    r31',
+        'addi    r1,r1,32',
+        'li      r3,7',
+        'blr',
+      );
+    expect(() => restr31()).toThrow(
+      /the 'blr' at 0x2c may not return through the caller's link register — on some path the 'mtlr' at 0x20 put r31 there/,
+    );
+    // `q_restr31b`, with a call before the restore: lifted `return ext();`
+    expect(() => restr31(bl('ext'))).toThrow(NOT_THROUGH_LR);
+  });
+
   test("mwcc's own saves of the return address are returns", () => {
     // 2.4.x: the push, then the save at N+4(r1) (`p_good`)
     expect(

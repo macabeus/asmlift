@@ -842,6 +842,15 @@ function linkRegisterProof(
           ) {
             slot = false;
           }
+          // A GPR restore routine reloads r{first}..r31 from their save words, as `lmw` does: none of
+          // them holds the return address after it, whatever was copied into them before.
+          if (routine.restore && !routine.fpr) {
+            for (const r of [...regs]) {
+              if (Number(r.slice(1)) >= routine.first) {
+                regs.delete(r);
+              }
+            }
+          }
         } else {
           for (const r of destroyed) {
             regs.delete(r);
