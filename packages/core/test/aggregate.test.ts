@@ -271,6 +271,13 @@ describe('a struct passed by value in argument words', () => {
     expect(
       byValueRefusal({ params: ['struct A', 'Opaque'], byValueLayouts: { 0: PASSED_A } }, ARMV4T_AGBCC)?.refused,
     ).toMatch(/its parameter 2 'Opaque' is not sized/);
+    // GNU C's `struct E { };` takes no argument word: agbcc's `k(e, b + 1)` crashed the fold, which
+    // had no operand to name the struct by
+    for (const t of [ARMV4T_AGBCC, MIPS_GCC]) {
+      expect(
+        byValueRefusal({ params: ['struct E', 's32'], byValueLayouts: { 0: { kind: 'struct', members: [] } } }, t),
+      ).toEqual({ param: 0, refused: expect.stringMatching(/it has no members, so no argument word carries it/) });
+    }
     // …and none where it places them, or where no struct is passed by value
     expect(byValueRefusal(p, ARMV4T_AGBCC)).toBeUndefined();
     expect(byValueRefusal({ params: ['s32'] }, ARMV4T_AGBCC)).toBeUndefined();

@@ -331,6 +331,11 @@ function layOutByValue(p: FnProto | undefined, target: TargetDescription, hidden
       if (type?.kind !== 'struct' || type.size === undefined) {
         return { refused: 'it is a union, or has a member this target does not size', param: i };
       }
+      // A STRUCT OF NO BYTES (GNU C's `struct E { };`) occupies no argument word, so it would be an
+      // argument with no operand to name it, and the fold that names the struct has none to read.
+      if (type.size === 0) {
+        return { refused: 'it has no members, so no argument word carries it', param: i };
+      }
       // An 8-aligned struct starts at an even argument word where the target aligns one
       // (`evenWordAlignedArgs`). Placed at an even word that changes nothing; placed at an odd
       // one, the skipped word would be an argument operand nothing passes, so that one refuses.
