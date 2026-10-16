@@ -53,7 +53,15 @@ describe.each(BUILDS)('on %s', (tc, flags) => {
     ).toThrow(/the 'blr' at 0x10 may not return through the caller's link register — on some path the 'mtlr' at 0x8/);
   });
 
-  test('a return address a call overwrote in its save word declines', () => {
+  test('a call whose return address nothing put back declines', () => {
+    // `p_leafbl`: lifted `ext(); return 7;`, a return to the instruction after the `bl`
+    expect(() => lift('p_leafbl', bl('ext'), 'li      r3,7', 'blr')).toThrow(
+      /the 'blr' at 0x8 may not return through the caller's link register — the 'bl' at 0x0 overwrote it/,
+    );
+    // a conditional return after a call is asked the same
+    expect(() => lift('condret', bl('ext'), 'cmpwi   r3,0', 'beqlr-', 'li      r3,7', 'blr')).toThrow(
+      /the 'beqlr' at 0x8 may not return through the caller's link register/,
+    );
     // the address saved, but the frame pushed AFTER the call: the callee saves its own return address
     // in that very word, the caller's link-register save word
     expect(() =>

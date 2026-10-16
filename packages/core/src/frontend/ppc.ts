@@ -736,12 +736,10 @@ function r1Displacements(blocks: PpcBlock[], succIdx: number[][]): Map<Instr, nu
 
 /** What the link-register proof knows at one point: what the link register holds (`lr`: null where
  *  it is still the caller's return address on every path, else the instruction that put something
- *  else there on some path), the last `bl` of any kind with no `mtlr` since (`call`), which general
- *  registers hold a copy of the return address on every path (`regs`), and whether the link
- *  register's save word does (`slot`). */
+ *  else there on some path), which general registers hold a copy of the return address on every
+ *  path (`regs`), and whether the link register's save word does (`slot`). */
 interface LrState {
   readonly lr: Instr | null;
-  readonly call: Instr | null;
   readonly regs: ReadonlySet<string>;
   readonly slot: boolean;
 }
@@ -752,9 +750,8 @@ interface LrState {
  *  `blr` and a conditional return (`beqlr`) read as returns from the instruction alone, and each is
  *  one only where the link register holds the address this function was called with. A forward
  *  dataflow over the blocks tracks where that address is:
- *    • the link register holds it at entry; a `bl` into a register save or restore routine writes it,
- *      and an `mtlr rS` puts back whatever rS holds. An ordinary call lifts as a call and is not
- *      asked about here yet;
+ *    • the link register holds it at entry; a `bl` writes it (a call, and a register save or restore
+ *      routine too), and an `mtlr rS` puts back whatever rS holds;
  *    • `mflr rD` copies it into rD, `mr` copies it on, and any other write to a register loses it —
  *      an ordinary call loses every register the EABI lets a callee destroy, a save routine none;
  *    • a `stw` of a register holding it into the link register's save word (`LR_SAVE_WORD`, named
@@ -766,8 +763,7 @@ interface LrState {
  *  does on every path in.
  *
  *  So `li r3,7; mtlr r4; blr`, `lwz r0,0(r3); mtlr r0; blr`, `mflr r0; addi r0,r0,4; mtlr r0; blr`, an
- *  `mtlr` on one path only, and a save routine with no saved address put back before the `blr` all
- *  decline,
+ *  `mtlr` on one path only, and a `bl` with no saved address put back before the `blr` all decline,
  *  where mwcc's `mflr r0; stw r0,N+4(r1)` … `lwz r0,N+4(r1); mtlr r0; blr` (2.3.3 saves at `4(r1)`
  *  before the push) and a leaf that never names the link register are returns. No compiler emits a
  *  violation; hand-written asm can, and it would otherwise lift as a C `return`.
@@ -791,16 +787,11 @@ function linkRegisterProof(
   const frameReg = target.registerSaveRoutines?.frameReg;
   const join = (a: LrState, b: LrState): LrState => ({
     lr: a.lr ?? b.lr,
-    call: a.call ?? b.call,
     regs: new Set([...a.regs].filter((r) => b.regs.has(r))),
     slot: a.slot && b.slot,
   });
   const same = (a: LrState, b: LrState) =>
-    a.lr === b.lr &&
-    a.call === b.call &&
-    a.slot === b.slot &&
-    a.regs.size === b.regs.size &&
-    [...a.regs].every((r) => b.regs.has(r));
+    a.lr === b.lr && a.slot === b.slot && a.regs.size === b.regs.size && [...a.regs].every((r) => b.regs.has(r));
   // The bytes `[lo, hi)` a store through r1 writes, as entry-r1 offsets, or null where r1's depth is
   // not known there or the address takes an index register.
   const storedRange = (ins: Instr): [number, number] | null => {
@@ -826,20 +817,22 @@ function linkRegisterProof(
   const namesR1 = (ins: Instr) => ins.ops.some((op) => (op.includes('(') ? parseMem(op).base : op) === 'r1');
 
   const run = (bi: number, inState: LrState, record: boolean): LrState => {
-    let { lr, call, slot } = inState;
+    let { lr, slot } = inState;
     const regs = new Set(inState.regs);
     let frameAddress: number | null = null;
     for (const ins of [...blocks[bi].body, ...(blocks[bi].branch ? [blocks[bi].branch] : [])]) {
       const mn = ins.mnemonic;
       const [d, s] = ins.ops;
-      if (record && ((mn === 'mflr' && call !== null) || ((isReturn(ins) || isCondReturn(ins)) && lr !== null))) {
-        at.set(ins, mn === 'mflr' ? call! : lr!);
+      if (
+        record &&
+        ((mn === 'mflr' && lr?.mnemonic === 'bl') || ((isReturn(ins) || isCondReturn(ins)) && lr !== null))
+      ) {
+        at.set(ins, lr!);
       }
       if (mn === 'bl') {
         const routine = saveRoutineOf(target, ins);
-        call = ins;
+        lr = ins;
         if (routine) {
-          lr = ins;
           // A save routine stores below its frame address; a restore routine writes no memory.
           const bytes = routine.fpr ? 8 : 4;
           if (
@@ -861,11 +854,10 @@ function linkRegisterProof(
       }
       if (mn === 'mtlr') {
         lr = regs.has(d) ? null : ins;
-        call = null;
         continue;
       }
       if (mn === 'mflr') {
-        if (lr === null && call === null) {
+        if (lr === null) {
           regs.add(d);
         } else {
           regs.delete(d);
@@ -925,11 +917,11 @@ function linkRegisterProof(
         regs.add(d);
       }
     }
-    return { lr, call, regs, slot };
+    return { lr, regs, slot };
   };
 
   const into: Array<LrState | undefined> = blocks.map(() => undefined);
-  into[0] = { lr: null, call: null, regs: new Set(), slot: false };
+  into[0] = { lr: null, regs: new Set(), slot: false };
   const work = [0];
   while (work.length) {
     const bi = work.pop()!;

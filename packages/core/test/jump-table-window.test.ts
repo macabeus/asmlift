@@ -466,7 +466,17 @@ test('…but with no declaration, a word computed only to be returned shows the 
   for (const ret of [
     ['li      r3,5', 'stw     r3,0(r12)', 'blr'],
     ['lwz     r3,4(r12)', 'blr'],
-    ['bl      0 <f>', 'blr'],
+    // (saving the link register around the call: a `bl` straight into a `blr` declines)
+    [
+      'mflr    r0',
+      'stw     r0,4(r1)',
+      'stwu    r1,-8(r1)',
+      'bl      0 <f>',
+      'addi    r1,r1,8',
+      'lwz     r0,4(r1)',
+      'mtlr    r0',
+      'blr',
+    ],
   ]) {
     expect(decompile('f', shape(ret), PPC_MWCC).source).not.toContain('a0');
   }

@@ -204,17 +204,24 @@ test('a pending high half does not count as a call ARGUMENT', () => {
   // value; counted by the prototype-less arity heuristic it turns `strlen(s)` into a two-argument
   // call whose second argument is the half — which then refuses at the read, hiding the real
   // decline behind a guard the row never actually hit.
+  // Framed with the link-register save a function that calls needs (`linkRegisterProof`).
+  const PRO = '   0:\tstwu    r1,-16(r1)\n   4:\tmflr    r0\n';
+  const EPI = '  18:\tlwz     r0,20(r1)\n  1c:\tmtlr    r0\n  20:\taddi    r1,r1,16\n  24:\tblr\n';
   const asm =
-    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
-    '   4:\taddi    r3,r4,0\n\t\t\t6: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
-    '   8:\tbl      8 <argc+0x8>\n\t\t\t8: R_PPC_REL24\tstrlen\n' +
-    '   c:\tblr\n';
+    PRO +
+    '   8:\tlis     r4,0\n\t\t\ta: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
+    '   c:\tstw     r0,20(r1)\n' +
+    '  10:\taddi    r3,r4,0\n\t\t\t12: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
+    '  14:\tbl      14 <argc+0x14>\n\t\t\t14: R_PPC_REL24\tstrlen\n' +
+    EPI;
   expect(dis('argc', asm)).toContain('strlen(&kanji_convert_table)');
   const hoisted =
-    '   0:\tlis     r4,0\n\t\t\t2: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
-    '   4:\tbl      4 <argc2+0x4>\n\t\t\t4: R_PPC_REL24\tstrlen\n' +
-    '   8:\taddi    r3,r4,0\n\t\t\ta: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
-    '   c:\tblr\n';
+    PRO +
+    '   8:\tlis     r4,0\n\t\t\ta: R_PPC_ADDR16_HA\tkanji_convert_table\n' +
+    '   c:\tstw     r0,20(r1)\n' +
+    '  10:\tbl      10 <argc2+0x10>\n\t\t\t10: R_PPC_REL24\tstrlen\n' +
+    '  14:\taddi    r3,r4,0\n\t\t\t16: R_PPC_ADDR16_LO\tkanji_convert_table\n' +
+    EPI;
   expect(dis('argc2', hoisted)).toContain('strlen()');
 });
 

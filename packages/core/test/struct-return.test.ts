@@ -413,7 +413,10 @@ describe('a callee declared to return a struct or union by value', () => {
     const g = { params: [], returns: 'struct message_window_s *' };
     expect(declaresAggregateReturn(g)).toBe(false);
     expect(declaresAggregateReturn({ returns: 'const struct S' })).toBe(true);
-    const ppc = '0 <c>:\n0:\tbl      c <c+0xc>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n';
+    const ppc =
+      '0 <c>:\n0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\n' +
+      'c:\tbl      c <c+0xc>\n\t\t\tc: R_PPC_REL24\tg\n' +
+      '10:\tlwz     r0,20(r1)\n14:\tmtlr    r0\n18:\taddi    r1,r1,16\n1c:\tblr\n';
     expect(decompile('c', ppc, PPC_MWCC, { prototypes: { g } }).source).toContain('return g();');
     const thumb = 'c:\n\tpush\t{lr}\n\tbl\tg\n\tpop\t{r1}\n\tbx\tr1\n';
     expect(decompile('c', thumb, ARMV4T_AGBCC, { prototypes: { g } }).source).toContain('return g();');

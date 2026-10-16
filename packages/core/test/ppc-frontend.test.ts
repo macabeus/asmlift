@@ -11,6 +11,27 @@ import { PPC_MWCC } from '../src/target';
 
 const dis = (sym: string, lines: string) => decompile(sym, `0 <${sym}>:\n${lines}`, PPC_MWCC).source;
 
+/** A fixture that makes a call, wrapped in mwcc's link-register save (`stwu`/`mflr`/`stw` …
+ *  `lwz`/`mtlr`/`addi`): a `bl` whose `blr` puts no saved return address back declines
+ *  (`linkRegisterProof` in frontend/ppc.ts). Every address shifts by the 12-byte prologue, and the
+ *  LAST `blr` becomes the epilogue. A `0 <name>:` header line stays first. */
+const framed = (text: string): string => {
+  const shift = (a: string) => (parseInt(a, 16) + 12).toString(16);
+  const header = /^\d+ <[^>]+>:\n/.exec(text)?.[0] ?? '';
+  const body = text
+    .slice(header.length)
+    .replace(/^( *)([0-9a-f]+):\t/gm, (_, sp: string, a: string) => `${sp}${shift(a)}:\t`)
+    .replace(/^(\t\t\t)([0-9a-f]+): R_/gm, (_, t: string, a: string) => `${t}${shift(a)}: R_`);
+  const last = /( *)([0-9a-f]+):\tblr\n$/.exec(body)!;
+  const at = (k: number) => (parseInt(last[2], 16) + 4 * k).toString(16);
+  return (
+    header +
+    '0:\tstwu    r1,-16(r1)\n4:\tmflr    r0\n8:\tstw     r0,20(r1)\n' +
+    body.slice(0, last.index) +
+    `${at(0)}:\tlwz     r0,20(r1)\n${at(1)}:\tmtlr    r0\n${at(2)}:\taddi    r1,r1,16\n${at(3)}:\tblr\n`
+  );
+};
+
 describe('PPC frontend robustness', () => {
   test('a compare in the ONLY predecessor reaches the branch, across a `b` or a `bc` fall-through', () => {
     // `40 <cross+0x40>` is a block of its own, entered only from the `b` at 0x4, so the `blt` there
@@ -160,7 +181,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     // undecidable ARITY shape the guard below refuses, which is a different question from this one.
     const src = dis(
       'f',
-      '0:\tli      r3,0\n4:\tli      r4,7\n8:\tbl      40 <foo>\nc:\tli      r3,1\n10:\tbl      50 <bar>\n14:\tblr\n',
+      framed(
+        '0:\tli      r3,0\n4:\tli      r4,7\n8:\tbl      40 <foo>\nc:\tli      r3,1\n10:\tbl      50 <bar>\n14:\tblr\n',
+      ),
     );
     expect(src).toContain('func(1)');
     expect(src).not.toContain('func(1, 7)');
@@ -180,7 +203,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
     );
   });
   test('control: no gap, so the contiguous count stands', () => {
-    expect(dis('nogap', '0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n')).toContain('func(1, 3)');
+    expect(dis('nogap', framed('0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      40 <foo>\nc:\tblr\n'))).toContain(
+      'func(1, 3)',
+    );
   });
   // A DECLARATION THIS FRONTEND CANNOT HONOUR IS A REFUSAL, NOT AN ARITY. `void llsink(long long)`
   // spends two argument registers on one parameter, and this frontend turns every argument
@@ -208,7 +233,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // a path where a call has destroyed it`), so the field was inert where it would have helped and
   // harmful where it was emitted.
   test('a RETURN declared wider than a register refuses, rather than taking one half of it', () => {
-    const asm = '0 <c>:\n0:\tbl      c <c+0xc>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n';
+    const asm = framed('0 <c>:\n0:\tbl      c <c+0xc>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n');
     const wide = { g: { params: [], returns: 'long long' } };
     expect(() => decompile('c', asm, PPC_MWCC, { prototypes: wide })).toThrow(
       /'g' would hand back one half of a 64-bit value — its return is declared wider than a register/,
@@ -231,7 +256,9 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   // g(Direction)` against two registers held — while the same frontend lifted it when told
   // nothing, and it accepted the narrow reading wherever the scan happened to miscount a pair.
   test('a spelling the width reader cannot size leaves the guess standing', () => {
-    const asm = '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tg\nc:\tblr\n';
+    const asm = framed(
+      '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,3\n8:\tbl      c <c+0xc>\n\t\t\t8: R_PPC_REL24\tg\nc:\tblr\n',
+    );
     const guessed = decompile('c', asm, PPC_MWCC).source;
     expect(guessed).toContain('g(1, 3)');
     expect(decompile('c', asm, PPC_MWCC, { prototypes: { g: { params: ['Direction'] } } }).source).toBe(guessed);
@@ -242,7 +269,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
 
   test('and a prototype answers the question the gap cannot', () => {
     // `declaredCallArgs` is consulted before the guess, so a declared callee is unaffected by the gap.
-    const asm = '0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n';
+    const asm = framed('0:\tli      r5,3\n4:\tbl      8 <proto+0x8>\n\t\t\t4: R_PPC_REL24\tg\n8:\tblr\n');
     expect(decompile('proto', `0 <proto>:\n${asm}`, PPC_MWCC, { prototypes: { g: { params: 3 } } }).source).toContain(
       'g(a0, a1, 3)',
     );
@@ -264,7 +291,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
   test('bl recovers the callee symbol from the R_PPC_REL24 relocation line', () => {
     // The bl's encoded target is a 0 placeholder; the name `g` lives only in the relocation. It is
     // recovered as the call target (not the `func` fallback used when no relocation is present).
-    const src = dis('callsym', '0:\tbl      4 <callsym+0x4>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n');
+    const src = dis('callsym', framed('0:\tbl      4 <callsym+0x4>\n\t\t\t0: R_PPC_REL24\tg\n4:\tblr\n'));
     expect(src).toContain('g(');
     expect(src).not.toContain('func');
   });
@@ -529,7 +556,7 @@ describe('PPC-WIDEN frontend (calls, frame transparency, rlwinm extract, CTR loo
       'c:\tlis     r5,0\n\t\t\te: R_PPC_ADDR16_HA\tgObj\n' +
       '10:\taddi    r5,r5,0\n\t\t\t12: R_PPC_ADDR16_LO\tgObj\n' +
       '14:\tbl      18 <argdrop+0x18>\n\t\t\t14: R_PPC_REL24\tcallee\n18:\tblr\n';
-    expect(dis('argdrop', asm)).toBe('s32 argdrop(s32 a0) {\n    return callee(1, a0, &gObj);\n}\n');
+    expect(dis('argdrop', framed(asm))).toBe('s32 argdrop(s32 a0) {\n    return callee(1, a0, &gObj);\n}\n');
   });
   test('a slot stored on one path and reloaded at the join refuses: the other path reads nothing', () => {
     // The reload at 0x14 reads uninitialised stack when r3 (or r4) is 0.
@@ -1113,8 +1140,10 @@ describe('a guessed call arity and the EABI return register', () => {
 describe('a PowerPC call reads the shared call declarations', () => {
   // r3..r6 all hold a value at the call
   const callTo = (callee: string) =>
-    '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,2\n8:\tli      r5,3\nc:\tli      r6,4\n' +
-    `10:\tbl      14 <c+0x14>\n\t\t\t10: R_PPC_REL24\t${callee}\n14:\tblr\n`;
+    framed(
+      '0 <c>:\n0:\tli      r3,1\n4:\tli      r4,2\n8:\tli      r5,3\nc:\tli      r6,4\n' +
+        `10:\tbl      14 <c+0x14>\n\t\t\t10: R_PPC_REL24\t${callee}\n14:\tblr\n`,
+    );
 
   test('an undeclared `memcpy` takes the three parameters the C standard fixes', () => {
     expect(decompile('c', callTo('memcpy'), PPC_MWCC).source).toBe('s32 c(void) {\n    return memcpy(1, 2, 3);\n}\n');
