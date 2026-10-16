@@ -1569,6 +1569,17 @@ export const SYNTHETIC: SynthSpec[] = [
     features: ['uninit-local', 'branch'],
     toolchains: ['ido7.1', 'gcc2.7.2kmc', 'gcc2.7.2'],
   },
+  // A REGISTER CACHING TWO UNINITIALISED FRAME WORDS. ido7.1 -O2 gives x and y their words and
+  // loads them into v1 and a0 on each arm (`lw a0,0(sp); move v1,a0` against `lw v1,4(sp);
+  // move a0,v1`), so the joins are register-keyed over two frame words' undefined values. Read as
+  // one undefined value per register, x - y is two unrelated locals; read as a copy on each arm,
+  // both arms leave them equal, as the machine does. Only ido homes these locals in frame words.
+  {
+    sym: 'uninit_swap',
+    src: 'int uninit_swap(int c){ int x; int y; if (c) x = y; else y = x; return x - y; }',
+    features: ['uninit-local', 'branch'],
+    toolchains: ['ido7.1'],
+  },
   {
     sym: 'uninit_both_saved',
     src:

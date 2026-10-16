@@ -296,6 +296,32 @@ describe('what a join must meet before an entry value is a local', () => {
     );
   });
 
+  // `int x, y; if (c) x = y; else y = x; return x - y;` at ido7.1 -O2: x and y keep their words
+  // but live in v1 and a0, each loaded from 0(sp) on one arm and 4(sp) on the other. The joins are
+  // register-keyed, over two frame words' undefined values, so each arm is a copy the machine ran,
+  // and both arms leave the two equal: what the function returns is 0, not two unrelated values.
+  test('a register caching two uninitialised frame words is assigned on each arm', () => {
+    const out = src(
+      [
+        '0:\tbeqz\ta0,14 <f+0x14>',
+        '4:\taddiu\tsp,sp,-8',
+        '8:\tlw\ta0,0(sp)',
+        'c:\tb\t1c <f+0x1c>',
+        '10:\tmove\tv1,a0',
+        '14:\tlw\tv1,4(sp)',
+        '18:\tmove\ta0,v1',
+        '1c:\tsubu\tv0,v1,a0',
+        '20:\tjr\tra',
+        '24:\taddiu\tsp,sp,8',
+      ],
+      MIPS_IDO,
+    );
+    expect(out).toMatch(
+      /if \(a0 != 0\) \{\n {8}(\w+) = uninit_sp0;\n {8}(\w+) = uninit_sp0;\n {4}\} else \{\n {8}\2 = uninit_sp4;\n {8}\1 = uninit_sp4;/,
+    );
+    expect(out).not.toMatch(/uninit_v1|uninit_a0/);
+  });
+
   // `return x + y + c;`: y read directly is the word the copy read, so both are one local.
   test('the word a copy reads and a direct read of it are one local', () => {
     expect(

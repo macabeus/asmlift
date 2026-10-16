@@ -1033,10 +1033,80 @@ export function makeSsaBuilder(
    *  in r8 and moves it to a low register to use it (`synthetic:uninit_spill`), and a spill writes a
    *  register's local to a word — one source variable under two keys, where a spelled copy would
    *  invent an assignment the source never wrote. So `x = y` between two locals in registers
-   *  (`uninit_both_saved` on agbcc) still collapses into one undefined value. */
+   *  (`uninit_both_saved` on agbcc) still collapses into one undefined value.
+   *
+   *  A REGISTER CACHING TWO FRAME WORDS. ido7.1 -O2 gives an uninitialised local its word and then
+   *  caches it in a register across a loop or an arm: `int x, y; if (c) x = y; else y = x;
+   *  return x - y;` is `lw a0,0(sp); move v1,a0` on one arm and `lw v1,4(sp); move a0,v1` on the
+   *  other, so the joins keyed v1 and a0 each take sp@0's undefined value on one edge and sp@4's on
+   *  the other, and collapsing them into two unrelated undefined values loses that x - y is 0.
+   *  Where the joins one register-keyed join is connected to by its edge arguments (a loop header's
+   *  and the arm join inside it, in `for (…) if (i & 1) x = y;`) take the undefined values of TWO
+   *  OR MORE frame words between them, the register is no one local's home, and each such edge
+   *  argument is marked `copied` too: every one is a load the machine ran. Of ONE frame word only
+   *  (an arm that leaves the cached local as it was) the web is that local's, and stays as it was. */
   const markCopiedUndefs = () => {
     const defOf = defOpMap(fn);
     const replaced = new Set<Value>();
+    const frameUndefKey = (v: Value): string | undefined => {
+      const d = defOf.get(v);
+      return d?.opcode === 'undef' && d.attrs.copied !== true && slotKeyOffset(String(d.attrs.key)) !== null
+        ? String(d.attrs.key)
+        : undefined;
+    };
+    // The register-keyed joins whose web of joins takes two or more frame words' undefined values.
+    const mixedRegisterJoins = new Set<Value>();
+    {
+      const incoming = joinArgs();
+      const isRegJoin = (p: Value) => {
+        const k = phiKey.get(p);
+        return incoming.has(p) && k !== undefined && slotKeyOffset(k) === null;
+      };
+      const parent = new Map<Value, Value>();
+      const find = (v: Value): Value => {
+        let r = v;
+        while (parent.get(r) !== undefined && parent.get(r) !== r) {
+          r = parent.get(r)!;
+        }
+        parent.set(v, r);
+        return r;
+      };
+      for (const [p, args] of incoming) {
+        if (!isRegJoin(p)) {
+          continue;
+        }
+        if (!parent.has(p)) {
+          parent.set(p, p);
+        }
+        for (const a of args) {
+          if (isRegJoin(a)) {
+            if (!parent.has(a)) {
+              parent.set(a, a);
+            }
+            parent.set(find(a), find(p));
+          }
+        }
+      }
+      const keysOf = new Map<Value, Set<string>>();
+      for (const [p, args] of incoming) {
+        if (!isRegJoin(p)) {
+          continue;
+        }
+        const root = find(p);
+        const ks = keysOf.get(root) ?? keysOf.set(root, new Set()).get(root)!;
+        for (const a of args) {
+          const k = frameUndefKey(a);
+          if (k !== undefined) {
+            ks.add(k);
+          }
+        }
+      }
+      for (const p of parent.keys()) {
+        if ((keysOf.get(find(p))?.size ?? 0) >= 2) {
+          mixedRegisterJoins.add(p);
+        }
+      }
+    }
     for (const blk of irBlocks) {
       for (const op of blk.ops) {
         for (const s of op.successors) {
@@ -1051,7 +1121,7 @@ export function makeSsaBuilder(
               d.attrs.copied === true ||
               key === undefined ||
               d.attrs.key === key ||
-              slotKeyOffset(key) === null ||
+              (slotKeyOffset(key) === null && !mixedRegisterJoins.has(p)) ||
               slotKeyOffset(String(d.attrs.key)) === null
             ) {
               return;
@@ -1287,7 +1357,8 @@ export function makeSsaBuilder(
       // transforms before its back edge — a bit reader's `if (!bits) code = *src++; … code <<= 1;`,
       // whose shift reaches the entry value only through the join the load also feeds. A counter
       // that only advances the entry value, and two undefined values joined (`phi(t0, v1)`), do
-      // not, and refuse.
+      // not, and refuse. A bit reader HANDED its buffer meets the same join and lifts with the
+      // input dropped: the rule's blind side, at `O32_SCRATCH_REGS` in target.ts.
       if (hiddenEntryValues.size > 0) {
         const incoming = joinArgs();
         const defOf = defOpMap(fn);
