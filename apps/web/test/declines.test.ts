@@ -960,8 +960,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
   // `outgoing-stack-args` is inhabited by two gcc2.7.2 rows: an undeclared `jal` in a function
   // that takes a frame address leaves gcc's local area unplaced (frontend/mips.ts
   // `measureO32Frame`), and that refusal comes before their FPU instruction does.
-  // `undecided-unused-read` is new with its refusal (frontend/dead-reads.ts `refuseUndecidedRead`);
-  // its row, `synthetic:dvstmt:agbcc`, reaches the artifact when the bench is next run whole.
   const NO_ROWS = [
     'branch-form',
     'branch-likely',
@@ -973,7 +971,6 @@ describe('THE ANCHOR — the committed artifact leaves nothing unclassified', ()
     'stack-frames',
     'structs',
     'tu-scoped-name',
-    'undecided-unused-read',
     'unread-data-directive',
     'unstored-slot',
   ];
