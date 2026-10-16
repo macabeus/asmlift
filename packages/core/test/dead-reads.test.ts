@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-import { DEAD_READ_GATES, type Declarations, pinDeadReads } from '../src/frontend/dead-reads';
+import { DEAD_READ_GATES, type Declarations, leftInDiscardRegister, pinDeadReads } from '../src/frontend/dead-reads';
 import { type Block, type Op, mkOp, mkValue } from '../src/ir/core';
 import { deadOps } from '../src/ir/discipline';
 import { T } from '../src/ir/types';
@@ -427,6 +427,37 @@ describe('the gates', () => {
     // an extension that stays in r0 is still the discard: `(short)*vp;`
     const cast = objdump('   0:\tlwz     r0,0(r3)\n   4:\textsh   r0,r0\n   8:\tblr\n');
     expect(decompile('f', cast, o0, voidF(['volatile s32 *'])).source).toMatch(/volatile s32/);
+  });
+
+  test("keeps-unused-reads: any write of a discarded load's value to another register homes it, whatever the op", () => {
+    // `unsigned char x; x = p[5]; x = 0;` is `lwz r0` + `clrlwi r31,r0,24`, lowered to an `and`:
+    // the write to r31 homes the load, so no lowering choice (an `and` the `computed` gate happens
+    // to reject, or a `zext` it looks through) decides whether the read is discarded
+    const load = (): { op: Op; v: ReturnType<typeof mkValue> } => {
+      const v = mkValue(T.unk(32));
+      return { op: mkOp('load', { operands: [mkValue(T.unk(32))], results: [v], attrs: { off: 20, width: 4 } }), v };
+    };
+    const derived = (opcode: 'and' | 'zext' | 'sext', from: ReturnType<typeof mkValue>) => {
+      const v = mkValue(T.unk(32));
+      return { op: mkOp(opcode, { operands: [from], results: [v], attrs: { width: 8 } }), v };
+    };
+    const homedU8 = load();
+    const masked = derived('and', homedU8.v);
+    const viaR0 = load();
+    const extR0 = derived('zext', viaR0.v);
+    const outOfR0 = derived('sext', extR0.v);
+    const kept = load();
+    const keptExt = derived('sext', kept.v);
+    const blocks: Block[] = [
+      {
+        params: [],
+        ops: [homedU8.op, masked.op, viaR0.op, extR0.op, outOfR0.op, kept.op, keptExt.op, mkOp('ret')],
+      },
+    ];
+    const left = leftInDiscardRegister(blocks, new Set([homedU8.v, viaR0.v, kept.v]), [masked.v, outOfR0.v]);
+    // an op's write to r31, and one out of r0 of what r0 computed from the load, home it; a load
+    // whose extension the discard register keeps (`(char)*vp;`) stays discarded
+    expect([...left]).toEqual([kept.v]);
   });
 
   test('keeps-unused-reads: IDO discards a volatile doubleword into the pair zero:at', () => {

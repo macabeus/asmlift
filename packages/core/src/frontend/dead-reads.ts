@@ -38,10 +38,11 @@
  *     that register and left there (`discarded`): mwcc at `-O0` keeps `x = p[5]; x = 0;`'s load in
  *     r31 and IDO at `-O1` in t6, so a read in a home says nothing about `volatile`, where `*p;`
  *     through a volatile pointer is `lwz r0` and `lw zero` — and a level no flag names, or one a
- *     word the flag table cannot read may set (mwcc `-opt off`), is judged as keeping. A load the
- *     frontend saw moved or extended into another register is no longer discarded (mwcc's
- *     `lwz r0` + `extsb r31,r0` of `signed char x; x = p[5]; x = 0;`); the second word of IDO's
- *     doubleword discard, `lw at,4(a0)` after `lw zero,0(a0)`, is (frontend/mips.ts `emitLoad`);
+ *     word the flag table cannot read may set (mwcc `-opt off`), is judged as keeping. A load whose
+ *     value, or a value computed from it, the frontend saw written to another register is no
+ *     longer discarded (`leftInDiscardRegister`: mwcc's `lwz r0` + `extsb r31,r0` of
+ *     `signed char x; x = p[5]; x = 0;`); the second word of IDO's doubleword discard,
+ *     `lw at,4(a0)` after `lw zero,0(a0)`, is (frontend/mips.ts `emitLoad`);
  *   • a read of a global the project declares with no volatile byte where it reads (`declared-plain`:
  *     the symbol map where it lays the object out, else the declaration context): the source spelled
  *     the read plain, so the compiler kept it for some other reason — agbcc merges the identical
@@ -295,6 +296,49 @@ export interface DeadReadFacts {
   readonly discarded?: ReadonlySet<Value>;
   /** where a read's object is declared: the project's symbol map and the declaration context */
   readonly declarations?: Declarations;
+}
+
+/** The loads a frontend saw the discard register take (`discarded`) that no write outside that
+ *  register carried, which is what `DeadReadFacts.discarded` holds. `written` is every value the
+ *  frontend wrote to another register; each is walked back through the ops that computed it, and a
+ *  discarded load the walk reaches was put in a home, so it is no read the compiler discarded:
+ *  mwcc at -O0,p reads `signed char x; x = p[5]; x = 0;` as `lwz r0,20(r3)` + `extsb r31,r0`, its
+ *  `unsigned char` twin as `clrlwi r31,r0,24`, and a volatile twin of either is the same
+ *  instructions. Keyed on the write rather than on the mnemonics that move or extend, so no
+ *  lowering choice decides it (`clrlwi` is an `and`, which `computed` rejects; were it a `zext`,
+ *  which the pin looks through, a list without it would stamp the home). One walk over the
+ *  function, shared by every write; a block parameter ends it, as it ends the defs a frontend sees.
+ *  An extension the discard register keeps (`(char)*vp;` is `extsb r0,r0`) stays discarded. */
+export function leftInDiscardRegister(
+  irBlocks: readonly Block[],
+  discarded: ReadonlySet<Value>,
+  written: readonly Value[],
+): Set<Value> {
+  if (discarded.size === 0) {
+    return new Set();
+  }
+  const defOf = new Map<Value, Op>();
+  for (const blk of irBlocks) {
+    for (const op of blk.ops) {
+      op.results.forEach((r) => defOf.set(r, op));
+    }
+  }
+  const seen = new Set<Value>();
+  const homed = new Set<Value>();
+  const stack = [...written];
+  while (stack.length > 0) {
+    const v = stack.pop()!;
+    if (seen.has(v)) {
+      continue;
+    }
+    seen.add(v);
+    if (discarded.has(v)) {
+      homed.add(v);
+      continue;
+    }
+    stack.push(...(defOf.get(v)?.operands ?? []));
+  }
+  return new Set([...discarded].filter((v) => !homed.has(v)));
 }
 
 /** The declarations `declared-plain` reads. */

@@ -1029,8 +1029,9 @@ export interface TargetDescription {
     // keeping level too. mwcc keeps one plain read in r0 as well, a read under an arithmetic or a
     // cast nothing uses (`p[5] + 1;`, `(char)p[5];`), which no real unit holds: that is the pin's
     // residue. The census counted loads dead at the machine; a load the discard register took and
-    // a move or extension then put in a home (`lwz r0` + `extsb r31,r0`, a plain `s8` local) is not
-    // discarded, and the frontend says so (frontend/ppc.ts `homed`). One register cannot name a
+    // an op then wrote to a home (`lwz r0` + `extsb r31,r0`, a plain `s8` local; `clrlwi r31,r0,24`,
+    // a `u8` one) is not discarded, and the frontend says so (frontend/dead-reads.ts
+    // `leftInDiscardRegister`). One register cannot name a
     // pair: IDO discards a doubleword into zero:at, `lw zero,0(a0)` + `lw at,4(a0)`, which
     // frontend/mips.ts `emitLoad` reads as the pair this register heads.
     //
