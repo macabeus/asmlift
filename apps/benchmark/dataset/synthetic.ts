@@ -6993,7 +6993,10 @@ export const SYNTHETIC: SynthSpec[] = [
   // discard, `lw zero,0(a0)` + `lw at,4(a0)`: both words are read, so both are kept (as two word
   // reads, which recompile to two `lw zero`). `dvif` is agbcc -O0's `if (*p) {}`, the same
   // `ldr; cmp; beq` as its plain twin, so it DECLINES (`undecided-unused-read`) rather than drop
-  // the read.
+  // the read. `dvifelse` (`if (*p) {} else {}`) and `dvtern` (`*p ? 1 : 2;`) are `beq .L4; b .L4`
+  // there, whose two edges meet only through the forwarder the `b` sits in: they decline too.
+  // `dvunarrow` is `dvnarrow`'s `u8` twin, `lwz r0` + `clrlwi r31,r0,24`: the write to r31 homes the
+  // load whatever op it is (dead-reads.ts `leftInDiscardRegister`), so it stays unstamped.
   {
     sym: 'dvnarrow',
     src: 'void dvnarrow(s32 *p, s32 *q)\n{\n    s8 x;\n    x = p[5];\n    x = 0;\n    *q = x;\n}',
@@ -7002,6 +7005,15 @@ export const SYNTHETIC: SynthSpec[] = [
     cflags: MWCC_O0P,
     ctx: 'void dvnarrow(s32 *p, s32 *q);',
     proto: { dvnarrow: { params: ['s32 *', 's32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'dvunarrow',
+    src: 'void dvunarrow(s32 *p, s32 *q)\n{\n    u8 x;\n    x = p[5];\n    x = 0;\n    *q = x;\n}',
+    features: ['pointer', 'store'],
+    toolchains: ['mwcc_242_81', 'mwcc_247_107', 'mwcc_233_163n'],
+    cflags: MWCC_O0P,
+    ctx: 'void dvunarrow(s32 *p, s32 *q);',
+    proto: { dvunarrow: { params: ['s32 *', 's32 *'], returnsVoid: true } },
   },
   {
     sym: 'dvdword',
@@ -7020,6 +7032,24 @@ export const SYNTHETIC: SynthSpec[] = [
     cflags: ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix'],
     ctx: 'void dvif(volatile s32 *p, s32 *q);',
     proto: { dvif: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'dvifelse',
+    src: 'void dvifelse(volatile s32 *p, s32 *q)\n{\n    if (*p) {\n    } else {\n    }\n    *q = 0;\n}',
+    features: ['pointer', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    cflags: ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix'],
+    ctx: 'void dvifelse(volatile s32 *p, s32 *q);',
+    proto: { dvifelse: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
+  },
+  {
+    sym: 'dvtern',
+    src: 'void dvtern(volatile s32 *p, s32 *q)\n{\n    *p ? 1 : 2;\n    *q = 0;\n}',
+    features: ['pointer', 'branch', 'store'],
+    toolchains: ['agbcc'],
+    cflags: ['-mthumb-interwork', '-O0', '-fhex-asm', '-fprologue-bugfix'],
+    ctx: 'void dvtern(volatile s32 *p, s32 *q);',
+    proto: { dvtern: { params: ['volatile s32 *', 's32 *'], returnsVoid: true } },
   },
 
   // ── THE MAP-ASKING VARIATIONS, and the synthetic rows that carry a map ─────────────────────
