@@ -333,8 +333,7 @@ describe('the gates', () => {
     expect(decompile('f', header + home, o1, voidF(['s32 *', 's32 *'])).source).not.toMatch(/volatile/);
   });
   test('keeps-unused-reads: the discard register is what admits a read, not the level', () => {
-    // the same read handed in as discarded is stamped at mwcc -O0; on agbcc, which names no
-    // register, the fact is never gathered and the gate refuses as before
+    // at mwcc -O0 the same read is stamped when it is handed in as discarded, and left plain when not
     const o0 = targetFor('mwcc_242_81', ['-O0']).target;
     const r0 = deadLoad(constAt(0x80001000), { off: 0, width: 4, signed: false });
     pinDeadReads(r0.blocks, o0, { discarded: new Set(r0.load.results) });
@@ -376,7 +375,7 @@ describe('the gates', () => {
     expect(ablated.load.attrs.volatile).toBe(true);
     // a compare or a computation is no evidence at a keeping level: agbcc -O0's `if (*vp) {}` is
     // the same `ldr; cmp; beq` as `if (p[0]) {}`, and a volatile bitfield's `ldr; lsl; lsr` reads
-    // as arithmetic. Both refuse, where the gates that rest on an optimiser left them plain.
+    // as arithmetic. Both refuse: `compared` and `computed` come after the refusal.
     const compared = deadLoad(constAt(0x02000000), { off: 0, width: 4, signed: false });
     expect(() => pinDeadReads(compared.blocks, o0, { name: 'f', compared: new Set(compared.load.results) })).toThrow(
       /cannot lift 'f'/,
@@ -431,8 +430,7 @@ describe('the gates', () => {
 
   test("keeps-unused-reads: any write of a discarded load's value to another register homes it, whatever the op", () => {
     // `unsigned char x; x = p[5]; x = 0;` is `lwz r0` + `clrlwi r31,r0,24`, lowered to an `and`:
-    // the write to r31 homes the load, so no lowering choice (an `and` the `computed` gate happens
-    // to reject, or a `zext` it looks through) decides whether the read is discarded
+    // the write to r31 homes the load, whether the op is lowered to an `and` or a `zext`
     const load = (): { op: Op; v: ReturnType<typeof mkValue> } => {
       const v = mkValue(T.unk(32));
       return { op: mkOp('load', { operands: [mkValue(T.unk(32))], results: [v], attrs: { off: 20, width: 4 } }), v };

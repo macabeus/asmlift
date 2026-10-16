@@ -1643,14 +1643,8 @@ function liftOnce(
   // plain one (`compilerBehaviors.discardsUnusedReadsInto`, frontend/dead-reads.ts `discarded`).
   const discarded = new Set<Value>();
   const discardReg = target.compilerBehaviors.discardsUnusedReadsInto;
-  // A load the discard register took whose value, or a value computed from it, an op then wrote to
-  // ANOTHER register is not discarded: mwcc at -O0,p loads `signed char x; x = p[5]; x = 0;` as
-  // `lwz r0,20(r3)` + `extsb r31,r0`, and the `unsigned char` twin as `clrlwi r31,r0,24` — a
-  // narrowing assignment to a home, plain — and a volatile twin is the same instructions. The rule
-  // is keyed on the WRITE, not on a list of mnemonics that move or extend: every write outside the
-  // discard register is recorded here, and `leftInDiscardRegister` drops each discarded load such a
-  // write's value derives from. What the discard register keeps (`(char)*vp;` is `extsb r0,r0`)
-  // stays discarded.
+  // Every value written to a register other than the discard register: `leftInDiscardRegister`
+  // takes out of `discarded` each load one of them derives from, which mwcc put in a home.
   const writtenElsewhere: Value[] = [];
   let wordReturn = false;
   const emitReturn = (ops: Op[], bi: number) => {
@@ -2409,10 +2403,9 @@ function liftOnce(
           assertOrdinaryMem(s);
           emitOpaqueDest(ins);
           break;
-        case 'mr': {
+        case 'mr':
           write(d, read(s));
           break; // move register (or rD,rS,rS)
-        }
         case 'li':
           // SDA21 ADDRESS formation encodes rA=0, so objdump prints `li rD,0` + R_PPC_EMB_SDA21:
           // the linker rewrites it to `addi rD,r13,SYM@sdarx`, i.e. rD = &SYM. Same relocation and

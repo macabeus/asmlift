@@ -2228,9 +2228,8 @@ function liftOnce(
     // through a pointer, an index and a global (`lui at` re-formed between the words), the `at`
     // word in the `jr`'s delay slot at -O1. So a word load into `at` is discarded too where it reads
     // the word above one the discard register took, at the same address, with no write to that
-    // address's base register between (`firstWords`); anywhere else `at` is the
-    // assembler's own temporary. -O1 schedules other accesses between the halves: `*p; g(x);` is
-    // `lw zero,0(t6); lw a0,28(sp); jal g; lw at,4(t6)`, the `at` word in the call's delay slot.
+    // address's base register and no call between (`firstWords`); anywhere else `at` is the
+    // assembler's own temporary.
     const loaded = (d: string, res: Value, discard: boolean) => {
       if (discard) {
         discarded.add(res);

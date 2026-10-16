@@ -6993,9 +6993,9 @@ export const SYNTHETIC: SynthSpec[] = [
   // discard, `lw zero,0(a0)` + `lw at,4(a0)`: both words are read, so both are kept (as two word
   // reads, which recompile to two `lw zero`). `dvdwcall` is that discard with -O1's schedule between
   // its halves, `lw zero,0(t6); lw a0,28(sp); jal g; lw at,4(t6)`: the pair survives the reload and
-  // the `at` word in the call's delay slot is still read (frontend/mips.ts `firstWords`). `dvif` is agbcc -O0's `if (*p) {}`, the same
-  // `ldr; cmp; beq` as its plain twin, so it DECLINES (`undecided-unused-read`) rather than drop
-  // the read. `dvifelse` (`if (*p) {} else {}`) and `dvtern` (`*p ? 1 : 2;`) are `beq .L4; b .L4`
+  // the `at` word in the call's delay slot is still read (frontend/mips.ts `firstWords`). `dvif`
+  // is agbcc -O0's `if (*p) {}`, the same `ldr; cmp; beq` as its plain twin, so it DECLINES
+  // (`undecided-unused-read`) rather than drop the read. `dvifelse` (`if (*p) {} else {}`) and `dvtern` (`*p ? 1 : 2;`) are `beq .L4; b .L4`
   // there, whose two edges meet only through the forwarder the `b` sits in: they decline too.
   // `dvunarrow` is `dvnarrow`'s `u8` twin, `lwz r0` + `clrlwi r31,r0,24`: the write to r31 homes the
   // load whatever op it is (dead-reads.ts `leftInDiscardRegister`), so it stays unstamped.
